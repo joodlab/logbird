@@ -1,0 +1,8 @@
+{
+  "extends": "@trailmark/tsconfig/react.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", ".cache", ".turbo"]
+}
