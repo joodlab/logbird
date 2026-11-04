@@ -112,7 +112,7 @@ if (!projectPath) {
 
 await browser.close();
 if (problems.length) {
-  console.log('\nProblems:\n' + [...new Set(problems)].join('\n'));
+  console.log(`\nProblems:\n${[...new Set(problems)].join('\n')}`);
   process.exitCode = 1;
 } else {
   console.log('\nNo page errors and no failed API calls.');

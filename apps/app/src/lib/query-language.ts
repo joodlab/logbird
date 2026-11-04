@@ -91,7 +91,8 @@ export function tokenize(input: string): QueryToken[] {
         start: i,
         end: i + raw.length,
         negated: field[1] === '-',
-        field: (field[2] ?? '').toLowerCase(),
+        // Case is significant: unknown fields are attribute keys (attr.metadata.supportTicket).
+        field: field[2] ?? '',
         value: unquote(field[3] ?? ''),
       });
       i += raw.length;
