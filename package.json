@@ -26,6 +26,7 @@
     "ch:migrate": "pnpm --filter @trailmark/clickhouse migrate",
     "seed": "pnpm --filter @trailmark/seed seed",
     "demo": "node --env-file=.env --import tsx scripts/demo.ts",
+    "demo:clean": "node --env-file=.env --import tsx scripts/demo-clean.ts",
     "e2e": "node --env-file=.env --import tsx scripts/e2e-smoke.ts"
   },
   "devDependencies": {
