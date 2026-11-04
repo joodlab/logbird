@@ -18,10 +18,10 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { SettingsSection } from '@/components/settings-section';
+import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keysQuery, keys as queryKeys } from '@/lib/api/queries';
-import { formatDate, formatRelative } from '@/lib/format';
 import { fieldErrorMessage } from '@/lib/forms';
 import { placeholderKeys } from '@/lib/placeholders';
 import { curlSnippet, readCurlSnippet } from '@/lib/snippets';
@@ -84,12 +84,16 @@ function KeysSettings() {
                   <div className="flex items-center gap-2">
                     <span className={cn('truncate font-medium text-sm', k.revokedAt && 'text-muted-foreground line-through')}>{k.name}</span>
                     <TypePill tone={k.kind === 'ingest' ? 'brand' : 'neutral'}>{k.kind}</TypePill>
-                    {k.revokedAt ? <TypePill tone="warning">revoked {formatRelative(k.revokedAt)}</TypePill> : null}
+                    {k.revokedAt ? (
+                      <TypePill tone="warning">
+                        revoked <Timestamp format="relative" iso={k.revokedAt} />
+                      </TypePill>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground text-xs">
                     <span className="font-mono">{k.prefix}••••••••</span>
                     <span>
-                      Created {formatDate(k.createdAt)}
+                      Created <Timestamp format="date" iso={k.createdAt} />
                       {k.createdBy ? ` by ${k.createdBy.name}` : ''}
                     </span>
                   </div>
@@ -98,7 +102,7 @@ function KeysSettings() {
                   <span className="text-muted-foreground text-xs">
                     {k.lastUsedAt ? (
                       <>
-                        Last used <span className="text-foreground">{formatRelative(k.lastUsedAt)}</span>
+                        Last used <Timestamp className="text-foreground" fallback="never" format="relative" iso={k.lastUsedAt} />
                       </>
                     ) : (
                       'Never used'

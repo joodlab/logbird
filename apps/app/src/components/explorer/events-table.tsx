@@ -10,8 +10,9 @@ import { cn } from '@trailmark/ui/lib/utils';
 import { Loader2Icon } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef } from 'react';
 import { ActionName } from '@/components/action-name';
+import { Timestamp } from '@/components/timestamp';
 import { eventSentence } from '@/lib/events';
-import { formatNumber, formatTimestamp } from '@/lib/format';
+import { formatNumber } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { EVENT_COLUMNS } from './columns';
 
@@ -163,10 +164,12 @@ export function EventsTable({
                   <>
                     <span className="flex min-w-0 items-center gap-2">
                       <OutcomeDot outcome={e.outcome} />
-                      <span className="truncate">{eventSentence(e)}</span>
+                      <span className="truncate" dir="auto">
+                        {eventSentence(e)}
+                      </span>
                     </span>
                     <span className="flex min-w-0 items-center gap-2 ps-4 text-muted-foreground text-xs">
-                      <span className="shrink-0 tabular-nums">{formatTimestamp(e.timestamp)}</span>
+                      <Timestamp className="shrink-0" iso={e.timestamp} />
                       <ActionName action={e.action} className="text-[11px]" />
                     </span>
                   </>

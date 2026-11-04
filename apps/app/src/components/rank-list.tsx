@@ -50,7 +50,9 @@ export function RankList({
               className="absolute inset-y-1 start-0 rounded-[5px] bg-brand/[0.07] transition-colors group-hover/rank:bg-brand/[0.12]"
               style={{ width: `${(item.count / max) * 100}%` }}
             />
-            <span className="relative min-w-0 flex-1 truncate">{item.label}</span>
+            <span className="relative min-w-0 flex-1 truncate" dir="auto">
+              {item.label}
+            </span>
             <span className="relative shrink-0 text-muted-foreground text-xs tabular-nums">{formatCompact(item.count)}</span>
           </>
         );

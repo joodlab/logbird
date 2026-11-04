@@ -23,7 +23,6 @@ import { z } from 'zod';
 import { api } from '@/lib/api/client';
 import { errorMessage, toApiError } from '@/lib/api/errors';
 import { keys } from '@/lib/api/queries';
-import { getTransport } from '@/lib/api/transport';
 import { fieldErrorMessage } from '@/lib/forms';
 import { rangeLabel, resolveRange } from '@/lib/range';
 import { DEFAULT_COLUMNS, EVENT_COLUMNS } from './columns';
@@ -69,8 +68,7 @@ export function ExportMenu({ projectId, range, q }: { projectId: string; range: 
     setBusy(true);
     try {
       const r = resolveRange(range);
-      const fetchImpl = await getTransport();
-      const response = await fetchImpl(api.events.exportUrl(projectId, { from: r.from, to: r.to, q: q || undefined, format }));
+      const response = await fetch(api.events.exportUrl(projectId, { from: r.from, to: r.to, q: q || undefined, format }));
       if (!response.ok) throw await toApiError(response);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);

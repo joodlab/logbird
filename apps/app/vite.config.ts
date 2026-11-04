@@ -13,13 +13,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const rootEnv = loadEnv(mode, '../..', '');
   const serverTarget = env.TRAILMARK_SERVER_URL ?? rootEnv.SERVER_URL?.replace('localhost', '127.0.0.1') ?? 'http://127.0.0.1:4601';
-  // Dev-only fixture mode (`pnpm dev:fixtures` or VITE_FIXTURES=1): fake transport + session, see src/dev/.
-  const fixtures = mode === 'fixtures' || env.VITE_FIXTURES === '1';
 
   return {
-    define: {
-      'import.meta.env.VITE_FIXTURES': JSON.stringify(fixtures ? '1' : ''),
-    },
     resolve: { tsconfigPaths: true },
     // Pre-bundle the heavy client deps up front so the first visit never hits a mid-session
     // "optimized dependencies changed" reload.
@@ -61,12 +56,10 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 4600,
-      proxy: fixtures
-        ? undefined
-        : {
-            '/api': { target: serverTarget, changeOrigin: false },
-            '/v1': { target: serverTarget, changeOrigin: false },
-          },
+      proxy: {
+        '/api': { target: serverTarget, changeOrigin: false },
+        '/v1': { target: serverTarget, changeOrigin: false },
+      },
     },
     plugins: [
       tailwindcss(),
@@ -78,9 +71,10 @@ export default defineConfig(({ mode }) => {
       }),
       tanstackStart({
         router: {
-          codeSplittingOptions: {
-            defaultBehavior: [['component'], ['pendingComponent', 'errorComponent', 'notFoundComponent']],
-          },
+          // Only page components are split. Pending/error/not-found components stay in the route chunk:
+          // they can render before a lazy chunk resolves, and a lazily loaded one trips React's
+          // "use() suspended in a previous render" warning.
+          codeSplittingOptions: { defaultBehavior: [['component']] },
         },
       }),
       viteReact(),

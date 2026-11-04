@@ -11,10 +11,10 @@ import { useConfirm } from '@trailmark/ui/components/ui/confirm';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { BookmarkIcon, Rows3Icon, Trash2Icon } from 'lucide-react';
 import { toast } from 'sonner';
+import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keys, viewsQuery } from '@/lib/api/queries';
-import { formatRelative } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { rangeLabel } from '@/lib/range';
 
@@ -131,7 +131,9 @@ function ViewsPage() {
                   <span>{rangeLabel(view.state.range ?? '24h')}</span>
                   <span className="flex min-w-0 items-center gap-1.5">
                     {view.createdBy ? <EntityChip className="max-w-32" id={view.createdBy.id} name={view.createdBy.name} /> : null}
-                    <span className="shrink-0">· {formatRelative(view.createdAt)}</span>
+                    <span className="shrink-0">
+                      · <Timestamp format="relative" iso={view.createdAt} />
+                    </span>
                   </span>
                 </div>
               </li>

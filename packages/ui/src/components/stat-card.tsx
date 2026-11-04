@@ -10,6 +10,8 @@ interface StatCardProps {
   delta?: number | null;
   /** Whether an increase is good (events, conformance) or bad (failure rate). */
   goodWhen?: 'up' | 'down' | 'neutral';
+  /** `relative`: delta is a ratio (+12%). `points`: delta is an absolute change of a rate (+0.4 pp). */
+  deltaKind?: 'relative' | 'points';
   hint?: ReactNode;
   footer?: ReactNode;
   loading?: boolean;
@@ -18,11 +20,20 @@ interface StatCardProps {
 }
 
 const pct = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 1, signDisplay: 'exceptZero' });
+const points = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1, signDisplay: 'exceptZero' });
 
-export function DeltaBadge({ delta, goodWhen = 'up' }: { delta: number | null | undefined; goodWhen?: 'up' | 'down' | 'neutral' }) {
+export function DeltaBadge({
+  delta,
+  goodWhen = 'up',
+  kind = 'relative',
+}: {
+  delta: number | null | undefined;
+  goodWhen?: 'up' | 'down' | 'neutral';
+  kind?: 'relative' | 'points';
+}) {
   if (delta === undefined) return null;
   if (delta === null) return <span className="text-muted-foreground text-xs">new</span>;
-  const flat = Math.abs(delta) < 0.005;
+  const flat = Math.abs(delta) < (kind === 'points' ? 0.0005 : 0.005);
   const up = delta > 0;
   const good = goodWhen === 'neutral' || flat ? null : (up && goodWhen === 'up') || (!up && goodWhen === 'down');
   const Icon = flat ? MinusIcon : up ? ArrowUpRightIcon : ArrowDownRightIcon;
@@ -34,15 +45,19 @@ export function DeltaBadge({ delta, goodWhen = 'up' }: { delta: number | null | 
         good === true && 'bg-outcome-success/10 text-outcome-success',
         good === false && 'bg-outcome-failure/10 text-outcome-failure',
       )}
-      title="Compared with the previous window of the same length"
+      title={
+        kind === 'points'
+          ? 'Change in percentage points versus the previous window of the same length'
+          : 'Compared with the previous window of the same length'
+      }
     >
       <Icon className="size-3" />
-      {flat ? '0%' : pct.format(delta)}
+      {kind === 'points' ? `${flat ? '0' : points.format(delta * 100)} pp` : flat ? '0%' : pct.format(delta)}
     </span>
   );
 }
 
-export function StatCard({ label, value, delta, goodWhen = 'up', hint, footer, loading, className, onClick }: StatCardProps) {
+export function StatCard({ label, value, delta, goodWhen = 'up', deltaKind, hint, footer, loading, className, onClick }: StatCardProps) {
   const Comp = onClick ? 'button' : 'div';
   return (
     <Comp
@@ -54,9 +69,10 @@ export function StatCard({ label, value, delta, goodWhen = 'up', hint, footer, l
       onClick={onClick}
       type={onClick ? 'button' : undefined}
     >
-      <div className="flex items-center justify-between gap-2">
+      {/* Fixed-height header so values line up whether or not a card has a delta badge. */}
+      <div className="flex h-5 items-center justify-between gap-2">
         <span className="truncate text-muted-foreground text-xs">{label}</span>
-        {loading ? null : <DeltaBadge delta={delta} goodWhen={goodWhen} />}
+        {loading ? null : <DeltaBadge delta={delta} goodWhen={goodWhen} kind={deltaKind} />}
       </div>
       {loading ? <Skeleton className="h-7 w-24" /> : <div className="font-semibold text-2xl tabular-nums tracking-tight">{value}</div>}
       {hint ? <div className="text-muted-foreground text-xs">{hint}</div> : null}

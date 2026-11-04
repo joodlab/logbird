@@ -42,6 +42,8 @@ export const formatTimeMs = (iso: string): string => msFmt.format(new Date(iso))
 export const formatDay = (iso: string): string => dayFmt.format(new Date(iso));
 export const formatFull = (iso: string): string => fullFmt.format(new Date(iso));
 export const formatDate = (iso: string): string => dateOnlyFmt.format(new Date(iso));
+/** "2026-11-04 14:32:10.123 UTC" — the unambiguous instant, for tooltips and copying. */
+export const formatUtc = (iso: string): string => `${new Date(iso).toISOString().replace('T', ' ').replace('Z', '')} UTC`;
 
 /** "Nov 4 · 14:32:10" in tables; time only when it happened today. */
 export function formatTimestamp(iso: string, now = Date.now()): string {

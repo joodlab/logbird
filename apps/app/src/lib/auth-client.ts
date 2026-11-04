@@ -1,17 +1,14 @@
 import { emailOTPClient, organizationClient } from 'better-auth/client/plugins';
 import { createAuthClient } from 'better-auth/react';
-import { transportFetch } from '@/lib/api/transport';
 
 /**
  * better-auth client. Same origin as the console: `/api/auth/*` is proxied to the Hono server
- * (vite dev proxy / Nitro route rules), so the session cookie is first-party. The fetch goes
- * through the shared transport so fixture mode can answer auth calls too.
+ * (vite dev proxy / Nitro route rules), so the session cookie is first-party.
  */
 export const authClient = createAuthClient({
   baseURL: typeof window === 'undefined' ? 'http://localhost:4600' : window.location.origin,
   basePath: '/api/auth',
   plugins: [emailOTPClient(), organizationClient()],
-  fetchOptions: { customFetchImpl: transportFetch },
 });
 
 /** Unwrap better-auth's `{ data, error }` result into a value or a thrown Error. */

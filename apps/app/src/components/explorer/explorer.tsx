@@ -12,7 +12,7 @@ import { EventHistogram } from '@/components/charts/event-histogram';
 import { api } from '@/lib/api/client';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
-import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
+import { absoluteRange, isValidRange, pickInterval, rangeLabel } from '@/lib/range';
 import { EventSheet } from './event-sheet';
 import { EventsTable } from './events-table';
 import { ColumnPicker, ExportMenu, SaveViewButton } from './explorer-toolbar';
@@ -41,6 +41,10 @@ interface ExplorerProps {
 
 const FACETS_KEY = 'trailmark.explorer.facets';
 
+function newestArrival(events: AuditEvent[]): string | undefined {
+  return events.reduce<string | undefined>((max, e) => (!max || e.receivedAt > max ? e.receivedAt : max), undefined);
+}
+
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   return Boolean(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.closest('[role=dialog]')));
@@ -63,7 +67,8 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
   const [cursor, setCursor] = useState(-1);
 
   const events = useInfiniteQuery(eventsInfiniteQuery(projectId, range, effectiveQ));
-  const histogram = useQuery(histogramQuery(projectId, range, effectiveQ));
+  // Round bucket sizes (30 min for 24 h, 3 h for 7 d) so bars line up with the axis ticks.
+  const histogram = useQuery(histogramQuery(projectId, range, effectiveQ, pickInterval(range)));
 
   /* ---------------- live tail ---------------- */
   const relative = isValidRange(range) && !range.includes('..');
@@ -79,9 +84,10 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
     sinceRef.current = null;
   }, [effectiveQ, range, live]);
 
+  // The tail follows *arrival* (`receivedAt`), so late or back-dated events still stream in.
   const firstPage = events.data?.pages[0]?.data;
   useEffect(() => {
-    if (!sinceRef.current && firstPage) sinceRef.current = firstPage[0]?.timestamp ?? new Date().toISOString();
+    if (!sinceRef.current && firstPage) sinceRef.current = newestArrival(firstPage) ?? new Date().toISOString();
   }, [firstPage]);
 
   useQuery({
@@ -92,11 +98,11 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
     gcTime: 0,
     queryFn: async ({ signal }) => {
       const since = sinceRef.current ?? new Date().toISOString();
-      // `since` is inclusive on event time, so the newest known rows come back too: dedupe by id.
+      // `since` is inclusive, so the newest known arrivals come back too: dedupe by id.
       const data = await api.events.live(projectId, { since, q: effectiveQ || undefined, limit: 100 }, signal);
-      const known = new Set([...(events.data?.pages[0]?.data ?? []), ...liveRowsRef.current].map((e) => e.id));
+      const known = new Set([...(firstPage ?? []), ...liveRowsRef.current].map((e) => e.id));
       const incoming = data.filter((e) => !known.has(e.id));
-      if (data.length) sinceRef.current = data.reduce((max, e) => (e.timestamp > max ? e.timestamp : max), since);
+      sinceRef.current = newestArrival(data) ?? since;
       if (incoming.length) {
         setLiveRows((prev) => [...incoming, ...prev].slice(0, 2000));
         setFresh(new Set(incoming.map((e) => e.id)));
@@ -111,7 +117,11 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
     const seen = new Set(liveRows.map((e) => e.id));
     return [...liveRows, ...paged.filter((e) => !seen.has(e.id))];
   }, [events.data, liveRows]);
-  const total = (events.data?.pages[0]?.total ?? 0) + liveRows.length;
+  // Search totals are capped for huge ranges; the histogram counts every match exactly.
+  const searchTotal = events.data?.pages[0]?.total ?? 0;
+  const histogramTotal = histogram.data && !histogram.isPlaceholderData ? histogram.data.buckets.reduce((n, b) => n + b.total, 0) : undefined;
+  const total = (histogramTotal ?? searchTotal) + liveRows.length;
+  const totalCapped = histogramTotal === undefined && searchTotal > 10_000;
 
   /* ---------------- selection ---------------- */
   const selectedIndex = ev ? rows.findIndex((e) => e.id === ev) : -1;
@@ -199,7 +209,7 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
                 render={
                   <Button
                     aria-label={facetsOpen ? 'Hide filters' : 'Show filters'}
-                    className="hidden lg:inline-flex"
+                    className="hidden xl:inline-flex"
                     onClick={() => {
                       setFacetsOpen((o) => {
                         try {
@@ -220,7 +230,7 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
               <TooltipContent>{facetsOpen ? 'Hide filters' : 'Show filters'}</TooltipContent>
             </Tooltip>
           )}
-          <Button aria-label="Filters" className="lg:hidden" onClick={() => setMobileFacets(true)} size="icon-sm" variant="outline">
+          <Button aria-label="Filters" className="xl:hidden" onClick={() => setMobileFacets(true)} size="icon-sm" variant="outline">
             <FilterIcon />
           </Button>
           {baseQuery ? (
@@ -284,10 +294,7 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
               'Searching…'
             ) : (
               <>
-                <span className="font-medium text-foreground">
-                  {total >= 10_000 && events.hasNextPage ? `${formatNumber(total)}+` : formatNumber(total)}
-                </span>{' '}
-                events · {rangeLabel(range)}
+                <span className="font-medium text-foreground">{totalCapped ? '10,000+' : formatNumber(total)}</span> events · {rangeLabel(range)}
                 {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>
@@ -304,13 +311,12 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
             height={embedded ? 96 : 112}
             loading={histogram.isFetching && !histogram.isPending}
             onZoom={(from, to) => onChange({ range: absoluteRange(from, to), live: undefined })}
-            range={range}
           />
         ) : null}
       </div>
 
       <div className="flex min-h-0 flex-1">
-        {facetsOpen ? <div className="hidden w-60 shrink-0 border-e lg:flex lg:flex-col">{facetsPanel}</div> : null}
+        {facetsOpen ? <div className="hidden w-60 shrink-0 border-e xl:flex xl:flex-col">{facetsPanel}</div> : null}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {liveActive && liveRows.length > 0 ? (
             <div className="pointer-events-none absolute inset-x-0 top-10 z-20 flex justify-center">

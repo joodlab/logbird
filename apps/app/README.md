@@ -3,10 +3,11 @@
 TanStack Start (React 19) on **:4600**. Every route renders in the browser (`defaultSsr: false` in
 `src/start.ts`); the Start/Nitro server only ships the shell and proxies `/api` + `/v1` to the Hono server
 (`http://127.0.0.1:4601`, override with `TRAILMARK_SERVER_URL`), so the better-auth cookie stays first-party.
+The console always talks to a real `apps/server` — run `pnpm dev` at the repo root to start server, worker and app.
 
 ```bash
-pnpm --filter @trailmark/app dev            # real mode: talks to apps/server through the proxy
-pnpm --filter @trailmark/app dev:fixtures   # dev-only fixture mode (no server needed)
+pnpm dev                                    # repo root: server :4601, worker, app :4600
+pnpm --filter @trailmark/app dev            # app only (expects a server on :4601)
 pnpm --filter @trailmark/app build && pnpm --filter @trailmark/app start
 ```
 
@@ -14,29 +15,22 @@ pnpm --filter @trailmark/app build && pnpm --filter @trailmark/app start
 
 | Path | What lives there |
 | --- | --- |
-| `src/lib/api/transport.ts` | The single network seam (`fetch` in real mode, `src/dev` in fixture mode). |
-| `src/lib/api/client.ts` | Typed API client — every response is parsed with `@trailmark/contracts`; errors map from `apiErrorSchema`. |
+| `src/lib/api/client.ts` | Typed API client — same-origin `fetch`, every response parsed with `@trailmark/contracts`, errors mapped from `apiErrorSchema`. |
 | `src/lib/api/queries.ts` | `queryOptions` / `infiniteQueryOptions` factories (keys: `['projects', projectId, resource, …]`). |
-| `src/lib/auth-client.ts` | better-auth client (`emailOTPClient` + `organizationClient`), same transport. |
+| `src/lib/auth-client.ts` | better-auth client (`emailOTPClient` + `organizationClient`). |
 | `src/lib/query-language.ts` | Lossless tokenizer for the query bar (highlighting, autocomplete, facet include/exclude). |
+| `src/lib/snippets.ts` | SDK / curl snippets — runnable as copied (real key when one was just created, `$TRAILMARK_*_KEY` otherwise). |
 | `src/components/explorer/*` | Query bar, facets, histogram, virtualized table (Table v9 + Virtual), event sheet. |
+| `src/components/timestamp.tsx` | Every time is shown in local time; the tooltip adds UTC and relative time. |
 | `src/routes/*` | File routes. Explorer state lives in search params (`q`, `range`, `cols`, `ev`, `live`, `view`). |
-| `src/dev/*` | **Dev-only fixtures** — delete the folder to remove them. |
 
-## Fixture mode
+## QA and media
 
-`VITE_FIXTURES=1` (or `--mode fixtures`) swaps the transport for an in-browser server that answers the same
-URLs with deterministic, StayDesk-shaped data: ~30 hotel businesses, staff, platform admins who impersonate,
-API-key and integration actors, workers/schedulers/webhooks, operation trees with retries and failures,
-off-standard events, plus a small "Ledger demo" project and the workspace activity stream. New events keep
-arriving so live tail and the ingestion card move.
+Both scripts drive the real stack with Playwright (`npx playwright install chromium` once). Sign-in codes are
+read from Mailpit's API (`http://127.0.0.1:8025`).
 
-- Sign in as `demo@trailmark.local` for the seeded workspace, or any other email to walk onboarding.
-- The one-time code is always `424242` (any other code shows the error state).
-- State persists in `localStorage` (`trailmark.fixtures.v1`); the banner's **Reset** button clears it.
-- The branch is gated on `import.meta.env.DEV`, so production builds never include it.
-
-## Media
-
-`pnpm --filter @trailmark/app media` (with `dev:fixtures` running) regenerates the screenshots and videos in
-`docs/media/ui-foundation/` using Playwright (`npx playwright install chromium` once).
+```bash
+node scripts/qa-shoot.mjs login demo@trailmark.local            # saves a session to .qa-state.json
+node scripts/qa-shoot.mjs shoot ./out dark 1440x900 /p/<id>/events  # screenshots + console/HTTP problems
+node scripts/capture-media.mjs                                  # regenerates docs/media/ui-real-api/
+```

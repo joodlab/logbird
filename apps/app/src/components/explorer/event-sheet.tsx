@@ -30,11 +30,12 @@ import {
 import type { ReactNode } from 'react';
 import { ActionName } from '@/components/action-name';
 import { EntityLink, EntityProfileLink } from '@/components/entity-link';
+import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
 import { eventSentence } from '@/lib/events';
-import { formatFull, formatRelative, formatTimeMs } from '@/lib/format';
+import { formatTimeMs } from '@/lib/format';
 import { formatTerm } from '@/lib/query-language';
 import { eventCurl } from '@/lib/snippets';
 
@@ -241,11 +242,13 @@ function EventDetailBody({
           <TypePill>{e.environment}</TypePill>
           {e.source ? <TypePill tone="brand">via {e.source}</TypePill> : null}
         </div>
-        <SheetTitle className="font-semibold text-[17px] leading-snug tracking-tight">{eventSentence(e)}</SheetTitle>
+        <SheetTitle className="font-semibold text-[17px] leading-snug tracking-tight" dir="auto">
+          {eventSentence(e)}
+        </SheetTitle>
         <SheetDescription className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
           <ActionName action={e.action} className="text-[12.5px]" />
-          <span className="text-muted-foreground" title={formatFull(e.timestamp)}>
-            {formatFull(e.timestamp)} · {formatRelative(e.timestamp)}
+          <span className="text-muted-foreground">
+            <Timestamp format="full" iso={e.timestamp} /> · <Timestamp format="relative" iso={e.timestamp} />
           </span>
         </SheetDescription>
         <div className="flex flex-wrap items-center gap-2">
@@ -457,9 +460,11 @@ function EventDetailBody({
                         {eventSentence(p)}
                       </Link>
                     ) : (
-                      <span className="truncate">{eventSentence(p)}</span>
+                      <span className="truncate" dir="auto">
+                        {eventSentence(p)}
+                      </span>
                     )}
-                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{formatTimeMs(p.timestamp)}</span>
+                    <Timestamp className="shrink-0 font-mono text-[11px] text-muted-foreground" format="ms" iso={p.timestamp} />
                   </li>
                 ))}
                 <li className="flex items-center gap-2 font-medium text-[13px]" style={{ paddingInlineStart: (detail?.parents.length ?? 0) * 14 }}>

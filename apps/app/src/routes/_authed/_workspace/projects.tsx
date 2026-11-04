@@ -7,8 +7,9 @@ import { Button } from '@trailmark/ui/components/ui/button';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { FolderPlusIcon, PlusIcon } from 'lucide-react';
 import { AppShell } from '@/components/shell/app-shell';
+import { Timestamp } from '@/components/timestamp';
 import { projectsQuery } from '@/lib/api/queries';
-import { formatNumber, formatRelative, formatRetention } from '@/lib/format';
+import { formatNumber, formatRetention } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 
 export const Route = createFileRoute('/_authed/_workspace/projects')({
@@ -51,9 +52,9 @@ function ProjectsPage() {
             </EmptyState>
           </div>
         ) : (
-          <ul className="grid gap-3 sm:grid-cols-2">
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {projects.data.map((p) => (
-              <li key={p.id}>
+              <li className="min-w-0" key={p.id}>
                 <Link
                   className="flex h-full flex-col gap-4 rounded-xl border bg-card p-4 shadow-xs outline-none transition-colors hover:border-foreground/20 focus-visible:ring-3 focus-visible:ring-ring/40"
                   params={{ projectId: p.id }}
@@ -63,9 +64,11 @@ function ProjectsPage() {
                     <EntityAvatar id={p.id} name={p.name} size="md" square />
                     <div className="flex min-w-0 flex-col">
                       <span className="truncate font-medium">{p.name}</span>
-                      <span className="line-clamp-2 text-muted-foreground text-sm">
-                        {p.description || <span className="font-mono text-xs">{p.slug}</span>}
-                      </span>
+                      {p.description ? (
+                        <span className="line-clamp-2 text-muted-foreground text-sm">{p.description}</span>
+                      ) : (
+                        <span className="truncate font-mono text-muted-foreground text-xs">{p.slug}</span>
+                      )}
                     </div>
                   </div>
                   <dl className="mt-auto grid grid-cols-3 gap-2 text-xs">
@@ -75,7 +78,9 @@ function ProjectsPage() {
                     </div>
                     <div>
                       <dt className="text-muted-foreground">Last event</dt>
-                      <dd className="font-medium text-sm">{formatRelative(p.lastEventAt)}</dd>
+                      <dd className="font-medium text-sm">
+                        <Timestamp fallback="never" format="relative" iso={p.lastEventAt} />
+                      </dd>
                     </div>
                     <div>
                       <dt className="text-muted-foreground">Retention</dt>

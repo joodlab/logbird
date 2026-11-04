@@ -15,5 +15,4 @@ export const Route = createFileRoute('/')({
     throw redirect({ to: '/p/$projectId', params: { projectId: target?.id ?? '' } });
   },
   pendingComponent: FullPageLoader,
-  component: FullPageLoader,
 });
