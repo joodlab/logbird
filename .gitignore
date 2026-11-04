@@ -64,3 +64,6 @@ temp/
 
 # local launchers
 shared-local.ps1
+
+# console QA session (apps/app/scripts/qa-shoot.mjs)
+.qa-state.json

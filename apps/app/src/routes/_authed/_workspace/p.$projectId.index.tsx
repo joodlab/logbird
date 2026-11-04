@@ -14,9 +14,10 @@ import { ActionName } from '@/components/action-name';
 import { OutcomeAreaChart } from '@/components/charts/outcome-area-chart';
 import { EntityProfileLink } from '@/components/entity-link';
 import { RankList } from '@/components/rank-list';
+import { Timestamp } from '@/components/timestamp';
 import { overviewQuery, projectQuery } from '@/lib/api/queries';
 import { eventSentence } from '@/lib/events';
-import { delta, formatNumber, formatPercent, formatRelative, formatTimestamp } from '@/lib/format';
+import { delta, formatNumber, formatPercent } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
@@ -112,12 +113,13 @@ function OverviewPage() {
           value={k ? formatNumber(k.tenants) : '—'}
         />
         <StatCard
-          delta={k ? (k.failureRatePrev ? (k.failureRate - k.failureRatePrev) / k.failureRatePrev : null) : undefined}
+          delta={k ? k.failureRate - k.failureRatePrev : undefined}
+          deltaKind="points"
           goodWhen="down"
           hint="failure + denied"
           label="Failure rate"
           loading={loading}
-          onClick={() => explore('-outcome:success -outcome:partial')}
+          onClick={() => explore('(outcome:failure OR outcome:denied)')}
           value={k ? formatPercent(k.failureRate) : '—'}
         />
         <StatCard
@@ -142,7 +144,7 @@ function OverviewPage() {
             {loading ? (
               <Skeleton className="h-[248px] w-full" />
             ) : (
-              <OutcomeAreaChart data={data?.series} height={240} onSelectOutcome={(o) => explore(`outcome:${o}`)} range={range} />
+              <OutcomeAreaChart data={data?.series} height={240} onSelectOutcome={(o) => explore(`outcome:${o}`)} />
             )}
           </div>
         </Panel>
@@ -168,7 +170,9 @@ function OverviewPage() {
                 <dl className="grid grid-cols-2 gap-3 text-sm">
                   <div className="flex flex-col gap-0.5">
                     <dt className="text-muted-foreground text-xs">Last event</dt>
-                    <dd className="font-medium tabular-nums">{formatRelative(data?.ingest.lastEventAt)}</dd>
+                    <dd className="font-medium">
+                      <Timestamp fallback="never" format="relative" iso={data?.ingest.lastEventAt} />
+                    </dd>
                   </div>
                   <div className="flex flex-col gap-0.5">
                     <dt className="text-muted-foreground text-xs">Last hour</dt>
@@ -318,7 +322,9 @@ function ProblemRow({ event, projectId }: { event: AuditEvent; projectId: string
       >
         <span className="flex min-w-0 flex-1 items-center gap-2.5">
           <OutcomeDot outcome={event.outcome} />
-          <span className="truncate text-sm">{eventSentence(event)}</span>
+          <span className="truncate text-sm" dir="auto">
+            {eventSentence(event)}
+          </span>
         </span>
         <span className="flex shrink-0 items-center gap-3 ps-4.5 sm:ps-0">
           <SeverityBadge hideInfo severity={event.severity} />
@@ -328,7 +334,7 @@ function ProblemRow({ event, projectId }: { event: AuditEvent; projectId: string
               <EntityChip id={event.actor.id} name={event.actor.name} />
             </span>
           ) : null}
-          <span className="w-24 text-end text-muted-foreground text-xs tabular-nums">{formatTimestamp(event.timestamp)}</span>
+          <Timestamp className="w-24 shrink-0 text-end text-muted-foreground text-xs" iso={event.timestamp} />
         </span>
       </Link>
     </li>

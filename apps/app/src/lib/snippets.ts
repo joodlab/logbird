@@ -7,49 +7,65 @@ export function ingestOrigin(): string {
 
 export const SDK_INSTALL = 'pnpm add @trailmark/sdk';
 
-export function sdkSnippet(key: string): string {
+/**
+ * Snippets are meant to be pasted and run as-is. With a freshly created secret they embed it;
+ * without one they read the key from the environment instead of showing a fake placeholder.
+ */
+const INGEST_ENV = 'TRAILMARK_INGEST_KEY';
+const READ_ENV = 'TRAILMARK_READ_KEY';
+
+/** `@trailmark/sdk`: `new Trailmark({ apiKey, endpoint })`, `track()` queues, `flush()`/`shutdown()` deliver. */
+export function sdkSnippet(key?: string): string {
+  const apiKey = key ? `'${key}'` : `process.env.${INGEST_ENV}!`;
   return `import { Trailmark } from '@trailmark/sdk';
 
 const trailmark = new Trailmark({
-  apiKey: '${key}',
+  apiKey: ${apiKey},
   endpoint: '${ingestOrigin()}',
+  onError: (error) => console.error('[trailmark]', error.message),
 });
 
+// track() never throws: it queues the event and sends it in batches.
 trailmark.track({
   action: 'hotel.policy.updated',
+  outcome: 'success',
   description: 'Raed changed the cancellation policy of Hotel Sunrise',
   actor: { type: 'user', id: 'usr_42', name: 'Raed' },
   tenant: { id: 'biz_7', name: 'Azure Hotels' },
   targets: [{ type: 'hotel', id: 'hotel_123', name: 'Hotel Sunrise' }],
   changes: [{ field: 'cancellationHours', before: 24, after: 48 }],
-  context: { requestId: req.id },
 });
 
-// Events are batched and retried; flush before the process exits.
-await trailmark.flush();`;
+// Deliver everything queued before the process exits.
+await trailmark.shutdown();`;
 }
 
-export function curlSnippet(key: string): string {
-  return `curl -X POST ${ingestOrigin()}/v1/events \\
-  -H "Authorization: Bearer ${key}" \\
+export function curlSnippet(key?: string): string {
+  return `curl -X POST "${ingestOrigin()}/v1/events" \\
+  -H "Authorization: Bearer ${key ?? `$${INGEST_ENV}`}" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "action": "user.signed_in",
+    "action": "hotel.policy.updated",
     "outcome": "success",
-    "actor": { "type": "user", "id": "usr_1", "name": "Ada" },
-    "description": "Ada signed in"
+    "description": "Raed changed the cancellation policy of Hotel Sunrise",
+    "actor": { "type": "user", "id": "usr_42", "name": "Raed" },
+    "tenant": { "id": "biz_7", "name": "Azure Hotels" },
+    "targets": [{ "type": "hotel", "id": "hotel_123", "name": "Hotel Sunrise" }],
+    "changes": [{ "field": "cancellationHours", "before": 24, "after": 48 }]
   }'`;
 }
 
-export function readCurlSnippet(key: string): string {
-  return `curl "${ingestOrigin()}/v1/events?q=outcome:failure&limit=20" \\
-  -H "Authorization: Bearer ${key}"`;
+export function readCurlSnippet(key?: string): string {
+  return `curl --get "${ingestOrigin()}/v1/events" \\
+  -H "Authorization: Bearer ${key ?? `$${READ_ENV}`}" \\
+  --data-urlencode "q=outcome:failure" \\
+  --data-urlencode "limit=20"`;
 }
 
 /** "Copy as curl" for an event: fetch it through the public read API. */
 export function eventCurl(event: AuditEvent): string {
-  return `curl "${ingestOrigin()}/v1/events/${event.id}" \\
-  -H "Authorization: Bearer $TRAILMARK_READ_KEY"`;
+  return `curl "${ingestOrigin()}/v1/events/${encodeURIComponent(event.id)}" \\
+  -H "Authorization: Bearer $${READ_ENV}"`;
 }
 
 export const ENVELOPE_EXAMPLE = `{

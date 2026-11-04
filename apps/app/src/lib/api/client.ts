@@ -24,7 +24,6 @@ import {
 } from '@trailmark/contracts';
 import { z } from 'zod';
 import { toApiError } from './errors';
-import { getTransport } from './transport';
 
 type Query = Record<string, string | number | boolean | null | undefined>;
 
@@ -55,9 +54,9 @@ export function withQuery(path: string, query?: Query): string {
 }
 
 async function request<S extends z.ZodType>(schema: S, method: string, path: string, options: RequestOptions = {}): Promise<z.output<S>> {
-  const fetchImpl = await getTransport();
-  const response = await fetchImpl(withQuery(path, options.query), {
+  const response = await fetch(withQuery(path, options.query), {
     method,
+    credentials: 'same-origin',
     signal: options.signal,
     headers: options.body === undefined ? { accept: 'application/json' } : { accept: 'application/json', 'content-type': 'application/json' },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -73,14 +72,9 @@ async function request<S extends z.ZodType>(schema: S, method: string, path: str
   return parsed.data;
 }
 
-/** Lists are `{ data: [...] }` (contracts/console.ts); bare arrays are accepted for robustness. */
+/** Lists are `{ data: [...] }` (contracts/console.ts). */
 function listOf<T extends z.ZodType>(item: T) {
-  return z.union([z.object({ data: z.array(item) }).transform((v) => v.data), z.array(item)]);
-}
-
-/** Single resources may come bare or wrapped (`{ project }`, `{ key }`). */
-function oneOf<T extends z.ZodType>(item: T, wrapKey: string) {
-  return z.union([item, z.object({ [wrapKey]: item }).transform((v) => v[wrapKey] as z.output<T>)]);
+  return z.object({ data: z.array(item) }).transform((v) => v.data);
 }
 
 const ok = z.unknown().transform(() => true as const);
@@ -103,15 +97,15 @@ export const api = {
 
   projects: {
     list: (signal?: AbortSignal) => request(listOf(projectSchema), 'GET', routes.projects.list.path, { signal }),
-    get: (projectId: string, signal?: AbortSignal) =>
-      request(oneOf(projectSchema, 'project'), 'GET', pathFor(routes.projects.get.path, { projectId }), { signal }),
+    get: (projectId: string, signal?: AbortSignal) => request(projectSchema, 'GET', pathFor(routes.projects.get.path, { projectId }), { signal }),
     create: (body: { name: string; description?: string; retentionDays: number }) =>
       request(createProjectResponseSchema, 'POST', routes.projects.create.path, { body }),
     update: (projectId: string, body: { name?: string; description?: string | null; retentionDays?: number; confirm?: string }) =>
-      request(oneOf(projectSchema, 'project'), 'PATCH', pathFor(routes.projects.update.path, { projectId }), { body }) as Promise<Project>,
+      request(projectSchema, 'PATCH', pathFor(routes.projects.update.path, { projectId }), { body }) as Promise<Project>,
     remove: (projectId: string) => request(ok, 'DELETE', pathFor(routes.projects.remove.path, { projectId })),
-    retention: (projectId: string, signal?: AbortSignal) =>
-      request(retentionStatusSchema, 'GET', pathFor(routes.projects.retention.path, { projectId }), { signal }),
+    /** `preview` (days) also counts the events a lower retention window would delete. */
+    retention: (projectId: string, preview?: number, signal?: AbortSignal) =>
+      request(retentionStatusSchema, 'GET', pathFor(routes.projects.retention.path, { projectId }), { query: { preview }, signal }),
   },
 
   keys: {
@@ -159,7 +153,7 @@ export const api = {
     list: (projectId: string, signal?: AbortSignal) =>
       request(listOf(savedViewSchema), 'GET', pathFor(routes.views.list.path, { projectId }), { signal }) as Promise<SavedView[]>,
     create: (projectId: string, body: { name: string; description: string | null; state: SavedView['state'] }) =>
-      request(oneOf(savedViewSchema, 'view'), 'POST', pathFor(routes.views.create.path, { projectId }), { body }) as Promise<SavedView>,
+      request(savedViewSchema, 'POST', pathFor(routes.views.create.path, { projectId }), { body }) as Promise<SavedView>,
     remove: (projectId: string, viewId: string) => request(ok, 'DELETE', pathFor(routes.views.remove.path, { projectId, viewId })),
   },
 

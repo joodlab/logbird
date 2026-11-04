@@ -65,7 +65,9 @@ export function EntityChip({ id, name, icon, meta, square, className, size = 'sm
   return (
     <span className={cn('inline-flex min-w-0 items-center gap-1.5', className)}>
       <EntityAvatar icon={icon} id={id} name={name || id} size={size === 'md' ? 'md' : 'sm'} square={square} />
-      <span className="truncate">{name || <span className="font-mono text-[12px]">{id}</span>}</span>
+      <span className="truncate" dir="auto">
+        {name || <span className="font-mono text-[12px]">{id}</span>}
+      </span>
       {meta ? <span className="shrink-0 truncate font-mono text-[11px] text-muted-foreground">{meta}</span> : null}
     </span>
   );

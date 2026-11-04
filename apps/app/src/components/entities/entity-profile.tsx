@@ -9,17 +9,19 @@ import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
 import { Button } from '@trailmark/ui/components/ui/button';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { ArrowLeftIcon, Rows3Icon, SearchXIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { ActionName } from '@/components/action-name';
 import { OutcomeAreaChart } from '@/components/charts/outcome-area-chart';
 import { EntityProfileLink } from '@/components/entity-link';
 import { Explorer, type ExplorerState } from '@/components/explorer/explorer';
 import { RankList } from '@/components/rank-list';
+import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { entityProfileQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
 import { ENTITY_SECTIONS, type EntitySection, entityQuery, splitTargetId, typeIcon } from '@/lib/entities';
 import { OUTCOME_ORDER } from '@/lib/events';
-import { formatDate, formatNumber, formatRelative } from '@/lib/format';
+import { formatNumber } from '@/lib/format';
 import { formatTerm } from '@/lib/query-language';
 import { rangeLabel } from '@/lib/range';
 
@@ -100,7 +102,9 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
                 </Link>
                 {p?.entity.type ? <TypePill>{p.entity.type}</TypePill> : null}
               </div>
-              <h1 className="truncate font-semibold text-xl tracking-tight">{p ? p.entity.name || displayId : <Skeleton className="h-6 w-48" />}</h1>
+              <h1 className="truncate font-semibold text-xl tracking-tight" dir="auto">
+                {p ? p.entity.name || displayId : <Skeleton className="h-6 w-48" />}
+              </h1>
               <CopyValue className="text-muted-foreground" value={displayId} />
             </div>
           </div>
@@ -120,8 +124,8 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
         <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-4">
           <Stat label={`Events · ${rangeLabel(timeline.range).toLowerCase()}`} loading={!p} value={p ? formatNumber(outcomeTotal) : ''} />
           <Stat label="Events · all time" loading={!p} value={p ? formatNumber(p.entity.events) : ''} />
-          <Stat label="First seen" loading={!p} value={p ? formatDate(p.entity.firstSeen) : ''} />
-          <Stat label="Last seen" loading={!p} value={p ? formatRelative(p.entity.lastSeen) : ''} />
+          <Stat label="First seen" loading={!p} value={p ? <Timestamp format="date" iso={p.entity.firstSeen} /> : ''} />
+          <Stat label="Last seen" loading={!p} value={p ? <Timestamp format="relative" iso={p.entity.lastSeen} /> : ''} />
         </dl>
 
         <div className="grid gap-3 lg:grid-cols-[1fr_320px]">
@@ -130,12 +134,11 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
               {p ? (
                 <OutcomeAreaChart
                   data={p.series}
-                  height={200}
+                  height={236}
                   onSelectOutcome={(o) => onTimelineChange({ q: formatTerm('outcome', o), ev: undefined })}
-                  range={timeline.range}
                 />
               ) : (
-                <Skeleton className="h-[208px] w-full" />
+                <Skeleton className="h-[244px] w-full" />
               )}
             </div>
           </Panel>
@@ -230,7 +233,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   );
 }
 
-function Stat({ label, value, loading }: { label: string; value: string; loading: boolean }) {
+function Stat({ label, value, loading }: { label: string; value: ReactNode; loading: boolean }) {
   return (
     <div className="flex flex-col gap-1 bg-card px-4 py-3">
       <dt className="truncate text-muted-foreground text-xs">{label}</dt>
@@ -265,7 +268,9 @@ function Related({ projectId, related }: { projectId: string; related: Profile['
                     size="sm"
                     square={r.kind !== 'actor'}
                   />
-                  <span className="min-w-0 flex-1 truncate">{r.name || r.id}</span>
+                  <span className="min-w-0 flex-1 truncate" dir="auto">
+                    {r.name || r.id}
+                  </span>
                   {r.type ? <span className="hidden font-mono text-[11px] text-muted-foreground sm:inline">{r.type}</span> : null}
                   <span className="text-muted-foreground text-xs tabular-nums">{formatNumber(r.count)}</span>
                 </EntityProfileLink>

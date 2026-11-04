@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { CodeBlock, CodeTabs, HighlightedCode } from '@trailmark/ui/components/code-block';
+import { CodeBlock, CodeTabs } from '@trailmark/ui/components/code-block';
 import { Kbd } from '@trailmark/ui/components/ui/kbd';
 import { ArrowUpRightIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { HighlightedQuery } from '@/components/explorer/query-bar';
 import { curlSnippet, ENVELOPE_EXAMPLE, readCurlSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/docs')({
@@ -26,14 +27,17 @@ const QUERY_SYNTAX: [string, string][] = [
   ['action:hotel.*', 'Prefix wildcard'],
   ['outcome:failure', 'Outcome: success · failure · denied · partial · unknown'],
   ['-env:staging', 'Negate any term with a leading -'],
-  ['actor:usr_42', 'Actor id (also actor.type, actor.name, actor.email)'],
+  ['(outcome:failure OR outcome:denied) action:booking.*', 'OR and parentheses; adjacent terms are ANDed'],
+  ['actor:usr_42', 'Actor id (also actor.type, actor.email)'],
   ['actor.name:"Raed Al-Harbi"', 'Quote values with spaces'],
-  ['tenant:biz_7', 'Tenant id'],
-  ['executor:crm-worker', 'Who performed it (also executor.type:worker)'],
+  ['impersonator:usr_1', 'Actions a support user took while impersonating'],
+  ['tenant:biz_7   tenant.name:"Azure Hotels"', 'Tenant by id or by name'],
+  ['executor:crm-worker   executor.name:"CRM worker"', 'Who performed it (also executor.type:worker)'],
+  ['job:456', 'Everything one job run did'],
   ['target:hotel_123', 'Any target id (also target.type:hotel)'],
   ['operation:op_101', 'Everything in one operation'],
+  ['parent:evt_123', 'Direct children of an event in the causation tree'],
   ['request:req_abc   trace:4bf92f…', 'Request and trace ids'],
-  ['attr.metadata.supportTicket:*', 'Attribute is present (a lone * matches any value)'],
   ['source:joodbooking', 'External system that supplied the change'],
   ['attr.metadata.plan:pro', 'Any attribute; unknown fields are treated as attr.<field>'],
   ['severity:critical  category:booking', 'Severity and first action segment'],
@@ -68,7 +72,6 @@ function Heading({ id, children }: { id: string; children: ReactNode }) {
 
 function DocsPage() {
   const { projectId } = Route.useParams();
-  const keyPlaceholder = 'tm_ingest_…';
   return (
     <div className="mx-auto grid w-full max-w-6xl gap-10 p-4 sm:p-6 lg:grid-cols-[1fr_200px]">
       <article className="flex min-w-0 flex-col gap-10">
@@ -84,20 +87,22 @@ function DocsPage() {
           <Heading id="install">1 · Install the SDK</Heading>
           <CodeBlock code={SDK_INSTALL} language="bash" />
           <p className="text-muted-foreground text-sm">
-            The SDK batches events, retries with idempotent ids, and flushes before your process exits. Keys live in{' '}
+            The SDK batches events, retries with idempotent ids and never throws from <span className="font-mono text-foreground">track()</span>.
+            Create an ingest key in{' '}
             <Link className="text-foreground underline underline-offset-2" params={{ projectId }} to="/p/$projectId/settings/keys">
               Settings → API keys
-            </Link>
-            .
+            </Link>{' '}
+            and export it — every snippet on this page reads it from the environment, so it runs as pasted:
           </p>
+          <CodeBlock code="export TRAILMARK_INGEST_KEY=tm_ingest_…   # and TRAILMARK_READ_KEY=tm_read_… for the read API" language="bash" />
         </section>
 
         <section className="flex flex-col gap-3">
           <Heading id="send">2 · Send an event</Heading>
           <CodeTabs
             tabs={[
-              { id: 'sdk', label: 'TypeScript', code: sdkSnippet(keyPlaceholder), language: 'ts' },
-              { id: 'curl', label: 'curl', code: curlSnippet(keyPlaceholder), language: 'bash' },
+              { id: 'sdk', label: 'TypeScript', code: sdkSnippet(), language: 'ts' },
+              { id: 'curl', label: 'curl', code: curlSnippet(), language: 'bash' },
             ]}
           />
           <p className="text-muted-foreground text-sm">
@@ -139,7 +144,10 @@ function DocsPage() {
 
         <section className="flex flex-col gap-3">
           <Heading id="query">5 · Query language</Heading>
-          <p className="text-muted-foreground text-sm">Terms are ANDed. Click an example to run it in the explorer.</p>
+          <p className="text-muted-foreground text-sm">
+            Adjacent terms are ANDed; use <span className="font-mono text-foreground">OR</span> and parentheses for alternatives. Click an example to
+            run it in the explorer.
+          </p>
           <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
             <table className="w-full text-sm">
               <tbody className="divide-y">
@@ -152,7 +160,7 @@ function DocsPage() {
                         search={(prev) => ({ range: prev.range ?? '7d', q: q.split('   ')[0] })}
                         to="/p/$projectId/events"
                       >
-                        <HighlightedQuery q={q} />
+                        <HighlightedQuery value={q} />
                         <ArrowUpRightIcon className="size-3 text-muted-foreground opacity-0 group-hover:opacity-100" />
                       </Link>
                     </td>
@@ -182,7 +190,7 @@ function DocsPage() {
             Products that show history to their own users read through <span className="font-mono text-foreground">GET /v1/events</span> with a read
             key and the same query language.
           </p>
-          <CodeBlock code={readCurlSnippet('tm_read_…')} language="bash" />
+          <CodeBlock code={readCurlSnippet()} language="bash" />
         </section>
       </article>
       <nav aria-label="On this page" className="hidden lg:block">
@@ -196,34 +204,5 @@ function DocsPage() {
         </div>
       </nav>
     </div>
-  );
-}
-
-function HighlightedQuery({ q }: { q: string }) {
-  // Reuse the code highlighter's palette: field names in key color, quoted text as strings.
-  return (
-    <span>
-      {q.split(/(\s+)/).map((part, i) => {
-        const sep = part.indexOf(':');
-        const key = `${i}-${part}`;
-        if (part.startsWith('"')) {
-          return (
-            <span className="text-syntax-string" key={key}>
-              {part}
-            </span>
-          );
-        }
-        if (sep > 0) {
-          return (
-            <span key={key}>
-              <span className={part.startsWith('-') ? 'text-outcome-failure' : 'text-syntax-key'}>{part.slice(0, sep)}</span>
-              <span className="text-syntax-punct">:</span>
-              <HighlightedCode code={part.slice(sep + 1)} language="text" />
-            </span>
-          );
-        }
-        return <span key={key}>{part}</span>;
-      })}
-    </span>
   );
 }

@@ -14,9 +14,9 @@ import { Loader2Icon, MailIcon, UserPlusIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { SettingsSection } from '@/components/settings-section';
+import { Timestamp } from '@/components/timestamp';
 import { meQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
-import { formatDate, formatRelative } from '@/lib/format';
 import { fieldErrorMessage } from '@/lib/forms';
 import { placeholderKeys } from '@/lib/placeholders';
 
@@ -188,7 +188,7 @@ function MembersSettings() {
                         {m.user.name || m.user.email} {self ? <span className="font-normal text-muted-foreground">(you)</span> : null}
                       </span>
                       <span className="truncate text-muted-foreground text-xs">
-                        {m.user.email} · joined {formatDate(new Date(m.createdAt).toISOString())}
+                        {m.user.email} · joined <Timestamp format="date" iso={new Date(m.createdAt).toISOString()} />
                       </span>
                     </div>
                   </div>
@@ -243,7 +243,7 @@ function MembersSettings() {
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm">{i.email}</span>
                   <span className="text-muted-foreground text-xs">
-                    {i.role ?? 'member'} · expires {formatRelative(new Date(i.expiresAt).toISOString())}
+                    {i.role ?? 'member'} · expires <Timestamp format="relative" iso={new Date(i.expiresAt).toISOString()} />
                   </span>
                 </div>
                 {canManage ? (
