@@ -1,0 +1,34 @@
+{
+  "name": "@trailmark/worker",
+  "license": "MIT",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./queue": "./src/queue.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "dev": "pnpm with-env tsx watch --clear-screen=false src/index.ts",
+    "with-env": "dotenv -e ../../.env --",
+    "build": "tsdown",
+    "start": "node dist/index.mjs",
+    "clean": "git clean -xdf .cache .turbo dist node_modules"
+  },
+  "dependencies": {
+    "@t3-oss/env-core": "^0.13.11",
+    "zod": "^4.5.4",
+    "@trailmark/database": "workspace:*",
+    "@clickhouse/client": "1.23.1",
+    "bullmq": "^6.2.0",
+    "ioredis": "^6.0.0"
+  },
+  "devDependencies": {
+    "@trailmark/tsconfig": "workspace:*",
+    "@types/node": "^22.20.1",
+    "typescript": "^7.0.2",
+    "tsx": "4.23.13",
+    "dotenv-cli": "^11.0.0",
+    "tsdown": "^0.22.14"
+  }
+}
