@@ -1,0 +1,10 @@
+{
+  "extends": "@trailmark/tsconfig/react.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "scripts", "vite.config.ts"],
+  "exclude": ["node_modules", "dist", ".output", ".nitro"]
+}

@@ -1,0 +1,126 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from '@trailmark/ui/components/ui/alert-dialog';
+import { Button } from '@trailmark/ui/components/ui/button';
+import { Input } from '@trailmark/ui/components/ui/input';
+import { Label } from '@trailmark/ui/components/ui/label';
+import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
+import { Loader2Icon, Trash2Icon } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
+import { SettingsSection } from '@/components/settings-section';
+import { api } from '@/lib/api/client';
+import { errorMessage } from '@/lib/api/errors';
+import { keys, projectQuery } from '@/lib/api/queries';
+import { formatNumber } from '@/lib/format';
+
+export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/danger')({
+  staticData: { crumb: 'Danger zone' },
+  component: DangerZone,
+});
+
+function DangerZone() {
+  const { projectId } = Route.useParams();
+  const project = useQuery(projectQuery(projectId));
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+  const remove = useMutation({
+    mutationFn: () => api.projects.remove(projectId),
+    onSuccess: async () => {
+      setOpen(false);
+      queryClient.removeQueries({ queryKey: keys.project(projectId) });
+      await queryClient.invalidateQueries({ queryKey: keys.projects });
+      toast.success(`Deleted ${project.data?.name}`, { description: 'The project and all of its events are gone.' });
+      await navigate({ to: '/' });
+    },
+    onError: (error) => toast.error('Could not delete the project', { description: errorMessage(error) }),
+  });
+
+  if (!project.data) return <Skeleton className="h-40 w-full rounded-xl" />;
+  const p = project.data;
+  const matches = typed.trim() === p.slug;
+
+  return (
+    <div className="flex flex-col gap-5">
+      <SettingsSection
+        description={
+          <>
+            Deletes <span className="font-medium text-foreground">{p.name}</span>, its API keys, saved views and every stored event. Products still
+            sending to its keys will get 401s. This cannot be undone.
+          </>
+        }
+        footer={
+          <Button onClick={() => setOpen(true)} size="sm" variant="destructive">
+            <Trash2Icon />
+            Delete project…
+          </Button>
+        }
+        title="Delete project"
+        tone="danger"
+      >
+        <p className="text-muted-foreground text-sm">
+          Last 24 hours: <span className="font-medium text-foreground tabular-nums">{formatNumber(p.eventsLast24h)}</span> events received.
+        </p>
+      </SettingsSection>
+      <AlertDialog
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setTyped('');
+        }}
+        open={open}
+      >
+        <AlertDialogContent className="sm:max-w-md">
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (matches) remove.mutate();
+            }}
+          >
+            <AlertDialogHeader>
+              <AlertDialogMedia className="bg-destructive/10 text-destructive">
+                <Trash2Icon />
+              </AlertDialogMedia>
+              <AlertDialogTitle>Delete {p.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Every event, key and saved view in this project is permanently deleted. Workspace activity keeps a record that you did this.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="delete-slug">
+                Type <span className="font-mono font-semibold">{p.slug}</span> to confirm
+              </Label>
+              <Input
+                autoComplete="off"
+                autoFocus
+                id="delete-slug"
+                onChange={(e) => setTyped(e.target.value)}
+                placeholder={p.slug}
+                spellCheck={false}
+                value={typed}
+              />
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
+              <Button disabled={!matches || remove.isPending} type="submit" variant="destructive">
+                {remove.isPending ? <Loader2Icon className="animate-spin" /> : null}
+                Delete project
+              </Button>
+            </AlertDialogFooter>
+          </form>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
