@@ -79,6 +79,15 @@ async function demoState() {
   return { state, projects };
 }
 
+/** STEPS=<dir>: also save a still at each step of the recorded flows, for reviewing them frame by frame. */
+let step = 0;
+async function snap(page, label) {
+  if (!process.env.STEPS) return;
+  await mkdir(process.env.STEPS, { recursive: true });
+  step += 1;
+  await page.screenshot({ path: path.join(process.env.STEPS, `${String(step).padStart(2, '0')}-${label}.png`) });
+}
+
 /** Slowly type like a person so the video reads well. */
 async function type(page, text, delay = 55) {
   await page.keyboard.type(text, { delay });
@@ -206,6 +215,7 @@ if (want('signin')) {
   await type(page, code, 120);
   await page.waitForURL((u) => u.pathname.startsWith('/p/'), { timeout: 30_000 });
   await settle(page, 1500);
+  await snap(page, 'step');
   await page.mouse.move(700, 450, { steps: 12 });
   await page.waitForTimeout(1200);
   if (ledger) {
@@ -216,8 +226,10 @@ if (want('signin')) {
     await page.waitForTimeout(700);
     await page.getByRole('menuitem', { name: ledger.name }).click();
     await settle(page, 1800);
+  await snap(page, 'step');
     await page.getByRole('link', { name: 'Explorer' }).first().click();
     await settle(page, 1800);
+  await snap(page, 'step');
   }
   await done();
 }
@@ -242,12 +254,14 @@ if (want('onboarding')) {
   await type(page, code, 100);
   await page.waitForURL((u) => u.pathname.startsWith('/onboarding'), { timeout: 30_000 });
   await settle(page, 800);
+  await snap(page, 'step');
   await page.getByLabel('Workspace name').fill('');
   await type(page, 'Nour Al-Huda Hospitality · نور الهدى');
   await page.screenshot({ path: path.join(OUT, 'light-onboarding-workspace.png') });
   await page.getByRole('button', { name: 'Create workspace' }).click();
   await page.waitForURL((u) => u.pathname.startsWith('/onboarding/project'), { timeout: 20_000 });
   await settle(page, 700);
+  await snap(page, 'step');
   await page.getByLabel('Project name').fill('');
   await type(page, 'Guest portal');
   await page
@@ -259,6 +273,7 @@ if (want('onboarding')) {
   await page.getByRole('button', { name: /create project/i }).click();
   await page.waitForURL((u) => u.pathname.startsWith('/onboarding/first-event'), { timeout: 20_000 });
   await settle(page, 1200);
+  await snap(page, 'step');
   const projectId = page.url().split('/').at(-1);
   await page.screenshot({ path: path.join(OUT, 'light-onboarding-first-event-waiting.png') });
   // Copy the curl snippet exactly as a person would, then run it with bash.
@@ -276,6 +291,7 @@ if (want('onboarding')) {
   const key = /Bearer (tm_ingest_\w+)/.exec(snippet)?.[1];
   await page.getByText('Open overview').click();
   await settle(page, 2500);
+  await snap(page, 'step');
   onboarded = { projectId, key, email, state: await context.storageState() };
   await done();
 }
@@ -336,6 +352,7 @@ if (onboarded?.key) {
     ]) {
       await page.goto(`${BASE}${url}`);
       await settle(page);
+  await snap(page, 'step');
       await page.screenshot({ path: path.join(OUT, `${theme}-${name}.png`) });
     }
     await context.close();
@@ -349,6 +366,7 @@ if (want('explorer')) {
   const { page, done } = await recorded('explorer-search-filter-zoom-detail', { storageState: state });
   await page.goto(`${BASE}${J}/events`);
   await settle(page, 1200);
+  await snap(page, 'step');
   await page.keyboard.press('/');
   await type(page, 'tenant.na');
   await page.waitForTimeout(700);
@@ -362,10 +380,12 @@ if (want('explorer')) {
   await page.keyboard.press('Escape');
   await page.keyboard.press('Enter');
   await settle(page, 1500);
+  await snap(page, 'step');
   // Facet: exclude one action with ⌥-click.
   const facetRow = page.locator('aside[aria-label=Filters] section').filter({ hasText: 'Action' }).locator('button[aria-pressed]').first();
   await facetRow.click({ modifiers: ['Alt'] });
   await settle(page, 1500);
+  await snap(page, 'step');
   // Drag across the histogram to zoom.
   const chart = page.locator('.recharts-wrapper').first();
   const box = await chart.boundingBox();
@@ -376,8 +396,10 @@ if (want('explorer')) {
     await page.mouse.up();
   }
   await settle(page, 1500);
+  await snap(page, 'step');
   await page.locator('[role=row][data-index="0"]').click();
   await settle(page, 1200);
+  await snap(page, 'step');
   await page.keyboard.press('j');
   await page.waitForTimeout(900);
   await page.keyboard.press('j');
@@ -395,6 +417,7 @@ if (want('explorer')) {
   if (await op.isVisible().catch(() => false)) {
     await op.click();
     await settle(page, 2500);
+  await snap(page, 'step');
   }
   await done();
 }
@@ -406,20 +429,26 @@ if (want('follow')) {
   const { page, done } = await recorded('follow-actor-tenant-record', { storageState: state });
   await page.goto(`${BASE}${J}/actors?type=user`);
   await settle(page, 1200);
+  await snap(page, 'step');
   await page.getByRole('link').filter({ hasText: /Al-/ }).first().click();
   await settle(page, 1800);
+  await snap(page, 'step');
   await page.mouse.wheel(0, 500);
   await page.waitForTimeout(900);
   await page.locator('a[href*="/tenants/"]').first().click();
   await settle(page, 1800);
+  await snap(page, 'step');
   await page.mouse.wheel(0, 500);
   await page.waitForTimeout(900);
   await page.locator('a[href*="/records/"]').first().click();
   await settle(page, 1800);
+  await snap(page, 'step');
   await page.goBack();
   await settle(page, 1200);
+  await snap(page, 'step');
   await page.goForward();
   await settle(page, 1500);
+  await snap(page, 'step');
   await done();
 }
 
@@ -431,6 +460,7 @@ if (want('settings') && onboarded) {
   const P = `/p/${onboarded.projectId}`;
   await page.goto(`${BASE}${P}/settings/retention`);
   await settle(page, 1200);
+  await snap(page, 'step');
   await page
     .getByRole('radio', { name: /^30 days/ })
     .first()
@@ -446,8 +476,10 @@ if (want('settings') && onboarded) {
   await page.getByRole('button', { name: /delete and lower/i }).click();
   await page.getByText(/Retention set to 30 days/).waitFor({ timeout: 30_000 });
   await settle(page, 2000);
+  await snap(page, 'step');
   await page.getByRole('link', { name: 'API keys' }).click();
   await settle(page, 1000);
+  await snap(page, 'step');
   await page
     .getByRole('button', { name: /create key/i })
     .first()
@@ -465,10 +497,12 @@ if (want('settings') && onboarded) {
   await page.waitForTimeout(2500);
   await page.getByRole('button', { name: /i have stored the key/i }).click();
   await settle(page, 900);
+  await snap(page, 'step');
   await page.getByRole('button', { name: 'Revoke' }).first().click();
   await page.waitForTimeout(900);
   await page.getByRole('button', { name: 'Revoke key' }).click();
   await settle(page, 1800);
+  await snap(page, 'step');
   await done();
 }
 

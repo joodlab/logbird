@@ -152,8 +152,34 @@ export function formatTerm(field: string, value: string, negated = false): strin
   return `${negated ? '-' : ''}${field}:${quoteIfNeeded(value)}`;
 }
 
+/**
+ * Drop operators and groups that removing a term left dangling — `(a OR b)` minus `a` and `b` must
+ * not become `( OR )`, which the server rightly rejects.
+ */
+function tidy(tokens: QueryToken[]): QueryToken[] {
+  let current = tokens;
+  for (;;) {
+    const solid = current.filter((t) => t.kind !== 'space');
+    const drop = new Set<QueryToken>();
+    solid.forEach((t, i) => {
+      const prev = solid[i - 1];
+      const next = solid[i + 1];
+      if (t.kind === 'operator' && (!prev || !next || prev.raw === '(' || next.raw === ')' || next.kind === 'operator')) drop.add(t);
+      if (t.raw === '(' && next?.raw === ')') {
+        drop.add(t);
+        drop.add(next);
+      }
+    });
+    current.forEach((t, i) => {
+      if (t.kind === 'space' && (current[i - 1]?.raw === '(' || current[i + 1]?.raw === ')')) drop.add(t);
+    });
+    if (drop.size === 0) return current;
+    current = current.filter((t) => !drop.has(t));
+  }
+}
+
 function join(tokens: QueryToken[]): string {
-  return tokens
+  return tidy(tokens)
     .map((t) => t.raw)
     .join('')
     .replace(/\s{2,}/g, ' ')

@@ -10,6 +10,7 @@
     "start": "node .output/server/index.mjs",
     "preview": "vite preview --port 4600",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "media": "node ./scripts/capture-media.mjs",
     "clean": "git clean -xdf .cache .turbo .output .nitro .tanstack dist node_modules"
   },
