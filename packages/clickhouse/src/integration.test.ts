@@ -43,8 +43,9 @@ it.runIf(process.env.CLICKHOUSE_URL)(
     const input = {
       action: 'hotel.updated',
       occurredAt: new Date(now.getTime() - 10_000).toISOString(),
-      actor: { id: 'u', name: 'Demo', type: 'user' },
-      executor: { id: 'crm', type: 'worker' },
+      actor: { id: 'u', name: 'Demo', type: 'user', email: 'demo@example.test' },
+      impersonator: { id: 'support' },
+      executor: { id: 'crm', name: 'CRM worker', type: 'worker', jobId: 'job-1' },
       tenant: { id: 'biz', name: 'Example' },
       targets: [{ type: 'hotel', id: 'h', name: 'Hotel' }],
       metadata: { plan: 'pro' },
@@ -62,6 +63,30 @@ it.runIf(process.env.CLICKHOUSE_URL)(
           rows.flatMap((r) => (r.ok ? [r.row] : [])),
         );
       }
+      const arrived = await liveEvents(ch, p, { since: new Date(now.getTime() - 1000).toISOString(), limit: 20 });
+      expect(arrived.map((e) => e.id).sort()).toEqual(['child', 'root']);
+      for (const [field, label] of [
+        ['actor', 'Demo'],
+        ['tenant', 'Example'],
+        ['executor', 'CRM worker'],
+        ['target', 'Hotel'],
+      ]) {
+        const result = await facets(ch, p, { from, to, field: field ?? 'actor', limit: 10 });
+        expect(result.values[0]?.label).toBe(label);
+        expect(result.values[0]?.count).toBe(2);
+      }
+      for (const query of [
+        'impersonator:support',
+        'actor.email:demo@example.test',
+        'tenant.name:Example',
+        'executor.name:"CRM worker"',
+        'job:job-1',
+        'parent:root OR id:root',
+      ]) {
+        expect((await searchEvents(ch, p, { from, to, q: query, limit: 20, order: 'desc' })).total).toBe(2);
+      }
+      const empty = await histogram(ch, p, { from: '2020-01-01T00:00:00Z', to: '2020-01-01T00:03:00Z', interval: 60 });
+      expect(empty.buckets.map((b) => b.total)).toEqual([0, 0, 0]);
       const q = { from, to, limit: 1, order: 'desc' as const };
       const page = searchResponseSchema.parse(await searchEvents(ch, p, q));
       expect(page.total).toBe(2);
@@ -97,6 +122,30 @@ it.runIf(process.env.CLICKHOUSE_URL)(
     } finally {
       await purgeProject(ch, p);
       await purgeProject(ch, other);
+      await ch.close();
+    }
+  },
+  60_000,
+);
+
+it.runIf(process.env.CLICKHOUSE_URL)(
+  'live tail dedupes event IDs across late event timestamps',
+  async () => {
+    const ch = createClickHouseClient();
+    const p = `test-live-${randomUUID()}`;
+    const receivedAt = new Date();
+    try {
+      for (const occurredAt of ['2020-01-01T00:00:00Z', '2020-01-02T00:00:00Z']) {
+        const normalized = normalizeEvent({ id: 'same-id', action: 'late.event', occurredAt }, { projectId: p, receivedAt });
+        if (!normalized.ok) throw new Error(normalized.reason);
+        await insertEvents(ch, [normalized.row]);
+      }
+      const result = await liveEvents(ch, p, { since: new Date(receivedAt.getTime() - 1000).toISOString(), limit: 20 });
+      expect(result.map((event) => event.id)).toEqual(['same-id']);
+      const empty = await liveEvents(ch, p, { since: new Date(receivedAt.getTime() + 1000).toISOString(), limit: 20 });
+      expect(empty).toEqual([]);
+    } finally {
+      await purgeProject(ch, p);
       await ch.close();
     }
   },

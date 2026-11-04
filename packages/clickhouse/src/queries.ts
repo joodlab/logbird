@@ -22,7 +22,7 @@ import { columns, compileQuery } from './query';
 
 type Params = Record<string, unknown>;
 async function read<T>(ch: ClickHouseClient, query: string, query_params: Params = {}, guard = 10): Promise<T[]> {
-  for (const key of ['from', 'to', 'cursorTs', 'hour']) {
+  for (const key of ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff']) {
     const value = query_params[key];
     if (typeof value === 'string') query_params[key] = new Date(value).toISOString().replace('T', ' ').slice(0, -1);
   }
@@ -150,18 +150,33 @@ export async function getEvent(ch: ClickHouseClient, projectId: string, eventId:
   };
 }
 export async function liveEvents(ch: ClickHouseClient, p: string, q: { since: string; q?: string; limit: number }) {
-  return (await searchEvents(ch, p, { from: q.since, q: q.q, limit: q.limit, order: 'desc' })).data;
+  const filter = compileQuery(q.q);
+  return (
+    await read<EventRow>(
+      ch,
+      `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={p:String} AND received_at >= {since:DateTime64(3)} AND (${filter.sql}) ORDER BY received_at DESC,event_id DESC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
+      { p, since: q.since, limit: q.limit, ...filter.params },
+    )
+  ).map(toEvent);
 }
 export async function histogram(ch: ClickHouseClient, p: string, q: z.infer<typeof histogramQuerySchema>): Promise<HistogramResponse> {
   const w = where(p, q),
     range = timeRange(q),
     interval = q.interval ?? Math.max(1, Math.ceil((Date.parse(range.to) - Date.parse(range.from)) / 60_000));
+  const step = interval * 1000;
+  const start = Math.floor(Date.parse(range.from) / step) * step;
+  if (Math.ceil((Date.parse(range.to) - start) / step) > 10_000) throw new Error('Query exceeds 10000 histogram buckets');
   const rows = await read<{ ts: string; outcome: string; n: number }>(
     ch,
     `SELECT toStartOfInterval(timestamp,toIntervalSecond({interval:UInt32})) ts,outcome,count() n FROM events WHERE ${w.sql} GROUP BY ts,outcome ORDER BY ts`,
     { ...w.params, interval },
   );
   const buckets = new Map<string, { ts: string; total: number; byOutcome: Record<string, number> }>();
+  const outcomes = [...new Set(rows.map((r) => r.outcome))];
+  for (let t = start; t < Date.parse(range.to); t += step) {
+    const ts = new Date(t).toISOString();
+    buckets.set(ts, { ts, total: 0, byOutcome: Object.fromEntries(outcomes.map((outcome) => [outcome, 0])) });
+  }
   for (const r of rows) {
     const ts = iso(r.ts),
       b = buckets.get(ts) ?? { ts, total: 0, byOutcome: {} };
@@ -179,15 +194,24 @@ export async function facets(ch: ClickHouseClient, p: string, q: z.infer<typeof 
     if (!q.field.startsWith('attr.')) throw new Error('Invalid facet field');
     expr = 'attributes[{attr:String}]';
   }
-  if (expr === 'target_types') expr = 'arrayJoin(target_types)';
-  const rows = await read<{ value: string; count: number }>(
+  let join = '';
+  let label = expr;
+  if (expr === 'target_ids') {
+    join = 'ARRAY JOIN arrayZip(target_ids,target_names) AS target';
+    expr = 'target.1';
+    label = 'target.2';
+  } else if (expr === 'target_types') {
+    expr = 'arrayJoin(target_types)';
+    label = expr;
+  } else if (['actor', 'tenant', 'executor'].includes(q.field)) label = `${q.field}_name`;
+  const rows = await read<{ value: string; label: string; count: number }>(
     ch,
-    `SELECT ${expr} value,count() count FROM events WHERE ${w.sql} GROUP BY value ORDER BY count DESC,value`,
+    `SELECT ${expr} value,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),value) label,count() count FROM events ${join} WHERE ${w.sql} GROUP BY value ORDER BY count DESC,value`,
     { ...w.params, attr: q.field.slice(5) },
   );
   return {
     field: q.field,
-    values: rows.slice(0, q.limit).map((r) => ({ ...r, label: r.value, count: Number(r.count) })),
+    values: rows.slice(0, q.limit).map((r) => ({ ...r, count: Number(r.count) })),
     otherCount: rows.slice(q.limit).reduce((n, r) => n + Number(r.count), 0),
   };
 }
@@ -207,7 +231,7 @@ async function top(ch: ClickHouseClient, p: string, q: RangeQuery, col: string, 
   const w = where(p, q);
   return read<{ id: string; label: string; type: string; count: number }>(
     ch,
-    `SELECT ${col} id,argMax(${label},timestamp) label,argMax(${type},timestamp) type,count() count FROM events WHERE ${w.sql} AND ${col}!='' GROUP BY id ORDER BY count DESC,id LIMIT 10`,
+    `SELECT ${col} id,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),id) label,argMax(${type},timestamp) type,count() count FROM events WHERE ${w.sql} AND ${col}!='' GROUP BY id ORDER BY count DESC,id LIMIT 10`,
     w.params,
   );
 }
@@ -286,7 +310,7 @@ export async function entityProfile(ch: ClickHouseClient, p: string, kind: Entit
   )[0];
   const entity = raw ? { ...raw, firstSeen: iso(raw.firstSeen), lastSeen: iso(raw.lastSeen), events: Number(raw.events) } : undefined;
   if (!entity) return null;
-  const scoped = { ...q, q: `${q.q ?? ''} ${entityFilter(kind, id)}` };
+  const scoped = { ...q, q: `${q.q ? `(${q.q})` : ''} ${entityFilter(kind, id)}` };
   const [series, topActions, outcomes] = await Promise.all([
     histogram(ch, p, scoped),
     top(ch, p, scoped, 'action', 'action'),
@@ -410,4 +434,14 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
       await ch.command({ query: `INSERT INTO ${m[1]} ${select}`, query_params: { p } });
     }
   }
+}
+
+/** Read-only retention preview, scoped to the authorized project. */
+export async function retentionStats(ch: ClickHouseClient, p: string, days?: number) {
+  const rows = await read<{ oldest: string | null; n: string }>(
+    ch,
+    'SELECT minOrNull(timestamp) oldest,countIf(timestamp < {cutoff:DateTime64(3)}) n FROM events WHERE project_id={p:String}',
+    { p, cutoff: new Date(Date.now() - (days ?? 3650) * 86_400_000).toISOString() },
+  );
+  return { oldestEventAt: rows[0]?.oldest ? iso(rows[0].oldest) : null, previewDeletedEvents: days === undefined ? null : Number(rows[0]?.n ?? 0) };
 }
