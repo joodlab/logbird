@@ -1,0 +1,25 @@
+{
+  "name": "@trailmark/clickhouse",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "migrate": "node --env-file=../../.env --import tsx scripts/migrate.ts"
+  },
+  "dependencies": {
+    "@clickhouse/client": "1.23.1",
+    "@trailmark/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@trailmark/tsconfig": "workspace:*",
+    "@types/node": "^22.20.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}
