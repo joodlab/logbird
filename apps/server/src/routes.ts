@@ -1,0 +1,184 @@
+﻿import { randomUUID } from 'node:crypto';
+import {
+  apiKeySchema,
+  createApiKeyResponseSchema,
+  createApiKeySchema,
+  createProjectResponseSchema,
+  createProjectSchema,
+  createSavedViewSchema,
+  meResponseSchema,
+  projectSchema,
+  savedViewSchema,
+  updateProjectSchema,
+} from '@trailmark/contracts';
+import { Prisma, prisma } from '@trailmark/database';
+import { enqueueProjectRetention } from '@trailmark/worker/queue';
+import { Hono } from 'hono';
+import { describeRoute, resolver, validator } from 'hono-openapi';
+import { z } from 'zod';
+import { purgeProjectEvents } from './clickhouse';
+import { ApiError } from './errors';
+import { generateApiKey } from './keys';
+import { requireProjectAccess, requireSession } from './middlewares';
+import { creatorSelect, serializeKey, serializeProject, serializeView } from './serialize';
+import type { AppEnv } from './types';
+
+const doc = (summary: string, schema: z.ZodType, status = 200) =>
+  describeRoute({ summary, responses: { [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } } } });
+async function activeOrganization(c: import('hono').Context<AppEnv>) {
+  const id = c.get('activeOrganizationId');
+  if (!id || !(await prisma.member.findFirst({ where: { organizationId: id, userId: c.get('user').id } })))
+    throw new ApiError(403, 'organization_required', 'Select an organization you belong to.');
+  return id;
+}
+export const managementRoutes = new Hono<AppEnv>()
+  .use('*', requireSession)
+  .get('/me', doc('Current user and workspaces', meResponseSchema), async (c) => {
+    const memberships = await prisma.member.findMany({ where: { userId: c.get('user').id }, include: { organization: true } });
+    return c.json(
+      meResponseSchema.parse({
+        user: c.get('user'),
+        organizations: memberships.map((m) => ({ ...m.organization, role: m.role })),
+        activeOrganizationId: c.get('activeOrganizationId'),
+      }),
+    );
+  })
+  .get('/projects', doc('List projects', z.object({ data: z.array(projectSchema) })), async (c) =>
+    c.json({
+      data: (await prisma.project.findMany({ where: { organizationId: await activeOrganization(c) }, orderBy: { createdAt: 'asc' } })).map(
+        serializeProject,
+      ),
+    }),
+  )
+  .post(
+    '/projects',
+    doc('Create project and initial ingest key', createProjectResponseSchema, 201),
+    validator('json', createProjectSchema, (result) => {
+      if (!result.success) throw new ApiError(422, 'validation_error', 'Invalid request body.', result.error);
+    }),
+    async (c) => {
+      const organizationId = await activeOrganization(c);
+      const input = c.req.valid('json');
+      const material = generateApiKey('ingest');
+      const base =
+        input.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '') || 'project';
+      const result = await prisma.$transaction(async (tx) => {
+        const project = await tx.project.create({ data: { ...input, organizationId, slug: `${base}-${randomUUID().slice(0, 8)}` } });
+        const key = await tx.apiKey.create({
+          data: {
+            projectId: project.id,
+            name: 'Initial ingest key',
+            kind: 'ingest',
+            hash: material.hash,
+            prefix: material.prefix,
+            createdById: c.get('user').id,
+          },
+          include: creatorSelect,
+        });
+        return { project: serializeProject(project), ingestKey: { key: serializeKey(key), secret: material.secret } };
+      });
+      return c.json(createProjectResponseSchema.parse(result), 201);
+    },
+  )
+  .use('/projects/:projectId', requireProjectAccess)
+  .use('/projects/:projectId/*', requireProjectAccess)
+  .get('/projects/:projectId', doc('Get project', projectSchema), (c) => c.json(serializeProject(c.get('project'))))
+  .patch(
+    '/projects/:projectId',
+    doc('Update project', projectSchema),
+    validator('json', updateProjectSchema, (result) => {
+      if (!result.success) throw new ApiError(422, 'validation_error', 'Invalid request body.', result.error);
+    }),
+    async (c) => {
+      const { confirm, ...input } = c.req.valid('json');
+      // Serialize policy changes so concurrent requests cannot bypass slug confirmation.
+      const project = await prisma.$transaction(async (tx) => {
+        const id = c.get('project').id;
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM "Project" WHERE id = ${id} FOR UPDATE`);
+        const current = await tx.project.findUniqueOrThrow({ where: { id } });
+        if (input.retentionDays !== undefined && input.retentionDays < current.retentionDays && confirm !== current.slug)
+          throw new ApiError(422, 'confirmation_required', 'Type the project slug to lower retention.');
+        return tx.project.update({ where: { id }, data: input });
+      });
+      if (input.retentionDays !== undefined) await enqueueProjectRetention(project.id);
+      return c.json(serializeProject(project));
+    },
+  )
+  .delete('/projects/:projectId', describeRoute({ summary: 'Delete project', responses: { 204: { description: 'Deleted' } } }), async (c) => {
+    const projectId = c.get('project').id;
+    await prisma.apiKey.updateMany({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
+    await purgeProjectEvents(projectId);
+    await prisma.project.delete({ where: { id: projectId } });
+    return c.body(null, 204);
+  })
+  .get('/projects/:projectId/keys', doc('List API keys', z.object({ data: z.array(apiKeySchema) })), async (c) =>
+    c.json({
+      data: (await prisma.apiKey.findMany({ where: { projectId: c.get('project').id }, include: creatorSelect, orderBy: { createdAt: 'asc' } })).map(
+        serializeKey,
+      ),
+    }),
+  )
+  .post(
+    '/projects/:projectId/keys',
+    doc('Create API key', createApiKeyResponseSchema, 201),
+    validator('json', createApiKeySchema, (result) => {
+      if (!result.success) throw new ApiError(422, 'validation_error', 'Invalid request body.', result.error);
+    }),
+    async (c) => {
+      const input = c.req.valid('json');
+      const material = generateApiKey(input.kind);
+      const key = await prisma.apiKey.create({
+        data: { ...input, projectId: c.get('project').id, createdById: c.get('user').id, hash: material.hash, prefix: material.prefix },
+        include: creatorSelect,
+      });
+      return c.json({ key: serializeKey(key), secret: material.secret }, 201);
+    },
+  )
+  .delete(
+    '/projects/:projectId/keys/:keyId',
+    describeRoute({ summary: 'Revoke API key', responses: { 204: { description: 'Revoked' } } }),
+    async (c) => {
+      const result = await prisma.apiKey.updateMany({
+        where: { id: c.req.param('keyId'), projectId: c.get('project').id },
+        data: { revokedAt: new Date() },
+      });
+      if (!result.count) throw new ApiError(404, 'not_found', 'API key not found.');
+      return c.body(null, 204);
+    },
+  )
+  .get('/projects/:projectId/views', doc('List saved views', z.object({ data: z.array(savedViewSchema) })), async (c) =>
+    c.json({
+      data: (
+        await prisma.savedView.findMany({ where: { projectId: c.get('project').id }, include: creatorSelect, orderBy: { createdAt: 'asc' } })
+      ).map(serializeView),
+    }),
+  )
+  .post(
+    '/projects/:projectId/views',
+    doc('Create saved view', savedViewSchema, 201),
+    validator('json', createSavedViewSchema, (result) => {
+      if (!result.success) throw new ApiError(422, 'validation_error', 'Invalid request body.', result.error);
+    }),
+    async (c) =>
+      c.json(
+        serializeView(
+          await prisma.savedView.create({
+            data: { ...c.req.valid('json'), projectId: c.get('project').id, createdById: c.get('user').id },
+            include: creatorSelect,
+          }),
+        ),
+        201,
+      ),
+  )
+  .delete(
+    '/projects/:projectId/views/:viewId',
+    describeRoute({ summary: 'Delete saved view', responses: { 204: { description: 'Deleted' } } }),
+    async (c) => {
+      const result = await prisma.savedView.deleteMany({ where: { id: c.req.param('viewId'), projectId: c.get('project').id } });
+      if (!result.count) throw new ApiError(404, 'not_found', 'Saved view not found.');
+      return c.body(null, 204);
+    },
+  );

@@ -1,0 +1,32 @@
+{
+  "name": "@trailmark/email",
+  "license": "MIT",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "clean": "git clean -xdf .cache .turbo dist node_modules"
+  },
+  "dependencies": {
+    "@t3-oss/env-core": "^0.13.11",
+    "zod": "^4.5.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-email": "^6.9.3",
+    "nodemailer": "^9.1.1",
+    "@types/react": "^19.2.18",
+    "@types/nodemailer": "^8.0.1"
+  },
+  "devDependencies": {
+    "@trailmark/tsconfig": "workspace:*",
+    "@types/node": "^22.20.1",
+    "typescript": "^7.0.2",
+    "tsx": "4.23.13",
+    "dotenv-cli": "^11.0.0",
+    "tsdown": "^0.22.14"
+  }
+}
