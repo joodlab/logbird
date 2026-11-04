@@ -50,6 +50,32 @@ describe('query language', () => {
     expect(compileQuery(`-${field}:x*`).sql).toContain('NOT');
     expect(compileQuery(`${field}:x*`).params.q0).toBe('x');
   });
+  it.each([
+    ['impersonator:*', "(impersonator_id != '')"],
+    ['actor:*', "(actor_id != '')"],
+    ['tenant:*', "(tenant_id != '')"],
+    ['executor:*', "(executor_id != '')"],
+    ['parent:*', "(parent_event_id != '')"],
+    ['job:*', "(job_id != '')"],
+    ['actor.email:*', "(actor_email != '')"],
+    ['target:*', "(arrayExists(x -> x != '', target_ids))"],
+  ])('treats %s as "present and non-empty"', (q, sql) => {
+    const c = compileQuery(q);
+    expect(c.sql).toBe(sql);
+    expect(c.params).toEqual({});
+  });
+  it('negated presence means "missing"', () => expect(compileQuery('-impersonator:*').sql).toBe("NOT (impersonator_id != '')"));
+  it('attribute presence requires the key with a non-empty value', () => {
+    const c = compileQuery('attr.metadata.plan:*');
+    expect(c.sql).toBe("(mapContains(attributes,{q0k:String}) AND attributes[{q0k:String}] != '')");
+    expect(c.params).toEqual({ q0k: 'metadata.plan' });
+    expect(compileQuery('plan:*').params).toEqual({ q0k: 'plan' });
+  });
+  it('keeps non-empty prefixes as prefix matches', () => {
+    const c = compileQuery('impersonator:usr_*');
+    expect(c.sql).toBe('(startsWith(impersonator_id, {q0:String}))');
+    expect(c.params).toEqual({ q0: 'usr_' });
+  });
   it('keeps internal stars literal', () => expect(compileQuery('action:a*b').params.q0).toBe('a*b'));
 });
 describe('normalization', () => {

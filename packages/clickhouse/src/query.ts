@@ -86,28 +86,28 @@ export function compileQuery(q: string | Token[] = '') {
     const i = termIndex++;
     const key = `q${i}`,
       wildcard = t.value.endsWith('*');
-    params[key] = wildcard ? t.value.slice(0, -1) : t.value;
+    const prefix = wildcard ? t.value.slice(0, -1) : t.value;
+    // `field:*` means "field present": a non-empty value. An empty prefix would otherwise match every row.
+    const presence = wildcard && prefix === '';
+    if (!presence || !t.field) params[key] = prefix;
     const column = Object.hasOwn(columns, t.field) ? columns[t.field] : undefined;
     let expression: string;
     if (!t.field)
       expression = /^[\p{L}\p{N}]+$/u.test(t.value)
         ? `hasToken(search_text, lowerUTF8({${key}:String}))`
         : `position(search_text, lowerUTF8({${key}:String})) > 0`;
+    else if (column === 'target_ids' || column === 'target_types')
+      expression = presence
+        ? `arrayExists(x -> x != '', ${column})`
+        : `arrayExists(x -> ${wildcard ? `startsWith(x, {${key}:String})` : `x = {${key}:String}`}, ${column})`;
+    else if (column) expression = presence ? `${column} != ''` : wildcard ? `startsWith(${column}, {${key}:String})` : `${column} = {${key}:String}`;
     else {
-      let lhs = column;
-      if (!lhs) {
-        params[`${key}k`] = t.field.replace(/^attr\./, '');
-        lhs = `attributes[{${key}k:String}]`;
-      }
-      expression =
-        lhs === 'target_ids' || lhs === 'target_types'
-          ? `arrayExists(x -> ${wildcard ? `startsWith(x, {${key}:String})` : `x = {${key}:String}`}, ${lhs})`
-          : wildcard
-            ? `startsWith(${lhs}, {${key}:String})`
-            : `${lhs} = {${key}:String}`;
-      if (!column)
-        expression = wildcard
-          ? `mapContains(attributes,{${key}k:String}) AND (${expression})`
+      params[`${key}k`] = t.field.replace(/^attr\./, '');
+      const value = `attributes[{${key}k:String}]`;
+      expression = presence
+        ? `mapContains(attributes,{${key}k:String}) AND ${value} != ''`
+        : wildcard
+          ? `mapContains(attributes,{${key}k:String}) AND (startsWith(${value}, {${key}:String}))`
           : `has(attribute_items,concat(toString(length({${key}k:String})),':',{${key}k:String},{${key}:String}))`;
     }
     return t.negate ? `NOT (${expression})` : `(${expression})`;

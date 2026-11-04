@@ -8,6 +8,7 @@ import {
   fieldsResponseSchema,
   histogramResponseSchema,
   overviewResponseSchema,
+  pickHistogramInterval,
   searchResponseSchema,
 } from '@trailmark/contracts';
 import { expect, it } from 'vitest';
@@ -151,3 +152,106 @@ it.runIf(process.env.CLICKHOUSE_URL)(
   },
   60_000,
 );
+
+it.runIf(process.env.CLICKHOUSE_URL)(
+  'field:* matches only events where the field is present',
+  async () => {
+    const ch = createClickHouseClient();
+    const p = `test-presence-${randomUUID()}`;
+    const now = Date.now();
+    const from = new Date(now - 3_600_000).toISOString(),
+      to = new Date(now + 1000).toISOString();
+    try {
+      const events = [
+        { id: 'a', action: 'x', actor: { id: 'u1' }, impersonator: { id: 'support' }, metadata: { plan: 'pro' }, context: { parentEventId: 'c' } },
+        { id: 'b', action: 'x', actor: { id: 'u1' }, executor: { id: 'w', jobId: '7' }, metadata: { plan: '' } },
+        { id: 'c', action: 'x', tenant: { id: 't1' }, targets: [{ type: 'hotel', id: 'h1' }] },
+      ];
+      await insertEvents(
+        ch,
+        events.flatMap((e, i) => {
+          const r = normalizeEvent({ ...e, occurredAt: new Date(now - 10_000 - i).toISOString() }, { projectId: p, receivedAt: new Date(now) });
+          return r.ok ? [r.row] : [];
+        }),
+      );
+      const ids = async (q: string) => (await searchEvents(ch, p, { from, to, q, limit: 20, order: 'desc' })).data.map((e) => e.id).sort();
+      expect(await ids('impersonator:*')).toEqual(['a']);
+      expect(await ids('-impersonator:*')).toEqual(['b', 'c']);
+      expect(await ids('actor:*')).toEqual(['a', 'b']);
+      expect(await ids('tenant:*')).toEqual(['c']);
+      expect(await ids('executor:*')).toEqual(['b']);
+      expect(await ids('job:*')).toEqual(['b']);
+      expect(await ids('parent:*')).toEqual(['a']);
+      expect(await ids('target:*')).toEqual(['c']);
+      expect(await ids('attr.metadata.plan:*')).toEqual(['a']);
+      expect(await ids('impersonator:sup*')).toEqual(['a']);
+    } finally {
+      await purgeProject(ch, p);
+      await ch.close();
+    }
+  },
+  60_000,
+);
+
+it.runIf(process.env.CLICKHOUSE_URL)(
+  'entity directories order by activity and page without gaps for every sort',
+  async () => {
+    const ch = createClickHouseClient();
+    const p = `test-entities-${randomUUID()}`;
+    const now = Date.now();
+    // u3 is the most active; u1/u2 tie on events and are separated by recency; names reverse the id order.
+    const plan: [string, string, number, number][] = [
+      ['u1', 'Zed', 2, 50_000],
+      ['u2', 'Yara', 2, 20_000],
+      ['u3', 'Xavier', 5, 40_000],
+      ['u4', 'Wanda', 1, 10_000],
+      ['u5', '', 1, 30_000],
+    ];
+    try {
+      const rows = plan.flatMap(([id, name, count, age]) =>
+        Array.from({ length: count }, (_, i) => {
+          const r = normalizeEvent(
+            { id: `${id}-${i}`, action: 'x', occurredAt: new Date(now - age - i * 1000).toISOString(), actor: { id, name, type: 'user' } },
+            { projectId: p, receivedAt: new Date(now) },
+          );
+          if (!r.ok) throw new Error(r.reason);
+          return r.row;
+        }),
+      );
+      await insertEvents(ch, rows);
+      const all = async (sort: 'events' | 'lastSeen' | 'name') => {
+        const seen: string[] = [];
+        let cursor: string | undefined;
+        do {
+          const page = entityListResponseSchema.parse(await listEntities(ch, p, { kind: 'actor', limit: 2, sort, cursor }));
+          seen.push(...page.data.map((e) => e.id));
+          cursor = page.nextCursor ?? undefined;
+        } while (cursor);
+        return seen;
+      };
+      expect(await all('events')).toEqual(['u3', 'u2', 'u1', 'u4', 'u5']);
+      expect(await all('lastSeen')).toEqual(['u4', 'u2', 'u5', 'u3', 'u1']);
+      expect(await all('name')).toEqual(['u5', 'u4', 'u3', 'u2', 'u1']);
+      expect((await listEntities(ch, p, { kind: 'actor', limit: 25 })).data.map((e) => e.id)).toEqual(['u3', 'u2', 'u1', 'u4', 'u5']);
+      const first = await listEntities(ch, p, { kind: 'actor', limit: 2, sort: 'events' });
+      await expect(listEntities(ch, p, { kind: 'actor', limit: 2, sort: 'name', cursor: first.nextCursor ?? '' })).rejects.toThrow('Invalid cursor');
+    } finally {
+      await purgeProject(ch, p);
+      await ch.close();
+    }
+  },
+  60_000,
+);
+
+it('histogram intervals come from the round ladder (≤ ~120 buckets)', () => {
+  const H = 3_600_000;
+  expect(pickHistogramInterval(15 * 60_000)).toBe(60);
+  expect(pickHistogramInterval(H)).toBe(60);
+  expect(pickHistogramInterval(6 * H)).toBe(300);
+  expect(pickHistogramInterval(24 * H)).toBe(900);
+  expect(pickHistogramInterval(7 * 24 * H)).toBe(10_800);
+  expect(pickHistogramInterval(30 * 24 * H)).toBe(21_600);
+  expect(pickHistogramInterval(30 * 24 * H + 50)).toBe(21_600);
+  expect(pickHistogramInterval(90 * 24 * H)).toBe(86_400);
+  expect(pickHistogramInterval(365 * 24 * H)).toBe(4 * 86_400);
+});
