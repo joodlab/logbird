@@ -37,10 +37,7 @@ app.onError((error, c) => {
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
     return c.json({ error: { code: 'conflict', message: 'This record already exists.' } }, 409);
   if (error instanceof HTTPException) return c.json({ error: { code: 'invalid_request', message: error.message } }, error.status);
-  if (
-    /^(Invalid (time range|cursor)|Query exceeds|OR is not supported|Parentheses are not supported|Unterminated quoted query)/.test(error.message) &&
-    !('code' in error)
-  )
+  if (/^(Invalid (time range|cursor|query syntax)|Query exceeds|Unterminated quoted query)/.test(error.message) && !('code' in error))
     return c.json({ error: { code: 'invalid_query', message: error.message } }, 422);
   if ('code' in error || /timeout|budget/i.test(error.message))
     return c.json(

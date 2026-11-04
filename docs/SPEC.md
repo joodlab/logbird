@@ -191,18 +191,35 @@ The **route table and every request/response schema live in `packages/contracts`
 - Dev: the app proxies `/api` and `/v1` to `http://127.0.0.1:4601` (Vite `server.proxy`), so cookies are
   same-origin. better-auth `baseURL` = app origin (`http://localhost:4600`), `trustedOrigins` includes it.
 
+`GET /api/projects/:projectId/retention?preview=30` returns retentionDays,
+oldestEventAt (null for an empty project), nextPurgeAt (next registered scheduler
+occurrence, null when unregistered), and lastRun (startedAt, finishedAt, status,
+cutoff, deletedEvents, error). Status uses the worker values running/completed/failed.
+previewDeletedEvents counts stored rows older than the candidate cutoff, or is null
+when preview is omitted. This is an approximate logical event count because storage
+is at least once; this endpoint never deletes data. Preview accepts integer days 1-3650.
+
+Live polling `/live?since=<ISO>` uses arrival time received_at inclusively, orders
+newest arrivals first, and dedupes IDs within the response. Clients overlap polls
+and dedupe IDs across responses. Event timestamp and receivedAt remain unchanged.
+Histograms zero-fill UTC buckets overlapping the half-open requested range; missing
+outcome counts are zero. Requests exceeding 10000 buckets are rejected.
+
 ### 5.1 Query language (`q`)
 ```
 action:hotel.policy.updated        exact
 action:hotel.*                     prefix wildcard
 outcome:failure  -env:staging      negation with leading -
 actor:usr_42  actor.type:user  actor.name:"Raed B"
-tenant:biz_7  executor:crm-worker  executor.type:worker
+tenant:biz_7  tenant.name:"Azure Hotels"  executor:crm-worker  executor.type:worker
+executor.name:"CRM worker"  actor.email:raed@example.com  impersonator:usr_1
+parent:evt_123  job:456
 target:hotel_123  target.type:hotel  operation:op_101  request:req_abc  trace:…  source:staybook
 attr.metadata.plan:pro             attribute map lookup (wildcard * allowed at end)
 severity:critical  category:hotel  id:<event id>
 "free text"  or  bare words        token search over description/actor/tenant/target names
-a OR b, parentheses                optional (v1); implicit AND between terms
+a OR b, (a OR b) c                OR and parentheses; implicit AND binds more tightly
+                                  max 4096 UTF-8 bytes, 64 terms, 16 nesting levels
 ```
 Parser lives in `packages/clickhouse/src/query` → parameterized SQL (never string-concatenate user input).
 Unknown `field:` prefixes are treated as `attr.<field>`. Ship unit tests for the parser.

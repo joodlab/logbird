@@ -92,3 +92,15 @@ describe('fictional hospitality fixtures', () => {
     expect(events.some((e) => e.executor?.type === 'scheduler')).toBe(false);
   });
 });
+
+it('gives business-scoped scheduler and partner identities distinct names', () => {
+  const names = new Map<string, string>();
+  for (const e of generateEvents(options)) {
+    if (e.actor?.type === 'system' || e.actor?.type === 'api_key') {
+      const previous = names.get(e.actor.name ?? '');
+      if (previous) expect(previous).toBe(e.actor.id);
+      names.set(e.actor.name ?? '', e.actor.id ?? '');
+    }
+  }
+  expect(names.size).toBeGreaterThan(24);
+});

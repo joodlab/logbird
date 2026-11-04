@@ -1,5 +1,5 @@
 ﻿import { randomUUID } from 'node:crypto';
-import { projectStats } from '@trailmark/clickhouse';
+import { projectStats, retentionStats } from '@trailmark/clickhouse';
 import {
   apiKeySchema,
   createApiKeyResponseSchema,
@@ -9,10 +9,13 @@ import {
   createSavedViewSchema,
   meResponseSchema,
   projectSchema,
+  retentionStatusQuerySchema,
+  retentionStatusSchema,
   savedViewSchema,
   updateProjectSchema,
 } from '@trailmark/contracts';
 import { Prisma, prisma, withProjectLock } from '@trailmark/database';
+import { retentionQueue } from '@trailmark/worker/queue';
 import { enforceProjectRetention } from '@trailmark/worker/retention';
 import { Hono } from 'hono';
 import { describeRoute, resolver, validator } from 'hono-openapi';
@@ -92,6 +95,36 @@ export const managementRoutes = new Hono<AppEnv>()
   .use('/projects/:projectId/*', requireProjectAccess)
   .get('/projects/:projectId', doc('Get project', projectSchema), async (c) =>
     c.json({ ...serializeProject(c.get('project')), ...(await projectStats(clickhouse, [c.get('project').id]))[c.get('project').id] }),
+  )
+  .get(
+    '/projects/:projectId/retention',
+    doc('Retention status and preview', retentionStatusSchema),
+    validator('query', retentionStatusQuerySchema, (r) => {
+      if (!r.success) throw new ApiError(422, 'validation_error', 'Invalid retention preview.');
+    }),
+    async (c) => {
+      const project = c.get('project');
+      const [stats, lastRun, scheduler] = await Promise.all([
+        retentionStats(clickhouse, project.id, c.req.valid('query').preview),
+        prisma.retentionRun.findFirst({ where: { projectId: project.id }, orderBy: { startedAt: 'desc' } }),
+        retentionQueue.getJobScheduler('retention-hourly'),
+      ]);
+      return c.json(
+        retentionStatusSchema.parse({
+          retentionDays: project.retentionDays,
+          ...stats,
+          nextPurgeAt: scheduler?.next ? new Date(scheduler.next).toISOString() : null,
+          lastRun: lastRun
+            ? {
+                ...lastRun,
+                startedAt: lastRun.startedAt.toISOString(),
+                finishedAt: lastRun.finishedAt?.toISOString() ?? null,
+                cutoff: lastRun.cutoff.toISOString(),
+              }
+            : null,
+        }),
+      );
+    },
   )
   .patch(
     '/projects/:projectId',

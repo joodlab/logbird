@@ -46,6 +46,11 @@ the window; a WhatsApp outage at 80% increases failed receipts and send retries.
 These incidents are relative to the requested window, not historical claims.
 Small requested counts are prefixes and may contain only scheduled traffic.
 
+Scheduler actors retain their business/resource-scoped IDs; names include the
+business so directory and overview labels distinguish them. The scheduler executor
+uses the same name and identity. Business-scoped partner API actors also include
+the business in their name.
+
 Request/job/record trees preserve the initiating actor. Workers have stable job
 IDs and attempts; retries chain through failed attempts (2 or 3 total), records
 point to the successful job, and summaries reconcile examined/changed/unchanged/

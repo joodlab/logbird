@@ -92,11 +92,11 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
     const provider = !ledger && !workflow && random() < 0.12 ? pick(['staybook', 'meta-whatsapp', 'payment-provider']) : undefined;
     const apiKey = !scheduled && !provider && random() < 0.04;
     const actor = scheduled
-      ? { type: 'system', id: `crm-hourly-biz_${biz + 1}-${resource}`, name: `Hourly CRM ${resource} scheduler` }
+      ? { type: 'system', id: `crm-hourly-biz_${biz + 1}-${resource}`, name: `Hourly CRM ${resource} scheduler - ${tenantName}` }
       : provider
         ? { type: 'integration', id: provider, name: provider }
         : apiKey
-          ? { type: 'api_key', id: `key_${biz + 1}`, name: 'Catalog partner automation' }
+          ? { type: 'api_key', id: `key_${biz + 1}`, name: `Catalog partner automation - ${tenantName}` }
           : user;
     const impersonated = actor.type === 'user' && random() < 0.02;
     const base: EventInput = {
@@ -218,7 +218,7 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
       const root = event(config.root, `${actor.name} requested ${resource} processing for ${tenantName}.`, {
         type: scheduled ? 'scheduler' : 'api',
         id: scheduled ? actor.id : 'api-server',
-        name: scheduled ? 'Hourly CRM scheduler' : 'API server',
+        name: scheduled ? actor.name : 'API server',
       });
       yield root;
       let parent = root.id;
