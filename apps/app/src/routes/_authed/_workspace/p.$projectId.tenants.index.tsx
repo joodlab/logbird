@@ -1,14 +1,15 @@
 import { createFileRoute } from '@tanstack/react-router';
+import { entitySortSchema } from '@trailmark/contracts';
 import { z } from 'zod';
 import { EntityDirectory } from '@/components/entities/entity-directory';
 import { entityListQuery } from '@/lib/api/queries';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/tenants/')({
-  validateSearch: z.object({ q: z.string().optional(), type: z.string().optional() }),
+  validateSearch: z.object({ q: z.string().optional(), type: z.string().optional(), sort: entitySortSchema.optional().catch(undefined) }),
   staticData: { crumb: 'Tenants' },
-  loaderDeps: ({ search }) => ({ q: search.q ?? '', type: search.type }),
+  loaderDeps: ({ search }) => ({ q: search.q ?? '', type: search.type, sort: search.sort }),
   loader: ({ context, params, deps }) => {
-    context.queryClient.prefetchInfiniteQuery(entityListQuery(params.projectId, 'tenant', deps.q, deps.type));
+    context.queryClient.prefetchInfiniteQuery(entityListQuery(params.projectId, 'tenant', deps.q, deps.type, deps.sort));
   },
   head: () => ({ meta: [{ title: 'Tenants · Trailmark' }] }),
   component: DirectoryPage,
@@ -23,6 +24,7 @@ function DirectoryPage() {
       onSearch={(patch) => navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true })}
       projectId={projectId}
       q={search.q ?? ''}
+      sort={search.sort}
       section="tenants"
       type={search.type}
     />

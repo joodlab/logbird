@@ -16,8 +16,10 @@ import { Route as AuthedWorkspaceRouteImport } from './routes/_authed/_workspace
 import { Route as AuthedOnboardingRouteImport } from './routes/_authed/onboarding'
 import { Route as LoginIndexRouteImport } from './routes/login.index'
 import { Route as LoginVerifyRouteImport } from './routes/login.verify'
+import { Route as AuthedWorkspaceAccountRouteImport } from './routes/_authed/_workspace/account'
 import { Route as AuthedWorkspaceProjectsRouteImport } from './routes/_authed/_workspace/projects'
 import { Route as AuthedOnboardingIndexRouteImport } from './routes/_authed/onboarding.index'
+import { Route as AuthedOnboardingProfileRouteImport } from './routes/_authed/onboarding.profile'
 import { Route as AuthedOnboardingProjectRouteImport } from './routes/_authed/onboarding.project'
 import { Route as AuthedWorkspacePProjectIdRouteImport } from './routes/_authed/_workspace/p.$projectId'
 import { Route as AuthedOnboardingFirstEventProjectIdRouteImport } from './routes/_authed/onboarding.first-event.$projectId'
@@ -76,6 +78,11 @@ const LoginVerifyRoute = LoginVerifyRouteImport.update({
   path: '/verify',
   getParentRoute: () => LoginRoute,
 } as any)
+const AuthedWorkspaceAccountRoute = AuthedWorkspaceAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => AuthedWorkspaceRoute,
+} as any)
 const AuthedWorkspaceProjectsRoute = AuthedWorkspaceProjectsRouteImport.update({
   id: '/projects',
   path: '/projects',
@@ -84,6 +91,11 @@ const AuthedWorkspaceProjectsRoute = AuthedWorkspaceProjectsRouteImport.update({
 const AuthedOnboardingIndexRoute = AuthedOnboardingIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AuthedOnboardingRoute,
+} as any)
+const AuthedOnboardingProfileRoute = AuthedOnboardingProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
   getParentRoute: () => AuthedOnboardingRoute,
 } as any)
 const AuthedOnboardingProjectRoute = AuthedOnboardingProjectRouteImport.update({
@@ -236,7 +248,9 @@ export interface FileRoutesByFullPath {
   '/onboarding': typeof AuthedOnboardingRouteWithChildren
   '/login/verify': typeof LoginVerifyRoute
   '/login/': typeof LoginIndexRoute
+  '/account': typeof AuthedWorkspaceAccountRoute
   '/projects': typeof AuthedWorkspaceProjectsRoute
+  '/onboarding/profile': typeof AuthedOnboardingProfileRoute
   '/onboarding/project': typeof AuthedOnboardingProjectRoute
   '/onboarding/': typeof AuthedOnboardingIndexRoute
   '/p/$projectId': typeof AuthedWorkspacePProjectIdRouteWithChildren
@@ -267,7 +281,9 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login/verify': typeof LoginVerifyRoute
   '/login': typeof LoginIndexRoute
+  '/account': typeof AuthedWorkspaceAccountRoute
   '/projects': typeof AuthedWorkspaceProjectsRoute
+  '/onboarding/profile': typeof AuthedOnboardingProfileRoute
   '/onboarding/project': typeof AuthedOnboardingProjectRoute
   '/onboarding': typeof AuthedOnboardingIndexRoute
   '/onboarding/first-event/$projectId': typeof AuthedOnboardingFirstEventProjectIdRoute
@@ -301,7 +317,9 @@ export interface FileRoutesById {
   '/_authed/onboarding': typeof AuthedOnboardingRouteWithChildren
   '/login/verify': typeof LoginVerifyRoute
   '/login/': typeof LoginIndexRoute
+  '/_authed/_workspace/account': typeof AuthedWorkspaceAccountRoute
   '/_authed/_workspace/projects': typeof AuthedWorkspaceProjectsRoute
+  '/_authed/onboarding/profile': typeof AuthedOnboardingProfileRoute
   '/_authed/onboarding/project': typeof AuthedOnboardingProjectRoute
   '/_authed/onboarding/': typeof AuthedOnboardingIndexRoute
   '/_authed/_workspace/p/$projectId': typeof AuthedWorkspacePProjectIdRouteWithChildren
@@ -336,7 +354,9 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/login/verify'
     | '/login/'
+    | '/account'
     | '/projects'
+    | '/onboarding/profile'
     | '/onboarding/project'
     | '/onboarding/'
     | '/p/$projectId'
@@ -367,7 +387,9 @@ export interface FileRouteTypes {
     | '/'
     | '/login/verify'
     | '/login'
+    | '/account'
     | '/projects'
+    | '/onboarding/profile'
     | '/onboarding/project'
     | '/onboarding'
     | '/onboarding/first-event/$projectId'
@@ -400,7 +422,9 @@ export interface FileRouteTypes {
     | '/_authed/onboarding'
     | '/login/verify'
     | '/login/'
+    | '/_authed/_workspace/account'
     | '/_authed/_workspace/projects'
+    | '/_authed/onboarding/profile'
     | '/_authed/onboarding/project'
     | '/_authed/onboarding/'
     | '/_authed/_workspace/p/$projectId'
@@ -485,6 +509,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginVerifyRouteImport
       parentRoute: typeof LoginRoute
     }
+    '/_authed/_workspace/account': {
+      id: '/_authed/_workspace/account'
+      path: '/account'
+      fullPath: '/account'
+      preLoaderRoute: typeof AuthedWorkspaceAccountRouteImport
+      parentRoute: typeof AuthedWorkspaceRoute
+    }
     '/_authed/_workspace/projects': {
       id: '/_authed/_workspace/projects'
       path: '/projects'
@@ -497,6 +528,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/onboarding/'
       preLoaderRoute: typeof AuthedOnboardingIndexRouteImport
+      parentRoute: typeof AuthedOnboardingRoute
+    }
+    '/_authed/onboarding/profile': {
+      id: '/_authed/onboarding/profile'
+      path: '/profile'
+      fullPath: '/onboarding/profile'
+      preLoaderRoute: typeof AuthedOnboardingProfileRouteImport
       parentRoute: typeof AuthedOnboardingRoute
     }
     '/_authed/onboarding/project': {
@@ -753,11 +791,13 @@ const AuthedWorkspacePProjectIdRouteWithChildren =
   )
 
 interface AuthedWorkspaceRouteChildren {
+  AuthedWorkspaceAccountRoute: typeof AuthedWorkspaceAccountRoute
   AuthedWorkspaceProjectsRoute: typeof AuthedWorkspaceProjectsRoute
   AuthedWorkspacePProjectIdRoute: typeof AuthedWorkspacePProjectIdRouteWithChildren
 }
 
 const AuthedWorkspaceRouteChildren: AuthedWorkspaceRouteChildren = {
+  AuthedWorkspaceAccountRoute: AuthedWorkspaceAccountRoute,
   AuthedWorkspaceProjectsRoute: AuthedWorkspaceProjectsRoute,
   AuthedWorkspacePProjectIdRoute: AuthedWorkspacePProjectIdRouteWithChildren,
 }
@@ -767,12 +807,14 @@ const AuthedWorkspaceRouteWithChildren = AuthedWorkspaceRoute._addFileChildren(
 )
 
 interface AuthedOnboardingRouteChildren {
+  AuthedOnboardingProfileRoute: typeof AuthedOnboardingProfileRoute
   AuthedOnboardingProjectRoute: typeof AuthedOnboardingProjectRoute
   AuthedOnboardingIndexRoute: typeof AuthedOnboardingIndexRoute
   AuthedOnboardingFirstEventProjectIdRoute: typeof AuthedOnboardingFirstEventProjectIdRoute
 }
 
 const AuthedOnboardingRouteChildren: AuthedOnboardingRouteChildren = {
+  AuthedOnboardingProfileRoute: AuthedOnboardingProfileRoute,
   AuthedOnboardingProjectRoute: AuthedOnboardingProjectRoute,
   AuthedOnboardingIndexRoute: AuthedOnboardingIndexRoute,
   AuthedOnboardingFirstEventProjectIdRoute:

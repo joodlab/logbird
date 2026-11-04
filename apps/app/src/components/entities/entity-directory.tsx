@@ -1,12 +1,13 @@
 import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import type { Entity } from '@trailmark/contracts';
+import type { Entity, EntitySort } from '@trailmark/contracts';
 import { TypePill } from '@trailmark/ui/components/badges';
 import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
 import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
 import { Button } from '@trailmark/ui/components/ui/button';
 import { Input } from '@trailmark/ui/components/ui/input';
+import { SegmentedControl, SegmentedControlItem } from '@trailmark/ui/components/ui/segmented-control';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { cn } from '@trailmark/ui/lib/utils';
 import { Loader2Icon, SearchIcon } from 'lucide-react';
@@ -18,16 +19,23 @@ import { formatCompact } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 
 const TYPE_FACET = { actor: 'actor.type', executor: 'executor.type', target: 'target.type', tenant: null } as const;
+const SORTS: { value: EntitySort; label: string; title: string }[] = [
+  { value: 'events', label: 'Most active', title: 'Most events first, then most recently seen' },
+  { value: 'lastSeen', label: 'Recently seen', title: 'Most recently seen first' },
+  { value: 'name', label: 'Name', title: 'Alphabetical by name' },
+];
 
 interface EntityDirectoryProps {
   projectId: string;
   section: EntitySection;
   q: string;
   type?: string;
-  onSearch: (patch: { q?: string; type?: string }) => void;
+  /** Omitted = most active (the server default). */
+  sort?: EntitySort;
+  onSearch: (patch: { q?: string; type?: string; sort?: EntitySort }) => void;
 }
 
-export function EntityDirectory({ projectId, section, q, type, onSearch }: EntityDirectoryProps) {
+export function EntityDirectory({ projectId, section, q, type, sort = 'events', onSearch }: EntityDirectoryProps) {
   const meta = ENTITY_SECTIONS[section];
   const [draft, setDraft] = useState(q);
   const [debounced] = useDebouncedValue(draft, { wait: 250 });
@@ -37,7 +45,7 @@ export function EntityDirectory({ projectId, section, q, type, onSearch }: Entit
     if (debounced !== q) onSearch({ q: debounced || undefined });
   }, [debounced]);
 
-  const list = useInfiniteQuery(entityListQuery(projectId, meta.kind, q, type));
+  const list = useInfiniteQuery(entityListQuery(projectId, meta.kind, q, type, sort));
   const typeField = TYPE_FACET[meta.kind];
   const types = useQuery({ ...facetQuery(projectId, typeField ?? 'action', '90d', '', 12), enabled: Boolean(typeField) });
   const rows = list.data?.pages.flatMap((p) => p.data) ?? [];
@@ -83,6 +91,18 @@ export function EntityDirectory({ projectId, section, q, type, onSearch }: Entit
             ))}
           </fieldset>
         ) : null}
+        <SegmentedControl aria-label="Sort" className="shrink-0 self-start sm:ms-auto sm:self-auto" density="compact">
+          {SORTS.map((s) => (
+            <SegmentedControlItem
+              active={sort === s.value}
+              key={s.value}
+              onClick={() => onSearch({ sort: s.value === 'events' ? undefined : s.value })}
+              title={s.title}
+            >
+              {s.label}
+            </SegmentedControlItem>
+          ))}
+        </SegmentedControl>
       </div>
 
       <div className="overflow-hidden rounded-xl border bg-card shadow-xs">

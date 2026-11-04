@@ -1,5 +1,6 @@
 import type { HistogramResponse } from '@trailmark/contracts';
 import type { ChartConfig } from '@trailmark/ui/components/ui/chart';
+import { formatClock, formatDayTime, formatMonthDay, zoneOffsetMs } from '@/lib/format';
 
 export const SERIES = ['success', 'partial', 'denied', 'failure', 'unknown'] as const;
 export type SeriesKey = (typeof SERIES)[number];
@@ -38,10 +39,6 @@ export function toSeries(h: HistogramResponse | undefined): SeriesRow[] {
   });
 }
 
-const hourFmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-const dayFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
-const fullFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
-
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -63,49 +60,39 @@ const NICE_STEPS = [
   30 * DAY,
 ];
 
-/** Offset that turns a UTC instant into local wall-clock ms, so ticks land on local hours and midnights. */
-const localOffset = (ts: number) => -new Date(ts).getTimezoneOffset() * MINUTE;
+/** Offset that turns a UTC instant into console-zone wall-clock ms, so ticks land on local hours and midnights. */
+const localOffset = zoneOffsetMs;
 
 /**
- * Axis ticks on round *local* boundaries (00:00, 03:00, Nov 5…), whatever bucket size the server chose.
- * Server buckets are epoch-aligned (e.g. 24 min), so labelling the buckets themselves gives 03:48, 06:36….
+ * Axis ticks for server buckets. The server picks bucket sizes from a round ladder (1m…1d) aligned to UTC
+ * multiples, so every tick is a bucket start: bars and area points sit exactly on their labels. Ticks prefer
+ * round *local* boundaries (00:00, 06:00, Nov 5…); zones with a sub-hour offset fall back to round UTC ones.
  */
 export function timeTicks(rows: SeriesRow[], intervalSeconds: number, target = 7) {
   const step = Math.max(1, intervalSeconds) * 1000;
   const first = rows[0]?.ts;
   const last = rows.at(-1)?.ts;
-  if (first === undefined || last === undefined || last <= first) return { ticks: undefined, format: (ts: number) => hourFmt.format(ts) };
+  if (first === undefined || last === undefined || last <= first) return { ticks: undefined, format: (ts: number) => formatClock(ts) };
   const span = last + step - first;
-  const nice = NICE_STEPS.find((n) => n >= step && span / n <= target) ?? NICE_STEPS.at(-1) ?? DAY;
-  const boundaries: number[] = [];
-  for (let b = Math.ceil((first + localOffset(first)) / nice) * nice; b - localOffset(b) <= last + step; b += nice)
-    boundaries.push(b - localOffset(b));
+  const nice = NICE_STEPS.find((n) => n >= step && n % step === 0 && span / n <= target) ?? Math.max(step, NICE_STEPS.at(-1) ?? DAY);
   // Labels are centered on their tick: keep them clear of the plot edges so none is clipped.
   const edge = span * 0.035;
-  const inside = boundaries.filter((b) => b >= first + edge && b <= last + step - edge);
+  const inside = (r: SeriesRow) => r.ts >= first + edge && r.ts <= last + step - edge;
+  let ticks = rows.filter((r) => inside(r) && (r.ts + localOffset(r.ts)) % nice === 0).map((r) => r.ts);
+  if (ticks.length < 2) ticks = rows.filter((r) => inside(r) && r.ts % nice === 0).map((r) => r.ts);
   const multiDay = span > DAY;
   const format = (ts: number) => {
     const midnight = (ts + localOffset(ts)) % DAY === 0;
-    return nice >= DAY || (multiDay && midnight) ? dayFmt.format(ts) : hourFmt.format(ts);
+    return nice >= DAY || (multiDay && midnight) ? formatMonthDay(ts) : formatClock(ts);
   };
-  return { ticks: inside, format };
+  return { ticks, format };
 }
 
-/** Category axes (bars) can only tick on bucket starts: map each boundary to the bucket containing it. */
-export function bucketTicks(rows: SeriesRow[], intervalSeconds: number) {
-  const { ticks, format } = timeTicks(rows, intervalSeconds);
-  if (!ticks) return { ticks: undefined, format };
-  const step = Math.max(1, intervalSeconds) * 1000;
-  const labelFor = new Map<number, number>();
-  for (const b of ticks) {
-    const row = rows.find((r) => b >= r.ts && b < r.ts + step);
-    if (row && !labelFor.has(row.ts)) labelFor.set(row.ts, b);
-  }
-  return { ticks: [...labelFor.keys()], format: (ts: number) => format(labelFor.get(ts) ?? ts) };
-}
+/** Bars tick on bucket starts too; kept as its own name for the category axis. */
+export const bucketTicks = (rows: SeriesRow[], intervalSeconds: number) => timeTicks(rows, intervalSeconds);
 
 export function bucketLabel(ts: number, intervalSeconds: number): string {
   const end = ts + intervalSeconds * 1000;
-  if (intervalSeconds >= 86_400) return dayFmt.format(ts);
-  return `${fullFmt.format(ts)} – ${hourFmt.format(end)}`;
+  if (intervalSeconds >= 86_400) return formatMonthDay(ts);
+  return `${formatDayTime(ts)} – ${formatClock(end)}`;
 }

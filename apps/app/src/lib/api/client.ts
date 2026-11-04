@@ -4,6 +4,7 @@ import {
   createApiKeyResponseSchema,
   createProjectResponseSchema,
   type EntityKind,
+  type EntitySort,
   entityListResponseSchema,
   entityProfileSchema,
   eventDetailSchema,
@@ -140,8 +141,11 @@ export const api = {
     request(overviewResponseSchema, 'GET', pathFor(routes.overview.path, { projectId }), { query: { ...query }, signal }),
 
   entities: {
-    list: (projectId: string, query: { kind: EntityKind; q?: string; type?: string; limit?: number; cursor?: string }, signal?: AbortSignal) =>
-      request(entityListResponseSchema, 'GET', pathFor(routes.entities.list.path, { projectId }), { query: { ...query }, signal }),
+    list: (
+      projectId: string,
+      query: { kind: EntityKind; q?: string; type?: string; sort?: EntitySort; limit?: number; cursor?: string },
+      signal?: AbortSignal,
+    ) => request(entityListResponseSchema, 'GET', pathFor(routes.entities.list.path, { projectId }), { query: { ...query }, signal }),
     profile: (projectId: string, kind: EntityKind, entityId: string, query: RangeParams, signal?: AbortSignal) =>
       request(entityProfileSchema, 'GET', pathFor(routes.entities.profile.path, { projectId, kind, entityId }), { query: { ...query }, signal }),
   },

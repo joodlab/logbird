@@ -2,7 +2,6 @@ import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { TypePill } from '@trailmark/ui/components/badges';
-import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
 import { ErrorState } from '@trailmark/ui/components/states';
 import { Button } from '@trailmark/ui/components/ui/button';
 import { useConfirm } from '@trailmark/ui/components/ui/confirm';
@@ -13,6 +12,7 @@ import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { Loader2Icon, MailIcon, UserPlusIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
+import { UserAvatar } from '@/components/account/user-avatar';
 import { SettingsSection } from '@/components/settings-section';
 import { Timestamp } from '@/components/timestamp';
 import { meQuery } from '@/lib/api/queries';
@@ -182,7 +182,7 @@ function MembersSettings() {
               return (
                 <li className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-3" key={m.id}>
                   <div className="flex min-w-0 flex-1 items-center gap-3">
-                    <EntityAvatar id={m.userId} name={m.user.name || m.user.email} size="md" />
+                    <UserAvatar size="md" user={{ id: m.userId, name: m.user.name, email: m.user.email }} />
                     <div className="flex min-w-0 flex-col">
                       <span className="truncate font-medium text-sm">
                         {m.user.name || m.user.email} {self ? <span className="font-normal text-muted-foreground">(you)</span> : null}

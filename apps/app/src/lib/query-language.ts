@@ -31,6 +31,10 @@ export interface FieldSpec {
   byLabel?: boolean;
   /** Entity directory used to suggest ids (by name or id) for high-cardinality fields. */
   entity?: 'actor' | 'tenant' | 'executor' | 'target';
+  /** What `field:*` (field present, non-empty) means; offered as the first value suggestion. */
+  presence?: string;
+  /** Also offer the full `field:*` term among the field suggestions. */
+  presenceShortcut?: boolean;
 }
 
 /** Query fields apps/server understands (SPEC §5.1), in the order autocomplete offers them. */
@@ -38,26 +42,61 @@ export const QUERY_FIELDS: FieldSpec[] = [
   { key: 'action', description: 'Exact action, or a prefix with *', example: 'action:hotel.*', facet: 'action' },
   { key: 'outcome', description: 'success · failure · denied · partial · unknown', example: 'outcome:failure', facet: 'outcome' },
   { key: 'severity', description: 'info · notice · warning · critical', example: 'severity:critical', facet: 'severity' },
-  { key: 'actor', description: 'Who caused it (actor id)', example: 'actor:usr_42', entity: 'actor' },
+  { key: 'actor', description: 'Who caused it (actor id)', example: 'actor:usr_42', entity: 'actor', presence: 'Any actor (events with an actor)' },
   { key: 'actor.name', description: 'Actor display name', example: 'actor.name:"Raed B"', facet: 'actor', byLabel: true },
-  { key: 'actor.email', description: 'Actor email', example: 'actor.email:raed@example.com' },
+  { key: 'actor.email', description: 'Actor email', example: 'actor.email:raed@example.com', presence: 'Any email (actor has an email)' },
   { key: 'actor.type', description: 'user · service · system · api_key · integration', example: 'actor.type:user', facet: 'actor.type' },
-  { key: 'impersonator', description: 'Support user acting as the actor', example: 'impersonator:usr_1' },
-  { key: 'tenant', description: 'Customer account (tenant id)', example: 'tenant:biz_7', entity: 'tenant' },
+  {
+    key: 'impersonator',
+    description: 'Support user acting as the actor',
+    example: 'impersonator:usr_1',
+    presence: 'Events done while impersonating',
+    presenceShortcut: true,
+  },
+  {
+    key: 'tenant',
+    description: 'Customer account (tenant id)',
+    example: 'tenant:biz_7',
+    entity: 'tenant',
+    presence: 'Any tenant (events with a tenant)',
+  },
   { key: 'tenant.name', description: 'Tenant display name', example: 'tenant.name:"Azure Hotels"', facet: 'tenant', byLabel: true },
-  { key: 'executor', description: 'Worker, job or API that performed it', example: 'executor:crm-worker', entity: 'executor' },
+  {
+    key: 'executor',
+    description: 'Worker, job or API that performed it',
+    example: 'executor:crm-worker',
+    entity: 'executor',
+    presence: 'Any executor (events with an executor)',
+  },
   { key: 'executor.name', description: 'Executor display name', example: 'executor.name:"CRM worker"', facet: 'executor', byLabel: true },
   { key: 'executor.type', description: 'api · worker · scheduler · webhook', example: 'executor.type:worker', facet: 'executor.type' },
-  { key: 'job', description: 'Job id the executor ran', example: 'job:456' },
-  { key: 'target', description: 'Record the event touched (target id)', example: 'target:hotel_123', entity: 'target' },
+  { key: 'job', description: 'Job id the executor ran', example: 'job:456', presence: 'Events run by a job' },
+  {
+    key: 'target',
+    description: 'Record the event touched (target id)',
+    example: 'target:hotel_123',
+    entity: 'target',
+    presence: 'Events that touched a record',
+  },
   { key: 'target.type', description: 'Record type', example: 'target.type:hotel', facet: 'target.type' },
   { key: 'category', description: 'First segment of the action', example: 'category:booking', facet: 'category' },
   { key: 'env', description: 'Environment', example: '-env:staging', facet: 'environment' },
-  { key: 'source', description: 'External system that supplied the change', example: 'source:joodbooking', facet: 'source' },
-  { key: 'operation', description: 'Operation id (request + spawned jobs)', example: 'operation:op_101' },
-  { key: 'parent', description: 'Parent event id (direct children)', example: 'parent:evt_123' },
-  { key: 'request', description: 'Request id', example: 'request:req_abc' },
-  { key: 'trace', description: 'Trace id', example: 'trace:4bf92f…' },
+  {
+    key: 'source',
+    description: 'External system that supplied the change',
+    example: 'source:joodbooking',
+    facet: 'source',
+    presence: 'Changes supplied by an external system',
+  },
+  {
+    key: 'operation',
+    description: 'Operation id (request + spawned jobs)',
+    example: 'operation:op_101',
+    presence: 'Events that belong to an operation',
+  },
+  { key: 'parent', description: 'Parent event id (direct children)', example: 'parent:evt_123', presence: 'Events caused by another event' },
+  { key: 'request', description: 'Request id', example: 'request:req_abc', presence: 'Events with a request id' },
+  { key: 'trace', description: 'Trace id', example: 'trace:4bf92f…', presence: 'Events with a trace id' },
   { key: 'id', description: 'Event id', example: 'id:01J…' },
   { key: 'attr.', description: 'Any attribute, e.g. attr.metadata.plan', example: 'attr.metadata.plan:pro' },
 ];
