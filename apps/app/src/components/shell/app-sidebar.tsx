@@ -43,11 +43,14 @@ import {
   MoonIcon,
   PlusIcon,
   SunIcon,
+  UserIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { UserAvatar } from '@/components/account/user-avatar';
 import { BrandMark } from '@/components/brand';
 import { meQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
+import { displayName, hasName } from '@/lib/user';
 import { PROJECT_NAV } from './nav';
 
 export function AppSidebar({ projectId }: { projectId?: string }) {
@@ -244,9 +247,11 @@ function UserMenu() {
         <DropdownMenuTrigger
           render={
             <SidebarMenuButton className="h-10 data-popup-open:bg-sidebar-accent" size="lg">
-              <EntityAvatar id={user?.id ?? ''} name={user?.name || user?.email || ''} size="md" />
+              <UserAvatar size="md" user={user} />
               <span className="flex min-w-0 flex-1 flex-col text-start leading-tight">
-                <span className="truncate font-medium text-[13px] text-sidebar-accent-foreground">{user?.name || 'Account'}</span>
+                <span className="truncate font-medium text-[13px] text-sidebar-accent-foreground" dir="auto">
+                  {displayName(user)}
+                </span>
                 <span className="truncate text-[11px] text-muted-foreground">{user?.email}</span>
               </span>
               <ChevronsUpDownIcon className="ms-auto size-4 text-muted-foreground" />
@@ -255,10 +260,22 @@ function UserMenu() {
         />
         <DropdownMenuContent align="start" className="w-60" side="top">
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="font-normal">
-              <div className="truncate font-medium text-foreground text-sm">{user?.name}</div>
-              <div className="truncate text-muted-foreground text-xs">{user?.email}</div>
+            <DropdownMenuLabel className="flex items-center gap-2.5 font-normal">
+              <UserAvatar size="md" user={user} />
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate font-medium text-foreground text-sm" dir="auto">
+                  {displayName(user)}
+                </span>
+                <span className="truncate text-muted-foreground text-xs">{user?.email}</span>
+              </span>
             </DropdownMenuLabel>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuItem render={<Link to="/account" />}>
+              <UserIcon />
+              {hasName(user) ? 'Account settings' : 'Add your name'}
+            </DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>

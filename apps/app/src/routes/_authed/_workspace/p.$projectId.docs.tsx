@@ -31,6 +31,7 @@ const QUERY_SYNTAX: [string, string][] = [
   ['actor:usr_42', 'Actor id (also actor.type, actor.email)'],
   ['actor.name:"Raed Al-Harbi"', 'Quote values with spaces'],
   ['impersonator:usr_1', 'Actions a support user took while impersonating'],
+  ['impersonator:*   -impersonator:*', 'field:* = the field is present (non-empty); -field:* = missing'],
   ['tenant:biz_7   tenant.name:"Azure Hotels"', 'Tenant by id or by name'],
   ['executor:crm-worker   executor.name:"CRM worker"', 'Who performed it (also executor.type:worker)'],
   ['job:456', 'Everything one job run did'],

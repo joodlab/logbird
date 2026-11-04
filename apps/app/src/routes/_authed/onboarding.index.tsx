@@ -10,10 +10,13 @@ import { z } from 'zod';
 import { meQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
 import { fieldErrorMessage } from '@/lib/forms';
+import { hasName } from '@/lib/user';
 
 export const Route = createFileRoute('/_authed/onboarding/')({
   validateSearch: z.object({ another: z.boolean().optional() }),
   beforeLoad: ({ context, search }) => {
+    // OTP sign-up creates nameless users: ask for a name first so the console never shows a bare email.
+    if (!hasName(context.me.user)) throw redirect({ to: '/onboarding/profile' });
     // Already in a workspace and not explicitly creating another one: continue with the project step.
     if (context.me.organizations.length > 0 && !search.another) throw redirect({ to: '/onboarding/project' });
   },

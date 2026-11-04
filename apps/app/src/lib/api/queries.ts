@@ -1,5 +1,5 @@
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from '@tanstack/react-query';
-import type { EntityKind } from '@trailmark/contracts';
+import type { EntityKind, EntitySort } from '@trailmark/contracts';
 import { authClient } from '@/lib/auth-client';
 import { resolveRange } from '@/lib/range';
 import { api } from './client';
@@ -128,11 +128,11 @@ export const operationQuery = (projectId: string, operationId: string) =>
     retry: noRetryOn4xx,
   });
 
-export const entityListQuery = (projectId: string, kind: EntityKind, q: string, type?: string) =>
+export const entityListQuery = (projectId: string, kind: EntityKind, q: string, type?: string, sort: EntitySort = 'events') =>
   infiniteQueryOptions({
-    queryKey: [...keys.project(projectId), 'entities', kind, q, type ?? null] as const,
+    queryKey: [...keys.project(projectId), 'entities', kind, q, type ?? null, sort] as const,
     queryFn: ({ pageParam, signal }) =>
-      api.entities.list(projectId, { kind, q: q || undefined, type: type || undefined, limit: 50, cursor: pageParam }, signal),
+      api.entities.list(projectId, { kind, q: q || undefined, type: type || undefined, sort, limit: 50, cursor: pageParam }, signal),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     placeholderData: keepPreviousData,

@@ -27,7 +27,8 @@ interface Suggestion {
   label: string;
   detail?: string;
   count?: number;
-  kind: 'field' | 'value';
+  /** field: completes `key:`; value: completes the value; term: inserts a whole `field:value` term. */
+  kind: 'field' | 'value' | 'term';
   /** Value suggestions that show a display name (sans) with the inserted id as detail (mono). */
   named?: boolean;
 }
@@ -75,6 +76,18 @@ export function HighlightedQuery({ value }: { value: string }) {
   );
 }
 
+/** A `field:value` suggestion, coloured like the query bar. */
+function HighlightedTerm({ value }: { value: string }) {
+  const sep = value.indexOf(':');
+  return (
+    <>
+      <span className="text-syntax-key">{value.slice(0, sep)}</span>
+      <span className="text-syntax-punct">:</span>
+      <span className="text-foreground">{value.slice(sep + 1)}</span>
+    </>
+  );
+}
+
 /**
  * Single-line query editor: a transparent <input> over a highlighted mirror, with field and
  * value autocomplete (values from facets for low-cardinality fields, entities for ids).
@@ -113,46 +126,63 @@ export function QueryBar({ projectId, range, value, onSubmit, placeholder, class
   const suggestions: Suggestion[] = useMemo(() => {
     if (!open) return [];
     if (fieldContext && field) {
+      // `field:*` = field present. Offer it first while no specific value has been typed.
+      const presence: Suggestion[] =
+        spec?.presence && (partial === '' || partial === '*')
+          ? [{ key: '*', insert: '*', label: '*', detail: spec.presence, kind: 'value' as const }]
+          : [];
       if (entityKind) {
-        return (entityValues.data?.data ?? []).map((e) => {
-          const raw = entityKind === 'target' ? e.id.slice(e.id.indexOf(':') + 1) : e.id;
-          return {
-            key: e.id,
-            insert: raw,
-            label: e.name || raw,
-            detail: e.name && e.name !== raw ? e.id : undefined,
-            count: e.events,
-            kind: 'value' as const,
-            named: Boolean(e.name && e.name !== raw),
-          };
-        });
+        return [
+          ...presence,
+          ...(entityValues.data?.data ?? []).map((e) => {
+            const raw = entityKind === 'target' ? e.id.slice(e.id.indexOf(':') + 1) : e.id;
+            return {
+              key: e.id,
+              insert: raw,
+              label: e.name || raw,
+              detail: e.name && e.name !== raw ? e.id : undefined,
+              count: e.events,
+              kind: 'value' as const,
+              named: Boolean(e.name && e.name !== raw),
+            };
+          }),
+        ];
       }
-      return (facetValues.data?.values ?? [])
-        .filter((v) => !partial || v.value.toLowerCase().includes(partial) || v.label.toLowerCase().includes(partial))
-        .slice(0, 10)
-        .map((v) =>
-          spec?.byLabel
-            ? { key: v.value, insert: v.label, label: v.label, detail: v.value, count: v.count, kind: 'value' as const, named: true }
-            : {
-                key: v.value,
-                insert: v.value,
-                label: v.value,
-                detail: v.label !== v.value ? v.label : undefined,
-                count: v.count,
-                kind: 'value' as const,
-              },
-        )
-        .filter((v, i, all) => all.findIndex((x) => x.insert === v.insert) === i);
+      return [
+        ...presence,
+        ...(facetValues.data?.values ?? [])
+          .filter((v) => !partial || v.value.toLowerCase().includes(partial) || v.label.toLowerCase().includes(partial))
+          .slice(0, 10)
+          .map((v) =>
+            spec?.byLabel
+              ? { key: v.value, insert: v.label, label: v.label, detail: v.value, count: v.count, kind: 'value' as const, named: true }
+              : {
+                  key: v.value,
+                  insert: v.value,
+                  label: v.value,
+                  detail: v.label !== v.value ? v.label : undefined,
+                  count: v.count,
+                  kind: 'value' as const,
+                },
+          ),
+      ].filter((v, i, all) => all.findIndex((x) => x.insert === v.insert) === i);
     }
     const prefix = current?.kind === 'text' ? (current.value ?? '').toLowerCase() : '';
-    // "name" also finds actor.name / tenant.name / executor.name.
-    return QUERY_FIELDS.filter((f) => !prefix || f.key.startsWith(prefix) || f.key.includes(`.${prefix}`)).map((f) => ({
-      key: f.key,
-      insert: f.key.endsWith('.') ? f.key : `${f.key}:`,
-      label: f.key,
-      detail: f.description,
-      kind: 'field' as const,
-    }));
+    // "name" also finds actor.name / tenant.name / executor.name; "imperson" also finds `impersonator:*`.
+    return QUERY_FIELDS.flatMap((f): Suggestion[] => {
+      const term = `${f.key}:*`;
+      const shortcut: Suggestion[] =
+        f.presenceShortcut && f.presence && (!prefix || term.startsWith(prefix) || f.presence.toLowerCase().includes(prefix))
+          ? [{ key: term, insert: term, label: term, detail: f.presence, kind: 'term' }]
+          : [];
+      const matches = !prefix || f.key.startsWith(prefix) || f.key.includes(`.${prefix}`);
+      return [
+        ...(matches
+          ? [{ key: f.key, insert: f.key.endsWith('.') ? f.key : `${f.key}:`, label: f.key, detail: f.description, kind: 'field' as const }]
+          : []),
+        ...shortcut,
+      ];
+    });
   }, [open, fieldContext, field, spec, entityKind, entityValues.data, facetValues.data, partial, current]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset the highlighted option whenever the suggestion list changes
@@ -161,12 +191,14 @@ export function QueryBar({ projectId, range, value, onSubmit, placeholder, class
   const accept = (s: Suggestion) => {
     let next: string;
     let nextCaret: number;
-    if (s.kind === 'field') {
+    if (s.kind === 'field' || s.kind === 'term') {
       const start = current?.kind === 'text' ? current.start : caret;
       const end = current?.kind === 'text' ? current.end : caret;
       const neg = current?.negated ? '-' : '';
-      next = `${draft.slice(0, start)}${neg}${s.insert}${draft.slice(end)}`;
-      nextCaret = start + neg.length + s.insert.length;
+      const after = draft.slice(end);
+      const spacer = s.kind === 'term' && !after.startsWith(' ') ? ' ' : '';
+      next = `${draft.slice(0, start)}${neg}${s.insert}${spacer}${after}`;
+      nextCaret = start + neg.length + s.insert.length + (s.kind === 'term' ? 1 : 0);
     } else if (fieldContext) {
       const sep = fieldContext.raw.indexOf(':');
       const valueStart = fieldContext.start + sep + 1;
@@ -183,7 +215,7 @@ export function QueryBar({ projectId, range, value, onSubmit, placeholder, class
       inputRef.current?.setSelectionRange(nextCaret, nextCaret);
       setCaret(nextCaret);
     });
-    if (s.kind === 'value') setOpen(false);
+    if (s.kind !== 'field') setOpen(false);
   };
 
   const submit = (q = draft) => {
@@ -242,7 +274,7 @@ export function QueryBar({ projectId, range, value, onSubmit, placeholder, class
               if (e.key === 'Enter') {
                 e.preventDefault();
                 const s = suggestions[active];
-                if (showMenu && s && (s.kind === 'value' || (current?.kind === 'text' && !e.metaKey && !e.ctrlKey))) {
+                if (showMenu && s && (s.kind !== 'field' || (current?.kind === 'text' && !e.metaKey && !e.ctrlKey))) {
                   accept(s);
                   return;
                 }
@@ -312,10 +344,10 @@ export function QueryBar({ projectId, range, value, onSubmit, placeholder, class
                   className={cn(
                     'min-w-0 shrink truncate',
                     s.named ? 'text-[13px] text-foreground' : 'font-mono text-[12px]',
-                    s.kind === 'field' ? 'shrink-0 text-syntax-key' : 'text-foreground',
+                    s.kind === 'value' ? 'text-foreground' : 'shrink-0 text-syntax-key',
                   )}
                 >
-                  {s.label}
+                  {s.kind === 'term' ? <HighlightedTerm value={s.label} /> : s.label}
                 </span>
                 {s.detail ? (
                   <span className={cn('min-w-0 flex-1 truncate text-muted-foreground text-xs', s.named && 'font-mono text-[11px]')}>{s.detail}</span>
