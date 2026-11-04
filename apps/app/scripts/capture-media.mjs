@@ -104,7 +104,7 @@ console.log(`signed in as ${DEMO}; JoodCMS=${jood.id} Ledger=${ledger?.id}`);
 /* ------------------------------------------------------------------ */
 /** A recent failure that belongs to an operation, with an actor, tenant and target to follow. */
 async function entityIds(page) {
-  const { data } = await api(page, `/api${J}/events?q=${encodeURIComponent('outcome:failure')}&limit=50`);
+  const { data } = await api(page, `/api/projects/${jood.id}/events?q=${encodeURIComponent('outcome:failure')}&limit=50`);
   const event = data.find((e) => e.context.operationId && e.actor && e.tenant && e.targets.length) ?? data[0];
   return { event };
 }
@@ -145,7 +145,8 @@ if (want('shots')) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, storageState: state });
     const page = await context.newPage();
     problems.push(...watch(page, () => `${theme} ${page.url().replace(BASE, '')}`));
-    const ids = await entityIds(page.goto(`${BASE}/projects`).then(() => page));
+    await page.goto(`${BASE}/projects`);
+    const ids = await entityIds(page);
     for (const [url, name] of PAGES(ids)) {
       await page.goto(`${BASE}${url}`);
       await settle(page);
@@ -183,7 +184,8 @@ if (want('phone')) {
     });
     const page = await context.newPage();
     problems.push(...watch(page, () => `phone ${page.url().replace(BASE, '')}`));
-    const ids = await entityIds(page.goto(`${BASE}/projects`).then(() => page));
+    await page.goto(`${BASE}/projects`);
+    const ids = await entityIds(page);
     const names = ['overview', 'explorer', 'event-sheet', 'operation', 'actor', 'settings-retention', 'settings-keys', 'quickstart'];
     for (const [url, name] of PAGES(ids).filter(([, n]) => names.includes(n))) {
       await page.goto(`${BASE}${url}`);
@@ -226,10 +228,10 @@ if (want('signin')) {
     await page.waitForTimeout(700);
     await page.getByRole('menuitem', { name: ledger.name }).click();
     await settle(page, 1800);
-  await snap(page, 'step');
+    await snap(page, 'step');
     await page.getByRole('link', { name: 'Explorer' }).first().click();
     await settle(page, 1800);
-  await snap(page, 'step');
+    await snap(page, 'step');
   }
   await done();
 }
@@ -352,7 +354,7 @@ if (onboarded?.key) {
     ]) {
       await page.goto(`${BASE}${url}`);
       await settle(page);
-  await snap(page, 'step');
+      await snap(page, 'step');
       await page.screenshot({ path: path.join(OUT, `${theme}-${name}.png`) });
     }
     await context.close();
@@ -417,7 +419,7 @@ if (want('explorer')) {
   if (await op.isVisible().catch(() => false)) {
     await op.click();
     await settle(page, 2500);
-  await snap(page, 'step');
+    await snap(page, 'step');
   }
   await done();
 }
