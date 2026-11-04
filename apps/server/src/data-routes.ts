@@ -1,18 +1,46 @@
 import * as ch from '@trailmark/clickhouse';
 import * as s from '@trailmark/contracts';
-import { prisma } from '@trailmark/database';
+import { prisma, withProjectLock } from '@trailmark/database';
 import { Hono } from 'hono';
+import { createMiddleware } from 'hono/factory';
 import { stream } from 'hono/streaming';
 import { describeRoute, resolver, validator } from 'hono-openapi';
 import { z } from 'zod';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
-import { ingest, readIngestBody } from './ingest';
+import { ingest, readIngestBody, requireRetentionReady } from './ingest';
 import { requireApiKey, requireProjectAccess, requireSession } from './middlewares';
 import type { AppEnv } from './types';
 
-const doc = (summary: string, schema: z.ZodType, status = 200) =>
-  describeRoute({ summary, responses: { [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } } } });
+const doc = (summary: string, schema: z.ZodType, status = 200, security = 'session') =>
+  describeRoute({
+    summary,
+    security: [{ [security]: [] }],
+    ...(summary === 'Ingest events'
+      ? {
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object' as const,
+                  description: 'Single event or {events: [...]}. Gzip supported. Maximum 1000 events, 5 MiB decoded body and 256 KiB per event.',
+                },
+              },
+            },
+          },
+        }
+      : {}),
+    responses: {
+      [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } },
+      ...Object.fromEntries(
+        [400, 401, 404, 413, 422, 503].map((code) => [
+          code,
+          { description: 'Request error', content: { 'application/json': { schema: resolver(s.apiErrorSchema) } } },
+        ]),
+      ),
+    },
+  });
 const query = <T extends z.ZodType>(schema: T) =>
   validator('query', schema, (r) => {
     if (!r.success) throw new ApiError(422, 'validation_error', 'Invalid query.', r.error);
@@ -21,14 +49,26 @@ const found = <T>(value: T | null) => {
   if (value === null) throw new ApiError(404, 'not_found', 'Record not found.');
   return value;
 };
+const projectRead = createMiddleware<AppEnv>(async (c, next) => {
+  if (c.req.method !== 'GET' || c.req.path.endsWith('/export')) return next();
+  await withProjectLock(c.get('project').id, async (tx) => {
+    await requireRetentionReady(tx, c.get('project').id);
+    await next();
+  });
+});
 export const publicRoutes = new Hono<AppEnv>()
-  .post('/events', requireApiKey('ingest'), doc('Ingest events', s.ingestResponseSchema, 202), async (c) =>
+  .post('/events', requireApiKey('ingest'), doc('Ingest events', s.ingestResponseSchema, 202, 'ingestKey'), async (c) =>
     c.json(await ingest(c.get('project').id, await readIngestBody(c.req.raw), c.req.header('x-trailmark-sdk') ?? c.req.header('user-agent')), 202),
   )
-  .get('/events', requireApiKey('read'), doc('Search events', s.searchResponseSchema), query(s.searchQuerySchema), async (c) =>
-    c.json(s.searchResponseSchema.parse(await ch.searchEvents(clickhouse, c.get('project').id, c.req.valid('query')))),
+  .get(
+    '/events',
+    requireApiKey('read'),
+    projectRead,
+    doc('Search events', s.searchResponseSchema, 200, 'readKey'),
+    query(s.searchQuerySchema),
+    async (c) => c.json(s.searchResponseSchema.parse(await ch.searchEvents(clickhouse, c.get('project').id, c.req.valid('query')))),
   )
-  .get('/events/:eventId', requireApiKey('read'), doc('Event detail', s.eventDetailSchema), async (c) =>
+  .get('/events/:eventId', requireApiKey('read'), projectRead, doc('Event detail', s.eventDetailSchema, 200, 'readKey'), async (c) =>
     c.json(s.eventDetailSchema.parse(found(await ch.getEvent(clickhouse, c.get('project').id, c.req.param('eventId'))))),
   );
 export const dataRoutes = new Hono<AppEnv>()
@@ -40,6 +80,7 @@ export const dataRoutes = new Hono<AppEnv>()
     return c.json(s.searchResponseSchema.parse(await ch.searchEvents(clickhouse, `ws:${id}`, c.req.valid('query'))));
   })
   .use('/projects/:projectId/*', requireProjectAccess)
+  .use('/projects/:projectId/*', projectRead)
   .get('/projects/:projectId/events', doc('Search events', s.searchResponseSchema), query(s.searchQuerySchema), async (c) =>
     c.json(s.searchResponseSchema.parse(await ch.searchEvents(clickhouse, c.get('project').id, c.req.valid('query')))),
   )
@@ -100,8 +141,30 @@ export const dataRoutes = new Hono<AppEnv>()
     query(s.rangeQuerySchema.extend({ format: z.enum(['csv', 'jsonl']) })),
     async (c) => {
       const q = c.req.valid('query');
-      const iterator = ch.exportEvents(clickhouse, c.get('project').id, q);
-      const first = await iterator.next();
+      let markReady!: () => void, failReady!: (error: unknown) => void, finish!: () => void;
+      const ready = new Promise<void>((resolve, reject) => {
+        markReady = resolve;
+        failReady = reject;
+      });
+      const release = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      let iterator: ReturnType<typeof ch.exportEvents>;
+      let first: IteratorResult<string>;
+      // Keep the same cross-process lock until the HTTP stream closes.
+      const task = withProjectLock(c.get('project').id, async (tx) => {
+        await requireRetentionReady(tx, c.get('project').id);
+        iterator = ch.exportEvents(clickhouse, c.get('project').id, q);
+        try {
+          first = await iterator.next();
+          markReady();
+          await release;
+        } finally {
+          await iterator.return();
+        }
+      });
+      void task.catch((error) => failReady(error));
+      await ready;
       c.header('Content-Type', q.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/x-ndjson');
       c.header('Content-Disposition', `attachment; filename="events.${q.format}"`);
       return stream(c, async (out) => {
@@ -109,7 +172,8 @@ export const dataRoutes = new Hono<AppEnv>()
           if (!first.done) await out.write(first.value);
           for await (const chunk of iterator) await out.write(chunk);
         } finally {
-          await iterator.return();
+          finish();
+          await task;
         }
       });
     },

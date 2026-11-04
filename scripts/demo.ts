@@ -24,7 +24,7 @@ try {
   });
   const org = await prisma.organization.upsert({
     where: { slug: 'jood' },
-    update: {},
+    update: { name: 'Jood' },
     create: { id: randomUUID(), name: 'Jood', slug: 'jood', createdAt: new Date() },
   });
   const member = await prisma.member.findFirst({ where: { organizationId: org.id, userId: user.id } });
@@ -40,7 +40,7 @@ try {
     if (!Number.isInteger(count) || count < 1) throw new Error('Event counts must be positive integers.');
     const project = await prisma.project.upsert({
       where: { organizationId_slug: { organizationId: org.id, slug } },
-      update: {},
+      update: { name, retentionDays },
       create: { organizationId: org.id, name, slug, retentionDays },
     });
     await withProjectLock(project.id, async () => purgeProject(ch, project.id));
@@ -58,6 +58,10 @@ try {
     }
     await sdk.shutdown();
     if (errors.length) throw new Error(`Demo ingestion failed: ${errors[0]?.message}`);
+    const stored = await (
+      await ch.query({ query: 'SELECT count() n FROM events WHERE project_id={p:String}', query_params: { p: project.id }, format: 'JSONEachRow' })
+    ).json<{ n: string }>();
+    if (Number(stored[0]?.n) !== count) throw new Error('Demo stored count differs from generated count.');
     const seconds = (performance.now() - start) / 1000;
     console.log(JSON.stringify({ project: name, events: sent, seconds, eventsPerSecond: Math.round(sent / seconds) }));
     const from = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
@@ -71,7 +75,7 @@ try {
       console.log(JSON.stringify({ project: name, route, milliseconds: latencies }));
     }
   }
-  console.log('Login: demo@trailmark.local â€” OTP is delivered to Mailpit http://127.0.0.1:8025');
+  console.log('Login: demo@trailmark.local - OTP is delivered to Mailpit http://127.0.0.1:8025');
 } finally {
   await ch.close();
   await prisma.$disconnect();

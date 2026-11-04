@@ -23,7 +23,14 @@ export const setAuthAuditHandler = (handler: NonNullable<typeof auditHandler>) =
 };
 function record(organizationId: string, action: string, fallback: AuditUser, target: { type: string; id: string }, changes?: unknown[]) {
   const context = authAuditContext.getStore();
-  return auditHandler?.({ organizationId, action, actor: context?.actor ?? fallback, target, changes, context });
+  return auditHandler?.({
+    organizationId,
+    action,
+    actor: action === 'auth.signed_in' ? fallback : (context?.actor ?? fallback),
+    target,
+    changes,
+    context,
+  });
 }
 const env = createEnv({ server: { APP_URL: z.url(), BETTER_AUTH_SECRET: z.string().min(32) }, runtimeEnv: process.env });
 export const auth = betterAuth({

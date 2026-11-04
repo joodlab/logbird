@@ -14,6 +14,7 @@ export async function readIngestBody(request: Request): Promise<unknown> {
   if (!request.body) throw new ApiError(400, 'invalid_json', 'A JSON body is required.');
   const source = Readable.fromWeb(request.body as import('node:stream/web').ReadableStream);
   const body = encoding === 'gzip' ? source.pipe(createGunzip()) : source;
+  if (body !== source) source.on('error', (error) => body.destroy(error));
   const chunks: Buffer[] = [];
   let size = 0;
   try {
@@ -49,10 +50,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
   await withProjectLock(projectId, async (tx) => {
     if (!projectId.startsWith('ws:') && !(await tx.project.findUnique({ where: { id: projectId } })))
       throw new ApiError(404, 'not_found', 'Project not found.');
-    const failed = await tx.retentionRun.findFirst({ where: { projectId, status: { in: ['failed', 'running'] } }, orderBy: { startedAt: 'desc' } });
-    const latest = failed && (await tx.retentionRun.findFirst({ where: { projectId }, orderBy: { startedAt: 'desc' } }));
-    if (latest && latest.status !== 'completed')
-      throw new ApiError(503, 'retention_unavailable', 'Retention rebuild must complete before ingestion.');
+    await requireRetentionReady(tx, projectId);
     await insertEvents(clickhouse, rows);
   });
   return ingestResponseSchema.parse({ accepted: ids.length, ids, rejected });
@@ -68,4 +66,10 @@ export function audit(c: Context<AppEnv>, action: string, target: { type: string
     description: action,
     context: { requestId: c.get('requestId'), ip: c.req.header('x-forwarded-for') ?? '', userAgent: c.req.header('user-agent') ?? '' },
   });
+}
+
+export async function requireRetentionReady(tx: import('@trailmark/database').Prisma.TransactionClient, projectId: string) {
+  const latest = await tx.retentionRun.findFirst({ where: { projectId }, orderBy: { startedAt: 'desc' } });
+  if (latest && latest.status !== 'completed')
+    throw new ApiError(503, 'retention_unavailable', 'Retention rebuild must complete before accessing project data.');
 }

@@ -12,10 +12,21 @@ const email = `smoke-${randomUUID()}@example.test`;
 const cookie = await login(email),
   api = client(cookie);
 let organizationId: string | undefined;
+const invitedEmail = `invite-${randomUUID()}@example.test`;
 try {
   const org = await (await api('/api/auth/organization/create', 'POST', { name: 'Smoke fixture', slug: `smoke-${randomUUID()}` })).json();
   organizationId = (org as { id: string }).id;
   await api('/api/auth/organization/set-active', 'POST', { organizationId });
+  const invitation = (await (
+    await api('/api/auth/organization/invite-member', 'POST', { email: invitedEmail, role: 'member', organizationId })
+  ).json()) as { id: string };
+  const invitedApi = client(await login(invitedEmail));
+  await invitedApi('/api/auth/organization/accept-invitation', 'POST', { invitationId: invitation.id });
+  const invited = await prisma.user.findUniqueOrThrow({ where: { email: invitedEmail } });
+  const member = await prisma.member.findFirstOrThrow({ where: { userId: invited.id, organizationId } });
+  await api('/api/auth/organization/update-member-role', 'POST', { memberId: member.id, role: 'admin', organizationId });
+  await api('/api/auth/organization/remove-member', 'POST', { memberIdOrEmail: member.id, organizationId });
+  await login(email);
   const created = s.createProjectResponseSchema.parse(await (await api('/api/projects', 'POST', { name: 'Smoke project' })).json());
   const p = created.project,
     base = `/api/projects/${p.id}`;
@@ -65,6 +76,24 @@ try {
   const pub = await fetch(`${endpoint}/v1/events`, { headers: { Authorization: `Bearer ${read.secret}` } });
   assert.equal(pub.status, 200);
   s.searchResponseSchema.parse(await pub.json());
+  const detail = await fetch(`${endpoint}/v1/events/smoke-root`, { headers: { Authorization: `Bearer ${read.secret}` } });
+  assert.equal(detail.status, 200);
+  s.eventDetailSchema.parse(await detail.json());
+  for (const suffix of ['/events?q=OR', '/events?from=garbage', '/events?cursor=invalid', '/export?format=csv&q=OR']) {
+    const invalid = await fetch(`${endpoint}${base}${suffix}`, { headers: { cookie } });
+    assert.equal(invalid.status, 422);
+    s.apiErrorSchema.parse(await invalid.json());
+  }
+  const openapi = (await (await fetch(`${endpoint}/openapi.json`)).json()) as { paths: Record<string, unknown> };
+  const checkRoutes = (value: unknown): void => {
+    if (value && typeof value === 'object') {
+      if ('path' in value && typeof value.path === 'string') {
+        // The OpenAPI generator omits its own document endpoint.
+        if (value.path !== '/openapi.json') assert.ok(openapi.paths[value.path.replace(/:([A-Za-z]+)/g, '{$1}')], value.path);
+      } else for (const child of Object.values(value)) checkRoutes(child);
+    }
+  };
+  checkRoutes(s.routes);
   const headers = { Authorization: `Bearer ${created.ingestKey.secret}`, 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' };
   const mixed = await fetch(`${endpoint}/v1/events`, {
     method: 'POST',
@@ -116,6 +145,10 @@ try {
   const activity = s.searchResponseSchema.parse(await (await api('/api/workspace/activity')).json());
   for (const action of [
     'organization.created',
+    'member.invited',
+    'member.role.changed',
+    'member.removed',
+    'auth.signed_in',
     'project.created',
     'project.updated',
     'project.deleted',
@@ -134,10 +167,12 @@ try {
   );
 } finally {
   if (organizationId) {
+    for (const project of await prisma.project.findMany({ where: { organizationId } }))
+      await (await import('@trailmark/clickhouse')).purgeProject(ch, project.id);
     await (await import('@trailmark/clickhouse')).purgeProject(ch, `ws:${organizationId}`);
     await prisma.organization.delete({ where: { id: organizationId } });
   }
-  await prisma.user.deleteMany({ where: { email } });
+  await prisma.user.deleteMany({ where: { email: { in: [email, invitedEmail] } } });
   await ch.close();
   await prisma.$disconnect();
 }

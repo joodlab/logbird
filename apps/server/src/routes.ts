@@ -102,19 +102,19 @@ export const managementRoutes = new Hono<AppEnv>()
     async (c) => {
       const { confirm, ...input } = c.req.valid('json');
       // Serialize policy changes so concurrent requests cannot bypass slug confirmation.
-      const project = await prisma.$transaction(async (tx) => {
+      const { project, before } = await withProjectLock(c.get('project').id, async (tx) => {
         const id = c.get('project').id;
         await tx.$queryRaw(Prisma.sql`SELECT id FROM "Project" WHERE id = ${id} FOR UPDATE`);
         const current = await tx.project.findUniqueOrThrow({ where: { id } });
         if (input.retentionDays !== undefined && input.retentionDays < current.retentionDays && confirm !== current.slug)
           throw new ApiError(422, 'confirmation_required', 'Type the project slug to lower retention.');
-        return tx.project.update({ where: { id }, data: input });
+        return { project: await tx.project.update({ where: { id }, data: input }), before: current.retentionDays };
       });
       if (input.retentionDays !== undefined) await enforceProjectRetention(project.id);
       await audit(c, 'project.updated', { type: 'project', id: project.id });
-      if (input.retentionDays !== undefined && input.retentionDays !== c.get('project').retentionDays)
+      if (input.retentionDays !== undefined && input.retentionDays !== before)
         await audit(c, 'project.retention.changed', { type: 'project', id: project.id }, [
-          { field: 'retentionDays', before: c.get('project').retentionDays, after: project.retentionDays },
+          { field: 'retentionDays', before, after: project.retentionDays },
         ]);
       return c.json(serializeProject(project));
     },

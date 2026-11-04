@@ -37,7 +37,10 @@ app.onError((error, c) => {
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
     return c.json({ error: { code: 'conflict', message: 'This record already exists.' } }, 409);
   if (error instanceof HTTPException) return c.json({ error: { code: 'invalid_request', message: error.message } }, error.status);
-  if (/Invalid (time range|cursor)|query|OR|parentheses/i.test(error.message) && !('code' in error))
+  if (
+    /^(Invalid (time range|cursor)|Query exceeds|OR is not supported|Parentheses are not supported|Unterminated quoted query)/.test(error.message) &&
+    !('code' in error)
+  )
     return c.json({ error: { code: 'invalid_query', message: error.message } }, 422);
   if ('code' in error || /timeout|budget/i.test(error.message))
     return c.json(
@@ -79,10 +82,17 @@ app.get('/health', describeRoute({ summary: 'Postgres and ClickHouse readiness' 
 export const routes = app.route('/api', dataRoutes).route('/api', managementRoutes).route('/v1', publicRoutes);
 app.get(
   '/openapi.json',
+  describeRoute({ summary: 'OpenAPI document' }),
   openAPIRouteHandler(app, {
     documentation: {
       info: { title: 'Trailmark API', version: '0.1.0' },
-      components: { securitySchemes: { session: { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' } } },
+      components: {
+        securitySchemes: {
+          session: { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' },
+          ingestKey: { type: 'http', scheme: 'bearer' },
+          readKey: { type: 'http', scheme: 'bearer' },
+        },
+      },
     },
   }),
 );
