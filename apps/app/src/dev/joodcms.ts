@@ -225,6 +225,8 @@ interface Ctx {
   biz: Business;
   t: number;
   admins: Person[];
+  /** Support ticket of the impersonation session this work belongs to. */
+  ticket?: string;
 }
 
 function req(rng: Rng) {
@@ -310,6 +312,10 @@ function crmSync(c: Ctx, actor: Person, opId: string, parentId: string, start: n
   return t;
 }
 
+function supportMeta(c: Ctx, impersonator?: Person): Record<string, unknown> {
+  return impersonator ? { supportTicket: c.ticket ?? `SUP-${c.rng.int(1000, 9999)}` } : {};
+}
+
 function hotelEdit(c: Ctx, actor: Person, impersonator?: Person) {
   const { rng, emit, biz } = c;
   const hotel = rng.pick(biz.hotels);
@@ -348,7 +354,12 @@ function hotelEdit(c: Ctx, actor: Person, impersonator?: Person) {
       ],
       changes: [{ field, before, after }],
       context: { operationId: opId, ...r },
-      metadata: { plan: biz.plan, channel: rng.pick(['web', 'web', 'mobile']), http: { method: 'PATCH', route: '/hotels/:id/policy', status: 200 } },
+      metadata: {
+        plan: biz.plan,
+        channel: rng.pick(['web', 'web', 'mobile']),
+        http: { method: 'PATCH', route: '/hotels/:id/policy', status: 200 },
+        ...supportMeta(c, impersonator),
+      },
     });
   } else if (kind === 'rate') {
     const room = rng.pick(hotel.rooms);
@@ -368,7 +379,7 @@ function hotelEdit(c: Ctx, actor: Person, impersonator?: Person) {
         { field: 'currency', before: 'SAR', after: 'SAR' },
       ],
       context: { operationId: opId, ...r },
-      metadata: { plan: biz.plan, channel: 'web', season: rng.pick(['ramadan', 'summer', 'hajj', 'standard']) },
+      metadata: { plan: biz.plan, channel: 'web', season: rng.pick(['ramadan', 'summer', 'hajj', 'standard']), ...supportMeta(c, impersonator) },
     });
   } else if (kind === 'room') {
     const room = rng.pick(hotel.rooms);
@@ -396,7 +407,7 @@ function hotelEdit(c: Ctx, actor: Person, impersonator?: Person) {
             ]
           : [],
       context: { operationId: opId, ...r },
-      metadata: { plan: biz.plan, channel: 'web' },
+      metadata: { plan: biz.plan, channel: 'web', ...supportMeta(c, impersonator) },
     });
   } else if (kind === 'hotel') {
     parent = emit({
@@ -410,7 +421,7 @@ function hotelEdit(c: Ctx, actor: Person, impersonator?: Person) {
         { field: 'amenities', before: ['wifi', 'parking'], after: ['wifi', 'parking', 'spa'] },
       ],
       context: { operationId: opId, ...r },
-      metadata: { plan: biz.plan, channel: 'web' },
+      metadata: { plan: biz.plan, channel: 'web', ...supportMeta(c, impersonator) },
     });
   } else {
     parent = emit({
@@ -424,7 +435,7 @@ function hotelEdit(c: Ctx, actor: Person, impersonator?: Person) {
         { type: 'website', id: biz.websiteId, name: biz.domain },
       ],
       context: { operationId: opId, ...r },
-      metadata: { plan: biz.plan },
+      metadata: { plan: biz.plan, ...supportMeta(c, impersonator) },
     });
   }
   let t = c.t + rng.int(80, 600);
@@ -440,7 +451,7 @@ function hotelEdit(c: Ctx, actor: Person, impersonator?: Person) {
       targets: [{ type: 'hotel', id: hotel.id, name: hotel.name }],
       context: { operationId: opId, parentEventId: parent },
       source: 'joodbooking',
-      metadata: { queue: 'catalog', channel: 'joodbooking' },
+      metadata: { queue: 'catalog', channel: 'joodbooking', ...supportMeta(c, impersonator) },
     });
     t += rng.int(400, 3000);
     const partial = rng.chance(0.06);
@@ -593,7 +604,7 @@ function bookingStaff(c: Ctx, actor: Person, impersonator?: Person) {
           ? [{ field: 'status', before: 'confirmed', after: 'cancelled' }]
           : [],
     context: { operationId: `op_${rng.alnum(10)}`, ...req(rng) },
-    metadata: denied ? { permission: 'bookings.refund', role: 'front_desk' } : { channel: 'web' },
+    metadata: { ...(denied ? { permission: 'bookings.refund', role: 'front_desk' } : { channel: 'web' }), ...supportMeta(c, impersonator) },
   });
 }
 
@@ -799,7 +810,7 @@ function impersonation(c: Ctx) {
     context: { operationId: opId, ...r },
     metadata: { ticket, reason: 'Customer asked support to fix room setup' },
   });
-  const inner: Ctx = { ...c, t: c.t + rng.int(20_000, 90_000) };
+  const inner: Ctx = { ...c, t: c.t + rng.int(20_000, 90_000), ticket };
   const n = rng.int(1, 3);
   for (let i = 0; i < n; i++) {
     if (rng.chance(0.5)) hotelEdit(inner, target, admin);

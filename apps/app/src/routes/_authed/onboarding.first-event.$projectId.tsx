@@ -35,7 +35,7 @@ function FirstEventStep() {
     queryKey: [...keys.project(projectId), 'first-event', since],
     queryFn: async ({ signal }) => {
       const res = await api.events.live(projectId, { since, limit: 1 }, signal);
-      const first = res.data.at(-1) ?? res.data[0];
+      const first = res[0];
       if (first && !received) {
         setReceived(first);
         queryClient.invalidateQueries({ queryKey: keys.project(projectId) });

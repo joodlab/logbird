@@ -7,13 +7,12 @@ import {
   entityListResponseSchema,
   entityProfileSchema,
   eventDetailSchema,
+  eventSchema,
   facetResponseSchema,
   fieldsResponseSchema,
   histogramResponseSchema,
   ingestResponseSchema,
-  liveResponseSchema,
   meResponseSchema,
-  operationResponseSchema,
   overviewResponseSchema,
   type Project,
   projectSchema,
@@ -86,6 +85,13 @@ function oneOf<T extends z.ZodType>(item: T, wrapKey: string) {
 
 const ok = z.unknown().transform(() => true as const);
 
+/** better-auth may omit `image`; the contract wants `string | null`. */
+const meResponse = z.preprocess((value) => {
+  const v = value as { user?: { image?: unknown } } | null;
+  if (v?.user && v.user.image === undefined) return { ...v, user: { ...v.user, image: null } };
+  return value;
+}, meResponseSchema);
+
 export interface RangeParams {
   from?: string;
   to?: string;
@@ -93,7 +99,7 @@ export interface RangeParams {
 }
 
 export const api = {
-  me: (signal?: AbortSignal) => request(meResponseSchema, 'GET', routes.me.path, { signal }),
+  me: (signal?: AbortSignal) => request(meResponse, 'GET', routes.me.path, { signal }),
 
   projects: {
     list: (signal?: AbortSignal) => request(listOf(projectSchema), 'GET', routes.projects.list.path, { signal }),
@@ -121,14 +127,16 @@ export const api = {
       request(searchResponseSchema, 'GET', pathFor(routes.events.search.path, { projectId }), { query: { ...query }, signal }),
     get: (projectId: string, eventId: string, signal?: AbortSignal) =>
       request(eventDetailSchema, 'GET', pathFor(routes.events.get.path, { projectId, eventId }), { signal }),
-    live: (projectId: string, query: { since?: string; q?: string; limit?: number }, signal?: AbortSignal) =>
-      request(liveResponseSchema, 'GET', pathFor(routes.events.live.path, { projectId }), { query: { ...query }, signal }),
+    /** Events with `timestamp >= since`, newest first (polling tail). */
+    live: (projectId: string, query: { since: string; q?: string; limit?: number }, signal?: AbortSignal) =>
+      request(z.array(eventSchema), 'GET', pathFor(routes.events.live.path, { projectId }), { query: { ...query }, signal }),
     histogram: (projectId: string, query: RangeParams & { interval?: number }, signal?: AbortSignal) =>
       request(histogramResponseSchema, 'GET', pathFor(routes.events.histogram.path, { projectId }), { query: { ...query }, signal }),
     facets: (projectId: string, query: RangeParams & { field: string; limit?: number }, signal?: AbortSignal) =>
       request(facetResponseSchema, 'GET', pathFor(routes.events.facets.path, { projectId }), { query: { ...query }, signal }),
+    /** Every event sharing `context.operationId`, oldest first. */
     operation: (projectId: string, operationId: string, signal?: AbortSignal) =>
-      request(operationResponseSchema, 'GET', pathFor(routes.events.operation.path, { projectId, operationId }), { signal }),
+      request(z.array(eventSchema), 'GET', pathFor(routes.events.operation.path, { projectId, operationId }), { signal }),
     testEvent: (projectId: string) => request(ingestResponseSchema, 'POST', pathFor(routes.events.testEvent.path, { projectId }), { body: {} }),
     exportUrl: (projectId: string, query: RangeParams & { format: 'csv' | 'jsonl' }) =>
       withQuery(pathFor(routes.events.export.path, { projectId }), { ...query }),

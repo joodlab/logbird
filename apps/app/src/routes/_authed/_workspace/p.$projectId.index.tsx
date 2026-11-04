@@ -142,7 +142,7 @@ function OverviewPage() {
             {loading ? (
               <Skeleton className="h-[248px] w-full" />
             ) : (
-              <OutcomeAreaChart data={data?.series} height={240} onSelectOutcome={(o) => explore(`outcome:${o}`)} />
+              <OutcomeAreaChart data={data?.series} height={240} onSelectOutcome={(o) => explore(`outcome:${o}`)} range={range} />
             )}
           </div>
         </Panel>

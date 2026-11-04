@@ -3,6 +3,7 @@ import { redirect } from '@tanstack/react-router';
 import type { MeResponse } from '@trailmark/contracts';
 import { ApiRequestError } from '@/lib/api/errors';
 import { meQuery } from '@/lib/api/queries';
+import { authClient } from '@/lib/auth-client';
 
 const LAST_PROJECT_KEY = 'trailmark.lastProject';
 
@@ -18,6 +19,20 @@ export async function requireMe(queryClient: QueryClient, href?: string): Promis
     }
     throw error;
   }
+}
+
+/**
+ * A fresh better-auth session has no active organization, and every project endpoint is scoped to
+ * it. Activate the first workspace when needed and return the refreshed `me`.
+ */
+export async function ensureActiveWorkspace(queryClient: QueryClient, me: MeResponse): Promise<MeResponse> {
+  if (me.organizations.length === 0) return me;
+  if (me.activeOrganizationId && me.organizations.some((o) => o.id === me.activeOrganizationId)) return me;
+  const first = me.organizations[0];
+  if (!first) return me;
+  await authClient.organization.setActive({ organizationId: first.id });
+  await queryClient.invalidateQueries({ queryKey: meQuery().queryKey });
+  return queryClient.fetchQuery({ ...meQuery(), staleTime: 0 });
 }
 
 export function rememberProject(projectId: string): void {

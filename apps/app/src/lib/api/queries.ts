@@ -45,10 +45,26 @@ export const projectQuery = (projectId: string) =>
     retry: noRetryOn4xx,
   });
 
-export const retentionQuery = (projectId: string) =>
+/**
+ * Retention status. Servers without `GET /projects/:id/retention` (contracts/console.ts) still get
+ * the oldest stored event from an ascending search; the last purge run is then unknown.
+ */
+export const retentionQuery = (projectId: string, retentionDays: number) =>
   queryOptions({
-    queryKey: [...keys.project(projectId), 'retention'] as const,
-    queryFn: ({ signal }) => api.projects.retention(projectId, signal),
+    queryKey: [...keys.project(projectId), 'retention', retentionDays] as const,
+    queryFn: async ({ signal }) => {
+      try {
+        return await api.projects.retention(projectId, signal);
+      } catch (error) {
+        if (!(error instanceof ApiRequestError && error.status === 404)) throw error;
+        const oldest = await api.events.search(
+          projectId,
+          { from: new Date(Date.now() - (retentionDays + 1) * 86_400_000).toISOString(), to: new Date().toISOString(), order: 'asc', limit: 1 },
+          signal,
+        );
+        return { retentionDays, oldestEventAt: oldest.data[0]?.timestamp ?? null, lastRun: null };
+      }
+    },
     retry: noRetryOn4xx,
   });
 

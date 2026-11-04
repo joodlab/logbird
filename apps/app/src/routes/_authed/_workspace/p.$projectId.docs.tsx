@@ -33,7 +33,7 @@ const QUERY_SYNTAX: [string, string][] = [
   ['target:hotel_123', 'Any target id (also target.type:hotel)'],
   ['operation:op_101', 'Everything in one operation'],
   ['request:req_abc   trace:4bf92f…', 'Request and trace ids'],
-  ['impersonator:*', 'Field is present (wildcard on its own)'],
+  ['attr.metadata.supportTicket:*', 'Attribute is present (a lone * matches any value)'],
   ['source:joodbooking', 'External system that supplied the change'],
   ['attr.metadata.plan:pro', 'Any attribute; unknown fields are treated as attr.<field>'],
   ['severity:critical  category:booking', 'Severity and first action segment'],

@@ -29,7 +29,7 @@ export interface FieldSpec {
   facet?: string;
 }
 
-/** Known query fields, in the order autocomplete offers them. */
+/** Query fields apps/server understands (SPEC §5.1), in the order autocomplete offers them. */
 export const QUERY_FIELDS: FieldSpec[] = [
   { key: 'action', description: 'Exact action, or a prefix with *', example: 'action:hotel.*', facet: 'action' },
   { key: 'outcome', description: 'success · failure · denied · partial · unknown', example: 'outcome:failure', facet: 'outcome' },
@@ -37,8 +37,6 @@ export const QUERY_FIELDS: FieldSpec[] = [
   { key: 'actor', description: 'Actor id', example: 'actor:usr_42', facet: 'actor' },
   { key: 'actor.type', description: 'user · service · system · api_key · integration', example: 'actor.type:user', facet: 'actor.type' },
   { key: 'actor.name', description: 'Actor display name', example: 'actor.name:"Raed B"' },
-  { key: 'actor.email', description: 'Actor email', example: 'actor.email:raed@jood.sa' },
-  { key: 'impersonator', description: 'Impersonating admin id', example: 'impersonator:usr_1' },
   { key: 'tenant', description: 'Tenant id', example: 'tenant:biz_7', facet: 'tenant' },
   { key: 'executor', description: 'Worker / job / api that performed it', example: 'executor:crm-worker', facet: 'executor' },
   { key: 'executor.type', description: 'api · worker · scheduler · webhook', example: 'executor.type:worker', facet: 'executor.type' },
@@ -50,8 +48,6 @@ export const QUERY_FIELDS: FieldSpec[] = [
   { key: 'operation', description: 'Operation id (request + spawned jobs)', example: 'operation:op_101' },
   { key: 'request', description: 'Request id', example: 'request:req_abc' },
   { key: 'trace', description: 'Trace id', example: 'trace:4bf92f…' },
-  { key: 'parent', description: 'Parent event id (direct children)', example: 'parent:01J…' },
-  { key: 'job', description: 'Job id', example: 'job:456' },
   { key: 'id', description: 'Event id', example: 'id:01J…' },
   { key: 'attr.', description: 'Any attribute, e.g. attr.metadata.plan', example: 'attr.metadata.plan:pro' },
 ];

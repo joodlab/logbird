@@ -3,7 +3,8 @@ import { ChartContainer, ChartTooltip } from '@trailmark/ui/components/ui/chart'
 import { cn } from '@trailmark/ui/lib/utils';
 import { useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ReferenceArea, XAxis, YAxis } from 'recharts';
-import { formatCompact } from '@/lib/format';
+import { formatAxis } from '@/lib/format';
+import { resolveRange } from '@/lib/range';
 import { OutcomeTooltip } from './chart-tooltip';
 import { outcomeChartConfig, SERIES, tickFormatter, toSeries } from './outcome-series';
 
@@ -14,6 +15,8 @@ interface EventHistogramProps {
   onZoom?: (fromMs: number, toMs: number) => void;
   className?: string;
   loading?: boolean;
+  /** Range string the histogram covers, for zero-filling quiet edges. */
+  range?: string;
 }
 
 interface ChartPointerState {
@@ -22,8 +25,8 @@ interface ChartPointerState {
 }
 
 /** Stacked outcome bars. Drag across bars to zoom the time range; click one bar to zoom into it. */
-export function EventHistogram({ data, height = 120, onZoom, className, loading }: EventHistogramProps) {
-  const rows = useMemo(() => toSeries(data), [data]);
+export function EventHistogram({ data, height = 120, onZoom, className, loading, range }: EventHistogramProps) {
+  const rows = useMemo(() => toSeries(data, range ? resolveRange(range) : undefined), [data, range]);
   const interval = data?.interval ?? 60;
   const [drag, setDrag] = useState<{ start: number; end: number } | null>(null);
 
@@ -65,7 +68,7 @@ export function EventHistogram({ data, height = 120, onZoom, className, loading 
         >
           <CartesianGrid stroke="var(--border)" vertical={false} />
           <XAxis axisLine={false} dataKey="ts" minTickGap={56} tickFormatter={tickFormatter(interval)} tickLine={false} tickMargin={6} />
-          <YAxis allowDecimals={false} axisLine={false} tickCount={3} tickFormatter={formatCompact} tickLine={false} width={32} />
+          <YAxis allowDecimals={false} axisLine={false} tickCount={3} tickFormatter={formatAxis} tickLine={false} width={40} />
           <ChartTooltip
             content={({ active, payload }) =>
               active && !drag ? (

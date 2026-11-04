@@ -206,8 +206,8 @@ function seedState(): State {
     view(
       'view_2',
       'Impersonated actions',
-      'Everything support did while impersonating a customer.',
-      'impersonator:*',
+      'Everything support did while impersonating a customer (tagged with a support ticket).',
+      'attr.metadata.supportTicket:*',
       '30d',
       18,
       by('usr_lina', 'Lina Haddad'),
@@ -459,9 +459,10 @@ function currentUser(): FixtureUser | null {
 function userOrgs(user: FixtureUser): Org[] {
   return state.orgs.filter((o) => o.members.some((m) => m.userId === user.id));
 }
+/** Like better-auth: only the organization explicitly activated on this session counts. */
 function activeOrg(user: FixtureUser): Org | null {
   const id = state.activeOrgId[user.id];
-  return userOrgs(user).find((o) => o.id === id) ?? userOrgs(user)[0] ?? null;
+  return userOrgs(user).find((o) => o.id === id) ?? null;
 }
 function slugify(s: string): string {
   return (
@@ -606,6 +607,7 @@ async function handleAuth(path: string, method: string, body: Record<string, unk
         state.users.push(u);
       }
       state.session = { userId: u.id, token: rng.alnum(24) };
+      state.activeOrgId[u.id] = null; // a new session has no active organization
       save();
       return json({ token: state.session.token, user: u });
     }
@@ -786,7 +788,7 @@ async function handleApi(url: URL, method: string, body: Record<string, unknown>
   }
 
   if (path === '/api/projects') {
-    if (!org) return method === 'GET' ? json({ data: [] }) : apiError(400, 'no_active_organization', 'Create a workspace first.');
+    if (!org) return apiError(403, 'no_active_organization', 'Select a workspace first.');
     if (method === 'GET') return json({ data: state.projects.filter((p) => p.organizationId === org.id).map(projectView) });
     if (method === 'POST') {
       const name = String(body.name ?? '').trim();
@@ -839,7 +841,7 @@ async function handleApi(url: URL, method: string, body: Record<string, unknown>
         const lowering = body.retentionDays < project.retentionDays;
         if (lowering && body.confirm !== project.slug) {
           return apiError(
-            400,
+            422,
             'confirmation_required',
             `Type the project slug "${project.slug}" to confirm. Data older than ${body.retentionDays} days will be permanently deleted.`,
           );
@@ -894,7 +896,7 @@ async function handleApi(url: URL, method: string, body: Record<string, unknown>
         { type: 'project', id: project.id, name: project.name },
       ]);
       save();
-      return json({ ok: true });
+      return new Response(null, { status: 204 });
     }
   }
 
@@ -938,7 +940,7 @@ async function handleApi(url: URL, method: string, body: Record<string, unknown>
       { type: 'api_key', id: key.id, name: key.name },
     ]);
     save();
-    return json({ ok: true });
+    return new Response(null, { status: 204 });
   }
 
   if (rest === 'events' && method === 'GET') {
@@ -968,15 +970,11 @@ async function handleApi(url: URL, method: string, body: Record<string, unknown>
     });
   }
   if (rest === 'live' && method === 'GET') {
-    const since = url.searchParams.get('since') ?? new Date(Date.now() - 60_000).toISOString();
-    const limit = Number(url.searchParams.get('limit') ?? 100);
-    const q = url.searchParams.get('q') ?? undefined;
-    const now = new Date().toISOString();
-    const data = store
-      .range(new Date(Date.parse(since) - DAY).toISOString(), now, q)
-      .filter((e) => e.receivedAt > since)
-      .slice(0, limit);
-    return json({ data, now });
+    // Mirrors apps/server: events with timestamp >= since, newest first, as a bare array.
+    const since = url.searchParams.get('since');
+    if (!since) return apiError(400, 'validation_error', 'since is required');
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    return json(store.range(since, new Date().toISOString(), url.searchParams.get('q') ?? undefined).slice(0, limit));
   }
   if (rest === 'histogram' && method === 'GET') {
     const r = rangeOf(url);
@@ -995,8 +993,7 @@ async function handleApi(url: URL, method: string, body: Record<string, unknown>
       .all()
       .filter((e) => e.context.operationId === opId)
       .reverse();
-    if (events.length === 0) return apiError(404, 'operation_not_found', 'No events carry this operation id (it may be past retention).');
-    return json({ operationId: opId, events, truncated: false });
+    return json(events);
   }
   if (rest === 'export' && method === 'GET') {
     const r = rangeOf(url);
@@ -1085,7 +1082,7 @@ async function handleApi(url: URL, method: string, body: Record<string, unknown>
     state.views = state.views.filter((v) => v.id !== view.id);
     recordActivity(user, 'view.deleted', `${user.name} deleted the view “${view.name}”`, [{ type: 'saved_view', id: view.id, name: view.name }]);
     save();
-    return json({ ok: true });
+    return new Response(null, { status: 204 });
   }
 
   return apiError(404, 'not_found', `No fixture for ${method} ${path}`);

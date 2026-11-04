@@ -81,11 +81,11 @@ function OperationPage() {
   const navigate = Route.useNavigate();
   const op = useQuery(operationQuery(projectId, operationId));
   useSetCrumb(operationId);
-  const nodes = useMemo(() => buildTree(op.data?.events ?? []), [op.data]);
+  const nodes = useMemo(() => buildTree(op.data ?? []), [op.data]);
   const t0 = nodes.length ? Math.min(...nodes.map((n) => n.start)) : 0;
   const t1 = nodes.length ? Math.max(...nodes.map((n) => n.end)) : 0;
   const total = Math.max(1, t1 - t0);
-  const events = op.data?.events ?? [];
+  const events = op.data ?? [];
   const failures = events.filter((e) => e.outcome === 'failure' || e.outcome === 'denied').length;
   const executors = [...new Map(events.filter((e) => e.executor?.id).map((e) => [e.executor?.id, e.executor])).values()];
   const actors = [...new Map(events.filter((e) => e.actor).map((e) => [e.actor?.id, e.actor])).values()];
@@ -110,7 +110,8 @@ function OperationPage() {
     );
   }
 
-  const ticks = [0, 0.25, 0.5, 0.75, 1];
+  // Instant operations (one event, or all at the same millisecond) get no time axis.
+  const ticks = t1 - t0 > 0 ? [0, 0.25, 0.5, 0.75, 1] : [];
 
   return (
     <div className="flex flex-col gap-5 p-4 sm:p-6">
@@ -272,9 +273,6 @@ function OperationPage() {
           </ul>
         )}
       </section>
-      {op.data?.truncated ? (
-        <p className="text-muted-foreground text-xs">Showing the first {formatNumber(events.length)} events of this operation.</p>
-      ) : null}
 
       <EventSheet
         event={selectedIndex >= 0 ? (nodes[selectedIndex]?.event ?? null) : null}

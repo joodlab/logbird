@@ -28,9 +28,6 @@ import { formatDate, formatFull, formatNumber, formatRelative, formatRetention }
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/retention')({
   staticData: { crumb: 'Retention' },
-  loader: ({ context, params }) => {
-    context.queryClient.prefetchQuery(retentionQuery(params.projectId));
-  },
   component: RetentionSettings,
 });
 
@@ -45,7 +42,7 @@ function RetentionSettings() {
 
 function RetentionForm({ project }: { project: Project }) {
   const queryClient = useQueryClient();
-  const status = useQuery(retentionQuery(project.id));
+  const status = useQuery(retentionQuery(project.id, project.retentionDays));
   const [days, setDays] = useState(project.retentionDays);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const lowering = days < project.retentionDays;
@@ -160,7 +157,7 @@ function RetentionForm({ project }: { project: Project }) {
                     {run.status} {formatRelative(run.finishedAt ?? run.startedAt)}
                   </>
                 ) : (
-                  'Not run yet'
+                  <span className="font-normal text-muted-foreground">Runs hourly — no run reported</span>
                 )}
               </dd>
               {run ? <span className="text-muted-foreground text-xs">Deleted events before {formatDate(run.cutoff)}</span> : null}

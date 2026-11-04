@@ -74,7 +74,7 @@ async function screenshots(browser, storageState, scheme) {
     await page.keyboard.type(' outcome:', { delay: 40 });
     await pause(page, 900);
   });
-  await go(`${P}/events?q=impersonator%3A*&range=30d`, 'event-detail', async () => {
+  await go(`${P}/events?q=attr.metadata.supportTicket%3A*&range=30d`, 'event-detail', async () => {
     await page.locator('[role=row][data-index="0"]').click();
     await pause(page, 1600);
   });
@@ -141,7 +141,7 @@ async function phoneShots(browser, storageState) {
     await settle(page, 1400);
     await shoot(page, name);
   }
-  await page.goto(`${BASE}${P}/events?q=impersonator%3A*&range=30d`);
+  await page.goto(`${BASE}${P}/events?q=attr.metadata.supportTicket%3A*&range=30d`);
   await settle(page, 1400);
   await page.locator('[role=row][data-index="0"]').click();
   await pause(page, 1500);
@@ -258,7 +258,7 @@ if (want('explorer')) {
   });
 
   await video(browser, 'explorer-detail-live-tail', state, async (page) => {
-    await page.goto(`${BASE}${P}/events?q=impersonator%3A*&range=30d`);
+    await page.goto(`${BASE}${P}/events?q=attr.metadata.supportTicket%3A*&range=30d`);
     await settle(page, 1500);
     await page.locator('[role=row][data-index="0"]').click();
     await pause(page, 2000);

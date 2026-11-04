@@ -132,6 +132,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
                   data={p.series}
                   height={200}
                   onSelectOutcome={(o) => onTimelineChange({ q: formatTerm('outcome', o), ev: undefined })}
+                  range={timeline.range}
                 />
               ) : (
                 <Skeleton className="h-[208px] w-full" />

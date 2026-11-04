@@ -15,10 +15,13 @@ import { keys } from '@/lib/api/queries';
 import { formatRetention } from '@/lib/format';
 import { fieldErrorMessage } from '@/lib/forms';
 import { stashSecret } from '@/lib/one-time-secrets';
+import { ensureActiveWorkspace } from '@/lib/session';
 
 export const Route = createFileRoute('/_authed/onboarding/project')({
-  beforeLoad: ({ context }) => {
+  beforeLoad: async ({ context }) => {
     if (context.me.organizations.length === 0) throw redirect({ to: '/onboarding' });
+    // Project creation is scoped to the session's active workspace.
+    return { me: await ensureActiveWorkspace(context.queryClient, context.me) };
   },
   component: ProjectStep,
 });

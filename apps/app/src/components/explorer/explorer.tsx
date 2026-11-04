@@ -71,6 +71,8 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
   const [liveRows, setLiveRows] = useState<AuditEvent[]>([]);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const sinceRef = useRef<string | null>(null);
+  const liveRowsRef = useRef<AuditEvent[]>([]);
+  liveRowsRef.current = liveRows;
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset the tail whenever the result set identity changes
   useEffect(() => {
     setLiveRows([]);
@@ -79,7 +81,7 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
 
   const firstPage = events.data?.pages[0]?.data;
   useEffect(() => {
-    if (!sinceRef.current && firstPage) sinceRef.current = firstPage[0]?.receivedAt ?? new Date().toISOString();
+    if (!sinceRef.current && firstPage) sinceRef.current = firstPage[0]?.timestamp ?? new Date().toISOString();
   }, [firstPage]);
 
   useQuery({
@@ -89,17 +91,17 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
     refetchIntervalInBackground: false,
     gcTime: 0,
     queryFn: async ({ signal }) => {
-      const res = await api.events.live(projectId, { since: sinceRef.current ?? undefined, q: effectiveQ || undefined, limit: 100 }, signal);
-      if (res.data.length) {
-        sinceRef.current = res.data.reduce((max, e) => (e.receivedAt > max ? e.receivedAt : max), sinceRef.current ?? '');
-        setLiveRows((prev) => {
-          const known = new Set(prev.map((e) => e.id));
-          const incoming = res.data.filter((e) => !known.has(e.id));
-          return [...incoming, ...prev].slice(0, 2000);
-        });
-        setFresh(new Set(res.data.map((e) => e.id)));
+      const since = sinceRef.current ?? new Date().toISOString();
+      // `since` is inclusive on event time, so the newest known rows come back too: dedupe by id.
+      const data = await api.events.live(projectId, { since, q: effectiveQ || undefined, limit: 100 }, signal);
+      const known = new Set([...(events.data?.pages[0]?.data ?? []), ...liveRowsRef.current].map((e) => e.id));
+      const incoming = data.filter((e) => !known.has(e.id));
+      if (data.length) sinceRef.current = data.reduce((max, e) => (e.timestamp > max ? e.timestamp : max), since);
+      if (incoming.length) {
+        setLiveRows((prev) => [...incoming, ...prev].slice(0, 2000));
+        setFresh(new Set(incoming.map((e) => e.id)));
       }
-      return res.now;
+      return incoming.length;
     },
   });
 
@@ -302,6 +304,7 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
             height={embedded ? 96 : 112}
             loading={histogram.isFetching && !histogram.isPending}
             onZoom={(from, to) => onChange({ range: absoluteRange(from, to), live: undefined })}
+            range={range}
           />
         ) : null}
       </div>

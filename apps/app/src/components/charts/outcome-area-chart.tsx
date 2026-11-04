@@ -3,7 +3,8 @@ import { ChartContainer, ChartTooltip } from '@trailmark/ui/components/ui/chart'
 import { cn } from '@trailmark/ui/lib/utils';
 import { useMemo, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
-import { formatCompact } from '@/lib/format';
+import { formatAxis } from '@/lib/format';
+import { resolveRange } from '@/lib/range';
 import { OutcomeTooltip } from './chart-tooltip';
 import { outcomeChartConfig, SERIES, type SeriesKey, tickFormatter, toSeries } from './outcome-series';
 
@@ -13,11 +14,13 @@ interface OutcomeAreaChartProps {
   /** Click a band (or a legend chip) → filter by that outcome. */
   onSelectOutcome?: (outcome: SeriesKey) => void;
   className?: string;
+  /** Range string the series covers, for zero-filling quiet edges. */
+  range?: string;
 }
 
 /** Stacked area of events by outcome. Bands and legend chips are clickable. */
-export function OutcomeAreaChart({ data, height = 240, onSelectOutcome, className }: OutcomeAreaChartProps) {
-  const rows = useMemo(() => toSeries(data), [data]);
+export function OutcomeAreaChart({ data, height = 240, onSelectOutcome, className, range }: OutcomeAreaChartProps) {
+  const rows = useMemo(() => toSeries(data, range ? resolveRange(range) : undefined), [data, range]);
   const [hover, setHover] = useState<SeriesKey | null>(null);
   const present = SERIES.filter((k) => rows.some((r) => r[k] > 0));
   const interval = data?.interval ?? 60;
@@ -46,7 +49,7 @@ export function OutcomeAreaChart({ data, height = 240, onSelectOutcome, classNam
             type="number"
             domain={['dataMin', 'dataMax']}
           />
-          <YAxis allowDecimals={false} axisLine={false} tickFormatter={formatCompact} tickLine={false} width={36} />
+          <YAxis allowDecimals={false} axisLine={false} tickFormatter={formatAxis} tickLine={false} width={40} />
           <ChartTooltip
             content={({ active, payload }) =>
               active ? (

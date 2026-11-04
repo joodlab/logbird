@@ -4,6 +4,8 @@ const pctFmt = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractio
 
 export const formatNumber = (n: number): string => numberFmt.format(n);
 export const formatCompact = (n: number): string => (Math.abs(n) < 10_000 ? numberFmt.format(n) : compactFmt.format(n));
+/** Axis ticks: 950, 1.2K, 12K. */
+export const formatAxis = (n: number): string => (Math.abs(n) < 1000 ? numberFmt.format(n) : compactFmt.format(n));
 export const formatPercent = (ratio: number): string => pctFmt.format(Number.isFinite(ratio) ? ratio : 0);
 
 /** Relative change between two values, or null when there is no baseline. */
