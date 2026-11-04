@@ -35,7 +35,7 @@ export const executorInputSchema = z.looseObject({
 
 export const targetInputSchema = z.looseObject({
   type: z.string().min(1).max(64),
-  id: id,
+  id,
   name: shortText.optional(),
 });
 
@@ -66,7 +66,7 @@ export const eventInputSchema = z.looseObject({
   actor: actorInputSchema.optional(),
   impersonator: actorInputSchema.optional(),
   executor: executorInputSchema.optional(),
-  tenant: z.looseObject({ id: id, name: shortText.optional() }).optional(),
+  tenant: z.looseObject({ id, name: shortText.optional() }).optional(),
   source: z.string().max(128).optional(), // external system that supplied the change, e.g. "joodbooking"
   targets: z.array(targetInputSchema).max(64).optional(),
   changes: z.array(changeInputSchema).max(256).optional(),

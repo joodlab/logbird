@@ -23,7 +23,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     return { ok: false as const, reason: 'event must be JSON serializable' };
   }
   if (Buffer.byteLength(payload) > 256 * 1024) return { ok: false as const, reason: 'event exceeds 256 KB' };
-  const attributes: Record<string, string> = {};
+  const attributes: Record<string, string> = Object.create(null);
   const flatten = (v: unknown, path: string, depth: number) => {
     if (Object.keys(attributes).length >= 256) return;
     const entries = Object.entries(object(v));

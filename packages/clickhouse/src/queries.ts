@@ -22,6 +22,10 @@ import { columns, compileQuery } from './query';
 
 type Params = Record<string, unknown>;
 async function read<T>(ch: ClickHouseClient, query: string, query_params: Params = {}, guard = 10): Promise<T[]> {
+  for (const key of ['from', 'to', 'cursorTs', 'hour']) {
+    const value = query_params[key];
+    if (typeof value === 'string') query_params[key] = new Date(value).toISOString().replace('T', ' ').slice(0, -1);
+  }
   return (await ch.query({ query, query_params, format: 'JSONEachRow', clickhouse_settings: { max_execution_time: guard } })).json<T>();
 }
 export function timeRange(q: RangeQuery) {
@@ -100,19 +104,16 @@ export async function searchEvents(ch: ClickHouseClient, projectId: string, q: S
   }
   const rows = await read<EventRow>(
     ch,
-    `SELECT * FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order},received_at DESC LIMIT 1 BY timestamp,event_id LIMIT {limit:UInt32}`,
+    `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={project:String} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id`,
     params,
   );
   const hasMore = rows.length > q.limit,
     data = rows.slice(0, q.limit).map(toEvent),
     last = data.at(-1);
-  let total: number;
-  try {
-    total = Number((await read<{ n: number }>(ch, `SELECT uniqExact(event_id) n FROM events WHERE ${w.sql}`, w.params, 1))[0]?.n ?? 0);
-  } catch (error) {
-    if (!(error instanceof Error) || !/TIMEOUT|TIME_LIMIT_EXCEEDED|Timeout/i.test(error.message)) throw error;
-    total = 10_000;
-  }
+  const total = Number(
+    (await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT 10001)`, w.params, 1))[0]?.n ??
+      0,
+  );
   return { data, total, nextCursor: hasMore && last ? encode([last.timestamp, last.id]) : null, tookMs: performance.now() - start };
 }
 async function eventRow(ch: ClickHouseClient, p: string, id: string) {
@@ -172,7 +173,7 @@ export async function histogram(ch: ClickHouseClient, p: string, q: z.infer<type
 }
 export async function facets(ch: ClickHouseClient, p: string, q: z.infer<typeof facetQuerySchema>): Promise<FacetResponse> {
   const w = where(p, q),
-    col = columns[q.field];
+    col = Object.hasOwn(columns, q.field) ? columns[q.field] : undefined;
   let expr = col;
   if (!expr) {
     if (!q.field.startsWith('attr.')) throw new Error('Invalid facet field');
@@ -276,7 +277,14 @@ function entityFilter(kind: EntityKind, id: string) {
     : `${kind}:${JSON.stringify(id)}`;
 }
 export async function entityProfile(ch: ClickHouseClient, p: string, kind: EntityKind, id: string, q: RangeQuery): Promise<EntityProfile | null> {
-  const entity = (await listEntities(ch, p, { kind, q: id, limit: 100 })).data.find((e) => e.id === id);
+  const raw = (
+    await read<Entity>(
+      ch,
+      'SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} AND entity_id={id:String} GROUP BY kind,id',
+      { p, kind, id },
+    )
+  )[0];
+  const entity = raw ? { ...raw, firstSeen: iso(raw.firstSeen), lastSeen: iso(raw.lastSeen), events: Number(raw.events) } : undefined;
   if (!entity) return null;
   const scoped = { ...q, q: `${q.q ?? ''} ${entityFilter(kind, id)}` };
   const [series, topActions, outcomes] = await Promise.all([
@@ -377,7 +385,7 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
   // Caller must serialize purge with ingestion for this project while aggregates rebuild.
   await ch.command({
     query: `DELETE FROM events WHERE project_id={p:String}${before ? ' AND timestamp < {before:DateTime64(3)}' : ''}`,
-    query_params: { p, before: before?.toISOString().replace("T"," ").slice(0,-1) },
+    query_params: { p, before: before?.toISOString().replace('T', ' ').slice(0, -1) },
     clickhouse_settings: { mutations_sync: '2' },
   });
   for (const table of ['events_by_minute', 'entities', 'attribute_keys'])

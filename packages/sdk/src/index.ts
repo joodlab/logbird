@@ -80,7 +80,9 @@ export class Trailmark {
   track(event: EventInput): void {
     try {
       if (this.closed) throw new Error('Trailmark is shut down');
-      const copy = JSON.parse(JSON.stringify({ ...event, id: event.id ?? uuidv7() })) as EventInput;
+      const serialized = JSON.stringify({ ...event, id: event.id ?? uuidv7(), occurredAt: event.occurredAt ?? new Date().toISOString() });
+      if (new TextEncoder().encode(serialized).length > 256 * 1024) throw new Error('Event exceeds 256 KB');
+      const copy = JSON.parse(serialized) as EventInput;
       this.queue.push(copy);
       if (this.queue.length >= this.batchSize) void this.flush().catch((e) => this.report(e));
       else this.schedule();
@@ -129,7 +131,17 @@ export class Trailmark {
     this.timer = undefined;
     this.pending = (async () => {
       while (this.queue.length) {
-        const batch = this.queue.splice(0, this.batchSize);
+        const batch: EventInput[] = [];
+        let bytes = 32;
+        while (this.queue.length && batch.length < this.batchSize) {
+          const next = this.queue[0];
+          if (!next) break;
+          const size = new TextEncoder().encode(JSON.stringify(next)).length + 1;
+          if (batch.length && bytes + size > 5 * 1024 * 1024) break;
+          this.queue.shift();
+          batch.push(next);
+          bytes += size;
+        }
         try {
           await this.send(batch);
         } catch (e) {

@@ -22,6 +22,7 @@ export const columns: Record<string, string> = {
   source: 'source',
 };
 export function parseQuery(q = ''): Term[] {
+  if (new TextEncoder().encode(q).length > 4096) throw new Error('Query exceeds 4096 bytes');
   const terms: Term[] = [];
   let token = '',
     quoted = false,
@@ -30,8 +31,10 @@ export function parseQuery(q = ''): Term[] {
     if (!token) return;
     const negate = token.startsWith('-');
     const body = negate ? token.slice(1) : token;
+    if (body === 'OR' || body.includes('(') || body.includes(')')) throw new Error('OR and parentheses are not supported');
     const colon = body.indexOf(':');
     terms.push({ field: colon > 0 ? body.slice(0, colon) : '', value: colon > 0 ? body.slice(colon + 1) : body, negate });
+    if (terms.length > 64) throw new Error('Query exceeds 64 terms');
     token = '';
   };
   for (const c of q) {
@@ -54,10 +57,12 @@ export function compileQuery(q: string | Term[] = '') {
     const key = `q${i}`,
       wildcard = t.value.endsWith('*');
     params[key] = wildcard ? t.value.slice(0, -1) : t.value;
-    const column = columns[t.field];
+    const column = Object.hasOwn(columns, t.field) ? columns[t.field] : undefined;
     let expression: string;
     if (!t.field)
-      expression = `positionCaseInsensitiveUTF8(concat(description,' ',actor_name,' ',tenant_name,' ',arrayStringConcat(target_names,' ')), {${key}:String}) > 0`;
+      expression = /^[\p{L}\p{N}]+$/u.test(t.value)
+        ? `hasToken(search_text, lowerUTF8({${key}:String}))`
+        : `position(search_text, lowerUTF8({${key}:String})) > 0`;
     else {
       let lhs = column;
       if (!lhs) {
@@ -70,6 +75,10 @@ export function compileQuery(q: string | Term[] = '') {
           : wildcard
             ? `startsWith(${lhs}, {${key}:String})`
             : `${lhs} = {${key}:String}`;
+      if (!column)
+        expression = wildcard
+          ? `mapContains(attributes,{${key}k:String}) AND (${expression})`
+          : `has(attribute_items,concat(toString(length({${key}k:String})),':',{${key}k:String},{${key}:String}))`;
     }
     return t.negate ? `NOT (${expression})` : `(${expression})`;
   });
