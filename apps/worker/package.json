@@ -5,7 +5,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./queue": "./src/queue.ts"
+    "./queue": "./src/queue.ts",
+    "./retention": "./src/retention.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -21,7 +22,8 @@
     "@trailmark/database": "workspace:*",
     "@clickhouse/client": "1.23.1",
     "bullmq": "^6.2.0",
-    "ioredis": "^6.0.0"
+    "ioredis": "^6.0.0",
+    "@trailmark/clickhouse": "workspace:*"
   },
   "devDependencies": {
     "@trailmark/tsconfig": "workspace:*",

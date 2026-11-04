@@ -6,7 +6,6 @@ export const serializeProject = (project: Project) =>
   projectSchema.parse({
     ...project,
     createdAt: project.createdAt.toISOString(),
-    // TODO(data-plane): populate these from ClickHouse once ingest/read routes land.
     lastEventAt: null,
     eventsLast24h: 0,
   });

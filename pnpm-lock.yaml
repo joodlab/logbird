@@ -11,6 +11,21 @@ importers:
       '@biomejs/biome':
         specifier: 2.5.11
         version: 2.5.11
+      '@trailmark/clickhouse':
+        specifier: workspace:*
+        version: link:packages/clickhouse
+      '@trailmark/contracts':
+        specifier: workspace:*
+        version: link:packages/contracts
+      '@trailmark/database':
+        specifier: workspace:*
+        version: link:packages/database
+      '@trailmark/sdk':
+        specifier: workspace:*
+        version: link:packages/sdk
+      '@trailmark/seed':
+        specifier: workspace:*
+        version: link:packages/seed
       '@trailmark/tsconfig':
         specifier: workspace:*
         version: link:packages/tsconfig
@@ -50,6 +65,9 @@ importers:
       '@trailmark/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@trailmark/clickhouse':
+        specifier: workspace:*
+        version: link:../../packages/clickhouse
       '@trailmark/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -102,6 +120,9 @@ importers:
       '@t3-oss/env-core':
         specifier: ^0.13.11
         version: 0.13.11(typescript@7.0.2)(valibot@1.4.2(typescript@7.0.2))(zod@4.6.7)
+      '@trailmark/clickhouse':
+        specifier: workspace:*
+        version: link:../../packages/clickhouse
       '@trailmark/database':
         specifier: workspace:*
         version: link:../../packages/database

@@ -357,9 +357,11 @@ export async function operationEvents(ch: ClickHouseClient, p: string, operation
 }
 export async function* exportEvents(ch: ClickHouseClient, p: string, q: RangeQuery & { format: 'csv' | 'jsonl' }) {
   let nextCursor: string | undefined;
-  if (q.format === 'csv') yield 'id,timestamp,action,outcome,description\n';
+  let first = true;
   do {
     const page = await searchEvents(ch, p, { ...q, cursor: nextCursor, limit: 200, order: 'asc' });
+    if (first && q.format === 'csv') yield 'id,timestamp,action,outcome,description\n';
+    first = false;
     for (const e of page.data)
       yield q.format === 'jsonl'
         ? `${JSON.stringify(e)}\n`
@@ -386,13 +388,13 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
   await ch.command({
     query: `DELETE FROM events WHERE project_id={p:String}${before ? ' AND timestamp < {before:DateTime64(3)}' : ''}`,
     query_params: { p, before: before?.toISOString().replace('T', ' ').slice(0, -1) },
-    clickhouse_settings: { mutations_sync: '2' },
+    clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
   });
   for (const table of ['events_by_minute', 'entities', 'attribute_keys'])
     await ch.command({
       query: `DELETE FROM ${table} WHERE project_id={p:String}`,
       query_params: { p },
-      clickhouse_settings: { mutations_sync: '2' },
+      clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
     });
   if (before) {
     const { readFile } = await import('node:fs/promises');
