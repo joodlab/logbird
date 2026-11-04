@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "generate": "pnpm with-env prisma generate",
     "setup": "pnpm generate",
-    "build": "pnpm generate && tsdown",
+    "build": "tsdown",
     "with-env": "dotenv -e ../../.env --",
     "migrate:dev": "pnpm with-env prisma migrate dev",
     "migrate:deploy": "pnpm with-env prisma migrate deploy",
