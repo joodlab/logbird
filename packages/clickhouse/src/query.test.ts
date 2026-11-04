@@ -106,8 +106,8 @@ describe('normalization', () => {
 });
 
 it('bounds grammar and preserves quoted punctuation', () => {
-  expect(() => parseQuery('a OR b')).toThrow('OR');
-  expect(() => parseQuery('(a)')).toThrow('Parentheses');
+  expect(compileQuery('a OR b').sql).toContain(' OR ');
+  expect(compileQuery('(a)').params.q0).toBe('a');
   expect(() => parseQuery('x '.repeat(65))).toThrow('64');
   expect(() => parseQuery('a'.repeat(4097))).toThrow('4096');
   expect(parseQuery('"Hello: (world)"')).toEqual([{ field: '', value: 'Hello: (world)', negate: false }]);
@@ -115,3 +115,25 @@ it('bounds grammar and preserves quoted punctuation', () => {
   expect(compileQuery('__proto__:safe').params.q0k).toBe('__proto__');
   expect(compileQuery('\u0645\u0631\u062d\u0628\u0627').sql).toContain('hasToken');
 });
+
+it.each([
+  ['impersonator', 'impersonator_id'],
+  ['actor.email', 'actor_email'],
+  ['parent', 'parent_event_id'],
+  ['tenant.name', 'tenant_name'],
+  ['executor.name', 'executor_name'],
+  ['job', 'job_id'],
+])('maps %s to its core column', (field, column) => {
+  expect(compileQuery(`${field}:value`).sql).toBe(`(${column} = {q0:String})`);
+});
+it('preserves boolean precedence and quoted operators', () => {
+  expect(compileQuery('action:a OR (actor:b -tenant:c)').sql).toBe(
+    '((action = {q0:String}) OR ((actor_id = {q1:String}) AND NOT (tenant_id = {q2:String})))',
+  );
+  expect(compileQuery('"OR"').params.q0).toBe('OR');
+  expect(() => parseQuery(`${'('.repeat(17)}x${')'.repeat(17)}`)).toThrow('16');
+  expect(() => parseQuery(`${'('.repeat(16)}x${')'.repeat(16)}`)).not.toThrow();
+});
+it.each(['OR a', 'a OR', 'a OR OR b', '()', '(a', 'a)', 'a ()'])('rejects malformed boolean grammar %s', (q) =>
+  expect(() => parseQuery(q)).toThrow('Invalid query syntax'),
+);

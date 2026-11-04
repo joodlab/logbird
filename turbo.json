@@ -13,7 +13,7 @@
     "clean": { "cache": false },
     "setup": { "dependsOn": ["^setup"], "cache": false },
     "generate": { "cache": false },
-    "typecheck": { "dependsOn": ["setup", "^setup", "^build"], "cache": false },
+    "typecheck": { "dependsOn": ["setup", "^setup"], "cache": false },
     "test": { "dependsOn": ["^build"], "outputs": ["coverage/**"] }
   }
 }

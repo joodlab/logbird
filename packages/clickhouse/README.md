@@ -18,8 +18,8 @@ migrate(ch): Promise<void>
 normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string }):
   { ok: true; row: EventRow; id: string } | { ok: false; reason: string }
 insertEvents(ch, rows: EventRow[]): Promise<void>
-parseQuery(q?: string): Term[]
-compileQuery(q?: string | Term[]): { sql: string; params: Record<string, string> }
+parseQuery(q?: string): Token[]
+compileQuery(q?: string | Token[]): { sql: string; params: Record<string, string> }
 searchEvents(ch, projectId, q: SearchQuery): Promise<SearchResponse>
 getEvent(ch, projectId, eventId): Promise<EventDetail | null>
 liveEvents(ch, projectId, q: { since: string; q?: string; limit: number }): Promise<AuditEvent[]>
@@ -53,7 +53,13 @@ Search first selects narrow page keys, then fetches only those events, excluding
 payload. All user terms, map keys, cursors and project IDs are bound parameters.
 Exact attributes require presence, including empty values. Free words are
 case-insensitive tokens; punctuation/phrases use a contiguous literal scan.
-OR/parentheses are rejected in this initial AND-only grammar (64 terms, 4096 bytes).
+OR and parentheses are supported; implicit AND binds more tightly than OR. Limits:
+64 terms, 4096 UTF-8 bytes, 16 nesting levels. Leading minus negates terms.
+Core aliases include impersonator, actor.email, parent, tenant.name, executor.name and job.
+Unknown prefixes remain attribute keys. Histogram buckets zero-fill the half-open range
+(including the bucket overlapping from); requests over 10000 buckets are rejected.
+Live polling uses received_at >= since, ordered by arrival descending and deduped by
+event ID. Clients should overlap polls and dedupe IDs across responses.
 
 Search totals are exact through 10,000 and return **10001 meaning 10k+** above
 that threshold. The bounded distinct subquery has a one-second guard; timeout

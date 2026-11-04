@@ -13,7 +13,7 @@ import { eventSchema } from './events';
 export const rangeQuerySchema = z.object({
   from: z.string().optional(), // ISO; default now-24h
   to: z.string().optional(), // ISO; default now
-  q: z.string().max(2000).optional(),
+  q: z.string().max(4096).optional(),
 });
 export type RangeQuery = z.infer<typeof rangeQuerySchema>;
 
@@ -60,6 +60,7 @@ export const FACET_FIELDS = [
   'tenant',
   'executor',
   'executor.type',
+  'target',
   'target.type',
   'source',
 ] as const;
