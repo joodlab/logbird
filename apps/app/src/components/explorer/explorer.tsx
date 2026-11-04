@@ -347,6 +347,7 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
           if (!open) select(null);
         }}
         onPrev={selectedIndex > 0 ? () => move(-1) : undefined}
+        missingError={deepLinked.isError ? deepLinked.error : undefined}
         open={Boolean(ev)}
         projectId={projectId}
       />

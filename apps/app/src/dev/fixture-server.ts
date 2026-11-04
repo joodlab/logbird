@@ -298,8 +298,10 @@ function storeFor(projectId: string): EventStore {
     const store = new EventStore();
     let live: Generator | undefined;
     if (project?.seed === 'jood') {
-      store.add(createJoodGenerator(projectId, BOOT - 45 * DAY, 700_000, 11).advance(BOOT));
-      live = createJoodGenerator(projectId, BOOT, 9000, 12);
+      // 45 days of history, a busier last two hours (so "now" looks alive), then a live trickle.
+      store.add(createJoodGenerator(projectId, BOOT - 45 * DAY, 560_000, 11).advance(BOOT - 2 * 3_600_000));
+      store.add(createJoodGenerator(projectId, BOOT - 2 * 3_600_000, 75_000, 13).advance(BOOT));
+      live = createJoodGenerator(projectId, BOOT, 8000, 12);
     } else if (project?.seed === 'ledger') {
       store.add(createLedgerGenerator(projectId, BOOT - 45 * DAY, 4_200_000, 21).advance(BOOT));
       live = createLedgerGenerator(projectId, BOOT, 120_000, 22);

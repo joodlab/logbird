@@ -177,7 +177,7 @@ function OperationPage() {
           <div className="relative hidden px-4 py-2 md:block">
             {ticks.map((t) => (
               <span
-                className="absolute top-2 font-mono text-[10px] normal-case tracking-normal"
+                className="absolute top-2 whitespace-nowrap font-mono text-[10px] normal-case tracking-normal"
                 key={t}
                 style={{
                   left: `calc(1rem + (100% - 2rem) * ${t})`,
@@ -251,8 +251,14 @@ function OperationPage() {
                           title={`${formatDuration(n.start - t0)} after start · spans ${formatDuration(n.end - n.start)}`}
                         />
                         <span
-                          className="absolute top-1/2 -translate-y-1/2 whitespace-nowrap font-mono text-[10.5px] text-muted-foreground"
-                          style={left + width > 70 ? { right: `${100 - left + 1}%` } : { left: `calc(${left + width}% + 6px)` }}
+                          className={cn(
+                            'absolute top-1/2 -translate-y-1/2 whitespace-nowrap font-mono text-[10.5px]',
+                            // Wide bars carry their label inside; others put it beside the bar, never over the tree.
+                            left + width > 70 && left <= 25 ? 'start-1.5 rounded bg-background/85 px-1 text-foreground' : 'text-muted-foreground',
+                          )}
+                          style={
+                            left + width > 70 ? (left > 25 ? { right: `${100 - left + 1}%` } : undefined) : { left: `calc(${left + width}% + 6px)` }
+                          }
                         >
                           +{formatDuration(n.start - t0)}
                           {n.end > n.start ? ` · ${formatDuration(n.end - n.start)}` : ''}

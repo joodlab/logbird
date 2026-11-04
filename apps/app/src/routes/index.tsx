@@ -8,7 +8,7 @@ export const Route = createFileRoute('/')({
   beforeLoad: async ({ context }) => {
     const me = await requireMe(context.queryClient);
     if (me.organizations.length === 0) throw redirect({ to: '/onboarding' });
-    const projects = await context.queryClient.ensureQueryData(projectsQuery());
+    const projects = await context.queryClient.fetchQuery(projectsQuery());
     if (projects.length === 0) throw redirect({ to: '/onboarding/project' });
     const remembered = lastProject();
     const target = projects.find((p) => p.id === remembered) ?? projects[0];

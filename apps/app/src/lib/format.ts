@@ -21,6 +21,7 @@ const msFmt = new Intl.DateTimeFormat('en-GB', {
   hour12: false,
 });
 const dayFmt = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
+const shortTimeFmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
 const fullFmt = new Intl.DateTimeFormat('en-US', {
   weekday: 'short',
   year: 'numeric',
@@ -45,7 +46,7 @@ export function formatTimestamp(iso: string, now = Date.now()): string {
   const d = new Date(iso);
   const today = new Date(now);
   if (d.toDateString() === today.toDateString()) return timeFmt.format(d);
-  return `${dayFmt.format(d)} · ${timeFmt.format(d)}`;
+  return `${dayFmt.format(d)}, ${shortTimeFmt.format(d)}`;
 }
 
 const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto', style: 'short' });

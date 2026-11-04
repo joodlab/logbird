@@ -20,7 +20,10 @@ const VERB_PAST: Record<string, string> = {
  */
 export function eventSentence(e: AuditEvent): string {
   if (e.description) return e.description;
-  const who = e.actor?.name || e.actor?.id || e.executor?.name || 'Something';
+  // Work done by a worker/scheduler/webhook reads best credited to the executor ("CRM worker upserted …");
+  // the actor who caused it stays visible in the actor column and the detail panel.
+  const performedByMachine = e.executor && ['worker', 'scheduler', 'webhook', 'job'].includes(e.executor.type);
+  const who = (performedByMachine ? e.executor?.name || e.executor?.id : '') || e.actor?.name || e.actor?.id || e.executor?.name || 'Something';
   const parts = e.action.split('.');
   const verb = parts.at(-1) ?? e.action;
   const noun = parts.slice(0, -1).join(' ');

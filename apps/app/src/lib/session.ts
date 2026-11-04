@@ -9,7 +9,8 @@ const LAST_PROJECT_KEY = 'trailmark.lastProject';
 /** Load the signed-in user, or send them to /login (keeping where they were going). */
 export async function requireMe(queryClient: QueryClient, href?: string): Promise<MeResponse> {
   try {
-    return await queryClient.ensureQueryData(meQuery());
+    // fetchQuery (not ensureQueryData): an invalidated session/org list must be re-read before guarding.
+    return await queryClient.fetchQuery(meQuery());
   } catch (error) {
     if (error instanceof ApiRequestError && error.status === 401) {
       queryClient.removeQueries({ queryKey: meQuery().queryKey });

@@ -243,9 +243,9 @@ function Related({ projectId, related }: { projectId: string; related: Profile['
   for (const r of related) groups.set(r.kind, [...(groups.get(r.kind) ?? []), r]);
   return (
     <Panel description="Entities that appear in the same events" title="Related">
-      <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid divide-y sm:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] sm:divide-x sm:divide-y-0">
         {[...groups.entries()].map(([kind, items]) => (
-          <div className="flex flex-col gap-1 bg-card p-3" key={kind}>
+          <div className="flex flex-col gap-1 p-3" key={kind}>
             <span className="px-1 pb-1 text-[11px] text-muted-foreground uppercase tracking-wider">{RELATED_LABEL[kind]}</span>
             {items.map((r) => {
               const showIcon = !(kind === 'actor' && (r.type === 'user' || r.type === 'anonymous'));

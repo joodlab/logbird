@@ -4,8 +4,8 @@ import { TypePill } from '@trailmark/ui/components/badges';
 import { Panel } from '@trailmark/ui/components/page-header';
 import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
 import { Input } from '@trailmark/ui/components/ui/input';
+import { SegmentedControl, SegmentedControlItem } from '@trailmark/ui/components/ui/segmented-control';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { ToggleGroup, ToggleGroupItem } from '@trailmark/ui/components/ui/toggle-group';
 import { cn } from '@trailmark/ui/lib/utils';
 import { CheckIcon, ListTreeIcon, SearchIcon, XIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -144,17 +144,23 @@ function FieldsPage() {
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <ToggleGroup
-          onValueChange={(v) =>
-            navigate({ search: (prev) => ({ ...prev, kind: (v[0] as 'all' | 'core' | 'attribute' | undefined) ?? 'all' }), replace: true })
-          }
-          value={[kind]}
-          variant="outline"
-        >
-          <ToggleGroupItem value="all">All</ToggleGroupItem>
-          <ToggleGroupItem value="core">Envelope</ToggleGroupItem>
-          <ToggleGroupItem value="attribute">Attributes</ToggleGroupItem>
-        </ToggleGroup>
+        <SegmentedControl aria-label="Field kind" density="compact">
+          {(
+            [
+              ['all', 'All'],
+              ['core', 'Envelope'],
+              ['attribute', 'Attributes'],
+            ] as const
+          ).map(([value, label]) => (
+            <SegmentedControlItem
+              active={kind === value}
+              key={value}
+              onClick={() => navigate({ search: (prev) => ({ ...prev, kind: value }), replace: true })}
+            >
+              {label}
+            </SegmentedControlItem>
+          ))}
+        </SegmentedControl>
         <div className="relative w-full sm:max-w-xs">
           <SearchIcon className="-translate-y-1/2 pointer-events-none absolute start-3 top-1/2 size-4 text-muted-foreground" />
           <Input
@@ -227,7 +233,7 @@ function FieldsPage() {
                     <span className="w-12 text-end text-muted-foreground text-xs tabular-nums">{formatPercent(f.coverage)}</span>
                   </span>
                   <span className="hidden text-end text-muted-foreground tabular-nums md:block">{formatCompact(f.distinctApprox)}</span>
-                  <span className="hidden min-w-0 flex-wrap gap-1 md:flex">
+                  <span className="hidden min-w-0 gap-1 overflow-hidden md:flex">
                     {f.samples.slice(0, 3).map((s) => (
                       <span
                         className="max-w-40 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"

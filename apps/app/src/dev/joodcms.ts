@@ -166,7 +166,8 @@ export function buildWorld(seed = 7): World {
   let personSeq = 40;
   let hotelSeq = 100;
   let roomSeq = 1000;
-  const usedNames = new Set<string>();
+  // Reserved for the flagship actor (usr_42) so no generated person shares the name.
+  const usedNames = new Set<string>(['Raed Al-Harbi']);
   const person = (): Person => {
     let name = '';
     do {
@@ -1055,8 +1056,12 @@ export function createJoodGenerator(projectId: string, startMs: number, meanGapM
         const id = ulid(at, rng);
         const env = rng.chance(0.04) ? 'staging' : 'production';
         const full: EventDraft = { id, occurredAt: new Date(at).toISOString(), environment: env, schemaVersion: '1', ...draft, action: draft.action };
-        if (!('outcome' in draft)) full.outcome = 'success';
+        // Real producers often omit defaults: ~35% of successes arrive without an explicit outcome,
+        // and some high-volume worker events skip the description (lower conformance, still accepted).
+        if (!('outcome' in draft) && rng.chance(0.65)) full.outcome = 'success';
         if (full.outcome === undefined) delete full.outcome;
+        if ((draft.action === 'crm.sync.contact.upserted' || draft.action === 'page.rendered') && rng.chance(0.4)) delete full.description;
+        if (draft.action === 'availability.updated' && rng.chance(0.5)) delete full.targets;
         const sdk =
           draft.action.startsWith('legacy.') || draft.action === 'cache.purged' || draft.action === 'review.imported'
             ? 'http'

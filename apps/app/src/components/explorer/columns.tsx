@@ -24,12 +24,12 @@ export const EVENT_COLUMNS: EventColumn[] = [
   {
     id: 'time',
     label: 'Time',
-    width: 128,
+    width: 120,
     required: true,
     defaultVisible: true,
     render: (e) => (
       <Tooltip>
-        <TooltipTrigger render={<span className="font-mono text-[12px] text-muted-foreground tabular-nums" />}>
+        <TooltipTrigger render={<span className="whitespace-nowrap font-mono text-[12px] text-muted-foreground tabular-nums" />}>
           {formatTimestamp(e.timestamp)}
         </TooltipTrigger>
         <TooltipContent>{formatFull(e.timestamp)}</TooltipContent>
@@ -39,7 +39,7 @@ export const EVENT_COLUMNS: EventColumn[] = [
   {
     id: 'outcome',
     label: 'Outcome',
-    width: 92,
+    width: 86,
     defaultVisible: true,
     render: (e) => (
       <span className="flex items-center gap-1.5 text-[12px]">
@@ -48,7 +48,7 @@ export const EVENT_COLUMNS: EventColumn[] = [
       </span>
     ),
   },
-  { id: 'action', label: 'Action', width: 230, defaultVisible: true, render: (e) => <ActionName action={e.action} /> },
+  { id: 'action', label: 'Action', width: 210, defaultVisible: true, render: (e) => <ActionName action={e.action} /> },
   {
     id: 'description',
     label: 'Event',
@@ -75,7 +75,7 @@ export const EVENT_COLUMNS: EventColumn[] = [
   {
     id: 'actor',
     label: 'Actor',
-    width: 176,
+    width: 156,
     defaultVisible: true,
     render: (e) =>
       e.actor ? (
@@ -87,7 +87,7 @@ export const EVENT_COLUMNS: EventColumn[] = [
   {
     id: 'tenant',
     label: 'Tenant',
-    width: 168,
+    width: 150,
     defaultVisible: true,
     render: (e) =>
       e.tenant ? <EntityChip id={e.tenant.id} name={e.tenant.name} square /> : <span className="text-muted-foreground text-xs">—</span>,
@@ -95,8 +95,8 @@ export const EVENT_COLUMNS: EventColumn[] = [
   {
     id: 'executor',
     label: 'Executor',
-    width: 168,
-    defaultVisible: true,
+    width: 150,
+    defaultVisible: false,
     render: (e) =>
       e.executor?.id ? (
         <span className="flex min-w-0 items-center gap-1.5">

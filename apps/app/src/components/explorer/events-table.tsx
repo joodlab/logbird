@@ -76,8 +76,8 @@ export function EventsTable({
   });
 
   const visible = table.getVisibleLeafColumns();
-  const template = visible.map((c) => (WIDTH.get(c.id) === 'flex' ? 'minmax(260px,1fr)' : `${WIDTH.get(c.id)}px`)).join(' ');
-  const minWidth = visible.reduce((sum, c) => sum + (WIDTH.get(c.id) === 'flex' ? 260 : Number(WIDTH.get(c.id))), 0) + 16;
+  const template = visible.map((c) => (WIDTH.get(c.id) === 'flex' ? 'minmax(200px,1fr)' : `${WIDTH.get(c.id)}px`)).join(' ');
+  const minWidth = visible.reduce((sum, c) => sum + (WIDTH.get(c.id) === 'flex' ? 200 : Number(WIDTH.get(c.id))), 0) + 16;
   const tableRows = table.getRowModel().rows;
   const rowHeight = isMobile ? 64 : 36;
 

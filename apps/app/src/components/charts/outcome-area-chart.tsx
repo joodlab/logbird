@@ -29,8 +29,8 @@ export function OutcomeAreaChart({ data, height = 240, onSelectOutcome, classNam
           <defs>
             {SERIES.map((k) => (
               <linearGradient id={`fill-${k}`} key={k} x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor={`var(--color-${k})`} stopOpacity={k === 'success' ? 0.28 : 0.55} />
-                <stop offset="100%" stopColor={`var(--color-${k})`} stopOpacity={k === 'success' ? 0.04 : 0.2} />
+                <stop offset="0%" stopColor={`var(--color-${k})`} stopOpacity={k === 'success' ? 0.26 : 0.8} />
+                <stop offset="100%" stopColor={`var(--color-${k})`} stopOpacity={k === 'success' ? 0.03 : 0.55} />
               </linearGradient>
             ))}
           </defs>
@@ -72,9 +72,11 @@ export function OutcomeAreaChart({ data, height = 240, onSelectOutcome, classNam
               onMouseEnter={() => setHover(k)}
               onMouseLeave={() => setHover(null)}
               stackId="1"
-              stroke={`var(--color-${k})`}
+              // Only the base series draws a line: stacked zero-height series would otherwise trace colored
+              // strokes along the top edge of the success band.
+              stroke={k === 'success' ? `var(--color-${k})` : 'none'}
               strokeOpacity={hover && hover !== k ? 0.4 : 1}
-              strokeWidth={k === 'success' ? 1.5 : 1.25}
+              strokeWidth={1.5}
               type="monotone"
             />
           ))}

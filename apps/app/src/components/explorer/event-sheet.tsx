@@ -30,6 +30,7 @@ import {
 import type { ReactNode } from 'react';
 import { ActionName } from '@/components/action-name';
 import { EntityLink, EntityProfileLink } from '@/components/entity-link';
+import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
 import { eventSentence } from '@/lib/events';
@@ -49,14 +50,16 @@ interface EventSheetProps {
   onFilter?: (term: string) => void;
   /** When false, the event has no detail endpoint (workspace activity). */
   fetchDetail?: boolean;
+  /** Set when a deep-linked event could not be loaded. */
+  missingError?: unknown;
 }
 
-export function EventSheet({ projectId, event, open, onOpenChange, onPrev, onNext, onFilter, fetchDetail = true }: EventSheetProps) {
+export function EventSheet({ projectId, event, open, onOpenChange, onPrev, onNext, onFilter, fetchDetail = true, missingError }: EventSheetProps) {
   const detail = useQuery({ ...eventQuery(projectId ?? '', event?.id ?? ''), enabled: open && fetchDetail && Boolean(projectId && event) });
   const e = detail.data?.event ?? event;
   return (
     <Sheet onOpenChange={onOpenChange} open={open}>
-      <SheetContent className="w-full gap-0 p-0 data-[side=right]:sm:max-w-[640px]" showCloseButton>
+      <SheetContent className="w-full gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[640px]" showCloseButton>
         {e ? (
           <EventDetailBody
             detail={detail.data}
@@ -69,10 +72,22 @@ export function EventSheet({ projectId, event, open, onOpenChange, onPrev, onNex
             onRetry={() => detail.refetch()}
             projectId={projectId}
           />
+        ) : missingError ? (
+          <div className="flex flex-1 items-center p-6">
+            <SheetTitle className="sr-only">Event not found</SheetTitle>
+            <ErrorState
+              className="w-full"
+              error={missingError}
+              title={missingError instanceof ApiRequestError && missingError.status === 404 ? 'Event not found' : 'Could not load this event'}
+            />
+          </div>
         ) : (
-          <div className="p-6">
-            <SheetTitle className="sr-only">Event</SheetTitle>
-            <Skeleton className="h-6 w-2/3" />
+          <div className="flex flex-col gap-3 p-6">
+            <SheetTitle className="sr-only">Loading event</SheetTitle>
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-6 w-3/4" />
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-40 w-full" />
           </div>
         )}
       </SheetContent>
@@ -333,7 +348,7 @@ function EventDetailBody({
               <div className="flex min-w-0 items-center gap-2 text-sm">
                 <span className="text-[11px] text-muted-foreground uppercase tracking-wider">Tenant</span>
                 {projectId ? <EntityLink id={e.tenant.id} kind="tenant" name={e.tenant.name} projectId={projectId} /> : <span>{e.tenant.name}</span>}
-                <span className="truncate font-mono text-muted-foreground text-xs">{e.tenant.id}</span>
+                <span className="hidden truncate font-mono text-muted-foreground text-xs sm:inline">{e.tenant.id}</span>
               </div>
               <FilterButton onFilter={onFilter} term={formatTerm('tenant', e.tenant.id)} />
             </div>

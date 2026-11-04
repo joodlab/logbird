@@ -23,7 +23,8 @@ const noRetryOn4xx = (failureCount: number, error: unknown) =>
 export const meQuery = () =>
   queryOptions({
     queryKey: keys.me,
-    queryFn: ({ signal }) => api.me(signal),
+    // No abort signal: route guards await this query, and an unmounting observer must not cancel it.
+    queryFn: () => api.me(),
     staleTime: 60_000,
     retry: noRetryOn4xx,
   });
@@ -31,7 +32,7 @@ export const meQuery = () =>
 export const projectsQuery = () =>
   queryOptions({
     queryKey: keys.projects,
-    queryFn: ({ signal }) => api.projects.list(signal),
+    queryFn: () => api.projects.list(),
     staleTime: 30_000,
     retry: noRetryOn4xx,
   });
@@ -39,7 +40,7 @@ export const projectsQuery = () =>
 export const projectQuery = (projectId: string) =>
   queryOptions({
     queryKey: [...keys.project(projectId), 'detail'] as const,
-    queryFn: ({ signal }) => api.projects.get(projectId, signal),
+    queryFn: () => api.projects.get(projectId),
     staleTime: 30_000,
     retry: noRetryOn4xx,
   });
@@ -152,14 +153,14 @@ export const fieldsQuery = (projectId: string, range: string) =>
 export const keysQuery = (projectId: string) =>
   queryOptions({
     queryKey: [...keys.project(projectId), 'keys'] as const,
-    queryFn: ({ signal }) => api.keys.list(projectId, signal),
+    queryFn: () => api.keys.list(projectId),
     retry: noRetryOn4xx,
   });
 
 export const viewsQuery = (projectId: string) =>
   queryOptions({
     queryKey: [...keys.project(projectId), 'views'] as const,
-    queryFn: ({ signal }) => api.views.list(projectId, signal),
+    queryFn: () => api.views.list(projectId),
     retry: noRetryOn4xx,
   });
 

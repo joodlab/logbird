@@ -22,7 +22,7 @@ export function AppShell({ projectId, children }: { projectId?: string; children
 
   return (
     <CrumbProvider>
-      <SidebarProvider style={{ '--sidebar-width': '15.5rem' } as CSSProperties}>
+      <SidebarProvider style={{ '--sidebar-width': '15rem' } as CSSProperties}>
         <AppSidebar projectId={projectId} />
         <SidebarInset className="min-w-0">
           <TopBar onOpenPalette={() => setPaletteOpen(true)} />
