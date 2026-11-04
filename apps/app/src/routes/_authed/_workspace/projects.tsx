@@ -52,9 +52,9 @@ function ProjectsPage() {
             </EmptyState>
           </div>
         ) : (
-          <ul className="grid gap-3 sm:grid-cols-2">
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {projects.data.map((p) => (
-              <li key={p.id}>
+              <li className="min-w-0" key={p.id}>
                 <Link
                   className="flex h-full flex-col gap-4 rounded-xl border bg-card p-4 shadow-xs outline-none transition-colors hover:border-foreground/20 focus-visible:ring-3 focus-visible:ring-ring/40"
                   params={{ projectId: p.id }}

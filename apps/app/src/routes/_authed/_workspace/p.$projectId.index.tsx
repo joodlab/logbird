@@ -322,7 +322,9 @@ function ProblemRow({ event, projectId }: { event: AuditEvent; projectId: string
       >
         <span className="flex min-w-0 flex-1 items-center gap-2.5">
           <OutcomeDot outcome={event.outcome} />
-          <span className="truncate text-sm">{eventSentence(event)}</span>
+          <span className="truncate text-sm" dir="auto">
+            {eventSentence(event)}
+          </span>
         </span>
         <span className="flex shrink-0 items-center gap-3 ps-4.5 sm:ps-0">
           <SeverityBadge hideInfo severity={event.severity} />

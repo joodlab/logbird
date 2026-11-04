@@ -137,7 +137,7 @@ function OperationPage() {
         </Button>
       </div>
 
-      <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border md:grid-cols-5">
+      <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border md:grid-cols-5 [&>div:last-child]:col-span-2 md:[&>div:last-child]:col-span-1">
         {[
           ['Events', op.data ? formatNumber(events.length) : ''],
           ['Duration', op.data ? formatDuration(t1 - t0) : ''],
@@ -145,7 +145,7 @@ function OperationPage() {
           ['Started', nodes[0] ? <Timestamp iso={new Date(t0).toISOString()} key="started" /> : ''],
           ['Workers', op.data ? formatNumber(executors.length) : ''],
         ].map(([label, value]) => (
-          <div className={cn('flex flex-col gap-1 bg-card px-4 py-3', label === 'Started' && 'col-span-2 md:col-span-1')} key={String(label)}>
+          <div className="flex flex-col gap-1 bg-card px-4 py-3" key={String(label)}>
             <dt className="text-muted-foreground text-xs">{label}</dt>
             <dd
               className={cn(

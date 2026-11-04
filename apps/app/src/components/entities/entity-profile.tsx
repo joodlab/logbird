@@ -102,7 +102,9 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
                 </Link>
                 {p?.entity.type ? <TypePill>{p.entity.type}</TypePill> : null}
               </div>
-              <h1 className="truncate font-semibold text-xl tracking-tight">{p ? p.entity.name || displayId : <Skeleton className="h-6 w-48" />}</h1>
+              <h1 className="truncate font-semibold text-xl tracking-tight" dir="auto">
+                {p ? p.entity.name || displayId : <Skeleton className="h-6 w-48" />}
+              </h1>
               <CopyValue className="text-muted-foreground" value={displayId} />
             </div>
           </div>
@@ -132,11 +134,11 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
               {p ? (
                 <OutcomeAreaChart
                   data={p.series}
-                  height={200}
+                  height={236}
                   onSelectOutcome={(o) => onTimelineChange({ q: formatTerm('outcome', o), ev: undefined })}
                 />
               ) : (
-                <Skeleton className="h-[208px] w-full" />
+                <Skeleton className="h-[244px] w-full" />
               )}
             </div>
           </Panel>
@@ -266,7 +268,9 @@ function Related({ projectId, related }: { projectId: string; related: Profile['
                     size="sm"
                     square={r.kind !== 'actor'}
                   />
-                  <span className="min-w-0 flex-1 truncate">{r.name || r.id}</span>
+                  <span className="min-w-0 flex-1 truncate" dir="auto">
+                    {r.name || r.id}
+                  </span>
                   {r.type ? <span className="hidden font-mono text-[11px] text-muted-foreground sm:inline">{r.type}</span> : null}
                   <span className="text-muted-foreground text-xs tabular-nums">{formatNumber(r.count)}</span>
                 </EntityProfileLink>

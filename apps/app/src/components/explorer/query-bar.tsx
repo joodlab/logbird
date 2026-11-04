@@ -47,7 +47,8 @@ function tokenClass(t: QueryToken): string {
   }
 }
 
-function HighlightedQuery({ value }: { value: string }) {
+/** Syntax-highlighted query (query bar mirror, docs cheatsheet). */
+export function HighlightedQuery({ value }: { value: string }) {
   const tokens = useMemo(() => tokenize(value), [value]);
   return (
     <>

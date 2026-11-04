@@ -9,6 +9,7 @@
  */
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { chromium } from '@playwright/test';
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:4600';
@@ -64,7 +65,9 @@ async function settle(page, ms = 1200) {
   await page.waitForTimeout(ms);
 }
 
-const [cmd, ...args] = process.argv.slice(2);
+// CLI only when run directly (capture-media.mjs imports the helpers above).
+const direct = import.meta.url === pathToFileURL(process.argv[1] ?? '').href;
+const [cmd, ...args] = direct ? process.argv.slice(2) : [];
 if (cmd === 'login') {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });

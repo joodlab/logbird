@@ -242,7 +242,9 @@ function EventDetailBody({
           <TypePill>{e.environment}</TypePill>
           {e.source ? <TypePill tone="brand">via {e.source}</TypePill> : null}
         </div>
-        <SheetTitle className="font-semibold text-[17px] leading-snug tracking-tight">{eventSentence(e)}</SheetTitle>
+        <SheetTitle className="font-semibold text-[17px] leading-snug tracking-tight" dir="auto">
+          {eventSentence(e)}
+        </SheetTitle>
         <SheetDescription className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
           <ActionName action={e.action} className="text-[12.5px]" />
           <span className="text-muted-foreground">
@@ -458,7 +460,9 @@ function EventDetailBody({
                         {eventSentence(p)}
                       </Link>
                     ) : (
-                      <span className="truncate">{eventSentence(p)}</span>
+                      <span className="truncate" dir="auto">
+                        {eventSentence(p)}
+                      </span>
                     )}
                     <Timestamp className="shrink-0 font-mono text-[11px] text-muted-foreground" format="ms" iso={p.timestamp} />
                   </li>

@@ -80,12 +80,15 @@ export function timeTicks(rows: SeriesRow[], intervalSeconds: number, target = 7
   const boundaries: number[] = [];
   for (let b = Math.ceil((first + localOffset(first)) / nice) * nice; b - localOffset(b) <= last + step; b += nice)
     boundaries.push(b - localOffset(b));
+  // Labels are centered on their tick: keep them clear of the plot edges so none is clipped.
+  const edge = span * 0.035;
+  const inside = boundaries.filter((b) => b >= first + edge && b <= last + step - edge);
   const multiDay = span > DAY;
   const format = (ts: number) => {
     const midnight = (ts + localOffset(ts)) % DAY === 0;
     return nice >= DAY || (multiDay && midnight) ? dayFmt.format(ts) : hourFmt.format(ts);
   };
-  return { ticks: boundaries, format };
+  return { ticks: inside, format };
 }
 
 /** Category axes (bars) can only tick on bucket starts: map each boundary to the bucket containing it. */

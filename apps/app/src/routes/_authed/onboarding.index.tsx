@@ -45,9 +45,14 @@ function WorkspaceStep() {
     onSubmit: async ({ value }) => {
       setServerError(null);
       try {
-        const org = await authCall(
-          authClient.organization.create({ name: value.name.trim(), slug: slugify(value.name) || `ws-${Date.now().toString(36)}` }),
-        );
+        // Workspace slugs are unique across the whole instance and never shown: when two teams pick the
+        // same name ("Acme"), retry with a short suffix instead of failing.
+        const base = slugify(value.name) || 'workspace';
+        const create = (slug: string) => authCall(authClient.organization.create({ name: value.name.trim(), slug }));
+        const org = await create(base).catch((error: Error & { code?: string }) => {
+          if (!/exist|taken|slug/i.test(`${error.code ?? ''} ${error.message}`)) throw error;
+          return create(`${base.slice(0, 33)}-${Math.random().toString(36).slice(2, 8)}`);
+        });
         if (org && typeof org === 'object' && 'id' in org) {
           await authCall(authClient.organization.setActive({ organizationId: String((org as { id: string }).id) }));
         }

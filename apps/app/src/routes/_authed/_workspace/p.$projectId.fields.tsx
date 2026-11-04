@@ -7,7 +7,7 @@ import { Input } from '@trailmark/ui/components/ui/input';
 import { SegmentedControl, SegmentedControlItem } from '@trailmark/ui/components/ui/segmented-control';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { cn } from '@trailmark/ui/lib/utils';
-import { CheckIcon, ListTreeIcon, SearchIcon, XIcon } from 'lucide-react';
+import { CheckIcon, ListTreeIcon, MinusIcon, SearchIcon, XIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { z } from 'zod';
 import { Timestamp } from '@/components/timestamp';
@@ -41,6 +41,26 @@ const CONFORMANCE_CHECKS = [
   ['description', 'A human sentence'],
 ] as const;
 
+/**
+ * Coverage for one conformance check, from the field keys the server reports (`tenant`, `operation`,
+ * `request`, `target`…). `occurredAt` always has a value (receive time by default); checks the
+ * server does not measure per field (description) return undefined and render as "—".
+ */
+function checkCoverage(key: string, coverage: Map<string, number>): number | undefined {
+  switch (key) {
+    case 'occurredAt':
+      return 1;
+    case 'tenant.id':
+      return coverage.get('tenant');
+    case 'targets':
+      return coverage.get('target') ?? coverage.get('target.type');
+    case 'context.operationId':
+      return Math.max(coverage.get('operation') ?? 0, coverage.get('request') ?? 0) || undefined;
+    default:
+      return coverage.get(key);
+  }
+}
+
 /** Map a field key to an explorer query that finds events carrying it. */
 function presenceQuery(key: string): string | null {
   if (key.startsWith('attr.')) return `${key}:*`;
@@ -72,7 +92,8 @@ function FieldsPage() {
       (fields.data?.data ?? []).filter((f) => (kind === 'all' || f.kind === kind) && (!filter || f.key.toLowerCase().includes(filter.toLowerCase()))),
     [fields.data, kind, filter],
   );
-  const coverage = new Map((fields.data?.data ?? []).map((f) => [f.key, f.coverage]));
+  // Coverage is computed from approximate counts and can drift a hair past 100%.
+  const coverage = new Map((fields.data?.data ?? []).map((f) => [f.key, Math.min(1, f.coverage)]));
   const avg = fields.data?.avgConformance ?? 0;
 
   return (
@@ -123,11 +144,13 @@ function FieldsPage() {
         <Panel title="Recommended fields">
           <ul className="flex flex-col p-2">
             {CONFORMANCE_CHECKS.map(([key, hint]) => {
-              const c = key === 'targets' ? coverage.get('targets') : key === 'occurredAt' ? 1 : coverage.get(key);
+              const c = checkCoverage(key, coverage);
               const good = (c ?? 0) >= 0.9;
               return (
                 <li className="flex items-center gap-2 rounded-md px-2 py-1 text-[13px]" key={key} title={hint}>
-                  {good ? (
+                  {c === undefined ? (
+                    <MinusIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                  ) : good ? (
                     <CheckIcon className="size-3.5 shrink-0 text-outcome-success" />
                   ) : (
                     <XIcon className="size-3.5 shrink-0 text-outcome-denied" />
@@ -135,7 +158,7 @@ function FieldsPage() {
                   <span className="font-mono text-[12px]">{key}</span>
                   <span className="hidden min-w-0 flex-1 truncate text-muted-foreground text-xs sm:inline">{hint}</span>
                   <span className="ms-auto shrink-0 text-muted-foreground text-xs tabular-nums">
-                    {fields.isPending ? '—' : formatPercent(c ?? 0)}
+                    {fields.isPending || c === undefined ? '—' : formatPercent(c)}
                   </span>
                 </li>
               );
@@ -228,10 +251,10 @@ function FieldsPage() {
                           'block h-full rounded-full',
                           f.coverage >= 0.9 ? 'bg-outcome-success' : f.coverage >= 0.5 ? 'bg-brand' : 'bg-outcome-denied',
                         )}
-                        style={{ width: `${f.coverage * 100}%` }}
+                        style={{ width: `${Math.min(1, f.coverage) * 100}%` }}
                       />
                     </span>
-                    <span className="w-12 text-end text-muted-foreground text-xs tabular-nums">{formatPercent(f.coverage)}</span>
+                    <span className="w-12 text-end text-muted-foreground text-xs tabular-nums">{formatPercent(Math.min(1, f.coverage))}</span>
                   </span>
                   <span className="hidden text-end text-muted-foreground tabular-nums md:block">{formatCompact(f.distinctApprox)}</span>
                   <span className="hidden min-w-0 gap-1 overflow-hidden md:flex">

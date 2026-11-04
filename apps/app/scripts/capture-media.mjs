@@ -1,327 +1,479 @@
 /**
- * Captures the UI evidence committed under docs/media/ui-foundation/.
+ * Evidence for the console against the REAL stack (server + worker + app, `pnpm dev` at the repo root).
  *
- *   pnpm --filter @trailmark/app dev:fixtures      # terminal 1 (fixture mode, port 4600)
- *   pnpm --filter @trailmark/app media             # terminal 2
+ *   node scripts/capture-media.mjs [flows…]       # default: every flow
+ *   flows: shots phone signin onboarding explorer follow settings
  *
- * Screenshots: every main page in light + dark at 1440×900, a few at 390×844.
- * Videos: sign-in → onboarding, explorer search/filter/detail, entity follow + operation tree,
- * retention change confirm.
+ * Sign-in codes come from Mailpit's API. Videos are recorded per flow at 1280×800 (webm, a few MB each) and
+ * screenshots go to docs/media/ui-real-api/. `onboarding` creates a fresh user + workspace + project, sends the
+ * copied curl snippet with bash, then streams back-dated events (Arabic and very long names included) so the
+ * retention flow has something to preview. Every console warning/error and failed /api call is reported.
  */
-import { mkdir, readdir, rename, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { signIn, watch } from './qa-shoot.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.resolve(here, '../../../docs/media/ui-foundation');
+const OUT = path.resolve(here, '../../../docs/media/ui-real-api');
+const TMP = path.join(OUT, '.video-tmp');
 const BASE = process.env.BASE_URL ?? 'http://localhost:4600';
-const P = '/p/prj_joodcms';
-const DESKTOP = { width: 1440, height: 900 };
-const PHONE = { width: 390, height: 844 };
-const only = process.argv.slice(2);
-const want = (name) => only.length === 0 || only.includes(name);
-
-const pause = (page, ms = 700) => page.waitForTimeout(ms);
-
-async function settle(page, ms = 900) {
-  await page.waitForLoadState('networkidle').catch(() => undefined);
-  await pause(page, ms);
-}
-
-async function signIn(page, email = 'demo@trailmark.local') {
-  await page.goto(`${BASE}/login`);
-  await page.getByLabel('Work email').fill(email);
-  await pause(page, 250);
-  await page.getByRole('button', { name: /continue with email/i }).click();
-  const otp = page.getByRole('textbox', { name: 'One-time code' });
-  await otp.waitFor();
-  await otp.click();
-  await page.keyboard.type('424242', { delay: 90 });
-}
-
-async function demoState(browser) {
-  const ctx = await browser.newContext({ viewport: DESKTOP });
-  const page = await ctx.newPage();
-  await page.goto(`${BASE}/login`);
-  await page.evaluate(() => window.localStorage.clear());
-  await signIn(page);
-  await page.getByRole('heading', { name: 'Overview' }).waitFor({ timeout: 60_000 });
-  const state = await ctx.storageState();
-  await ctx.close();
-  return state;
-}
-
-async function shoot(page, name) {
-  await page.screenshot({ path: path.join(OUT, `${name}.png`) });
-  console.log('  ✓', name);
-}
-
-async function screenshots(browser, storageState, scheme) {
-  const ctx = await browser.newContext({ viewport: DESKTOP, colorScheme: scheme, storageState });
-  const page = await ctx.newPage();
-  const go = async (url, name, after) => {
-    await page.goto(`${BASE}${url}`);
-    await settle(page, 1400);
-    if (after) await after();
-    await shoot(page, `${scheme}-${name}`);
-  };
-  await go(`${P}`, 'overview');
-  await go(`${P}/events`, 'explorer');
-  await go(`${P}/events?q=action%3Ahotel.*`, 'explorer-autocomplete', async () => {
-    await page.getByRole('combobox', { name: 'Query' }).click();
-    await page.keyboard.press('End');
-    await page.keyboard.type(' outcome:', { delay: 40 });
-    await pause(page, 900);
-  });
-  await go(`${P}/events?q=attr.metadata.supportTicket%3A*&range=30d`, 'event-detail', async () => {
-    await page.locator('[role=row][data-index="0"]').click();
-    await pause(page, 1600);
-  });
-  await go(`${P}/actors`, 'actors');
-  await go(`${P}/actors/usr_42?range=7d`, 'actor-profile');
-  await go(`${P}/tenants/biz_1?range=7d`, 'tenant-profile');
-  await go(`${P}/workers`, 'workers');
-  await go(`${P}/records/hotel:hotel_123?range=30d`, 'record-profile');
-  // Find a multi-step operation from the CRM sync view.
-  await page.goto(`${BASE}${P}/events?q=action%3Acrm.sync.failed&range=30d`);
-  await settle(page, 1400);
-  await page.locator('[role=row][data-index="0"]').click();
-  await page.getByRole('button', { name: /view operation/i }).click();
-  await settle(page, 1500);
-  await shoot(page, `${scheme}-operation`);
-  await go(`${P}/views`, 'saved-views');
-  await go(`${P}/fields?range=7d`, 'fields');
-  await go(`${P}/settings`, 'settings-general');
-  await go(`${P}/settings/retention`, 'settings-retention-confirm', async () => {
-    await page
-      .getByRole('radio', { name: /^30 days/ })
-      .first()
-      .click();
-    await page.getByRole('button', { name: /lower retention/i }).click();
-    await pause(page, 600);
-    await page.getByLabel(/to confirm/i).fill('joodcms');
-    await pause(page, 400);
-  });
-  await go(`${P}/settings/keys`, 'settings-keys');
-  await go(`${P}/settings/members`, 'settings-members');
-  await go(`${P}/settings/activity`, 'workspace-activity');
-  await go(`${P}/docs`, 'quickstart');
-  await go(`${P}`, 'command-palette', async () => {
-    await page.keyboard.press('Control+k');
-    await page.keyboard.type('raed', { delay: 60 });
-    await pause(page, 1200);
-  });
-  await ctx.close();
-
-  const anon = await browser.newContext({ viewport: DESKTOP, colorScheme: scheme });
-  const p2 = await anon.newPage();
-  await p2.goto(`${BASE}/login`);
-  await settle(p2);
-  await shoot(p2, `${scheme}-login`);
-  await p2.getByLabel('Work email').fill('demo@trailmark.local');
-  await p2.getByRole('button', { name: /continue with email/i }).click();
-  await p2.getByRole('textbox', { name: 'One-time code' }).waitFor();
-  await p2.getByRole('textbox', { name: 'One-time code' }).click();
-  await p2.keyboard.type('000000', { delay: 50 });
-  await pause(p2, 900);
-  await shoot(p2, `${scheme}-login-otp-error`);
-  await anon.close();
-}
-
-async function phoneShots(browser, storageState) {
-  const ctx = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState });
-  const page = await ctx.newPage();
-  for (const [url, name] of [
-    [`${P}`, 'phone-overview'],
-    [`${P}/events`, 'phone-explorer'],
-    [`${P}/actors/usr_42?range=7d`, 'phone-actor'],
-  ]) {
-    await page.goto(`${BASE}${url}`);
-    await settle(page, 1400);
-    await shoot(page, name);
-  }
-  await page.goto(`${BASE}${P}/events?q=attr.metadata.supportTicket%3A*&range=30d`);
-  await settle(page, 1400);
-  await page.locator('[role=row][data-index="0"]').click();
-  await pause(page, 1500);
-  await shoot(page, 'phone-event-detail');
-  await ctx.close();
-}
-
-async function video(browser, name, storageState, run) {
-  const dir = path.join(OUT, `.video-${name}`);
-  await rm(dir, { recursive: true, force: true });
-  const ctx = await browser.newContext({
-    viewport: { width: 1280, height: 800 },
-    recordVideo: { dir, size: { width: 1280, height: 800 } },
-    storageState,
-  });
-  const page = await ctx.newPage();
-  try {
-    await run(page);
-  } finally {
-    await ctx.close();
-  }
-  const [file] = await readdir(dir);
-  await rename(path.join(dir, file), path.join(OUT, `${name}.webm`));
-  await rm(dir, { recursive: true, force: true });
-  console.log('  ✓ video', name);
-}
+const DEMO = process.env.DEMO_EMAIL ?? 'demo@trailmark.local';
+const VIDEO = { width: 1280, height: 800 };
+const flows = process.argv.slice(2);
+const want = (name) => flows.length === 0 || flows.includes(name);
+const problems = [];
 
 const browser = await chromium.launch();
 await mkdir(OUT, { recursive: true });
-const state = await demoState(browser);
 
-if (want('screens')) {
-  for (const scheme of ['light', 'dark']) {
-    console.log(`Screenshots (${scheme})`);
-    await screenshots(browser, state, scheme);
-  }
-  console.log('Screenshots (phone)');
-  await phoneShots(browser, state);
+async function api(page, pathname, init) {
+  return page.evaluate(
+    async ([p, i]) => {
+      const r = await fetch(p, { credentials: 'same-origin', ...i, headers: { 'content-type': 'application/json', ...(i?.headers ?? {}) } });
+      return r.status === 204 ? null : r.json();
+    },
+    [pathname, init],
+  );
 }
 
-if (want('onboarding')) {
-  await video(browser, 'signin-onboarding', undefined, async (page) => {
-    await page.goto(`${BASE}/login`);
-    await page.evaluate(() => window.localStorage.clear());
-    await signIn(page, 'maya@acme.dev');
-    await page.getByLabel('Workspace name').waitFor({ timeout: 30_000 });
-    await pause(page, 900);
-    await page.getByLabel('Workspace name').fill('');
-    await page.getByLabel('Workspace name').pressSequentially('Acme Travel', { delay: 70 });
-    await pause(page, 500);
-    await page.getByRole('button', { name: 'Create workspace' }).click();
-    await page.getByLabel('Project name').waitFor();
-    await pause(page, 700);
-    await page.getByLabel('Project name').pressSequentially('Booking API', { delay: 70 });
-    await page
-      .getByRole('radio', { name: /^1 year/ })
-      .first()
-      .click();
-    await pause(page, 500);
-    await page
-      .getByRole('radio', { name: /^90 days/ })
-      .first()
-      .click();
-    await pause(page, 400);
-    await page.getByRole('button', { name: 'Create project' }).click();
-    await page.getByText('Listening for your first event').waitFor();
-    await pause(page, 1500);
-    await page.getByRole('tab', { name: 'curl' }).click();
-    await pause(page, 1200);
-    await page.getByRole('button', { name: 'Copy key' }).click();
-    await pause(page, 800);
-    await page.getByRole('button', { name: /send a test event/i }).click();
-    await page.getByText('First event received').waitFor({ timeout: 20_000 });
-    await pause(page, 1800);
-    await page.getByRole('button', { name: /open overview/i }).click();
-    await page.getByRole('heading', { name: 'Overview' }).waitFor();
-    await pause(page, 2500);
-  });
+async function settle(page, ms = 900) {
+  await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
+  await page
+    .waitForFunction(() => document.querySelectorAll('[data-slot=skeleton]').length === 0, undefined, { timeout: 20_000 })
+    .catch(() => undefined);
+  await page.waitForTimeout(ms);
 }
 
-if (want('explorer')) {
-  await video(browser, 'explorer-search-filter-zoom', state, async (page) => {
-    await page.goto(`${BASE}${P}/events`);
-    await settle(page, 1500);
-    await page.keyboard.press('/');
-    await page.keyboard.type('action:', { delay: 90 });
-    await pause(page, 1000);
-    await page.keyboard.type('booking', { delay: 90 });
-    await pause(page, 800);
-    await page.keyboard.press('Tab');
-    await pause(page, 600);
-    await page.keyboard.press('Enter');
-    await settle(page, 1200);
-    // ⌥-click excludes a facet value (here: staging), a plain click includes one.
-    await page
-      .getByRole('button', { name: /^staging/ })
-      .first()
-      .click({ modifiers: ['Alt'] })
-      .catch(() => undefined);
-    await settle(page, 1200);
-    await page.getByRole('button', { name: /^info/ }).first().click();
-    await settle(page, 1200);
-    // drag-to-zoom on the histogram
-    const chart = page.locator('.recharts-wrapper').first();
-    const box = await chart.boundingBox();
-    if (box) {
-      await page.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.5);
-      await page.mouse.down();
-      await page.mouse.move(box.x + box.width * 0.97, box.y + box.height * 0.5, { steps: 18 });
-      await page.mouse.up();
-      await settle(page, 1200);
+/** A context whose video is saved as <name>.webm when `done()` is called. */
+async function recorded(name, options = {}) {
+  const dir = path.join(TMP, name);
+  await rm(dir, { recursive: true, force: true });
+  const context = await browser.newContext({ viewport: VIDEO, recordVideo: { dir, size: VIDEO }, ...options });
+  const page = await context.newPage();
+  const seen = watch(page, () => `${name} ${page.url().replace(BASE, '')}`);
+  return {
+    context,
+    page,
+    async done() {
+      await page.waitForTimeout(800);
+      await context.close();
+      const [file] = await readdir(dir);
+      if (file) await rename(path.join(dir, file), path.join(OUT, `${name}.webm`));
+      problems.push(...seen);
+      console.log(`🎬 ${name}.webm`);
+    },
+  };
+}
+
+async function demoState() {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  await signIn(page, DEMO);
+  await settle(page);
+  const state = await context.storageState();
+  const projects = (await api(page, '/api/projects')).data;
+  await context.close();
+  return { state, projects };
+}
+
+/** Slowly type like a person so the video reads well. */
+async function type(page, text, delay = 55) {
+  await page.keyboard.type(text, { delay });
+}
+
+const { state, projects } = await demoState();
+const jood = projects.find((p) => p.slug === 'joodcms') ?? projects[0];
+const ledger = projects.find((p) => p.slug === 'ledger-demo') ?? projects[1];
+const J = `/p/${jood.id}`;
+console.log(`signed in as ${DEMO}; JoodCMS=${jood.id} Ledger=${ledger?.id}`);
+
+/* ------------------------------------------------------------------ */
+/* Screenshots: every page, light + dark, against the demo data        */
+/* ------------------------------------------------------------------ */
+/** A recent failure that belongs to an operation, with an actor, tenant and target to follow. */
+async function entityIds(page) {
+  const { data } = await api(page, `/api${J}/events?q=${encodeURIComponent('outcome:failure')}&limit=50`);
+  const event = data.find((e) => e.context.operationId && e.actor && e.tenant && e.targets.length) ?? data[0];
+  return { event };
+}
+
+const PAGES = (ids) => [
+  [`${J}`, 'overview'],
+  [`${J}/events`, 'explorer'],
+  [`${J}/events?q=${encodeURIComponent('outcome:failure')}&ev=${encodeURIComponent(ids.event.id)}`, 'event-sheet'],
+  [`${J}/operations/${encodeURIComponent(ids.event.context.operationId)}`, 'operation'],
+  [`${J}/actors`, 'actors'],
+  [`${J}/actors/${encodeURIComponent(ids.event.actor?.id ?? 'usr_1')}`, 'actor'],
+  [`${J}/tenants`, 'tenants'],
+  [`${J}/tenants/${encodeURIComponent(ids.event.tenant?.id ?? 'biz_1')}`, 'tenant'],
+  [`${J}/workers`, 'workers'],
+  [`${J}/workers/business-crm-worker`, 'worker'],
+  [`${J}/records`, 'records'],
+  [`${J}/records/${encodeURIComponent(`${ids.event.targets[0]?.type}:${ids.event.targets[0]?.id}`)}`, 'record'],
+  [`${J}/views`, 'views'],
+  [`${J}/fields`, 'fields'],
+  [`${J}/docs`, 'quickstart'],
+  [`${J}/settings`, 'settings-general'],
+  [`${J}/settings/retention`, 'settings-retention'],
+  [`${J}/settings/keys`, 'settings-keys'],
+  [`${J}/settings/members`, 'settings-members'],
+  [`${J}/settings/activity`, 'settings-activity'],
+  [`${J}/settings/danger`, 'settings-danger'],
+  ['/projects', 'projects'],
+  ...(ledger
+    ? [
+        [`/p/${ledger.id}`, 'ledger-overview'],
+        [`/p/${ledger.id}/events?range=7d`, 'ledger-explorer'],
+      ]
+    : []),
+];
+
+if (want('shots')) {
+  for (const theme of ['light', 'dark']) {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, storageState: state });
+    const page = await context.newPage();
+    problems.push(...watch(page, () => `${theme} ${page.url().replace(BASE, '')}`));
+    const ids = await entityIds(page.goto(`${BASE}/projects`).then(() => page));
+    for (const [url, name] of PAGES(ids)) {
+      await page.goto(`${BASE}${url}`);
+      await settle(page);
+      await page.screenshot({ path: path.join(OUT, `${theme}-${name}.png`) });
     }
-    await pause(page, 1500);
-  });
-
-  await video(browser, 'explorer-detail-live-tail', state, async (page) => {
-    await page.goto(`${BASE}${P}/events?q=attr.metadata.supportTicket%3A*&range=30d`);
-    await settle(page, 1500);
-    await page.locator('[role=row][data-index="0"]').click();
-    await pause(page, 2000);
-    await page.keyboard.press('j');
-    await pause(page, 1200);
-    await page.keyboard.press('j');
-    await pause(page, 1200);
-    await page.getByText('Raw payload').click();
-    await pause(page, 1500);
-    await page.keyboard.press('Escape');
-    await pause(page, 600);
-    // Live tail needs a relative window: open the last 15 minutes, then stream.
-    await page.goto(`${BASE}${P}/events?range=15m`);
-    await settle(page, 1200);
-    await page.getByRole('switch').first().click();
-    await pause(page, 8000);
-  });
-}
-
-if (want('entity')) {
-  await video(browser, 'entity-follow-operation-tree', state, async (page) => {
-    await page.goto(`${BASE}${P}/events?q=action%3Ahotel.policy.updated&range=30d`);
-    await settle(page, 1500);
-    await page.locator('[role=row][data-index="0"]').click();
-    await pause(page, 1600);
-    await page.getByRole('dialog').locator('a[href*="/actors/"]').first().click();
-    await settle(page, 1800);
-    await page.mouse.wheel(0, 700);
-    await pause(page, 1500);
-    await page.mouse.wheel(0, 700);
-    await pause(page, 1500);
-    await page.goto(`${BASE}${P}/events?q=action%3Acrm.sync.failed&range=30d`);
-    await settle(page, 1400);
-    await page.locator('[role=row][data-index="0"]').click();
-    await pause(page, 1400);
-    await page.getByRole('button', { name: /view operation/i }).click();
-    await settle(page, 1800);
-    await page.locator('section[aria-label="Causation tree"] li button').nth(2).click();
-    await pause(page, 2200);
-    await page.keyboard.press('Escape');
-    await pause(page, 1200);
-  });
-}
-
-if (want('retention')) {
-  await video(browser, 'retention-change-confirm', state, async (page) => {
-    await page.goto(`${BASE}${P}/settings/retention`);
-    await settle(page, 1500);
+    // Interaction states worth a still: autocomplete and the retention confirm.
+    await page.goto(`${BASE}${J}/events`);
+    await settle(page);
+    await page.getByRole('combobox', { name: 'Query' }).click();
+    await type(page, 'tenant.name:', 0);
+    await page.waitForTimeout(1200);
+    await page.screenshot({ path: path.join(OUT, `${theme}-explorer-autocomplete.png`) });
+    await page.goto(`${BASE}${J}/settings/retention`);
+    await settle(page);
     await page
       .getByRole('radio', { name: /^30 days/ })
       .first()
       .click();
-    await pause(page, 1600);
-    await page.getByRole('button', { name: /lower retention/i }).click();
-    await pause(page, 1200);
-    await page.getByLabel(/to confirm/i).pressSequentially('joodcms', { delay: 120 });
-    await pause(page, 700);
-    await page.getByRole('button', { name: /delete and lower/i }).click();
-    await pause(page, 2500);
-    await page.getByRole('link', { name: 'Workspace activity' }).first().click();
-    await settle(page, 2500);
+    await page.waitForTimeout(1500);
+    await page.screenshot({ path: path.join(OUT, `${theme}-settings-retention-preview.png`) });
+    await context.close();
+    console.log(`📸 ${theme}: ${PAGES(ids).length + 2} pages`);
+  }
+}
+
+if (want('phone')) {
+  for (const theme of ['light', 'dark']) {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      deviceScaleFactor: 2,
+      isMobile: true,
+      hasTouch: true,
+      colorScheme: theme,
+      storageState: state,
+    });
+    const page = await context.newPage();
+    problems.push(...watch(page, () => `phone ${page.url().replace(BASE, '')}`));
+    const ids = await entityIds(page.goto(`${BASE}/projects`).then(() => page));
+    const names = ['overview', 'explorer', 'event-sheet', 'operation', 'actor', 'settings-retention', 'settings-keys', 'quickstart'];
+    for (const [url, name] of PAGES(ids).filter(([, n]) => names.includes(n))) {
+      await page.goto(`${BASE}${url}`);
+      await settle(page);
+      await page.screenshot({ path: path.join(OUT, `phone-${theme}-${name}.png`) });
+    }
+    await context.close();
+    console.log(`📱 phone ${theme}`);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Video 1: OTP sign-in → overview → switch project                    */
+/* ------------------------------------------------------------------ */
+if (want('signin')) {
+  const { page, done } = await recorded('signin-overview');
+  await page.goto(`${BASE}/login`);
+  await page.waitForTimeout(600);
+  await page.getByLabel('Work email').click();
+  await type(page, DEMO);
+  const sentAt = Date.now() - 2000;
+  await page.getByRole('button', { name: /continue with email/i }).click();
+  const otp = page.getByRole('textbox', { name: 'One-time code' });
+  await otp.waitFor();
+  const { latestOtp } = await import('./qa-shoot.mjs');
+  const code = await latestOtp(DEMO, sentAt);
+  await page.waitForTimeout(700);
+  await otp.click();
+  await type(page, code, 120);
+  await page.waitForURL((u) => u.pathname.startsWith('/p/'), { timeout: 30_000 });
+  await settle(page, 1500);
+  await page.mouse.move(700, 450, { steps: 12 });
+  await page.waitForTimeout(1200);
+  if (ledger) {
+    await page
+      .getByRole('button', { name: /select a project|joodcms|ledger demo/i })
+      .first()
+      .click();
+    await page.waitForTimeout(700);
+    await page.getByRole('menuitem', { name: ledger.name }).click();
+    await settle(page, 1800);
+    await page.getByRole('link', { name: 'Explorer' }).first().click();
+    await settle(page, 1800);
+  }
+  await done();
+}
+
+/* ------------------------------------------------------------------ */
+/* Video 2: onboarding a brand-new workspace → first event             */
+/* ------------------------------------------------------------------ */
+let onboarded;
+if (want('onboarding')) {
+  const email = `newcomer-${Date.now().toString(36)}@trailmark.local`;
+  const { page, context, done } = await recorded('onboarding-first-event', { permissions: ['clipboard-read', 'clipboard-write'] });
+  await page.goto(`${BASE}/login`);
+  await page.getByLabel('Work email').click();
+  await type(page, email, 35);
+  const sentAt = Date.now() - 2000;
+  await page.getByRole('button', { name: /continue with email/i }).click();
+  const otp = page.getByRole('textbox', { name: 'One-time code' });
+  await otp.waitFor();
+  const { latestOtp } = await import('./qa-shoot.mjs');
+  const code = await latestOtp(email, sentAt);
+  await otp.click();
+  await type(page, code, 100);
+  await page.waitForURL((u) => u.pathname.startsWith('/onboarding'), { timeout: 30_000 });
+  await settle(page, 800);
+  await page.getByLabel('Workspace name').fill('');
+  await type(page, 'Nour Al-Huda Hospitality · نور الهدى');
+  await page.screenshot({ path: path.join(OUT, 'light-onboarding-workspace.png') });
+  await page.getByRole('button', { name: 'Create workspace' }).click();
+  await page.waitForURL((u) => u.pathname.startsWith('/onboarding/project'), { timeout: 20_000 });
+  await settle(page, 700);
+  await page.getByLabel('Project name').fill('');
+  await type(page, 'Guest portal');
+  await page
+    .getByRole('radio', { name: /^90 days/ })
+    .first()
+    .click();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: path.join(OUT, 'light-onboarding-project.png') });
+  await page.getByRole('button', { name: /create project/i }).click();
+  await page.waitForURL((u) => u.pathname.startsWith('/onboarding/first-event'), { timeout: 20_000 });
+  await settle(page, 1200);
+  const projectId = page.url().split('/').at(-1);
+  await page.screenshot({ path: path.join(OUT, 'light-onboarding-first-event-waiting.png') });
+  // Copy the curl snippet exactly as a person would, then run it with bash.
+  await page.getByRole('tab', { name: 'curl' }).click();
+  await page.waitForTimeout(500);
+  await page.getByRole('button', { name: 'Copy snippet' }).click();
+  const snippet = await page.evaluate(() => navigator.clipboard.readText());
+  await writeFile(path.join(OUT, '.copied-curl.sh'), snippet);
+  const result = execFileSync('bash', [path.join(OUT, '.copied-curl.sh')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  console.log(`   copied curl → ${result.trim()}`);
+  await rm(path.join(OUT, '.copied-curl.sh'));
+  await page.getByText('First event received').waitFor({ timeout: 30_000 });
+  await page.waitForTimeout(1800);
+  await page.screenshot({ path: path.join(OUT, 'light-onboarding-first-event-received.png') });
+  const key = /Bearer (tm_ingest_\w+)/.exec(snippet)?.[1];
+  await page.getByText('Open overview').click();
+  await settle(page, 2500);
+  onboarded = { projectId, key, email, state: await context.storageState() };
+  await done();
+}
+
+/* Back-dated events with Arabic and very long names, sent through the public API with the new key. */
+if (onboarded?.key) {
+  const people = [
+    ['usr_ar_1', 'نورة الحربي', 'noura@nour-alhuda.example'],
+    ['usr_ar_2', 'عبدالرحمن بن عبدالعزيز آل سعود الشمري', 'abdulrahman@nour-alhuda.example'],
+    ['usr_en_1', 'Maximilian Alexander von Hohenberg-Wittelsbach III (Revenue Operations)', 'max@nour-alhuda.example'],
+    ['usr_en_2', 'Lina Haddad', 'lina@nour-alhuda.example'],
+  ];
+  const tenants = [
+    ['biz_nh', 'فنادق نور الهدى'],
+    ['biz_long', 'The Extraordinarily Long-Named Boutique Hotel & Residences Collection of the Arabian Gulf Coast'],
+  ];
+  const actions = ['booking.created', 'booking.modified', 'hotel.policy.updated', 'guest.updated', 'payment.refunded', 'room.rate.changed'];
+  const events = [];
+  for (let i = 0; i < 240; i++) {
+    const [id, name, email] = people[i % people.length];
+    const [tid, tname] = tenants[i % tenants.length];
+    const action = actions[i % actions.length];
+    const fail = i % 17 === 0;
+    events.push({
+      action,
+      occurredAt: new Date(Date.now() - (i / 240) * 80 * 864e5 - 60_000).toISOString(),
+      outcome: fail ? 'failure' : i % 23 === 0 ? 'denied' : 'success',
+      severity: fail ? 'warning' : 'info',
+      description: `${name} ${action.split('.').at(-1)} ${action.split('.')[0]} for ${tname}`,
+      actor: { type: 'user', id, name, email },
+      ...(i % 29 === 0 ? { impersonator: { id: 'usr_support', name: 'دعم العملاء — Customer support' } } : {}),
+      executor: { type: i % 3 ? 'api' : 'worker', id: i % 3 ? 'api-server' : 'booking-worker', name: i % 3 ? 'API server' : 'عامل الحجوزات' },
+      tenant: { id: tid, name: tname },
+      targets: [{ type: 'booking', id: `bk_${1000 + i}`, name: `حجز رقم ${1000 + i}` }],
+      changes: [{ field: 'status', before: 'pending', after: fail ? 'failed' : 'confirmed' }],
+      context: { operationId: `op_nh_${Math.floor(i / 3)}`, requestId: `req_nh_${i}` },
+      metadata: { channel: i % 2 ? 'web' : 'whatsapp' },
+    });
+  }
+  const res = await fetch(`${BASE}/v1/events`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${onboarded.key}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ events }),
   });
+  console.log(`   back-dated ${events.length} events → ${res.status} ${JSON.stringify(await res.json()).slice(0, 80)}`);
+  await new Promise((r) => setTimeout(r, 2500));
+  // Stills of the new project: names in Arabic and very long names.
+  for (const theme of ['light', 'dark']) {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, storageState: onboarded.state });
+    const page = await context.newPage();
+    problems.push(...watch(page, () => `onboarded ${page.url().replace(BASE, '')}`));
+    const P = `/p/${onboarded.projectId}`;
+    for (const [url, name] of [
+      [`${P}?range=90d`, 'arabic-overview'],
+      [`${P}/events?range=90d`, 'arabic-explorer'],
+      [`${P}/actors`, 'arabic-actors'],
+      [`${P}/actors/usr_ar_2?range=90d`, 'arabic-actor'],
+    ]) {
+      await page.goto(`${BASE}${url}`);
+      await settle(page);
+      await page.screenshot({ path: path.join(OUT, `${theme}-${name}.png`) });
+    }
+    await context.close();
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Video 3: explorer — autocomplete, facets, zoom, detail, operation   */
+/* ------------------------------------------------------------------ */
+if (want('explorer')) {
+  const { page, done } = await recorded('explorer-search-filter-zoom-detail', { storageState: state });
+  await page.goto(`${BASE}${J}/events`);
+  await settle(page, 1200);
+  await page.keyboard.press('/');
+  await type(page, 'tenant.na');
+  await page.waitForTimeout(700);
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(1200);
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(400);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(400);
+  await type(page, '(outcome:failure OR outcome:denied)');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Enter');
+  await settle(page, 1500);
+  // Facet: exclude one action with ⌥-click.
+  const facetRow = page.locator('aside[aria-label=Filters] section').filter({ hasText: 'Action' }).locator('button[aria-pressed]').first();
+  await facetRow.click({ modifiers: ['Alt'] });
+  await settle(page, 1500);
+  // Drag across the histogram to zoom.
+  const chart = page.locator('.recharts-wrapper').first();
+  const box = await chart.boundingBox();
+  if (box) {
+    await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5, { steps: 18 });
+    await page.mouse.up();
+  }
+  await settle(page, 1500);
+  await page.locator('[role=row][data-index="0"]').click();
+  await settle(page, 1200);
+  await page.keyboard.press('j');
+  await page.waitForTimeout(900);
+  await page.keyboard.press('j');
+  await page.waitForTimeout(900);
+  await page.keyboard.press('k');
+  await page.waitForTimeout(900);
+  await page
+    .getByRole('dialog')
+    .getByText(/raw json/i)
+    .first()
+    .scrollIntoViewIfNeeded()
+    .catch(() => undefined);
+  await page.waitForTimeout(1200);
+  const op = page.getByRole('button', { name: /view operation/i });
+  if (await op.isVisible().catch(() => false)) {
+    await op.click();
+    await settle(page, 2500);
+  }
+  await done();
+}
+
+/* ------------------------------------------------------------------ */
+/* Video 4: follow an actor → tenant → record                          */
+/* ------------------------------------------------------------------ */
+if (want('follow')) {
+  const { page, done } = await recorded('follow-actor-tenant-record', { storageState: state });
+  await page.goto(`${BASE}${J}/actors?type=user`);
+  await settle(page, 1200);
+  await page.getByRole('link').filter({ hasText: /Al-/ }).first().click();
+  await settle(page, 1800);
+  await page.mouse.wheel(0, 500);
+  await page.waitForTimeout(900);
+  await page.locator('a[href*="/tenants/"]').first().click();
+  await settle(page, 1800);
+  await page.mouse.wheel(0, 500);
+  await page.waitForTimeout(900);
+  await page.locator('a[href*="/records/"]').first().click();
+  await settle(page, 1800);
+  await page.goBack();
+  await settle(page, 1200);
+  await page.goForward();
+  await settle(page, 1500);
+  await done();
+}
+
+/* ------------------------------------------------------------------ */
+/* Video 5: retention lowering (preview + slug confirm) + API keys     */
+/* ------------------------------------------------------------------ */
+if (want('settings') && onboarded) {
+  const { page, done } = await recorded('retention-and-api-keys', { storageState: onboarded.state });
+  const P = `/p/${onboarded.projectId}`;
+  await page.goto(`${BASE}${P}/settings/retention`);
+  await settle(page, 1200);
+  await page
+    .getByRole('radio', { name: /^30 days/ })
+    .first()
+    .click();
+  await page.getByText(/That is [\d,]+ events?/).waitFor({ timeout: 15_000 });
+  await page.waitForTimeout(1500);
+  await page.getByRole('button', { name: /lower retention/i }).click();
+  await page.waitForTimeout(800);
+  await page.getByLabel(/to confirm/).click();
+  const slug = await page.getByLabel(/to confirm/).getAttribute('placeholder');
+  await type(page, slug ?? '', 70);
+  await page.waitForTimeout(500);
+  await page.getByRole('button', { name: /delete and lower/i }).click();
+  await page.getByText(/Retention set to 30 days/).waitFor({ timeout: 30_000 });
+  await settle(page, 2000);
+  await page.getByRole('link', { name: 'API keys' }).click();
+  await settle(page, 1000);
+  await page
+    .getByRole('button', { name: /create key/i })
+    .first()
+    .click();
+  await page.waitForTimeout(500);
+  await page.getByLabel('Name').fill('');
+  await type(page, 'Partner portal (read)');
+  await page.getByRole('radio', { name: /^Read/ }).click();
+  await page.waitForTimeout(400);
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: /create key/i })
+    .click();
+  await page.getByText(/only time Trailmark shows/).waitFor();
+  await page.waitForTimeout(2500);
+  await page.getByRole('button', { name: /i have stored the key/i }).click();
+  await settle(page, 900);
+  await page.getByRole('button', { name: 'Revoke' }).first().click();
+  await page.waitForTimeout(900);
+  await page.getByRole('button', { name: 'Revoke key' }).click();
+  await settle(page, 1800);
+  await done();
 }
 
 await browser.close();
-console.log(`Media written to ${OUT}`);
+await rm(TMP, { recursive: true, force: true });
+const unique = [...new Set(problems)];
+console.log(unique.length ? `\nProblems:\n${unique.join('\n')}` : '\nNo console warnings/errors and no failed /api requests.');
+if (unique.length) process.exitCode = 1;

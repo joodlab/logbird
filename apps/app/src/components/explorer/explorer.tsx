@@ -117,7 +117,11 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
     const seen = new Set(liveRows.map((e) => e.id));
     return [...liveRows, ...paged.filter((e) => !seen.has(e.id))];
   }, [events.data, liveRows]);
-  const total = (events.data?.pages[0]?.total ?? 0) + liveRows.length;
+  // Search totals are capped for huge ranges; the histogram counts every match exactly.
+  const searchTotal = events.data?.pages[0]?.total ?? 0;
+  const histogramTotal = histogram.data && !histogram.isPlaceholderData ? histogram.data.buckets.reduce((n, b) => n + b.total, 0) : undefined;
+  const total = (histogramTotal ?? searchTotal) + liveRows.length;
+  const totalCapped = histogramTotal === undefined && searchTotal > 10_000;
 
   /* ---------------- selection ---------------- */
   const selectedIndex = ev ? rows.findIndex((e) => e.id === ev) : -1;
@@ -205,7 +209,7 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
                 render={
                   <Button
                     aria-label={facetsOpen ? 'Hide filters' : 'Show filters'}
-                    className="hidden lg:inline-flex"
+                    className="hidden xl:inline-flex"
                     onClick={() => {
                       setFacetsOpen((o) => {
                         try {
@@ -226,7 +230,7 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
               <TooltipContent>{facetsOpen ? 'Hide filters' : 'Show filters'}</TooltipContent>
             </Tooltip>
           )}
-          <Button aria-label="Filters" className="lg:hidden" onClick={() => setMobileFacets(true)} size="icon-sm" variant="outline">
+          <Button aria-label="Filters" className="xl:hidden" onClick={() => setMobileFacets(true)} size="icon-sm" variant="outline">
             <FilterIcon />
           </Button>
           {baseQuery ? (
@@ -290,10 +294,7 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
               'Searching…'
             ) : (
               <>
-                <span className="font-medium text-foreground">
-                  {total >= 10_000 && events.hasNextPage ? `${formatNumber(total)}+` : formatNumber(total)}
-                </span>{' '}
-                events · {rangeLabel(range)}
+                <span className="font-medium text-foreground">{totalCapped ? '10,000+' : formatNumber(total)}</span> events · {rangeLabel(range)}
                 {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>
@@ -315,7 +316,7 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
       </div>
 
       <div className="flex min-h-0 flex-1">
-        {facetsOpen ? <div className="hidden w-60 shrink-0 border-e lg:flex lg:flex-col">{facetsPanel}</div> : null}
+        {facetsOpen ? <div className="hidden w-60 shrink-0 border-e xl:flex xl:flex-col">{facetsPanel}</div> : null}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {liveActive && liveRows.length > 0 ? (
             <div className="pointer-events-none absolute inset-x-0 top-10 z-20 flex justify-center">

@@ -164,7 +164,9 @@ export function EventsTable({
                   <>
                     <span className="flex min-w-0 items-center gap-2">
                       <OutcomeDot outcome={e.outcome} />
-                      <span className="truncate">{eventSentence(e)}</span>
+                      <span className="truncate" dir="auto">
+                        {eventSentence(e)}
+                      </span>
                     </span>
                     <span className="flex min-w-0 items-center gap-2 ps-4 text-muted-foreground text-xs">
                       <Timestamp className="shrink-0" iso={e.timestamp} />

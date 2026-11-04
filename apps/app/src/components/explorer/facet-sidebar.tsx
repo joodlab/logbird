@@ -136,7 +136,10 @@ function FacetGroup({
                     />
                     {spec.field === 'outcome' ? <OutcomeDot className="relative" outcome={v.value} /> : null}
                     <span className="relative flex min-w-0 flex-1 items-baseline gap-1.5">
-                      <span className={cn('min-w-0 truncate', spec.mono && 'font-mono text-[12px]', !v.label && 'text-muted-foreground italic')}>
+                      <span
+                        className={cn('min-w-0 truncate', spec.mono && 'font-mono text-[12px]', !v.label && 'text-muted-foreground italic')}
+                        dir="auto"
+                      >
                         {v.label || '(none)'}
                       </span>
                       {spec.named && v.label && v.label !== v.value ? (

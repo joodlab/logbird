@@ -85,7 +85,7 @@ function GeneralForm({ project }: { project: { id: string; name: string; slug: s
             {(field) => {
               const message = fieldErrorMessage(field.state.meta.errors);
               return (
-                <div className="flex max-w-md flex-col gap-1.5">
+                <div className="flex max-w-xl flex-col gap-1.5">
                   <Label htmlFor="settings-name">Name</Label>
                   <Input
                     aria-invalid={Boolean(message) || undefined}
