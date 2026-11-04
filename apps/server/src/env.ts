@@ -1,0 +1,13 @@
+import { createEnv } from '@t3-oss/env-core';
+import { z } from 'zod';
+export const env = createEnv({
+  server: {
+    PORT: z.coerce.number().int().min(1).max(65_535).default(4601),
+    APP_URL: z.url(),
+    CLICKHOUSE_URL: z.url(),
+    CLICKHOUSE_DATABASE: z.string(),
+    CLICKHOUSE_USER: z.string(),
+    CLICKHOUSE_PASSWORD: z.string(),
+  },
+  runtimeEnv: process.env,
+});
