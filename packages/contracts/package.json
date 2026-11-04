@@ -1,0 +1,21 @@
+{
+  "name": "@trailmark/contracts",
+  "license": "MIT",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "clean": "git clean -xdf .cache .turbo dist node_modules"
+  },
+  "dependencies": {
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@trailmark/tsconfig": "workspace:*",
+    "typescript": "^7.0.2"
+  }
+}
