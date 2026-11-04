@@ -14,12 +14,15 @@ const VERB_PAST: Record<string, string> = {
   sent: 'sent',
 };
 
+const INTRANSITIVE = new Set(['signed_in', 'signed_out', 'logged_in', 'logged_out', 'signed_up']);
+
 /**
  * The human sentence for an event. Prefer the producer's `description`; otherwise build
  * "<actor> <verb> <target>" from the envelope so even off-standard events read naturally.
  */
 export function eventSentence(e: AuditEvent): string {
-  if (e.description) return e.description;
+  // Some producers repeat the action as the description ("project.deleted"): build a sentence instead.
+  if (e.description && e.description !== e.action) return e.description;
   // Work done by a worker/scheduler/webhook reads best credited to the executor ("CRM worker upserted …");
   // the actor who caused it stays visible in the actor column and the detail panel.
   const performedByMachine = e.executor && ['worker', 'scheduler', 'webhook', 'job'].includes(e.executor.type);
@@ -27,8 +30,10 @@ export function eventSentence(e: AuditEvent): string {
   const parts = e.action.split('.');
   const verb = parts.at(-1) ?? e.action;
   const noun = parts.slice(0, -1).join(' ');
+  if (INTRANSITIVE.has(verb)) return `${who} ${verb.replaceAll('_', ' ')}`;
   const target = e.targets[0];
-  const object = target ? target.name || `${target.type} ${target.id}` : noun;
+  // Prefer a name; an opaque id reads worse than the action's own noun ("changed project retention").
+  const object = target?.name || noun || (target ? `${target.type} ${target.id}` : '');
   return `${who} ${VERB_PAST[verb] ?? verb.replaceAll('_', ' ')} ${object}`.trim();
 }
 

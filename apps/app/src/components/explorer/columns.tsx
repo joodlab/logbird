@@ -5,9 +5,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/component
 import { VenetianMaskIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ActionName } from '@/components/action-name';
+import { Timestamp } from '@/components/timestamp';
 import { typeIcon } from '@/lib/entities';
 import { eventSentence } from '@/lib/events';
-import { formatFull, formatTimestamp } from '@/lib/format';
 
 export interface EventColumn {
   id: string;
@@ -24,17 +24,10 @@ export const EVENT_COLUMNS: EventColumn[] = [
   {
     id: 'time',
     label: 'Time',
-    width: 120,
+    width: 108,
     required: true,
     defaultVisible: true,
-    render: (e) => (
-      <Tooltip>
-        <TooltipTrigger render={<span className="whitespace-nowrap font-mono text-[12px] text-muted-foreground tabular-nums" />}>
-          {formatTimestamp(e.timestamp)}
-        </TooltipTrigger>
-        <TooltipContent>{formatFull(e.timestamp)}</TooltipContent>
-      </Tooltip>
-    ),
+    render: (e) => <Timestamp className="whitespace-nowrap font-mono text-[12px] text-muted-foreground" iso={e.timestamp} />,
   },
   {
     id: 'outcome',
@@ -48,7 +41,7 @@ export const EVENT_COLUMNS: EventColumn[] = [
       </span>
     ),
   },
-  { id: 'action', label: 'Action', width: 210, defaultVisible: true, render: (e) => <ActionName action={e.action} /> },
+  { id: 'action', label: 'Action', width: 196, defaultVisible: true, render: (e) => <ActionName action={e.action} /> },
   {
     id: 'description',
     label: 'Event',
@@ -75,7 +68,7 @@ export const EVENT_COLUMNS: EventColumn[] = [
   {
     id: 'actor',
     label: 'Actor',
-    width: 156,
+    width: 164,
     defaultVisible: true,
     render: (e) =>
       e.actor ? (

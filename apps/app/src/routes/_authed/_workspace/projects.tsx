@@ -7,8 +7,9 @@ import { Button } from '@trailmark/ui/components/ui/button';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { FolderPlusIcon, PlusIcon } from 'lucide-react';
 import { AppShell } from '@/components/shell/app-shell';
+import { Timestamp } from '@/components/timestamp';
 import { projectsQuery } from '@/lib/api/queries';
-import { formatNumber, formatRelative, formatRetention } from '@/lib/format';
+import { formatNumber, formatRetention } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 
 export const Route = createFileRoute('/_authed/_workspace/projects')({
@@ -63,9 +64,11 @@ function ProjectsPage() {
                     <EntityAvatar id={p.id} name={p.name} size="md" square />
                     <div className="flex min-w-0 flex-col">
                       <span className="truncate font-medium">{p.name}</span>
-                      <span className="line-clamp-2 text-muted-foreground text-sm">
-                        {p.description || <span className="font-mono text-xs">{p.slug}</span>}
-                      </span>
+                      {p.description ? (
+                        <span className="line-clamp-2 text-muted-foreground text-sm">{p.description}</span>
+                      ) : (
+                        <span className="truncate font-mono text-muted-foreground text-xs">{p.slug}</span>
+                      )}
                     </div>
                   </div>
                   <dl className="mt-auto grid grid-cols-3 gap-2 text-xs">
@@ -75,7 +78,9 @@ function ProjectsPage() {
                     </div>
                     <div>
                       <dt className="text-muted-foreground">Last event</dt>
-                      <dd className="font-medium text-sm">{formatRelative(p.lastEventAt)}</dd>
+                      <dd className="font-medium text-sm">
+                        <Timestamp fallback="never" format="relative" iso={p.lastEventAt} />
+                      </dd>
                     </div>
                     <div>
                       <dt className="text-muted-foreground">Retention</dt>

@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ReferenceArea, XAxis, YAxis } from 'recharts';
 import { formatAxis } from '@/lib/format';
 import { OutcomeTooltip } from './chart-tooltip';
-import { outcomeChartConfig, SERIES, tickFormatter, toSeries } from './outcome-series';
+import { bucketTicks, outcomeChartConfig, SERIES, toSeries } from './outcome-series';
 
 interface EventHistogramProps {
   data: HistogramResponse | undefined;
@@ -25,6 +25,7 @@ interface ChartPointerState {
 export function EventHistogram({ data, height = 120, onZoom, className, loading }: EventHistogramProps) {
   const rows = useMemo(() => toSeries(data), [data]);
   const interval = data?.interval ?? 60;
+  const axis = useMemo(() => bucketTicks(rows, interval), [rows, interval]);
   const [drag, setDrag] = useState<{ start: number; end: number } | null>(null);
 
   const pointTs = (state: ChartPointerState | null | undefined): number | null => {
@@ -50,7 +51,7 @@ export function EventHistogram({ data, height = 120, onZoom, className, loading 
           barCategoryGap={1}
           className={onZoom ? 'cursor-crosshair' : undefined}
           data={rows}
-          margin={{ top: 4, right: 4, bottom: 0, left: 0 }}
+          margin={{ top: 4, right: 16, bottom: 0, left: 0 }}
           onMouseDown={(state) => {
             const ts = pointTs(state as ChartPointerState);
             if (ts !== null) setDrag({ start: ts, end: ts });
@@ -64,7 +65,7 @@ export function EventHistogram({ data, height = 120, onZoom, className, loading 
           onMouseUp={finish}
         >
           <CartesianGrid stroke="var(--border)" vertical={false} />
-          <XAxis axisLine={false} dataKey="ts" minTickGap={56} tickFormatter={tickFormatter(interval)} tickLine={false} tickMargin={6} />
+          <XAxis axisLine={false} dataKey="ts" interval={0} tickFormatter={axis.format} tickLine={false} tickMargin={6} ticks={axis.ticks} />
           <YAxis allowDecimals={false} axisLine={false} tickCount={3} tickFormatter={formatAxis} tickLine={false} width={40} />
           <ChartTooltip
             content={({ active, payload }) =>

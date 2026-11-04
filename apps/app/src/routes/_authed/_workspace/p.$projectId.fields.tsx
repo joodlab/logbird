@@ -10,8 +10,9 @@ import { cn } from '@trailmark/ui/lib/utils';
 import { CheckIcon, ListTreeIcon, SearchIcon, XIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { z } from 'zod';
+import { Timestamp } from '@/components/timestamp';
 import { fieldsQuery } from '@/lib/api/queries';
-import { formatCompact, formatPercent, formatRelative } from '@/lib/format';
+import { formatCompact, formatPercent } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
@@ -244,7 +245,7 @@ function FieldsPage() {
                       </span>
                     ))}
                   </span>
-                  <span className="hidden text-muted-foreground text-xs md:block">{formatRelative(f.lastSeen)}</span>
+                  <Timestamp className="hidden text-muted-foreground text-xs md:block" fallback="never" format="relative" iso={f.lastSeen} />
                 </li>
               );
             })}

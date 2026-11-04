@@ -11,10 +11,10 @@ import { Loader2Icon } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { SettingsSection } from '@/components/settings-section';
+import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keys, projectQuery } from '@/lib/api/queries';
-import { formatFull } from '@/lib/format';
 import { fieldErrorMessage } from '@/lib/forms';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/')({
@@ -129,7 +129,9 @@ function GeneralForm({ project }: { project: { id: string; name: string; slug: s
             <span className="text-muted-foreground text-xs">Typed to confirm destructive changes (retention, deletion).</span>
           </dd>
           <dt className="text-muted-foreground">Created</dt>
-          <dd>{formatFull(project.createdAt)}</dd>
+          <dd>
+            <Timestamp format="full" iso={project.createdAt} />
+          </dd>
         </dl>
       </SettingsSection>
     </div>

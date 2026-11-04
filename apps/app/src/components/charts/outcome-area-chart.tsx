@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { formatAxis } from '@/lib/format';
 import { OutcomeTooltip } from './chart-tooltip';
-import { outcomeChartConfig, SERIES, type SeriesKey, tickFormatter, toSeries } from './outcome-series';
+import { outcomeChartConfig, SERIES, type SeriesKey, timeTicks, toSeries } from './outcome-series';
 
 interface OutcomeAreaChartProps {
   data: HistogramResponse | undefined;
@@ -21,11 +21,12 @@ export function OutcomeAreaChart({ data, height = 240, onSelectOutcome, classNam
   const [hover, setHover] = useState<SeriesKey | null>(null);
   const present = SERIES.filter((k) => rows.some((r) => r[k] > 0));
   const interval = data?.interval ?? 60;
+  const axis = useMemo(() => timeTicks(rows, interval), [rows, interval]);
 
   return (
     <div className={cn('flex flex-col gap-3', className)}>
       <ChartContainer className="aspect-auto w-full" config={outcomeChartConfig} style={{ height }}>
-        <AreaChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+        <AreaChart data={rows} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
           <defs>
             {SERIES.map((k) => (
               <linearGradient id={`fill-${k}`} key={k} x1="0" x2="0" y1="0" y2="1">
@@ -38,9 +39,10 @@ export function OutcomeAreaChart({ data, height = 240, onSelectOutcome, classNam
           <XAxis
             axisLine={false}
             dataKey="ts"
-            minTickGap={48}
+            interval={0}
             scale="time"
-            tickFormatter={tickFormatter(interval)}
+            tickFormatter={axis.format}
+            ticks={axis.ticks}
             tickLine={false}
             tickMargin={8}
             type="number"

@@ -3,7 +3,6 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import type { AuditEvent } from '@trailmark/contracts';
 import { OutcomeDot, TypePill } from '@trailmark/ui/components/badges';
 import { CopyValue } from '@trailmark/ui/components/copy-button';
-import { EntityChip } from '@trailmark/ui/components/entity-chip';
 import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
 import { Button } from '@trailmark/ui/components/ui/button';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
@@ -12,12 +11,14 @@ import { GitBranchIcon, Rows3Icon, SearchXIcon } from 'lucide-react';
 import { useMemo } from 'react';
 import { z } from 'zod';
 import { ActionName } from '@/components/action-name';
+import { EntityLink } from '@/components/entity-link';
 import { EventSheet } from '@/components/explorer/event-sheet';
+import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { operationQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
 import { eventSentence } from '@/lib/events';
-import { formatDuration, formatFull, formatNumber } from '@/lib/format';
+import { formatDuration, formatNumber } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/operations/$operationId')({
@@ -120,7 +121,7 @@ function OperationPage() {
           <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
             <GitBranchIcon className="size-3.5" /> Operation
           </span>
-          <h1 className="truncate font-semibold text-xl tracking-tight">
+          <h1 className="line-clamp-2 font-semibold text-xl tracking-tight" title={nodes[0] ? eventSentence(nodes[0].event) : undefined}>
             {nodes[0] ? eventSentence(nodes[0].event) : <Skeleton className="h-6 w-80" />}
           </h1>
           <CopyValue className="text-muted-foreground" value={operationId} />
@@ -141,15 +142,15 @@ function OperationPage() {
           ['Events', op.data ? formatNumber(events.length) : ''],
           ['Duration', op.data ? formatDuration(t1 - t0) : ''],
           ['Problems', op.data ? formatNumber(failures) : ''],
-          ['Started', nodes[0] ? formatFull(new Date(t0).toISOString()) : ''],
+          ['Started', nodes[0] ? <Timestamp iso={new Date(t0).toISOString()} key="started" /> : ''],
           ['Workers', op.data ? formatNumber(executors.length) : ''],
         ].map(([label, value]) => (
-          <div className={cn('flex flex-col gap-1 bg-card px-4 py-3', label === 'Started' && 'col-span-2 md:col-span-1')} key={label}>
+          <div className={cn('flex flex-col gap-1 bg-card px-4 py-3', label === 'Started' && 'col-span-2 md:col-span-1')} key={String(label)}>
             <dt className="text-muted-foreground text-xs">{label}</dt>
             <dd
               className={cn(
                 'truncate font-semibold tabular-nums tracking-tight',
-                label === 'Started' ? 'text-sm' : 'text-lg',
+                'text-lg',
                 label === 'Problems' && failures > 0 && 'text-outcome-failure',
               )}
             >
@@ -163,11 +164,15 @@ function OperationPage() {
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-xs">Caused by</span>
-            {actors.slice(0, 4).map((a) => (a ? <EntityChip id={a.id} key={a.id} name={a.name} /> : null))}
+            {actors
+              .slice(0, 4)
+              .map((a) => (a ? <EntityLink id={a.id} key={a.id} kind="actor" name={a.name} projectId={projectId} type={a.type} /> : null))}
           </span>
-          <span className="flex flex-wrap items-center gap-1.5">
+          <span className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-xs">Performed by</span>
-            {executors.map((x) => (x ? <TypePill key={x.id}>{x.id}</TypePill> : null))}
+            {executors.map((x) =>
+              x ? <EntityLink id={x.id} key={x.id} kind="executor" meta={x.type} name={x.name} projectId={projectId} type={x.type} /> : null,
+            )}
           </span>
         </div>
       ) : null}

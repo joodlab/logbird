@@ -11,9 +11,10 @@ import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { cn } from '@trailmark/ui/lib/utils';
 import { Loader2Icon, SearchIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Timestamp } from '@/components/timestamp';
 import { entityListQuery, facetQuery } from '@/lib/api/queries';
 import { ENTITY_SECTIONS, type EntitySection, splitTargetId, typeIcon } from '@/lib/entities';
-import { formatCompact, formatDate, formatRelative } from '@/lib/format';
+import { formatCompact } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 
 const TYPE_FACET = { actor: 'actor.type', executor: 'executor.type', target: 'target.type', tenant: null } as const;
@@ -40,6 +41,8 @@ export function EntityDirectory({ projectId, section, q, type, onSearch }: Entit
   const typeField = TYPE_FACET[meta.kind];
   const types = useQuery({ ...facetQuery(projectId, typeField ?? 'action', '90d', '', 12), enabled: Boolean(typeField) });
   const rows = list.data?.pages.flatMap((p) => p.data) ?? [];
+  // Events without a type cannot be filtered by type: only offer real values.
+  const typeValues = (types.data?.values ?? []).filter((t) => t.value);
 
   return (
     <div className="flex flex-col gap-5 p-4 sm:p-6">
@@ -65,13 +68,14 @@ export function EntityDirectory({ projectId, section, q, type, onSearch }: Entit
             <Loader2Icon className="-translate-y-1/2 absolute end-3 top-1/2 size-4 animate-spin text-muted-foreground" />
           ) : null}
         </div>
-        {typeField && (types.data?.values.length ?? 0) > 1 ? (
+        {typeField && typeValues.length > 1 ? (
           <fieldset className="flex flex-wrap items-center gap-1.5">
             <legend className="sr-only">Filter by type</legend>
             <TypeChip active={!type} label="All" onClick={() => onSearch({ type: undefined })} />
-            {types.data?.values.map((t) => (
+            {typeValues.map((t) => (
               <TypeChip
                 active={type === t.value}
+                count={t.count}
                 key={t.value}
                 label={t.value}
                 onClick={() => onSearch({ type: type === t.value ? undefined : t.value })}
@@ -132,18 +136,19 @@ export function EntityDirectory({ projectId, section, q, type, onSearch }: Entit
   );
 }
 
-function TypeChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+function TypeChip({ label, active, onClick, count }: { label: string; active: boolean; onClick: () => void; count?: number }) {
   return (
     <button
       aria-pressed={active}
       className={cn(
-        'h-7 rounded-md border px-2 font-mono text-[12px] outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50',
+        'flex h-7 items-center gap-1.5 rounded-md border px-2 font-mono text-[12px] outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50',
         active ? 'border-brand bg-brand/10 text-brand' : 'text-muted-foreground',
       )}
       onClick={onClick}
       type="button"
     >
       {label}
+      {count === undefined ? null : <span className="font-sans text-[11px] tabular-nums opacity-70">{formatCompact(count)}</span>}
     </button>
   );
 }
@@ -171,8 +176,8 @@ function EntityRow({ entity: e, projectId, section }: { entity: Entity; projectI
         <span className="truncate font-mono text-[12px] text-muted-foreground max-md:col-start-1 max-md:ps-9.5">{displayId}</span>
         <span className="hidden md:block">{e.type ? <TypePill>{e.type}</TypePill> : <span className="text-muted-foreground">—</span>}</span>
         <span className="text-end text-muted-foreground tabular-nums max-md:col-start-2 max-md:row-start-1">{formatCompact(e.events)}</span>
-        <span className="hidden text-muted-foreground text-xs md:block">{formatDate(e.firstSeen)}</span>
-        <span className="hidden text-muted-foreground text-xs md:block">{formatRelative(e.lastSeen)}</span>
+        <Timestamp className="hidden text-muted-foreground text-xs md:block" format="date" iso={e.firstSeen} />
+        <Timestamp className="hidden text-muted-foreground text-xs md:block" format="relative" iso={e.lastSeen} />
       </Link>
     </li>
   );
