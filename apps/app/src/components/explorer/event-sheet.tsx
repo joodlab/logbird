@@ -179,7 +179,7 @@ function PartyCard({
   return (
     <div
       className={cn(
-        'flex min-w-0 flex-col gap-2 rounded-lg border p-3',
+        'flex min-w-0 flex-col gap-2 overflow-hidden rounded-lg border p-3',
         tone === 'warning' ? 'border-outcome-denied/30 bg-outcome-denied/5' : 'bg-muted/25',
       )}
     >
