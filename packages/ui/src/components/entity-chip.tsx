@@ -63,7 +63,7 @@ interface EntityChipProps {
 /** Avatar + name (+ mono id/type). Wrap in a Link to make it navigable. */
 export function EntityChip({ id, name, icon, meta, square, className, size = 'sm' }: EntityChipProps) {
   return (
-    <span className={cn('inline-flex min-w-0 items-center gap-1.5', className)}>
+    <span className={cn('inline-flex min-w-0 max-w-full items-center gap-1.5', className)}>
       <EntityAvatar icon={icon} id={id} name={name || id} size={size === 'md' ? 'md' : 'sm'} square={square} />
       <span className="truncate" dir="auto">
         {name || <span className="font-mono text-[12px]">{id}</span>}
