@@ -1,0 +1,47 @@
+{
+  "name": "@trailmark/app",
+  "license": "MIT",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --port 4600 --strictPort",
+    "dev:fixtures": "vite dev --port 4600 --strictPort --mode fixtures",
+    "build": "vite build",
+    "start": "node .output/server/index.mjs",
+    "preview": "vite preview --port 4600",
+    "typecheck": "tsc --noEmit",
+    "media": "node ./scripts/capture-media.mjs",
+    "clean": "git clean -xdf .cache .turbo .output .nitro .tanstack dist node_modules"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-form": "1.33.5",
+    "@tanstack/react-pacer": "^0.23.0",
+    "@tanstack/react-query": "^5.102.8",
+    "@tanstack/react-router": "^1.170.32",
+    "@tanstack/react-start": "^1.168.49",
+    "@tanstack/react-table": "^9.2.6",
+    "@tanstack/react-virtual": "^3.13.12",
+    "@trailmark/contracts": "workspace:*",
+    "@trailmark/ui": "workspace:*",
+    "better-auth": "^1.7.2",
+    "lucide-react": "^1.39.0",
+    "nitro": "3.0.260522-beta",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "recharts": "3.10.1",
+    "sonner": "^2.0.8",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@trailmark/tsconfig": "workspace:*",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  }
+}

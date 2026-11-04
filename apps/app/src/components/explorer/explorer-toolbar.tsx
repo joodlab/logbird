@@ -1,0 +1,211 @@
+import { useForm } from '@tanstack/react-form';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
+import { Button } from '@trailmark/ui/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@trailmark/ui/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@trailmark/ui/components/ui/dropdown-menu';
+import { Input } from '@trailmark/ui/components/ui/input';
+import { Label } from '@trailmark/ui/components/ui/label';
+import { Textarea } from '@trailmark/ui/components/ui/textarea';
+import { BookmarkPlusIcon, Columns3Icon, DownloadIcon, Loader2Icon } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
+import { z } from 'zod';
+import { api } from '@/lib/api/client';
+import { errorMessage, toApiError } from '@/lib/api/errors';
+import { keys } from '@/lib/api/queries';
+import { getTransport } from '@/lib/api/transport';
+import { fieldErrorMessage } from '@/lib/forms';
+import { rangeLabel, resolveRange } from '@/lib/range';
+import { DEFAULT_COLUMNS, EVENT_COLUMNS } from './columns';
+
+export function ColumnPicker({ columns, onChange }: { columns: string[]; onChange: (cols: string[]) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button aria-label="Choose columns" size="sm" variant="outline" />}>
+        <Columns3Icon />
+        <span className="hidden xl:inline">Columns</span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-[11px] uppercase tracking-wider">Visible columns</DropdownMenuLabel>
+          {EVENT_COLUMNS.map((c) => (
+            <DropdownMenuCheckboxItem
+              checked={columns.includes(c.id)}
+              closeOnClick={false}
+              disabled={c.required}
+              key={c.id}
+              onCheckedChange={(checked) =>
+                onChange(
+                  checked
+                    ? EVENT_COLUMNS.filter((x) => x.id === c.id || columns.includes(x.id)).map((x) => x.id)
+                    : columns.filter((id) => id !== c.id),
+                )
+              }
+            >
+              {c.label}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => onChange(DEFAULT_COLUMNS)}>Reset to default</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export function ExportMenu({ projectId, range, q }: { projectId: string; range: string; q: string }) {
+  const [busy, setBusy] = useState(false);
+  const download = async (format: 'csv' | 'jsonl') => {
+    setBusy(true);
+    try {
+      const r = resolveRange(range);
+      const fetchImpl = await getTransport();
+      const response = await fetchImpl(api.events.exportUrl(projectId, { from: r.from, to: r.to, q: q || undefined, format }));
+      if (!response.ok) throw await toApiError(response);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `trailmark-events-${new Date().toISOString().slice(0, 19).replaceAll(':', '')}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Export ready', { description: `${rangeLabel(range)}${q ? ` · ${q}` : ''}` });
+    } catch (error) {
+      toast.error('Export failed', { description: errorMessage(error) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button aria-label="Export" disabled={busy} size="sm" variant="outline" />}>
+        {busy ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />}
+        <span className="hidden xl:inline">Export</span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="font-normal text-muted-foreground text-xs">
+            Exports every match in the current range and query.
+          </DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => download('csv')}>CSV (spreadsheet)</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => download('jsonl')}>JSON Lines (full events)</DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+const nameSchema = z.string().trim().min(1, 'Name the view.').max(80);
+
+export function SaveViewButton({ projectId, q, range, columns }: { projectId: string; q: string; range: string; columns: string[] }) {
+  const [open, setOpen] = useState(false);
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const create = useMutation({
+    mutationFn: (value: { name: string; description: string }) =>
+      api.views.create(projectId, { name: value.name.trim(), description: value.description.trim() || null, state: { q, range, columns } }),
+    onSuccess: async (view) => {
+      await queryClient.invalidateQueries({ queryKey: [...keys.project(projectId), 'views'] });
+      setOpen(false);
+      toast.success(`Saved “${view.name}”`, { description: 'It is in the sidebar and shareable by URL.' });
+      navigate({ to: '.', search: ((prev: Record<string, unknown>) => ({ ...prev, view: view.id })) as never, replace: true });
+    },
+  });
+  const form = useForm({
+    defaultValues: { name: '', description: '' },
+    onSubmit: ({ value }) => create.mutateAsync(value).catch(() => undefined),
+  });
+  return (
+    <>
+      <Button onClick={() => setOpen(true)} size="sm" variant="outline">
+        <BookmarkPlusIcon />
+        <span className="hidden xl:inline">Save view</span>
+      </Button>
+      <Dialog
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) {
+            form.reset();
+            create.reset();
+          }
+        }}
+        open={open}
+      >
+        <DialogContent className="sm:max-w-md">
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              form.handleSubmit();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Save view</DialogTitle>
+              <DialogDescription>Saves the query, time range and visible columns. Everyone in the workspace can open it.</DialogDescription>
+            </DialogHeader>
+            <div className="rounded-lg border bg-muted/40 px-3 py-2 font-mono text-[12px]">
+              <div className="truncate">{q || <span className="text-muted-foreground">All events</span>}</div>
+              <div className="mt-0.5 font-sans text-muted-foreground text-xs">
+                {rangeLabel(range)} · {columns.length} columns
+              </div>
+            </div>
+            <form.Field name="name" validators={{ onSubmit: nameSchema }}>
+              {(field) => {
+                const message = fieldErrorMessage(field.state.meta.errors);
+                return (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="view-name">Name</Label>
+                    <Input
+                      aria-invalid={Boolean(message) || undefined}
+                      autoFocus
+                      id="view-name"
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="Failed CRM syncs"
+                      value={field.state.value}
+                    />
+                    {message ? <p className="text-destructive text-xs">{message}</p> : null}
+                  </div>
+                );
+              }}
+            </form.Field>
+            <form.Field name="description">
+              {(field) => (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="view-description">
+                    Description <span className="font-normal text-muted-foreground">(optional)</span>
+                  </Label>
+                  <Textarea
+                    className="min-h-16"
+                    id="view-description"
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    value={field.state.value}
+                  />
+                </div>
+              )}
+            </form.Field>
+            {create.isError ? <p className="text-destructive text-sm">{errorMessage(create.error)}</p> : null}
+            <DialogFooter>
+              <Button onClick={() => setOpen(false)} type="button" variant="outline">
+                Cancel
+              </Button>
+              <Button disabled={create.isPending} type="submit">
+                {create.isPending ? <Loader2Icon className="animate-spin" /> : null}
+                Save view
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

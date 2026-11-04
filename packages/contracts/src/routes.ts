@@ -19,6 +19,8 @@ export const routes = {
     get: { method: 'GET', path: '/api/projects/:projectId', auth: 'session' },
     update: { method: 'PATCH', path: '/api/projects/:projectId', auth: 'session' },
     remove: { method: 'DELETE', path: '/api/projects/:projectId', auth: 'session' },
+    /** Retention status for Settings → Retention (oldest event, last purge run). */
+    retention: { method: 'GET', path: '/api/projects/:projectId/retention', auth: 'session' },
   },
   keys: {
     list: { method: 'GET', path: '/api/projects/:projectId/keys', auth: 'session' },

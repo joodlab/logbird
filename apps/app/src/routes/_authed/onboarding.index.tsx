@@ -1,0 +1,149 @@
+import { useForm } from '@tanstack/react-form';
+import { useQueryClient } from '@tanstack/react-query';
+import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router';
+import { Button } from '@trailmark/ui/components/ui/button';
+import { Input } from '@trailmark/ui/components/ui/input';
+import { Label } from '@trailmark/ui/components/ui/label';
+import { ArrowRightIcon, Loader2Icon } from 'lucide-react';
+import { useState } from 'react';
+import { z } from 'zod';
+import { meQuery } from '@/lib/api/queries';
+import { authCall, authClient } from '@/lib/auth-client';
+import { fieldErrorMessage } from '@/lib/forms';
+
+export const Route = createFileRoute('/_authed/onboarding/')({
+  validateSearch: z.object({ another: z.boolean().optional() }),
+  beforeLoad: ({ context, search }) => {
+    // Already in a workspace and not explicitly creating another one: continue with the project step.
+    if (context.me.organizations.length > 0 && !search.another) throw redirect({ to: '/onboarding/project' });
+  },
+  component: WorkspaceStep,
+});
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
+const nameSchema = z.string().trim().min(2, 'Use at least 2 characters.').max(64, 'Keep it under 64 characters.');
+
+function WorkspaceStep() {
+  const { me } = Route.useRouteContext();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [serverError, setServerError] = useState<string | null>(null);
+  const suggested = me.user.email.split('@')[1]?.split('.')[0] ?? '';
+  const form = useForm({
+    defaultValues: {
+      name:
+        suggested && !/gmail|outlook|hotmail|yahoo|icloud|trailmark/.test(suggested) ? suggested.charAt(0).toUpperCase() + suggested.slice(1) : '',
+    },
+    onSubmit: async ({ value }) => {
+      setServerError(null);
+      try {
+        const org = await authCall(
+          authClient.organization.create({ name: value.name.trim(), slug: slugify(value.name) || `ws-${Date.now().toString(36)}` }),
+        );
+        if (org && typeof org === 'object' && 'id' in org) {
+          await authCall(authClient.organization.setActive({ organizationId: String((org as { id: string }).id) }));
+        }
+        await queryClient.invalidateQueries({ queryKey: meQuery().queryKey });
+        await navigate({ to: '/onboarding/project' });
+      } catch (error) {
+        setServerError(error instanceof Error ? error.message : 'Could not create the workspace.');
+      }
+    },
+  });
+
+  return (
+    <div className="grid gap-10 md:grid-cols-[1fr_260px]">
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-1.5">
+          <h1 className="font-semibold text-2xl tracking-tight">Create your workspace</h1>
+          <p className="text-muted-foreground text-sm">
+            A workspace holds your team and every project that sends events. You can invite people once it exists.
+          </p>
+        </div>
+        <form
+          className="flex flex-col gap-5"
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            form.handleSubmit();
+          }}
+        >
+          <form.Field name="name" validators={{ onSubmit: nameSchema, onChange: nameSchema }}>
+            {(field) => {
+              const message = field.state.meta.isTouched ? fieldErrorMessage(field.state.meta.errors) : undefined;
+              const slug = slugify(field.state.value);
+              return (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="workspace-name">Workspace name</Label>
+                  <Input
+                    aria-describedby="workspace-help"
+                    aria-invalid={Boolean(message) || undefined}
+                    autoFocus
+                    className="h-10"
+                    id="workspace-name"
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    placeholder="Acme Inc."
+                    value={field.state.value}
+                  />
+                  <p className="text-muted-foreground text-xs" id="workspace-help">
+                    {message ? (
+                      <span className="text-destructive">{message}</span>
+                    ) : (
+                      <>
+                        URL slug: <span className="font-mono text-foreground">{slug || 'your-workspace'}</span>
+                      </>
+                    )}
+                  </p>
+                </div>
+              );
+            }}
+          </form.Field>
+          {serverError ? (
+            <p className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-destructive text-sm" role="alert">
+              {serverError}
+            </p>
+          ) : null}
+          <div className="flex items-center gap-3">
+            <form.Subscribe selector={(s) => [s.isSubmitting, s.canSubmit] as const}>
+              {([submitting, canSubmit]) => (
+                <Button className="h-10" disabled={submitting || !canSubmit} type="submit">
+                  {submitting ? <Loader2Icon className="animate-spin" /> : null}
+                  Create workspace
+                  {submitting ? null : <ArrowRightIcon />}
+                </Button>
+              )}
+            </form.Subscribe>
+            {me.organizations.length > 0 ? (
+              <Button nativeButton={false} render={<Link to="/" />} variant="ghost">
+                Cancel
+              </Button>
+            ) : null}
+          </div>
+        </form>
+      </div>
+      <aside className="flex flex-col gap-3 rounded-xl border bg-card/60 p-4 text-sm shadow-xs">
+        <p className="font-medium">What happens next</p>
+        <ol className="flex flex-col gap-2.5 text-muted-foreground">
+          <li>
+            <span className="font-medium text-foreground">1.</span> Create a project for the product that will send events.
+          </li>
+          <li>
+            <span className="font-medium text-foreground">2.</span> Copy its ingest key and send one event with the SDK or curl.
+          </li>
+          <li>
+            <span className="font-medium text-foreground">3.</span> Search, follow and explain every change from the console.
+          </li>
+        </ol>
+      </aside>
+    </div>
+  );
+}

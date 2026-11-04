@@ -1,0 +1,328 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+/* The package is consumed as a symlinked workspace dependency, which Tailwind v4's
+   automatic content detection skips. Scan our own sources explicitly so classes used
+   only inside @trailmark/ui are generated. */
+@source "../**/*.{ts,tsx}";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive: var(--destructive);
+  --color-info-foreground: var(--info-foreground);
+  --color-info: var(--info);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning: var(--warning);
+  --color-success-foreground: var(--success-foreground);
+  --color-success: var(--success);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-subtle: var(--subtle);
+  --color-outcome-success: var(--outcome-success);
+  --color-outcome-failure: var(--outcome-failure);
+  --color-outcome-denied: var(--outcome-denied);
+  --color-outcome-partial: var(--outcome-partial);
+  --color-outcome-unknown: var(--outcome-unknown);
+  --color-severity-info: var(--severity-info);
+  --color-severity-notice: var(--severity-notice);
+  --color-severity-warning: var(--severity-warning);
+  --color-severity-critical: var(--severity-critical);
+  --color-syntax-key: var(--syntax-key);
+  --color-syntax-string: var(--syntax-string);
+  --color-syntax-number: var(--syntax-number);
+  --color-syntax-keyword: var(--syntax-keyword);
+  --color-syntax-comment: var(--syntax-comment);
+  --color-syntax-punct: var(--syntax-punct);
+  --color-diff-add: var(--diff-add);
+  --color-diff-remove: var(--diff-remove);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+/* Trailmark palette — a true-neutral "ink & paper" console with ONE accent (indigo,
+   `--brand`) carried by focus rings, active navigation, links, selection and the
+   primary chart series. Primary buttons stay ink-on-paper so the accent keeps its
+   meaning. Outcome and severity colors are a separate, fixed semantic scale and are
+   never used decoratively. */
+:root {
+  --control-size-default: 2.25rem;
+  --control-size-compact: 2rem;
+  --control-size-large: 2.5rem;
+  --control-group-inset: 0.125rem;
+  --control-tabs-inset: 0.1875rem;
+
+  --radius: 0.625rem;
+  --background: #fafafa;
+  --foreground: #171717;
+  --card: #ffffff;
+  --card-foreground: #171717;
+  --popover: #ffffff;
+  --popover-foreground: #171717;
+  --primary: #171717;
+  --primary-foreground: #fafafa;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #171717;
+  --muted: #f4f4f4;
+  --muted-foreground: #6b6b6b;
+  --subtle: #a1a1a1;
+  --accent: #f1f1f1;
+  --accent-foreground: #171717;
+  --destructive: #dc2626;
+  --destructive-foreground: #fafafa;
+  --info: #2563eb;
+  --info-foreground: #eff6ff;
+  --warning: #b45309;
+  --warning-foreground: #fffbeb;
+  --success: #047857;
+  --success-foreground: #ecfdf5;
+  --border: #e6e6e6;
+  --input: #e2e2e2;
+  --ring: #4f46e5;
+  --brand: #4f46e5;
+  --brand-foreground: #ffffff;
+
+  --outcome-success: #059669;
+  --outcome-failure: #dc2626;
+  --outcome-denied: #d97706;
+  --outcome-partial: #ea580c;
+  --outcome-unknown: #94a3b8;
+  --severity-info: #737373;
+  --severity-notice: #2563eb;
+  --severity-warning: #d97706;
+  --severity-critical: #dc2626;
+
+  --syntax-key: #7c3aed;
+  --syntax-string: #047857;
+  --syntax-number: #c2410c;
+  --syntax-keyword: #4f46e5;
+  --syntax-comment: #8a8a8a;
+  --syntax-punct: #737373;
+  --diff-add: #047857;
+  --diff-remove: #b91c1c;
+
+  --chart-1: #4f46e5;
+  --chart-2: #0891b2;
+  --chart-3: #a855f7;
+  --chart-4: #737373;
+  --chart-5: #d4d4d4;
+  --sidebar: #f7f7f7;
+  --sidebar-foreground: #525252;
+  --sidebar-primary: #4f46e5;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ececec;
+  --sidebar-accent-foreground: #171717;
+  --sidebar-border: #e6e6e6;
+  --sidebar-ring: #4f46e5;
+}
+
+.dark {
+  --background: #0b0b0c;
+  --foreground: #ededed;
+  --card: #121213;
+  --card-foreground: #ededed;
+  --popover: #161617;
+  --popover-foreground: #ededed;
+  --primary: #ededed;
+  --primary-foreground: #121213;
+  --secondary: #1f1f21;
+  --secondary-foreground: #ededed;
+  --muted: #1c1c1e;
+  --muted-foreground: #a0a0a0;
+  --subtle: #6b6b6b;
+  --accent: #1f1f21;
+  --accent-foreground: #ededed;
+  --destructive: #f87171;
+  --destructive-foreground: #1a0a0a;
+  --info: #60a5fa;
+  --info-foreground: #172554;
+  --warning: #fbbf24;
+  --warning-foreground: #451a03;
+  --success: #34d399;
+  --success-foreground: #022c22;
+  --border: #242426;
+  --input: #2e2e31;
+  --ring: #818cf8;
+  --brand: #818cf8;
+  --brand-foreground: #0b0b0c;
+
+  --outcome-success: #34d399;
+  --outcome-failure: #f87171;
+  --outcome-denied: #fbbf24;
+  --outcome-partial: #fb923c;
+  --outcome-unknown: #64748b;
+  --severity-info: #a0a0a0;
+  --severity-notice: #60a5fa;
+  --severity-warning: #fbbf24;
+  --severity-critical: #f87171;
+
+  --syntax-key: #c4b5fd;
+  --syntax-string: #6ee7b7;
+  --syntax-number: #fdba74;
+  --syntax-keyword: #a5b4fc;
+  --syntax-comment: #6b6b6b;
+  --syntax-punct: #8a8a8a;
+  --diff-add: #6ee7b7;
+  --diff-remove: #fca5a5;
+
+  --chart-1: #818cf8;
+  --chart-2: #22d3ee;
+  --chart-3: #c084fc;
+  --chart-4: #a3a3a3;
+  --chart-5: #404040;
+  --sidebar: #0e0e0f;
+  --sidebar-foreground: #a0a0a0;
+  --sidebar-primary: #818cf8;
+  --sidebar-primary-foreground: #0b0b0c;
+  --sidebar-accent: #1c1c1e;
+  --sidebar-accent-foreground: #ededed;
+  --sidebar-border: #1f1f21;
+  --sidebar-ring: #818cf8;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--brand) 24%, transparent);
+  }
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+    font-feature-settings: "zero" 0;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  summary,
+  label[for],
+  [data-slot="select-trigger"],
+  [data-slot="sidebar-menu-button"] {
+    cursor: pointer;
+  }
+  /* Quiet, thin scrollbars that match the neutral chrome. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent)
+      transparent;
+  }
+}
+
+@layer utilities {
+  .tm-grid-bg {
+    background-image: radial-gradient(
+      color-mix(in oklab, var(--foreground) 9%, transparent) 1px,
+      transparent 1px
+    );
+    background-size: 16px 16px;
+  }
+  .tm-fade-in {
+    animation: tm-fade-in 180ms ease-out both;
+  }
+  .tm-row-new {
+    animation: tm-row-new 1.6s ease-out both;
+  }
+  .tm-pulse-dot {
+    animation: tm-pulse 1.8s ease-in-out infinite;
+  }
+}
+
+@keyframes tm-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes tm-row-new {
+  from {
+    background-color: color-mix(in oklab, var(--brand) 14%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+@keyframes tm-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, currentColor 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in oklab, currentColor 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tm-fade-in,
+  .tm-row-new,
+  .tm-pulse-dot {
+    animation: none;
+  }
+}
+
+@media (pointer: coarse) {
+  :root {
+    --control-size-default: 2.75rem;
+    --control-size-compact: 2.5rem;
+    --control-size-large: 2.75rem;
+    --control-group-inset: 0px;
+    --control-tabs-inset: 0px;
+  }
+}
