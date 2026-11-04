@@ -6,7 +6,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 4600 --strictPort",
-    "dev:fixtures": "vite dev --port 4600 --strictPort --mode fixtures",
     "build": "vite build",
     "start": "node .output/server/index.mjs",
     "preview": "vite preview --port 4600",

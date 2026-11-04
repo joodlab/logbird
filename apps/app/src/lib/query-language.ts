@@ -27,6 +27,10 @@ export interface FieldSpec {
   example: string;
   /** Facet field used to suggest values, when there is one. */
   facet?: string;
+  /** Suggest the facet's labels (names) instead of its values (ids). */
+  byLabel?: boolean;
+  /** Entity directory used to suggest ids (by name or id) for high-cardinality fields. */
+  entity?: 'actor' | 'tenant' | 'executor' | 'target';
 }
 
 /** Query fields apps/server understands (SPEC §5.1), in the order autocomplete offers them. */
@@ -34,18 +38,24 @@ export const QUERY_FIELDS: FieldSpec[] = [
   { key: 'action', description: 'Exact action, or a prefix with *', example: 'action:hotel.*', facet: 'action' },
   { key: 'outcome', description: 'success · failure · denied · partial · unknown', example: 'outcome:failure', facet: 'outcome' },
   { key: 'severity', description: 'info · notice · warning · critical', example: 'severity:critical', facet: 'severity' },
-  { key: 'actor', description: 'Actor id', example: 'actor:usr_42', facet: 'actor' },
+  { key: 'actor', description: 'Who caused it (actor id)', example: 'actor:usr_42', entity: 'actor' },
+  { key: 'actor.name', description: 'Actor display name', example: 'actor.name:"Raed B"', facet: 'actor', byLabel: true },
+  { key: 'actor.email', description: 'Actor email', example: 'actor.email:raed@example.com' },
   { key: 'actor.type', description: 'user · service · system · api_key · integration', example: 'actor.type:user', facet: 'actor.type' },
-  { key: 'actor.name', description: 'Actor display name', example: 'actor.name:"Raed B"' },
-  { key: 'tenant', description: 'Tenant id', example: 'tenant:biz_7', facet: 'tenant' },
-  { key: 'executor', description: 'Worker / job / api that performed it', example: 'executor:crm-worker', facet: 'executor' },
+  { key: 'impersonator', description: 'Support user acting as the actor', example: 'impersonator:usr_1' },
+  { key: 'tenant', description: 'Customer account (tenant id)', example: 'tenant:biz_7', entity: 'tenant' },
+  { key: 'tenant.name', description: 'Tenant display name', example: 'tenant.name:"Azure Hotels"', facet: 'tenant', byLabel: true },
+  { key: 'executor', description: 'Worker, job or API that performed it', example: 'executor:crm-worker', entity: 'executor' },
+  { key: 'executor.name', description: 'Executor display name', example: 'executor.name:"CRM worker"', facet: 'executor', byLabel: true },
   { key: 'executor.type', description: 'api · worker · scheduler · webhook', example: 'executor.type:worker', facet: 'executor.type' },
-  { key: 'target', description: 'Target record id', example: 'target:hotel_123' },
-  { key: 'target.type', description: 'Target record type', example: 'target.type:hotel', facet: 'target.type' },
+  { key: 'job', description: 'Job id the executor ran', example: 'job:456' },
+  { key: 'target', description: 'Record the event touched (target id)', example: 'target:hotel_123', entity: 'target' },
+  { key: 'target.type', description: 'Record type', example: 'target.type:hotel', facet: 'target.type' },
   { key: 'category', description: 'First segment of the action', example: 'category:booking', facet: 'category' },
   { key: 'env', description: 'Environment', example: '-env:staging', facet: 'environment' },
   { key: 'source', description: 'External system that supplied the change', example: 'source:joodbooking', facet: 'source' },
   { key: 'operation', description: 'Operation id (request + spawned jobs)', example: 'operation:op_101' },
+  { key: 'parent', description: 'Parent event id (direct children)', example: 'parent:evt_123' },
   { key: 'request', description: 'Request id', example: 'request:req_abc' },
   { key: 'trace', description: 'Trace id', example: 'trace:4bf92f…' },
   { key: 'id', description: 'Event id', example: 'id:01J…' },
@@ -108,7 +118,8 @@ export function tokenize(input: string): QueryToken[] {
     const word = WORD_RE.exec(rest);
     if (word) {
       const raw = word[0];
-      const isOperator = raw === 'OR' || raw === 'AND' || raw === 'NOT';
+      // `OR` is the only keyword; adjacency means AND (SPEC §5.1).
+      const isOperator = raw === 'OR';
       tokens.push({
         kind: isOperator ? 'operator' : 'text',
         raw,
@@ -175,8 +186,9 @@ export function removeTerm(q: string, field: string, value?: string, negated?: b
 }
 
 /**
- * Include `field:value`. The v0 grammar ANDs terms, so including a second value for the same
- * field would match nothing: positive terms for that field are replaced instead.
+ * Include `field:value`. Adjacent terms are ANDed, so including a second value for the same
+ * field would match nothing: positive terms for that field are replaced instead (people who want
+ * either value write `(a OR b)` themselves).
  */
 export function includeTerm(q: string, field: string, value: string): string {
   const without = removeTerm(removeTerm(q, field, undefined, false), field, value, true);
@@ -202,11 +214,11 @@ export function tokenAt(q: string, caret: number): QueryToken | undefined {
   return tokenize(q).find((t) => t.kind !== 'space' && caret >= t.start && caret <= t.end);
 }
 
-/** Map query fields to the facet API field names. */
-export function facetFieldFor(field: string): string | undefined {
+/** Autocomplete spec for a query field; `attr.*` keys suggest values from their own facet. */
+export function fieldSpec(field: string): FieldSpec | undefined {
   const f = canonicalField(field);
-  if (f.startsWith('attr.')) return f;
-  return QUERY_FIELDS.find((spec) => spec.key === f)?.facet;
+  if (f.startsWith('attr.')) return { key: f, description: 'Attribute', example: `${f}:…`, facet: f };
+  return QUERY_FIELDS.find((spec) => spec.key === f);
 }
 
 /** Map facet API field names back to query fields. */

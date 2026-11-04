@@ -1,7 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import type { Project } from '@trailmark/contracts';
+import type { Project, RetentionStatus } from '@trailmark/contracts';
 import { OutcomeDot } from '@trailmark/ui/components/badges';
+import { ErrorState } from '@trailmark/ui/components/states';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -17,14 +18,15 @@ import { Input } from '@trailmark/ui/components/ui/input';
 import { Label } from '@trailmark/ui/components/ui/label';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { Loader2Icon, TriangleAlertIcon } from 'lucide-react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { toast } from 'sonner';
 import { RetentionPicker } from '@/components/retention-picker';
 import { SettingsSection } from '@/components/settings-section';
+import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { keys, projectQuery, retentionQuery } from '@/lib/api/queries';
-import { formatDate, formatFull, formatNumber, formatRelative, formatRetention } from '@/lib/format';
+import { formatNumber, formatRetention, pluralize } from '@/lib/format';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/retention')({
   staticData: { crumb: 'Retention' },
@@ -42,25 +44,16 @@ function RetentionSettings() {
 
 function RetentionForm({ project }: { project: Project }) {
   const queryClient = useQueryClient();
-  const status = useQuery(retentionQuery(project.id, project.retentionDays));
+  const status = useQuery(retentionQuery(project.id));
   const [days, setDays] = useState(project.retentionDays);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const lowering = days < project.retentionDays;
   const changed = days !== project.retentionDays;
   const cutoff = new Date(Date.now() - days * DAY);
 
-  // Rough size of what a lower window deletes: events between the oldest stored and the new cutoff.
-  const doomed = useQuery({
-    queryKey: [...keys.project(project.id), 'retention-impact', days],
-    enabled: lowering,
-    queryFn: ({ signal }) =>
-      api.events.search(
-        project.id,
-        { from: new Date(Date.now() - project.retentionDays * DAY).toISOString(), to: cutoff.toISOString(), limit: 1 },
-        signal,
-      ),
-    staleTime: 60_000,
-  });
+  // The server counts exactly what a lower window deletes (`?preview=<days>`).
+  const preview = useQuery({ ...retentionQuery(project.id, days), enabled: lowering, placeholderData: keepPreviousData });
+  const doomed = lowering && preview.data && !preview.isPlaceholderData ? (preview.data.previewDeletedEvents ?? undefined) : undefined;
 
   const save = useMutation({
     mutationFn: (confirm?: string) => api.projects.update(project.id, { retentionDays: days, confirm }),
@@ -69,7 +62,9 @@ function RetentionForm({ project }: { project: Project }) {
       await queryClient.invalidateQueries({ queryKey: keys.project(project.id) });
       await queryClient.invalidateQueries({ queryKey: keys.projects });
       toast.success(`Retention set to ${formatRetention(updated.retentionDays)}`, {
-        description: lowering ? 'Events past the new window were permanently deleted.' : 'Older events will now be kept longer.',
+        description: lowering
+          ? `${doomed === undefined ? 'Events' : pluralize(doomed, 'event')} past the new window ${doomed === 1 ? 'was' : 'were'} permanently deleted.`
+          : 'Future events will be kept longer.',
       });
     },
     onError: (error) => {
@@ -77,8 +72,6 @@ function RetentionForm({ project }: { project: Project }) {
         toast.error('Could not change retention', { description: errorMessage(error) });
     },
   });
-
-  const run = status.data?.lastRun;
 
   return (
     <div className="flex flex-col gap-5">
@@ -111,19 +104,17 @@ function RetentionForm({ project }: { project: Project }) {
       >
         <RetentionPicker current={project.retentionDays} onChange={setDays} value={days} />
         {lowering ? (
-          <p className="flex items-start gap-2 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm">
+          <div
+            className="tm-fade-in flex items-start gap-2.5 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2.5 text-sm"
+            role="status"
+          >
             <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
-            <span>
-              Lowering to {formatRetention(days)} deletes every event before <span className="font-medium">{formatDate(cutoff.toISOString())}</span>
-              {doomed.data ? (
-                <>
-                  {' '}
-                  — about <span className="font-medium tabular-nums">{formatNumber(doomed.data.total)}</span> events
-                </>
-              ) : null}
-              . It happens as soon as you confirm.
-            </span>
-          </p>
+            <p>
+              Lowering to {formatRetention(days)} deletes every event before{' '}
+              <Timestamp className="font-medium" format="full" iso={cutoff.toISOString()} />.{' '}
+              <DoomedCount count={doomed} error={preview.isError} loading={preview.isFetching} /> It happens as soon as you confirm.
+            </p>
+          </div>
         ) : changed ? (
           <p className="text-muted-foreground text-sm">Raising retention keeps future events longer. Events already deleted do not come back.</p>
         ) : null}
@@ -131,45 +122,23 @@ function RetentionForm({ project }: { project: Project }) {
 
       <SettingsSection description="A purge job runs every hour, and immediately after retention is lowered." title="Status">
         {status.isPending ? (
-          <Skeleton className="h-20 w-full" />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Skeleton className="h-12" />
+            <Skeleton className="h-12" />
+            <Skeleton className="h-12" />
+            <Skeleton className="h-12" />
+          </div>
         ) : status.isError ? (
-          <p className="text-muted-foreground text-sm">Retention status is not available from this server yet ({errorMessage(status.error)}).</p>
+          <ErrorState className="py-6" error={status.error} onRetry={() => status.refetch()} title="Retention status is unavailable" />
         ) : (
-          <dl className="grid gap-4 text-sm sm:grid-cols-3">
-            <div className="flex flex-col gap-1">
-              <dt className="text-muted-foreground text-xs">Current window</dt>
-              <dd className="font-medium">{formatRetention(status.data.retentionDays)}</dd>
-            </div>
-            <div className="flex flex-col gap-1">
-              <dt className="text-muted-foreground text-xs">Oldest event</dt>
-              <dd className="font-medium" title={status.data.oldestEventAt ? formatFull(status.data.oldestEventAt) : undefined}>
-                {status.data.oldestEventAt
-                  ? `${formatDate(status.data.oldestEventAt)} · ${formatRelative(status.data.oldestEventAt)}`
-                  : 'No events stored'}
-              </dd>
-            </div>
-            <div className="flex flex-col gap-1">
-              <dt className="text-muted-foreground text-xs">Last purge</dt>
-              <dd className="flex items-center gap-1.5 font-medium">
-                {run ? (
-                  <>
-                    <OutcomeDot outcome={run.status === 'succeeded' ? 'success' : run.status === 'failed' ? 'failure' : 'unknown'} />
-                    {run.status} {formatRelative(run.finishedAt ?? run.startedAt)}
-                  </>
-                ) : (
-                  <span className="font-normal text-muted-foreground">Runs hourly — no run reported</span>
-                )}
-              </dd>
-              {run ? <span className="text-muted-foreground text-xs">Deleted events before {formatDate(run.cutoff)}</span> : null}
-              {run?.error ? <span className="text-destructive text-xs">{run.error}</span> : null}
-            </div>
-          </dl>
+          <RetentionStatusGrid status={status.data} />
         )}
       </SettingsSection>
 
       <LowerRetentionDialog
+        cutoff={cutoff}
         days={days}
-        doomed={doomed.data?.total}
+        doomed={doomed}
         error={save.error instanceof ApiRequestError && save.error.code === 'confirmation_required' ? save.error.message : null}
         onConfirm={(slug) => save.mutate(slug)}
         onOpenChange={(open) => {
@@ -179,9 +148,89 @@ function RetentionForm({ project }: { project: Project }) {
         open={confirmOpen}
         pending={save.isPending}
         project={project}
-        cutoff={cutoff}
       />
     </div>
+  );
+}
+
+function DoomedCount({ count, loading, error }: { count: number | undefined; loading: boolean; error: boolean }) {
+  if (count !== undefined)
+    return (
+      <span>
+        That is <span className="font-semibold tabular-nums">{pluralize(count, 'event')}</span>
+        {count === 0 ? ' — nothing is old enough to be removed yet.' : '.'}
+      </span>
+    );
+  if (loading)
+    return (
+      <span className="inline-flex items-center gap-1 text-muted-foreground">
+        <Loader2Icon className="size-3 animate-spin" /> Counting affected events…
+      </span>
+    );
+  if (error) return <span className="text-muted-foreground">The number of affected events could not be counted.</span>;
+  return null;
+}
+
+function StatusItem({ label, children, detail }: { label: string; children: ReactNode; detail?: ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <dt className="text-muted-foreground text-xs">{label}</dt>
+      <dd className="flex min-w-0 items-center gap-1.5 font-medium text-sm">{children}</dd>
+      {detail ? <dd className="text-muted-foreground text-xs">{detail}</dd> : null}
+    </div>
+  );
+}
+
+const RUN_OUTCOME: Record<string, string> = { completed: 'success', succeeded: 'success', failed: 'failure', running: 'unknown' };
+
+function RetentionStatusGrid({ status }: { status: RetentionStatus }) {
+  const run = status.lastRun;
+  return (
+    <dl className="grid gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
+      <StatusItem label="Current window">{formatRetention(status.retentionDays)}</StatusItem>
+      <StatusItem detail={status.oldestEventAt ? <Timestamp format="relative" iso={status.oldestEventAt} /> : null} label="Oldest event">
+        {status.oldestEventAt ? (
+          <Timestamp format="date" iso={status.oldestEventAt} />
+        ) : (
+          <span className="font-normal text-muted-foreground">No events stored</span>
+        )}
+      </StatusItem>
+      <StatusItem
+        detail={
+          run ? (
+            run.error ? (
+              <span className="text-destructive">{run.error}</span>
+            ) : (
+              <>
+                {run.deletedEvents === null ? 'Removed' : `Removed ${pluralize(run.deletedEvents, 'event')}`} before{' '}
+                <Timestamp format="date" iso={run.cutoff} />
+              </>
+            )
+          ) : null
+        }
+        label="Last purge"
+      >
+        {run ? (
+          <>
+            <OutcomeDot outcome={RUN_OUTCOME[run.status] ?? 'unknown'} />
+            <span className="capitalize">{run.status}</span>
+            <Timestamp className="font-normal text-muted-foreground" format="relative" iso={run.finishedAt ?? run.startedAt} />
+          </>
+        ) : (
+          <span className="font-normal text-muted-foreground">No purge has run yet</span>
+        )}
+      </StatusItem>
+      <StatusItem
+        detail={status.nextPurgeAt ? <Timestamp format="full" iso={status.nextPurgeAt} /> : 'The worker schedules it hourly'}
+        label="Next purge"
+      >
+        {status.nextPurgeAt ? (
+          <Timestamp format="relative" iso={status.nextPurgeAt} />
+        ) : (
+          <span className="font-normal text-muted-foreground">Not scheduled</span>
+        )}
+      </StatusItem>
+    </dl>
   );
 }
 
@@ -228,13 +277,12 @@ function LowerRetentionDialog({
             <AlertDialogMedia className="bg-destructive/10 text-destructive">
               <TriangleAlertIcon />
             </AlertDialogMedia>
-            <AlertDialogTitle>Permanently delete older events?</AlertDialogTitle>
+            <AlertDialogTitle>{doomed ? `Permanently delete ${formatNumber(doomed)} events?` : 'Permanently delete older events?'}</AlertDialogTitle>
             <AlertDialogDescription>
               Lowering <span className="font-medium text-foreground">{project.name}</span> from {formatRetention(project.retentionDays)} to{' '}
               {formatRetention(days)} deletes every event before{' '}
-              <span className="font-medium text-foreground">{formatFull(cutoff.toISOString())}</span>
-              {doomed !== undefined ? ` (about ${formatNumber(doomed)} events)` : ''}. They are removed from search, dashboards and exports, and
-              cannot be recovered.
+              <Timestamp className="font-medium text-foreground" format="full" iso={cutoff.toISOString()} />. They are removed from search, dashboards
+              and exports, and cannot be recovered.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex flex-col gap-1.5">

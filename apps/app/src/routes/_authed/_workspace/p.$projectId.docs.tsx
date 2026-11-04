@@ -68,7 +68,6 @@ function Heading({ id, children }: { id: string; children: ReactNode }) {
 
 function DocsPage() {
   const { projectId } = Route.useParams();
-  const keyPlaceholder = 'tm_ingest_…';
   return (
     <div className="mx-auto grid w-full max-w-6xl gap-10 p-4 sm:p-6 lg:grid-cols-[1fr_200px]">
       <article className="flex min-w-0 flex-col gap-10">
@@ -96,8 +95,8 @@ function DocsPage() {
           <Heading id="send">2 · Send an event</Heading>
           <CodeTabs
             tabs={[
-              { id: 'sdk', label: 'TypeScript', code: sdkSnippet(keyPlaceholder), language: 'ts' },
-              { id: 'curl', label: 'curl', code: curlSnippet(keyPlaceholder), language: 'bash' },
+              { id: 'sdk', label: 'TypeScript', code: sdkSnippet(), language: 'ts' },
+              { id: 'curl', label: 'curl', code: curlSnippet(), language: 'bash' },
             ]}
           />
           <p className="text-muted-foreground text-sm">
@@ -182,7 +181,7 @@ function DocsPage() {
             Products that show history to their own users read through <span className="font-mono text-foreground">GET /v1/events</span> with a read
             key and the same query language.
           </p>
-          <CodeBlock code={readCurlSnippet('tm_read_…')} language="bash" />
+          <CodeBlock code={readCurlSnippet()} language="bash" />
         </section>
       </article>
       <nav aria-label="On this page" className="hidden lg:block">

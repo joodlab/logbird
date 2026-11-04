@@ -41,6 +41,10 @@ interface ExplorerProps {
 
 const FACETS_KEY = 'trailmark.explorer.facets';
 
+function newestArrival(events: AuditEvent[]): string | undefined {
+  return events.reduce<string | undefined>((max, e) => (!max || e.receivedAt > max ? e.receivedAt : max), undefined);
+}
+
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   return Boolean(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.closest('[role=dialog]')));
@@ -79,9 +83,10 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
     sinceRef.current = null;
   }, [effectiveQ, range, live]);
 
+  // The tail follows *arrival* (`receivedAt`), so late or back-dated events still stream in.
   const firstPage = events.data?.pages[0]?.data;
   useEffect(() => {
-    if (!sinceRef.current && firstPage) sinceRef.current = firstPage[0]?.timestamp ?? new Date().toISOString();
+    if (!sinceRef.current && firstPage) sinceRef.current = newestArrival(firstPage) ?? new Date().toISOString();
   }, [firstPage]);
 
   useQuery({
@@ -92,11 +97,11 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
     gcTime: 0,
     queryFn: async ({ signal }) => {
       const since = sinceRef.current ?? new Date().toISOString();
-      // `since` is inclusive on event time, so the newest known rows come back too: dedupe by id.
+      // `since` is inclusive, so the newest known arrivals come back too: dedupe by id.
       const data = await api.events.live(projectId, { since, q: effectiveQ || undefined, limit: 100 }, signal);
-      const known = new Set([...(events.data?.pages[0]?.data ?? []), ...liveRowsRef.current].map((e) => e.id));
+      const known = new Set([...(firstPage ?? []), ...liveRowsRef.current].map((e) => e.id));
       const incoming = data.filter((e) => !known.has(e.id));
-      if (data.length) sinceRef.current = data.reduce((max, e) => (e.timestamp > max ? e.timestamp : max), since);
+      sinceRef.current = newestArrival(data) ?? since;
       if (incoming.length) {
         setLiveRows((prev) => [...incoming, ...prev].slice(0, 2000));
         setFresh(new Set(incoming.map((e) => e.id)));
@@ -304,7 +309,6 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
             height={embedded ? 96 : 112}
             loading={histogram.isFetching && !histogram.isPending}
             onZoom={(from, to) => onChange({ range: absoluteRange(from, to), live: undefined })}
-            range={range}
           />
         ) : null}
       </div>

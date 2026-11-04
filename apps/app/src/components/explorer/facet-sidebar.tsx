@@ -15,15 +15,18 @@ interface FacetSpec {
   label: string;
   mono?: boolean;
   defaultOpen?: boolean;
+  /** Values are ids with display names as labels: show the name, keep the id secondary. */
+  named?: boolean;
 }
 
 const FACETS: FacetSpec[] = [
   { field: 'outcome', label: 'Outcome', defaultOpen: true },
   { field: 'severity', label: 'Severity', defaultOpen: true },
   { field: 'action', label: 'Action', mono: true, defaultOpen: true },
-  { field: 'actor', label: 'Actor', defaultOpen: true },
-  { field: 'tenant', label: 'Tenant' },
-  { field: 'executor', label: 'Executor' },
+  { field: 'actor', label: 'Actor', defaultOpen: true, named: true },
+  { field: 'tenant', label: 'Tenant', named: true },
+  { field: 'executor', label: 'Executor', named: true },
+  { field: 'target', label: 'Record', named: true },
   { field: 'executor.type', label: 'Executor type', mono: true },
   { field: 'actor.type', label: 'Actor type', mono: true },
   { field: 'target.type', label: 'Target type', mono: true },
@@ -123,7 +126,7 @@ function FacetGroup({
                       excluded && 'text-muted-foreground line-through decoration-outcome-failure/60',
                     )}
                     onClick={(e) => onChange(toggleTerm(q, queryField, v.value, e.altKey ? 'exclude' : 'include'))}
-                    title={`${v.label} — click to filter, ⌥-click to exclude`}
+                    title={`${spec.named && v.label !== v.value ? `${v.label} (${v.value})` : v.label} — click to filter, ⌥-click to exclude`}
                     type="button"
                   >
                     <span
@@ -132,7 +135,14 @@ function FacetGroup({
                       style={{ width: `${(v.count / max) * 100}%` }}
                     />
                     {spec.field === 'outcome' ? <OutcomeDot className="relative" outcome={v.value} /> : null}
-                    <span className={cn('relative min-w-0 flex-1 truncate', spec.mono && 'font-mono text-[12px]')}>{v.label || '(empty)'}</span>
+                    <span className="relative flex min-w-0 flex-1 items-baseline gap-1.5">
+                      <span className={cn('min-w-0 truncate', spec.mono && 'font-mono text-[12px]', !v.label && 'text-muted-foreground italic')}>
+                        {v.label || '(none)'}
+                      </span>
+                      {spec.named && v.label && v.label !== v.value ? (
+                        <span className="min-w-0 shrink-[3] truncate font-mono text-[10.5px] text-muted-foreground">{v.value}</span>
+                      ) : null}
+                    </span>
                     <span className="relative shrink-0 text-[11px] text-muted-foreground tabular-nums group-hover/facet:opacity-0">
                       {formatCompact(v.count)}
                     </span>

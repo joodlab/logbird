@@ -1,5 +1,6 @@
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from '@tanstack/react-query';
 import type { EntityKind } from '@trailmark/contracts';
+import { authClient } from '@/lib/auth-client';
 import { resolveRange } from '@/lib/range';
 import { api } from './client';
 import { ApiRequestError } from './errors';
@@ -24,7 +25,13 @@ export const meQuery = () =>
   queryOptions({
     queryKey: keys.me,
     // No abort signal: route guards await this query, and an unmounting observer must not cancel it.
-    queryFn: () => api.me(),
+    // better-auth's get-session answers 200/null when signed out, so a signed-out visit never
+    // produces a failed request; /api/me is only called with a live session.
+    queryFn: async () => {
+      const session = await authClient.getSession();
+      if (!session.data) throw new ApiRequestError(401, 'unauthorized', 'Sign in to continue.');
+      return api.me();
+    },
     staleTime: 60_000,
     retry: noRetryOn4xx,
   });
@@ -46,25 +53,13 @@ export const projectQuery = (projectId: string) =>
   });
 
 /**
- * Retention status. Servers without `GET /projects/:id/retention` (contracts/console.ts) still get
- * the oldest stored event from an ascending search; the last purge run is then unknown.
+ * Retention status (oldest stored event, last and next purge). With `preview` (days) the server
+ * also counts exactly how many events lowering retention to that window would delete.
  */
-export const retentionQuery = (projectId: string, retentionDays: number) =>
+export const retentionQuery = (projectId: string, preview?: number) =>
   queryOptions({
-    queryKey: [...keys.project(projectId), 'retention', retentionDays] as const,
-    queryFn: async ({ signal }) => {
-      try {
-        return await api.projects.retention(projectId, signal);
-      } catch (error) {
-        if (!(error instanceof ApiRequestError && error.status === 404)) throw error;
-        const oldest = await api.events.search(
-          projectId,
-          { from: new Date(Date.now() - (retentionDays + 1) * 86_400_000).toISOString(), to: new Date().toISOString(), order: 'asc', limit: 1 },
-          signal,
-        );
-        return { retentionDays, oldestEventAt: oldest.data[0]?.timestamp ?? null, lastRun: null };
-      }
-    },
+    queryKey: [...keys.project(projectId), 'retention', preview ?? null] as const,
+    queryFn: ({ signal }) => api.projects.retention(projectId, preview, signal),
     retry: noRetryOn4xx,
   });
 

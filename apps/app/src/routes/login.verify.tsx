@@ -9,7 +9,6 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { meQuery } from '@/lib/api/queries';
-import { FIXTURES } from '@/lib/api/transport';
 import { authCall, authClient } from '@/lib/auth-client';
 import { markOtpSent, otpCooldownLeft } from '@/lib/otp';
 import { safeRedirect } from '@/lib/session';
@@ -127,11 +126,6 @@ function VerifyStep() {
           ) : (
             <p className="text-muted-foreground text-xs" id="otp-help">
               Tip: paste the whole code — it fills every box.
-              {FIXTURES ? (
-                <span className="ms-1 font-medium text-foreground">
-                  Fixture mode: use <span className="font-mono">424242</span>.
-                </span>
-              ) : null}
             </p>
           )}
         </div>

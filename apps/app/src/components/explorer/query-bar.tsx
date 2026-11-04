@@ -1,13 +1,12 @@
 import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useQuery } from '@tanstack/react-query';
-import type { EntityKind } from '@trailmark/contracts';
 import { Kbd } from '@trailmark/ui/components/ui/kbd';
 import { cn } from '@trailmark/ui/lib/utils';
 import { CornerDownLeftIcon, SearchIcon, XIcon } from 'lucide-react';
 import { type Ref, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api/client';
 import { facetQuery } from '@/lib/api/queries';
-import { canonicalField, facetFieldFor, QUERY_FIELDS, type QueryToken, tokenAt, tokenize } from '@/lib/query-language';
+import { canonicalField, fieldSpec, QUERY_FIELDS, type QueryToken, tokenAt, tokenize } from '@/lib/query-language';
 
 export interface QueryBarHandle {
   focus: () => void;
@@ -29,9 +28,9 @@ interface Suggestion {
   detail?: string;
   count?: number;
   kind: 'field' | 'value';
+  /** Value suggestions that show a display name (sans) with the inserted id as detail (mono). */
+  named?: boolean;
 }
-
-const ENTITY_FIELDS: Record<string, EntityKind> = { actor: 'actor', tenant: 'tenant', executor: 'executor', target: 'target' };
 
 function tokenClass(t: QueryToken): string {
   switch (t.kind) {
@@ -96,8 +95,9 @@ export function QueryBar({ projectId, range, value, onSubmit, placeholder, class
   const partial = (fieldContext ? (fieldContext.value ?? '') : current?.kind === 'text' ? (current.value ?? '') : '').toLowerCase();
   const [debouncedPartial] = useDebouncedValue(partial, { wait: 150 });
 
-  const facetField = field ? facetFieldFor(field) : undefined;
-  const entityKind = field ? ENTITY_FIELDS[field] : undefined;
+  const spec = field ? fieldSpec(field) : undefined;
+  const facetField = spec?.facet;
+  const entityKind = spec?.entity;
   const facetValues = useQuery({
     ...facetQuery(projectId, facetField ?? 'action', range, '', 30),
     enabled: open && Boolean(facetField) && !entityKind,
@@ -119,29 +119,40 @@ export function QueryBar({ projectId, range, value, onSubmit, placeholder, class
             key: e.id,
             insert: raw,
             label: e.name || raw,
-            detail: entityKind === 'target' ? e.id : e.id,
+            detail: e.name && e.name !== raw ? e.id : undefined,
             count: e.events,
             kind: 'value' as const,
+            named: Boolean(e.name && e.name !== raw),
           };
         });
       }
       return (facetValues.data?.values ?? [])
         .filter((v) => !partial || v.value.toLowerCase().includes(partial) || v.label.toLowerCase().includes(partial))
         .slice(0, 10)
-        .map((v) => ({
-          key: v.value,
-          insert: v.value,
-          label: v.value,
-          detail: v.label !== v.value ? v.label : undefined,
-          count: v.count,
-          kind: 'value' as const,
-        }));
+        .map((v) =>
+          spec?.byLabel
+            ? { key: v.value, insert: v.label, label: v.label, detail: v.value, count: v.count, kind: 'value' as const, named: true }
+            : {
+                key: v.value,
+                insert: v.value,
+                label: v.value,
+                detail: v.label !== v.value ? v.label : undefined,
+                count: v.count,
+                kind: 'value' as const,
+              },
+        )
+        .filter((v, i, all) => all.findIndex((x) => x.insert === v.insert) === i);
     }
     const prefix = current?.kind === 'text' ? (current.value ?? '').toLowerCase() : '';
-    return QUERY_FIELDS.filter((f) => !prefix || f.key.startsWith(prefix))
-      .slice(0, prefix ? 8 : 12)
-      .map((f) => ({ key: f.key, insert: f.key.endsWith('.') ? f.key : `${f.key}:`, label: f.key, detail: f.description, kind: 'field' as const }));
-  }, [open, fieldContext, field, entityKind, entityValues.data, facetValues.data, partial, current]);
+    // "name" also finds actor.name / tenant.name / executor.name.
+    return QUERY_FIELDS.filter((f) => !prefix || f.key.startsWith(prefix) || f.key.includes(`.${prefix}`)).map((f) => ({
+      key: f.key,
+      insert: f.key.endsWith('.') ? f.key : `${f.key}:`,
+      label: f.key,
+      detail: f.description,
+      kind: 'field' as const,
+    }));
+  }, [open, fieldContext, field, spec, entityKind, entityValues.data, facetValues.data, partial, current]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset the highlighted option whenever the suggestion list changes
   useEffect(() => setActive(0), [suggestions.length, field]);
@@ -296,14 +307,32 @@ export function QueryBar({ projectId, range, value, onSubmit, placeholder, class
                 onMouseEnter={() => setActive(i)}
                 role="option"
               >
-                <span className={cn('shrink-0 font-mono text-[12px]', s.kind === 'field' ? 'text-syntax-key' : 'text-foreground')}>{s.label}</span>
-                {s.detail ? <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">{s.detail}</span> : <span className="flex-1" />}
+                <span
+                  className={cn(
+                    'min-w-0 shrink truncate',
+                    s.named ? 'text-[13px] text-foreground' : 'font-mono text-[12px]',
+                    s.kind === 'field' ? 'shrink-0 text-syntax-key' : 'text-foreground',
+                  )}
+                >
+                  {s.label}
+                </span>
+                {s.detail ? (
+                  <span className={cn('min-w-0 flex-1 truncate text-muted-foreground text-xs', s.named && 'font-mono text-[11px]')}>{s.detail}</span>
+                ) : (
+                  <span className="flex-1" />
+                )}
                 {s.count !== undefined ? (
                   <span className="shrink-0 text-muted-foreground text-xs tabular-nums">{s.count.toLocaleString('en-US')}</span>
                 ) : null}
               </div>
             ))}
           </div>
+          {fieldContext ? null : (
+            <div className="border-t px-3 py-1.5 text-[11px] text-muted-foreground">
+              Terms are ANDed. Use <span className="font-mono font-semibold text-syntax-keyword">OR</span> and parentheses for either:{' '}
+              <span className="font-mono">(outcome:failure OR outcome:denied) action:booking.*</span>
+            </div>
+          )}
         </div>
       ) : null}
     </div>

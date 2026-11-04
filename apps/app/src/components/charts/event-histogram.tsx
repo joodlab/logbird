@@ -4,7 +4,6 @@ import { cn } from '@trailmark/ui/lib/utils';
 import { useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ReferenceArea, XAxis, YAxis } from 'recharts';
 import { formatAxis } from '@/lib/format';
-import { resolveRange } from '@/lib/range';
 import { OutcomeTooltip } from './chart-tooltip';
 import { outcomeChartConfig, SERIES, tickFormatter, toSeries } from './outcome-series';
 
@@ -15,8 +14,6 @@ interface EventHistogramProps {
   onZoom?: (fromMs: number, toMs: number) => void;
   className?: string;
   loading?: boolean;
-  /** Range string the histogram covers, for zero-filling quiet edges. */
-  range?: string;
 }
 
 interface ChartPointerState {
@@ -25,8 +22,8 @@ interface ChartPointerState {
 }
 
 /** Stacked outcome bars. Drag across bars to zoom the time range; click one bar to zoom into it. */
-export function EventHistogram({ data, height = 120, onZoom, className, loading, range }: EventHistogramProps) {
-  const rows = useMemo(() => toSeries(data, range ? resolveRange(range) : undefined), [data, range]);
+export function EventHistogram({ data, height = 120, onZoom, className, loading }: EventHistogramProps) {
+  const rows = useMemo(() => toSeries(data), [data]);
   const interval = data?.interval ?? 60;
   const [drag, setDrag] = useState<{ start: number; end: number } | null>(null);
 
