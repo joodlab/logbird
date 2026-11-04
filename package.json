@@ -24,7 +24,9 @@
     "db:migrate": "pnpm --filter @trailmark/database migrate:dev",
     "db:deploy": "pnpm --filter @trailmark/database migrate:deploy",
     "ch:migrate": "pnpm --filter @trailmark/clickhouse migrate",
-    "seed": "pnpm --filter @trailmark/seed seed"
+    "seed": "pnpm --filter @trailmark/seed seed",
+    "demo": "node --env-file=.env --import tsx scripts/demo.ts",
+    "e2e": "node --env-file=.env --import tsx scripts/e2e-smoke.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.11",
@@ -33,6 +35,11 @@
     "typescript": "^7.0.2",
     "tsx": "4.23.13",
     "ultracite": "7.10.7",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "@trailmark/clickhouse": "workspace:*",
+    "@trailmark/database": "workspace:*",
+    "@trailmark/sdk": "workspace:*",
+    "@trailmark/seed": "workspace:*",
+    "@trailmark/contracts": "workspace:*"
   }
 }
