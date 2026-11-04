@@ -203,7 +203,15 @@ Live polling `/live?since=<ISO>` uses arrival time received_at inclusively, orde
 newest arrivals first, and dedupes IDs within the response. Clients overlap polls
 and dedupe IDs across responses. Event timestamp and receivedAt remain unchanged.
 Histograms zero-fill UTC buckets overlapping the half-open requested range; missing
-outcome counts are zero. Requests exceeding 10000 buckets are rejected.
+outcome counts are zero. Requests exceeding 10000 buckets are rejected. Without an explicit
+`interval` the server picks the smallest step of the ladder 1m, 5m, 10m, 15m, 30m, 1h, 3h, 6h,
+12h, 1d that keeps the range at ≤ 120 buckets (whole days beyond that); buckets are aligned to
+UTC multiples of their size, so ≥ 1h buckets start on whole hours (24h → 15m, 7d → 3h, 30d → 6h).
+
+`GET /api/projects/:projectId/entities?kind=…&sort=events|lastSeen|name` lists a directory.
+`events` (default) is most active first, ties broken by most recently seen; `lastSeen` is most
+recent first; `name` is A→Z (unnamed entities by id). `nextCursor` is an opaque keyset cursor
+bound to its sort.
 
 ### 5.1 Query language (`q`)
 ```
@@ -216,6 +224,8 @@ executor.name:"CRM worker"  actor.email:raed@example.com  impersonator:usr_1
 parent:evt_123  job:456
 target:hotel_123  target.type:hotel  operation:op_101  request:req_abc  trace:…  source:staybook
 attr.metadata.plan:pro             attribute map lookup (wildcard * allowed at end)
+impersonator:*  -tenant:*          field:* = field present (non-empty value); -field:* = missing.
+                                  Works for every core column and attribute key; x* stays a prefix match
 severity:critical  category:hotel  id:<event id>
 "free text"  or  bare words        token search over description/actor/tenant/target names
 a OR b, (a OR b) c                OR and parentheses; implicit AND binds more tightly

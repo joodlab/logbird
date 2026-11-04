@@ -12,6 +12,7 @@ export const Route = createFileRoute('/_authed/onboarding')({
 });
 
 const STEPS = [
+  { id: 'you', label: 'You', match: (p: string) => p.startsWith('/onboarding/profile') },
   { id: 'workspace', label: 'Workspace', match: (p: string) => p === '/onboarding' || p === '/onboarding/' },
   { id: 'project', label: 'Project', match: (p: string) => p.startsWith('/onboarding/project') },
   { id: 'event', label: 'First event', match: (p: string) => p.startsWith('/onboarding/first-event') },

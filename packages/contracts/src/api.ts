@@ -33,8 +33,22 @@ export const searchResponseSchema = z.object({
 });
 export type SearchResponse = z.infer<typeof searchResponseSchema>;
 
+/**
+ * Histogram bucket ladder (seconds). When `interval` is omitted the server picks the smallest step that keeps the
+ * range at ≤ ~120 buckets (multiples of 1d beyond that). Buckets are aligned to UTC boundaries of their size, so
+ * hourly-and-larger buckets always start on whole hours.
+ */
+export const HISTOGRAM_LADDER = [60, 300, 600, 900, 1800, 3600, 10_800, 21_600, 43_200, 86_400] as const;
+export const HISTOGRAM_TARGET_BUCKETS = 120;
+export function pickHistogramInterval(rangeMs: number, target = HISTOGRAM_TARGET_BUCKETS): number {
+  const seconds = Math.max(1, rangeMs / 1000);
+  // One bucket of slack: a "30d" window that ends a few ms after now must still get 6h buckets.
+  const step = HISTOGRAM_LADDER.find((c) => seconds / c <= target + 1);
+  return step ?? 86_400 * Math.ceil(seconds / 86_400 / target);
+}
+
 export const histogramQuerySchema = rangeQuerySchema.extend({
-  /** Bucket size in seconds; server picks a sensible one (~60 buckets) when omitted. */
+  /** Bucket size in seconds; server picks one from HISTOGRAM_LADDER (≤ ~120 buckets) when omitted. */
   interval: z.coerce.number().int().min(1).optional(),
 });
 export const histogramResponseSchema = z.object({
@@ -125,10 +139,16 @@ export const entitySchema = z.object({
 });
 export type Entity = z.infer<typeof entitySchema>;
 
+export const ENTITY_SORTS = ['events', 'lastSeen', 'name'] as const;
+export const entitySortSchema = z.enum(ENTITY_SORTS);
+export type EntitySort = z.infer<typeof entitySortSchema>;
+
 export const entityListQuerySchema = z.object({
   kind: entityKindSchema,
   q: z.string().max(200).optional(), // fuzzy match on id + name
   type: z.string().optional(),
+  /** events: most active first (then most recently seen); lastSeen: most recent first; name: A→Z. */
+  sort: entitySortSchema.default('events'),
   limit: z.coerce.number().int().min(1).max(100).default(25),
   cursor: z.string().optional(),
 });

@@ -12,7 +12,7 @@ import { EventHistogram } from '@/components/charts/event-histogram';
 import { api } from '@/lib/api/client';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
-import { absoluteRange, isValidRange, pickInterval, rangeLabel } from '@/lib/range';
+import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
 import { EventSheet } from './event-sheet';
 import { EventsTable } from './events-table';
 import { ColumnPicker, ExportMenu, SaveViewButton } from './explorer-toolbar';
@@ -68,7 +68,7 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
 
   const events = useInfiniteQuery(eventsInfiniteQuery(projectId, range, effectiveQ));
   // Round bucket sizes (30 min for 24 h, 3 h for 7 d) so bars line up with the axis ticks.
-  const histogram = useQuery(histogramQuery(projectId, range, effectiveQ, pickInterval(range)));
+  const histogram = useQuery(histogramQuery(projectId, range, effectiveQ));
 
   /* ---------------- live tail ---------------- */
   const relative = isValidRange(range) && !range.includes('..');

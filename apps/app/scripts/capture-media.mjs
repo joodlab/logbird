@@ -254,7 +254,15 @@ if (want('onboarding')) {
   const code = await latestOtp(email, sentAt);
   await otp.click();
   await type(page, code, 100);
-  await page.waitForURL((u) => u.pathname.startsWith('/onboarding'), { timeout: 30_000 });
+  await page.waitForURL((u) => u.pathname.startsWith('/onboarding/profile'), { timeout: 30_000 });
+  await settle(page, 800);
+  await snap(page, 'step');
+  // OTP sign-up has no name yet: the first step asks for one.
+  await page.getByLabel('Your name').click();
+  await type(page, 'Nour Al-Huda');
+  await page.screenshot({ path: path.join(OUT, 'light-onboarding-name.png') });
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.waitForURL((u) => u.pathname === '/onboarding' || u.pathname === '/onboarding/', { timeout: 20_000 });
   await settle(page, 800);
   await snap(page, 'step');
   await page.getByLabel('Workspace name').fill('');

@@ -4,6 +4,8 @@
  * "<isoFrom>..<isoTo>" window (what drag-to-zoom and the custom picker produce).
  */
 
+import { formatClock, formatMonthDay, localDayKey } from './format';
+
 export const RANGE_PRESETS = [
   { value: '15m', label: 'Last 15 minutes', short: '15m' },
   { value: '1h', label: 'Last hour', short: '1h' },
@@ -61,9 +63,6 @@ export function absoluteRange(fromMs: number, toMs: number): string {
   return `${new Date(Math.min(fromMs, toMs)).toISOString()}..${new Date(Math.max(fromMs, toMs)).toISOString()}`;
 }
 
-const dateFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
-const timeFmt = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
-
 export function rangeLabel(range: string): string {
   const preset = RANGE_PRESETS.find((p) => p.value === range);
   if (preset) return preset.label;
@@ -73,12 +72,9 @@ export function rangeLabel(range: string): string {
     return `Last ${rel[1]} ${unit}${rel[1] === '1' ? '' : 's'}`;
   }
   const r = resolveRange(range);
-  const from = new Date(r.fromMs);
-  const to = new Date(r.toMs);
-  const sameDay = from.toDateString() === to.toDateString();
-  return sameDay
-    ? `${dateFmt.format(from)}, ${timeFmt.format(from)} – ${timeFmt.format(to)}`
-    : `${dateFmt.format(from)} ${timeFmt.format(from)} – ${dateFmt.format(to)} ${timeFmt.format(to)}`;
+  return localDayKey(r.fromMs) === localDayKey(r.toMs)
+    ? `${formatMonthDay(r.fromMs)}, ${formatClock(r.fromMs)} – ${formatClock(r.toMs)}`
+    : `${formatMonthDay(r.fromMs)} ${formatClock(r.fromMs)} – ${formatMonthDay(r.toMs)} ${formatClock(r.toMs)}`;
 }
 
 export function rangeShortLabel(range: string): string {
@@ -92,11 +88,4 @@ export function previousWindow(range: string): { from: string; to: string } {
   const r = resolveRange(range);
   const len = r.toMs - r.fromMs;
   return { from: new Date(r.fromMs - len).toISOString(), to: r.from };
-}
-
-/** Pick a histogram bucket (seconds) that yields roughly `target` bars. */
-export function pickInterval(range: string, target = 60): number {
-  const seconds = rangeDurationMs(range) / 1000;
-  const candidates = [10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10_800, 21_600, 43_200, 86_400];
-  return candidates.find((c) => seconds / c <= target) ?? 86_400;
 }

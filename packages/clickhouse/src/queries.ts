@@ -3,6 +3,7 @@ import type {
   Entity,
   EntityKind,
   EntityProfile,
+  EntitySort,
   EventDetail,
   entityListQuerySchema,
   FacetResponse,
@@ -15,6 +16,7 @@ import type {
   SearchQuery,
   SearchResponse,
 } from '@trailmark/contracts';
+import { pickHistogramInterval } from '@trailmark/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import type { EventRow } from './normalize';
@@ -162,7 +164,7 @@ export async function liveEvents(ch: ClickHouseClient, p: string, q: { since: st
 export async function histogram(ch: ClickHouseClient, p: string, q: z.infer<typeof histogramQuerySchema>): Promise<HistogramResponse> {
   const w = where(p, q),
     range = timeRange(q),
-    interval = q.interval ?? Math.max(1, Math.ceil((Date.parse(range.to) - Date.parse(range.from)) / 60_000));
+    interval = q.interval ?? pickHistogramInterval(Date.parse(range.to) - Date.parse(range.from));
   const step = interval * 1000;
   const start = Math.floor(Date.parse(range.from) / step) * step;
   if (Math.ceil((Date.parse(range.to) - start) / step) > 10_000) throw new Error('Query exceeds 10000 histogram buckets');
@@ -284,16 +286,58 @@ export async function overview(ch: ClickHouseClient, p: string, q: RangeQuery): 
     },
   };
 }
-export async function listEntities(ch: ClickHouseClient, p: string, q: z.infer<typeof entityListQuerySchema>) {
-  const rows = await read<Entity>(
+type EntityListQuery = Omit<z.infer<typeof entityListQuerySchema>, 'sort'> & { sort?: EntitySort };
+/**
+ * Keyset ordering per sort. Every key sorts ascending (desc keys are negated) and ends with `id`, so the tuple
+ * comparison `(k1,k2,id) > cursor` pages without gaps or duplicates for a stable snapshot.
+ */
+const ENTITY_ORDER: Record<EntitySort, { keys: string; types: [string, string] }> = {
+  events: { keys: '-toInt64(events),-toUnixTimestamp64Milli(lastSeen)', types: ['Int64', 'Int64'] },
+  lastSeen: { keys: '-toUnixTimestamp64Milli(lastSeen),-toInt64(events)', types: ['Int64', 'Int64'] },
+  name: { keys: "lowerUTF8(if(name='',id,name)),''", types: ['String', 'String'] },
+};
+export async function listEntities(ch: ClickHouseClient, p: string, q: EntityListQuery) {
+  const sort = q.sort ?? 'events',
+    order = ENTITY_ORDER[sort];
+  let after = '';
+  const params: Params = { p, kind: q.kind, q: q.q ?? '', type: q.type ?? '', limit: q.limit + 1 };
+  if (q.cursor) {
+    const [c1, c2, id] = entityCursor(q.cursor, sort);
+    Object.assign(params, { c1, c2, cid: id });
+    after = `WHERE (${order.keys},id) > ({c1:${order.types[0]}},{c2:${order.types[1]}},{cid:String})`;
+  }
+  const rows = await read<Entity & { k1: string | number; k2: string | number }>(
     ch,
-    `SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} GROUP BY kind,id HAVING ({q:String}='' OR positionCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0 OR ngramSearchCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0.3) AND ({type:String}='' OR type={type:String}) AND id>{cursor:String} ORDER BY id LIMIT {limit:UInt32}`,
-    { p, kind: q.kind, q: q.q ?? '', type: q.type ?? '', cursor: q.cursor ?? '', limit: q.limit + 1 },
+    `SELECT *,tupleElement(k,1) k1,tupleElement(k,2) k2 FROM (SELECT *,tuple(${order.keys}) k FROM (SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} GROUP BY kind,id HAVING ({q:String}='' OR positionCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0 OR ngramSearchCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0.3) AND ({type:String}='' OR type={type:String}))) ${after} ORDER BY k,id LIMIT {limit:UInt32}`,
+    params,
+    // Directory pages aggregate the whole kind; keep the guard roomy but bounded.
+    20,
   );
+  const last = rows[q.limit - 1];
   return {
-    data: rows.slice(0, q.limit).map((r) => ({ ...r, firstSeen: iso(r.firstSeen), lastSeen: iso(r.lastSeen), events: Number(r.events) })),
-    nextCursor: rows.length > q.limit ? (rows[q.limit - 1]?.id ?? null) : null,
+    data: rows.slice(0, q.limit).map((r) => ({
+      kind: r.kind,
+      id: r.id,
+      type: r.type,
+      name: r.name,
+      firstSeen: iso(r.firstSeen),
+      lastSeen: iso(r.lastSeen),
+      events: Number(r.events),
+    })),
+    nextCursor: rows.length > q.limit && last ? encode([sort, String(last.k1), String(last.k2), last.id]) : null,
   };
+}
+function entityCursor(s: string, sort: EntitySort): [string, string, string] {
+  try {
+    const a: unknown = JSON.parse(Buffer.from(s, 'base64url').toString());
+    if (Array.isArray(a) && a.length === 4 && a.every((v) => typeof v === 'string') && a[0] === sort) {
+      const [, k1, k2, id] = a as [string, string, string, string];
+      return [k1, k2, id];
+    }
+  } catch {
+    /* Report malformed or cross-sort cursors with a stable public error below. */
+  }
+  throw new Error('Invalid cursor');
 }
 function entityFilter(kind: EntityKind, id: string) {
   return kind === 'target'

@@ -44,9 +44,11 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
           const last = i === sections.length - 1 && !dynamicCrumb;
           return (
             <span className="flex min-w-0 items-center gap-1" key={s.id}>
-              <ChevronRightIcon
-                className={i === 0 ? 'hidden size-3.5 shrink-0 text-muted-foreground/60 sm:block' : 'size-3.5 shrink-0 text-muted-foreground/60'}
-              />
+              {i === 0 && !params.projectId ? null : (
+                <ChevronRightIcon
+                  className={i === 0 ? 'hidden size-3.5 shrink-0 text-muted-foreground/60 sm:block' : 'size-3.5 shrink-0 text-muted-foreground/60'}
+                />
+              )}
               {last ? (
                 <span aria-current="page" className="truncate font-medium">
                   {s.label}
