@@ -26,25 +26,35 @@ export function parseQuery(q = ''): Term[] {
   const terms: Term[] = [];
   let token = '',
     quoted = false,
-    escaped = false;
+    escaped = false,
+    fieldColon = -1,
+    hadQuotes = false;
   const push = () => {
     if (!token) return;
     const negate = token.startsWith('-');
     const body = negate ? token.slice(1) : token;
-    if (body === 'OR' || body.includes('(') || body.includes(')')) throw new Error('OR and parentheses are not supported');
-    const colon = body.indexOf(':');
+    if (!hadQuotes && body === 'OR') throw new Error('OR is not supported');
+    const colon = fieldColon - (negate ? 1 : 0);
     terms.push({ field: colon > 0 ? body.slice(0, colon) : '', value: colon > 0 ? body.slice(colon + 1) : body, negate });
     if (terms.length > 64) throw new Error('Query exceeds 64 terms');
     token = '';
+    fieldColon = -1;
+    hadQuotes = false;
   };
   for (const c of q) {
     if (escaped) {
       token += c;
       escaped = false;
     } else if (c === '\\' && quoted) escaped = true;
-    else if (c === '"') quoted = !quoted;
-    else if (/\s/.test(c) && !quoted) push();
-    else token += c;
+    else if (c === '"') {
+      quoted = !quoted;
+      hadQuotes = true;
+    } else if (/\s/.test(c) && !quoted) push();
+    else {
+      if (!quoted && (c === '(' || c === ')')) throw new Error('Parentheses are not supported');
+      if (c === ':' && !quoted && fieldColon < 0) fieldColon = token.length;
+      token += c;
+    }
   }
   if (quoted || escaped) throw new Error('Unterminated quoted query');
   push();

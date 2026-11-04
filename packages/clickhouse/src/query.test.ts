@@ -104,3 +104,14 @@ describe('normalization', () => {
   });
   it.each([null, [], {}, { action: 1 }])('rejects no action %s', (input) => expect(normalizeEvent(input, ctx).ok).toBe(false));
 });
+
+it('bounds grammar and preserves quoted punctuation', () => {
+  expect(() => parseQuery('a OR b')).toThrow('OR');
+  expect(() => parseQuery('(a)')).toThrow('Parentheses');
+  expect(() => parseQuery('x '.repeat(65))).toThrow('64');
+  expect(() => parseQuery('a'.repeat(4097))).toThrow('4096');
+  expect(parseQuery('"Hello: (world)"')).toEqual([{ field: '', value: 'Hello: (world)', negate: false }]);
+  expect(compileQuery('attr.empty:""').sql).toContain('attribute_items');
+  expect(compileQuery('__proto__:safe').params.q0k).toBe('__proto__');
+  expect(compileQuery('\u0645\u0631\u062d\u0628\u0627').sql).toContain('hasToken');
+});
