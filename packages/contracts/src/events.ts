@@ -77,12 +77,18 @@ export const eventInputSchema = z.looseObject({
 export type EventInput = z.infer<typeof eventInputSchema>;
 
 /** Ingest body: a single event or a batch. Max 1000 events / 5 MB per request. */
-export const ingestBodySchema = z.union([z.object({ events: z.array(z.unknown()).min(1).max(1000) }), z.record(z.string(), z.unknown())]);
+export const ingestBodySchema = z.union([
+  z.array(z.unknown()).min(1).max(1000),
+  z.object({ events: z.array(z.unknown()).min(1).max(1000) }),
+  z.record(z.string(), z.unknown()),
+]);
 
 export const ingestResponseSchema = z.object({
   accepted: z.number().int(),
   ids: z.array(z.string()),
   rejected: z.array(z.object({ index: z.number().int(), reason: z.string() })),
+  /** Accepted events that were adjusted, e.g. an unusable occurredAt stored at receive time (original kept in attributes). */
+  warnings: z.array(z.object({ index: z.number().int(), reason: z.string() })).default([]),
 });
 export type IngestResponse = z.infer<typeof ingestResponseSchema>;
 

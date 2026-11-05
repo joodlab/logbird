@@ -92,9 +92,43 @@ setAuthAuditHandler((e) =>
 );
 app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  const authBody =
+    c.req.path === '/api/auth/organization/invite-member'
+      ? await c.req.raw
+          .clone()
+          .json()
+          .catch(() => null)
+      : null;
+  const pendingResend =
+    authBody?.resend === true &&
+    typeof authBody.email === 'string' &&
+    (authBody.organizationId === undefined || typeof authBody.organizationId === 'string') &&
+    session
+      ? await prisma.invitation.findFirst({
+          where: {
+            organizationId: authBody.organizationId ?? session.session.activeOrganizationId ?? '',
+            email: String(authBody.email).toLowerCase(),
+            status: 'pending',
+          },
+        })
+      : null;
   return authAuditContext.run(
     { actor: session?.user, requestId: c.get('requestId'), ip: clientAddress(c) ?? '', userAgent: c.req.header('user-agent') ?? '' },
-    () => auth.handler(c.req.raw),
+    async () => {
+      const response = await auth.handler(c.req.raw);
+      // Installed better-auth skips organization hooks on resend; audit the successful endpoint result.
+      if (response.ok && c.req.path === '/api/auth/organization/invite-member' && session && pendingResend) {
+        const invitation = await response.clone().json();
+        if (invitation.id === pendingResend.id)
+          await ingest(`ws:${invitation.organizationId}`, {
+            action: 'member.invitation.resent',
+            actor: { ...session.user, type: 'user' },
+            targets: [{ type: 'invitation', id: invitation.id, name: invitation.email }],
+            executor: { type: 'api', id: 'api-server' },
+          });
+      }
+      return response;
+    },
   );
 });
 app.get('/livez', (c) => c.json({ status: 'ok' }));

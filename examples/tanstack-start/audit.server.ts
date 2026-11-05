@@ -5,4 +5,10 @@ export const client = new Trailmark({
   apiKey: process.env.TRAILMARK_INGEST_KEY ?? '',
   onError: console.error,
 });
-export const options = { client, actor: () => ({ type: 'user', id: 'demo-user' }), tenant: () => ({ id: 'demo-tenant' }), onError: console.error };
+export const options = {
+  client,
+  actor: () => ({ type: 'user', id: 'demo-user' }),
+  executor: () => ({ type: 'api', id: 'demo-api', name: 'Demo API' }),
+  tenant: () => ({ id: 'demo-tenant' }),
+  onError: console.error,
+};

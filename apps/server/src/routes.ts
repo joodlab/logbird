@@ -153,20 +153,23 @@ export const managementRoutes = new Hono<AppEnv>()
               ...(setupDismissed !== undefined ? { setupDismissedAt: setupDismissed ? new Date() : null } : {}),
             },
           }),
-          before: current.retentionDays,
+          before: current,
         };
       });
       invalidateSetup(project.id);
-      if (input.retentionDays !== undefined) await enforceProjectRetention(project.id);
+      if (input.retentionDays !== undefined && input.retentionDays < before.retentionDays) await enforceProjectRetention(project.id);
       if (retentionReviewed) await audit(c, 'project.retention.reviewed', { type: 'project', id: project.id, name: project.name });
       if (setupDismissed !== undefined)
         await audit(c, 'project.setup.dismissed', { type: 'project', id: project.id, name: project.name }, [
           { field: 'setupDismissed', after: setupDismissed },
         ]);
-      await audit(c, 'project.updated', { type: 'project', id: project.id, name: project.name });
-      if (input.retentionDays !== undefined && input.retentionDays !== before)
+      const changes = (['name', 'description', 'retentionDays'] as const)
+        .filter((field) => before[field] !== project[field])
+        .map((field) => ({ field, before: before[field], after: project[field] }));
+      if (changes.length) await audit(c, 'project.updated', { type: 'project', id: project.id, name: project.name }, changes);
+      if (input.retentionDays !== undefined && input.retentionDays !== before.retentionDays)
         await audit(c, 'project.retention.changed', { type: 'project', id: project.id, name: project.name }, [
-          { field: 'retentionDays', before, after: project.retentionDays },
+          { field: 'retentionDays', before: before.retentionDays, after: project.retentionDays },
         ]);
       return c.json(serializeProject(project));
     },
@@ -252,6 +255,7 @@ export const managementRoutes = new Hono<AppEnv>()
     },
   )
   .delete('/projects/:projectId/views/:viewId', routeDoc('Delete saved view', { responses: { 204: { description: 'Deleted' } } }), async (c) => {
+    const view = await prisma.savedView.findFirst({ where: { id: c.req.param('viewId'), projectId: c.get('project').id } });
     const result = await prisma.savedView.deleteMany({
       where: {
         id: c.req.param('viewId'),
@@ -260,6 +264,6 @@ export const managementRoutes = new Hono<AppEnv>()
       },
     });
     if (!result.count) throw new ApiError(404, 'not_found', 'Saved view not found.');
-    await audit(c, 'saved_view.deleted', { type: 'saved_view', id: c.req.param('viewId') });
+    await audit(c, 'saved_view.deleted', { type: 'saved_view', id: c.req.param('viewId'), name: view?.name });
     return c.body(null, 204);
   });

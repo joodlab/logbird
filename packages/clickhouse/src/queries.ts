@@ -508,14 +508,69 @@ export async function projectStats(
   for (const r of rows) result[r.project_id] = { lastEventAt: iso(r.last), eventsLast24h: Number(r.n) };
   return result;
 }
+export async function hasExpiredEvents(ch: ClickHouseClient, p: string, before: Date) {
+  const rows = await read<{ n: number }>(
+    ch,
+    'SELECT count() n FROM (SELECT 1 FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} LIMIT 1)',
+    { p, before: before.toISOString().replace('T', ' ').slice(0, -1) },
+  );
+  return Number(rows[0]?.n ?? 0) > 0;
+}
+
 export async function purgeProject(ch: ClickHouseClient, p: string, before?: Date) {
-  // Caller must serialize purge with ingestion for this project while aggregates rebuild.
+  // Caller serializes ingestion. Capture only aggregate keys touched by expired rows.
+  const params = {
+    p,
+    before: before?.toISOString().replace('T', ' ').slice(0, -1),
+    bucket: before ? new Date(Math.floor(before.getTime() / 60_000) * 60_000).toISOString().replace('T', ' ').slice(0, -1) : undefined,
+  };
+  const affected = before
+    ? await read<{ kind: string; id: string }>(
+        ch,
+        `SELECT DISTINCT kind,id FROM (
+    SELECT 'actor' kind,actor_id id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} AND actor_id!=''
+    UNION ALL SELECT 'tenant',tenant_id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} AND tenant_id!=''
+    UNION ALL SELECT 'executor',executor_id FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} AND executor_id!=''
+    UNION ALL SELECT 'target',concat(t.1,':',t.2) FROM events ARRAY JOIN arrayZip(target_types,target_ids) AS t WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)}
+    UNION ALL SELECT 'attribute',arrayJoin(mapKeys(attributes)) FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)})`,
+        params,
+      )
+    : [];
   await ch.command({
     query: `DELETE FROM events WHERE project_id={p:String}${before ? ' AND timestamp < {before:DateTime64(3)}' : ''}`,
-    query_params: { p, before: before?.toISOString().replace('T', ' ').slice(0, -1) },
+    query_params: params,
     clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
   });
-  await rebuildProjectRollups(ch, p, !!before);
+  if (!before) return rebuildProjectRollups(ch, p, false);
+  const filters = {
+    events_by_minute: 'bucket <= {bucket:DateTime64(3)}',
+    entities: '(kind,entity_id) IN arrayZip({kinds:Array(String)},{entityIds:Array(String)})',
+    attribute_keys: 'key IN {keys:Array(String)}',
+  };
+  const scoped = {
+    ...params,
+    kinds: affected.filter((r) => r.kind !== 'attribute').map((r) => r.kind),
+    entityIds: affected.filter((r) => r.kind !== 'attribute').map((r) => r.id),
+    keys: affected.filter((r) => r.kind === 'attribute').map((r) => r.id),
+  };
+  for (const [table, filter] of Object.entries(filters))
+    await ch.command({
+      query: `DELETE FROM ${table} WHERE project_id={p:String} AND ${filter}`,
+      query_params: scoped,
+      clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
+    });
+  // Recompute the boundary minute and affected entity/key histories exactly; newer buckets stay intact.
+  const { readFile } = await import('node:fs/promises');
+  const sql = await readFile(new URL('../migrations/002_rollups.sql', import.meta.url), 'utf8');
+  for (const statement of sql.split(';')) {
+    const m = statement.match(/CREATE MATERIALIZED VIEW IF NOT EXISTS \w+ TO (\w+) AS (SELECT[\s\S]+)/);
+    if (!m) continue;
+    const table = m[1] as keyof typeof filters;
+    await ch.command({
+      query: `INSERT INTO ${table} SELECT * FROM (${m[2]}) WHERE project_id={p:String} AND ${filters[table]}`,
+      query_params: scoped,
+    });
+  }
 }
 
 /** Caller holds the project ingestion lock. Rebuild from surviving raw rows. */

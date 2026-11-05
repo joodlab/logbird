@@ -26,6 +26,7 @@ export const searchQuerySchema = rangeQuerySchema.extend({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   order: z.enum(['desc', 'asc']).default('desc'),
 });
+export const publicSearchQuerySchema = searchQuerySchema.extend({ lang: z.literal('query').optional() });
 export type SearchQuery = z.infer<typeof searchQuerySchema>;
 
 export const searchResponseSchema = z.object({
@@ -220,7 +221,7 @@ export const apiKeySchema = z.object({
   kind: z.enum(API_KEY_KINDS),
   prefix: z.string(), // e.g. "tm_ingest_7Hq2"; full secret only returned once on create
   createdAt: z.string(),
-  createdBy: z.object({ id: z.string(), name: z.string() }).nullable(),
+  createdBy: z.object({ id: z.string(), name: z.string(), email: z.string().optional() }).nullable(),
   lastUsedAt: z.string().nullable(),
   revokedAt: z.string().nullable(),
 });
@@ -243,7 +244,7 @@ export const savedViewSchema = z.object({
     range: z.string().optional(), // "24h" | "7d" | "<isoFrom>..<isoTo>"
     columns: z.array(z.string()).optional(),
   }),
-  createdBy: z.object({ id: z.string(), name: z.string() }).nullable(),
+  createdBy: z.object({ id: z.string(), name: z.string(), email: z.string().optional() }).nullable(),
   createdAt: z.string(),
 });
 export type SavedView = z.infer<typeof savedViewSchema>;
