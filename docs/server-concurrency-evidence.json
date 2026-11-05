@@ -1,0 +1,656 @@
+[
+  {
+    "before": "two-connection pool deadlock reproduced",
+    "lockWaiter": true,
+    "nestedGlobalQueryQueued": true,
+    "poolWaiting": 1
+  },
+  {
+    "after": "ClickHouse DELETE paused; connection_limit=2",
+    "elapsedMs": 3702.7327000000005,
+    "sessions": [
+      {
+        "idleTransactions": 0,
+        "lockWaiters": 0,
+        "sessions": 2
+      }
+    ],
+    "requests": [
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1167.2924000000003,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1023.5368999999996,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1069.9233,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1062.2974999999997,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1056.4798999999998,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1602.9808000000003,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1066.0724,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 869.5249999999996,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1128.0469999999996,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1076.6421000000005,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1073.2561,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1111.3096,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1088.5851000000002,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1621.8698,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1114.7797999999998,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 862.6035000000002,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1187.0926,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1141.7347,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1171.9039000000002,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1182.4777,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1184.3740000000003,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1637.9706,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1162.7213000000002,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 924.8042,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1257.5788000000002,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1179.6525000000001,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1220.8324000000002,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1209.0929,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1209.962,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1636.2715000000003,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1212.7873,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 889.4731000000006,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1271.2720000000004,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1247.7019999999998,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1282.7492000000002,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1267.3225999999995,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1245.2894000000001,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1665.426,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1258.1236000000004,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 909.0880000000002,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1323.3495999999996,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1255.3017999999997,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1262.3943,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1324.3490000000002,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1298.2921999999999,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1681.8545,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1296.8640999999998,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 943.5962,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1340.1734999999994,
+        "retryAfter": null
+      },
+      {
+        "group": "B read",
+        "status": 200,
+        "ms": 1312.1221000000005,
+        "retryAfter": null
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1259.3149999999996,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1248.1436999999996,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1272.2093,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1283.1231999999995,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1269.0995000000003,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1305.6904,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1286.8540000000003,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1284.8298,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1297.2054999999996,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1308.1387999999997,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1315.8602999999998,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1324.6583999999998,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1328.3296,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1316.5172000000002,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1325.2313999999997,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1329.0791,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1341.9078,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1335.0955,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1335.8881000000006,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1347.7377999999999,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1345.8126000000007,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1345.2813000000006,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1356.8754,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1350.9335,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1348.1311999999998,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1352.1746999999996,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1354.7055,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1360.4219000000003,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1365.9444000000003,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1367.9923999999996,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1371.0485000000003,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1371.8807000000002,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1375.5476999999996,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1376.2603,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1381.3055,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1378.9303999999997,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1387.1686000000004,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1384.5477,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1389.9844000000003,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1393.6397000000006,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1392.4916999999996,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1404.0837000000001,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1395.9241999999995,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1398.1356999999994,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1399.0649000000003,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1399.8615000000004,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1401.8808,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1406.6310000000003,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1408.8581,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A read",
+        "status": 503,
+        "ms": 1411.9406,
+        "retryAfter": "1"
+      },
+      {
+        "group": "B ingest",
+        "status": 202,
+        "ms": 1537.0559999999996,
+        "retryAfter": null
+      },
+      {
+        "group": "readyz",
+        "status": 200,
+        "ms": 37.10519999999997,
+        "retryAfter": null
+      },
+      {
+        "group": "A ingest",
+        "status": 503,
+        "ms": 1015.2139999999999,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A sample removal",
+        "status": 503,
+        "ms": 477.7060999999994,
+        "retryAfter": "1"
+      },
+      {
+        "group": "A project deletion",
+        "status": 503,
+        "ms": 1448.4804000000004,
+        "retryAfter": "1"
+      }
+    ]
+  },
+  {
+    "purgeCompleted": true,
+    "projectA": "cmw3ezxk40000mcyoiitqfcj7",
+    "projectB": "cmw3ezxro0002mcyob3ujpcks"
+  }
+]

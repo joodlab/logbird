@@ -1,6 +1,6 @@
 import * as ch from '@trailmark/clickhouse';
 import * as s from '@trailmark/contracts';
-import { prisma, withProjectLock } from '@trailmark/database';
+import { prisma } from '@trailmark/database';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { stream } from 'hono/streaming';
@@ -8,7 +8,7 @@ import { resolver, validator } from 'hono-openapi';
 import { z } from 'zod';
 import { clickhouse, queryClickhouse } from './clickhouse';
 import { ApiError } from './errors';
-import { ingest, readIngestBody, requireRetentionReady } from './ingest';
+import { ingest, readIngestBody, requireProjectReadable } from './ingest';
 import { requireApiKey, requireProjectAccess, requireSession } from './middlewares';
 import { doc as responseDoc, routeDoc } from './openapi';
 import type { AppEnv } from './types';
@@ -53,11 +53,9 @@ const found = <T>(value: T | null) => {
   return value;
 };
 const projectRead = createMiddleware<AppEnv>(async (c, next) => {
-  if (c.req.method !== 'GET' || c.req.path.endsWith('/export')) return next();
-  await withProjectLock(c.get('project').id, async (tx) => {
-    await requireRetentionReady(tx, c.get('project').id);
-    await next();
-  });
+  if (c.req.method !== 'GET') return next();
+  await requireProjectReadable(c.get('project').id);
+  await next();
 });
 export const publicRoutes = new Hono<AppEnv>()
   .use('*', async (c, next) => {
@@ -132,7 +130,7 @@ export const dataRoutes = new Hono<AppEnv>()
     );
   })
   .get('/projects/:projectId/suggest', doc('Suggest field values', s.suggestResponseSchema), query(s.suggestQuerySchema), async (c) =>
-    c.json(s.suggestResponseSchema.parse(await ch.suggestValues(clickhouse, c.get('project').id, c.req.valid('query')))),
+    c.json(s.suggestResponseSchema.parse(await ch.suggestValues(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
   )
   .get('/projects/:projectId/fields', doc('Fields', s.fieldsResponseSchema), query(s.rangeQuerySchema), async (c) =>
     c.json(s.fieldsResponseSchema.parse(await ch.listFields(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
@@ -168,30 +166,8 @@ export const dataRoutes = new Hono<AppEnv>()
     query(s.rangeQuerySchema.extend({ format: z.enum(['csv', 'jsonl']) })),
     async (c) => {
       const q = c.req.valid('query');
-      let markReady!: () => void, failReady!: (error: unknown) => void, finish!: () => void;
-      const ready = new Promise<void>((resolve, reject) => {
-        markReady = resolve;
-        failReady = reject;
-      });
-      const release = new Promise<void>((resolve) => {
-        finish = resolve;
-      });
-      let iterator: ReturnType<typeof ch.exportEvents>;
-      let first: IteratorResult<string>;
-      // Keep the same cross-process lock until the HTTP stream closes.
-      const task = withProjectLock(c.get('project').id, async (tx) => {
-        await requireRetentionReady(tx, c.get('project').id);
-        iterator = ch.exportEvents(queryClient(q), c.get('project').id, q);
-        try {
-          first = await iterator.next();
-          markReady();
-          await release;
-        } finally {
-          await iterator.return();
-        }
-      });
-      void task.catch((error) => failReady(error));
-      await ready;
+      const iterator = ch.exportEvents(queryClient(q), c.get('project').id, q);
+      const first = await iterator.next();
       c.header('Content-Type', q.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/x-ndjson');
       c.header('Content-Disposition', `attachment; filename="events.${q.format}"`);
       return stream(c, async (out) => {
@@ -199,8 +175,7 @@ export const dataRoutes = new Hono<AppEnv>()
           if (!first.done) await out.write(first.value);
           for await (const chunk of iterator) await out.write(chunk);
         } finally {
-          finish();
-          await task;
+          await iterator.return();
         }
       });
     },

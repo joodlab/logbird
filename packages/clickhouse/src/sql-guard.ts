@@ -161,10 +161,7 @@ export async function validateSql(ch: ClickHouseClient, q = ''): Promise<string>
     const kind = error && typeof error === 'object' && 'type' in error ? String(error.type) : '';
     if (/TOO_DEEP|TOO_BIG_AST|maximum pars(?:e|er) depth/i.test(message + kind)) reject('too_complex', q, 'Reduce SQL expression nesting');
     if (/SYNTAX_ERROR|Syntax error/.test(message)) {
-      const position = Number(message.match(/position (\d+)/)?.[1] ?? 1) - 1;
-      const bytes = Buffer.from(`EXPLAIN AST ${prefix}${expression}`);
-      const start = Math.max(0, Math.min(q.length, bytes.subarray(0, position).toString('utf8').length - prefix.length - 12));
-      reject('syntax', q, 'Check the SQL expression syntax', start, Math.min(q.length, start + 1));
+      throw sqlSyntaxError(error, `EXPLAIN AST ${prefix}${expression})`, expression);
     }
     throw error;
   }
@@ -181,4 +178,19 @@ export async function validateSql(ch: ClickHouseClient, q = ''): Promise<string>
   if (cache.size >= 256) cache.delete(cache.keys().next().value!);
   cache.set(expression, Date.now() + 30_000);
   return expression;
+}
+
+/** ClickHouse positions are one-based UTF-8 byte offsets; editors use UTF-16. */
+export function sqlSyntaxError(error: unknown, statement: string, expression: string) {
+  const message = error instanceof Error ? error.message : '';
+  const position = Number(message.match(/position (\d+)/)?.[1] ?? 1) - 1;
+  const offset = statement.indexOf(expression);
+  const start = Math.max(0, Math.min(expression.length, Buffer.from(statement).subarray(0, position).toString('utf8').length - Math.max(0, offset)));
+  return new QueryError('Invalid SQL expression syntax', {
+    lang: 'sql',
+    reason: 'syntax',
+    start,
+    end: Math.min(expression.length, start + 1),
+    hint: 'Check the SQL expression syntax',
+  });
 }

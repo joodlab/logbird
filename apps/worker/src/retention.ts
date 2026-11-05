@@ -1,12 +1,20 @@
 import { createClickHouseClient, purgeProject } from '@trailmark/clickhouse';
-import { prisma, withProjectLock } from '@trailmark/database';
+import { prisma, recoverAbandonedRetention, withProjectLock } from '@trailmark/database';
 export const clickhouse = createClickHouseClient();
 export async function enforceProjectRetention(projectId: string) {
   return withProjectLock(projectId, async (tx) => {
+    await recoverAbandonedRetention(tx, projectId);
+    if (await tx.retentionRun.findFirst({ where: { projectId, status: 'running' } })) return;
     const project = await tx.project.findUnique({ where: { id: projectId } });
     if (!project) return;
     const cutoff = new Date(Date.now() - project.retentionDays * 86_400_000);
     const run = await prisma.retentionRun.create({ data: { projectId, retentionDays: project.retentionDays, cutoff, status: 'running' } });
+    // Short Prisma statements remain independent of the session holding the project lock.
+    const heartbeat = setInterval(() => {
+      void prisma.retentionRun
+        .updateMany({ where: { id: run.id, status: 'running' }, data: { heartbeatAt: new Date() } })
+        .catch(() => console.error(JSON.stringify({ level: 'error', event: 'retention.heartbeat_failed', runId: run.id })));
+    }, 30_000);
     try {
       const rows = await (
         await clickhouse.query({
@@ -26,6 +34,8 @@ export async function enforceProjectRetention(projectId: string) {
         data: { status: 'failed', finishedAt: new Date(), error: 'ClickHouse retention failed; retry required.' },
       });
       throw error;
+    } finally {
+      clearInterval(heartbeat);
     }
   });
 }

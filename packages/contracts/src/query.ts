@@ -35,6 +35,7 @@ export const queryErrorDetailsSchema = z.object({
   end: z.number().int().nullable(),
   /** Short fix suggestion, e.g. 'Use attempt:>2 or attempt:[2 TO 5]'. */
   hint: z.string().nullable(),
+  replacement: z.object({ start: z.number().int(), end: z.number().int(), text: z.string() }).optional(),
 });
 export type QueryErrorDetails = z.infer<typeof queryErrorDetailsSchema>;
 
@@ -311,11 +312,16 @@ export const SQL_ALLOWED_FUNCTIONS = [
 export const suggestQuerySchema = z.object({
   /** A QUERY_FIELDS key/alias, or an attribute key (`attr.metadata.plan` / `metadata.plan`). */
   field: z.string().min(1).max(256),
+  q: z.string().max(4096).optional(),
+  lang: queryLangSchema.optional(),
+  from: z.iso.datetime().optional(),
+  to: z.iso.datetime().optional(),
   /** Case-insensitive match on value and label; empty = most frequent values. */
   prefix: z.string().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 export const suggestResponseSchema = z.object({
+  complete: z.boolean(),
   field: z.string(),
   values: z.array(z.object({ value: z.string(), label: z.string(), count: z.number().int() })),
 });

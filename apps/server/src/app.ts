@@ -2,7 +2,7 @@ import { apiReference } from '@scalar/hono-api-reference';
 import { auth, authAuditContext, setAuthAuditHandler } from '@trailmark/auth';
 import { QueryError } from '@trailmark/clickhouse';
 import { queryErrorDetailsSchema } from '@trailmark/contracts';
-import { Prisma, prisma } from '@trailmark/database';
+import { Prisma, ProjectBusyError, prisma } from '@trailmark/database';
 import { connection } from '@trailmark/worker/queue';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -52,9 +52,17 @@ app.use('*', async (c, next) => {
   );
 });
 app.onError((error, c) => {
+  if (error instanceof ProjectBusyError) {
+    c.header('Retry-After', '1');
+    return c.json({ error: { code: 'project_busy', message: error.message } }, 503);
+  }
+
   if (error instanceof QueryError)
     return c.json({ error: { code: 'invalid_query', message: error.message, details: queryErrorDetailsSchema.parse(error.details) } }, 422);
-  if (error instanceof ApiError) return c.json({ error: { code: error.code, message: error.message, details: error.details } }, error.status);
+  if (error instanceof ApiError) {
+    if (error.code === 'retention_unavailable') c.header('Retry-After', '1');
+    return c.json({ error: { code: error.code, message: error.message, details: error.details } }, error.status);
+  }
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
     return c.json({ error: { code: 'conflict', message: 'This record already exists.' } }, 409);
   if (error instanceof HTTPException) return c.json({ error: { code: 'invalid_request', message: error.message } }, error.status);

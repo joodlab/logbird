@@ -52,6 +52,37 @@ it('real services: setup, keys, raw envelope coverage, samples, membership and i
     if (!neighborEvent.ok) throw new Error(neighborEvent.reason);
     await insertEvents(clickhouse, [neighborEvent.row]);
 
+    const run = await prisma.retentionRun.create({
+      data: {
+        projectId: p,
+        retentionDays: 30,
+        cutoff: new Date(),
+        status: 'running',
+        startedAt: new Date(Date.now() - 60 * 60_000),
+        heartbeatAt: new Date(),
+      },
+    });
+    expect((await request(`/api/projects/${p}/events`, 'GET', undefined, cookie)).status).toBe(503);
+    const busy = s.workspaceSetupSchema.parse(await (await api('/api/workspace/setup')).json());
+    expect(busy.projects.find((v) => v.projectId === p)?.retentionBusy).toBe(true);
+    expect(busy.projects).toHaveLength(2);
+    const old = new Date(Date.now() - 11 * 60_000);
+    await prisma.retentionRun.update({ where: { id: run.id }, data: { startedAt: old, heartbeatAt: old } });
+    expect((await request(`/api/projects/${p}/events`, 'GET', undefined, cookie)).status).toBe(200);
+    expect(await prisma.retentionRun.findUnique({ where: { id: run.id } })).toMatchObject({ status: 'failed', error: 'abandoned' });
+    // A shared worker may consume the recovery retry immediately. Wait for that live run,
+    // then prove that an independent last-failed run never blocks its project.
+    for (let attempt = 0; ; attempt++) {
+      const response = await request(`/api/projects/${p}/events`, 'GET', undefined, cookie);
+      if (response.status === 200) break;
+      expect(response.status).toBe(503);
+      expect(attempt).toBeLessThan(240);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    await prisma.retentionRun.create({
+      data: { projectId: neighbor.id, retentionDays: 30, cutoff: new Date(), status: 'failed', error: 'fixture failure', finishedAt: new Date() },
+    });
+    expect((await request(`/api/projects/${neighbor.id}/events`, 'GET', undefined, cookie)).status).toBe(200);
     const base = `/api/projects/${p}`;
     const status = async () => s.projectSetupSchema.parse(await (await api(`${base}/setup`)).json());
     let state = await status();

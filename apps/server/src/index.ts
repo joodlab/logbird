@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server';
-import { prisma } from '@trailmark/database';
+import { closeProjectLocks, prisma } from '@trailmark/database';
 import { closeRetentionQueue } from '@trailmark/worker/queue';
 import { app } from './app';
 import { clickhouse, queryClickhouse } from './clickhouse';
@@ -21,6 +21,7 @@ function shutdown() {
   server.close(async () => {
     const results = await Promise.allSettled([
       closeRetentionQueue(),
+      closeProjectLocks(),
       rateLimitStore.quit(),
       clickhouse.close(),
       queryClickhouse?.close(),

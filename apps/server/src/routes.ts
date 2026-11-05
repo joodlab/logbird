@@ -14,7 +14,7 @@ import {
   savedViewSchema,
   updateProjectSchema,
 } from '@trailmark/contracts';
-import { Prisma, prisma, withProjectLock } from '@trailmark/database';
+import { prisma, withProjectLock } from '@trailmark/database';
 import { retentionQueue } from '@trailmark/worker/queue';
 import { enforceProjectRetention } from '@trailmark/worker/retention';
 import { Hono } from 'hono';
@@ -137,7 +137,6 @@ export const managementRoutes = new Hono<AppEnv>()
       // Serialize policy changes so concurrent requests cannot bypass slug confirmation.
       const { project, before } = await withProjectLock(c.get('project').id, async (tx) => {
         const id = c.get('project').id;
-        await tx.$queryRaw(Prisma.sql`SELECT id FROM "Project" WHERE id = ${id} FOR UPDATE`);
         const current = await tx.project.findUniqueOrThrow({ where: { id } });
         if (input.retentionDays !== undefined && input.retentionDays < current.retentionDays && confirm !== current.slug)
           throw new ApiError(422, 'confirmation_required', 'Type the project slug to lower retention.');
