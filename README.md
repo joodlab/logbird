@@ -1,56 +1,51 @@
 # Trailmark
 
-Open-source (MIT), self-hostable audit log & activity history. Send any event from your product through the SDK
-or HTTP API, keep it for as long as your project's retention says, and follow every user, tenant, executor and record
-in a fast console built on ClickHouse.
+Open-source audit logs and activity history for your product. Send events through HTTP or the TypeScript SDK, then search who did what, follow records and background jobs, and trace changes across an operation.
 
-- Spec: [`docs/SPEC.md`](docs/SPEC.md)
-- Concepts — actors, tenants, executors, records, operations: [`docs/concepts.md`](docs/concepts.md)
-- Agent/contributor guide: [`AGENTS.md`](AGENTS.md)
+![Trailmark explorer](marketing/captures/2026-11-04-final-polish/light-explorer-autocomplete.png)
 
-```bash
-pnpm install
-pnpm db:deploy && pnpm ch:migrate
-pnpm dev            # app http://localhost:4600 · server http://localhost:4601
-pnpm seed           # StayDesk-shaped demo data; sign in as demo@trailmark.local (OTP in Mailpit :8025)
+- Structured filters, autocomplete and guarded SQL expressions.
+- Actor, tenant, executor and record timelines; before/after changes and causation trees.
+- Live activity, charts, saved views and workspace activity.
+- Workspaces, API keys and project retention. Retention permanently deletes expired events.
+- ClickHouse durable insert acknowledgement. Delivery is at least once; counts may include duplicates.
+
+## Quickstart
+
+For managed cloud, a public signup URL will be announced by the maintainers. Self-host the same application today:
+
+```sh
+cp .env.example .env
+# Fill credentials and URLs per docs/self-hosting.md.
+docker compose build
+docker compose up -d postgres clickhouse redis
 ```
 
-## End-to-end local development
+Complete migrations and restricted query-user setup in [self-hosting](docs/self-hosting.md), then start the applications. For source development see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Use Node 22.18+ and pnpm 10. Copy the gitignored root .env into your worktree.
-The shared Trailmark Postgres, ClickHouse, Dragonfly and Mailpit services must
-already be available. Do not start duplicate backing containers.
+Create a workspace and project in the console, copy its ingest key, and send:
 
-    pnpm install
-    pnpm db:generate
-    pnpm db:deploy
-    pnpm ch:migrate
-    pnpm dev
+```sh
+curl "$BASE_URL/v1/events" -H "Authorization: Bearer $TRAILMARK_INGEST_KEY" -H 'Content-Type: application/json' -d '{"action":"document.updated"}'
+```
 
-Root dev starts the server (4601), retention worker, and app (4600) when its
-workspace exists. Each process loads the root .env. API reference:
-http://localhost:4601/docs (public API key and internal session routes).
+Only action is required. Never send passwords or tokens. See the [TypeScript SDK](packages/sdk/README.md), [concepts](docs/concepts.md), [query language](docs/query-language.md), and your server's `/docs` API reference. See [Hono, TanStack Start, Vue and Nuxt integrations](docs/integrations.md) and runnable [examples](examples).
 
-In another terminal, pnpm e2e exercises OTP login through Mailpit, project
-creation, SDK ingest, search, exports and retention/purge against real services.
-It uses isolated fictional fixtures. Run pnpm demo --sink api to provision
-Raed (demo), the Acme workspace, and 300,000 StayDesk + 5,000 Ledger demo events.
-It purges previous demo project rows before streaming the exported seed generator
-through the public API with the SDK. For a quick run, use --events 1000
---ledger-events 100. Each run creates fresh keys and preserves existing keys.
-Sign in as demo@trailmark.local; find its OTP at http://127.0.0.1:8025.
+## Architecture
 
-Ingest supports gzip, at most 1,000 events / 5 MiB decoded per request and
-256 KiB per event. A 202 waits for ClickHouse async insert acknowledgement.
-Invalid events appear in rejected; size failures return 413. Storage budget
-failures return 503 and malformed queries 422. Delivery and aggregate counts
-are at least once, as documented in packages/clickhouse/README.md.
+```mermaid
+flowchart LR
+  Product[Your product / SDK] -->|ingest key| Server[Hono API]
+  Browser[TanStack Start console] --> Server
+  Server --> PG[(Postgres)]
+  Server --> CH[(ClickHouse)]
+  Server --> Redis[(Redis / Dragonfly)]
+  Redis --> Worker[Retention worker]
+  Worker --> PG
+  Worker --> CH
+  Server --> SMTP[SMTP]
+```
 
-Retention lowering requires the slug and synchronously purges and rebuilds
-derived tables. Ingestion and worker purges share a Postgres advisory lock
-across processes. Failed rebuilds block ingestion until a successful retry.
+[Deployment](docs/deployment.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
-## Integrations
-
-First-party [Hono, TanStack Start, Vue and Nuxt integrations](docs/integrations.md) use our hand-written SDK.
-Ingest stays server-side; browser history panels use an authorized backend read proxy.
+MIT licensed. See [LICENSE](LICENSE).

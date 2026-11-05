@@ -105,7 +105,7 @@ export class Trailmark {
       try {
         response = await fetch(`${this.options.endpoint.replace(/\/$/, '')}/v1/events`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${this.options.apiKey}`, 'Content-Type': 'application/json', 'X-Trailmark-SDK': 'typescript/0.0.0' },
+          headers: { Authorization: `Bearer ${this.options.apiKey}`, 'Content-Type': 'application/json', 'X-Trailmark-SDK': 'typescript/0.1.0' },
           body,
           signal: AbortSignal.timeout(30_000),
         });

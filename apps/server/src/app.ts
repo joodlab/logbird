@@ -3,10 +3,13 @@ import { auth, authAuditContext, setAuthAuditHandler } from '@trailmark/auth';
 import { QueryError } from '@trailmark/clickhouse';
 import { queryErrorDetailsSchema } from '@trailmark/contracts';
 import { Prisma, prisma } from '@trailmark/database';
+import { connection } from '@trailmark/worker/queue';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import { requestId } from 'hono/request-id';
+import { secureHeaders } from 'hono/secure-headers';
 import { openAPIRouteHandler } from 'hono-openapi';
 import { z } from 'zod';
 import { clickhouse } from './clickhouse';
@@ -17,13 +20,22 @@ import { ingest } from './ingest';
 import { invitationRoutes } from './invitation-routes';
 import { inviteLinkRoutes } from './invite-link-routes';
 import { doc, routeDoc } from './openapi';
+import { rateLimit } from './rate-limit';
 import { managementRoutes } from './routes';
 import { setupRoutes } from './setup-routes';
 import type { AppEnv } from './types';
 
 export const app = new Hono<AppEnv>();
 app.use('*', requestId());
-app.use('*', cors({ origin: env.APP_URL, credentials: true, exposeHeaders: ['X-Request-Id'] }));
+app.use('*', secureHeaders({ strictTransportSecurity: env.APP_URL.startsWith('https:') ? 'max-age=31536000' : false }));
+// Ingest has its own decoded streaming limit, including gzip.
+app.use(
+  '/api/*',
+  bodyLimit({ maxSize: 5 * 1024 * 1024, onError: (c) => c.json({ error: { code: 'payload_too_large', message: 'Request exceeds 5 MB.' } }, 413) }),
+);
+app.use('/api/auth/*', rateLimit);
+app.use('/v1/*', rateLimit);
+app.use('*', cors({ origin: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)], credentials: true, exposeHeaders: ['X-Request-Id'] }));
 app.use('*', async (c, next) => {
   const start = Date.now();
   await next();
@@ -33,7 +45,7 @@ app.use('*', async (c, next) => {
       event: 'http.request',
       requestId: c.get('requestId'),
       method: c.req.method,
-      path: c.req.path.replace(/(\/api\/invite-links\/)[^/]+/, '$1[redacted]'),
+      path: c.req.path.replace(/(\/api\/(?:invite-links|invitations)\/)[^/]+/g, '$1[redacted]'),
       status: c.res.status,
       durationMs: Date.now() - start,
     }),
@@ -75,6 +87,18 @@ app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
     { actor: session?.user, requestId: c.get('requestId'), ip: c.req.header('x-forwarded-for') ?? '', userAgent: c.req.header('user-agent') ?? '' },
     () => auth.handler(c.req.raw),
   );
+});
+app.get('/livez', (c) => c.json({ status: 'ok' }));
+app.get('/readyz', async (c) => {
+  const checks = await Promise.allSettled([
+    prisma.$queryRaw`SELECT 1`,
+    clickhouse.ping().then((r) => {
+      if (!r.success) throw new Error('Storage unavailable');
+    }),
+    connection.ping(),
+  ]);
+  const ready = checks.every((r) => r.status === 'fulfilled');
+  return c.json({ status: ready ? 'ok' : 'degraded' }, ready ? 200 : 503);
 });
 app.get(
   '/health',

@@ -8,7 +8,7 @@ Nothing under `experiments/` is a workspace package or imported by production co
 ## Sources and exact versions
 
 - [Forge repository](https://github.com/cloudflare/forge), Apache-2.0, cloned outside Trailmark at
-  `<local-path>Desktop/Work/OSS/forge`, commit `68134895e81dd3a0a005981b05a3c5e0baaff3f9`, version 0.1.0.
+  `../forge`, commit `68134895e81dd3a0a005981b05a3c5e0baaff3f9`, version 0.1.0.
 - [Cloudflare announcement](https://blog.cloudflare.com/forge-open-source-generation-pipeline/), published
   September 28, 2026. Its pipeline describes broader ambitions than the standalone command currently exposes.
 - Forge's `packages/forge/README.md` documents the working `--target ts` interface. The top-level README
@@ -49,7 +49,7 @@ that are in the contracts but not implemented yet (e.g. suggest) must use `route
 
 ## Reproduction
 
-From the isolated Trailmark worktree in PowerShell (copy the owner's `.env` first; never print it):
+From the isolated Trailmark worktree in PowerShell (configure the root `.env` first; never print it):
 
 ```powershell
 pnpm install
@@ -69,16 +69,16 @@ regenerable and gitignored to keep the repo small.
 Forge setup and generation (PowerShell; paths here match the requested worktree):
 
 ```powershell
-git clone https://github.com/cloudflare/forge <local-path>Desktop/Work/OSS/forge
-git -C <local-path>Desktop/Work/OSS/forge checkout 68134895e81dd3a0a005981b05a3c5e0baaff3f9
-wsl -d Ubuntu -- sh -lc 'cd /mnt<local-path> && cargo +stable build --bin forge'
+git clone https://github.com/cloudflare/forge ../forge
+git -C ../forge checkout 68134895e81dd3a0a005981b05a3c5e0baaff3f9
+wsl -d Ubuntu -- sh -lc 'cd ../forge && cargo +stable build --bin forge'
 ```
 
 Then in WSL:
 
 ```sh
-FORGE=/mnt<local-path>
-cd /mnt<local-path>
+FORGE=../forge/target/debug/forge
+cd ../trailmark
 "$FORGE" experiments/forge/public.input.json --target ts --out experiments/forge/public
 "$FORGE" experiments/forge/console.input.json --target ts --out experiments/forge/console
 "$FORGE" openapi/public.json --target cli --out /tmp/trailmark-forge-cli

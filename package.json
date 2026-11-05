@@ -30,7 +30,9 @@
     "e2e": "node --env-file=.env --import tsx scripts/e2e-smoke.ts",
     "openapi:export": "node --env-file=.env --import tsx scripts/export-openapi.ts",
     "sdk:generate": "pnpm openapi:export && node --import tsx experiments/hey-api/generate.ts",
-    "sdk:verify": "node --env-file=.env --import tsx scripts/verify-sdk.ts"
+    "sdk:verify": "node --env-file=.env --import tsx scripts/verify-sdk.ts",
+    "release:check": "pnpm typecheck && pnpm check && pnpm test && pnpm build && pnpm openapi:export && git diff --exit-code -- openapi",
+    "smoke:prod": "node --import tsx scripts/smoke-prod.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.11",
@@ -45,5 +47,6 @@
     "typescript": "^7.0.2",
     "ultracite": "7.10.7",
     "vitest": "^4.1.11"
-  }
+  },
+  "version": "0.1.0"
 }

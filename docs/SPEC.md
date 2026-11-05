@@ -40,9 +40,7 @@ packages/sdk         `@trailmark/sdk` TypeScript client: batching, retries, idem
 packages/seed        StayDesk-shaped synthetic data generator that sends through the public ingest API
 ```
 
-Local backing services are the owner's **shared containers** (see AGENTS.md): Postgres `trailmark` DB,
-ClickHouse `trailmark` DB, Dragonfly DB 115 with `{trailmark}` BullMQ prefix, Mailpit SMTP `127.0.0.1:1025`
-(UI `http://127.0.0.1:8025`). Env comes from the root `.env` (generated from the shared host env).
+Development dependencies and production deployment are documented in [self-hosting.md](self-hosting.md). Configuration comes from environment variables; see the root .env.example.
 
 Ingestion path (v0): `POST /v1/events` → validate/normalize → ClickHouse `INSERT` with
 `async_insert=1, wait_for_async_insert=1` (ack only after ClickHouse has the rows) → 202. Large batches are
@@ -368,8 +366,7 @@ loaders, `placeholderData: keepPreviousData` for filters), TanStack Form for for
 
 ## 9. Synthetic StayDesk data (`packages/seed`)
 
-Mimic the real StayDesk domain (read `<local-path>Desktop/Work/staydesk/packages/database/prisma/schema.prisma`,
-`apps/server/src/actions`, `packages/bullmq/src/jobs`, processors) — do **not** connect to StayDesk. Generate via the
+Generate a fictional hospitality domain; do not connect to customer systems. Generate via the
 public ingest API with the SDK (dogfooding): workspace "Acme", project "StayDesk" (~300k events over 60 days,
 weekday/hour seasonality) + small project "Ledger demo" (a fictional accounting app, ~5k events, different
 vocabulary) to prove "accept anything". Include: ~30 businesses as tenants with websites, ~150 users across

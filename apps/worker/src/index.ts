@@ -19,11 +19,13 @@ worker.on('failed', (job) => console.error(JSON.stringify({ level: 'error', even
 worker.on('error', () => console.error(JSON.stringify({ level: 'error', event: 'worker.error' })));
 await retentionQueue.upsertJobScheduler('retention-hourly', { every: 3_600_000 }, { name: 'retention.enforce', data: {} });
 console.log(JSON.stringify({ level: 'info', event: 'worker.ready' }));
+let stopping = false;
 async function shutdown() {
+  if (stopping) return;
+  stopping = true;
   await worker.close();
-  await closeRetentionQueue();
-  await clickhouse.close();
-  await prisma.$disconnect();
+  const results = await Promise.allSettled([closeRetentionQueue(), clickhouse.close(), prisma.$disconnect()]);
+  if (results.some((r) => r.status === 'rejected')) process.exitCode = 1;
 }
 process.once('SIGINT', shutdown);
 process.once('SIGTERM', shutdown);

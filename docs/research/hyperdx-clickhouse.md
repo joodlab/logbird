@@ -10,7 +10,7 @@ Before implementing dashboards, resolve ingest idempotency and retention for der
 
 ## Evidence scope and navigation
 
-HyperDX was shallow-cloned to `<local-path>Desktop/Work/OSS/hyperdx`, commit **253a690d49776c390d2c5b7e4824edeb011f027d**. All `H:` references below are paths and inclusive line ranges inside that clone at that revision. For example, `H:docker/otel-collector/schema/seed/00002_otel_logs.sql:4-44` resolves under that absolute directory. These are source findings, not measured HyperDX production behavior.
+HyperDX was shallow-cloned to `../hyperdx`, commit **253a690d49776c390d2c5b7e4824edeb011f027d**. All `H:` references below are paths and inclusive line ranges inside that clone at that revision. For example, `H:docker/otel-collector/schema/seed/00002_otel_logs.sql:4-44` resolves under that absolute directory. These are source findings, not measured HyperDX production behavior.
 
 Permanent upstream source root: <https://github.com/hyperdxio/hyperdx/tree/253a690d49776c390d2c5b7e4824edeb011f027d>. Trailmark baseline read: `AGENTS.md` and `docs/SPEC.md`, master commit `4204dd6`. No real events were read. The only local data writes were synthetic rows in `trailmark.research_text` and `trailmark.research_pairs`; both tables were dropped.
 
@@ -112,7 +112,7 @@ The shared MV planner rejects views that cannot represent required dimensions/gr
 
 Official [text-index documentation](https://clickhouse.com/docs/reference/engines/table-engines/mergetree-family/textindexes) says **GA from 26.2**, without an experimental opt-in. Syntax is `INDEX name expression TYPE text(tokenizer = splitByNonAlpha)`; use `tokenizer = array` for whole items. The official [MergeTree reference](https://clickhouse.com/docs/reference/engines/table-engines/mergetree-family/mergetree) recommends text indexes over token/ngram Bloom filters from 26.2. Bloom filters remain probabilistic granule pruning; text indexes map tokens to matching rows. Syntax acceptance of tokenbf does not make it the recommended new design. Avoid assuming every tokenizer in today's docs exists throughout all 26.x releases.
 
-### Observed on the owner's server
+### Observed on a local test server
 
 HTTP POST to `http://127.0.0.1:8123/?database=trailmark`, authenticated from the primary checkout's `.env` without printing values, returned **26.9.19.9** and database **trailmark**. Observed settings included `enable_full_text_index=1`, `use_skip_indexes=1`, `query_plan_direct_read_from_text_index=1`; the legacy-named `allow_experimental_full_text_index` setting also read 1. That setting name/value is not evidence that this release's feature is experimental. No settings were changed.
 
