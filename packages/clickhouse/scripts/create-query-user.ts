@@ -10,10 +10,17 @@ try {
   await (await ch.query({ query: 'SHOW ACCESS', format: 'TabSeparatedRaw' })).text();
   if (!/CREATE USER|ALL ON/.test(grants) || !/CREATE SETTINGS PROFILE|ALL ON/.test(grants))
     throw new Error('Requires CREATE USER and CREATE SETTINGS PROFILE (and SELECT grant option on Trailmark tables)');
-  const files = process.env.CLICKHOUSE_QUERY_PASSWORD
-    ? []
-    : [resolve('../../.env'), ...(process.env.TRAILMARK_PRIMARY_ENV ? [resolve(process.env.TRAILMARK_PRIMARY_ENV)] : [])];
-  const contents = await Promise.all(files.map((f) => readFile(f, 'utf8')));
+  const fromEnvironment = Boolean(process.env.CLICKHOUSE_QUERY_PASSWORD);
+  const files = [resolve('../../.env'), ...(process.env.TRAILMARK_PRIMARY_ENV ? [resolve(process.env.TRAILMARK_PRIMARY_ENV)] : [])];
+  const contents = await Promise.all(
+    files.map((file) =>
+      readFile(file, 'utf8').catch((error: NodeJS.ErrnoException) => {
+        // Containers need no env file; still compare any existing source-install files.
+        if (fromEnvironment && error.code === 'ENOENT') return '';
+        throw error;
+      }),
+    ),
+  );
   const passwords = [process.env.CLICKHOUSE_QUERY_PASSWORD, ...contents.map((c) => c.match(/^CLICKHOUSE_QUERY_PASSWORD=(.*)$/m)?.[1])].filter(
     Boolean,
   );
@@ -106,7 +113,7 @@ try {
   } finally {
     await probe.close();
   }
-  for (let i = 0; i < files.length; i++) {
+  for (let i = 0; !fromEnvironment && i < files.length; i++) {
     let addition = '';
     if (!/^CLICKHOUSE_QUERY_USER=/m.test(contents[i]!)) addition += '\nCLICKHOUSE_QUERY_USER=trailmark_query';
     if (!/^CLICKHOUSE_QUERY_PASSWORD=/m.test(contents[i]!)) addition += `\nCLICKHOUSE_QUERY_PASSWORD=${password}`;
