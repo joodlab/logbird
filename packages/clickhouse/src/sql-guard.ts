@@ -129,7 +129,12 @@ function extract(tree: Node): Node {
   return args;
 }
 async function explain(ch: ClickHouseClient, q: string) {
-  const result = await ch.query({ query: `EXPLAIN AST ${prefix}${q})`, query_params: parameters, format: 'TabSeparatedRaw' });
+  const result = await ch.query({
+    query: `EXPLAIN AST ${prefix}${q})`,
+    query_params: parameters,
+    clickhouse_settings: { SQL_trailmark_project: parameters.p },
+    format: 'TabSeparatedRaw',
+  });
   return parseTree(await result.text());
 }
 export async function validateSql(ch: ClickHouseClient, q = ''): Promise<string> {
