@@ -13,17 +13,21 @@ import {
   fieldsResponseSchema,
   histogramResponseSchema,
   ingestResponseSchema,
+  invitationPreviewSchema,
   meResponseSchema,
   overviewResponseSchema,
   type Project,
   projectSchema,
+  projectSetupSchema,
   type QueryLang,
   retentionStatusSchema,
   routes,
   type SavedView,
+  sampleDataResponseSchema,
   savedViewSchema,
   searchResponseSchema,
   suggestResponseSchema,
+  workspaceSetupSchema,
 } from '@trailmark/contracts';
 import { z } from 'zod';
 import { toApiError } from './errors';
@@ -108,12 +112,35 @@ export const api = {
     get: (projectId: string, signal?: AbortSignal) => request(projectSchema, 'GET', pathFor(routes.projects.get.path, { projectId }), { signal }),
     create: (body: { name: string; description?: string; retentionDays: number }) =>
       request(createProjectResponseSchema, 'POST', routes.projects.create.path, { body }),
-    update: (projectId: string, body: { name?: string; description?: string | null; retentionDays?: number; confirm?: string }) =>
-      request(projectSchema, 'PATCH', pathFor(routes.projects.update.path, { projectId }), { body }) as Promise<Project>,
+    update: (
+      projectId: string,
+      body: {
+        name?: string;
+        description?: string | null;
+        retentionDays?: number;
+        confirm?: string;
+        retentionReviewed?: true;
+        setupDismissed?: boolean;
+      },
+    ) => request(projectSchema, 'PATCH', pathFor(routes.projects.update.path, { projectId }), { body }) as Promise<Project>,
     remove: (projectId: string) => request(ok, 'DELETE', pathFor(routes.projects.remove.path, { projectId })),
     /** `preview` (days) also counts the events a lower retention window would delete. */
     retention: (projectId: string, preview?: number, signal?: AbortSignal) =>
       request(retentionStatusSchema, 'GET', pathFor(routes.projects.retention.path, { projectId }), { query: { preview }, signal }),
+    /** Integration checklist, computed server-side from real state. Cheap enough to poll every few seconds. */
+    setup: (projectId: string, signal?: AbortSignal) =>
+      request(projectSetupSchema, 'GET', pathFor(routes.projects.setup.path, { projectId }), { signal }),
+    loadSampleData: (projectId: string) => request(sampleDataResponseSchema, 'POST', pathFor(routes.projects.sampleData.path, { projectId })),
+    removeSampleData: (projectId: string) => request(ok, 'DELETE', pathFor(routes.projects.removeSampleData.path, { projectId })),
+  },
+
+  /** Workspace setup summary + resumable onboarding target. */
+  workspaceSetup: (signal?: AbortSignal) => request(workspaceSetupSchema, 'GET', routes.workspaceSetup.path, { signal }),
+
+  invitations: {
+    /** Public: works signed out. */
+    preview: (invitationId: string, signal?: AbortSignal) =>
+      request(invitationPreviewSchema, 'GET', pathFor(routes.invitations.preview.path, { invitationId }), { signal }),
   },
 
   keys: {

@@ -16,6 +16,8 @@ export const keys = {
   projects: ['projects'] as const,
   project: (projectId: string) => ['projects', projectId] as const,
   workspaceActivity: (range: string, q: string) => ['workspace-activity', range, q] as const,
+  workspaceSetup: ['workspace-setup'] as const,
+  organization: ['organization'] as const,
 };
 
 const noRetryOn4xx = (failureCount: number, error: unknown) =>
@@ -198,5 +200,34 @@ export const workspaceActivityQuery = (range: string, q: string) =>
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     placeholderData: keepPreviousData,
+    retry: noRetryOn4xx,
+  });
+
+/**
+ * Project setup checklist. With `pollUntilFirstEvent` (ms) the first-event step polls quickly while nothing has
+ * arrived yet, then drops back to the normal minute refresh.
+ */
+export const projectSetupQuery = (projectId: string, options: { pollUntilFirstEvent?: number } = {}) =>
+  queryOptions({
+    queryKey: [...keys.project(projectId), 'setup'] as const,
+    queryFn: ({ signal }) => api.projects.setup(projectId, signal),
+    staleTime: 10_000,
+    refetchInterval: (query) => (options.pollUntilFirstEvent && !query.state.data?.ingest.firstEventAt ? options.pollUntilFirstEvent : 60_000),
+    refetchIntervalInBackground: Boolean(options.pollUntilFirstEvent),
+    retry: noRetryOn4xx,
+  });
+
+export const workspaceSetupQuery = () =>
+  queryOptions({
+    queryKey: keys.workspaceSetup,
+    queryFn: ({ signal }) => api.workspaceSetup(signal),
+    staleTime: 0,
+    retry: noRetryOn4xx,
+  });
+
+export const invitationPreviewQuery = (invitationId: string) =>
+  queryOptions({
+    queryKey: ['invitation', invitationId] as const,
+    queryFn: ({ signal }) => api.invitations.preview(invitationId, signal),
     retry: noRetryOn4xx,
   });
