@@ -20,6 +20,7 @@ import { Timestamp } from '@/components/timestamp';
 import { projectSetupQuery } from '@/lib/api/queries';
 import { formatNumber, formatRetention } from '@/lib/format';
 import { useOrganization } from '@/lib/organization';
+import { useCan } from '@/lib/permissions';
 import { OPERATION_EXAMPLE, readCurlSnippet, readFetchSnippet } from '@/lib/snippets';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/setup')({
@@ -72,6 +73,7 @@ function SetupPage() {
 
 function SetupHeader({ projectId, setup }: { projectId: string; setup?: ProjectSetup }) {
   const dismiss = useDismissSetup(projectId);
+  const manage = useCan()('setup.manage');
   const requiredDone = setup?.steps.filter((s) => s.required && s.status === 'done').length ?? 0;
   const requiredTotal = setup?.steps.filter((s) => s.required).length ?? 0;
   return (
@@ -104,7 +106,7 @@ function SetupHeader({ projectId, setup }: { projectId: string; setup?: ProjectS
                 </span>
               ) : null}
             </div>
-            {setup.complete || setup.completedAt ? null : setup.dismissedAt ? (
+            {setup.complete || setup.completedAt || !manage ? null : setup.dismissedAt ? (
               <Button disabled={dismiss.isPending} onClick={() => dismiss.mutate(false)} size="sm" variant="outline">
                 {dismiss.isPending ? <Loader2Icon className="animate-spin" /> : <EyeIcon />}
                 Show checklist on overview
@@ -308,6 +310,7 @@ function OperationStep({ projectId, setup }: { projectId: string; setup: Project
 
 function RetentionStep({ projectId, setup }: { projectId: string; setup: ProjectSetup }) {
   const review = useReviewRetention(projectId);
+  const manage = useCan()('retention.manage');
   const reviewed = Boolean(setup.retention.reviewedAt);
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -331,15 +334,19 @@ function RetentionStep({ projectId, setup }: { projectId: string; setup: Project
           nativeButton={false}
           render={<Link params={{ projectId }} to="/p/$projectId/settings/retention" />}
           size="sm"
-          variant={reviewed ? 'outline' : 'ghost'}
+          variant={reviewed || !manage ? 'outline' : 'ghost'}
         >
-          Change retention
+          {manage ? 'Change retention' : 'View retention'}
         </Button>
-        {reviewed ? null : (
+        {reviewed ? null : manage ? (
           <Button disabled={review.isPending} onClick={() => review.mutate()} size="sm">
             {review.isPending ? <Loader2Icon className="animate-spin" /> : <CheckIcon />}
             Looks good
           </Button>
+        ) : (
+          <span className="self-center text-muted-foreground text-xs" data-testid="ask-an-admin">
+            Ask an admin to review it
+          </span>
         )}
       </div>
     </div>

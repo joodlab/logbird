@@ -7,6 +7,7 @@ import { useCallback } from 'react';
 import { z } from 'zod';
 import { parseColumns, serializeColumns } from '@/components/explorer/columns';
 import { Explorer, type ExplorerState } from '@/components/explorer/explorer';
+import { SampleDataBanner } from '@/components/setup/sample-data-banner';
 import { eventsInfiniteQuery, histogramQuery, viewsQuery } from '@/lib/api/queries';
 import { DEFAULT_RANGE, isValidRange } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
@@ -91,6 +92,7 @@ function ExplorerPage() {
           </Button>
         </div>
       ) : null}
+      <SampleDataBanner className="border-b" projectId={projectId} />
       <Explorer onChange={onChange} projectId={projectId} state={state} />
     </div>
   );

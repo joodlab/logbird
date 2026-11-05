@@ -17,11 +17,13 @@ import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { Loader2Icon, Trash2Icon } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { AdminNote, AdminOnly } from '@/components/admin-gate';
 import { SettingsSection } from '@/components/settings-section';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keys, projectQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
+import { useCan } from '@/lib/permissions';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/danger')({
   staticData: { crumb: 'Danger zone' },
@@ -35,6 +37,7 @@ function DangerZone() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
+  const manage = useCan()('project.delete');
   const remove = useMutation({
     mutationFn: () => api.projects.remove(projectId, typed.trim()),
     onSuccess: async () => {
@@ -61,10 +64,12 @@ function DangerZone() {
           </>
         }
         footer={
-          <Button onClick={() => setOpen(true)} size="sm" variant="destructive">
-            <Trash2Icon />
-            Delete project…
-          </Button>
+          <AdminOnly allowed={manage}>
+            <Button disabled={!manage} onClick={() => setOpen(true)} size="sm" variant="destructive">
+              <Trash2Icon />
+              Delete project…
+            </Button>
+          </AdminOnly>
         }
         title="Delete project"
         tone="danger"
@@ -72,13 +77,14 @@ function DangerZone() {
         <p className="text-muted-foreground text-sm">
           Last 24 hours: <span className="font-medium text-foreground tabular-nums">{formatNumber(p.eventsLast24h)}</span> events received.
         </p>
+        {manage ? null : <AdminNote>Only workspace owners and admins can delete a project.</AdminNote>}
       </SettingsSection>
       <AlertDialog
         onOpenChange={(next) => {
           setOpen(next);
           if (!next) setTyped('');
         }}
-        open={open}
+        open={open && manage}
       >
         <AlertDialogContent className="sm:max-w-md">
           <form

@@ -74,7 +74,11 @@ export const EVENT_COLUMNS: EventColumn[] = [
     defaultVisible: true,
     render: (e) =>
       e.actor ? (
-        <EntityChip icon={e.actor.type === 'user' ? undefined : typeIcon('actor', e.actor.type)} id={e.actor.id} name={e.actor.name} />
+        <EntityChip
+          icon={e.actor.type === 'user' ? undefined : typeIcon('actor', e.actor.type)}
+          id={e.actor.id}
+          name={e.actor.name || e.actor.email}
+        />
       ) : (
         <span className="text-muted-foreground text-xs">—</span>
       ),

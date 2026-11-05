@@ -13,11 +13,13 @@ import { ArrowRightIcon, CheckIcon, DatabaseIcon, Loader2Icon, PanelRightOpenIco
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ActionName } from '@/components/action-name';
+import { AdminOnly } from '@/components/admin-gate';
 import { EventSheet } from '@/components/explorer/event-sheet';
 import { Timestamp } from '@/components/timestamp';
 import { projectSetupQuery } from '@/lib/api/queries';
-import { eventSentence } from '@/lib/events';
+import { eventSentence, personLabel } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
+import { useCan } from '@/lib/permissions';
 import { curlSnippet, fetchSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
 import { useSessionKey } from './api-key-step';
 import { useInvalidateSetup, useSampleData, useTestEvent } from './use-setup';
@@ -87,6 +89,7 @@ export function FirstEventPanel({ projectId, showSnippets = true }: { projectId:
 
 function Listening({ projectId, setup }: { projectId: string; setup: ProjectSetup }) {
   const test = useTestEvent(projectId);
+  const canSend = useCan()('testEvent.send');
   return (
     <div
       aria-live="polite"
@@ -107,11 +110,15 @@ function Listening({ projectId, setup }: { projectId: string; setup: ProjectSetu
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
-        <Button disabled={test.isPending} onClick={() => test.mutate()} size="sm" variant="outline">
-          {test.isPending ? <Loader2Icon className="animate-spin" /> : <SendIcon />}
-          Send a test event
-        </Button>
-        <span className="text-[11px] text-muted-foreground">Sent from the console as you · counts as a real event</span>
+        <AdminOnly allowed={canSend}>
+          <Button disabled={test.isPending || !canSend} onClick={() => test.mutate()} size="sm" variant="outline">
+            {test.isPending ? <Loader2Icon className="animate-spin" /> : <SendIcon />}
+            Send a test event
+          </Button>
+        </AdminOnly>
+        <span className="text-[11px] text-muted-foreground">
+          {canSend ? 'Sent from the console as you · counts as a real event' : 'Ask an admin to send one, or run a snippet'}
+        </span>
       </div>
     </div>
   );
@@ -156,7 +163,7 @@ function ReceivedEvent({ projectId, event, celebrate }: { projectId: string; eve
         </span>
         <span className="truncate text-sm">{eventSentence(event)}</span>
         <span className="flex flex-wrap items-center gap-1.5">
-          {event.actor ? <EntityChip id={event.actor.id} meta={event.actor.type} name={event.actor.name || event.actor.id} /> : null}
+          {event.actor ? <EntityChip id={event.actor.id} meta={event.actor.type} name={personLabel(event.actor)} /> : null}
           {event.tenant ? <EntityChip id={event.tenant.id} meta="tenant" name={event.tenant.name || event.tenant.id} square /> : null}
           {event.targets.slice(0, 2).map((t) => (
             <EntityChip id={t.id} key={`${t.type}:${t.id}`} meta={t.type} name={t.name || t.id} square />
@@ -186,7 +193,8 @@ function ReceivedEvent({ projectId, event, celebrate }: { projectId: string; eve
 
 export function SampleDataControl({ projectId, setup }: { projectId: string; setup: ProjectSetup }) {
   const { load, remove } = useSampleData(projectId);
-  const confirm = useConfirm();
+  const confirmRemove = useConfirmRemoveSampleData(setup.ingest.sampleEvents);
+  const manage = useCan()('sampleData.manage');
   const loaded = setup.ingest.sampleEvents > 0;
   return (
     <div className="flex flex-col gap-3 rounded-xl border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between" data-testid="sample-data">
@@ -194,7 +202,11 @@ export function SampleDataControl({ projectId, setup }: { projectId: string; set
         <DatabaseIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div className="flex flex-col gap-0.5">
           <p className="font-medium text-sm">
-            {loaded ? `${formatNumber(setup.ingest.sampleEvents)} sample events loaded` : 'Just looking around? Load sample data'}
+            {loaded
+              ? `${formatNumber(setup.ingest.sampleEvents)} sample events loaded`
+              : manage
+                ? 'Just looking around? Load sample data'
+                : 'No sample data loaded'}
           </p>
           <p className="text-muted-foreground text-xs">
             {formatNumber(SAMPLE_DATA_EVENTS)} fictional hotel-booking events over 7 days, tagged{' '}
@@ -213,31 +225,41 @@ export function SampleDataControl({ projectId, setup }: { projectId: string; set
             >
               Explore
             </Button>
-            <Button
-              disabled={remove.isPending}
-              onClick={async () => {
-                const ok = await confirm({
-                  title: 'Remove sample data?',
-                  description: `Deletes the ${formatNumber(setup.ingest.sampleEvents)} events tagged source:${SAMPLE_DATA_SOURCE}. Your real events are not touched.`,
-                  confirmLabel: 'Remove sample data',
-                  destructive: true,
-                });
-                if (ok) remove.mutate();
-              }}
-              size="sm"
-              variant="ghost"
-            >
-              {remove.isPending ? <Loader2Icon className="animate-spin" /> : <Trash2Icon />}
-              Remove
-            </Button>
+            {manage ? (
+              <Button
+                disabled={remove.isPending}
+                onClick={async () => {
+                  if (await confirmRemove()) remove.mutate();
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                {remove.isPending ? <Loader2Icon className="animate-spin" /> : <Trash2Icon />}
+                Remove
+              </Button>
+            ) : null}
           </>
-        ) : (
+        ) : manage ? (
           <Button disabled={load.isPending} onClick={() => load.mutate()} size="sm" variant="outline">
             {load.isPending ? <Loader2Icon className="animate-spin" /> : <DatabaseIcon />}
             {load.isPending ? 'Loading…' : 'Load sample data'}
           </Button>
+        ) : (
+          <span className="text-muted-foreground text-xs">Ask an admin to load it</span>
         )}
       </div>
     </div>
   );
+}
+
+/** The one confirmation before removing sample data (Setup, the onboarding first-event step and the sample-data banner). */
+export function useConfirmRemoveSampleData(count: number) {
+  const confirm = useConfirm();
+  return () =>
+    confirm({
+      title: 'Remove sample data?',
+      description: `Deletes the ${formatNumber(count)} events tagged source:${SAMPLE_DATA_SOURCE}. Your real events are not touched.`,
+      confirmLabel: 'Remove sample data',
+      destructive: true,
+    });
 }
