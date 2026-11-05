@@ -221,7 +221,7 @@ function NeverPopulated({ projectId, section }: { projectId: string; section: En
       {/* A plain block (not a flex child of EmptyState) so the snippet's long lines scroll inside it instead of widening the card. */}
       <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-3 px-4 sm:px-6">
         <CodeBlock className="w-full text-start" code={explainer.snippet} copyLabel="Copy snippet" language="json" />
-        <Link className={buttonVariants({ size: 'sm', variant: 'outline' })} hash="envelope" params={{ projectId }} to="/p/$projectId/docs">
+        <Link className={buttonVariants({ size: 'sm', variant: 'outline' })} hash="envelope" params={{ projectId }} to="/p/$projectId/setup">
           <BookOpenIcon />
           Read the quickstart
         </Link>
