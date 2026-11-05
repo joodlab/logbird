@@ -2,7 +2,8 @@ import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import { insertEvents, normalizeEvent } from '@trailmark/clickhouse';
 import { ingestResponseSchema } from '@trailmark/contracts';
-import { withProjectLock } from '@trailmark/database';
+import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@trailmark/database';
+import { enqueueProjectRetention } from '@trailmark/worker/queue';
 import type { Context } from 'hono';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
@@ -48,13 +49,18 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
       ids.push(normalized.id);
     } else rejected.push({ index, reason: normalized.reason });
   }
-  await withProjectLock(projectId, async (tx) => {
-    if (!projectId.startsWith('ws:') && !(await tx.project.findUnique({ where: { id: projectId } })))
-      throw new ApiError(404, 'not_found', 'Project not found.');
-    await requireRetentionReady(tx, projectId);
-    await insertEvents(clickhouse, rows);
-    invalidateSetup(projectId);
-  });
+  await withProjectLock(
+    projectId,
+    async (tx) => {
+      if (!projectId.startsWith('ws:') && !(await tx.project.findUnique({ where: { id: projectId } })))
+        throw new ApiError(404, 'not_found', 'Project not found.');
+      await requireRetentionReady(tx, projectId);
+      await insertEvents(clickhouse, rows);
+      invalidateSetup(projectId);
+      // Shared: concurrent ingests (several app servers, SDK flushes, audit writes) coexist; maintenance excludes them.
+    },
+    { mode: 'shared' },
+  );
   return ingestResponseSchema.parse({ accepted: ids.length, ids, rejected });
 }
 export function audit(c: Context<AppEnv>, action: string, target: { type: string; id: string; name?: string }, changes?: unknown[]) {
@@ -71,7 +77,17 @@ export function audit(c: Context<AppEnv>, action: string, target: { type: string
 }
 
 export async function requireRetentionReady(tx: import('@trailmark/database').Prisma.TransactionClient, projectId: string) {
-  const latest = await tx.retentionRun.findFirst({ where: { projectId }, orderBy: { startedAt: 'desc' } });
-  if (latest && latest.status !== 'completed')
-    throw new ApiError(503, 'retention_unavailable', 'Retention rebuild must complete before accessing project data.');
+  const recovered = await recoverAbandonedRetention(tx, projectId);
+  if (recovered.count) await enqueueProjectRetention(projectId);
+  const latest = await tx.retentionRun.findFirst({ where: { projectId, status: 'running' } });
+  if (latest) throw new ApiError(503, 'retention_unavailable', 'Retention rebuild must complete before accessing project data.');
+}
+
+/** Reads use short statements only; stale recovery alone needs a non-blocking project lock. */
+export async function requireProjectReadable(projectId: string) {
+  const run = await prisma.retentionRun.findFirst({ where: { projectId, status: 'running' }, orderBy: { startedAt: 'desc' } });
+  if (!run) return;
+  if ((run.heartbeatAt ?? run.startedAt).getTime() >= Date.now() - RETENTION_LEASE_MS)
+    throw new ApiError(503, 'retention_unavailable', 'Retention rebuild is in progress. Retry shortly.');
+  await withProjectLock(projectId, (db) => requireRetentionReady(db, projectId));
 }

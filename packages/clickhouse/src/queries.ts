@@ -22,16 +22,18 @@ import type { ClickHouseClient } from './client';
 import { isQueryClient } from './client';
 import type { EventRow } from './normalize';
 import { columns, compileQuery, QueryError } from './query';
-import { validateSql } from './sql-guard';
+import { sqlSyntaxError, validateSql } from './sql-guard';
 
+const sqlExpression = Symbol('sqlExpression');
 async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }) {
   if (q.lang !== 'sql') return compileQuery(q.q);
   if (!isQueryClient(ch)) throw new Error('SQL mode requires the restricted query client');
-  return { sql: await validateSql(ch, q.q), params: {} };
+  return { sql: await validateSql(ch, q.q), params: { [sqlExpression]: q.q ?? '' } };
 }
 
 type Params = Record<string, unknown>;
-async function read<T>(ch: ClickHouseClient, query: string, query_params: Params = {}, guard = 10): Promise<T[]> {
+export async function read<T>(ch: ClickHouseClient, query: string, parameters: Params = {}, guard = 10): Promise<T[]> {
+  const query_params = { ...parameters };
   for (const key of ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff']) {
     const value = query_params[key];
     if (typeof value === 'string') query_params[key] = new Date(value).toISOString().replace('T', ' ').slice(0, -1);
@@ -65,6 +67,8 @@ async function read<T>(ch: ClickHouseClient, query: string, query_params: Params
         end: null,
         hint: 'Narrow the time range or filter',
       });
+    if (isQueryClient(ch) && /SYNTAX_ERROR|Syntax error/.test(error instanceof Error ? error.message : ''))
+      throw sqlSyntaxError(error, query, (query_params as Record<symbol, string>)[sqlExpression] ?? '');
     throw error;
   }
 }
@@ -74,7 +78,7 @@ export function timeRange(q: RangeQuery) {
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
   return { from: from.toISOString(), to: to.toISOString() };
 }
-async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery) {
+export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery) {
   const c = await filter(ch, q);
   return {
     sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${c.sql})`,

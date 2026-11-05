@@ -9,7 +9,7 @@ Trailmark searches one authorized project within a half-open UTC time range. The
 | Exact | action:hotel.policy.updated | Exact, case-sensitive value |
 | Prefix | action:hotel.* | Trailing wildcard; internal stars are literal |
 | Negation | -env:staging or NOT env:staging | Exclude matches |
-| Presence | impersonator:* -tenant:* | Non-empty / missing (numeric/date columns always present) |
+| Presence | impersonator:* -tenant:* or _exists_:impersonator | Non-empty / missing (numeric/date columns always present) |
 | Text | "free text" bare words | Search description, actor, tenant and target names; adjacency AND |
 | Boolean | (a OR b) AND NOT c | AND binds more tightly than OR; parentheses override |
 | Number | attempt:>2 conformance:<=50 | >, >=, <, <= on number/date fields or attributes |
@@ -40,6 +40,11 @@ severity:critical category:hotel id:evt_123
 "free text" bare words
 (a OR b) c
 ```
+
+Date bounds also accept `occurredAt:>now-7d` and `occurredAt:[now-24h TO now]`.
+Units are s/m/h/d/w; + and - offsets are supported, optionally followed by `/d`
+(round down to UTC midnight, e.g. now-7d/d). A compilation uses one clock instant;
+resolved dates are parameters. `NOT _exists_:field` means missing.
 
 ## Field catalog
 
@@ -132,7 +137,25 @@ Query language: 4096 UTF-8 bytes, 64 terms and 16 nesting levels. SQL: 4096 UTF-
 
 ## Autocomplete
 
-GET /api/projects/:projectId/suggest?field=actor&prefix=ra&limit=10 returns {field,values:[{value,label,count}]}. Prefix is case-insensitive contains matching over value and label. Results rank by count, then value. Entities use the entities rollup (display name labels); low-cardinality values use events_by_minute over seven days; column values scan at most 50,000 recent events in seven days. Attribute samples use attribute_keys; count is the key's total frequency, not an individual sampled value frequency. Sources are approximate rollups and can include pre-retention history until rebuilt. Unsupported suggestion sources return an empty list. Authorization precedes every lookup.
+GET /api/projects/:projectId/suggest?field=actor&prefix=ra&limit=10 returns
+{field,values:[{value,label,count}],complete}. Prefix is case-insensitive contains matching
+over value and label; ranking is count descending, then value. Optional q/lang/from/to
+scope values to the current query (including the suggested field's own predicate).
+SQL mode uses the restricted client and the same AST validation and project binding.
+With no query/time scope, entities and low-cardinality fields keep their rollup fast paths.
+Attributes and column fields, and all scoped requests, count actual values in at most
+50,000 most recent stored rows in the requested range (default seven days). Sampling
+precedes query filtering, so rare values outside the sample may be omitted. Counts are
+per stored row within that sample, not a key's total frequency or deduplicated event counts.
+`complete` is true only if the scan was exhaustive for that window and every matching
+value fits within limit; it is conservatively false when the row bound is reached.
+Unsupported sources return an empty complete list. Rollups can be incomplete after a
+failed retention rebuild; the retention status endpoint reports failures.
+
+KQL-style syntax errors include optional `details.replacement: {start,end,text}` with
+UTF-16 offsets. Applying that edit converts `f = v`, `f != v`, `!f:v`, `&&` or `||` to
+Trailmark syntax. Operators inside quoted values and regexes remain literal. SQL syntax
+errors from validation and execution map ClickHouse byte positions to UTF-16 spans.
 
 ## Query bar (console)
 

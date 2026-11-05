@@ -173,6 +173,31 @@ Retention: `apps/worker` runs hourly (and on demand after a retention change):
 same for rollups/entities by their time column. Each run is logged (`RetentionRun` in Postgres) and shown in
 Settings → Retention ("last purge", "oldest event"). Project deletion purges all of its rows.
 
+Runs heartbeat every 30 seconds with a ten-minute lease (legacy null heartbeats use startedAt).
+Recovery under the project ingestion lock marks expired running runs failed with error `abandoned`.
+Requests recover lazily and enqueue a retry; worker startup revisits running projects and the hourly
+sweep retries all projects, continuing past individual failures. Live running runs return 503 retention_unavailable with Retry-After: 1 for project data reads
+and project setup; retention status remains readable. Readiness checks are short non-transactional
+statements, and no read holds a project lock or a Postgres connection during ClickHouse I/O.
+An already-started read/export is not a snapshot and may overlap a purge.
+Writers use session advisory locks held on a separate pool (16 connections per process), never a transaction:
+ingest (including Trailmark's own audit writes) takes a **shared** data lock, so concurrent ingests for one project
+coexist; maintenance (retention, sample replacement/removal, deletion, policy changes) takes it **exclusive**. A
+second "gate" lock gives maintenance writer preference: while maintenance waits or runs, new ingests cannot pass the
+gate, so a steady ingest stream cannot starve it, and in-flight ingests (tens of ms) drain first. Every acquisition is
+a non-blocking try with a bounded retry (default 3 s); on timeout the caller gets HTTP 503 project_busy with
+Retry-After: 1 (the SDK retries), and no Prisma connection ever waits behind a purge.
+The lock statements also have a one-second lock timeout and two-second statement/connection budgets.
+No Postgres transaction spans ClickHouse work. Prisma uses its own independent pool; connection_limit
+in DATABASE_URL sets that pool size (default 10). Callbacks are exclusive sections, not transactions.
+Sample/deletion reads may see transient aggregates during maintenance; once rebuilt, rollups reflect
+surviving rows exactly because concurrent writers never enter the exclusive section.
+Failed runs allow reads and ingestion: surviving raw events remain accessible, but aggregates may be
+incomplete until a successful retry rebuilds them. The retention status endpoint exposes the failure.
+Recovery never restores expired events. Workspace setup reports `retentionBusy: true` per affected
+project instead of failing the workspace; its progress is a placeholder (0, nextStep null,
+firstEventAt null), not measured emptiness.
+
 Hot-path rules: always filter `project_id` + time range first; never `FINAL` on search; dedupe in the result
 set by `event_id` when needed; cursor = `(timestamp, event_id)` keyset; `total` via `count()` with
 `max_execution_time` guard (fall back to "10k+").
@@ -268,6 +293,13 @@ match. Array fields (`target`, `target.type`, `target.name`, `changes.field`) ma
 
 Errors: HTTP 422 `invalid_query`, `details` = `QueryErrorDetails` (`lang`, `reason`, `start`/`end` UTF-16 offsets,
 `hint`), e.g. `attempt:>abc` → reason `type`, span of `abc`, hint `attempt is a number`.
+
+Server follow-ups: `_exists_:field` aliases `field:*` (including NOT). Date bounds accept
+`now`, `now-7d`, `now+1h`, units s/m/h/d/w and optional `/d` UTC-day rounding; one clock
+instant per compilation, values remain parameters. Query errors may include optional
+`replacement: { start, end, text }` for KQL `f = v`, `f != v`, `!f:v`, `&&`, `||`.
+Suggestions accept q/lang/from/to and return `complete`; see the query-language reference
+for sample bounds and counts. Execution SQL syntax errors use UTF-16 spans as validation does.
 
 #### 5.1.2 SQL mode (`lang=sql`)
 `q` is a ClickHouse boolean expression only (`job_attempt > 2 AND attributes['metadata.channel'] = 'whatsapp'`).

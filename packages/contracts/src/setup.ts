@@ -137,6 +137,7 @@ export const workspaceSetupSchema = z.object({
   team: z.object({ members: z.number().int(), pendingInvitations: z.number().int() }),
   projects: z.array(
     z.object({
+      retentionBusy: z.boolean().optional(),
       projectId: z.string(),
       name: z.string(),
       slug: z.string(),
