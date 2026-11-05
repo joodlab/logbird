@@ -13,7 +13,7 @@ docker compose run --rm server pnpm --filter @trailmark/database migrate:deploy
 docker compose run --rm server pnpm --filter @trailmark/clickhouse migrate
 # Provisioning writes generated credentials to the mounted env, without rotation.
 # The invoking container user must have write access to this file.
-docker compose run --rm -v "$PWD/.env:/workspace/.env" server pnpm --filter @trailmark/clickhouse create-query-user
+docker compose run --rm --user "$(id -u):$(id -g)" -v "$PWD/.env:/workspace/.env" server pnpm --filter @trailmark/clickhouse create-query-user
 docker compose up -d --force-recreate server app worker
 ```
 

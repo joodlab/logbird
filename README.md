@@ -2,7 +2,7 @@
 
 Open-source audit logs and activity history for your product. Send events through HTTP or the TypeScript SDK, then search who did what, follow records and background jobs, and trace changes across an operation.
 
-![Trailmark explorer](docs/media/walkthrough/03-explorer-query.png)
+![Trailmark explorer](marketing/captures/2026-11-04-final-polish/light-explorer-autocomplete.png)
 
 - Structured filters, autocomplete and guarded SQL expressions.
 - Actor, tenant, executor and record timelines; before/after changes and causation trees.

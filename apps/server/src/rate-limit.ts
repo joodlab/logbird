@@ -16,15 +16,14 @@ export function requestRateLimit(scope: string, limit: number, windowMs = 60_000
       env.TRUST_PROXY === 'true'
         ? c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
         : (c.env as { incoming?: { socket: { remoteAddress?: string } } })?.incoming?.socket.remoteAddress;
-    const identity = peer;
     const digest = createHash('sha256')
-      .update(identity || 'unknown')
+      .update(peer || 'unknown')
       .digest('hex');
-    const key = `${env.BULLMQ_PREFIX}:rate:${scope}:${c.req.routePath}:${digest}:${Math.floor(Date.now() / windowMs)}`;
+    const key = `${env.BULLMQ_PREFIX}:rate:${scope}:${c.req.method}:${c.req.routePath}:${digest}:${Math.floor(Date.now() / windowMs)}`;
     try {
       const count = Number(await rateLimitStore.eval(script, 1, key, windowMs * 2));
       if (count > limit) {
-        c.header('Retry-After', '60');
+        c.header('Retry-After', String(Math.ceil(windowMs / 1000)));
         return c.json({ error: { code: 'rate_limited', message: 'Too many requests. Retry shortly.' } }, 429);
       }
     } catch {

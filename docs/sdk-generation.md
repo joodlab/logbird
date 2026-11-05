@@ -71,14 +71,14 @@ Forge setup and generation (PowerShell; paths here match the requested worktree)
 ```powershell
 git clone https://github.com/cloudflare/forge ../forge
 git -C ../forge checkout 68134895e81dd3a0a005981b05a3c5e0baaff3f9
-wsl -d Ubuntu -- sh -lc 'cd /mnt/c/Users/raedb/Desktop/Work/OSS/forge && cargo +stable build --bin forge'
+wsl -d Ubuntu -- sh -lc 'cd ../forge && cargo +stable build --bin forge'
 ```
 
 Then in WSL:
 
 ```sh
-FORGE=/mnt/c/Users/raedb/Desktop/Work/OSS/forge/target/debug/forge
-cd /mnt/c/Users/raedb/AppData/Local/OpenAI/Codex/worktrees/trailmark-forge
+FORGE=../forge/target/debug/forge
+cd ../trailmark
 "$FORGE" experiments/forge/public.input.json --target ts --out experiments/forge/public
 "$FORGE" experiments/forge/console.input.json --target ts --out experiments/forge/console
 "$FORGE" openapi/public.json --target cli --out /tmp/trailmark-forge-cli
