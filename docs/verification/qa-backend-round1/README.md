@@ -118,3 +118,25 @@ and sentence composition belong to the parallel UI change.
 Cleanup review inspected the owned diff against master 3768bd8, callers and tests; no actionable
 slop found. No speculative abstractions or dependencies were introduced. This is local-service
 proof, not hosted or production acceptance.
+
+## Final local check receipts
+
+```text
+pnpm install: lockfile up to date; pnpm 10.30.3, exit 0
+pnpm typecheck: 16 successful / 16 tasks, exit 0
+pnpm check: 352 files checked; 74 advisory warnings; exit 0
+BULLMQ_PREFIX={trailmark-qa-backend} pnpm test: 18 successful / 18 tasks, exit 0
+  server: 12 files passed, 1 skipped; 27 tests passed, 48 skipped
+  skipped: opt-in Search v2 HTTP suite (SEARCH_V2_HTTP is not enabled)
+  existing role-authorization and project-lock regressions included and passed
+pnpm build: 10 successful / 10 tasks, exit 0
+pnpm openapi:export: Exported 41 operations in-process
+focused qa-backend.integration.test.ts: 1 file, 2 tests passed
+```
+
+The final full suite took 6m04s; Turbo reports no coverage output files because the tests do
+not produce coverage artifacts. No test failures or fork-termination warning on this final run.
+An earlier unisolated run encountered a retention job and another emitted a fork-termination
+warning; neither is used as the final receipt. The rebase added master #33 documentation
+only; typecheck/build were repeated successfully afterward. Cleanup scope and contract
+review remain valid on the rebased code.
