@@ -3,6 +3,106 @@
 Status: **proposal, waiting for the owner's decision.** Nothing in the code, packages or docs has been renamed.
 Research date: 2026-11-05. Re-run the checks before buying anything: availability changes daily.
 
+## 0. Round 2 (current): a name that is easy in Arabic and English
+
+The owner asked for a name that is equally easy to say and spell in Arabic and English, checked by counsel.
+
+What "easy in both" means here:
+
+- **Latin spelling:** only letters with one obvious Arabic equivalent (b t d r s sh f k l m n h w y z j). No p, v, ch, x
+  or q. No silent letters. Two syllables where possible.
+- **Arabic spelling:** a real word or a regular derivation, so it has exactly one natural Arabic spelling. It should
+  mean something about *recording what happened*.
+
+Round 1's Etchlog fails the Arabic half. "إتشلوج" has no natural Arabic spelling, and the "ch" and "g" sounds are
+ambiguous.
+
+The checks use the same method as section 2 (live registry, WHOIS, npm and GitHub lookups on 2026-11-05) and the same
+Porkbun prices.
+
+| # | Name | Arabic | Meaning | Say it | Free domains | npm `@scope` / pkg | GitHub org | Bluesky / YouTube | Conflicts found |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **1** | **Sijla** | سِجلة | Coined from سِجِلّ, "record / log" | SIJ-la | **.dev**, .app, .io, .sh, .so | free / free | **free** | free / taken | No product named Sijla. Apps on the same root: "Sijil" HR/attendance (Odoo), "Sijilaty" (medical consent), "MySijil" (certificates). Different products. sijla.com held since 2006 (Gandi), no site. |
+| 2 | Sijillat | سِجِلّات | Literally "logs, records" | si-JIL-lat | .dev, .app, .io, .sh, .so | free / free | **free** | free / taken | None found. Long, and the double-l invites "Sijilat", so also buy sijilat.dev (free). |
+| 3 | Tadween | تدوين | "Recording, writing down" | tad-WEEN | .dev, .io, .sh, .so | free / free | taken by an unrelated small user account → `tadween-hq` | free / free | A 2009 SourceForge Arabic-typing utility (inactive). The "Tanween" kids-school app is a similar name. |
+| 4 | Sijlo | سجلو | Coined: record + o. In dialect it sounds like "record it!" | SIJ-lo | .dev, .io, .sh, .so | free / free | dormant user (2020, 0 repos) | taken / free | None found |
+| 5 | Mahdar | محضر | Official record, minutes | MAH-dar | .dev, .io, .sh, .so | **taken** / free | dormant user | — | `@mahdar/sdk` isn't possible, which is the main blocker |
+| 6 | Kunnash | كنّاش | Classical notebook or register | kun-NASH | .dev, .io, .sh, .so | free / free | free | — | None found. Unfamiliar to most Arabic readers. |
+| 7 | Rasmo | رسمو | From رسم, "trace, mark" | RAS-mo | .dev, .app, .io, .sh, .so | free / free | dormant user (2012) | — | None found. Weakest meaning. |
+
+Round 1's **Deedmark** also writes cleanly in Arabic (ديدمارك) if an English-first name is preferred.
+
+Checked and rejected because .dev, npm or GitHub is taken:
+
+- Athar (أثر)
+- Sijil (سجل)
+- Isnad (إسناد)
+- Daleel (دليل)
+- Alama (علامة)
+- Masar (مسار)
+- Rasid (راصد)
+- Amana (أمانة)
+- Bayan (بيان)
+- Thabit (ثابت)
+- Marsad (مرصد)
+- Zimam (زمام)
+- Seera (سيرة)
+- Raqeeb (رقيب)
+- Rasad (رصد)
+- Darb (درب)
+- Mahfuz (محفوظ)
+
+**Recommendation: Sijla (سِجلة) on sijla.dev.**
+
+- It is the only bilingual candidate free on every namespace that matters: .dev, .app, .io, .sh, .so, the npm scope
+  and package, and the GitHub org.
+- It is five letters and two syllables. There is one way to say it in English and one way to write it in Arabic.
+- An Arabic reader hears "record"; an English reader meets a short, ownable coined word.
+
+Buy sijla.dev ($8.75 / $12.87), sijla.app ($8.75 / $14.93) and sijla.sh ($31.20 / $46.65). That is **$48.70 the first
+year and $74.45 a year after**. YouTube @sijla is taken, so use `@sijla-dev` or `@sijlahq`.
+
+The runner-up is **Sijillat**, if the literal word matters more than brevity.
+
+| | Console | Sign-in | README hero (bilingual) |
+| --- | --- | --- | --- |
+| Sijla | ![](../marketing/captures/2026-11-05-brand-shortlist/bilingual/sijla-console.png) | ![](../marketing/captures/2026-11-05-brand-shortlist/bilingual/sijla-login.png) | ![](../marketing/captures/2026-11-05-brand-shortlist/bilingual/sijla-readme.png) |
+| Sijla (dark) | ![](../marketing/captures/2026-11-05-brand-shortlist/bilingual/sijla-console-dark.png) | ![](../marketing/captures/2026-11-05-brand-shortlist/bilingual/sijla-login-dark.png) | ![](../marketing/captures/2026-11-05-brand-shortlist/bilingual/sijla-readme-dark.png) |
+| Sijillat | ![](../marketing/captures/2026-11-05-brand-shortlist/bilingual/sijillat-console.png) | ![](../marketing/captures/2026-11-05-brand-shortlist/bilingual/sijillat-login.png) | ![](../marketing/captures/2026-11-05-brand-shortlist/bilingual/sijillat-readme.png) |
+| Tadween | ![](../marketing/captures/2026-11-05-brand-shortlist/bilingual/tadween-console.png) | ![](../marketing/captures/2026-11-05-brand-shortlist/bilingual/tadween-login.png) | ![](../marketing/captures/2026-11-05-brand-shortlist/bilingual/tadween-readme.png) |
+
+![Bilingual marks and wordmarks](../marketing/captures/2026-11-05-brand-shortlist/bilingual/marks-and-wordmarks.png)
+
+The marks are concept sketches:
+
+- **Sijla and Sijillat:** the three teeth of س sit on a log line, and an indigo dot marks the newest entry.
+- **Tadween:** ت drawn as a ledger tray with its two dots, one written and one being written.
+
+The Arabic wordmark is set in IBM Plex Sans Arabic (SIL OFL), the Arabic companion to the console's Geist. Final SVG
+assets for the chosen name, in both scripts and outlined, come with the rename PR. The Etchlog files in
+`apps/app/public/brand/` are round-1 work.
+
+### Brief for counsel (knock-out and clearance search)
+
+- **Marks:**
+  - SIJLA as a word mark.
+  - سجلة in Arabic script.
+  - Alternates if Sijla is cleared out: SIJILLAT / سجلات and TADWEEN / تدوين.
+- **Goods and services:**
+  - **Class 9:** downloadable software for recording, storing and searching audit logs and activity records.
+  - **Class 42:** SaaS and PaaS for audit logging, activity history, security and compliance record-keeping; hosting
+    of such software.
+- **Jurisdictions:**
+  - Where we sell and build: Saudi Arabia (SAIP), UAE, other GCC, Egypt, Tunisia.
+  - Where developers are: USPTO, EUIPO, UK IPO.
+  - The WIPO Madrid route for coverage.
+- **Questions to answer:**
+  1. Do "Sijil" / "Sijilaty" registrations in Classes 9 or 42 block SIJLA? They are the same Arabic root, but
+     different goods.
+  2. Is سجلة descriptive in Arabic for a records product, given سجل means "record"? This affects strength in Arabic
+     jurisdictions.
+  3. Are there conflicts in transliteration variants (Sijlah, Sejla, Sijila)?
+
 ## 1. Is "Trailmark" usable?
 
 **No. Rename before the open-source launch.** The name is crowded in exactly our category, and we cannot own the
