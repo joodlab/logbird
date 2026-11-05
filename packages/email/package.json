@@ -8,27 +8,31 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "dev": "email dev --dir emails --port 4722",
+    "export": "email export --dir emails --outDir .react-email-out",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "git clean -xdf .cache .turbo dist node_modules"
+    "clean": "git clean -xdf .cache .turbo .react-email .react-email-out dist node_modules"
   },
   "dependencies": {
     "@t3-oss/env-core": "^0.13.11",
-    "zod": "^4.5.4",
+    "@types/nodemailer": "^8.0.1",
+    "@types/react": "^19.2.18",
+    "nodemailer": "^9.1.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-email": "^6.9.3",
-    "nodemailer": "^9.1.1",
-    "@types/react": "^19.2.18",
-    "@types/nodemailer": "^8.0.1"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@react-email/ui": "6.11.6",
     "@trailmark/tsconfig": "workspace:*",
     "@types/node": "^22.20.1",
-    "typescript": "^7.0.2",
-    "tsx": "4.23.13",
     "dotenv-cli": "^11.0.0",
+    "html-validate": "^11.18.0",
     "tsdown": "^0.22.14",
+    "tsx": "4.23.13",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.11"
   }
 }

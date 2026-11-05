@@ -1,0 +1,97 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`'invitation' email > has a plain-text part with the footer and no markup 1`] = `
+"Join Acme on Trailmark
+======================
+
+Raed Bahri (raed@acme.test) invited you to the Acme workspace as an Admin. Trailmark keeps a searchable history of who did what, when and where across your team’s systems.
+
+Workspace:       Acme
+Role:            Admin
+                 Manages projects, API keys, retention and members.
+Invited address: lina@acme.test
+Expires:         Nov 7, 2026, 14:32 UTC (in 2 days)
+
+Accept the invitation:
+https://audit.acme.test/accept-invitation/inv_7Hc2kP9xQm
+
+Not expecting this? You can ignore it — you won’t join Acme unless you accept. To accept, sign in as lina@acme.test; the invitation only works for that address.
+
+--
+You received this email because raed@acme.test invited lina@acme.test to the Acme workspace.
+Trailmark · open-source audit logs · audit.acme.test
+https://audit.acme.test
+"
+`;
+
+exports[`'memberJoined' email > has a plain-text part with the footer and no markup 1`] = `
+"Lina Haddad joined Acme
+=======================
+
+Lina Haddad accepted your invitation and is now a member of Acme as an Admin.
+
+Member:    Lina Haddad (lina@acme.test)
+Role:      Admin
+           Manages projects, API keys, retention and members.
+Workspace: Acme
+Joined:    Nov 5, 2026, 14:32 UTC
+
+Open Trailmark:
+https://audit.acme.test
+
+Not who you expected? An owner or admin can change their role or remove them from Acme under Settings → Members.
+
+--
+You received this email because you invited lina@acme.test to the Acme workspace.
+Trailmark · open-source audit logs · audit.acme.test
+https://audit.acme.test
+"
+`;
+
+exports[`'roleChanged' email > has a plain-text part with the footer and no markup 1`] = `
+"Your role in Acme changed
+=========================
+
+Raed Bahri (raed@acme.test) changed your role from Member to Admin.
+
+New role:      Admin
+               Manages projects, API keys, retention and members.
+Previous role: Member
+Workspace:     Acme
+Changed by:    Raed Bahri (raed@acme.test)
+When:          Nov 5, 2026, 14:32 UTC
+
+Open Trailmark:
+https://audit.acme.test
+
+Didn’t expect this? Ask a workspace owner. Every role change is recorded in the workspace activity log.
+
+--
+You received this email because you’re a member of the Acme workspace (lina@acme.test).
+Trailmark · open-source audit logs · audit.acme.test
+https://audit.acme.test
+"
+`;
+
+exports[`'signInCode' email > has a plain-text part with the footer and no markup 1`] = `
+"Your sign-in code
+=================
+
+Enter this code on the Trailmark sign-in page to continue as lina@acme.test.
+
+    482913
+    Expires in 10 minutes, at 14:42 UTC
+
+Account:    lina@acme.test
+Requested:  Nov 5, 2026, 14:32 UTC
+Device:     Chrome on Windows
+IP address: 203.0.113.24
+
+Didn’t request this? You can ignore this email — nobody can sign in without this code. Never share it: Trailmark will never ask you for it.
+
+--
+You received this email because a sign-in code was requested for lina@acme.test on audit.acme.test.
+Trailmark · open-source audit logs · audit.acme.test
+https://audit.acme.test
+"
+`;

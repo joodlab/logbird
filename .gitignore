@@ -78,3 +78,7 @@ experiments/hey-api/node_modules/
 # Private workstation instructions
 AGENTS.local.md
 CLAUDE.local.md
+
+# react-email preview build output (packages/email)
+.react-email/
+.react-email-out/
