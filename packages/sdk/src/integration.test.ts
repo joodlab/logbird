@@ -69,6 +69,14 @@ it('round trips JSON carriers through workers and nested jobs', async () => {
   });
   expect(await job.carrier({ parentEventId: id })).toMatchObject({ parentEventId: id, operationId: 'host-operation', actor: { id: 'user' } });
 });
+it('omits jobId instead of sending "undefined" for jobs without an id', async () => {
+  const { client, track } = fixture();
+  const job = jobAudit({ client, job: { name: 'sweep', queueName: 'health' } });
+  job('health.sweep.completed');
+  await job.pending();
+  expect(track.mock.calls[0]?.[0].executor).toEqual({ type: 'worker', id: 'health', name: 'sweep', jobId: undefined, attempt: 1 });
+  expect(track.mock.calls[0]?.[0].actor).toEqual({ type: 'system', id: 'scheduler' });
+});
 it('shutdown waits for pending resolutions before closing the client', async () => {
   const { client, track } = fixture();
   let finish!: (actor: { id: string }) => void;
