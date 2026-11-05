@@ -264,7 +264,7 @@ function CreateInviteLinkDialog({ open, onOpenChange }: { open: boolean; onOpenC
     <Dialog onOpenChange={close} open={open}>
       <DialogContent className="sm:max-w-md" data-testid="create-invite-link-dialog">
         {created ? (
-          <div className="flex flex-col gap-4">
+          <div className="flex min-w-0 flex-col gap-4">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <CheckCircle2Icon className="size-5 text-outcome-success" />
@@ -274,7 +274,7 @@ function CreateInviteLinkDialog({ open, onOpenChange }: { open: boolean; onOpenC
                 Share it with the people you want in this workspace. You can copy it again or revoke it from Members.
               </DialogDescription>
             </DialogHeader>
-            <div className="flex items-center gap-2 rounded-lg border bg-muted/40 py-1.5 ps-3 pe-1.5">
+            <div className="flex min-w-0 items-center gap-2 rounded-lg border bg-muted/40 py-1.5 ps-3 pe-1.5">
               <code className="min-w-0 flex-1 truncate font-mono text-[13px]" data-testid="created-invite-link">
                 {created.url}
               </code>
@@ -297,7 +297,7 @@ function CreateInviteLinkDialog({ open, onOpenChange }: { open: boolean; onOpenC
           </div>
         ) : (
           <form
-            className="flex flex-col gap-5"
+            className="flex min-w-0 flex-col gap-5"
             noValidate
             onSubmit={(event) => {
               event.preventDefault();
