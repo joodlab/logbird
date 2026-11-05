@@ -1,12 +1,12 @@
 import {
   BookmarkIcon,
-  BookOpenIcon,
   Building2Icon,
   CogIcon,
   LayoutDashboardIcon,
   ListTreeIcon,
   type LucideIcon,
   PackageIcon,
+  RocketIcon,
   Rows3Icon,
   SettingsIcon,
   UserIcon,
@@ -48,7 +48,7 @@ export const PROJECT_NAV: { group: string | null; items: NavItem[] }[] = [
   {
     group: 'Project',
     items: [
-      { to: '/p/$projectId/docs', label: 'Quickstart', icon: BookOpenIcon, keywords: 'docs sdk query language help' },
+      { to: '/p/$projectId/setup', label: 'Setup', icon: RocketIcon, keywords: 'setup quickstart docs sdk onboarding checklist query language help' },
       { to: '/p/$projectId/settings', label: 'Settings', icon: SettingsIcon, keywords: 'retention keys members danger' },
     ],
   },

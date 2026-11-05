@@ -78,7 +78,16 @@ export const auth = betterAuth({
         },
       },
       async sendInvitationEmail(data) {
-        await sendOrganizationInvitation(data.email, data.organization.name, `${env.APP_URL}/accept-invitation/${data.id}`);
+        const inviter = data.inviter.user;
+        await sendOrganizationInvitation({
+          email: data.email,
+          workspace: data.organization.name,
+          inviterName: inviter.name?.trim() || inviter.email,
+          inviterEmail: inviter.email,
+          role: data.role || 'member',
+          url: `${env.APP_URL}/accept-invitation/${data.id}`,
+          expiresAt: new Date(data.invitation.expiresAt),
+        });
       },
     }),
   ],

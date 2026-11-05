@@ -55,6 +55,59 @@ export function curlSnippet(key?: string): string {
   }'`;
 }
 
+/** Plain `fetch` (Node 18+, Deno, Bun, edge runtimes): no dependency at all. */
+export function fetchSnippet(key?: string): string {
+  const auth = key ? `'Bearer ${key}'` : `\`Bearer \${process.env.${INGEST_ENV}}\``;
+  return `const response = await fetch('${ingestOrigin()}/v1/events', {
+  method: 'POST',
+  headers: { Authorization: ${auth}, 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    action: 'hotel.policy.updated',
+    outcome: 'success',
+    description: 'Raed changed the cancellation policy of Hotel Sunrise',
+    actor: { type: 'user', id: 'usr_42', name: 'Raed' },
+    tenant: { id: 'biz_7', name: 'Azure Hotels' },
+    targets: [{ type: 'hotel', id: 'hotel_123', name: 'Hotel Sunrise' }],
+  }),
+});
+if (response.status !== 202) throw new Error(await response.text());`;
+}
+
+/** Read the audit trail from a product backend (read keys only). */
+export function readFetchSnippet(key?: string): string {
+  const auth = key ? `'Bearer ${key}'` : `\`Bearer \${process.env.${READ_ENV}}\``;
+  return `const params = new URLSearchParams({ q: 'tenant:biz_7', limit: '20' });
+const response = await fetch(\`${ingestOrigin()}/v1/events?\${params}\`, {
+  headers: { Authorization: ${auth} },
+});
+const { data, nextCursor } = await response.json();`;
+}
+
+/** The fields that move conformance the most, in the order operators usually add them. */
+export const ENVELOPE_CORE = `{
+  "action": "hotel.policy.updated",
+  "occurredAt": "2026-11-04T14:32:10.123Z",
+  "outcome": "success",
+  "description": "Raed changed the cancellation policy of Hotel Sunrise",
+  "actor":    { "type": "user", "id": "usr_42", "name": "Raed" },
+  "tenant":   { "id": "biz_7", "name": "Azure Hotels" },
+  "executor": { "type": "api", "id": "booking-api" },
+  "targets":  [{ "type": "hotel", "id": "hotel_123", "name": "Hotel Sunrise" }],
+  "context":  { "operationId": "op_101", "requestId": "req_abc" }
+}`;
+
+export const OPERATION_EXAMPLE = `// 1. The API handler starts an operation and passes its id along (job payload, message headers…)
+const operationId = request.id; // any stable id: request id, trace id, ULID
+trailmark.track({ action: 'booking.created', context: { operationId }, /* … */ });
+await queue.add('send-confirmation', { bookingId, operationId });
+
+// 2. The worker reuses it, so the job's events join the same operation
+trailmark.track({
+  action: 'booking.confirmation.sent',
+  executor: { type: 'worker', id: 'mail-worker', jobId: job.id },
+  context: { operationId: job.data.operationId },
+});`;
+
 export function readCurlSnippet(key?: string): string {
   return `curl --get "${ingestOrigin()}/v1/events" \\
   -H "Authorization: Bearer ${key ?? `$${READ_ENV}`}" \\

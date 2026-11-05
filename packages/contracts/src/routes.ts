@@ -64,6 +64,10 @@ export const routes = {
    * (invite-member, list-invitations, get-invitation, accept-invitation, reject-invitation, cancel-invitation,
    * list-members, update-member-role, remove-member). Invite emails link to `${APP_URL}/accept-invitation/:id`.
    */
+  invitations: {
+    /** Public preview for the accept page (InvitationPreview, ./invitations.ts): works signed out, 404 when unknown. */
+    preview: { method: 'GET', path: '/api/invitations/:invitationId', auth: 'none' },
+  },
 
   /* Public API used by SDKs and customer products */
   public: {

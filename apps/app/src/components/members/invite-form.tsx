@@ -1,0 +1,134 @@
+import { useForm } from '@tanstack/react-form';
+import { Button } from '@trailmark/ui/components/ui/button';
+import { Input } from '@trailmark/ui/components/ui/input';
+import { Label } from '@trailmark/ui/components/ui/label';
+import { NativeSelect, NativeSelectOption } from '@trailmark/ui/components/ui/native-select';
+import { Loader2Icon, MailIcon, UserPlusIcon } from 'lucide-react';
+import { useId } from 'react';
+import { z } from 'zod';
+import { fieldErrorMessage } from '@/lib/forms';
+import { INVITE_ROLES, ROLE_INFO, type Role, useInviteMember, useOrganization } from '@/lib/organization';
+
+const emailSchema = z.email('Enter a valid email address.');
+
+/** Email + role invite form, shared by Settings → Members and the Setup page's teammate step. */
+export function InviteForm({ compact = false }: { compact?: boolean }) {
+  const id = useId();
+  const { org, canManage, pending } = useOrganization();
+  const invite = useInviteMember();
+  const memberEmails = new Set(org.data?.members.map((m) => m.user.email.toLowerCase()));
+  const pendingEmails = new Set(pending.map((i) => i.email.toLowerCase()));
+
+  const form = useForm({
+    defaultValues: { email: '', role: 'member' as Role },
+    onSubmit: async ({ value, formApi }) => {
+      const email = value.email.trim().toLowerCase();
+      try {
+        await invite.mutateAsync({ email, role: value.role, resend: pendingEmails.has(email) });
+        formApi.reset();
+      } catch {
+        // Shown inline below.
+      }
+    },
+  });
+
+  return (
+    <div className="flex flex-col gap-2">
+      <form
+        className="flex flex-col gap-2 sm:flex-row sm:items-start"
+        data-testid="invite-form"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          form.handleSubmit();
+        }}
+      >
+        <form.Field
+          name="email"
+          validators={{
+            onSubmit: ({ value }) => {
+              const parsed = emailSchema.safeParse(value.trim());
+              if (!parsed.success) return parsed.error.issues[0]?.message;
+              if (memberEmails.has(value.trim().toLowerCase())) return 'Already a member of this workspace.';
+            },
+          }}
+        >
+          {(field) => {
+            const message = fieldErrorMessage(field.state.meta.errors);
+            const alreadyInvited = pendingEmails.has(field.state.value.trim().toLowerCase());
+            return (
+              <div className="flex flex-1 flex-col gap-1">
+                <Label className="sr-only" htmlFor={`${id}-email`}>
+                  Email
+                </Label>
+                <div className="relative">
+                  <MailIcon className="-translate-y-1/2 pointer-events-none absolute start-3 top-1/2 size-4 text-muted-foreground" />
+                  <Input
+                    aria-invalid={Boolean(message) || undefined}
+                    autoComplete="off"
+                    className="ps-9"
+                    disabled={!canManage}
+                    id={`${id}-email`}
+                    onChange={(e) => {
+                      field.handleChange(e.target.value);
+                      invite.reset();
+                    }}
+                    placeholder="teammate@company.com"
+                    type="email"
+                    value={field.state.value}
+                  />
+                </div>
+                {message ? (
+                  <p className="text-destructive text-xs">{message}</p>
+                ) : alreadyInvited ? (
+                  <p className="text-muted-foreground text-xs">Already invited — sending again re-sends the email and extends the link.</p>
+                ) : null}
+              </div>
+            );
+          }}
+        </form.Field>
+        <form.Field name="role">
+          {(field) => (
+            <NativeSelect
+              aria-label="Role"
+              className="sm:w-32"
+              disabled={!canManage}
+              onChange={(e) => field.handleChange(e.target.value as Role)}
+              title={ROLE_INFO[field.state.value].description}
+              value={field.state.value}
+            >
+              {INVITE_ROLES.map((role) => (
+                <NativeSelectOption key={role} value={role}>
+                  {ROLE_INFO[role].label}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          )}
+        </form.Field>
+        <form.Subscribe selector={(s) => s.isSubmitting}>
+          {(submitting) => (
+            <Button disabled={submitting || !canManage} type="submit">
+              {submitting ? <Loader2Icon className="animate-spin" /> : <UserPlusIcon />}
+              Send invite
+            </Button>
+          )}
+        </form.Subscribe>
+      </form>
+      {invite.isError ? (
+        <p className="text-destructive text-sm" role="alert">
+          {invite.error.message}
+        </p>
+      ) : null}
+      {!canManage && org.data ? <p className="text-muted-foreground text-xs">Only owners and admins can invite people.</p> : null}
+      {compact ? null : (
+        <form.Subscribe selector={(s) => s.values.role}>
+          {(role) => (
+            <p className="text-muted-foreground text-xs">
+              {ROLE_INFO[role].label}s: {ROLE_INFO[role].description.toLowerCase()}
+            </p>
+          )}
+        </form.Subscribe>
+      )}
+    </div>
+  );
+}

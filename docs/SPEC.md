@@ -221,6 +221,11 @@ Postgres facts are fresh; ClickHouse facts may be cached for 30 seconds after a 
 Replacement is limited to projects with at most 100000 stored rows. Sample mutations hold the
 project ingestion lock and synchronously rebuild project rollups from surviving events.
 
+`GET /api/invitations/:invitationId` is public (the id is the secret sent only to the invited address) and returns an
+`InvitationPreview` for the accept page: invited email, role, workspace, inviter name, `expiresAt` and a derived
+`state` (pending / accepted / rejected / canceled / expired). Accepting still goes through better-auth with a session
+whose email matches the invitation.
+
 ### 5.1 Query language (`q`)
 
 Full reference: [query language and SQL expressions](query-language.md).
@@ -306,9 +311,14 @@ in TanStack Router search params (shareable URLs, back/forward works). Responsiv
 User journeys (each must work end-to-end against the real server):
 1. **Sign in**: `/login` email → `/login/verify` 6-digit OTP (input-otp, paste support, resend with cooldown) →
    redirect to last project or onboarding.
-2. **Onboarding**: create workspace (org) → create first project (name, retention) → "Send your first event"
-   page: shows the ingest key once (copy), SDK + curl snippets with the key pre-filled, a **live waiting
-   indicator** that flips to "First event received" (polls `/live`), and a "Send a test event" button → Overview.
+2. **Onboarding** (resumable): you (name) → create workspace (org) → create first project (name, retention) →
+   "Send your first event". `/` and every post-sign-in redirect follow `GET /api/workspace/setup` →
+   `onboarding.next`, so leaving and coming back resumes at the missing step; the wizard's progress reflects real
+   state. The first-event step reuses the Setup page's component: ingest key shown once (copy), curl / SDK / fetch
+   snippets pre-filled, a **live waiting indicator** that polls setup every 2.5 s and flips to the received event,
+   "Send a test event", "Load sample data" (never counts) and "Skip for now" → Overview.
+   Invited people land on `/accept-invitation/$invitationId` (signed-out preview → OTP as the invited email → accept /
+   decline; expired, accepted, canceled and wrong-account states).
 3. **Overview dashboard** (`/p/$projectId`): KPI cards with deltas (events, active actors, tenants, failure rate,
    conformance), stacked area chart of events by outcome (click a band → explorer filtered), top actions / actors /
    tenants / executors lists (click → filter or entity page), recent problems feed, ingestion health (last event,
@@ -333,7 +343,11 @@ User journeys (each must work end-to-end against the real server):
    **API keys** (create dialog → secret shown once with copy + snippet; list with kind badges, last used,
    revoke confirm), workspace members + invite by email, **workspace activity** (Trailmark's own audit stream,
    rendered with the same explorer components), danger zone (delete project).
-10. **Docs / Quickstart** in-app page: SDK install, envelope reference, query language cheatsheet.
+10. **Setup** (`/p/$projectId/setup`, replaces Docs / Quickstart; `/docs` redirects): live checklist from
+    `GET /api/projects/:projectId/setup` with one section per step (inline ingest/read keys, first event, envelope
+    coverage with "find missing" explorer links, operationId, retention review, invite), followed by the envelope
+    semantics, query language cheatsheet and keyboard shortcuts. The overview shows a compact, expandable checklist
+    card until setup is complete or dismissed (workspace-wide, reopened from Setup); the sidebar shows "Setup n/m".
 
 App shell: collapsible left sidebar (workspace switcher, project switcher, nav: Overview, Explorer, Actors,
 Tenants, Workers, Records, Fields, Saved views, Settings; footer: theme toggle, docs, user menu), top bar with
