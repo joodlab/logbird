@@ -13,6 +13,7 @@ export interface SetupProjectFacts {
   retentionDays: number;
   retentionReviewedAt: Date | null;
   setupDismissedAt: Date | null;
+  setupCompletedAt: Date | null;
   keys: { kind: string; createdAt: Date }[];
 }
 export function computeSetup(project: SetupProjectFacts, events: SetupEventFacts, team: ProjectSetup['team']): ProjectSetup {
@@ -57,8 +58,7 @@ export function computeSetup(project: SetupProjectFacts, events: SetupEventFacts
     complete: steps.every((s) => s.status === 'done'),
     nextStep: order.find((s) => s.status !== 'done')?.id ?? null,
     dismissedAt: project.setupDismissedAt?.toISOString() ?? null,
-    // Placeholder until Project.setupCompletedAt is persisted (feat/invite-links-backend).
-    completedAt: null,
+    completedAt: project.setupCompletedAt?.toISOString() ?? null,
     ingest: {
       activeIngestKeys: ingest.length,
       firstEvent: events.firstEvent,

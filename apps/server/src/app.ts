@@ -15,6 +15,7 @@ import { env } from './env';
 import { ApiError } from './errors';
 import { ingest } from './ingest';
 import { invitationRoutes } from './invitation-routes';
+import { inviteLinkRoutes } from './invite-link-routes';
 import { doc, routeDoc } from './openapi';
 import { managementRoutes } from './routes';
 import { setupRoutes } from './setup-routes';
@@ -32,7 +33,7 @@ app.use('*', async (c, next) => {
       event: 'http.request',
       requestId: c.get('requestId'),
       method: c.req.method,
-      path: c.req.path,
+      path: c.req.path.replace(/(\/api\/invite-links\/)[^/]+/, '$1[redacted]'),
       status: c.res.status,
       durationMs: Date.now() - start,
     }),
@@ -94,6 +95,7 @@ app.get(
   },
 );
 export const routes = app
+  .route('/api', inviteLinkRoutes)
   .route('/api', invitationRoutes)
   .route('/api', setupRoutes)
   .route('/api', dataRoutes)

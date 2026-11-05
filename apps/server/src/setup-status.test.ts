@@ -2,7 +2,7 @@ import { ENVELOPE_FIELDS, SETUP_STEPS } from '@trailmark/contracts';
 import { describe, expect, it } from 'vitest';
 import { computeSetup } from './setup-status';
 
-const project = { id: 'fixture', retentionDays: 90, retentionReviewedAt: null, setupDismissedAt: null, keys: [] };
+const project = { id: 'fixture', setupCompletedAt: null, retentionDays: 90, retentionReviewedAt: null, setupDismissedAt: null, keys: [] };
 const events = {
   firstEvent: null,
   firstEventAt: null,
