@@ -26,6 +26,7 @@ import { formatNumber } from '@/lib/format';
 import { useCan } from '@/lib/permissions';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/danger')({
+  head: () => ({ meta: [{ title: 'Danger zone · Settings · Trailmark' }] }),
   staticData: { crumb: 'Danger zone' },
   component: DangerZone,
 });
