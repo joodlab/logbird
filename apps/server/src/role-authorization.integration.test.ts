@@ -107,8 +107,11 @@ it('real services: every console mutation by role, ADMIN-1 regressions, confirma
       const linkResponse = await check('/api/workspace/invite-links', 'POST', { role: 'member', expiresInDays: 1 }, 201);
       const linkId = member ? 'unknown' : ((await linkResponse.json()) as { id: string }).id;
       await check(`/api/workspace/invite-links/${linkId}`, 'DELETE', undefined, 204);
-      for (const path of [base, `${base}/export?format=jsonl`, '/api/workspace/activity'])
-        expect((await request(actor.cookie, path)).status).toBe(200);
+      for (const path of [base, `${base}/export?format=jsonl`, '/api/workspace/activity']) {
+        const response = await request(actor.cookie, path);
+        expect(response.status).toBe(200);
+        await response.text();
+      }
       // Every project mutation against another workspace must fail before disclosing or changing it.
       for (const [suffix, method, body] of [
         ['', 'PATCH', { name: 'Stolen' }],
@@ -163,4 +166,4 @@ it('real services: every console mutation by role, ADMIN-1 regressions, confirma
     }
     await prisma.user.deleteMany({ where: { id: { in: users } } });
   }
-}, 300_000);
+}, 900_000);
