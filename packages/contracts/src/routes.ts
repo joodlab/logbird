@@ -21,6 +21,11 @@ export const routes = {
     remove: { method: 'DELETE', path: '/api/projects/:projectId', auth: 'session' },
     /** Retention status for Settings → Retention (oldest event, last purge run). */
     retention: { method: 'GET', path: '/api/projects/:projectId/retention', auth: 'session' },
+    /** Setup checklist (ProjectSetup, ./setup.ts). Cheap to poll: the first-event step polls it every few seconds. */
+    setup: { method: 'GET', path: '/api/projects/:projectId/setup', auth: 'session' },
+    /** Load (POST → SampleDataResponse) or remove (DELETE → 204) synthetic sample events. */
+    sampleData: { method: 'POST', path: '/api/projects/:projectId/sample-data', auth: 'session' },
+    removeSampleData: { method: 'DELETE', path: '/api/projects/:projectId/sample-data', auth: 'session' },
   },
   keys: {
     list: { method: 'GET', path: '/api/projects/:projectId/keys', auth: 'session' },
@@ -43,6 +48,8 @@ export const routes = {
     profile: { method: 'GET', path: '/api/projects/:projectId/entities/:kind/:entityId', auth: 'session' },
   },
   fields: { method: 'GET', path: '/api/projects/:projectId/fields', auth: 'session' },
+  /** Value autocomplete for the query bar (suggestQuerySchema → SuggestResponse, ./query.ts). */
+  suggest: { method: 'GET', path: '/api/projects/:projectId/suggest', auth: 'session' },
   views: {
     list: { method: 'GET', path: '/api/projects/:projectId/views', auth: 'session' },
     create: { method: 'POST', path: '/api/projects/:projectId/views', auth: 'session' },
@@ -50,6 +57,13 @@ export const routes = {
   },
   /** Trailmark's own management actions (project/key/retention/member changes), dogfooded into ClickHouse. */
   workspaceActivity: { method: 'GET', path: '/api/workspace/activity', auth: 'session' },
+  /** Workspace setup summary + resumable onboarding target (WorkspaceSetup, ./setup.ts). */
+  workspaceSetup: { method: 'GET', path: '/api/workspace/setup', auth: 'session' },
+  /**
+   * Members & invitations use better-auth's organization endpoints under /api/auth/organization/*
+   * (invite-member, list-invitations, get-invitation, accept-invitation, reject-invitation, cancel-invitation,
+   * list-members, update-member-role, remove-member). Invite emails link to `${APP_URL}/accept-invitation/:id`.
+   */
 
   /* Public API used by SDKs and customer products */
   public: {
