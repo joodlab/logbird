@@ -6,6 +6,9 @@ applied to JoodCMS.** Applying it needs the owner's sign-off and a JoodCMS PR th
 
 - `joodcms-trailmark-starter.patch`: `git apply` against JoodCMS `master` (`0f712673a`, checked with
   `git apply --check`). 576 lines; three new files plus about 50 inserted lines in 11 existing files.
+  `lib/audit/*.ts` compiles under `tsc --strict` (TypeScript 7.0.2) against the `@trailmark/sdk` /
+  `@trailmark/hono` 0.2.0 sources from PR #43, with JoodCMS imports stubbed to their real shapes. It has not yet been
+  type-checked inside JoodCMS, because installing JoodCMS dependencies needs the owner's sign-off.
 - The snippets below cover the parts that need JoodCMS judgment (auth hooks, jobs, admin links, phase-2 history).
 
 ## Prerequisites

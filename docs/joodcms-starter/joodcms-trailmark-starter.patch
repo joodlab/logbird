@@ -229,7 +229,7 @@ index 000000000..1fa0bfe28
 +export type AuditAction = keyof typeof AUDIT_ACTIONS;
 diff --git a/apps/server/src/lib/audit/client.ts b/apps/server/src/lib/audit/client.ts
 new file mode 100644
-index 000000000..d5844422d
+index 000000000..a1bd54df5
 --- /dev/null
 +++ b/apps/server/src/lib/audit/client.ts
 @@ -0,0 +1,137 @@
@@ -349,7 +349,7 @@ index 000000000..d5844422d
 +/** Serialisable correlation for job data: `queue.add(name, { ...data, audit: await auditCarrier() })`. */
 +export async function auditCarrier(parentEventId?: string): Promise<AuditCarrier | undefined> {
 +  try {
-+    return await getContext<HonoEnv>().var.audit.carrier({ context: { parentEventId } });
++    return await getContext<HonoEnv>().var.audit.carrier(parentEventId ? { parentEventId } : {});
 +  } catch {
 +    return undefined;
 +  }
