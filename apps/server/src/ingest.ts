@@ -6,6 +6,7 @@ import { withProjectLock } from '@trailmark/database';
 import type { Context } from 'hono';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
+import { invalidateSetup } from './setup-cache';
 import type { AppEnv } from './types';
 
 export async function readIngestBody(request: Request): Promise<unknown> {
@@ -52,6 +53,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
       throw new ApiError(404, 'not_found', 'Project not found.');
     await requireRetentionReady(tx, projectId);
     await insertEvents(clickhouse, rows);
+    invalidateSetup(projectId);
   });
   return ingestResponseSchema.parse({ accepted: ids.length, ids, rejected });
 }

@@ -131,6 +131,8 @@ model Project {
   slug           String
   description    String?
   retentionDays  Int            @default(90)
+  retentionReviewedAt DateTime?
+  setupDismissedAt DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   keys           ApiKey[]

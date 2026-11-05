@@ -213,6 +213,14 @@ UTC multiples of their size, so ≥ 1h buckets start on whole hours (24h → 15m
 recent first; `name` is A→Z (unnamed entities by id). `nextCursor` is an opaque keyset cursor
 bound to its sort.
 
+Session-authenticated `GET /api/projects/:projectId/setup` reports the computed integration checklist;
+`GET /api/workspace/setup` summarizes active-workspace projects and resumable onboarding.
+Postgres facts are fresh; ClickHouse facts may be cached for 30 seconds after a real first event.
+`POST /api/projects/:projectId/sample-data` replaces 2000 fictional events over seven days;
+`DELETE` removes them. The reserved source `trailmark-sample` never counts toward setup.
+Replacement is limited to projects with at most 100000 stored rows. Sample mutations hold the
+project ingestion lock and synchronously rebuild project rollups from surviving events.
+
 ### 5.1 Query language (`q`)
 ```
 action:hotel.policy.updated        exact

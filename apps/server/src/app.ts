@@ -12,6 +12,7 @@ import { env } from './env';
 import { ApiError } from './errors';
 import { ingest } from './ingest';
 import { managementRoutes } from './routes';
+import { setupRoutes } from './setup-routes';
 import type { AppEnv } from './types';
 
 export const app = new Hono<AppEnv>();
@@ -76,7 +77,7 @@ app.get('/health', describeRoute({ summary: 'Postgres and ClickHouse readiness' 
   const ch = checks[1].status === 'fulfilled';
   return c.json({ status: postgres && ch ? 'ok' : 'degraded', postgres, clickhouse: ch }, postgres && ch ? 200 : 503);
 });
-export const routes = app.route('/api', dataRoutes).route('/api', managementRoutes).route('/v1', publicRoutes);
+export const routes = app.route('/api', setupRoutes).route('/api', dataRoutes).route('/api', managementRoutes).route('/v1', publicRoutes);
 app.get(
   '/openapi.json',
   describeRoute({ summary: 'OpenAPI document' }),
