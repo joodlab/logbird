@@ -11,7 +11,10 @@ import { INVITE_ROLES, ROLE_INFO, type Role, useInviteMember, useOrganization } 
 
 const emailSchema = z.email('Enter a valid email address.');
 
-/** Email + role invite form, shared by Settings → Members and the Setup page's teammate step. */
+/**
+ * Email + role invite form, shared by Settings → Members (half-width column) and the Setup page's teammate step
+ * (full width). A container query puts it on one row only when there is room for it.
+ */
 export function InviteForm({ compact = false }: { compact?: boolean }) {
   const id = useId();
   const { org, canManage, pending } = useOrganization();
@@ -33,9 +36,9 @@ export function InviteForm({ compact = false }: { compact?: boolean }) {
   });
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="@container flex flex-col gap-2">
       <form
-        className="flex flex-col gap-2 sm:flex-row sm:items-start"
+        className="flex flex-col gap-2 @lg:flex-row @lg:items-start"
         data-testid="invite-form"
         noValidate
         onSubmit={(event) => {
@@ -87,32 +90,34 @@ export function InviteForm({ compact = false }: { compact?: boolean }) {
             );
           }}
         </form.Field>
-        <form.Field name="role">
-          {(field) => (
-            <NativeSelect
-              aria-label="Role"
-              className="sm:w-32"
-              disabled={!canManage}
-              onChange={(e) => field.handleChange(e.target.value as Role)}
-              title={ROLE_INFO[field.state.value].description}
-              value={field.state.value}
-            >
-              {INVITE_ROLES.map((role) => (
-                <NativeSelectOption key={role} value={role}>
-                  {ROLE_INFO[role].label}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          )}
-        </form.Field>
-        <form.Subscribe selector={(s) => s.isSubmitting}>
-          {(submitting) => (
-            <Button disabled={submitting || !canManage} type="submit">
-              {submitting ? <Loader2Icon className="animate-spin" /> : <UserPlusIcon />}
-              Send invite
-            </Button>
-          )}
-        </form.Subscribe>
+        <div className="flex gap-2">
+          <form.Field name="role">
+            {(field) => (
+              <NativeSelect
+                aria-label="Role"
+                className="flex-1 @lg:w-32 @lg:flex-none"
+                disabled={!canManage}
+                onChange={(e) => field.handleChange(e.target.value as Role)}
+                title={ROLE_INFO[field.state.value].description}
+                value={field.state.value}
+              >
+                {INVITE_ROLES.map((role) => (
+                  <NativeSelectOption key={role} value={role}>
+                    {ROLE_INFO[role].label}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            )}
+          </form.Field>
+          <form.Subscribe selector={(s) => s.isSubmitting}>
+            {(submitting) => (
+              <Button disabled={submitting || !canManage} type="submit">
+                {submitting ? <Loader2Icon className="animate-spin" /> : <UserPlusIcon />}
+                Send invite
+              </Button>
+            )}
+          </form.Subscribe>
+        </div>
       </form>
       {invite.isError ? (
         <p className="text-destructive text-sm" role="alert">

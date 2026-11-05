@@ -5,12 +5,12 @@ import type { Entity, EntitySort } from '@trailmark/contracts';
 import { TypePill } from '@trailmark/ui/components/badges';
 import { CodeBlock } from '@trailmark/ui/components/code-block';
 import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
+import { FilterChip } from '@trailmark/ui/components/filter-chip';
 import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
 import { Button, buttonVariants } from '@trailmark/ui/components/ui/button';
 import { Input } from '@trailmark/ui/components/ui/input';
 import { SegmentedControl, SegmentedControlItem } from '@trailmark/ui/components/ui/segmented-control';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { cn } from '@trailmark/ui/lib/utils';
 import { BookOpenIcon, Loader2Icon, SearchIcon, SearchXIcon } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { Timestamp } from '@/components/timestamp';
@@ -118,6 +118,7 @@ export function EntityDirectory({ projectId, section, q, type, sort = 'events', 
             className="ps-9"
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Search by name or id…"
+            size="sm"
             value={draft}
           />
           {list.isFetching && !list.isFetchingNextPage ? (
@@ -139,7 +140,7 @@ export function EntityDirectory({ projectId, section, q, type, sort = 'events', 
             ))}
           </fieldset>
         ) : null}
-        <SegmentedControl aria-label="Sort" className="shrink-0 self-start sm:ms-auto sm:self-auto" density="compact">
+        <SegmentedControl aria-label="Sort" className="shrink-0 self-start sm:ms-auto sm:self-auto" size="sm">
           {SORTS.map((s) => (
             <SegmentedControlItem
               active={sort === s.value}
@@ -236,18 +237,10 @@ function Code({ children }: { children: ReactNode }) {
 
 function TypeChip({ label, active, onClick, count }: { label: string; active: boolean; onClick: () => void; count?: number }) {
   return (
-    <button
-      aria-pressed={active}
-      className={cn(
-        'flex h-7 items-center gap-1.5 rounded-md border px-2 font-mono text-[12px] outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50',
-        active ? 'border-brand bg-brand/10 text-brand' : 'text-muted-foreground',
-      )}
-      onClick={onClick}
-      type="button"
-    >
+    <FilterChip active={active} className="font-mono text-[13px]" onClick={onClick}>
       {label}
-      {count === undefined ? null : <span className="font-sans text-[11px] tabular-nums opacity-70">{formatCompact(count)}</span>}
-    </button>
+      {count === undefined ? null : <span className="font-sans text-xs tabular-nums opacity-70">{formatCompact(count)}</span>}
+    </FilterChip>
   );
 }
 

@@ -69,7 +69,8 @@ function EmailStep() {
                     aria-invalid={Boolean(message) || undefined}
                     autoComplete="email"
                     autoFocus
-                    className="h-10 ps-9"
+                    className="ps-9"
+                    size="lg"
                     id={field.name}
                     inputMode="email"
                     name={field.name}
@@ -96,7 +97,7 @@ function EmailStep() {
         ) : null}
         <form.Subscribe selector={(s) => s.isSubmitting}>
           {(submitting) => (
-            <Button className="h-10" disabled={submitting} type="submit">
+            <Button size="lg" disabled={submitting} type="submit">
               {submitting ? <Loader2Icon className="animate-spin" /> : null}
               {submitting ? 'Sending code…' : 'Continue with email'}
               {submitting ? null : <ArrowRightIcon />}

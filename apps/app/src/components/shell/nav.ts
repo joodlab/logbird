@@ -6,7 +6,6 @@ import {
   ListTreeIcon,
   type LucideIcon,
   PackageIcon,
-  RocketIcon,
   Rows3Icon,
   SettingsIcon,
   UserIcon,
@@ -20,7 +19,10 @@ export interface NavItem {
   keywords?: string;
 }
 
-/** Project navigation, shared by the sidebar and the command palette. */
+/**
+ * Project navigation, shared by the sidebar and the command palette. Setup is deliberately not here: while it is
+ * incomplete the sidebar footer shows "Finish setup n/m"; afterwards it lives under Settings → General and ⌘K.
+ */
 export const PROJECT_NAV: { group: string | null; items: NavItem[] }[] = [
   {
     group: null,
@@ -47,9 +49,6 @@ export const PROJECT_NAV: { group: string | null; items: NavItem[] }[] = [
   },
   {
     group: 'Project',
-    items: [
-      { to: '/p/$projectId/setup', label: 'Setup', icon: RocketIcon, keywords: 'setup quickstart docs sdk onboarding checklist query language help' },
-      { to: '/p/$projectId/settings', label: 'Settings', icon: SettingsIcon, keywords: 'retention keys members danger' },
-    ],
+    items: [{ to: '/p/$projectId/settings', label: 'Settings', icon: SettingsIcon, keywords: 'retention keys members danger' }],
   },
 ];

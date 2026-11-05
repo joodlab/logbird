@@ -168,7 +168,7 @@ function FieldsPage() {
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <SegmentedControl aria-label="Field kind" density="compact">
+        <SegmentedControl aria-label="Field kind" size="sm">
           {(
             [
               ['all', 'All'],
@@ -192,6 +192,7 @@ function FieldsPage() {
             className="ps-9"
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter fields…"
+            size="sm"
             value={filter}
           />
         </div>

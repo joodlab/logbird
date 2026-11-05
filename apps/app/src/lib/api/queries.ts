@@ -225,6 +225,22 @@ export const workspaceSetupQuery = () =>
     retry: noRetryOn4xx,
   });
 
+/** Invite links of the active workspace (admin-only endpoint: only enable it for owners/admins). */
+export const inviteLinksQuery = (organizationId: string | null | undefined) =>
+  queryOptions({
+    queryKey: [...keys.organization, organizationId ?? 'none', 'invite-links'] as const,
+    queryFn: ({ signal }) => api.inviteLinks.list(signal),
+    staleTime: 15_000,
+    retry: noRetryOn4xx,
+  });
+
+export const inviteLinkPreviewQuery = (token: string) =>
+  queryOptions({
+    queryKey: ['invite-link', token] as const,
+    queryFn: ({ signal }) => api.inviteLinks.preview(token, signal),
+    retry: noRetryOn4xx,
+  });
+
 export const invitationPreviewQuery = (invitationId: string) =>
   queryOptions({
     queryKey: ['invitation', invitationId] as const,

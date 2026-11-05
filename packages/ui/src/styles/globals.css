@@ -85,6 +85,10 @@
    meaning. Outcome and severity colors are a separate, fixed semantic scale and are
    never used decoratively. */
 :root {
+  /* One height scale for every control that can share a row — Button, Input, InputGroup, Select, NativeSelect,
+     Toggle/ToggleGroup, SegmentedControl, Tabs: size "sm" = compact, "default", "lg" = large (nibleaf values).
+     Same radius (rounded-md) and text (text-sm, 16px icons) at every size; see lib/control.ts. Never override a
+     control's height at a call site — pick a size. */
   --control-size-default: 2.25rem;
   --control-size-compact: 2rem;
   --control-size-large: 2.5rem;
@@ -317,10 +321,11 @@
   }
 }
 
+/* Increase the whole control family together on touch-first devices (rows stay aligned). */
 @media (pointer: coarse) {
   :root {
     --control-size-default: 2.75rem;
-    --control-size-compact: 2.5rem;
+    --control-size-compact: 2.75rem;
     --control-size-large: 2.75rem;
     --control-group-inset: 0px;
     --control-tabs-inset: 0px;

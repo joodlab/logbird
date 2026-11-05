@@ -118,13 +118,20 @@ export function TimeRangePicker({
                 <Label className="text-muted-foreground text-xs" htmlFor="tr-from">
                   From
                 </Label>
-                <Input className="h-8 tabular-nums" id="tr-from" onChange={(e) => setFromTime(e.target.value)} type="time" value={fromTime} />
+                <Input className="tabular-nums" id="tr-from" size="sm" onChange={(e) => setFromTime(e.target.value)} type="time" value={fromTime} />
               </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-muted-foreground text-xs" htmlFor="tr-to">
                   To
                 </Label>
-                <Input className="h-8 tabular-nums" id="tr-to" onChange={(e) => setToTimeValue(e.target.value)} type="time" value={toTimeValue} />
+                <Input
+                  className="tabular-nums"
+                  id="tr-to"
+                  size="sm"
+                  onChange={(e) => setToTimeValue(e.target.value)}
+                  type="time"
+                  value={toTimeValue}
+                />
               </div>
             </div>
             <Button

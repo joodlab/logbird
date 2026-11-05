@@ -31,7 +31,7 @@ function writeExpanded(value: boolean) {
 /**
  * Overview setup checklist. Compact by default (one row: progress + the next step's action) so the KPIs stay above
  * the fold; expands into required / recommended columns. Hidden once complete or dismissed (dismissal is
- * workspace-wide and reversible from the Setup page).
+ * workspace-wide and reversible from the Setup page), and for good once setup was completed the first time.
  */
 export function SetupChecklistCard({ projectId, projectName }: { projectId: string; projectName?: string }) {
   const setup = useQuery(projectSetupQuery(projectId));
@@ -41,7 +41,7 @@ export function SetupChecklistCard({ projectId, projectName }: { projectId: stri
 
   if (setup.isPending) return <Skeleton className="h-[92px] w-full rounded-xl" />;
   // A failing checklist must never block the dashboard; the Setup page shows the error.
-  if (!data || data.complete || data.dismissedAt) return null;
+  if (!data || data.complete || data.completedAt || data.dismissedAt) return null;
 
   const next = data.steps.find((s) => s.id === data.nextStep);
   const nextCopy = next ? stepCopy(next.id, data, next.status) : null;
@@ -111,7 +111,7 @@ export function SetupChecklistCard({ projectId, projectName }: { projectId: stri
               >
                 <XIcon />
               </TooltipTrigger>
-              <TooltipContent>Hide for everyone in the workspace · reopen from Setup</TooltipContent>
+              <TooltipContent>Hide for everyone in the workspace · reopen from Finish setup</TooltipContent>
             </Tooltip>
           </div>
         </div>

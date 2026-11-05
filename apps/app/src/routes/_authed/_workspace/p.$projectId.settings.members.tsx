@@ -11,9 +11,19 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/component
 import { Loader2Icon, MailIcon, MoreHorizontalIcon, RotateCwIcon, ShieldIcon, UserMinusIcon, XIcon } from 'lucide-react';
 import { UserAvatar } from '@/components/account/user-avatar';
 import { InviteForm } from '@/components/members/invite-form';
+import { InviteLinkPanel, PanelHeading } from '@/components/members/invite-link-panel';
 import { SettingsSection } from '@/components/settings-section';
 import { Timestamp } from '@/components/timestamp';
-import { type OrgMember, ROLE_INFO, type Role, roleLabel, useInviteMember, useMemberActions, useOrganization } from '@/lib/organization';
+import {
+  invitationUrl,
+  type OrgMember,
+  ROLE_INFO,
+  type Role,
+  roleLabel,
+  useInviteMember,
+  useMemberActions,
+  useOrganization,
+} from '@/lib/organization';
 import { placeholderKeys } from '@/lib/placeholders';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/members')({
@@ -21,8 +31,6 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/
   head: () => ({ meta: [{ title: 'Members · Trailmark' }] }),
   component: MembersSettings,
 });
-
-const acceptUrl = (invitationId: string) => `${typeof window === 'undefined' ? '' : window.location.origin}/accept-invitation/${invitationId}`;
 
 function MembersSettings() {
   const { me, org, myRole, owners, canManage, pending } = useOrganization();
@@ -59,13 +67,25 @@ function MembersSettings() {
       <SettingsSection
         description={
           <>
-            Everyone in <span className="font-medium text-foreground">{org.data?.name ?? 'this workspace'}</span> can see every project. Invites
-            arrive by email and expire after 48 hours.
+            Everyone in <span className="font-medium text-foreground">{org.data?.name ?? 'this workspace'}</span> can see every project. Invite
+            someone by email, or share a link with a group.
           </>
         }
         title="Invite people"
       >
-        <InviteForm />
+        <div className="grid gap-6 lg:grid-cols-2 lg:gap-0 lg:divide-x">
+          <div className="flex flex-col gap-3 lg:pe-6" data-testid="invite-by-email">
+            <PanelHeading
+              description="A personal link for one address, valid for 48 hours. Copy it from Pending invitations."
+              icon={MailIcon}
+              title="Email invitation"
+            />
+            <InviteForm />
+          </div>
+          <div className="max-lg:border-t max-lg:pt-6 lg:ps-6">
+            <InviteLinkPanel />
+          </div>
+        </div>
       </SettingsSection>
 
       <SettingsSection title={`Members${org.data ? ` · ${org.data.members.length}` : ''}`}>
@@ -99,9 +119,10 @@ function MembersSettings() {
                     {p.canChangeRole ? (
                       <NativeSelect
                         aria-label={`Role of ${name}`}
-                        className="h-8 w-28"
+                        className="w-28"
                         disabled={changeRole.isPending}
                         onChange={(e) => confirmRole(m, e.target.value as Role)}
+                        size="sm"
                         value={m.role}
                       >
                         {(myRole === 'owner' ? (['member', 'admin', 'owner'] as Role[]) : (['member', 'admin'] as Role[])).map((r) => (
@@ -152,7 +173,7 @@ function MembersSettings() {
                         </DropdownMenuContent>
                       </DropdownMenu>
                     ) : (
-                      <span className="hidden size-7 sm:block" />
+                      <span className="hidden size-(--control-size-compact) sm:block" />
                     )}
                   </div>
                 </li>
@@ -193,7 +214,7 @@ function MembersSettings() {
                 </div>
                 {canManage ? (
                   <div className="flex items-center gap-1 ps-11 sm:ps-0">
-                    <CopyButton label="Copy invite link" value={acceptUrl(i.id)} />
+                    <CopyButton label="Copy link" showLabel size="sm" value={invitationUrl(i.id)} variant="outline" />
                     <Button
                       disabled={resend.isPending}
                       onClick={() => resend.mutate({ email: i.email, role: (i.role ?? 'member') as Role, resend: true })}

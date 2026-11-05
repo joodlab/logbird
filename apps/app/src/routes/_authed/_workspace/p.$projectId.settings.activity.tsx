@@ -2,9 +2,9 @@ import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import type { AuditEvent } from '@trailmark/contracts';
+import { FilterChip } from '@trailmark/ui/components/filter-chip';
 import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
 import { Input } from '@trailmark/ui/components/ui/input';
-import { cn } from '@trailmark/ui/lib/utils';
 import { ActivityIcon, SearchIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
@@ -67,18 +67,15 @@ function WorkspaceActivity() {
               className="ps-9"
               onChange={(e) => setDraft(e.target.value)}
               placeholder="Search activity…"
+              size="sm"
               value={draft}
             />
           </div>
           <fieldset className="flex flex-wrap gap-1.5">
             <legend className="sr-only">Filter by area</legend>
             {CATEGORIES.map(([value, label]) => (
-              <button
-                aria-pressed={category === value}
-                className={cn(
-                  'h-7 rounded-md border px-2 text-xs outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50',
-                  category === value ? 'border-brand bg-brand/10 text-brand' : 'text-muted-foreground',
-                )}
+              <FilterChip
+                active={category === value}
                 key={value}
                 onClick={() =>
                   navigate({
@@ -89,10 +86,9 @@ function WorkspaceActivity() {
                     replace: true,
                   })
                 }
-                type="button"
               >
                 {label}
-              </button>
+              </FilterChip>
             ))}
           </fieldset>
           <span className="text-muted-foreground text-xs sm:ms-auto">
