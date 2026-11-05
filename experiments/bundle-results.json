@@ -1,0 +1,30 @@
+[
+  {
+    "generator": "forge",
+    "platform": "browser",
+    "format": "esm",
+    "bytes": 4716,
+    "gzipBytes": 2165
+  },
+  {
+    "generator": "forge",
+    "platform": "node",
+    "format": "esm",
+    "bytes": 4716,
+    "gzipBytes": 2165
+  },
+  {
+    "generator": "hey-api",
+    "platform": "browser",
+    "format": "esm",
+    "bytes": 9891,
+    "gzipBytes": 3998
+  },
+  {
+    "generator": "hey-api",
+    "platform": "node",
+    "format": "esm",
+    "bytes": 9891,
+    "gzipBytes": 3998
+  }
+]
