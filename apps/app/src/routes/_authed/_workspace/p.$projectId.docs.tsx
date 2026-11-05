@@ -3,7 +3,7 @@ import { CodeBlock, CodeTabs } from '@trailmark/ui/components/code-block';
 import { Kbd } from '@trailmark/ui/components/ui/kbd';
 import { ArrowUpRightIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { HighlightedQuery } from '@/components/explorer/query-bar';
+import { HighlightedQuery } from '@/components/query-input/highlighted';
 import { curlSnippet, ENVELOPE_EXAMPLE, readCurlSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/docs')({

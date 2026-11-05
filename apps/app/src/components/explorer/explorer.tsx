@@ -1,26 +1,32 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import type { AuditEvent } from '@trailmark/contracts';
+import type { AuditEvent, HistogramResponse, QueryLang, SearchResponse } from '@trailmark/contracts';
 import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
 import { Button } from '@trailmark/ui/components/ui/button';
 import { Sheet, SheetContent, SheetTitle } from '@trailmark/ui/components/ui/sheet';
 import { Switch } from '@trailmark/ui/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
 import { cn } from '@trailmark/ui/lib/utils';
-import { ArrowUpIcon, ChevronDownIcon, FilterIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, SearchXIcon } from 'lucide-react';
+import { ArrowUpIcon, ChevronDownIcon, CircleAlertIcon, FilterIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, SearchXIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { EventHistogram } from '@/components/charts/event-histogram';
-import { api } from '@/lib/api/client';
+import { QueryInput, type QueryInputHandle } from '@/components/query-input/query-input';
+import { api, langParam } from '@/lib/api/client';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
+import { queryProblem, reasonTitle } from '@/lib/query-error';
+import { translateQueryToSql } from '@/lib/query-translate';
 import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
+import { appendSqlPredicate } from '@/lib/sql-language';
 import { EventSheet } from './event-sheet';
 import { EventsTable } from './events-table';
 import { ColumnPicker, ExportMenu, SaveViewButton } from './explorer-toolbar';
 import { FacetSidebar } from './facet-sidebar';
-import { QueryBar, type QueryBarHandle } from './query-bar';
 
 export interface ExplorerState {
   q: string;
+  /** Language of `q`; absent = the query language. */
+  lang?: QueryLang;
   range: string;
   columns: string[];
   ev?: string;
@@ -36,6 +42,8 @@ interface ExplorerProps {
   baseLabel?: string;
   /** Compact layout for embedding in profile pages. */
   embedded?: boolean;
+  /** Offer SQL mode. Off for embedded timelines: their locked base filter is query language. */
+  allowSql?: boolean;
   className?: string;
 }
 
@@ -50,10 +58,20 @@ function isTyping(target: EventTarget | null): boolean {
   return Boolean(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.closest('[role=dialog]')));
 }
 
-export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, embedded = false, className }: ExplorerProps) {
+export function Explorer({
+  projectId,
+  state,
+  onChange,
+  baseQuery,
+  baseLabel,
+  embedded = false,
+  allowSql = !embedded && !baseQuery,
+  className,
+}: ExplorerProps) {
   const { q, range, columns, ev, live } = state;
+  const lang: QueryLang = allowSql && state.lang === 'sql' ? 'sql' : 'query';
   const effectiveQ = [baseQuery, q].filter(Boolean).join(' ');
-  const queryBar = useRef<QueryBarHandle>(null);
+  const queryBar = useRef<QueryInputHandle>(null);
   const [facetsOpen, setFacetsOpen] = useState(() => {
     if (embedded || typeof window === 'undefined') return false;
     try {
@@ -66,9 +84,18 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
   const [showChart, setShowChart] = useState(true);
   const [cursor, setCursor] = useState(-1);
 
-  const events = useInfiniteQuery(eventsInfiniteQuery(projectId, range, effectiveQ));
+  const events = useInfiniteQuery(eventsInfiniteQuery(projectId, range, effectiveQ, lang));
   // Round bucket sizes (30 min for 24 h, 3 h for 7 d) so bars line up with the axis ticks.
-  const histogram = useQuery(histogramQuery(projectId, range, effectiveQ));
+  const histogram = useQuery(histogramQuery(projectId, range, effectiveQ, lang));
+
+  /* ---------------- query errors ---------------- */
+  // A rejected query keeps the last good results on screen (dimmed) and explains itself in the bar.
+  const problem = queryProblem(events.error, lang) ?? queryProblem(histogram.error, lang);
+  const lastGood = useRef<{ pages?: SearchResponse[]; histogram?: HistogramResponse }>({});
+  if (events.data && !events.isError) lastGood.current.pages = events.data.pages;
+  if (histogram.data && !histogram.isError) lastGood.current.histogram = histogram.data;
+  const pages = problem ? lastGood.current.pages : events.data?.pages;
+  const histogramData = problem ? lastGood.current.histogram : histogram.data;
 
   /* ---------------- live tail ---------------- */
   const relative = isValidRange(range) && !range.includes('..');
@@ -82,16 +109,16 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
   useEffect(() => {
     setLiveRows([]);
     sinceRef.current = null;
-  }, [effectiveQ, range, live]);
+  }, [effectiveQ, lang, range, live]);
 
   // The tail follows *arrival* (`receivedAt`), so late or back-dated events still stream in.
-  const firstPage = events.data?.pages[0]?.data;
+  const firstPage = problem ? undefined : events.data?.pages[0]?.data;
   useEffect(() => {
     if (!sinceRef.current && firstPage) sinceRef.current = newestArrival(firstPage) ?? new Date().toISOString();
   }, [firstPage]);
 
   useQuery({
-    queryKey: ['projects', projectId, 'live-tail', effectiveQ, range],
+    queryKey: ['projects', projectId, 'live-tail', effectiveQ, lang, range],
     enabled: liveActive && Boolean(firstPage),
     refetchInterval: 2500,
     refetchIntervalInBackground: false,
@@ -99,7 +126,11 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
     queryFn: async ({ signal }) => {
       const since = sinceRef.current ?? new Date().toISOString();
       // `since` is inclusive, so the newest known arrivals come back too: dedupe by id.
-      const data = await api.events.live(projectId, { since, q: effectiveQ || undefined, limit: 100 }, signal);
+      const data = await api.events.live(
+        projectId,
+        { since, q: effectiveQ || undefined, lang: effectiveQ ? langParam(lang) : undefined, limit: 100 },
+        signal,
+      );
       const known = new Set([...(firstPage ?? []), ...liveRowsRef.current].map((e) => e.id));
       const incoming = data.filter((e) => !known.has(e.id));
       sinceRef.current = newestArrival(data) ?? since;
@@ -112,14 +143,15 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
   });
 
   const rows = useMemo(() => {
-    const paged = events.data?.pages.flatMap((p) => p.data) ?? [];
+    const paged = pages?.flatMap((p) => p.data) ?? [];
     if (!liveRows.length) return paged;
     const seen = new Set(liveRows.map((e) => e.id));
     return [...liveRows, ...paged.filter((e) => !seen.has(e.id))];
-  }, [events.data, liveRows]);
+  }, [pages, liveRows]);
   // Search totals are capped for huge ranges; the histogram counts every match exactly.
-  const searchTotal = events.data?.pages[0]?.total ?? 0;
-  const histogramTotal = histogram.data && !histogram.isPlaceholderData ? histogram.data.buckets.reduce((n, b) => n + b.total, 0) : undefined;
+  const searchTotal = pages?.[0]?.total ?? 0;
+  const histogramTotal =
+    histogramData && (problem || !histogram.isPlaceholderData) ? histogramData.buckets.reduce((n, b) => n + b.total, 0) : undefined;
   const total = (histogramTotal ?? searchTotal) + liveRows.length;
   const totalCapped = histogramTotal === undefined && searchTotal > 10_000;
 
@@ -165,9 +197,20 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
     return () => window.removeEventListener('keydown', onKey);
   }, [move, cursor, ev, rows, select]);
 
-  const addFilter = (term: string) => onChange({ q: `${q} ${term}`.trim(), ev: undefined });
+  /** "Filter by this value" from the event sheet: a query term, translated to a predicate in SQL mode. */
+  const addFilter = (term: string) => {
+    if (lang !== 'sql') {
+      onChange({ q: `${q} ${term}`.trim(), ev: undefined });
+      return;
+    }
+    const predicate = translateQueryToSql(term);
+    if (predicate) onChange({ q: appendSqlPredicate(q, predicate), ev: undefined });
+    else toast.error('This filter has no SQL equivalent', { description: `Switch to Query mode to filter by ${term}.` });
+  };
 
-  const empty = events.isError ? (
+  const empty = problem ? (
+    <EmptyState description="Fix the query above to see results." icon={SearchXIcon} title="Query not run" />
+  ) : events.isError ? (
     <ErrorState error={events.error} onRetry={() => events.refetch()} title="Search failed" />
   ) : (
     <EmptyState
@@ -197,7 +240,9 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
     </EmptyState>
   );
 
-  const facetsPanel = <FacetSidebar onChange={(next) => onChange({ q: next, ev: undefined })} projectId={projectId} q={q} range={range} />;
+  const facetsPanel = (
+    <FacetSidebar lang={lang} onChange={(next) => onChange({ q: next, ev: undefined })} projectId={projectId} q={q} range={range} />
+  );
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
@@ -241,9 +286,12 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
               {baseLabel ?? baseQuery}
             </span>
           ) : null}
-          <QueryBar
-            onSubmit={(next) => onChange({ q: next, ev: undefined })}
-            placeholder={embedded ? 'Filter this timeline… e.g. outcome:failure' : 'Search… e.g. action:hotel.* outcome:failure actor:usr_42'}
+          <QueryInput
+            allowSql={allowSql}
+            lang={lang}
+            onSubmit={(next, nextLang) => onChange({ q: next, lang: nextLang, ev: undefined })}
+            placeholder={embedded ? 'Filter this timeline… e.g. outcome:failure attempt:>1' : undefined}
+            problem={problem}
             projectId={projectId}
             range={range}
             ref={queryBar}
@@ -283,14 +331,32 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
           {embedded ? null : (
             <div className="hidden items-center gap-2 md:flex">
               <ColumnPicker columns={columns} onChange={(cols) => onChange({ columns: cols })} />
-              <SaveViewButton columns={columns} projectId={projectId} q={q} range={range} />
-              <ExportMenu projectId={projectId} q={effectiveQ} range={range} />
+              <SaveViewButton columns={columns} lang={lang} projectId={projectId} q={q} range={range} />
+              <ExportMenu lang={lang} projectId={projectId} q={effectiveQ} range={range} />
             </div>
           )}
         </div>
         <div className="flex items-center justify-between gap-3 text-muted-foreground text-xs">
-          <span className="tabular-nums" aria-live="polite">
-            {events.isPending ? (
+          <span className={cn('min-w-0 tabular-nums', problem && 'flex items-center gap-1.5 text-destructive')} aria-live="polite">
+            {problem ? (
+              <>
+                <CircleAlertIcon className="size-3.5 shrink-0" />
+                <span className="min-w-0 truncate" title={[problem.message, problem.details?.hint].filter(Boolean).join(' — ')}>
+                  <span className="font-medium">{reasonTitle(problem.details, problem.code)}</span>
+                  {problem.message && problem.message !== problem.details?.hint ? ` · ${problem.message}` : ''}
+                  {problem.details?.hint ? <span className="text-muted-foreground"> — {problem.details.hint}</span> : null}
+                </span>
+                {problem.code === 'sql_mode_unavailable' ? (
+                  <button
+                    className="shrink-0 font-medium underline underline-offset-2"
+                    onClick={() => onChange({ q: '', lang: 'query' })}
+                    type="button"
+                  >
+                    Use Query mode
+                  </button>
+                ) : null}
+              </>
+            ) : events.isPending ? (
               'Searching…'
             ) : (
               <>
@@ -300,14 +366,14 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
               </>
             )}
           </span>
-          <button className="flex items-center gap-1 hover:text-foreground" onClick={() => setShowChart((s) => !s)} type="button">
+          <button className="flex shrink-0 items-center gap-1 hover:text-foreground" onClick={() => setShowChart((s) => !s)} type="button">
             <ChevronDownIcon className={cn('size-3.5 transition-transform', !showChart && '-rotate-90')} />
             {showChart ? 'Hide chart' : 'Show chart'}
           </button>
         </div>
         {showChart ? (
           <EventHistogram
-            data={histogram.data}
+            data={histogramData}
             height={embedded ? 96 : 112}
             loading={histogram.isFetching && !histogram.isPending}
             onZoom={(from, to) => onChange({ range: absoluteRange(from, to), live: undefined })}
@@ -317,7 +383,7 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
 
       <div className="flex min-h-0 flex-1">
         {facetsOpen ? <div className="hidden w-60 shrink-0 border-e xl:flex xl:flex-col">{facetsPanel}</div> : null}
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className={cn('relative flex min-h-0 min-w-0 flex-1 flex-col transition-opacity', problem && rows.length > 0 && 'opacity-45')}>
           {liveActive && liveRows.length > 0 ? (
             <div className="pointer-events-none absolute inset-x-0 top-10 z-20 flex justify-center">
               <span className="pointer-events-auto flex items-center gap-1.5 rounded-full border bg-popover px-3 py-1 text-xs shadow-md">
@@ -332,9 +398,9 @@ export function Explorer({ projectId, state, onChange, baseQuery, baseLabel, emb
             empty={empty}
             fetchingMore={events.isFetchingNextPage}
             freshIds={fresh}
-            hasMore={events.hasNextPage}
+            hasMore={!problem && events.hasNextPage}
             loadMore={() => events.fetchNextPage()}
-            loading={events.isPending}
+            loading={events.isPending && !problem}
             onSelect={(e) => {
               setCursor(rows.indexOf(e));
               select(e);

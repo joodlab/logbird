@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import type { SavedView } from '@trailmark/contracts';
-import { HighlightedCode } from '@trailmark/ui/components/code-block';
 import { CopyButton } from '@trailmark/ui/components/copy-button';
 import { EntityChip } from '@trailmark/ui/components/entity-chip';
 import { PageHeader } from '@trailmark/ui/components/page-header';
@@ -11,6 +10,8 @@ import { useConfirm } from '@trailmark/ui/components/ui/confirm';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { BookmarkIcon, Rows3Icon, Trash2Icon } from 'lucide-react';
 import { toast } from 'sonner';
+import { SqlBadge } from '@/components/explorer/explorer-toolbar';
+import { HighlightedText } from '@/components/query-input/highlighted';
 import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
@@ -26,7 +27,13 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/views')({
 });
 
 function viewSearch(view: SavedView) {
-  return { q: view.state.q || undefined, range: view.state.range, cols: view.state.columns?.join(',') || undefined, view: view.id };
+  return {
+    q: view.state.q || undefined,
+    lang: view.state.lang === 'sql' ? ('sql' as const) : undefined,
+    range: view.state.range,
+    cols: view.state.columns?.join(',') || undefined,
+    view: view.id,
+  };
 }
 
 function ViewsPage() {
@@ -94,6 +101,7 @@ function ViewsPage() {
                     <span className="flex items-center gap-2 font-medium">
                       <BookmarkIcon className="size-4 shrink-0 text-brand" />
                       <span className="truncate group-hover:underline group-hover:underline-offset-2">{view.name}</span>
+                      {view.state.lang === 'sql' ? <SqlBadge /> : null}
                     </span>
                     {view.description ? <span className="line-clamp-2 text-muted-foreground text-sm">{view.description}</span> : null}
                   </Link>
@@ -121,7 +129,7 @@ function ViewsPage() {
                 <pre className="overflow-hidden rounded-md bg-muted/50 px-2.5 py-1.5 font-mono text-[12px]">
                   <code className="block truncate">
                     {view.state.q ? (
-                      <HighlightedCode code={view.state.q} language="text" />
+                      <HighlightedText lang={view.state.lang ?? 'query'} value={view.state.q} />
                     ) : (
                       <span className="text-muted-foreground">All events</span>
                     )}
