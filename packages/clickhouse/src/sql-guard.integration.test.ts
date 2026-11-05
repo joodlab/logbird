@@ -27,6 +27,16 @@ describe.runIf(enabled)('real ClickHouse SQL guard', () => {
       details: { reason: 'syntax', start: q.indexOf('@'), end: q.indexOf('@') + 1 },
     });
   });
+  it.each([
+    ["action = 'sleep(' AND sleep(3) = 0", 'sleep(', 'not_allowed'],
+    ["outcome = 'project_id' OR project_id = 'x'", 'project_id', 'unknown_field'],
+    ['event_id IN (SELECT event_id FROM events)', 'SELECT', 'not_allowed'],
+  ])('points %s at the offending token, outside string literals', async (q, token, reason) => {
+    const start = q.lastIndexOf(token);
+    const error = await validateSql(restricted!, q).catch((e) => e);
+    expect(error.details).toMatchObject({ reason, start, end: start + token.length });
+    expect(error.details.hint).not.toBe(error.message);
+  });
   it('reports validator latency separately from a cache hit', async () => {
     const q = `action = 'latency-${Date.now()}'`;
     const a = performance.now();
