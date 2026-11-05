@@ -20,14 +20,41 @@ try {
   if (!/^[a-f0-9]{64}$/.test(password)) throw new Error('Existing password is not in the generated credential format; refusing to modify it');
   if (contents.some((c) => /^CLICKHOUSE_QUERY_USER=(?!trailmark_query$).+$/m.test(c)))
     throw new Error('Existing query username differs; refusing to replace it');
+  // SQL_ is ClickHouse's built-in custom-setting prefix on 26.9. Probe rather
+  // than changing server configuration (it may not appear in server_settings).
+  await (
+    await ch.query({ query: "SELECT getSetting('SQL_trailmark_project')", clickhouse_settings: { SQL_trailmark_project: '__provision__' } })
+  ).text();
+  const tables = ['events', 'events_by_minute', 'entities', 'attribute_keys'];
+  const before = new Map<string, string>();
+  for (const table of tables)
+    before.set(table, await (await ch.query({ query: `SELECT count() FROM trailmark.${table}`, format: 'TabSeparatedRaw' })).text());
+  const limits =
+    "readonly=2 CONST, allow_ddl=0 CONST, max_execution_time=10 CONST, max_rows_to_read=5000000 CONST, max_bytes_to_read=1073741824 CONST, max_memory_usage=1073741824 CONST, max_result_rows=100000 CONST, result_overflow_mode='throw' CONST, read_overflow_mode='throw' CONST, timeout_overflow_mode='throw' CONST, max_query_size=65536 CONST, max_ast_depth=128 CONST, max_threads=4 CONST";
   await ch.command({
-    query: `CREATE SETTINGS PROFILE IF NOT EXISTS trailmark_query_limits SETTINGS readonly=1 CONST, allow_ddl=0 CONST, max_execution_time=10 MAX 10, max_rows_to_read=5000000 MAX 5000000, max_bytes_to_read=1073741824 MAX 1073741824, max_memory_usage=1073741824 MAX 1073741824, max_result_rows=100000 MAX 100000, result_overflow_mode='throw' CONST, read_overflow_mode='throw' CONST, timeout_overflow_mode='throw' CONST, max_query_size=65536 MAX 65536, max_ast_depth=128 MAX 128, max_threads=4 MAX 4`,
+    query: `CREATE SETTINGS PROFILE IF NOT EXISTS trailmark_query_limits SETTINGS ${limits}`,
   });
+  // CREATE IF NOT EXISTS alone would leave an existing readonly=1 profile unchanged.
+  await ch.command({ query: `ALTER SETTINGS PROFILE trailmark_query_limits SETTINGS ${limits}` });
   await ch.command({
     query: `CREATE USER IF NOT EXISTS trailmark_query IDENTIFIED WITH sha256_password BY '${password}' SETTINGS PROFILE trailmark_query_limits`,
   });
-  for (const table of ['events', 'events_by_minute', 'entities', 'attribute_keys'])
-    await ch.command({ query: `GRANT SELECT ON trailmark.${table} TO trailmark_query` });
+  for (const table of tables) await ch.command({ query: `GRANT SELECT ON trailmark.${table} TO trailmark_query` });
+  await ch.command({ query: 'ALTER USER trailmark_query SETTINGS PROFILE trailmark_query_limits' });
+  for (const table of tables) {
+    // Install the companion first: versions/configurations that default-deny users
+    // without a policy must not hide the main application's data during provisioning.
+    await ch.command({ query: `CREATE ROW POLICY IF NOT EXISTS trailmark_unrestricted ON trailmark.${table} USING 1 TO ALL EXCEPT trailmark_query` });
+    await ch.command({
+      query: `CREATE ROW POLICY IF NOT EXISTS trailmark_project_isolation ON trailmark.${table} USING project_id = getSetting('SQL_trailmark_project') TO trailmark_query`,
+    });
+    await ch.command({ query: `ALTER ROW POLICY trailmark_unrestricted ON trailmark.${table} USING 1 TO ALL EXCEPT trailmark_query` });
+    await ch.command({
+      query: `ALTER ROW POLICY trailmark_project_isolation ON trailmark.${table} USING project_id = getSetting('SQL_trailmark_project') TO trailmark_query`,
+    });
+    const after = await (await ch.query({ query: `SELECT count() FROM trailmark.${table}`, format: 'TabSeparatedRaw' })).text();
+    if (after !== before.get(table)) throw new Error(`Main-user row count changed for ${table}; check concurrent ingestion before retrying`);
+  }
   const actualGrants = await (await ch.query({ query: 'SHOW GRANTS FOR trailmark_query', format: 'TabSeparatedRaw' })).text();
   if (
     actualGrants
@@ -46,7 +73,7 @@ try {
       })
     ).json<{ name: string; value: string }>();
     const expected: Record<string, string> = {
-      readonly: '1',
+      readonly: '2',
       allow_ddl: '0',
       max_execution_time: '10',
       max_memory_usage: '1073741824',
