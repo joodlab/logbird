@@ -7,7 +7,7 @@ import {
   inviteLinkSchema,
 } from '@trailmark/contracts';
 import { Prisma, prisma } from '@trailmark/database';
-import { type Context, Hono } from 'hono';
+import { Hono } from 'hono';
 import { validator } from 'hono-openapi';
 import { env } from './env';
 import { ApiError } from './errors';
@@ -15,6 +15,7 @@ import { audit } from './ingest';
 import { inviteLinkState } from './invite-link-state';
 import { limitInviteRequests } from './invite-rate-limit';
 import { requireSession } from './middlewares';
+import { requireRole } from './middlewares/require-role';
 import { doc, routeDoc } from './openapi';
 import type { AppEnv } from './types';
 
@@ -28,13 +29,6 @@ function serialize(link: Prisma.InviteLinkGetPayload<{ include: typeof include }
     createdAt: link.createdAt.toISOString(),
     revokedAt: link.revokedAt?.toISOString() ?? null,
   });
-}
-async function adminWorkspace(c: Context<AppEnv>) {
-  const organizationId = c.get('activeOrganizationId');
-  const member = organizationId ? await prisma.member.findFirst({ where: { organizationId, userId: c.get('user').id } }) : null;
-  if (!member?.role.split(',').some((role) => role === 'admin' || role === 'owner'))
-    throw new ApiError(403, 'forbidden', 'Workspace owner or admin access required.');
-  return member.organizationId;
 }
 export const inviteLinkRoutes = new Hono<AppEnv>()
   .get('/invite-links/:token', doc('Invite link preview', inviteLinkPreviewSchema, 200, 'none'), limitInviteRequests, async (c) => {
@@ -74,7 +68,11 @@ export const inviteLinkRoutes = new Hono<AppEnv>()
     return c.json(acceptInviteLinkResponseSchema.parse(result));
   })
   .get('/workspace/invite-links', doc('List invite links', inviteLinkListResponseSchema), requireSession, async (c) => {
-    const links = await prisma.inviteLink.findMany({ where: { organizationId: await adminWorkspace(c) }, include, orderBy: { createdAt: 'desc' } });
+    const links = await prisma.inviteLink.findMany({
+      where: { organizationId: (await requireRole(c)).organizationId },
+      include,
+      orderBy: { createdAt: 'desc' },
+    });
     return c.json(inviteLinkListResponseSchema.parse({ data: links.map(serialize) }));
   })
   .post(
@@ -85,7 +83,7 @@ export const inviteLinkRoutes = new Hono<AppEnv>()
       if (!r.success) throw new ApiError(422, 'validation_error', 'Invalid invite link.', r.error);
     }),
     async (c) => {
-      const organizationId = await adminWorkspace(c);
+      const organizationId = (await requireRole(c)).organizationId;
       const { expiresInDays, ...input } = c.req.valid('json');
       const link = await prisma.inviteLink.create({
         data: {
@@ -107,7 +105,7 @@ export const inviteLinkRoutes = new Hono<AppEnv>()
     routeDoc('Revoke invite link', { responses: { 204: { description: 'Revoked' } } }),
     requireSession,
     async (c) => {
-      const organizationId = await adminWorkspace(c);
+      const organizationId = (await requireRole(c)).organizationId;
       const where = { id: c.req.param('linkId'), organizationId };
       if (!(await prisma.inviteLink.findFirst({ where }))) throw new ApiError(404, 'invite_link_not_found', 'This invite link does not exist.');
       await prisma.inviteLink.updateMany({ where: { ...where, revokedAt: null }, data: { revokedAt: new Date() } });

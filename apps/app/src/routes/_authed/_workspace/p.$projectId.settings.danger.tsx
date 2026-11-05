@@ -36,7 +36,7 @@ function DangerZone() {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
   const remove = useMutation({
-    mutationFn: () => api.projects.remove(projectId),
+    mutationFn: () => api.projects.remove(projectId, typed.trim()),
     onSuccess: async () => {
       setOpen(false);
       queryClient.removeQueries({ queryKey: keys.project(projectId) });
