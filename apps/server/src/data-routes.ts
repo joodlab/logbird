@@ -23,7 +23,7 @@ const doc = (summary: string, schema: z.ZodType, status = 200, security = 'sessi
           requestBody: {
             required: true,
             description: 'Single event or batch. Gzip supported; 1000 events, 5 MiB decoded body, 256 KiB per event.',
-            content: { 'application/json': { schema: ingestRequestSchema } },
+            content: { 'application/json': { schema: ingestRequestSchema, example: { action: 'document.updated' } } },
           },
           responses: { [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } } },
         },

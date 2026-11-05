@@ -16,7 +16,7 @@ import { queryLangSchema } from './query';
 export const rangeQuerySchema = z.object({
   from: z.string().optional(), // ISO; default now-24h
   to: z.string().optional(), // ISO; default now
-  q: z.string().max(4096).optional(),
+  q: z.string().max(4096).optional().meta({ example: 'action:document.updated' }),
   lang: queryLangSchema.optional(), // absent = 'query'
 });
 export type RangeQuery = z.infer<typeof rangeQuerySchema>;
@@ -247,6 +247,7 @@ export const savedViewSchema = z.object({
   createdAt: z.string(),
 });
 export type SavedView = z.infer<typeof savedViewSchema>;
+/** Query and SQL expressions are compiled by the server before a view is persisted. */
 export const createSavedViewSchema = savedViewSchema.pick({ name: true, description: true, state: true });
 
 export const fieldInfoSchema = z.object({

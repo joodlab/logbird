@@ -12,7 +12,7 @@ type AuthAudit = {
   organizationId: string;
   action: string;
   actor: AuditUser;
-  target: { type: string; id: string };
+  target: { type: string; id: string; name?: string };
   changes?: unknown[];
   context?: { requestId: string; ip: string; userAgent: string };
 };
@@ -21,7 +21,13 @@ let auditHandler: ((event: AuthAudit) => Promise<unknown>) | undefined;
 export const setAuthAuditHandler = (handler: NonNullable<typeof auditHandler>) => {
   auditHandler = handler;
 };
-function record(organizationId: string, action: string, fallback: AuditUser, target: { type: string; id: string }, changes?: unknown[]) {
+function record(
+  organizationId: string,
+  action: string,
+  fallback: AuditUser,
+  target: { type: string; id: string; name?: string },
+  changes?: unknown[],
+) {
   const context = authAuditContext.getStore();
   return auditHandler?.({
     organizationId,
@@ -56,7 +62,7 @@ export const auth = betterAuth({
         after: async (session) => {
           const user = await prisma.user.findUniqueOrThrow({ where: { id: session.userId } });
           for (const member of await prisma.member.findMany({ where: { userId: user.id } }))
-            await record(member.organizationId, 'auth.signed_in', user, { type: 'user', id: user.id });
+            await record(member.organizationId, 'auth.signed_in', user, { type: 'user', id: user.id, name: user.email });
         },
       },
     },
@@ -74,18 +80,18 @@ export const auth = betterAuth({
     organization({
       organizationHooks: {
         afterCreateOrganization: async ({ organization, user }) => {
-          await record(organization.id, 'organization.created', user, { type: 'organization', id: organization.id });
+          await record(organization.id, 'organization.created', user, { type: 'organization', id: organization.id, name: organization.name });
         },
         afterCreateInvitation: async ({ organization, inviter, invitation }) => {
-          await record(organization.id, 'member.invited', inviter, { type: 'invitation', id: invitation.id });
+          await record(organization.id, 'member.invited', inviter, { type: 'invitation', id: invitation.id, name: invitation.email });
         },
         afterUpdateMemberRole: async ({ organization, user, member, previousRole }) => {
-          await record(organization.id, 'member.role.changed', user, { type: 'user', id: member.userId }, [
+          await record(organization.id, 'member.role.changed', user, { type: 'user', id: member.userId, name: user.email }, [
             { field: 'role', before: previousRole, after: member.role },
           ]);
         },
         afterRemoveMember: async ({ organization, user, member }) => {
-          await record(organization.id, 'member.removed', user, { type: 'user', id: member.userId });
+          await record(organization.id, 'member.removed', user, { type: 'user', id: member.userId, name: user.email });
         },
       },
       async sendInvitationEmail(data) {

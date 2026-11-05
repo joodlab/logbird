@@ -46,6 +46,9 @@ export interface TrailmarkOptions {
   flushIntervalMs?: number;
   maxRetries?: number;
   onError?: (error: Error) => void;
+  maxQueueSize?: number;
+  dropPolicy?: 'oldest' | 'newest';
+  onDrop?: (event: EventInput) => void;
 }
 export class Trailmark {
   private readonly queue: EventInput[] = [];
@@ -55,11 +58,31 @@ export class Trailmark {
   private readonly batchSize: number;
   private readonly interval: number;
   private readonly retries: number;
+  private readonly capacity: number;
+  private droppedCount = 0;
+  get dropped(): number {
+    return this.droppedCount;
+  }
+  get queueSize(): number {
+    return this.queue.length;
+  }
+  private drop(event: EventInput) {
+    this.droppedCount++;
+    try {
+      this.options.onDrop?.(event);
+    } catch {
+      /* Diagnostics cannot break capture. */
+    }
+  }
   constructor(private readonly options: TrailmarkOptions) {
+    this.capacity = options.maxQueueSize ?? 10_000;
     this.batchSize = options.batchSize ?? 100;
     this.interval = options.flushIntervalMs ?? 1000;
     this.retries = options.maxRetries ?? 5;
     if (
+      !Number.isInteger(this.capacity) ||
+      this.capacity < 1 ||
+      (options.dropPolicy !== undefined && !['oldest', 'newest'].includes(options.dropPolicy)) ||
       !Number.isInteger(this.batchSize) ||
       this.batchSize < 1 ||
       this.batchSize > 1000 ||
@@ -83,6 +106,13 @@ export class Trailmark {
       const serialized = JSON.stringify({ ...event, id: event.id ?? uuidv7(), occurredAt: event.occurredAt ?? new Date().toISOString() });
       if (new TextEncoder().encode(serialized).length > 256 * 1024) throw new Error('Event exceeds 256 KB');
       const copy = JSON.parse(serialized) as EventInput;
+      if (this.queue.length >= this.capacity) {
+        if (this.options.dropPolicy === 'newest') {
+          this.drop(copy);
+          return;
+        }
+        this.drop(this.queue.shift()!);
+      }
       this.queue.push(copy);
       if (this.queue.length >= this.batchSize) void this.flush().catch((e) => this.report(e));
       else this.schedule();
@@ -146,6 +176,9 @@ export class Trailmark {
           await this.send(batch);
         } catch (e) {
           this.queue.unshift(...batch);
+          while (this.queue.length > this.capacity) {
+            this.drop(this.options.dropPolicy === 'newest' ? this.queue.pop()! : this.queue.shift()!);
+          }
           throw e;
         }
       }

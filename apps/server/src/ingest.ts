@@ -67,7 +67,7 @@ export function audit(c: Context<AppEnv>, action: string, target: { type: string
   return ingest(`ws:${c.get('activeOrganizationId')}`, {
     action,
     occurredAt: new Date().toISOString(),
-    actor: { type: 'user', ...c.get('user') },
+    actor: { type: 'user', ...c.get('user'), name: c.get('user').name || c.get('user').email },
     executor: { type: 'api', id: 'api-server' },
     targets: [target],
     changes,

@@ -1,6 +1,7 @@
 import { Trailmark } from '@trailmark/sdk';
+export const endpoint = process.env.TRAILMARK_ENDPOINT ?? 'http://127.0.0.1:4731';
 export const client = new Trailmark({
-  endpoint: process.env.TRAILMARK_ENDPOINT ?? 'http://127.0.0.1:4731',
+  endpoint,
   apiKey: process.env.TRAILMARK_INGEST_KEY ?? '',
   onError: console.error,
 });

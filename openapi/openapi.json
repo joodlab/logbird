@@ -839,6 +839,13 @@
         "operationId": "console_delete_project",
         "parameters": [
           {
+            "in": "query",
+            "name": "confirm",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "projectId",
             "required": true,
@@ -1373,6 +1380,7 @@
             "in": "query",
             "name": "q",
             "schema": {
+              "example": "action:document.updated",
               "maxLength": 4096,
               "type": "string"
             }
@@ -1660,6 +1668,7 @@
             "in": "query",
             "name": "q",
             "schema": {
+              "example": "action:document.updated",
               "maxLength": 4096,
               "type": "string"
             }
@@ -2710,6 +2719,7 @@
             "in": "query",
             "name": "q",
             "schema": {
+              "example": "action:document.updated",
               "maxLength": 4096,
               "type": "string"
             }
@@ -2827,6 +2837,7 @@
             "in": "query",
             "name": "q",
             "schema": {
+              "example": "action:document.updated",
               "maxLength": 4096,
               "type": "string"
             }
@@ -3007,6 +3018,7 @@
             "in": "query",
             "name": "q",
             "schema": {
+              "example": "action:document.updated",
               "maxLength": 4096,
               "type": "string"
             }
@@ -3163,6 +3175,7 @@
             "in": "query",
             "name": "q",
             "schema": {
+              "example": "action:document.updated",
               "maxLength": 4096,
               "type": "string"
             }
@@ -3704,6 +3717,7 @@
             "in": "query",
             "name": "q",
             "schema": {
+              "example": "action:document.updated",
               "maxLength": 4096,
               "type": "string"
             }
@@ -4431,6 +4445,7 @@
             "in": "query",
             "name": "q",
             "schema": {
+              "example": "action:document.updated",
               "maxLength": 4096,
               "type": "string"
             }
@@ -6665,6 +6680,7 @@
             "in": "query",
             "name": "q",
             "schema": {
+              "example": "action:document.updated",
               "maxLength": 4096,
               "type": "string"
             }
@@ -7792,6 +7808,7 @@
             "in": "query",
             "name": "q",
             "schema": {
+              "example": "action:document.updated",
               "maxLength": 4096,
               "type": "string"
             }
@@ -8186,6 +8203,9 @@
         "requestBody": {
           "content": {
             "application/json": {
+              "example": {
+                "action": "document.updated"
+              },
               "schema": {
                 "anyOf": [
                   {
@@ -8930,5 +8950,11 @@
         ]
       }
     }
-  }
+  },
+  "servers": [
+    {
+      "description": "This Trailmark instance",
+      "url": "http://localhost:4600"
+    }
+  ]
 }

@@ -96,7 +96,7 @@ export const setupRoutes = new Hono<AppEnv>()
       const loaded = await loadSampleData(projectId);
       return loaded;
     });
-    await audit(c, 'project.sample_data.loaded', { type: 'project', id: projectId });
+    await audit(c, 'project.sample_data.loaded', { type: 'project', id: projectId, name: c.get('project').name });
     return c.json(sampleDataResponseSchema.parse(result));
   })
   .delete('/projects/:projectId/sample-data', routeDoc('Remove sample data', { responses: { 204: { description: 'Removed' } } }), async (c) => {
@@ -106,6 +106,6 @@ export const setupRoutes = new Hono<AppEnv>()
       invalidateSetup(projectId);
       await removeSampleData(projectId);
     });
-    await audit(c, 'project.sample_data.removed', { type: 'project', id: projectId });
+    await audit(c, 'project.sample_data.removed', { type: 'project', id: projectId, name: c.get('project').name });
     return c.body(null, 204);
   });

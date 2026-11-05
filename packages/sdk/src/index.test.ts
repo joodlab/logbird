@@ -53,3 +53,42 @@ it('does not retry permanent errors', async () => {
   await expect(sdk.shutdown()).rejects.toThrow('401');
   expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it.each(['oldest', 'newest'] as const)('bounds queued and retried events with %s policy and throwing drop hooks', async (dropPolicy) => {
+  let reject!: (error: Error) => void;
+  const fetcher = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, fail) => {
+          reject = fail;
+        }),
+    )
+    .mockImplementation(async () => new Response('{}', { status: 202 }));
+  vi.stubGlobal('fetch', fetcher);
+  const drops: string[] = [];
+  const sdk = new Trailmark({
+    apiKey: 'fake',
+    endpoint: 'http://test',
+    batchSize: 2,
+    maxQueueSize: 3,
+    maxRetries: 0,
+    dropPolicy,
+    onDrop: (event) => {
+      drops.push(event.action);
+      throw new Error('hook');
+    },
+  });
+  for (let i = 0; i < 10; i++) expect(() => sdk.track({ action: String(i) })).not.toThrow();
+  expect(sdk.queueSize).toBe(3);
+  expect(sdk.dropped).toBe(5);
+  const pending = sdk.flush();
+  reject(new Error('offline'));
+  await expect(pending).rejects.toThrow('offline');
+  expect(sdk.queueSize).toBe(3);
+  expect(sdk.dropped).toBe(7);
+  expect(drops).toHaveLength(7);
+  await sdk.shutdown();
+  const delivered = fetcher.mock.calls.slice(1).flatMap((call) => JSON.parse(call[1].body).events.map((e: { action: string }) => e.action));
+  expect(delivered).toEqual(dropPolicy === 'oldest' ? ['7', '8', '9'] : ['0', '1', '2']);
+});
