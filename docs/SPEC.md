@@ -234,6 +234,41 @@ a OR b, (a OR b) c                OR and parentheses; implicit AND binds more ti
 Parser lives in `packages/clickhouse/src/query` → parameterized SQL (never string-concatenate user input).
 Unknown `field:` prefixes are treated as `attr.<field>`. Ship unit tests for the parser.
 
+#### 5.1.1 Query language v2 (2026-11-05)
+Additive; every v0 query keeps its meaning. Field catalog (keys, aliases, types, columns): `QUERY_FIELDS` in
+`packages/contracts/src/query.ts`.
+```
+attempt:>2  attempt:>=2  conformance:<50  attempt:<=3        comparisons on number/date fields and attributes
+duration_ms:[100 TO 500]   duration_ms:{100 TO 500}           inclusive / exclusive range; * = open end ([2 TO *])
+occurredAt:>2026-11-01  occurredAt:[2026-11-01 TO 2026-11-03T12:00:00Z]
+                                  dates: YYYY-MM-DD (UTC midnight) or ISO-8601; the explorer time range still applies
+action:/booking\.(created|cancelled)/   RE2 regex, Lucene semantics: anchored to the whole value
+action:(booking.created OR booking.cancelled)   value group = IN list (OR only; members may use trailing *)
+-outcome:(failure OR denied)      negated group = NOT IN
+metadata.channel:whatsapp         unknown dotted keys are attributes (= attr.metadata.channel)
+attributes.foo.bar:x              `attributes.` is an alias of `attr.`
+a AND b,  NOT a                   explicit AND / NOT keywords (upper-case), same as adjacency / leading -
+```
+Attribute values are strings; with comparisons/ranges they are read as numbers
+(`toFloat64OrNull(attributes[k])`), or as dates when the bound is a date. Rows whose value does not convert never
+match. Array fields (`target`, `target.type`, `target.name`, `changes.field`) match when any element matches.
+
+Errors: HTTP 422 `invalid_query`, `details` = `QueryErrorDetails` (`lang`, `reason`, `start`/`end` UTF-16 offsets,
+`hint`), e.g. `attempt:>abc` → reason `type`, span of `abc`, hint `attempt is a number`.
+
+#### 5.1.2 SQL mode (`lang=sql`)
+`q` is a ClickHouse boolean expression only (`job_attempt > 2 AND attributes['metadata.channel'] = 'whatsapp'`).
+The server never runs anything but its own statement: `SELECT … FROM trailmark.events WHERE project_id = {p} AND
+timestamp >= {from} AND timestamp < {to} AND (<expr>)`. Before running, it validates `<expr>` by asking ClickHouse
+for `EXPLAIN AST` of the wrapped statement and walking the tree: the tree must be exactly our template (one SELECT,
+one table, no SETTINGS/FORMAT/UNION/JOIN/WITH), and `<expr>` may contain only literals, identifiers in
+`SQL_ALLOWED_COLUMNS` (plus lambda parameters), and functions in `SQL_ALLOWED_FUNCTIONS`. Subqueries, table
+functions, query parameters, `system.*`, dictionaries, `arrayJoin`, and comments/semicolons are rejected. Queries
+run as ClickHouse user `trailmark_query` (readonly=1, SELECT on `trailmark.events` + rollups only, settings profile
+with max_execution_time, max_rows_to_read, max_memory_usage, max_result_rows). Console endpoints only; `/v1`
+rejects `lang=sql`. A free-form SQL console is out of scope for the cloud product (possibly a future self-host
+instance-admin feature).
+
 ## 6. Postgres model (Prisma)
 
 better-auth tables (user, session, account, verification) + organization plugin (organization, member,
