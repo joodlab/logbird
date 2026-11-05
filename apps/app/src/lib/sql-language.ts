@@ -362,11 +362,36 @@ export function sqlConjuncts(q: string): string[] {
   return parts.filter(Boolean);
 }
 
-function joinConjuncts(original: string, parts: string[]): string {
-  const hasTopLevelOr =
-    sqlConjuncts(original).length === 1 && tokenizeSql(original).some((t) => t.kind === 'keyword' && t.raw.toUpperCase() === 'OR');
-  if (hasTopLevelOr && parts.length > 1 && parts[0] === original.trim()) parts[0] = `(${parts[0]})`;
-  return parts.join(' AND ');
+/** `(…)` around the whole expression, with the outer parentheses matching each other. */
+function isWrapped(q: string): boolean {
+  const solid = tokenizeSql(q.trim()).filter((t) => t.kind !== 'space');
+  if (solid[0]?.raw !== '(' || solid.at(-1)?.raw !== ')') return false;
+  let depth = 0;
+  for (const [i, t] of solid.entries()) {
+    if (t.raw === '(') depth += 1;
+    else if (t.raw === ')') depth -= 1;
+    if (depth === 0 && i < solid.length - 1) return false;
+  }
+  return true;
+}
+
+function hasTopLevelOr(q: string): boolean {
+  let depth = 0;
+  for (const t of tokenizeSql(q)) {
+    if (t.raw === '(' || t.raw === '[') depth += 1;
+    else if (t.raw === ')' || t.raw === ']') depth -= 1;
+    else if (depth === 0 && t.kind === 'keyword' && t.raw.toUpperCase() === 'OR') return true;
+  }
+  return false;
+}
+
+/** Join conjuncts with AND, parenthesising a part with a top-level OR so precedence stays intact. */
+function joinConjuncts(parts: string[]): string {
+  if (parts.length === 1) {
+    const only = parts[0] ?? '';
+    return isWrapped(only) ? only.trim().slice(1, -1).trim() : only;
+  }
+  return parts.map((p) => (hasTopLevelOr(p) && !isWrapped(p) ? `(${p})` : p)).join(' AND ');
 }
 
 const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -380,14 +405,14 @@ export function hasSqlPredicate(q: string, predicate: string): boolean {
 export function appendSqlPredicate(q: string, predicate: string): string {
   if (!q.trim()) return predicate;
   if (hasSqlPredicate(q, predicate)) return q.trim();
-  return joinConjuncts(q, [...sqlConjuncts(q), predicate]);
+  return joinConjuncts([...sqlConjuncts(q), predicate]);
 }
 
 /** Remove conjuncts matching `test`. */
 export function removeSqlConjuncts(q: string, test: (conjunct: string) => boolean): string {
   const parts = sqlConjuncts(q);
   const kept = parts.filter((c) => !test(normalize(c)));
-  return kept.length === parts.length ? q.trim() : kept.join(' AND ');
+  return kept.length === parts.length ? q.trim() : joinConjuncts(kept);
 }
 
 /** Equality / membership predicates for one column, as facets write them. */

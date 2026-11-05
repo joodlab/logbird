@@ -4,7 +4,7 @@ import { SegmentedControl, SegmentedControlItem } from '@trailmark/ui/components
 import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
 import { cn } from '@trailmark/ui/lib/utils';
 import { CornerDownLeftIcon, Loader2Icon, SearchIcon, XIcon } from 'lucide-react';
-import { type KeyboardEvent, type Ref, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { type KeyboardEvent, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { QueryProblem } from '@/lib/query-error';
 import { translateQueryToSql } from '@/lib/query-translate';
@@ -38,7 +38,7 @@ const PLACEHOLDER: Record<QueryLang, string> = {
 };
 
 /* Mirror and textarea must share every metric that affects wrapping. */
-const TEXT = 'px-2.5 py-[7px] font-mono text-[13px] leading-5 whitespace-pre-wrap break-words';
+const TEXT = 'px-2.5 py-[7px] font-mono text-[13px] leading-5 whitespace-pre-wrap [overflow-wrap:anywhere]';
 
 /**
  * Query bar: a transparent auto-growing textarea over a syntax-highlighted mirror (no editor
@@ -70,14 +70,24 @@ export function QueryInput({ projectId, range, value, lang, onSubmit, allowSql =
     if (showMenu) document.getElementById(`${listId}-${active}`)?.scrollIntoView({ block: 'nearest' });
   }, [active, showMenu, listId]);
 
+  /* The caret is restored synchronously after React commits the new text, before the next keystroke. */
+  const pendingCaret = useRef<number | null>(null);
+  const [edit, setEdit] = useState(0);
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    const next = pendingCaret.current;
+    if (!el || next === null || edit === 0) return;
+    pendingCaret.current = null;
+    el.focus();
+    el.setSelectionRange(next, next);
+    setCaret(next);
+  }, [edit]);
+
   const setText = (text: string, nextCaret: number) => {
+    pendingCaret.current = nextCaret;
     setDraft(text);
     setNavigated(false);
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(nextCaret, nextCaret);
-      setCaret(nextCaret);
-    });
+    setEdit((n) => n + 1);
   };
 
   const accept = (s: Suggestion) => {
@@ -202,10 +212,10 @@ export function QueryInput({ projectId, range, value, lang, onSubmit, allowSql =
             WHERE
           </span>
         ) : null}
-        <div className="relative grid max-h-[9.75rem] min-w-0 flex-1 overflow-y-auto">
+        <div className="relative grid max-h-[9.75rem] min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-y-auto overflow-x-hidden">
           <div aria-hidden className={cn(TEXT, 'pointer-events-none [grid-area:1/1]')}>
             {draft ? (
-              <HighlightedText error={error} lang={lang} value={draft} />
+              <HighlightedText error={error} lang={lang} typingAt={open ? caret : undefined} value={draft} />
             ) : (
               <span className="block truncate whitespace-nowrap text-muted-foreground">{placeholder ?? PLACEHOLDER[lang]}</span>
             )}
@@ -312,7 +322,7 @@ export function QueryInput({ projectId, range, value, lang, onSubmit, allowSql =
                     s.kind === 'function' || s.kind === 'keyword' || s.kind === 'snippet' ? 'text-syntax-keyword' : '',
                   )}
                 >
-                  {s.kind === 'term' || s.kind === 'attr' ? <HighlightedText lang={lang} value={s.label} /> : s.label}
+                  {s.kind === 'term' || s.label.startsWith("attributes['") ? <HighlightedText lang={lang} value={s.label} /> : s.label}
                 </span>
                 {s.badge ? (
                   <span className="shrink-0 rounded bg-muted px-1 font-mono text-[9.5px] text-muted-foreground uppercase leading-4 tracking-wide">

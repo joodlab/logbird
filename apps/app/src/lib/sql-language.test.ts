@@ -133,6 +133,16 @@ describe('predicates', () => {
     expect(appendSqlPredicate("outcome = 'failure'", "outcome = 'failure'")).toBe("outcome = 'failure'");
   });
 
+  it('never stacks parentheses when predicates come and go', () => {
+    const base = 'job_attempt > 1 OR conformance < 50';
+    const added = toggleSqlPredicate(base, "severity = 'warning'", 'severity', 'include');
+    expect(added).toBe("(job_attempt > 1 OR conformance < 50) AND severity = 'warning'");
+    const removed = toggleSqlPredicate(added, "severity = 'warning'", 'severity', 'include');
+    expect(removed).toBe(base);
+    expect(appendSqlPredicate('(a = 1 OR b = 2)', 'c = 3')).toBe('(a = 1 OR b = 2) AND c = 3');
+    expect(appendSqlPredicate('(a = 1) OR (b = 2)', 'c = 3')).toBe('((a = 1) OR (b = 2)) AND c = 3');
+  });
+
   it('toggles facet predicates', () => {
     const q = toggleSqlPredicate("job_attempt > 2 AND outcome = 'failure'", "outcome = 'denied'", 'outcome', 'include');
     expect(q).toBe("job_attempt > 2 AND outcome = 'denied'");

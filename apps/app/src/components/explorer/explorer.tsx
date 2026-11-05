@@ -91,8 +91,9 @@ export function Explorer({
   /* ---------------- query errors ---------------- */
   // A rejected query keeps the last good results on screen (dimmed) and explains itself in the bar.
   const problem = queryProblem(events.error, lang) ?? queryProblem(histogram.error, lang);
-  const lastGood = useRef<{ pages?: SearchResponse[]; histogram?: HistogramResponse }>({});
+  const lastGood = useRef<{ pages?: SearchResponse[]; histogram?: HistogramResponse; query?: { q: string; lang: QueryLang } }>({});
   if (events.data && !events.isError) lastGood.current.pages = events.data.pages;
+  if (events.isSuccess && !events.isPlaceholderData) lastGood.current.query = { q, lang };
   if (histogram.data && !histogram.isError) lastGood.current.histogram = histogram.data;
   const pages = problem ? lastGood.current.pages : events.data?.pages;
   const histogramData = problem ? lastGood.current.histogram : histogram.data;
@@ -241,13 +242,20 @@ export function Explorer({
   );
 
   const facetsPanel = (
-    <FacetSidebar lang={lang} onChange={(next) => onChange({ q: next, ev: undefined })} projectId={projectId} q={q} range={range} />
+    <FacetSidebar
+      counts={problem ? lastGood.current.query : undefined}
+      lang={lang}
+      onChange={(next) => onChange({ q: next, ev: undefined })}
+      projectId={projectId}
+      q={q}
+      range={range}
+    />
   );
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
       <div className="flex flex-col gap-2 border-b px-3 py-2.5 sm:px-4">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
           {embedded ? null : (
             <Tooltip>
               <TooltipTrigger
@@ -288,6 +296,7 @@ export function Explorer({
           ) : null}
           <QueryInput
             allowSql={allowSql}
+            className="max-sm:order-last max-sm:basis-full"
             lang={lang}
             onSubmit={(next, nextLang) => onChange({ q: next, lang: nextLang, ev: undefined })}
             placeholder={embedded ? 'Filter this timeline… e.g. outcome:failure attempt:>1' : undefined}
@@ -302,7 +311,7 @@ export function Explorer({
               render={
                 <div
                   className={cn(
-                    'flex h-8 shrink-0 items-center gap-2 rounded-md border px-2.5 text-sm shadow-xs',
+                    'flex h-8 shrink-0 items-center gap-2 rounded-md border px-2.5 text-sm shadow-xs max-sm:ms-auto',
                     liveActive && 'border-outcome-success/40 bg-outcome-success/5',
                     !relative && 'opacity-60',
                   )}

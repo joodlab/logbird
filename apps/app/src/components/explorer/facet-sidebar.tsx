@@ -43,6 +43,8 @@ interface FacetSidebarProps {
   range: string;
   q: string;
   lang?: QueryLang;
+  /** Count against this query instead of `q` (the last one that ran, while `q` is rejected). */
+  counts?: { q: string; lang: QueryLang };
   onChange: (q: string) => void;
   className?: string;
 }
@@ -84,7 +86,7 @@ function sqlOps(field: string): FacetOps {
 }
 
 /** Facet groups with counts. Click includes a value, ⌥/Alt-click (or −) excludes it. */
-export function FacetSidebar({ projectId, range, q, lang = 'query', onChange, className }: FacetSidebarProps) {
+export function FacetSidebar({ projectId, range, q, lang = 'query', counts, onChange, className }: FacetSidebarProps) {
   return (
     <aside aria-label="Filters" className={cn('flex flex-col overflow-y-auto py-2', className)}>
       <div className="flex items-center justify-between px-3 pb-1">
@@ -92,7 +94,7 @@ export function FacetSidebar({ projectId, range, q, lang = 'query', onChange, cl
         <span className="text-[10px] text-muted-foreground">⌥-click excludes</span>
       </div>
       {FACETS.map((f) => (
-        <FacetGroup key={f.field} lang={lang} onChange={onChange} projectId={projectId} q={q} range={range} spec={f} />
+        <FacetGroup counts={counts} key={f.field} lang={lang} onChange={onChange} projectId={projectId} q={q} range={range} spec={f} />
       ))}
     </aside>
   );
@@ -104,6 +106,7 @@ function FacetGroup({
   range,
   q,
   lang,
+  counts,
   onChange,
 }: {
   spec: FacetSpec;
@@ -111,6 +114,7 @@ function FacetGroup({
   range: string;
   q: string;
   lang: QueryLang;
+  counts?: { q: string; lang: QueryLang };
   onChange: (q: string) => void;
 }) {
   const queryField = queryFieldForFacet(spec.field);
@@ -119,8 +123,9 @@ function FacetGroup({
   const [open, setOpen] = useState(Boolean(spec.defaultOpen) || activeCount > 0);
   const [limit, setLimit] = useState(6);
   // Counts ignore this field's own terms so sibling values stay visible while one is selected.
-  const scopedQ = ops.without(q);
-  const facet = useQuery({ ...facetQuery(projectId, spec.field, range, scopedQ, 20, lang), enabled: open });
+  const base = counts ?? { q, lang };
+  const scopedQ = (base.lang === 'sql' ? sqlOps(queryField) : queryOps(queryField)).without(base.q);
+  const facet = useQuery({ ...facetQuery(projectId, spec.field, range, scopedQ, 20, base.lang), enabled: open });
   const values = facet.data?.values ?? [];
   const max = Math.max(...values.map((v) => v.count), 1);
 

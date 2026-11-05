@@ -47,7 +47,18 @@ function CaretMarker() {
  * Syntax-highlighted query or SQL expression. Used as the query bar's mirror (under a transparent
  * textarea), in the cheat-sheet, saved views and docs.
  */
-export function HighlightedText({ value, lang = 'query', error }: { value: string; lang?: QueryLang; error?: HighlightError | null }) {
+export function HighlightedText({
+  value,
+  lang = 'query',
+  error,
+  typingAt,
+}: {
+  value: string;
+  lang?: QueryLang;
+  error?: HighlightError | null;
+  /** Caret offset while editing: the word being typed is not flagged as unknown yet. */
+  typingAt?: number;
+}) {
   const nodes = useMemo(() => {
     const base = lang === 'sql' ? highlightSql(value) : highlightQuery(value);
     const start = error?.start ?? null;
@@ -59,14 +70,14 @@ export function HighlightedText({ value, lang = 'query', error }: { value: strin
     for (const s of segments) {
       if (caretAt !== null && caretAt === s.start) out.push(<CaretMarker key="caret" />);
       out.push(
-        <span className={cn(CLASS[s.cls], s.error && ERROR)} key={`${s.start}-${s.end}`}>
+        <span className={cn(CLASS[s.cls === 'unknown' && typingAt === s.end ? 'ident' : s.cls], s.error && ERROR)} key={`${s.start}-${s.end}`}>
           {value.slice(s.start, s.end)}
         </span>,
       );
     }
     if (caretAt !== null && caretAt >= value.length) out.push(<CaretMarker key="caret" />);
     return out;
-  }, [value, lang, error?.start, error?.end]);
+  }, [value, lang, error?.start, error?.end, typingAt]);
   return <>{nodes}</>;
 }
 

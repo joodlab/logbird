@@ -140,6 +140,8 @@ export function useCompletions({
       const items: Suggestion[] = [];
       const core = sql ? undefined : coreField(context.field);
       const ordered = core?.type === 'number' || core?.type === 'date';
+      // /suggest counts for attributes are the key's frequency, not the value's: don't show them per value.
+      const attributeValues = valueField !== null && !coreField(valueField);
 
       if (!sql && !queryContext.op && ordered && !p) {
         const snippets =
@@ -202,7 +204,7 @@ export function useCompletions({
           label: named ? v.label : v.value,
           detail: named ? v.value : undefined,
           named,
-          meta: formatCompact(v.count),
+          meta: attributeValues ? undefined : formatCompact(v.count),
           from: context.from,
           to: context.to,
           insert,
