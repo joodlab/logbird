@@ -1,5 +1,7 @@
 import { apiReference } from '@scalar/hono-api-reference';
 import { auth, authAuditContext, setAuthAuditHandler } from '@trailmark/auth';
+import { QueryError } from '@trailmark/clickhouse';
+import { queryErrorDetailsSchema } from '@trailmark/contracts';
 import { Prisma, prisma } from '@trailmark/database';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -36,6 +38,8 @@ app.use('*', async (c, next) => {
   );
 });
 app.onError((error, c) => {
+  if (error instanceof QueryError)
+    return c.json({ error: { code: 'invalid_query', message: error.message, details: queryErrorDetailsSchema.parse(error.details) } }, 422);
   if (error instanceof ApiError) return c.json({ error: { code: error.code, message: error.message, details: error.details } }, error.status);
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
     return c.json({ error: { code: 'conflict', message: 'This record already exists.' } }, 409);

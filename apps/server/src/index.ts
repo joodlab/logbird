@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import { prisma } from '@trailmark/database';
 import { closeRetentionQueue } from '@trailmark/worker/queue';
 import { app } from './app';
-import { clickhouse } from './clickhouse';
+import { clickhouse, queryClickhouse } from './clickhouse';
 import { env } from './env';
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, () =>
@@ -12,6 +12,7 @@ function shutdown() {
   server.close(async () => {
     await closeRetentionQueue();
     await clickhouse.close();
+    await queryClickhouse?.close();
     await prisma.$disconnect();
   });
 }
