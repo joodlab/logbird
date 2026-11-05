@@ -3,7 +3,7 @@ import type { EntityKind, EntitySort, QueryLang } from '@trailmark/contracts';
 import { authClient } from '@/lib/auth-client';
 import { resolveRange } from '@/lib/range';
 import { api, langParam } from './client';
-import { ApiRequestError } from './errors';
+import { ApiRequestError, isBusyError, isTimeoutError, withDeadline } from './errors';
 
 /**
  * Query keys are hierarchical so one invalidation clears a whole project:
@@ -20,8 +20,28 @@ export const keys = {
   organization: ['organization'] as const,
 };
 
-const noRetryOn4xx = (failureCount: number, error: unknown) =>
-  !(error instanceof ApiRequestError && error.status >= 400 && error.status < 500) && failureCount < 2;
+/** A busy project (503 project_busy / retention_unavailable) clears on its own: keep retrying for about a minute. */
+export const BUSY_RETRIES = 12;
+
+/** Session bootstrap deadline: past it the boot screen turns into an error with Retry. */
+export const SESSION_DEADLINE_MS = 15_000;
+
+/**
+ * Shared retry policy: never retry 4xx or a request that already hit its deadline, retry busy projects patiently,
+ * and give other failures (network, 5xx) two more tries.
+ */
+export function shouldRetry(failureCount: number, error: unknown): boolean {
+  if (isBusyError(error)) return failureCount < BUSY_RETRIES;
+  if (isTimeoutError(error)) return false;
+  return !(error instanceof ApiRequestError && error.status >= 400 && error.status < 500) && failureCount < 2;
+}
+
+/** Exponential backoff capped at 10 s, never sooner than the server's `Retry-After`. */
+export function retryDelay(failureCount: number, error: unknown): number {
+  const backoff = Math.min(1000 * 2 ** failureCount, 10_000);
+  const floor = error instanceof ApiRequestError && error.retryAfter !== null ? error.retryAfter * 1000 : 0;
+  return Math.min(Math.max(backoff, floor), 30_000);
+}
 
 export const meQuery = () =>
   queryOptions({
@@ -30,12 +50,19 @@ export const meQuery = () =>
     // better-auth's get-session answers 200/null when signed out, so a signed-out visit never
     // produces a failed request; /api/me is only called with a live session.
     queryFn: async () => {
-      const session = await authClient.getSession();
+      const session = await withDeadline(authClient.getSession(), SESSION_DEADLINE_MS, 'The Trailmark server');
+      // A 5xx from get-session means "could not check", not "signed out": show an error with Retry, not /login.
+      if (session.error && (session.error.status ?? 0) >= 500)
+        throw new ApiRequestError(
+          session.error.status,
+          'session_unavailable',
+          'The Trailmark server could not check your session. Try again in a moment.',
+        );
       if (!session.data) throw new ApiRequestError(401, 'unauthorized', 'Sign in to continue.');
       return api.me();
     },
     staleTime: 60_000,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const projectsQuery = () =>
@@ -43,7 +70,7 @@ export const projectsQuery = () =>
     queryKey: keys.projects,
     queryFn: () => api.projects.list(),
     staleTime: 30_000,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const projectQuery = (projectId: string) =>
@@ -51,7 +78,7 @@ export const projectQuery = (projectId: string) =>
     queryKey: [...keys.project(projectId), 'detail'] as const,
     queryFn: () => api.projects.get(projectId),
     staleTime: 30_000,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 /**
@@ -62,7 +89,7 @@ export const retentionQuery = (projectId: string, preview?: number) =>
   queryOptions({
     queryKey: [...keys.project(projectId), 'retention', preview ?? null] as const,
     queryFn: ({ signal }) => api.projects.retention(projectId, preview, signal),
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const overviewQuery = (projectId: string, range: string, q = '') =>
@@ -92,7 +119,7 @@ export const eventsInfiniteQuery = (projectId: string, range: string, q: string,
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     placeholderData: keepPreviousData,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const histogramQuery = (projectId: string, range: string, q: string, lang: QueryLang = 'query', interval?: number) =>
@@ -103,7 +130,7 @@ export const histogramQuery = (projectId: string, range: string, q: string, lang
       return api.events.histogram(projectId, { from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, interval }, signal);
     },
     placeholderData: keepPreviousData,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const facetQuery = (projectId: string, field: string, range: string, q: string, limit = 8, lang: QueryLang = 'query') =>
@@ -115,7 +142,7 @@ export const facetQuery = (projectId: string, field: string, range: string, q: s
     },
     placeholderData: keepPreviousData,
     staleTime: 30_000,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const eventQuery = (projectId: string, eventId: string) =>
@@ -123,7 +150,7 @@ export const eventQuery = (projectId: string, eventId: string) =>
     queryKey: [...keys.project(projectId), 'event', eventId] as const,
     queryFn: ({ signal }) => api.events.get(projectId, eventId, signal),
     staleTime: 5 * 60_000,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const operationQuery = (projectId: string, operationId: string) =>
@@ -131,7 +158,7 @@ export const operationQuery = (projectId: string, operationId: string) =>
     queryKey: [...keys.project(projectId), 'operation', operationId] as const,
     queryFn: ({ signal }) => api.events.operation(projectId, operationId, signal),
     staleTime: 60_000,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const entityListQuery = (projectId: string, kind: EntityKind, q: string, type?: string, sort: EntitySort = 'events') =>
@@ -142,7 +169,7 @@ export const entityListQuery = (projectId: string, kind: EntityKind, q: string, 
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     placeholderData: keepPreviousData,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const entityProfileQuery = (projectId: string, kind: EntityKind, entityId: string, range: string) =>
@@ -153,7 +180,7 @@ export const entityProfileQuery = (projectId: string, kind: EntityKind, entityId
       return api.entities.profile(projectId, kind, entityId, { from: r.from, to: r.to }, signal);
     },
     placeholderData: keepPreviousData,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const fieldsQuery = (projectId: string, range: string) =>
@@ -164,7 +191,7 @@ export const fieldsQuery = (projectId: string, range: string) =>
       return api.fields(projectId, { from: r.from, to: r.to }, signal);
     },
     placeholderData: keepPreviousData,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 /** Values per /suggest request. A shorter answer means the list is complete and can be filtered locally. */
@@ -183,14 +210,14 @@ export const keysQuery = (projectId: string) =>
   queryOptions({
     queryKey: [...keys.project(projectId), 'keys'] as const,
     queryFn: () => api.keys.list(projectId),
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const viewsQuery = (projectId: string) =>
   queryOptions({
     queryKey: [...keys.project(projectId), 'views'] as const,
     queryFn: () => api.views.list(projectId),
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const workspaceActivityQuery = (range: string, q: string) =>
@@ -203,7 +230,7 @@ export const workspaceActivityQuery = (range: string, q: string) =>
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     placeholderData: keepPreviousData,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 /**
@@ -217,7 +244,7 @@ export const projectSetupQuery = (projectId: string, options: { pollUntilFirstEv
     staleTime: 10_000,
     refetchInterval: (query) => (options.pollUntilFirstEvent && !query.state.data?.ingest.firstEventAt ? options.pollUntilFirstEvent : 60_000),
     refetchIntervalInBackground: Boolean(options.pollUntilFirstEvent),
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const workspaceSetupQuery = () =>
@@ -225,7 +252,7 @@ export const workspaceSetupQuery = () =>
     queryKey: keys.workspaceSetup,
     queryFn: ({ signal }) => api.workspaceSetup(signal),
     staleTime: 0,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 /** Invite links of the active workspace (admin-only endpoint: only enable it for owners/admins). */
@@ -234,19 +261,19 @@ export const inviteLinksQuery = (organizationId: string | null | undefined) =>
     queryKey: [...keys.organization, organizationId ?? 'none', 'invite-links'] as const,
     queryFn: ({ signal }) => api.inviteLinks.list(signal),
     staleTime: 15_000,
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const inviteLinkPreviewQuery = (token: string) =>
   queryOptions({
     queryKey: ['invite-link', token] as const,
     queryFn: ({ signal }) => api.inviteLinks.preview(token, signal),
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });
 
 export const invitationPreviewQuery = (invitationId: string) =>
   queryOptions({
     queryKey: ['invitation', invitationId] as const,
     queryFn: ({ signal }) => api.invitations.preview(invitationId, signal),
-    retry: noRetryOn4xx,
+    retry: shouldRetry,
   });

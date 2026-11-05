@@ -25,7 +25,7 @@ import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { inviteLinkPreviewQuery, keys, meQuery } from '@/lib/api/queries';
-import { authCall, authClient } from '@/lib/auth-client';
+import { authCall, authClient, sendSignInCode } from '@/lib/auth-client';
 import { formatFull } from '@/lib/format';
 import { fieldErrorMessage } from '@/lib/forms';
 import { emailDomain } from '@/lib/invite-links';
@@ -254,7 +254,7 @@ function JoinSignIn({ link }: { link: InviteLinkPreview }) {
       setServerError(null);
       const email = value.email.trim().toLowerCase();
       try {
-        await authCall(authClient.emailOtp.sendVerificationOtp({ email, type: 'sign-in' }));
+        await sendSignInCode(email);
         markOtpSent(email);
         await navigate({ to: '/login/verify', search: { email, redirect: `/join/${token}` } });
       } catch (error) {
