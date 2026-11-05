@@ -6,9 +6,26 @@ const prefix =
   'SELECT event_id FROM trailmark.events WHERE project_id = {p:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (';
 const parameters = { p: '__validation__', from: '2000-01-01 00:00:00', to: '2000-01-02 00:00:00' };
 type Node = { text: string; children: Node[] };
-function reject(reason: 'not_allowed' | 'unknown_field' | 'too_complex' | 'syntax', q: string, hint: string, start = 0, end = q.length): never {
-  throw new QueryError(hint, { lang: 'sql', reason, start, end, hint });
+type Reason = 'not_allowed' | 'unknown_field' | 'too_complex' | 'syntax';
+const HINTS: Record<Reason, string> = {
+  not_allowed: 'Write a boolean WHERE expression using allowed columns and pure functions only (see the SQL cheat-sheet).',
+  unknown_field: "Use an events column such as action, actor_id, tenant_id, job_attempt, or attributes['key'].",
+  too_complex: 'Simplify the expression: fewer nested parentheses or a shorter filter.',
+  syntax: 'Check quotes, parentheses and operators near the marked position.',
+};
+function reject(reason: Reason, q: string, message: string, start = 0, end = q.length, hint = HINTS[reason]): never {
+  throw new QueryError(message, { lang: 'sql', reason, start, end, hint });
 }
+/** q with the contents of single-quoted literals blanked (same length), so searches never match inside strings. */
+function code(q: string) {
+  return q.replace(/'(?:[^'\\]|\\.|'')*'?/g, (m) => `'${' '.repeat(Math.max(0, m.length - 2))}${m.length > 1 ? "'" : ''}`);
+}
+/** Span of the first occurrence of `pattern` outside string literals, or the whole expression. */
+function locate(q: string, pattern: RegExp): [number, number] {
+  const m = pattern.exec(code(q));
+  return m ? [m.index, m.index + m[0].length] : [0, q.length];
+}
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function parseTree(text: string): Node {
   const roots: Node[] = [],
     stack: { depth: number; node: Node }[] = [];
@@ -26,7 +43,8 @@ function walk(node: Node, q: string, scope = new Set<string>(), depth = 0) {
   if (depth > 64) reject('too_complex', q, 'SQL expression exceeds 64 AST levels');
   if (node.text.startsWith('Identifier ')) {
     const name = node.text.slice(11);
-    if (!(SQL_ALLOWED_COLUMNS as readonly string[]).includes(name) && !scope.has(name)) reject('unknown_field', q, `Column ${name} is not allowed`);
+    if (!(SQL_ALLOWED_COLUMNS as readonly string[]).includes(name) && !scope.has(name))
+      reject('unknown_field', q, `Unknown column ${name}`, ...locate(q, new RegExp(`(?<![\\w.])${escapeRegExp(name)}(?!\\w)`)));
     if (node.children.length) reject('not_allowed', q, 'Invalid identifier');
     return;
   }
@@ -38,9 +56,16 @@ function walk(node: Node, q: string, scope = new Set<string>(), depth = 0) {
     for (const child of node.children) walk(child, q, scope, depth + 1);
     return;
   }
-  if (!node.text.startsWith('Function ')) reject('not_allowed', q, 'Only boolean expressions, allowed columns and pure functions are supported');
+  if (!node.text.startsWith('Function '))
+    reject(
+      'not_allowed',
+      q,
+      /Subquery|SelectWithUnionQuery|SelectQuery/.test(node.text) ? 'Subqueries are not allowed' : `${node.text.split(' ')[0]} is not allowed`,
+      ...locate(q, /\b(?:select|with|union|settings|format|join)\b/i),
+    );
   const name = node.text.slice(9);
-  if (!(SQL_ALLOWED_FUNCTIONS as readonly string[]).includes(name)) reject('not_allowed', q, `Function ${name} is not allowed`);
+  if (!(SQL_ALLOWED_FUNCTIONS as readonly string[]).includes(name))
+    reject('not_allowed', q, `Function ${name}() is not allowed`, ...locate(q, new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, 'i')));
   if (name === 'lambda') {
     const args = node.children[0]?.children;
     const names = args?.[0]?.children[0]?.children;
