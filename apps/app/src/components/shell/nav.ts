@@ -34,7 +34,7 @@ export const PROJECT_NAV: { group: string | null; items: NavItem[] }[] = [
     items: [
       { to: '/p/$projectId/actors', label: 'Actors', icon: UserIcon, keywords: 'users people who' },
       { to: '/p/$projectId/tenants', label: 'Tenants', icon: Building2Icon, keywords: 'customers accounts businesses' },
-      { to: '/p/$projectId/workers', label: 'Workers', icon: CogIcon, keywords: 'executors jobs schedulers webhooks' },
+      { to: '/p/$projectId/workers', label: 'Executors', icon: CogIcon, keywords: 'workers jobs queues cron schedulers webhooks api' },
       { to: '/p/$projectId/records', label: 'Records', icon: PackageIcon, keywords: 'targets objects' },
     ],
   },

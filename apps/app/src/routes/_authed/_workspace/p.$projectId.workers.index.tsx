@@ -6,12 +6,12 @@ import { entityListQuery } from '@/lib/api/queries';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/workers/')({
   validateSearch: z.object({ q: z.string().optional(), type: z.string().optional(), sort: entitySortSchema.optional().catch(undefined) }),
-  staticData: { crumb: 'Workers' },
+  staticData: { crumb: 'Executors' },
   loaderDeps: ({ search }) => ({ q: search.q ?? '', type: search.type, sort: search.sort }),
   loader: ({ context, params, deps }) => {
     context.queryClient.prefetchInfiniteQuery(entityListQuery(params.projectId, 'executor', deps.q, deps.type, deps.sort));
   },
-  head: () => ({ meta: [{ title: 'Workers · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Executors · Trailmark' }] }),
   component: DirectoryPage,
 });
 

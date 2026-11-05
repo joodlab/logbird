@@ -3,15 +3,16 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import type { Entity, EntitySort } from '@trailmark/contracts';
 import { TypePill } from '@trailmark/ui/components/badges';
+import { CodeBlock } from '@trailmark/ui/components/code-block';
 import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
 import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
+import { Button, buttonVariants } from '@trailmark/ui/components/ui/button';
 import { Input } from '@trailmark/ui/components/ui/input';
 import { SegmentedControl, SegmentedControlItem } from '@trailmark/ui/components/ui/segmented-control';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { cn } from '@trailmark/ui/lib/utils';
-import { Loader2Icon, SearchIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { BookOpenIcon, Loader2Icon, SearchIcon, SearchXIcon } from 'lucide-react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { Timestamp } from '@/components/timestamp';
 import { entityListQuery, facetQuery } from '@/lib/api/queries';
 import { ENTITY_SECTIONS, type EntitySection, splitTargetId, typeIcon } from '@/lib/entities';
@@ -19,6 +20,53 @@ import { formatCompact } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 
 const TYPE_FACET = { actor: 'actor.type', executor: 'executor.type', target: 'target.type', tenant: null } as const;
+/** Never-populated state: what the page is for and which envelope field fills it. */
+const EMPTY_EXPLAINERS: Record<EntitySection, { lead: ReactNode; snippet: string; note?: ReactNode }> = {
+  actors: {
+    lead: (
+      <>
+        Send <Code>{'actor: { type, id, name }'}</Code> on your events.
+      </>
+    ),
+    snippet: '"actor": { "type": "user", "id": "usr_42", "name": "Raed" }',
+    note: (
+      <>
+        Scheduled jobs use <Code>type: "system"</Code>.
+      </>
+    ),
+  },
+  tenants: {
+    lead: (
+      <>
+        Send <Code>{'tenant: { id, name }'}</Code> so you can answer “what happened in this customer’s account?”.
+      </>
+    ),
+    snippet: '"tenant": { "id": "biz_7", "name": "Azure Hotels" }',
+  },
+  workers: {
+    lead: (
+      <>
+        Send <Code>{'executor: { type, id, name, jobId, attempt }'}</Code>.
+      </>
+    ),
+    snippet: [
+      '"executor": {',
+      '  "type": "worker", "id": "refunds-worker",',
+      '  "name": "Refunds worker", "jobId": "job_981", "attempt": 2',
+      '}',
+    ].join('\n'),
+    note: 'The actor is who asked; the executor is what did the work.',
+  },
+  records: {
+    lead: (
+      <>
+        Send <Code>{'targets: [{ type, id, name }]'}</Code> — one entry per record the action touched.
+      </>
+    ),
+    snippet: ['"targets": [', '  { "type": "booking", "id": "bk_1042", "name": "Booking #1042" }', ']'].join('\n'),
+  },
+};
+
 const SORTS: { value: EntitySort; label: string; title: string }[] = [
   { value: 'events', label: 'Most active', title: 'Most events first, then most recently seen' },
   { value: 'lastSeen', label: 'Recently seen', title: 'Most recently seen first' },
@@ -106,14 +154,16 @@ export function EntityDirectory({ projectId, section, q, type, sort = 'events', 
       </div>
 
       <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
-        <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_100px_90px_120px_120px] items-center gap-3 border-b bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground uppercase tracking-wider md:grid">
-          <span>Name</span>
-          <span>Id</span>
-          <span>Type</span>
-          <span className="text-end">Events</span>
-          <span>First seen</span>
-          <span>Last seen</span>
-        </div>
+        {list.isSuccess && rows.length === 0 ? null : (
+          <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_100px_90px_120px_120px] items-center gap-3 border-b bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground uppercase tracking-wider md:grid">
+            <span>Name</span>
+            <span>Id</span>
+            <span>Type</span>
+            <span className="text-end">Events</span>
+            <span>First seen</span>
+            <span>Last seen</span>
+          </div>
+        )}
         {list.isPending ? (
           <div className="flex flex-col gap-1 p-2">
             {placeholderKeys(10).map((k) => (
@@ -123,19 +173,15 @@ export function EntityDirectory({ projectId, section, q, type, sort = 'events', 
         ) : list.isError ? (
           <ErrorState error={list.error} onRetry={() => list.refetch()} title={`Could not load ${meta.label.toLowerCase()}`} />
         ) : rows.length === 0 ? (
-          <EmptyState
-            description={
-              q || type ? 'Nothing matches that search. Try a shorter name or id.' : `${meta.label} appear here as soon as events mention them.`
-            }
-            icon={meta.icon}
-            title={q || type ? 'No matches' : `No ${meta.label.toLowerCase()} yet`}
-          >
-            {q || type ? (
+          q || type ? (
+            <EmptyState description="Nothing matches that search. Try a shorter name or id." icon={SearchXIcon} size="sm" title="No matches">
               <Button onClick={() => onSearch({ q: undefined, type: undefined })} size="sm" variant="outline">
                 Clear search
               </Button>
-            ) : null}
-          </EmptyState>
+            </EmptyState>
+          ) : (
+            <NeverPopulated projectId={projectId} section={section} />
+          )
         ) : (
           <ul className="divide-y">
             {rows.map((e) => (
@@ -154,6 +200,38 @@ export function EntityDirectory({ projectId, section, q, type, sort = 'events', 
       </div>
     </div>
   );
+}
+
+function NeverPopulated({ projectId, section }: { projectId: string; section: EntitySection }) {
+  const meta = ENTITY_SECTIONS[section];
+  const explainer = EMPTY_EXPLAINERS[section];
+  return (
+    <div className="pb-10">
+      <EmptyState
+        className="pb-5"
+        description={
+          <span className="flex flex-col gap-1">
+            <span>{explainer.lead}</span>
+            {explainer.note ? <span>{explainer.note}</span> : null}
+          </span>
+        }
+        icon={meta.icon}
+        title={`No ${meta.label.toLowerCase()} yet`}
+      />
+      {/* A plain block (not a flex child of EmptyState) so the snippet's long lines scroll inside it instead of widening the card. */}
+      <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-3 px-4 sm:px-6">
+        <CodeBlock className="w-full text-start" code={explainer.snippet} copyLabel="Copy snippet" language="json" />
+        <Link className={buttonVariants({ size: 'sm', variant: 'outline' })} hash="envelope" params={{ projectId }} to="/p/$projectId/docs">
+          <BookOpenIcon />
+          Read the quickstart
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function Code({ children }: { children: ReactNode }) {
+  return <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-foreground">{children}</code>;
 }
 
 function TypeChip({ label, active, onClick, count }: { label: string; active: boolean; onClick: () => void; count?: number }) {
