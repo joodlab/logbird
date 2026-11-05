@@ -10,7 +10,7 @@
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo watch dev",
+    "dev": "turbo watch dev --filter=!./examples/*",
     "dev:server": "turbo watch dev -F @trailmark/server...",
     "dev:app": "turbo watch dev -F @trailmark/app...",
     "clean": "turbo run clean && git clean -xdf node_modules",
