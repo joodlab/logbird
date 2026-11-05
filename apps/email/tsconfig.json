@@ -1,0 +1,9 @@
+{
+  "extends": "@trailmark/tsconfig/hono.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["emails", "src"],
+  "exclude": ["node_modules", "dist", ".react-email"]
+}

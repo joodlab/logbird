@@ -1,84 +1,74 @@
 // The server runs these through tsx with the classic JSX runtime, so React must be in scope.
 import * as React from 'react';
-import { Button, Heading, Hr, Link, Section, Text } from 'react-email';
-import { colors, EmailLayout, fonts } from './layout';
+import { formatDateTime, formatRelative, roleLabel, roleSummary, withArticle } from '../format';
+import type { EmailDefinition } from '../render';
+import { plainText } from '../text';
+import { Button, DetailRows, EmailLayout, Note, Paragraph, RawLink, Spacer, Strong, Title } from './components';
 
 export interface InvitationEmailProps {
+  appUrl: string;
   /** Invited address. */
   email: string;
   workspace: string;
   inviterName: string;
   inviterEmail: string;
   role: string;
+  /** Accept page for this invitation. */
   url: string;
   expiresAt: Date;
+  /** When the invitation was sent; drives "in 2 days". Defaults to now. */
+  sentAt?: Date;
 }
 
-export const ROLE_SUMMARY: Record<string, string> = {
-  owner: 'Owners manage everything, including billing-level settings and other owners.',
-  admin: 'Admins manage projects, API keys, retention and members.',
-  member: 'Members can explore events, follow actors and records, and save views.',
-};
+const inviter = (p: InvitationEmailProps) => (p.inviterName === p.inviterEmail ? p.inviterEmail : `${p.inviterName} (${p.inviterEmail})`);
+const expiry = (p: InvitationEmailProps) => `${formatDateTime(p.expiresAt)} (${formatRelative(p.expiresAt, p.sentAt ?? new Date())})`;
+const title = (p: InvitationEmailProps) => `Join ${p.workspace} on Trailmark`;
+const lead = (p: InvitationEmailProps) =>
+  `${inviter(p)} invited you to the ${p.workspace} workspace as ${withArticle(roleLabel(p.role))}. Trailmark keeps a searchable history of who did what, when and where across your team’s systems.`;
 
-export const roleLabel = (role: string) => role.charAt(0).toUpperCase() + role.slice(1);
+const details = (p: InvitationEmailProps) => [
+  { label: 'Workspace', value: p.workspace },
+  { label: 'Role', value: roleLabel(p.role), hint: roleSummary(p.role) },
+  { label: 'Invited address', value: p.email },
+  { label: 'Expires', value: expiry(p) },
+];
 
-export function formatExpiry(date: Date) {
-  return new Intl.DateTimeFormat('en', { dateStyle: 'long', timeStyle: 'short', timeZone: 'UTC' }).format(date).concat(' UTC');
-}
+const reason = (p: InvitationEmailProps) => `${p.inviterEmail} invited ${p.email} to the ${p.workspace} workspace.`;
+const NOTE_TITLE = 'Not expecting this?';
+const note = (p: InvitationEmailProps) =>
+  `You can ignore it — you won’t join ${p.workspace} unless you accept. To accept, sign in as ${p.email}; the invitation only works for that address.`;
 
-export function InvitationEmail({ email, workspace, inviterName, inviterEmail, role, url, expiresAt }: InvitationEmailProps) {
+export function InvitationEmail(props: InvitationEmailProps) {
   return (
-    <EmailLayout
-      footnote={`This invitation was sent to ${email}. If you were not expecting it, you can ignore this email — nothing happens until you accept.`}
-      preview={`${inviterName} invited you to ${workspace} on Trailmark`}
-    >
-      <Heading style={{ fontSize: '22px', lineHeight: '30px', margin: '0 0 8px' }}>{`Join ${workspace} on Trailmark`}</Heading>
-      <Text style={{ color: colors.muted, fontSize: '15px', lineHeight: '24px', margin: '0 0 20px' }}>
-        <strong style={{ color: colors.text }}>{inviterName}</strong> ({inviterEmail}) invited you to the{' '}
-        <strong style={{ color: colors.text }}>{workspace}</strong> workspace as {role === 'admin' || role === 'owner' ? 'an' : 'a'}{' '}
-        <strong style={{ color: colors.text }}>{role}</strong>.
-      </Text>
-      <Section style={{ backgroundColor: colors.tint, border: `1px solid ${colors.border}`, borderRadius: '8px', padding: '14px 16px' }}>
-        <Text style={{ fontSize: '12px', color: colors.subtle, margin: 0, textTransform: 'uppercase', letterSpacing: '0.6px' }}>Your role</Text>
-        <Text style={{ fontSize: '15px', fontWeight: 600, margin: '2px 0 2px' }}>{roleLabel(role)}</Text>
-        <Text style={{ fontSize: '13px', lineHeight: '20px', color: colors.muted, margin: 0 }}>{ROLE_SUMMARY[role] ?? ROLE_SUMMARY.member}</Text>
-      </Section>
-      <Section style={{ margin: '24px 0 8px' }}>
-        <Button
-          href={url}
-          style={{ backgroundColor: colors.brand, color: '#ffffff', fontSize: '14px', fontWeight: 600, padding: '12px 20px', borderRadius: '8px' }}
-        >
-          Accept invitation
-        </Button>
-      </Section>
-      <Text style={{ fontSize: '13px', lineHeight: '20px', color: colors.subtle, margin: '12px 0 0' }}>
-        This invitation expires on {formatExpiry(expiresAt)}. Sign in with {email} to accept it.
-      </Text>
-      <Hr style={{ borderColor: colors.border, margin: '24px 0 16px' }} />
-      <Text style={{ fontSize: '12px', lineHeight: '18px', color: colors.subtle, margin: 0 }}>
-        Button not working? Paste this link into your browser:
-        <br />
-        <Link href={url} style={{ color: colors.text, fontFamily: fonts.mono, fontSize: '12px', wordBreak: 'break-all' }}>
-          {url}
-        </Link>
-      </Text>
+    <EmailLayout appUrl={props.appUrl} preview={invitation.preview(props)} reason={reason(props)} title={title(props)}>
+      <Title>{title(props)}</Title>
+      <Paragraph>
+        <Strong>{props.inviterName}</Strong>
+        {props.inviterName === props.inviterEmail ? null : ` (${props.inviterEmail})`} invited you to the <Strong>{props.workspace}</Strong> workspace
+        as {withArticle(roleLabel(props.role))}. Trailmark keeps a searchable history of who did what, when and where across your team’s systems.
+      </Paragraph>
+      <Spacer height={4} />
+      <DetailRows rows={details(props)} />
+      <Spacer height={24} />
+      <Button href={props.url}>Accept invitation</Button>
+      <RawLink href={props.url} />
+      <Note title={NOTE_TITLE}>{note(props)}</Note>
     </EmailLayout>
   );
 }
 
-/** Hand-written plain-text part: readable in any client, no HTML-to-text artifacts. */
-export function invitationText({ email, workspace, inviterName, inviterEmail, role, url, expiresAt }: InvitationEmailProps) {
-  return [
-    `Join ${workspace} on Trailmark`,
-    '',
-    `${inviterName} (${inviterEmail}) invited you to the ${workspace} workspace as ${role === 'admin' || role === 'owner' ? 'an' : 'a'} ${role}.`,
-    ROLE_SUMMARY[role] ?? ROLE_SUMMARY.member,
-    '',
-    `Accept the invitation: ${url}`,
-    '',
-    `This invitation expires on ${formatExpiry(expiresAt)}. Sign in with ${email} to accept it.`,
-    'If you were not expecting it, you can ignore this email — nothing happens until you accept.',
-    '',
-    '— Trailmark · A clear history of what happened.',
-  ].join('\n');
-}
+export const invitation: EmailDefinition<InvitationEmailProps> = {
+  id: 'invitation',
+  name: 'Workspace invitation',
+  recipient: 'email',
+  subject: (p) => `${p.inviterName} invited you to ${p.workspace} on Trailmark`,
+  preview: (p) => `Join as ${roleLabel(p.role)}. The invitation expires ${formatRelative(p.expiresAt, p.sentAt ?? new Date())}.`,
+  text: (p) =>
+    plainText({
+      title: title(p),
+      appUrl: p.appUrl,
+      reason: reason(p),
+      blocks: [lead(p), { details: details(p) }, { action: 'Accept the invitation', url: p.url }, { title: NOTE_TITLE, note: note(p) }],
+    }),
+  Component: InvitationEmail,
+};

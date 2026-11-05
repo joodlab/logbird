@@ -14,7 +14,7 @@ pnpm --filter @trailmark/clickhouse create-query-user
 pnpm dev
 ```
 
-App: localhost:4600; API: localhost:4601; Mailpit: localhost:8025.
+App: localhost:4600; API: localhost:4601; email preview (`apps/email`): localhost:4602; Mailpit: localhost:8025.
 Existing shared development services may be used instead of Compose. Never reset shared data. Keep machine instructions in gitignored AGENTS.local.md.
 
 packages/contracts defines the API; server implements it and app consumes it. Keep schema changes in the same PR. Reuse packages/ui components. Use Biome/ultracite formatting, Vitest tests and isolated fictional fixtures.
