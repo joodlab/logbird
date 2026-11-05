@@ -3,6 +3,7 @@ import type { Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import Redis from 'ioredis';
 import { env } from './env';
+import type { AppEnv } from './types';
 
 export const rateLimitStore = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 1, commandTimeout: 2000 });
 rateLimitStore.on('error', () => console.error(JSON.stringify({ level: 'error', event: 'rate_limit.storage_error' })));
@@ -43,9 +44,74 @@ export function requestRateLimit(scope: string, limit: number, windowMs = 60_000
   });
 }
 const authLimiter = requestRateLimit('auth', env.AUTH_RATE_LIMIT_PER_MINUTE);
-const publicLimiter = requestRateLimit('public', env.PUBLIC_RATE_LIMIT_PER_MINUTE, 60_000, true);
+
 // Only state-changing auth calls (send code, sign in, accept…) are limited; session reads happen on every navigation.
 export const rateLimit = createMiddleware((c, next) => {
   if (c.req.path.startsWith('/api/auth/')) return c.req.method === 'GET' ? next() : authLimiter(c, next);
-  return publicLimiter(c, next);
+  return next();
 });
+
+/** Injectable store/clock keep tests isolated without changing process configuration. */
+export function createPublicRateLimits({
+  store = rateLimitStore,
+  prefix = env.BULLMQ_PREFIX,
+  ingestLimit = env.INGEST_RATE_LIMIT_PER_MINUTE,
+  readLimit = env.READ_RATE_LIMIT_PER_MINUTE,
+  peerLimit = env.PUBLIC_RATE_LIMIT_PER_MINUTE,
+  now = Date.now,
+}: {
+  store?: Pick<Redis, 'eval' | 'get'>;
+  prefix?: string;
+  ingestLimit?: number;
+  readLimit?: number;
+  peerLimit?: number;
+  now?: () => number;
+} = {}) {
+  const window = () => Math.floor(now() / 60_000);
+  const retryAfter = () => Math.ceil((60_000 - (now() % 60_000)) / 1000);
+  const peerKey = (c: Context) =>
+    `${prefix}:rate:public-failures:${createHash('sha256')
+      .update(clientAddress(c) || 'unknown')
+      .digest('hex')}:${window()}`;
+  const storageError = () => console.error(JSON.stringify({ level: 'error', event: 'rate_limit.storage_error' }));
+  const denied = (c: Context) => {
+    c.header('Retry-After', String(retryAfter()));
+    return c.json({ error: { code: 'rate_limited', message: 'Too many requests. Retry shortly.' } }, 429);
+  };
+  return {
+    // Only credentials which cannot authenticate can be rejected before lookup.
+    async precheck(c: Context) {
+      try {
+        return Number(await store.get(peerKey(c))) >= peerLimit;
+      } catch {
+        storageError();
+        return false;
+      }
+    },
+    async reject(c: Context) {
+      try {
+        if (Number(await store.eval(script, 1, peerKey(c), 120_000)) > peerLimit) return denied(c);
+      } catch {
+        storageError();
+      }
+      return c.json({ error: { code: 'invalid_api_key', message: 'A valid API key is required.' } }, 401);
+    },
+    denied,
+    authenticated: (kind: 'ingest' | 'read') =>
+      createMiddleware<AppEnv>(async (c, next) => {
+        const limit = kind === 'ingest' ? ingestLimit : readLimit;
+        try {
+          const key = `${prefix}:rate:project:${c.get('project').id}:${kind}:${window()}`;
+          const count = Number(await store.eval(script, 1, key, 120_000));
+          c.header('RateLimit-Limit', String(limit));
+          c.header('RateLimit-Remaining', String(Math.max(0, limit - count)));
+          c.header('RateLimit-Reset', String(retryAfter()));
+          if (count > limit) return denied(c);
+        } catch {
+          storageError();
+        }
+        await next();
+      }),
+  };
+}
+export const publicRateLimits = createPublicRateLimits();

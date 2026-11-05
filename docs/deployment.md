@@ -32,6 +32,16 @@ BASE_URL=https://audit.example.com pnpm smoke:prod
 # SMOKE_EMAIL sends an OTP; SMOKE_OTP optionally verifies it.
 ```
 
-The smoke script reports skipped optional checks explicitly. Capture their real results before declaring acceptance. Shared request limits are 30 auth requests/minute and 600 public API requests/minute per peer; invite routes use 30/minute per peer and route. If Redis is unavailable, the limiter fails **closed** for sign-in and invitation routes (503 rate_limit_unavailable) and fails **open** for the public `/v1` ingest/read API, so customers' audit events keep flowing during a Redis blip; alert on `rate_limit.storage_error` logs. Limits are configurable with `AUTH_RATE_LIMIT_PER_MINUTE` and `PUBLIC_RATE_LIMIT_PER_MINUTE`. Keep ingress client-IP handling correct to avoid grouping every browser under the proxy address. Verify security headers, cookie Secure/HttpOnly/SameSite, disallowed CORS and rate limits. Kill/restart each app and test recovery. Stop writes before a rollback; use matched backups if migrations are incompatible.
+The smoke script reports skipped optional checks explicitly. Capture their real results before declaring acceptance. Shared request limits are 30 auth requests/minute per peer, 3000 ingest requests/minute per project
+and 1200 read requests/minute per project (shared across keys of each kind and replicas).
+`PUBLIC_RATE_LIMIT_PER_MINUTE` (600) limits failed public authentication per peer only; valid keys
+remain usable behind a throttled NAT. Malformed/wrong-kind credentials can be rejected before lookup;
+well-formed unknown/revoked credentials still require lookup to distinguish them from valid keys.
+Configure `AUTH_RATE_LIMIT_PER_MINUTE`, `PUBLIC_RATE_LIMIT_PER_MINUTE`,
+`INGEST_RATE_LIMIT_PER_MINUTE` and `READ_RATE_LIMIT_PER_MINUTE`. Invite routes retain 30/minute
+per peer and route. Redis failure is closed for auth/invites (503 rate_limit_unavailable), open
+for public ingest/read; alert on `rate_limit.storage_error`. Authenticated public responses carry
+`RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` (seconds until reset); 429 includes `Retry-After`.
+Keep ingress client-IP handling correct to avoid grouping every browser under the proxy address. Verify security headers, cookie Secure/HttpOnly/SameSite, disallowed CORS and rate limits. Kill/restart each app and test recovery. Stop writes before a rollback; use matched backups if migrations are incompatible.
 
 ClickHouse capacity depends on event size, cardinality, retention and concurrent scans. Measure compressed disk growth using fictional representative traffic, reserve free disk for merges/backups, and keep query memory limits below available RAM. Alert on disk pressure, /readyz failures, HTTP 5xx/429, queue age, failed retention and backup age. Logs contain event names, request IDs, status and timing; do not collect bodies, cookies, API keys or raw URLs with query parameters. This single VM is a first test, not HA.
