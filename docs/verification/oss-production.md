@@ -5,7 +5,7 @@ Local verification on 2026-11-05. No deployment, public visibility change, packa
 ## Checks
 
 - `pnpm install --frozen-lockfile`: passed using pnpm 10.30.3.
-- `pnpm typecheck`: 12 successful tasks.
+- `pnpm typecheck`: 16 successful tasks.
 - `pnpm check`: passed with 65 existing warning-level diagnostics, no errors.
 - `pnpm test`: nine successful tasks. Server: 19 passed, 48 skipped; app: 42 passed. The optional HTTP search matrix remains disabled. Real Postgres, ClickHouse, SMTP and Redis integration tests ran. Server tests run serially; the setup test allows 240 seconds for real ClickHouse sample rebuilds and teardown (the original 120-second budget timed out during cleanup).
 - `pnpm build`: all five build tasks passed, including server, worker and console. Declaration generation now uses a dedicated RPC tsconfig so builds do not emit declarations beside test fixtures or scripts.
@@ -32,11 +32,11 @@ The runtime smoke wrapper used Mailpit OTP sign-in, a fresh fictional workspace/
 
 The broader `pnpm e2e` script passes OTP, invitation management, ingest/read, gzip, malformed/oversized inputs, schema checks and saved views, then fails on retention lowering at scripts/e2e-smoke.ts:129 with a storage 503. Reproduced twice after the body-limit fix. This is an unresolved first-production acceptance blocker; no complete E2E pass is claimed. Retention internals were kept outside this cross-cutting task.
 
-TLS/cookie behavior for a real HTTPS domain, off-host backups and restore rehearsal, live SMTP provider, Linux signal/drain behavior, and actual VM deployment remain unverified. Health checks alone do not establish retention execution or production readiness.
+TLS/cookie behavior for a real HTTPS domain, off-host backups and restore rehearsal, live SMTP provider, Linux signal/drain behavior, and actual VM deployment remain unverified. Health checks alone do not establish retention execution or production readiness. All task-owned app, server and worker processes were stopped afterward; ports 4740/4741 were verified without listeners.
 
 ## Publication audit
 
-A bounded scan covered 1,263 historical blobs for private-key headers, common GitHub/AWS/service token patterns, credential URLs and personal paths. No credential-pattern matches were found. Eight current configured password/secret values were also compared privately against reachable history with zero matches; values were never printed. This does not establish an exhaustive secret-free history.
+A bounded scan covered 1,521 historical blobs for private-key headers, common GitHub/AWS/service token patterns, credential URLs and personal paths. The only credential-pattern match was the documented CHANGE_ME connection-string placeholder in .env.example; no credential findings remained after inspecting that match. Eight current configured password/secret values were also compared privately against reachable history with zero matches; values were never printed. This does not establish an exhaustive secret-free history.
 
 Historical personal paths/local instructions remain in AGENTS.local.md, AGENTS.md, docs/SPEC.md, docs/research/hyperdx-clickhouse.md and docs/sdk-generation.md blobs. History was not rewritten. The owner must decide how to handle that history before making the repository public. Current tracked text was scrubbed of personal workstation paths and private service instructions. Original local notes are preserved in the primary checkout's ignored AGENTS.local.md; the public guide documents this optional file.
 
@@ -44,7 +44,7 @@ README uses the existing marketing capture; this task changes infrastructure and
 
 ## Cleanup review
 
-Reviewed task-owned diff against master after integrating PR #21. Removed duplicate in-memory invite limiting in favor of shared Redis enforcement, avoided a second ingest body limiter, and restricted declaration generation to its actual entry point. No further actionable slop found in the reviewed scope. Checks above cover the changes; the retention failure and deployment limits remain open.
+Reviewed task-owned diff against master after integrating PRs #21 and #23. Removed duplicate in-memory invite limiting in favor of shared Redis enforcement, avoided a second ingest body limiter, and restricted declaration generation to its actual entry point. No further actionable slop found in the reviewed scope. Checks above cover the changes; the retention failure and deployment limits remain open.
 
 ## Decisions needed
 
