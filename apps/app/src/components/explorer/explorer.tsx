@@ -20,7 +20,7 @@ import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
 import { appendSqlPredicate } from '@/lib/sql-language';
 import { EventSheet } from './event-sheet';
 import { EventsTable } from './events-table';
-import { ColumnPicker, ExportMenu, SaveViewButton } from './explorer-toolbar';
+import { ColumnPicker, ExplorerOverflowMenu, ExportMenu, SaveViewButton } from './explorer-toolbar';
 import { FacetSidebar } from './facet-sidebar';
 
 export interface ExplorerState {
@@ -95,6 +95,9 @@ export function Explorer({
   if (events.data && !events.isError) lastGood.current.pages = events.data.pages;
   if (events.isSuccess && !events.isPlaceholderData) lastGood.current.query = { q, lang };
   if (histogram.data && !histogram.isError) lastGood.current.histogram = histogram.data;
+  // Nothing valid to save or export while the query is rejected (the export would fail the same way).
+  const saveBlocked = problem ? 'Fix the query first — a view must run without errors.' : null;
+  const exportBlocked = problem ? 'Fix the query first — the export runs the same query.' : null;
   const pages = problem ? lastGood.current.pages : events.data?.pages;
   const histogramData = problem ? lastGood.current.histogram : histogram.data;
 
@@ -350,18 +353,23 @@ export function Explorer({
             </TooltipContent>
           </Tooltip>
           {embedded ? null : (
-            <div className="hidden items-center gap-2 md:flex">
-              <ColumnPicker columns={columns} onChange={(cols) => onChange({ columns: cols })} />
-              <SaveViewButton
+            <>
+              <div className="hidden items-center gap-2 md:flex">
+                <ColumnPicker columns={columns} onChange={(cols) => onChange({ columns: cols })} />
+                <SaveViewButton columns={columns} disabledReason={saveBlocked} lang={lang} projectId={projectId} q={q} range={range} />
+                <ExportMenu disabledReason={exportBlocked} lang={lang} projectId={projectId} q={effectiveQ} range={range} />
+              </div>
+              <ExplorerOverflowMenu
+                className="md:hidden"
                 columns={columns}
-                disabledReason={problem ? 'Fix the query first — a view must run without errors.' : null}
+                disabledReason={problem ? 'Fix the query first — saving and exporting need a query that runs.' : null}
+                exportQ={effectiveQ}
                 lang={lang}
                 projectId={projectId}
                 q={q}
                 range={range}
               />
-              <ExportMenu lang={lang} projectId={projectId} q={effectiveQ} range={range} />
-            </div>
+            </>
           )}
         </div>
         <div className="flex items-center justify-between gap-3 text-muted-foreground text-xs">
@@ -405,6 +413,7 @@ export function Explorer({
             height={embedded ? 96 : 112}
             loading={histogram.isFetching && !histogram.isPending}
             onZoom={(from, to) => onChange({ range: absoluteRange(from, to), live: undefined })}
+            stale={Boolean(problem)}
           />
         ) : null}
       </div>

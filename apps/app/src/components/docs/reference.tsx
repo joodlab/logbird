@@ -14,7 +14,7 @@ export const QUERY_SYNTAX: [string, string][] = [
   ['-env:staging', 'Negate any term with a leading -'],
   ['(outcome:failure OR outcome:denied) action:booking.*', 'OR and parentheses; adjacent terms are ANDed'],
   ['actor:usr_42', 'Actor id (also actor.type, actor.email)'],
-  ['actor.name:"Raed Al-Harbi"', 'Quote values with spaces'],
+  ['actor.name:"Lina Haddad"', 'Quote values with spaces'],
   ['impersonator:usr_1', 'Actions a support user took while impersonating'],
   ['impersonator:*   -impersonator:*', 'field:* = the field is present (non-empty); -field:* = missing'],
   ['tenant:biz_7   tenant.name:"Azure Hotels"', 'Tenant by id or by name'],
@@ -24,7 +24,7 @@ export const QUERY_SYNTAX: [string, string][] = [
   ['operation:op_101', 'Everything in one operation'],
   ['parent:evt_123', 'Direct children of an event in the causation tree'],
   ['request:req_abc   trace:4bf92f…', 'Request and trace ids'],
-  ['source:joodbooking', 'External system that supplied the change'],
+  ['source:channel-manager', 'External system that supplied the change'],
   ['attr.metadata.plan:pro', 'Any attribute; unknown fields are treated as attr.<field>'],
   ['severity:critical  category:booking', 'Severity and first action segment'],
   ['"cancellation policy"', 'Free text over description, actor, tenant and target names'],
@@ -57,7 +57,7 @@ export function EnvelopeSemantics() {
         ['actor', 'Who caused it — a person, API key, integration or the system (scheduled runs use actor.type = system).'],
         [
           'executor',
-          'Who performed it — api, worker, scheduler, webhook — with jobId and attempt. A worker doing Raed’s work has actor = Raed, executor = crm-worker.',
+          'Who performed it — api, worker, scheduler, webhook — with jobId and attempt. A worker doing Lina’s work has actor = Lina, executor = crm-worker.',
         ],
         ['impersonator', 'Who was at the keyboard when support acted as a customer. The actor stays the customer.'],
         ['context.operationId', 'Groups a request, the jobs it spawned and every record they changed. parentEventId forms the causation tree.'],
@@ -73,26 +73,30 @@ export function EnvelopeSemantics() {
   );
 }
 
-/** Query language cheatsheet; each example opens in the explorer. */
+/**
+ * Query language cheatsheet; each example opens in the explorer. Below `sm` each row stacks (example over meaning) and
+ * long examples wrap, so nothing is clipped on a phone. The example renders inline: a flex container would split the
+ * highlighted tokens into flex items (spacing out "action : hotel") and stop them wrapping.
+ */
 export function QueryCheatsheet({ projectId }: { projectId: string }) {
   return (
-    <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
-      <table className="w-full text-sm">
-        <tbody className="divide-y">
+    <div className="overflow-hidden rounded-xl border bg-card shadow-xs" data-testid="query-cheatsheet">
+      <table className="w-full text-sm max-sm:block">
+        <tbody className="divide-y max-sm:block">
           {QUERY_SYNTAX.map(([q, meaning]) => (
-            <tr className="group" key={q}>
-              <td className="w-[46%] px-4 py-2 align-top">
+            <tr className="group max-sm:flex max-sm:flex-col max-sm:gap-1 max-sm:py-2.5" key={q}>
+              <td className="px-4 py-2 align-top max-sm:py-0 sm:w-[46%]">
                 <Link
-                  className="inline-flex items-center gap-1 font-mono text-[12.5px]"
+                  className="font-mono text-[12.5px] [overflow-wrap:anywhere]"
                   params={{ projectId }}
                   search={(prev) => ({ range: prev.range ?? '7d', q: q.split('   ')[0] })}
                   to="/p/$projectId/events"
                 >
                   <HighlightedQuery value={q} />
-                  <ArrowUpRightIcon className="size-3 text-muted-foreground opacity-0 group-hover:opacity-100" />
+                  <ArrowUpRightIcon className="ms-1 inline size-3 align-[-1px] text-muted-foreground opacity-0 group-hover:opacity-100" />
                 </Link>
               </td>
-              <td className="px-4 py-2 text-muted-foreground">{meaning}</td>
+              <td className="px-4 py-2 text-muted-foreground max-sm:py-0 max-sm:text-[13px]">{meaning}</td>
             </tr>
           ))}
         </tbody>

@@ -26,7 +26,11 @@ export function OutcomeAreaChart({ data, height = 240, onSelectOutcome, classNam
   return (
     <div className={cn('flex flex-col gap-3', className)}>
       <ChartContainer className="aspect-auto w-full" config={outcomeChartConfig} style={{ height }}>
-        <AreaChart data={rows} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+        <AreaChart
+          aria-label="Events by outcome over time. Arrow keys move between points."
+          data={rows}
+          margin={{ top: 8, right: 16, bottom: 0, left: 0 }}
+        >
           <defs>
             {SERIES.map((k) => (
               <linearGradient id={`fill-${k}`} key={k} x1="0" x2="0" y1="0" y2="1">

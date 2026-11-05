@@ -62,12 +62,12 @@ Omitted values use receive time.
   "environment": "production",
   "outcome": "success",             // success | failure | denied | partial | unknown
   "severity": "info",               // info | notice | warning | critical
-  "description": "Raed changed the cancellation policy of Hotel Sunrise",
-  "actor":        { "type": "user", "id": "usr_42", "name": "Raed", "email": "raed@example.com" },
+  "description": "Lina changed the cancellation policy of Hotel Sunrise",
+  "actor":        { "type": "user", "id": "usr_42", "name": "Lina Haddad", "email": "lina@example.com" },
   "impersonator": { "id": "usr_1", "name": "Lina (support)" },
   "executor":     { "type": "worker", "id": "crm-worker", "name": "CRM worker", "jobId": "456", "attempt": 2 },
   "tenant":       { "id": "biz_7", "name": "Azure Hotels" },
-  "source": "joodbooking",           // external system that supplied the change, if any
+  "source": "channel-manager",           // external system that supplied the change, if any
   "targets": [ { "type": "hotel", "id": "hotel_123", "name": "Hotel Sunrise" },
                { "type": "website", "id": "web_a", "name": "azurehotels.com" } ],
   "changes": [ { "field": "cancellationHours", "before": 24, "after": 48 } ],
@@ -80,7 +80,7 @@ Omitted values use receive time.
 
 Semantics worth documenting to users:
 - **actor = who caused it** (person, API key, scheduler…); **executor = who performed it** (api, worker, job,
-  attempt). A worker doing work requested by Raed has `actor=Raed`, `executor=crm-worker`. Scheduled runs use
+  attempt). A worker doing work requested by Lina has `actor=Lina`, `executor=crm-worker`. Scheduled runs use
   `actor.type=system`.
 - **operationId** groups a request, the jobs it spawned and every record they changed; **parentEventId** forms
   the causation tree.
@@ -277,11 +277,11 @@ Full reference: [query language and SQL expressions](query-language.md).
 action:hotel.policy.updated        exact
 action:hotel.*                     prefix wildcard
 outcome:failure  -env:staging      negation with leading -
-actor:usr_42  actor.type:user  actor.name:"Raed B"
+actor:usr_42  actor.type:user  actor.name:"Lina Haddad"
 tenant:biz_7  tenant.name:"Azure Hotels"  executor:crm-worker  executor.type:worker
-executor.name:"CRM worker"  actor.email:raed@example.com  impersonator:usr_1
+executor.name:"CRM worker"  actor.email:lina@example.com  impersonator:usr_1
 parent:evt_123  job:456
-target:hotel_123  target.type:hotel  operation:op_101  request:req_abc  trace:…  source:joodbooking
+target:hotel_123  target.type:hotel  operation:op_101  request:req_abc  trace:…  source:channel-manager
 attr.metadata.plan:pro             attribute map lookup (wildcard * allowed at end)
 impersonator:*  -tenant:*          field:* = field present (non-empty value); -field:* = missing.
                                   Works for every core column and attribute key; x* stays a prefix match

@@ -17,6 +17,7 @@ import { rangeLabel } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/activity')({
+  head: () => ({ meta: [{ title: 'Workspace activity · Settings · Trailmark' }] }),
   validateSearch: z.object({ q: z.string().optional(), ev: z.string().optional() }),
   staticData: { crumb: 'Workspace activity', range: true, defaultRange: '90d' },
   component: WorkspaceActivity,

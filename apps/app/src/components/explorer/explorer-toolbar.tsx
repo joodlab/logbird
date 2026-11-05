@@ -17,7 +17,7 @@ import {
 import { Input } from '@trailmark/ui/components/ui/input';
 import { Label } from '@trailmark/ui/components/ui/label';
 import { Textarea } from '@trailmark/ui/components/ui/textarea';
-import { BookmarkPlusIcon, Columns3Icon, DownloadIcon, Loader2Icon } from 'lucide-react';
+import { BookmarkPlusIcon, CircleAlertIcon, Columns3Icon, DownloadIcon, Loader2Icon, MoreHorizontalIcon } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
@@ -65,9 +65,16 @@ export function ColumnPicker({ columns, onChange }: { columns: string[]; onChang
   );
 }
 
-export function ExportMenu({ projectId, range, q, lang = 'query' }: { projectId: string; range: string; q: string; lang?: QueryLang }) {
+type ExportFormat = 'csv' | 'jsonl';
+const EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
+  { format: 'csv', label: 'CSV (spreadsheet)' },
+  { format: 'jsonl', label: 'JSON Lines (full events)' },
+];
+
+/** Downloads every match of the range and query as CSV or JSON Lines (the toolbar menu and the mobile menu share it). */
+function useExport({ projectId, range, q, lang = 'query' }: { projectId: string; range: string; q: string; lang?: QueryLang }) {
   const [busy, setBusy] = useState(false);
-  const download = async (format: 'csv' | 'jsonl') => {
+  const download = async (format: ExportFormat) => {
     setBusy(true);
     try {
       const r = resolveRange(range);
@@ -89,22 +96,130 @@ export function ExportMenu({ projectId, range, q, lang = 'query' }: { projectId:
       setBusy(false);
     }
   };
+  return { busy, download };
+}
+
+export function ExportMenu({
+  projectId,
+  range,
+  q,
+  lang = 'query',
+  disabledReason,
+}: {
+  projectId: string;
+  range: string;
+  q: string;
+  lang?: QueryLang;
+  /** Why there is nothing valid to export (e.g. the query is rejected). Disables the menu and explains on hover. */
+  disabledReason?: string | null;
+}) {
+  const { busy, download } = useExport({ projectId, range, q, lang });
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger render={<Button aria-label="Export" disabled={busy} size="sm" variant="outline" />}>
-        {busy ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />}
-        <span className="hidden xl:inline">Export</span>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel className="font-normal text-muted-foreground text-xs">
-            Exports every match in the current range and query.
-          </DropdownMenuLabel>
-          <DropdownMenuItem onClick={() => download('csv')}>CSV (spreadsheet)</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => download('jsonl')}>JSON Lines (full events)</DropdownMenuItem>
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <DisabledReason reason={disabledReason}>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              aria-label={disabledReason ? `Export: ${disabledReason}` : 'Export'}
+              data-testid="export-menu"
+              disabled={busy || Boolean(disabledReason)}
+              size="sm"
+              variant="outline"
+            />
+          }
+        >
+          {busy ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />}
+          <span className="hidden xl:inline">Export</span>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="font-normal text-muted-foreground text-xs">
+              Exports every match in the current range and query.
+            </DropdownMenuLabel>
+            {EXPORT_FORMATS.map((f) => (
+              <DropdownMenuItem key={f.format} onClick={() => download(f.format)}>
+                {f.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </DisabledReason>
+  );
+}
+
+/**
+ * Below `md` the toolbar has no room for Save view and Export, so one overflow menu offers both, with the same dialog
+ * and the same disabled reason. Columns stay desktop-only: phones show the card list, which has no columns.
+ */
+export function ExplorerOverflowMenu({
+  projectId,
+  q,
+  exportQ,
+  lang = 'query',
+  range,
+  columns,
+  disabledReason,
+  className,
+}: {
+  projectId: string;
+  /** The query as typed (what a view saves). */
+  q: string;
+  /** The query that is exported (includes a locked base filter, if any). */
+  exportQ: string;
+  lang?: QueryLang;
+  range: string;
+  columns: string[];
+  disabledReason?: string | null;
+  className?: string;
+}) {
+  const [saveOpen, setSaveOpen] = useState(false);
+  const { busy, download } = useExport({ projectId, range, q: exportQ, lang });
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={<Button aria-label="More actions" className={className} data-testid="explorer-more" size="icon-sm" variant="outline" />}
+        >
+          {busy ? <Loader2Icon className="animate-spin" /> : <MoreHorizontalIcon />}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-60">
+          {disabledReason ? (
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="flex items-start gap-1.5 font-normal text-muted-foreground text-xs" data-testid="explorer-more-reason">
+                <CircleAlertIcon className="mt-px size-3.5 shrink-0" />
+                {disabledReason}
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
+          ) : null}
+          <DropdownMenuGroup>
+            <DropdownMenuItem disabled={Boolean(disabledReason)} onClick={() => setSaveOpen(true)}>
+              <BookmarkPlusIcon />
+              Save view…
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="font-normal text-muted-foreground text-xs">Export every match</DropdownMenuLabel>
+            {EXPORT_FORMATS.map((f) => (
+              <DropdownMenuItem disabled={busy || Boolean(disabledReason)} key={f.format} onClick={() => download(f.format)}>
+                <DownloadIcon />
+                {f.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <SaveViewDialog
+        columns={columns}
+        lang={lang}
+        onOpenChange={setSaveOpen}
+        open={saveOpen && !disabledReason}
+        projectId={projectId}
+        q={q}
+        range={range}
+      />
+    </>
   );
 }
 
@@ -127,22 +242,6 @@ export function SaveViewButton({
   disabledReason?: string | null;
 }) {
   const [open, setOpen] = useState(false);
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const create = useMutation({
-    mutationFn: (value: { name: string; description: string }) =>
-      api.views.create(projectId, { name: value.name.trim(), description: value.description.trim() || null, state: { q, lang, range, columns } }),
-    onSuccess: async (view) => {
-      await queryClient.invalidateQueries({ queryKey: [...keys.project(projectId), 'views'] });
-      setOpen(false);
-      toast.success(`Saved “${view.name}”`, { description: 'It is in the sidebar and shareable by URL.' });
-      navigate({ to: '.', search: ((prev: Record<string, unknown>) => ({ ...prev, view: view.id })) as never, replace: true });
-    },
-  });
-  const form = useForm({
-    defaultValues: { name: '', description: '' },
-    onSubmit: ({ value }) => create.mutateAsync(value).catch(() => undefined),
-  });
   return (
     <>
       <DisabledReason reason={disabledReason}>
@@ -158,89 +257,124 @@ export function SaveViewButton({
           <span className="hidden xl:inline">Save view</span>
         </Button>
       </DisabledReason>
-      <Dialog
-        onOpenChange={(next) => {
-          setOpen(next);
-          if (!next) {
-            form.reset();
-            create.reset();
-          }
-        }}
-        open={open && !disabledReason}
-      >
-        <DialogContent className="sm:max-w-md">
-          <form
-            className="flex flex-col gap-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              form.handleSubmit();
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle>Save view</DialogTitle>
-              <DialogDescription>
-                Saves the query, its mode, the time range and visible columns. Everyone in the workspace can open it.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="rounded-lg border bg-muted/40 px-3 py-2 font-mono text-[12px]">
-              <div className="flex min-w-0 items-center gap-2">
-                {lang === 'sql' ? <SqlBadge /> : null}
-                <span className="truncate">
-                  {q ? <HighlightedText lang={lang} value={q} /> : <span className="text-muted-foreground">All events</span>}
-                </span>
-              </div>
-              <div className="mt-0.5 font-sans text-muted-foreground text-xs">
-                {rangeLabel(range)} · {columns.length} columns
-              </div>
+      <SaveViewDialog columns={columns} lang={lang} onOpenChange={setOpen} open={open && !disabledReason} projectId={projectId} q={q} range={range} />
+    </>
+  );
+}
+
+/** Names and saves the current explorer state (query, mode, range, columns) as a workspace-wide view. */
+function SaveViewDialog({
+  projectId,
+  q,
+  lang = 'query',
+  range,
+  columns,
+  open,
+  onOpenChange,
+}: {
+  projectId: string;
+  q: string;
+  lang?: QueryLang;
+  range: string;
+  columns: string[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const create = useMutation({
+    mutationFn: (value: { name: string; description: string }) =>
+      api.views.create(projectId, { name: value.name.trim(), description: value.description.trim() || null, state: { q, lang, range, columns } }),
+    onSuccess: async (view) => {
+      await queryClient.invalidateQueries({ queryKey: [...keys.project(projectId), 'views'] });
+      onOpenChange(false);
+      form.reset();
+      toast.success(`Saved “${view.name}”`, { description: 'It is in the sidebar and shareable by URL.' });
+      navigate({ to: '.', search: ((prev: Record<string, unknown>) => ({ ...prev, view: view.id })) as never, replace: true });
+    },
+  });
+  const form = useForm({
+    defaultValues: { name: '', description: '' },
+    onSubmit: ({ value }) => create.mutateAsync(value).catch(() => undefined),
+  });
+  return (
+    <Dialog
+      onOpenChange={(next) => {
+        onOpenChange(next);
+        if (!next) {
+          form.reset();
+          create.reset();
+        }
+      }}
+      open={open}
+    >
+      <DialogContent className="sm:max-w-md">
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            form.handleSubmit();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Save view</DialogTitle>
+            <DialogDescription>
+              Saves the query, its mode, the time range and visible columns. Everyone in the workspace can open it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border bg-muted/40 px-3 py-2 font-mono text-[12px]">
+            <div className="flex min-w-0 items-center gap-2">
+              {lang === 'sql' ? <SqlBadge /> : null}
+              <span className="truncate">
+                {q ? <HighlightedText lang={lang} value={q} /> : <span className="text-muted-foreground">All events</span>}
+              </span>
             </div>
-            <form.Field name="name" validators={{ onSubmit: nameSchema }}>
-              {(field) => {
-                const message = fieldErrorMessage(field.state.meta.errors);
-                return (
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="view-name">Name</Label>
-                    <Input
-                      aria-invalid={Boolean(message) || undefined}
-                      autoFocus
-                      id="view-name"
-                      onChange={(e) => field.handleChange(e.target.value)}
-                      placeholder="Failed CRM syncs"
-                      value={field.state.value}
-                    />
-                    {message ? <p className="text-destructive text-xs">{message}</p> : null}
-                  </div>
-                );
-              }}
-            </form.Field>
-            <form.Field name="description">
-              {(field) => (
+            <div className="mt-0.5 font-sans text-muted-foreground text-xs">
+              {rangeLabel(range)} · {columns.length} columns
+            </div>
+          </div>
+          <form.Field name="name" validators={{ onSubmit: nameSchema }}>
+            {(field) => {
+              const message = fieldErrorMessage(field.state.meta.errors);
+              return (
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="view-description">
-                    Description <span className="font-normal text-muted-foreground">(optional)</span>
-                  </Label>
-                  <Textarea
-                    className="min-h-16"
-                    id="view-description"
+                  <Label htmlFor="view-name">Name</Label>
+                  <Input
+                    aria-invalid={Boolean(message) || undefined}
+                    autoFocus
+                    id="view-name"
                     onChange={(e) => field.handleChange(e.target.value)}
+                    placeholder="Failed CRM syncs"
                     value={field.state.value}
                   />
+                  {message ? <p className="text-destructive text-xs">{message}</p> : null}
                 </div>
-              )}
-            </form.Field>
-            {create.isError ? <p className="text-destructive text-sm">{errorMessage(create.error)}</p> : null}
-            <DialogFooter>
-              <Button onClick={() => setOpen(false)} type="button" variant="outline">
-                Cancel
-              </Button>
-              <Button disabled={create.isPending} type="submit">
-                {create.isPending ? <Loader2Icon className="animate-spin" /> : null}
-                Save view
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </>
+              );
+            }}
+          </form.Field>
+          <form.Field name="description">
+            {(field) => (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="view-description">
+                  Description <span className="font-normal text-muted-foreground">(optional)</span>
+                </Label>
+                <Textarea className="min-h-16" id="view-description" onChange={(e) => field.handleChange(e.target.value)} value={field.state.value} />
+              </div>
+            )}
+          </form.Field>
+          {create.isError ? <p className="text-destructive text-sm">{errorMessage(create.error)}</p> : null}
+          <DialogFooter>
+            <Button onClick={() => onOpenChange(false)} type="button" variant="outline">
+              Cancel
+            </Button>
+            <Button disabled={create.isPending} type="submit">
+              {create.isPending ? <Loader2Icon className="animate-spin" /> : null}
+              Save view
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

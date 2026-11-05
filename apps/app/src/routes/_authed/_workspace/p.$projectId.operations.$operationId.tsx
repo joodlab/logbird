@@ -27,7 +27,7 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/operation
   loader: ({ context, params }) => {
     context.queryClient.prefetchQuery(operationQuery(params.projectId, params.operationId));
   },
-  head: ({ params }) => ({ meta: [{ title: `${params.operationId} · Trailmark` }] }),
+  head: ({ params }) => ({ meta: [{ title: `Operation ${params.operationId} · Trailmark` }] }),
   component: OperationPage,
 });
 

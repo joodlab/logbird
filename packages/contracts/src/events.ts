@@ -67,7 +67,7 @@ export const eventInputSchema = z.looseObject({
   impersonator: actorInputSchema.optional(),
   executor: executorInputSchema.optional(),
   tenant: z.looseObject({ id, name: shortText.optional() }).optional(),
-  source: z.string().max(128).optional(), // external system that supplied the change, e.g. "joodbooking"
+  source: z.string().max(128).optional(), // external system that supplied the change, e.g. "channel-manager"
   targets: z.array(targetInputSchema).max(64).optional(),
   changes: z.array(changeInputSchema).max(256).optional(),
   context: contextInputSchema.optional(),

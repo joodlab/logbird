@@ -21,6 +21,7 @@ import { fieldErrorMessage } from '@/lib/forms';
 import { useCan } from '@/lib/permissions';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/')({
+  head: () => ({ meta: [{ title: 'General · Settings · Trailmark' }] }),
   staticData: { crumb: 'General' },
   component: GeneralSettings,
 });

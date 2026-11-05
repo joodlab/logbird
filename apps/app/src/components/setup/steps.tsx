@@ -52,7 +52,8 @@ export function stepCopy(id: SetupStepId, setup: ProjectSetup, status: SetupStep
         detail:
           setup.envelope.sampledEvents === 0
             ? `Average conformance must reach ${setup.envelope.target}% — measured once events arrive.`
-            : `Average conformance ${Math.round(setup.envelope.avgConformance)}% (target ${setup.envelope.target}%).`,
+            : // "Real": sample data never counts here, while the Overview KPI averages every event in its range.
+              `Real events average ${Math.round(setup.envelope.avgConformance)}% conformance (target ${setup.envelope.target}%).`,
         action: done ? 'Review fields' : 'See what is missing',
       };
     case 'operation_id':
