@@ -23,12 +23,14 @@ import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keysQuery, keys as queryKeys } from '@/lib/api/queries';
+import { creatorLabel } from '@/lib/events';
 import { fieldErrorMessage } from '@/lib/forms';
 import { useCan } from '@/lib/permissions';
 import { placeholderKeys } from '@/lib/placeholders';
 import { curlSnippet, readCurlSnippet } from '@/lib/snippets';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/keys')({
+  head: () => ({ meta: [{ title: 'API keys · Settings · Trailmark' }] }),
   staticData: { crumb: 'API keys' },
   loader: ({ context, params }) => context.queryClient.prefetchQuery(keysQuery(params.projectId)),
   component: KeysSettings,
@@ -101,7 +103,7 @@ function KeysSettings() {
                     <span className="font-mono">{k.prefix}••••••••</span>
                     <span>
                       Created <Timestamp format="date" iso={k.createdAt} />
-                      {k.createdBy ? ` by ${k.createdBy.name}` : ''}
+                      {creatorLabel(k.createdBy) ? ` by ${creatorLabel(k.createdBy)}` : ''}
                     </span>
                   </div>
                 </div>
