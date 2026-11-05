@@ -2,6 +2,7 @@ import { useForm } from '@tanstack/react-form';
 import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '@trailmark/ui/components/ui/input';
 import { Label } from '@trailmark/ui/components/ui/label';
+import type { ControlSize } from '@trailmark/ui/lib/control';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { z } from 'zod';
@@ -29,7 +30,7 @@ export function NameForm({
   onSaved,
   autoFocus,
   actions,
-  inputClassName,
+  size,
   onChange,
 }: {
   initial: string;
@@ -37,7 +38,8 @@ export function NameForm({
   onChange?: (name: string) => void;
   onSaved?: (name: string) => Promise<void> | void;
   autoFocus?: boolean;
-  inputClassName?: string;
+  /** Control size of the input (onboarding uses lg). */
+  size?: ControlSize;
   actions: (state: { dirty: boolean; submitting: boolean; canSubmit: boolean; reset: () => void }) => ReactNode;
 }) {
   const save = useSaveName();
@@ -75,7 +77,7 @@ export function NameForm({
                 aria-invalid={Boolean(message) || undefined}
                 autoComplete="name"
                 autoFocus={autoFocus}
-                className={inputClassName}
+                size={size}
                 dir="auto"
                 id="person-name"
                 onBlur={field.handleBlur}

@@ -1,5 +1,6 @@
 import {
   type ApiKey,
+  acceptInviteLinkResponseSchema,
   apiKeySchema,
   createApiKeyResponseSchema,
   createProjectResponseSchema,
@@ -12,8 +13,11 @@ import {
   facetResponseSchema,
   fieldsResponseSchema,
   histogramResponseSchema,
+  type InviteLink,
   ingestResponseSchema,
   invitationPreviewSchema,
+  inviteLinkPreviewSchema,
+  inviteLinkSchema,
   meResponseSchema,
   overviewResponseSchema,
   type Project,
@@ -141,6 +145,19 @@ export const api = {
     /** Public: works signed out. */
     preview: (invitationId: string, signal?: AbortSignal) =>
       request(invitationPreviewSchema, 'GET', pathFor(routes.invitations.preview.path, { invitationId }), { signal }),
+  },
+
+  /** Shareable join links. list/create/revoke: owner or admin of the active workspace. */
+  inviteLinks: {
+    list: (signal?: AbortSignal) => request(listOf(inviteLinkSchema), 'GET', routes.inviteLinks.list.path, { signal }) as Promise<InviteLink[]>,
+    create: (body: { role: 'member' | 'admin'; expiresInDays: number; maxUses: number | null; allowedDomain: string | null }) =>
+      request(inviteLinkSchema, 'POST', routes.inviteLinks.create.path, { body }) as Promise<InviteLink>,
+    revoke: (linkId: string) => request(ok, 'DELETE', pathFor(routes.inviteLinks.revoke.path, { linkId })),
+    /** Public: works signed out. */
+    preview: (token: string, signal?: AbortSignal) =>
+      request(inviteLinkPreviewSchema, 'GET', pathFor(routes.inviteLinks.preview.path, { token }), { signal }),
+    /** Joins the signed-in user and makes the workspace active on the session. */
+    accept: (token: string) => request(acceptInviteLinkResponseSchema, 'POST', pathFor(routes.inviteLinks.accept.path, { token })),
   },
 
   keys: {

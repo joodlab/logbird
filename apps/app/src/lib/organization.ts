@@ -45,6 +45,10 @@ export const organizationQuery = (organizationId: string | null | undefined) =>
     staleTime: 15_000,
   });
 
+/** Personal accept link of an email invitation (only the invited address can use it). */
+export const invitationUrl = (invitationId: string) =>
+  `${typeof window === 'undefined' ? '' : window.location.origin}/accept-invitation/${invitationId}`;
+
 export const isPendingInvitation = (i: OrgInvitation, now = Date.now()) => i.status === 'pending' && new Date(i.expiresAt).getTime() > now;
 
 /** The active workspace, my membership and what I may do in it. */
@@ -81,10 +85,23 @@ export function useInviteMember() {
   return useMutation({
     mutationFn: (value: { email: string; role: Role; resend?: boolean }) =>
       authCall(authClient.organization.inviteMember({ email: value.email.trim().toLowerCase(), role: value.role, resend: value.resend })),
-    onSuccess: (_, value) => {
+    onSuccess: (invitation, value) => {
       refresh();
+      const id = (invitation as { id?: string } | null)?.id;
       toast.success(value.resend ? 'Invitation re-sent' : 'Invitation sent', {
         description: `${value.email} gets an email with a link to join. It is valid for 48 hours.`,
+        // The personal link works only for that address: handy when the email lands in spam.
+        action: id
+          ? {
+              label: 'Copy link',
+              onClick: () => {
+                navigator.clipboard
+                  ?.writeText(invitationUrl(id))
+                  .then(() => toast.success('Invitation link copied'))
+                  .catch(() => undefined);
+              },
+            }
+          : undefined,
       });
     },
   });

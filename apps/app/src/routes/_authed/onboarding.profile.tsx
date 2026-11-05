@@ -27,7 +27,7 @@ function ProfileStep() {
         <NameForm
           actions={({ submitting, canSubmit }) => (
             <div className="flex items-center gap-3">
-              <Button className="h-10" disabled={submitting || !canSubmit} type="submit">
+              <Button size="lg" disabled={submitting || !canSubmit} type="submit">
                 {submitting ? <Loader2Icon className="animate-spin" /> : null}
                 Continue
                 {submitting ? null : <ArrowRightIcon />}
@@ -36,7 +36,7 @@ function ProfileStep() {
           )}
           autoFocus
           initial={me.user.name ?? ''}
-          inputClassName="h-10"
+          size="lg"
           onChange={setPreview}
           onSaved={() => navigate({ to: '/' })}
         />

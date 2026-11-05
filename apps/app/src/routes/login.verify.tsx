@@ -129,7 +129,7 @@ function VerifyStep() {
             </p>
           )}
         </div>
-        <Button className="h-10" disabled={code.length !== OTP_LENGTH || verifying} type="submit">
+        <Button size="lg" disabled={code.length !== OTP_LENGTH || verifying} type="submit">
           {verified ? <CheckCircle2Icon /> : verifying ? <Loader2Icon className="animate-spin" /> : null}
           {verified ? 'Signed in' : verifying ? 'Verifying…' : 'Verify and sign in'}
         </Button>

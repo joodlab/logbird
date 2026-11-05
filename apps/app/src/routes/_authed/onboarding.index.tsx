@@ -92,8 +92,8 @@ function WorkspaceStep() {
                     aria-describedby="workspace-help"
                     aria-invalid={Boolean(message) || undefined}
                     autoFocus
-                    className="h-10"
                     id="workspace-name"
+                    size="lg"
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
                     placeholder="Acme Inc."
@@ -120,7 +120,7 @@ function WorkspaceStep() {
           <div className="flex items-center gap-3">
             <form.Subscribe selector={(s) => [s.isSubmitting, s.canSubmit] as const}>
               {([submitting, canSubmit]) => (
-                <Button className="h-10" disabled={submitting || !canSubmit} type="submit">
+                <Button size="lg" disabled={submitting || !canSubmit} type="submit">
                   {submitting ? <Loader2Icon className="animate-spin" /> : null}
                   Create workspace
                   {submitting ? null : <ArrowRightIcon />}

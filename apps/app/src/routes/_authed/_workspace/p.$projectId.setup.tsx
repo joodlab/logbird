@@ -89,13 +89,22 @@ function SetupHeader({ projectId, setup }: { projectId: string; setup?: ProjectS
             <div className="flex items-center gap-2">
               {setup.complete ? <PartyPopperIcon className="size-4 text-brand" /> : null}
               <span className="font-medium text-sm tabular-nums">
-                {setup.complete ? 'All set — every step is done' : `${setup.progress.done} of ${setup.progress.total} steps done`}
+                {setup.complete
+                  ? 'All set — every step is done'
+                  : setup.completedAt
+                    ? `${setup.progress.done} of ${setup.progress.total} checks passing`
+                    : `${setup.progress.done} of ${setup.progress.total} steps done`}
               </span>
               <span className="text-muted-foreground text-xs tabular-nums">
                 · required {requiredDone}/{requiredTotal}
               </span>
+              {setup.completedAt ? (
+                <span className="text-muted-foreground text-xs" data-testid="setup-completed-at">
+                  · first completed <Timestamp format="date" iso={setup.completedAt} />
+                </span>
+              ) : null}
             </div>
-            {setup.complete ? null : setup.dismissedAt ? (
+            {setup.complete || setup.completedAt ? null : setup.dismissedAt ? (
               <Button disabled={dismiss.isPending} onClick={() => dismiss.mutate(false)} size="sm" variant="outline">
                 {dismiss.isPending ? <Loader2Icon className="animate-spin" /> : <EyeIcon />}
                 Show checklist on overview

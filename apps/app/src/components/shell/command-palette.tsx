@@ -14,7 +14,18 @@ import {
   CommandShortcut,
 } from '@trailmark/ui/components/ui/command';
 import { useTheme } from '@trailmark/ui/theme';
-import { BookmarkIcon, FileSearchIcon, GitBranchIcon, KeyRoundIcon, MonitorIcon, MoonIcon, SearchIcon, SunIcon } from 'lucide-react';
+import {
+  BookmarkIcon,
+  FileSearchIcon,
+  GitBranchIcon,
+  KeyRoundIcon,
+  MonitorIcon,
+  MoonIcon,
+  RocketIcon,
+  SearchIcon,
+  SunIcon,
+  UsersIcon,
+} from 'lucide-react';
 import { useState } from 'react';
 import { api } from '@/lib/api/client';
 import { projectsQuery, viewsQuery } from '@/lib/api/queries';
@@ -146,6 +157,22 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
             >
               <KeyRoundIcon />
               API keys
+            </CommandItem>
+            <CommandItem
+              keywords={['invite', 'team', 'teammates', 'link', 'join', 'people']}
+              onSelect={() => go(() => navigate({ to: '/p/$projectId/settings/members', params: { projectId } }))}
+              value="Members"
+            >
+              <UsersIcon />
+              Members &amp; invites
+            </CommandItem>
+            <CommandItem
+              keywords={['setup', 'quickstart', 'docs', 'sdk', 'onboarding', 'checklist', 'query', 'language', 'help', 'integration', 'guide']}
+              onSelect={() => go(() => navigate({ to: '/p/$projectId/setup', params: { projectId } }))}
+              value="Setup integration guide"
+            >
+              <RocketIcon />
+              Setup &amp; integration guide
             </CommandItem>
           </CommandGroup>
         ) : null}
