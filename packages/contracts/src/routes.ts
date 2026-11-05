@@ -68,6 +68,14 @@ export const routes = {
     /** Public preview for the accept page (InvitationPreview, ./invitations.ts): works signed out, 404 when unknown. */
     preview: { method: 'GET', path: '/api/invitations/:invitationId', auth: 'none' },
   },
+  /** Shareable join links (./invitations.ts). Create/list/revoke need owner/admin of the active workspace. */
+  inviteLinks: {
+    list: { method: 'GET', path: '/api/workspace/invite-links', auth: 'session' },
+    create: { method: 'POST', path: '/api/workspace/invite-links', auth: 'session' },
+    revoke: { method: 'DELETE', path: '/api/workspace/invite-links/:linkId', auth: 'session' },
+    preview: { method: 'GET', path: '/api/invite-links/:token', auth: 'none' },
+    accept: { method: 'POST', path: '/api/invite-links/:token/accept', auth: 'session' },
+  },
 
   /* Public API used by SDKs and customer products */
   public: {
