@@ -19,6 +19,7 @@ import { ApiError } from './errors';
 import { ingest } from './ingest';
 import { invitationRoutes } from './invitation-routes';
 import { inviteLinkRoutes } from './invite-link-routes';
+import { authorizeMutation } from './middlewares/require-role';
 import { doc, routeDoc } from './openapi';
 import { rateLimit } from './rate-limit';
 import { managementRoutes } from './routes';
@@ -126,6 +127,7 @@ app.get(
     return c.json({ status: postgres && ch ? 'ok' : 'degraded', postgres, clickhouse: ch }, postgres && ch ? 200 : 503);
   },
 );
+app.use('/api/*', authorizeMutation);
 export const routes = app
   .route('/api', inviteLinkRoutes)
   .route('/api', invitationRoutes)

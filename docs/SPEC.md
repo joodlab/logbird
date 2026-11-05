@@ -341,6 +341,48 @@ better-auth with **email OTP sign-in only** (`emailOTP` plugin, `disableSignUp: 
 user) + `organization` plugin. OTP + invitation emails are react-email templates in `packages/email`, sent via
 SMTP (Mailpit locally). After first sign-in the user has no org → onboarding creates one.
 
+### 7.1 Console authorization
+
+The explicit mutation policy is `apps/server/src/middlewares/require-role.ts`.
+Roles are resolved from current membership in the project's organization, which must
+match the active workspace. Comma-separated better-auth roles grant the union of
+recognized permissions; unknown roles grant nothing. Unlisted console mutations
+are denied, including for owners. Authentication endpoints under `/api/auth/*`
+are delegated to better-auth (self-service profile/session/workspace creation and
+invitation acceptance remain available; organization administration uses its role ACL).
+
+| /api operation | Owner | Admin | Member |
+|---|---|---|---|
+| better-auth organization update | yes | yes | no |
+| better-auth organization delete | yes | no | no |
+| better-auth invite/cancel invitation, manage members | yes | yes (owner safeguards apply) | no |
+| better-auth profile/session, create workspace, accept/reject invitation, leave workspace | self-service | self-service | self-service (last-owner safeguards apply) |
+| POST projects | yes | yes | no |
+| PATCH project: name, description, retentionDays, setupDismissed, retentionReviewed | yes | yes | no |
+| DELETE project | yes | yes | no |
+| POST project keys / DELETE project key | yes | yes | no |
+| POST project views | yes | yes | yes |
+| DELETE project view | any | any | own only (others return 404) |
+| POST / DELETE project sample-data | yes | yes | no |
+| POST project test-event | yes | yes | no |
+| POST workspace invite-links / DELETE workspace invite-link | yes | yes | no |
+| POST invite-links/:token/accept | valid invitation | valid invitation | valid invitation |
+| GET export, workspace activity and other workspace/project reads | yes | yes | yes |
+| GET workspace invite-links | yes | yes | no (contains bearer invitations) |
+
+Link acceptance requires a session and valid token, domain, expiry and remaining
+uses, independent of an existing workspace role. Public invitation previews remain
+public. Role denials return 403 with code `forbidden` and message
+`Workspace owner or admin access required.` Tenancy misses return 404 without project data.
+`GET /api/me` exposes fresh stored membership roles, including comma-separated roles.
+All project updates are administrative, even setup flags. Saved views are shared
+for reading, but members can delete only their own; admins can moderate any view.
+
+Both lowering retention (PATCH body `confirm`) and project deletion (DELETE query
+`?confirm=<slug>`) require the exact project slug. Missing or incorrect confirmation
+returns 422 `confirmation_required` before any destructive work. Deletion confirmation
+is an additive request field with newly enforced validation; clients must send it.
+
 ## 8. UI / UX (apps/app) — the bar is "Linear / Vercel / PostHog quality" on shadcn
 
 Design: shadcn (Base UI variant, same conventions as nibleaf `packages/design-system`), Geist + Geist Mono,

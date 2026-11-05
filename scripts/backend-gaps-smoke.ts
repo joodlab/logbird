@@ -99,6 +99,6 @@ try {
   assert.equal(invalid.status, 422);
   console.log('malformed boolean status', invalid.status);
 } finally {
-  await api(base, 'DELETE');
+  await api(`${base}?confirm=${encodeURIComponent(created.project.slug)}`, 'DELETE');
 }
 console.log('Backend gaps HTTP regression passed');

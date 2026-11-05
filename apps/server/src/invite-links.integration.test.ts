@@ -26,7 +26,7 @@ it('real services: invite lifecycle, permissions, tenancy, atomic usage and pers
     const response = await request('/api/auth/sign-in/email-otp', 'POST', { email, otp: content.Text.match(/\b\d{6}\b/)?.[0] });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { user: { id: string } };
-    if (email !== 'demo@trailmark.local') users.push(body.user.id);
+    users.push(body.user.id);
     return {
       id: body.user.id,
       cookie: response.headers
@@ -39,7 +39,6 @@ it('real services: invite lifecycle, permissions, tenancy, atomic usage and pers
   const joiners: { id: string; cookie: string }[] = [];
   try {
     for (let i = 0; i < 5; i++) joiners.push(await login(`join-${randomUUID()}@trailmark.local`));
-    await login('demo@trailmark.local');
     const [first, second] = joiners;
     if (!first || !second) throw new Error('Missing join fixtures');
     const org = await request('/api/auth/organization/create', 'POST', { name: 'Invite fixture', slug: `invite-${randomUUID()}` }, owner.cookie);

@@ -7,6 +7,7 @@ import {
   createProjectResponseSchema,
   createProjectSchema,
   createSavedViewSchema,
+  deleteProjectQuerySchema,
   meResponseSchema,
   projectSchema,
   retentionStatusQuerySchema,
@@ -25,6 +26,7 @@ import { ApiError } from './errors';
 import { audit } from './ingest';
 import { generateApiKey } from './keys';
 import { requireProjectAccess, requireSession } from './middlewares';
+import { hasAdminRole } from './middlewares/require-role';
 import { doc, routeDoc } from './openapi';
 import { creatorSelect, serializeKey, serializeProject, serializeView } from './serialize';
 import { invalidateSetup } from './setup-cache';
@@ -167,16 +169,23 @@ export const managementRoutes = new Hono<AppEnv>()
       return c.json(serializeProject(project));
     },
   )
-  .delete('/projects/:projectId', routeDoc('Delete project', { responses: { 204: { description: 'Deleted' } } }), async (c) => {
-    const projectId = c.get('project').id;
-    await withProjectLock(projectId, async (tx) => {
-      await tx.apiKey.updateMany({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
-      await purgeProjectEvents(projectId);
-      await tx.project.delete({ where: { id: projectId } });
-    });
-    await audit(c, 'project.deleted', { type: 'project', id: projectId });
-    return c.body(null, 204);
-  })
+  .delete(
+    '/projects/:projectId',
+    routeDoc('Delete project', { responses: { 204: { description: 'Deleted' } } }),
+    validator('query', deleteProjectQuerySchema),
+    async (c) => {
+      const { confirm } = c.req.valid('query');
+      if (confirm !== c.get('project').slug) throw new ApiError(422, 'confirmation_required', 'Type the project slug to delete the project.');
+      const projectId = c.get('project').id;
+      await withProjectLock(projectId, async (tx) => {
+        await tx.apiKey.updateMany({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
+        await purgeProjectEvents(projectId);
+        await tx.project.delete({ where: { id: projectId } });
+      });
+      await audit(c, 'project.deleted', { type: 'project', id: projectId });
+      return c.body(null, 204);
+    },
+  )
   .get('/projects/:projectId/keys', doc('List API keys', z.object({ data: z.array(apiKeySchema) })), async (c) =>
     c.json({
       data: (await prisma.apiKey.findMany({ where: { projectId: c.get('project').id }, include: creatorSelect, orderBy: { createdAt: 'asc' } })).map(
@@ -235,7 +244,13 @@ export const managementRoutes = new Hono<AppEnv>()
     },
   )
   .delete('/projects/:projectId/views/:viewId', routeDoc('Delete saved view', { responses: { 204: { description: 'Deleted' } } }), async (c) => {
-    const result = await prisma.savedView.deleteMany({ where: { id: c.req.param('viewId'), projectId: c.get('project').id } });
+    const result = await prisma.savedView.deleteMany({
+      where: {
+        id: c.req.param('viewId'),
+        projectId: c.get('project').id,
+        ...(hasAdminRole(c.get('member').role) ? {} : { createdById: c.get('user').id }),
+      },
+    });
     if (!result.count) throw new ApiError(404, 'not_found', 'Saved view not found.');
     await audit(c, 'saved_view.deleted', { type: 'saved_view', id: c.req.param('viewId') });
     return c.body(null, 204);
