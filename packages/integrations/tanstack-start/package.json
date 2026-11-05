@@ -1,0 +1,40 @@
+{
+  "name": "@trailmark/tanstack-start",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@trailmark/sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "@tanstack/react-start": "1.168.49"
+  },
+  "devDependencies": {
+    "@tanstack/react-start": "1.168.49",
+    "@trailmark/tsconfig": "workspace:*",
+    "@trailmark/contracts": "workspace:*",
+    "@types/node": "22.20.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "tsdown": "0.22.14"
+  }
+}

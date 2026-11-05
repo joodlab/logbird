@@ -1,0 +1,22 @@
+{
+  "name": "@trailmark/example-tanstack-start",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 4730 --host 127.0.0.1 --strictPort"
+  },
+  "dependencies": {
+    "@trailmark/tanstack-start": "workspace:*",
+    "@trailmark/sdk": "workspace:*",
+    "@tanstack/react-start": "1.168.49",
+    "@tanstack/react-router": "1.170.32",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "nitro": "3.0.260522-beta"
+  },
+  "devDependencies": {
+    "tsx": "4.23.13",
+    "vite": "8.2.2",
+    "@vitejs/plugin-react": "6.1.1"
+  }
+}

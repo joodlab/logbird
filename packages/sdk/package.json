@@ -5,17 +5,41 @@
   "type": "module",
   "private": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./integration": "./src/integration.ts",
+    "./read": "./src/read.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "build": "tsdown"
   },
   "dependencies": {},
   "devDependencies": {
     "@trailmark/tsconfig": "workspace:*",
     "@types/node": "^22.20.1",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "@trailmark/contracts": "workspace:*",
+    "tsdown": "0.22.14"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./read": {
+        "types": "./dist/read.d.mts",
+        "import": "./dist/read.mjs"
+      },
+      "./integration": {
+        "types": "./dist/integration.d.mts",
+        "import": "./dist/integration.mjs"
+      }
+    }
   }
 }

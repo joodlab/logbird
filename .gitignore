@@ -73,3 +73,4 @@ experiments/forge/*.input.json
 experiments/forge/console/
 experiments/hey-api/console/
 experiments/hey-api/node_modules/
+.nuxt

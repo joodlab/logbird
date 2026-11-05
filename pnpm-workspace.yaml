@@ -1,6 +1,8 @@
 packages:
   - apps/*
   - packages/*
+  - packages/integrations/*
+  - examples/*
 
 allowBuilds:
   '@prisma/client': true
