@@ -1,5 +1,5 @@
 ﻿import { randomUUID } from 'node:crypto';
-import { projectStats, retentionStats } from '@trailmark/clickhouse';
+import { compileQuery, projectStats, retentionStats, validateSql } from '@trailmark/clickhouse';
 import {
   apiKeySchema,
   createApiKeyResponseSchema,
@@ -21,7 +21,7 @@ import { enforceProjectRetention } from '@trailmark/worker/retention';
 import { Hono } from 'hono';
 import { validator } from 'hono-openapi';
 import { z } from 'zod';
-import { clickhouse, purgeProjectEvents } from './clickhouse';
+import { clickhouse, purgeProjectEvents, queryClickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { audit } from './ingest';
 import { generateApiKey } from './keys';
@@ -89,7 +89,7 @@ export const managementRoutes = new Hono<AppEnv>()
         return { project: serializeProject(project), ingestKey: { key: serializeKey(key), secret: material.secret } };
       });
       await audit(c, 'project.created', { type: 'project', id: result.project.id, name: result.project.name });
-      await audit(c, 'api_key.created', { type: 'api_key', id: result.ingestKey.key.id });
+      await audit(c, 'api_key.created', { type: 'api_key', id: result.ingestKey.key.id, name: result.ingestKey.key.name });
       return c.json(createProjectResponseSchema.parse(result), 201);
     },
   )
@@ -158,12 +158,14 @@ export const managementRoutes = new Hono<AppEnv>()
       });
       invalidateSetup(project.id);
       if (input.retentionDays !== undefined) await enforceProjectRetention(project.id);
-      if (retentionReviewed) await audit(c, 'project.retention.reviewed', { type: 'project', id: project.id });
+      if (retentionReviewed) await audit(c, 'project.retention.reviewed', { type: 'project', id: project.id, name: project.name });
       if (setupDismissed !== undefined)
-        await audit(c, 'project.setup.dismissed', { type: 'project', id: project.id }, [{ field: 'setupDismissed', after: setupDismissed }]);
-      await audit(c, 'project.updated', { type: 'project', id: project.id });
+        await audit(c, 'project.setup.dismissed', { type: 'project', id: project.id, name: project.name }, [
+          { field: 'setupDismissed', after: setupDismissed },
+        ]);
+      await audit(c, 'project.updated', { type: 'project', id: project.id, name: project.name });
       if (input.retentionDays !== undefined && input.retentionDays !== before)
-        await audit(c, 'project.retention.changed', { type: 'project', id: project.id }, [
+        await audit(c, 'project.retention.changed', { type: 'project', id: project.id, name: project.name }, [
           { field: 'retentionDays', before, after: project.retentionDays },
         ]);
       return c.json(serializeProject(project));
@@ -182,7 +184,7 @@ export const managementRoutes = new Hono<AppEnv>()
         await purgeProjectEvents(projectId);
         await tx.project.delete({ where: { id: projectId } });
       });
-      await audit(c, 'project.deleted', { type: 'project', id: projectId });
+      await audit(c, 'project.deleted', { type: 'project', id: projectId, name: c.get('project').name });
       return c.body(null, 204);
     },
   )
@@ -207,18 +209,19 @@ export const managementRoutes = new Hono<AppEnv>()
         include: creatorSelect,
       });
       invalidateSetup(c.get('project').id);
-      await audit(c, 'api_key.created', { type: 'api_key', id: key.id });
+      await audit(c, 'api_key.created', { type: 'api_key', id: key.id, name: key.name });
       return c.json({ key: serializeKey(key), secret: material.secret }, 201);
     },
   )
   .delete('/projects/:projectId/keys/:keyId', routeDoc('Revoke API key', { responses: { 204: { description: 'Revoked' } } }), async (c) => {
+    const key = await prisma.apiKey.findFirst({ where: { id: c.req.param('keyId'), projectId: c.get('project').id } });
     const result = await prisma.apiKey.updateMany({
       where: { id: c.req.param('keyId'), projectId: c.get('project').id },
       data: { revokedAt: new Date() },
     });
     if (!result.count) throw new ApiError(404, 'not_found', 'API key not found.');
     invalidateSetup(c.get('project').id);
-    await audit(c, 'api_key.revoked', { type: 'api_key', id: c.req.param('keyId') });
+    await audit(c, 'api_key.revoked', { type: 'api_key', id: c.req.param('keyId'), name: key?.name });
     return c.body(null, 204);
   })
   .get('/projects/:projectId/views', doc('List saved views', z.object({ data: z.array(savedViewSchema) })), async (c) =>
@@ -235,6 +238,11 @@ export const managementRoutes = new Hono<AppEnv>()
       if (!result.success) throw new ApiError(422, 'validation_error', 'Invalid request body.', result.error);
     }),
     async (c) => {
+      const { state } = c.req.valid('json');
+      if (state.lang === 'sql') {
+        if (!queryClickhouse) throw new ApiError(503, 'sql_mode_unavailable', 'Configure the restricted ClickHouse query user to enable SQL mode.');
+        await validateSql(queryClickhouse, state.q);
+      } else compileQuery(state.q);
       const view = await prisma.savedView.create({
         data: { ...c.req.valid('json'), projectId: c.get('project').id, createdById: c.get('user').id },
         include: creatorSelect,

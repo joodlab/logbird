@@ -9,7 +9,7 @@ import { readAuditTrail } from '@trailmark/sdk/read';
 import { generateApiKey } from '../apps/server/src/keys';
 
 const root = process.cwd();
-const endpoint = 'http://127.0.0.1:4731';
+const endpoint = 'http://127.0.0.1:4871';
 const children = new Set<ChildProcess>();
 function launch(name: string, cwd: string, args: string[], env: NodeJS.ProcessEnv) {
   const log = createWriteStream(resolve(root, `.tmp/${name}.log`));
@@ -48,7 +48,7 @@ const ch = createClickHouseClient();
 let orgId: string | undefined;
 let projectId: string | undefined;
 try {
-  for (const port of [4730, 4731]) {
+  for (const port of [4872, 4871]) {
     let occupied = false;
     try {
       await fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(500) });
@@ -73,30 +73,43 @@ try {
   ] as const)
     await prisma.apiKey.create({ data: { projectId, name: 'Disposable integration verification', kind, hash: key.hash, prefix: key.prefix } });
   const server = launch('integration-server', '.', ['--env-file=.env', '--import', 'tsx', 'apps/server/src/index.ts'], {
-    PORT: '4731',
-    APP_URL: 'http://localhost:4730',
+    PORT: '4871',
+    APP_URL: endpoint,
   });
   await ready(`${endpoint}/health`, server);
   const env = {
-    PORT: '4730',
-    NITRO_PORT: '4730',
+    PORT: '4872',
+    NITRO_PORT: '4872',
     TRAILMARK_ENDPOINT: endpoint,
     TRAILMARK_INGEST_KEY: ingest.secret,
     TRAILMARK_READ_KEY: read.secret,
   };
   const results: object[] = [];
+  const specification = await (await fetch(`${endpoint}/openapi.json`)).json();
+  assert.equal(specification.servers[0].url, endpoint);
+  const ingestExample = specification.paths['/v1/events'].post.requestBody.content['application/json'].example;
+  const exampleResponse = await fetch(`${specification.servers[0].url}/v1/events`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${ingest.secret}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(ingestExample),
+  });
+  assert.equal(exampleResponse.status, 202);
+  const readExample = specification.paths['/v1/events'].get.parameters.find((parameter: { name: string }) => parameter.name === 'q').schema.example;
+  assert.equal((await readAuditTrail({ endpoint, readKey: read.secret }, { q: readExample })).data[0]?.action, 'document.updated');
+  console.log('openapi: advertised instance URL and ingest/read request examples passed real HTTP (202/200)');
+
   for (const name of ['hono', 'vue', 'tanstack-start', 'nuxt']) {
     const args =
       name === 'nuxt'
-        ? [resolve(root, 'node_modules/nuxt/bin/nuxt.mjs'), 'dev', '--port', '4730', '--host', '127.0.0.1']
+        ? [resolve(root, 'node_modules/nuxt/bin/nuxt.mjs'), 'dev', '--port', '4872', '--host', '127.0.0.1']
         : name === 'tanstack-start'
-          ? [resolve(root, 'node_modules/vite/bin/vite.js'), '--port', '4730', '--host', '127.0.0.1', '--strictPort']
+          ? [resolve(root, 'node_modules/vite/bin/vite.js'), '--port', '4872', '--host', '127.0.0.1', '--strictPort']
           : ['--import', 'tsx', 'index.ts'];
     const child = launch(`example-${name}`, `examples/${name}`, args, env);
     try {
-      await ready('http://127.0.0.1:4730/', child);
+      await ready('http://127.0.0.1:4872/', child);
       const operation = `smoke-${name}-${id}`;
-      const response = await fetch(`http://127.0.0.1:4730/${name === 'nuxt' ? 'api/' : ''}demo`, {
+      const response = await fetch(`http://127.0.0.1:4872/${name === 'nuxt' ? 'api/' : ''}demo`, {
         method: 'POST',
         headers: { 'x-trailmark-operation': operation },
       });
@@ -115,7 +128,7 @@ try {
         await new Promise((done) => setTimeout(done, 500));
       }
       assert.ok(found, `${name} event must be visible through real read API`);
-      const history = await fetch(`http://127.0.0.1:4730/${name === 'nuxt' ? 'api/_trailmark/events' : 'history'}`);
+      const history = await fetch(`http://127.0.0.1:4872/${name === 'nuxt' ? 'api/_trailmark/events' : 'history'}`);
       assert.equal(history.status, 200, `${name} history status`);
       const historyBody = await history.text();
       assert.ok(historyBody.includes(`${name}.record.updated`), `${name} history contains event`);
@@ -130,6 +143,34 @@ try {
     } finally {
       await stop(child);
     }
+  }
+  const broken = launch('example-vue-read-failure', 'examples/vue', ['--import', 'tsx', 'index.ts'], {
+    ...env,
+    TRAILMARK_READ_KEY: 'fictional-invalid-key',
+  });
+  try {
+    await ready('http://127.0.0.1:4872/', broken);
+    const operation = `smoke-vue-read-failure-${id}`;
+    assert.equal((await fetch('http://127.0.0.1:4872/demo', { method: 'POST', headers: { 'x-trailmark-operation': operation } })).status, 200);
+    const failure = await fetch('http://127.0.0.1:4872/history');
+    assert.equal(failure.status, 502);
+    assert.ok((await failure.text()).includes('Audit history unavailable'));
+    const page = await readAuditTrail({ endpoint, readKey: read.secret }, { q: `operation:"${operation}"` });
+    assert.ok(
+      page.data.some((event) => event.action === 'vue.record.updated'),
+      'failure path flush delivered the buffered event',
+    );
+    assert.equal(broken.exitCode, null);
+    assert.equal((await fetch('http://127.0.0.1:4872/demo', { method: 'POST' })).status, 200);
+    results.push({
+      framework: 'vue-read-failure',
+      history: 502,
+      process: 'survived; next mutation 200',
+      flush: 'captured event read back after failure',
+    });
+    console.log('vue: read failure 502, rendered error, process alive, buffered audit event flushed');
+  } finally {
+    await stop(broken);
   }
   await mkdir('docs/verification/sdk-integrations', { recursive: true });
   await writeFile(

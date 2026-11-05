@@ -81,7 +81,7 @@ app.notFound((c) => c.json({ error: { code: 'not_found', message: 'Route not fou
 setAuthAuditHandler((e) =>
   ingest(`ws:${e.organizationId}`, {
     action: e.action,
-    actor: { ...e.actor, type: 'user' },
+    actor: { ...e.actor, type: 'user', name: e.actor.name || e.actor.email },
     executor: { type: 'api', id: 'api-server' },
     targets: [e.target],
     changes: e.changes,
@@ -141,6 +141,7 @@ app.get(
   openAPIRouteHandler(app, {
     documentation: {
       info: { title: 'Trailmark API', version: '0.1.0' },
+      servers: [{ url: env.APP_URL, description: 'This Trailmark instance' }],
       components: {
         securitySchemes: {
           session: { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' },

@@ -47,3 +47,25 @@ audit.track({ action: 'guest.updated', actor,
   changes: [{ field: 'status', before: 'pending', after: 'ready' }] });
 // Scheduled work uses actor: { type: 'system', id: 'crm-scheduler' }.
 ```
+
+## Outage backpressure
+
+The SDK retains at most `maxQueueSize` queued events (default 10,000), plus one in-flight
+batch (at most `batchSize`, default 100). Each event is capped at 256 KiB; this is an event
+count limit, not a byte budget. Size the queue for your payloads and memory budget.
+`dropPolicy: 'oldest'` (default) keeps recent events; `'newest'` preserves queued history.
+`onDrop(event)` reports each overflow discard and `client.dropped` counts them;
+`client.queueSize` reports queued events. Exceptions from diagnostic callbacks never escape
+`track`. Failed batches re-enter the same bounded queue with the same drop policy.
+`track` is best effort; `flush` and `shutdown` reject on delivery failure so callers must
+handle them. Call shutdown in the host lifecycle and await it before exiting.
+
+```ts
+const client = new Trailmark({ endpoint, apiKey, maxQueueSize: 1000,
+  dropPolicy: 'oldest', onDrop: () => metrics.increment('audit.dropped') });
+```
+
+Read adapters expose failures: Vue `useAuditTrail` sets `error` and clears `loading`;
+render that error before treating an empty `data` array as success. Its `refresh()` resolves
+with the error in reactive state, including SSR; never throw it from `serverPrefetch`.
+The examples return 502 on read failure. Set `TRAILMARK_ENDPOINT` for both capture and read.

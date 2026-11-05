@@ -140,6 +140,8 @@ async function explain(ch: ClickHouseClient, q: string) {
 export async function validateSql(ch: ClickHouseClient, q = ''): Promise<string> {
   if (Buffer.byteLength(q) > 4096) reject('too_complex', q, 'SQL exceeds 4096 bytes');
   lexicalCheck(q);
+  const statement = /^\s*(select|with)\b/i.exec(q);
+  if (statement) reject('not_allowed', q, "Enter only a WHERE expression (e.g. outcome = 'failure')", ...locate(q, /\b(?:select|with)\b/i));
   const expression = q.trim() ? q : '1';
   const cache = caches.get(ch) ?? new Map<string, number>();
   caches.set(ch, cache);
