@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { BrandLockup } from '@/components/brand';
 
 export const Route = createFileRoute('/login')({
-  validateSearch: z.object({ redirect: z.string().optional() }),
+  validateSearch: z.object({ redirect: z.string().optional(), email: z.string().optional() }),
   head: () => ({ meta: [{ title: 'Sign in · Trailmark' }] }),
   component: LoginLayout,
 });

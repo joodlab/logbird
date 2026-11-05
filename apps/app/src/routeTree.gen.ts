@@ -14,6 +14,7 @@ import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedWorkspaceRouteImport } from './routes/_authed/_workspace'
 import { Route as AuthedOnboardingRouteImport } from './routes/_authed/onboarding'
+import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accept-invitation.$invitationId'
 import { Route as LoginIndexRouteImport } from './routes/login.index'
 import { Route as LoginVerifyRouteImport } from './routes/login.verify'
 import { Route as AuthedWorkspaceAccountRouteImport } from './routes/_authed/_workspace/account'
@@ -28,6 +29,7 @@ import { Route as AuthedWorkspacePProjectIdDocsRouteImport } from './routes/_aut
 import { Route as AuthedWorkspacePProjectIdEventsRouteImport } from './routes/_authed/_workspace/p.$projectId.events'
 import { Route as AuthedWorkspacePProjectIdFieldsRouteImport } from './routes/_authed/_workspace/p.$projectId.fields'
 import { Route as AuthedWorkspacePProjectIdSettingsRouteImport } from './routes/_authed/_workspace/p.$projectId.settings'
+import { Route as AuthedWorkspacePProjectIdSetupRouteImport } from './routes/_authed/_workspace/p.$projectId.setup'
 import { Route as AuthedWorkspacePProjectIdViewsRouteImport } from './routes/_authed/_workspace/p.$projectId.views'
 import { Route as AuthedWorkspacePProjectIdActorsIndexRouteImport } from './routes/_authed/_workspace/p.$projectId.actors.index'
 import { Route as AuthedWorkspacePProjectIdActorsEntityIdRouteImport } from './routes/_authed/_workspace/p.$projectId.actors.$entityId'
@@ -68,6 +70,12 @@ const AuthedOnboardingRoute = AuthedOnboardingRouteImport.update({
   path: '/onboarding',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AcceptInvitationInvitationIdRoute =
+  AcceptInvitationInvitationIdRouteImport.update({
+    id: '/accept-invitation/$invitationId',
+    path: '/accept-invitation/$invitationId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const LoginIndexRoute = LoginIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -143,6 +151,12 @@ const AuthedWorkspacePProjectIdSettingsRoute =
   AuthedWorkspacePProjectIdSettingsRouteImport.update({
     id: '/settings',
     path: '/settings',
+    getParentRoute: () => AuthedWorkspacePProjectIdRoute,
+  } as any)
+const AuthedWorkspacePProjectIdSetupRoute =
+  AuthedWorkspacePProjectIdSetupRouteImport.update({
+    id: '/setup',
+    path: '/setup',
     getParentRoute: () => AuthedWorkspacePProjectIdRoute,
   } as any)
 const AuthedWorkspacePProjectIdViewsRoute =
@@ -246,6 +260,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRouteWithChildren
   '/onboarding': typeof AuthedOnboardingRouteWithChildren
+  '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/login/verify': typeof LoginVerifyRoute
   '/login/': typeof LoginIndexRoute
   '/account': typeof AuthedWorkspaceAccountRoute
@@ -259,6 +274,7 @@ export interface FileRoutesByFullPath {
   '/p/$projectId/events': typeof AuthedWorkspacePProjectIdEventsRoute
   '/p/$projectId/fields': typeof AuthedWorkspacePProjectIdFieldsRoute
   '/p/$projectId/settings': typeof AuthedWorkspacePProjectIdSettingsRouteWithChildren
+  '/p/$projectId/setup': typeof AuthedWorkspacePProjectIdSetupRoute
   '/p/$projectId/views': typeof AuthedWorkspacePProjectIdViewsRoute
   '/p/$projectId/': typeof AuthedWorkspacePProjectIdIndexRoute
   '/p/$projectId/actors/$entityId': typeof AuthedWorkspacePProjectIdActorsEntityIdRoute
@@ -279,6 +295,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/login/verify': typeof LoginVerifyRoute
   '/login': typeof LoginIndexRoute
   '/account': typeof AuthedWorkspaceAccountRoute
@@ -290,6 +307,7 @@ export interface FileRoutesByTo {
   '/p/$projectId/docs': typeof AuthedWorkspacePProjectIdDocsRoute
   '/p/$projectId/events': typeof AuthedWorkspacePProjectIdEventsRoute
   '/p/$projectId/fields': typeof AuthedWorkspacePProjectIdFieldsRoute
+  '/p/$projectId/setup': typeof AuthedWorkspacePProjectIdSetupRoute
   '/p/$projectId/views': typeof AuthedWorkspacePProjectIdViewsRoute
   '/p/$projectId': typeof AuthedWorkspacePProjectIdIndexRoute
   '/p/$projectId/actors/$entityId': typeof AuthedWorkspacePProjectIdActorsEntityIdRoute
@@ -315,6 +333,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRouteWithChildren
   '/_authed/_workspace': typeof AuthedWorkspaceRouteWithChildren
   '/_authed/onboarding': typeof AuthedOnboardingRouteWithChildren
+  '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/login/verify': typeof LoginVerifyRoute
   '/login/': typeof LoginIndexRoute
   '/_authed/_workspace/account': typeof AuthedWorkspaceAccountRoute
@@ -328,6 +347,7 @@ export interface FileRoutesById {
   '/_authed/_workspace/p/$projectId/events': typeof AuthedWorkspacePProjectIdEventsRoute
   '/_authed/_workspace/p/$projectId/fields': typeof AuthedWorkspacePProjectIdFieldsRoute
   '/_authed/_workspace/p/$projectId/settings': typeof AuthedWorkspacePProjectIdSettingsRouteWithChildren
+  '/_authed/_workspace/p/$projectId/setup': typeof AuthedWorkspacePProjectIdSetupRoute
   '/_authed/_workspace/p/$projectId/views': typeof AuthedWorkspacePProjectIdViewsRoute
   '/_authed/_workspace/p/$projectId/': typeof AuthedWorkspacePProjectIdIndexRoute
   '/_authed/_workspace/p/$projectId/actors/$entityId': typeof AuthedWorkspacePProjectIdActorsEntityIdRoute
@@ -352,6 +372,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/onboarding'
+    | '/accept-invitation/$invitationId'
     | '/login/verify'
     | '/login/'
     | '/account'
@@ -365,6 +386,7 @@ export interface FileRouteTypes {
     | '/p/$projectId/events'
     | '/p/$projectId/fields'
     | '/p/$projectId/settings'
+    | '/p/$projectId/setup'
     | '/p/$projectId/views'
     | '/p/$projectId/'
     | '/p/$projectId/actors/$entityId'
@@ -385,6 +407,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/accept-invitation/$invitationId'
     | '/login/verify'
     | '/login'
     | '/account'
@@ -396,6 +419,7 @@ export interface FileRouteTypes {
     | '/p/$projectId/docs'
     | '/p/$projectId/events'
     | '/p/$projectId/fields'
+    | '/p/$projectId/setup'
     | '/p/$projectId/views'
     | '/p/$projectId'
     | '/p/$projectId/actors/$entityId'
@@ -420,6 +444,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/_authed/_workspace'
     | '/_authed/onboarding'
+    | '/accept-invitation/$invitationId'
     | '/login/verify'
     | '/login/'
     | '/_authed/_workspace/account'
@@ -433,6 +458,7 @@ export interface FileRouteTypes {
     | '/_authed/_workspace/p/$projectId/events'
     | '/_authed/_workspace/p/$projectId/fields'
     | '/_authed/_workspace/p/$projectId/settings'
+    | '/_authed/_workspace/p/$projectId/setup'
     | '/_authed/_workspace/p/$projectId/views'
     | '/_authed/_workspace/p/$projectId/'
     | '/_authed/_workspace/p/$projectId/actors/$entityId'
@@ -456,6 +482,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthedRoute: typeof AuthedRouteWithChildren
   LoginRoute: typeof LoginRouteWithChildren
+  AcceptInvitationInvitationIdRoute: typeof AcceptInvitationInvitationIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -494,6 +521,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/onboarding'
       preLoaderRoute: typeof AuthedOnboardingRouteImport
       parentRoute: typeof AuthedRoute
+    }
+    '/accept-invitation/$invitationId': {
+      id: '/accept-invitation/$invitationId'
+      path: '/accept-invitation/$invitationId'
+      fullPath: '/accept-invitation/$invitationId'
+      preLoaderRoute: typeof AcceptInvitationInvitationIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/login/': {
       id: '/login/'
@@ -591,6 +625,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/p/$projectId/settings'
       preLoaderRoute: typeof AuthedWorkspacePProjectIdSettingsRouteImport
+      parentRoute: typeof AuthedWorkspacePProjectIdRoute
+    }
+    '/_authed/_workspace/p/$projectId/setup': {
+      id: '/_authed/_workspace/p/$projectId/setup'
+      path: '/setup'
+      fullPath: '/p/$projectId/setup'
+      preLoaderRoute: typeof AuthedWorkspacePProjectIdSetupRouteImport
       parentRoute: typeof AuthedWorkspacePProjectIdRoute
     }
     '/_authed/_workspace/p/$projectId/views': {
@@ -743,6 +784,7 @@ interface AuthedWorkspacePProjectIdRouteChildren {
   AuthedWorkspacePProjectIdEventsRoute: typeof AuthedWorkspacePProjectIdEventsRoute
   AuthedWorkspacePProjectIdFieldsRoute: typeof AuthedWorkspacePProjectIdFieldsRoute
   AuthedWorkspacePProjectIdSettingsRoute: typeof AuthedWorkspacePProjectIdSettingsRouteWithChildren
+  AuthedWorkspacePProjectIdSetupRoute: typeof AuthedWorkspacePProjectIdSetupRoute
   AuthedWorkspacePProjectIdViewsRoute: typeof AuthedWorkspacePProjectIdViewsRoute
   AuthedWorkspacePProjectIdIndexRoute: typeof AuthedWorkspacePProjectIdIndexRoute
   AuthedWorkspacePProjectIdActorsEntityIdRoute: typeof AuthedWorkspacePProjectIdActorsEntityIdRoute
@@ -763,6 +805,7 @@ const AuthedWorkspacePProjectIdRouteChildren: AuthedWorkspacePProjectIdRouteChil
     AuthedWorkspacePProjectIdFieldsRoute: AuthedWorkspacePProjectIdFieldsRoute,
     AuthedWorkspacePProjectIdSettingsRoute:
       AuthedWorkspacePProjectIdSettingsRouteWithChildren,
+    AuthedWorkspacePProjectIdSetupRoute: AuthedWorkspacePProjectIdSetupRoute,
     AuthedWorkspacePProjectIdViewsRoute: AuthedWorkspacePProjectIdViewsRoute,
     AuthedWorkspacePProjectIdIndexRoute: AuthedWorkspacePProjectIdIndexRoute,
     AuthedWorkspacePProjectIdActorsEntityIdRoute:
@@ -853,6 +896,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthedRoute: AuthedRouteWithChildren,
   LoginRoute: LoginRouteWithChildren,
+  AcceptInvitationInvitationIdRoute: AcceptInvitationInvitationIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -9,11 +9,12 @@ import { StatCard } from '@trailmark/ui/components/stat-card';
 import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
 import { Button } from '@trailmark/ui/components/ui/button';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { ArrowRightIcon, CheckCircle2Icon, RadioIcon, Rows3Icon, SendIcon } from 'lucide-react';
+import { ArrowRightIcon, CheckCircle2Icon, RadioIcon, Rows3Icon } from 'lucide-react';
 import { ActionName } from '@/components/action-name';
 import { OutcomeAreaChart } from '@/components/charts/outcome-area-chart';
 import { EntityProfileLink } from '@/components/entity-link';
 import { RankList } from '@/components/rank-list';
+import { SetupChecklistCard } from '@/components/setup/setup-checklist-card';
 import { Timestamp } from '@/components/timestamp';
 import { overviewQuery, projectQuery } from '@/lib/api/queries';
 import { eventSentence } from '@/lib/events';
@@ -51,8 +52,6 @@ function OverviewPage() {
     );
   }
 
-  const neverReceived = project.data && !project.data.lastEventAt;
-
   return (
     <div className="flex flex-col gap-5 p-4 sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -73,23 +72,7 @@ function OverviewPage() {
         </Button>
       </div>
 
-      {neverReceived ? (
-        <div className="flex flex-col gap-3 rounded-xl border border-dashed bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <SendIcon className="mt-0.5 size-5 text-brand" />
-            <div className="flex flex-col gap-0.5">
-              <p className="font-medium text-sm">No events yet</p>
-              <p className="text-muted-foreground text-sm">
-                Send your first event with the SDK or a single curl. The dashboard fills in within seconds.
-              </p>
-            </div>
-          </div>
-          <Button nativeButton={false} render={<Link params={{ projectId }} to="/onboarding/first-event/$projectId" />} size="sm">
-            Send first event
-            <ArrowRightIcon />
-          </Button>
-        </div>
-      ) : null}
+      <SetupChecklistCard projectId={projectId} projectName={project.data?.name} />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <StatCard

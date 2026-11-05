@@ -48,6 +48,7 @@ import {
 import { toast } from 'sonner';
 import { UserAvatar } from '@/components/account/user-avatar';
 import { BrandMark } from '@/components/brand';
+import { SetupProgress } from '@/components/setup/setup-progress';
 import { meQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
 import { displayName, hasName } from '@/lib/user';
@@ -133,6 +134,7 @@ export function AppSidebar({ projectId }: { projectId?: string }) {
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
+          {projectId ? <SetupProgress projectId={projectId} /> : null}
           {projectId ? (
             <SidebarMenuItem>
               <SidebarMenuButton

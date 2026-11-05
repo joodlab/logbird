@@ -38,7 +38,7 @@ function ProfileStep() {
           initial={me.user.name ?? ''}
           inputClassName="h-10"
           onChange={setPreview}
-          onSaved={() => navigate({ to: '/onboarding' })}
+          onSaved={() => navigate({ to: '/' })}
         />
       </div>
       <aside className="flex flex-col gap-3 rounded-xl border bg-card/60 p-4 text-sm shadow-xs">

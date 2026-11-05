@@ -56,7 +56,8 @@ function WorkspaceStep() {
           await authCall(authClient.organization.setActive({ organizationId: String((org as { id: string }).id) }));
         }
         await queryClient.invalidateQueries({ queryKey: meQuery().queryKey });
-        await navigate({ to: '/onboarding/project' });
+        // `/` resumes at whatever is missing next (normally the project step).
+        await navigate({ to: '/' });
       } catch (error) {
         setServerError(error instanceof Error ? error.message : 'Could not create the workspace.');
       }

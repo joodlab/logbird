@@ -134,7 +134,7 @@ function FieldsPage() {
               </p>
               <p className="text-muted-foreground">
                 Off-standard events still land: unknown keys become searchable <span className="font-mono text-foreground">attr.*</span> fields.{' '}
-                <Link className="text-foreground underline underline-offset-2" params={{ projectId }} to="/p/$projectId/docs">
+                <Link className="text-foreground underline underline-offset-2" hash="envelope" params={{ projectId }} to="/p/$projectId/setup">
                   Recommended envelope →
                 </Link>
               </p>

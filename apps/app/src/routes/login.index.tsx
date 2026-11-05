@@ -25,10 +25,10 @@ const emailSchema = z.email('Enter a valid email address.');
 
 function EmailStep() {
   const navigate = useNavigate();
-  const { redirect: target } = Route.useSearch();
+  const { redirect: target, email: prefill } = Route.useSearch();
   const [serverError, setServerError] = useState<string | null>(null);
   const form = useForm({
-    defaultValues: { email: '' },
+    defaultValues: { email: prefill ?? '' },
     onSubmit: async ({ value }) => {
       setServerError(null);
       const email = value.email.trim().toLowerCase();
