@@ -28,7 +28,7 @@ import { placeholderKeys } from '@/lib/placeholders';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/members')({
   staticData: { crumb: 'Members' },
-  head: () => ({ meta: [{ title: 'Members · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Members · Settings · Trailmark' }] }),
   component: MembersSettings,
 });
 
@@ -73,8 +73,9 @@ function MembersSettings() {
         }
         title="Invite people"
       >
-        <div className="grid gap-6 lg:grid-cols-2 lg:gap-0 lg:divide-x">
-          <div className="flex flex-col gap-3 lg:pe-6" data-testid="invite-by-email">
+        {/* Explicit minmax(0,1fr) tracks + min-w-0: an implicit auto track grows to the untruncated invite URL on phones. */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-0 lg:divide-x">
+          <div className="flex min-w-0 flex-col gap-3 lg:pe-6" data-testid="invite-by-email">
             <PanelHeading
               description="A personal link for one address, valid for 48 hours. Copy it from Pending invitations."
               icon={MailIcon}
@@ -82,7 +83,7 @@ function MembersSettings() {
             />
             <InviteForm />
           </div>
-          <div className="max-lg:border-t max-lg:pt-6 lg:ps-6">
+          <div className="min-w-0 max-lg:border-t max-lg:pt-6 lg:ps-6">
             <InviteLinkPanel />
           </div>
         </div>

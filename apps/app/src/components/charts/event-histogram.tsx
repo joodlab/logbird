@@ -14,6 +14,11 @@ interface EventHistogramProps {
   onZoom?: (fromMs: number, toMs: number) => void;
   className?: string;
   loading?: boolean;
+  /**
+   * The bars belong to an earlier query (the current one was rejected): dim them, say so, and turn zoom off, which
+   * would otherwise apply a new range to the broken query.
+   */
+  stale?: boolean;
 }
 
 interface ChartPointerState {
@@ -22,7 +27,8 @@ interface ChartPointerState {
 }
 
 /** Stacked outcome bars. Drag across bars to zoom the time range; click one bar to zoom into it. */
-export function EventHistogram({ data, height = 120, onZoom, className, loading }: EventHistogramProps) {
+export function EventHistogram({ data, height = 120, onZoom: onZoomProp, className, loading, stale = false }: EventHistogramProps) {
+  const onZoom = stale ? undefined : onZoomProp;
   const rows = useMemo(() => toSeries(data), [data]);
   const interval = data?.interval ?? 60;
   const axis = useMemo(() => bucketTicks(rows, interval), [rows, interval]);
@@ -45,14 +51,28 @@ export function EventHistogram({ data, height = 120, onZoom, className, loading 
   };
 
   return (
-    <div className={cn('relative select-none', loading && 'opacity-60 transition-opacity', className)}>
-      <ChartContainer className="aspect-auto w-full" config={outcomeChartConfig} style={{ height }}>
+    <div className={cn('relative select-none', className)} data-stale={stale || undefined}>
+      {stale ? (
+        <span
+          className="absolute end-4 top-1 z-10 rounded-md border bg-background/90 px-1.5 py-0.5 text-[11px] text-muted-foreground shadow-xs"
+          data-testid="histogram-stale"
+        >
+          From the last query that ran
+        </span>
+      ) : null}
+      <ChartContainer
+        className={cn('aspect-auto w-full transition-opacity', stale ? 'opacity-45' : loading && 'opacity-60')}
+        config={outcomeChartConfig}
+        style={{ height }}
+      >
         <BarChart
+          aria-label="Events per interval by outcome. Arrow keys move between bars."
           barCategoryGap={1}
           className={onZoom ? 'cursor-crosshair' : undefined}
           data={rows}
           margin={{ top: 4, right: 16, bottom: 0, left: 0 }}
           onMouseDown={(state) => {
+            if (!onZoom) return;
             const ts = pointTs(state as ChartPointerState);
             if (ts !== null) setDrag({ start: ts, end: ts });
           }}
