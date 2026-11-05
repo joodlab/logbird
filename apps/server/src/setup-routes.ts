@@ -22,7 +22,13 @@ async function projectSetup(projectId: string, team: Awaited<ReturnType<typeof t
   return withProjectLock(projectId, async (tx) => {
     await requireRetentionReady(tx, projectId);
     const project = await tx.project.findUniqueOrThrow({ where: { id: projectId }, include: { keys: { where: { revokedAt: null } } } });
-    return computeSetup(project, await setupFacts(projectId), team);
+    const result = computeSetup(project, await setupFacts(projectId), team);
+    if (result.complete && !project.setupCompletedAt) {
+      await tx.project.updateMany({ where: { id: projectId, setupCompletedAt: null }, data: { setupCompletedAt: new Date() } });
+      const saved = await tx.project.findUniqueOrThrow({ where: { id: projectId } });
+      result.completedAt = saved.setupCompletedAt?.toISOString() ?? null;
+    }
+    return result;
   });
 }
 export const setupRoutes = new Hono<AppEnv>()

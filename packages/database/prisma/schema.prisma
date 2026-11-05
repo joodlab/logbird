@@ -26,6 +26,7 @@ model User {
   invitations   Invitation[]
   apiKeys       ApiKey[]
   savedViews    SavedView[]
+  inviteLinks   InviteLink[]
 
   @@map("user")
 }
@@ -88,6 +89,7 @@ model Organization {
   members     Member[]
   invitations Invitation[]
   projects    Project[]
+  inviteLinks InviteLink[]
 
   @@map("organization")
 }
@@ -133,6 +135,7 @@ model Project {
   retentionDays  Int            @default(90)
   retentionReviewedAt DateTime?
   setupDismissedAt DateTime?
+  setupCompletedAt DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   keys           ApiKey[]
@@ -186,4 +189,22 @@ model RetentionRun {
   error         String?
 
   @@index([projectId, startedAt])
+}
+
+model InviteLink {
+  id String @id @default(cuid())
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  token String @unique
+  role String
+  allowedDomain String?
+  maxUses Int?
+  uses Int @default(0)
+  expiresAt DateTime
+  createdById String?
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  @@index([organizationId])
 }

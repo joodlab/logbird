@@ -2,6 +2,7 @@ import { type InvitationState, invitationPreviewSchema } from '@trailmark/contra
 import { prisma } from '@trailmark/database';
 import { Hono } from 'hono';
 import { ApiError } from './errors';
+import { limitInviteRequests } from './invite-rate-limit';
 import { doc } from './openapi';
 import type { AppEnv } from './types';
 
@@ -20,13 +21,14 @@ export function invitationState(status: string, expiresAt: Date, now = new Date(
 export const invitationRoutes = new Hono<AppEnv>().get(
   '/invitations/:invitationId',
   doc('Invitation preview', invitationPreviewSchema, 200, 'none'),
+  limitInviteRequests,
   async (c) => {
+    c.header('Cache-Control', 'no-store');
     const invitation = await prisma.invitation.findUnique({
       where: { id: c.req.param('invitationId') },
       include: { organization: { select: { id: true, name: true } }, inviter: { select: { name: true, email: true } } },
     });
     if (!invitation) throw new ApiError(404, 'invitation_not_found', 'This invitation does not exist. Ask for a new one.');
-    c.header('Cache-Control', 'no-store');
     return c.json(
       invitationPreviewSchema.parse({
         id: invitation.id,
