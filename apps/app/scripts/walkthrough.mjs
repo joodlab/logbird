@@ -1,13 +1,13 @@
 // Recorded end-to-end walkthrough against the real local stack (`pnpm dev`, demo data): OTP sign-in via Mailpit → overview →
 // explorer query → event detail → operation → impersonation search → actor/tenant profiles → retention preview → API keys →
-// dark mode → Ledger project. Usage: OUT_DIR=<dir> node scripts/walkthrough.mjs  (writes PNGs + walkthrough.webm, reports console/API errors)
+// dark mode → Ledger project. Usage: OUT_DIR=<dir> [BASE_URL=http://localhost:4600] node scripts/walkthrough.mjs  (writes PNGs + walkthrough.webm, reports console/API errors)
 import { mkdir, readdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { latestOtp, watch } from './qa-shoot.mjs';
 
 const OUT = process.env.OUT_DIR;
-const BASE = 'http://localhost:4600';
+const BASE = process.env.BASE_URL ?? 'http://localhost:4600';
 const VIEW = { width: 1440, height: 900 };
 await mkdir(OUT, { recursive: true });
 const browser = await chromium.launch({ slowMo: 60 });

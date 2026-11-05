@@ -53,7 +53,7 @@ function WorkspaceActivity() {
   const select = (e: AuditEvent | null | undefined) => navigate({ search: (prev) => ({ ...prev, ev: e?.id }), replace: true });
 
   return (
-    <div className="flex min-h-[calc(100svh-9.5rem)] flex-1 flex-col">
+    <div className="flex min-h-[28rem] flex-1 flex-col">
       <div className="flex flex-col gap-3 border-b px-4 py-4 sm:px-6">
         <p className="max-w-3xl text-muted-foreground text-sm">
           Trailmark records its own management actions — projects, keys, retention, members, views — into this stream. It is the same event model you

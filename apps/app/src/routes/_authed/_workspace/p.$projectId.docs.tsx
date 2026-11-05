@@ -195,7 +195,7 @@ function DocsPage() {
         </section>
       </article>
       <nav aria-label="On this page" className="hidden lg:block">
-        <div className="sticky top-20 flex flex-col gap-1 text-sm">
+        <div className="sticky top-6 flex flex-col gap-1 text-sm">
           <span className="pb-1 font-medium text-[11px] text-muted-foreground uppercase tracking-wider">On this page</span>
           {TOC.map(([id, label]) => (
             <a className="rounded px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" href={`#${id}`} key={id}>

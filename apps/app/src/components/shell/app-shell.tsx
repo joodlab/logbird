@@ -22,11 +22,19 @@ export function AppShell({ projectId, children }: { projectId?: string; children
 
   return (
     <CrumbProvider>
-      <SidebarProvider style={{ '--sidebar-width': '15rem' } as CSSProperties}>
+      {/* Inset layout (as in nibleaf): the sidebar sits on the muted sidebar surface and the page is a floating rounded
+          panel. The shell is exactly one viewport tall; pages scroll inside #app-main so the panel never moves. */}
+      <SidebarProvider className="h-svh overflow-hidden" style={{ '--sidebar-width': '15rem' } as CSSProperties}>
         <AppSidebar projectId={projectId} />
-        <SidebarInset className="min-w-0">
+        <SidebarInset className="min-w-0 overflow-hidden md:peer-data-[variant=inset]:border md:peer-data-[variant=inset]:border-border/80">
           <TopBar onOpenPalette={() => setPaletteOpen(true)} />
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+          <div
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain"
+            data-scroll-restoration-id="app-main"
+            id="app-main"
+          >
+            {children}
+          </div>
         </SidebarInset>
         <CommandPalette onOpenChange={setPaletteOpen} open={paletteOpen} projectId={projectId} />
       </SidebarProvider>
