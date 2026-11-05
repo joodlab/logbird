@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { eventSchema } from './events';
+import { queryLangSchema } from './query';
 
 /* ------------------------------------------------------------------ */
 /* Shared query params                                                 */
@@ -7,13 +8,16 @@ import { eventSchema } from './events';
 
 /**
  * Every read endpoint accepts a time range and a query string.
- * `q` uses the Trailmark query language (see docs/SPEC.md §6):
- *   action:hotel.*  outcome:failure  actor:usr_123  -env:staging  attr.plan:pro  "free text"
+ * `q` uses the Trailmark query language (see docs/SPEC.md §5.1) unless `lang=sql`:
+ *   action:hotel.*  outcome:failure  actor:usr_123  -env:staging  attempt:>2  metadata.channel:whatsapp  "free text"
+ * With `lang=sql`, `q` is a ClickHouse WHERE expression (see ./query.ts). Invalid queries answer 422
+ * `invalid_query` with `details: QueryErrorDetails`.
  */
 export const rangeQuerySchema = z.object({
   from: z.string().optional(), // ISO; default now-24h
   to: z.string().optional(), // ISO; default now
   q: z.string().max(4096).optional(),
+  lang: queryLangSchema.optional(), // absent = 'query'
 });
 export type RangeQuery = z.infer<typeof rangeQuerySchema>;
 
@@ -202,6 +206,10 @@ export const updateProjectSchema = z.object({
     .optional(),
   /** Required when lowering retention: must equal the project slug. Data past the new window is PERMANENTLY deleted. */
   confirm: z.string().optional(),
+  /** Marks the setup "retention" step as reviewed (any retentionDays change also marks it). */
+  retentionReviewed: z.literal(true).optional(),
+  /** true hides the overview setup card for the whole workspace; false re-opens it. */
+  setupDismissed: z.boolean().optional(),
 });
 
 export const API_KEY_KINDS = ['ingest', 'read'] as const;
@@ -230,6 +238,8 @@ export const savedViewSchema = z.object({
   /** Serialized explorer state: q, relative/absolute range, visible columns. */
   state: z.object({
     q: z.string().optional(),
+    /** Language of `q`; absent = 'query' (views saved before SQL mode). */
+    lang: queryLangSchema.optional(),
     range: z.string().optional(), // "24h" | "7d" | "<isoFrom>..<isoTo>"
     columns: z.array(z.string()).optional(),
   }),
