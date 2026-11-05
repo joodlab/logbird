@@ -54,6 +54,47 @@ describe('tokenize', () => {
   it('treats -( as a negated group', () => {
     expect(tokenize('-(a OR b)')[0]).toMatchObject({ kind: 'paren', raw: '-(', negated: true });
   });
+
+  it('lexes the half-typed states the suggestion panel works on', () => {
+    // `field:` with nothing after it is still a field token, with an empty value starting after the colon.
+    expect(tokenize('tenant:')[0]).toMatchObject({ kind: 'field', field: 'tenant', value: '', valueKind: 'plain', valueStart: 7 });
+    expect(tokenize('-tenant:')[0]).toMatchObject({ kind: 'field', field: 'tenant', negated: true, valueStart: 8 });
+    // A bare comparison operator: the value is empty, the operator is known.
+    expect(tokenize('attempt:>')[0]).toMatchObject({ valueKind: 'compare', op: '>', value: '' });
+    // An unclosed group / quote runs to the end of the input.
+    expect(tokenize('outcome:(failure OR ')[0]).toMatchObject({ valueKind: 'group', end: 20 });
+    expect(tokenize('actor.name:"Ra')[0]).toMatchObject({ valueKind: 'quoted', value: 'Ra' });
+    // A lone `-` is plain text, not a negation of nothing.
+    expect(tokenize('a -')[2]).toMatchObject({ kind: 'text', raw: '-', negated: false });
+  });
+
+  it('keeps offsets exact in the middle of a longer query', () => {
+    const q = 'outcome:failure tenant:biz_7 attempt:>2';
+    const fields = tokenize(q).filter((t) => t.kind === 'field');
+    expect(fields.map((t) => [t.field, t.start, t.end, t.valueStart])).toEqual([
+      ['outcome', 0, 15, 8],
+      ['tenant', 16, 28, 23],
+      ['attempt', 29, 39, 37],
+    ]);
+    for (const t of fields) expect(q.slice(t.start, t.end)).toBe(t.raw);
+  });
+
+  it('lexes Lucene / KQL spellings the linter rewrites', () => {
+    // `_exists_:tenant` is an ordinary field token (the linter turns it into `tenant:*`).
+    expect(tokenize('_exists_:tenant')[0]).toMatchObject({ kind: 'field', field: '_exists_', value: 'tenant' });
+    // KQL `tenant = x` is three words, so the linter can see the `=` between a field name and a value.
+    expect(
+      tokenize('tenant = x')
+        .filter((t) => t.kind !== 'space')
+        .map((t) => [t.kind, t.raw]),
+    ).toEqual([
+      ['text', 'tenant'],
+      ['text', '='],
+      ['text', 'x'],
+    ]);
+    // Lower-case boolean words stay text (the server only knows upper-case operators).
+    expect(tokenize('a and b').filter((t) => t.kind === 'operator')).toEqual([]);
+  });
 });
 
 describe('highlightQuery', () => {
@@ -196,6 +237,22 @@ describe('queryCompletionAt', () => {
     expect(queryCompletionAt('action:/boo', 11)).toEqual({ kind: 'regex', field: 'action' });
     expect(queryCompletionAt('attempt:[1 TO', 13)).toEqual({ kind: 'range', field: 'attempt' });
     expect(queryCompletionAt('"free te', 8)).toEqual({ kind: 'phrase' });
+  });
+
+  it('treats the caret, not the end of the text, as the completion point', () => {
+    const q = 'outcome:failure  attempt:>2';
+    // An empty gap between two terms: a new term starts here and the next term is untouched.
+    expect(queryCompletionAt(q, 16)).toEqual({ kind: 'key', prefix: '', from: 16, to: 16, afterTerm: true });
+    // Inside the first value: only that value is replaced.
+    expect(queryCompletionAt(q, 10)).toMatchObject({ kind: 'value', field: 'outcome', prefix: 'fa', from: 8, to: 15 });
+    // At the very start of the query, before an existing term.
+    expect(queryCompletionAt(q, 0)).toMatchObject({ kind: 'key', prefix: '', from: 0, afterTerm: false });
+  });
+
+  it('starts a term inside parentheses and after negation', () => {
+    expect(queryCompletionAt('(outcome:failure OR ', 20)).toMatchObject({ kind: 'key', prefix: '', afterTerm: false });
+    expect(queryCompletionAt('-(', 2)).toMatchObject({ kind: 'key', prefix: '', from: 2, afterTerm: false });
+    expect(queryCompletionAt('-tenant:', 8)).toMatchObject({ kind: 'value', field: 'tenant', prefix: '', from: 8 });
   });
 
   it('turns Lucene _exists_:field into a field picker for the whole term', () => {

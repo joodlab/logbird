@@ -58,6 +58,30 @@ describe('tokenizeSql / highlightSql', () => {
     expect(classes('CAST(job_attempt AS String) = 2').filter((c) => c.endsWith(':unknown'))).toEqual([]);
   });
 
+  it('marks unterminated strings and quoted attribute keys as open', () => {
+    const open = tokenizeSql("attributes['metadata.ch").find((t) => t.kind === 'string');
+    expect(open).toMatchObject({ raw: "'metadata.ch", closed: false });
+    const closed = tokenizeSql("action = 'it''s'").find((t) => t.kind === 'string');
+    expect(closed).toMatchObject({ raw: "'it''s'", closed: true });
+  });
+
+  it('keeps offsets exact and splits operators from operands without spaces', () => {
+    const q = "job_attempt>=2 AND outcome IN('failure')";
+    const solid = tokenizeSql(q).filter((t) => t.kind !== 'space');
+    expect(solid.map((t) => [t.kind, t.raw])).toEqual([
+      ['ident', 'job_attempt'],
+      ['operator', '>='],
+      ['number', '2'],
+      ['keyword', 'AND'],
+      ['ident', 'outcome'],
+      ['keyword', 'IN'],
+      ['punct', '('],
+      ['string', "'failure'"],
+      ['punct', ')'],
+    ]);
+    for (const t of solid) expect(q.slice(t.start, t.end)).toBe(t.raw);
+  });
+
   it('treats function names case-insensitively but columns case-sensitively', () => {
     expect(classes('LOWER(action)')).toEqual(['LOWER:function', '(:punct', 'action:ident', '):punct']);
     expect(classes('ACTION')).toEqual(['ACTION:unknown']);
@@ -96,6 +120,15 @@ describe('sqlCompletionAt', () => {
     expect(sqlCompletionAt('job_attempt > 2', 15, suggestFieldFor)).toEqual({ kind: 'none' });
     expect(sqlCompletionAt("action = 'x'", 12, suggestFieldFor)).toEqual({ kind: 'none' });
     expect(sqlCompletionAt('job_attempt > ', 14, suggestFieldFor)).toEqual({ kind: 'operand', column: 'job_attempt' });
+  });
+
+  it('completes at the caret in the middle of a longer expression', () => {
+    const q = "outcome = 'failure' AND job_att > 2";
+    // Renaming the second column touches only that identifier.
+    expect(sqlCompletionAt(q, 31, suggestFieldFor)).toMatchObject({ kind: 'ident', prefix: 'job_att', from: 24, to: 31 });
+    expect(sqlCompletionAt(q, 31, suggestFieldFor)).not.toHaveProperty('after');
+    // Back inside the first string: values for that column, closing quote already present.
+    expect(sqlCompletionAt(q, 13, suggestFieldFor)).toMatchObject({ kind: 'value', field: 'outcome', prefix: 'fa', closeQuote: false });
   });
 
   it("completes attribute keys inside attributes['…", () => {
