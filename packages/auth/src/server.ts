@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createEnv } from '@t3-oss/env-core';
 import { SIGN_IN_CODE_TTL_SECONDS } from '@trailmark/contracts';
 import { prisma } from '@trailmark/database';
-import { sendOrganizationInvitation, sendSignInCode } from '@trailmark/email';
+import { clientIp, primaryRole, sendMemberJoined, sendOrganizationInvitation, sendRoleChanged, sendSignInCode } from '@trailmark/email';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { emailOTP, organization } from 'better-auth/plugins';
@@ -49,6 +49,15 @@ if (
   !['localhost', '127.0.0.1'].includes(new URL(env.APP_URL).hostname)
 )
   throw new Error('APP_URL must use HTTPS in production');
+const displayName = (user: { name?: string | null; email: string }) => user.name?.trim() || user.email;
+/** Courtesy notifications must never fail the action that triggered them. */
+async function notify(kind: string, send: () => Promise<unknown>) {
+  try {
+    await send();
+  } catch (error) {
+    console.error(JSON.stringify({ level: 'error', event: 'email.failed', kind, message: error instanceof Error ? error.message : String(error) }));
+  }
+}
 export const auth = betterAuth({
   baseURL: env.APP_URL,
   // The API boundary enforces shared Redis limits across replicas.
@@ -74,8 +83,19 @@ export const auth = betterAuth({
       storeOTP: 'hashed',
       expiresIn: SIGN_IN_CODE_TTL_SECONDS,
       disableSignUp: false,
-      async sendVerificationOTP({ email, otp }) {
-        await sendSignInCode(email, otp);
+      async sendVerificationOTP({ email, otp, type }, ctx) {
+        // Device / IP hints help the recipient spot a request that was not theirs.
+        const request = authAuditContext.getStore();
+        await sendSignInCode({
+          email,
+          code: otp,
+          purpose: type,
+          expiresInMinutes: SIGN_IN_CODE_TTL_SECONDS / 60,
+          requestedAt: new Date(),
+          userAgent: request?.userAgent || ctx?.headers?.get('user-agent') || undefined,
+          // Already resolved by the server from the trusted proxy hop or the socket peer; never a raw header.
+          ip: clientIp(request?.ip),
+        });
       },
     }),
     organization({
@@ -90,6 +110,35 @@ export const auth = betterAuth({
           await record(organization.id, 'member.role.changed', user, { type: 'user', id: member.userId, name: user.email }, [
             { field: 'role', before: previousRole, after: member.role },
           ]);
+          // `user` is the member whose role changed; the person who changed it is the session user.
+          const changedBy = authAuditContext.getStore()?.actor;
+          if (!changedBy || changedBy.id === member.userId || previousRole === member.role) return;
+          await notify('role-changed', () =>
+            sendRoleChanged({
+              email: user.email,
+              workspace: organization.name,
+              previousRole: primaryRole(previousRole),
+              role: primaryRole(member.role),
+              changedByName: displayName(changedBy),
+              changedByEmail: changedBy.email,
+              changedAt: new Date(),
+            }),
+          );
+        },
+        afterAcceptInvitation: async ({ organization, invitation, member, user }) => {
+          if (!invitation.inviterId || invitation.inviterId === user.id) return;
+          await notify('member-joined', async () => {
+            const inviter = await prisma.user.findUnique({ where: { id: invitation.inviterId }, select: { email: true } });
+            if (!inviter) return;
+            await sendMemberJoined({
+              inviterEmail: inviter.email,
+              workspace: organization.name,
+              memberName: displayName(user),
+              memberEmail: user.email,
+              role: primaryRole(member.role),
+              joinedAt: new Date(),
+            });
+          });
         },
         afterRemoveMember: async ({ organization, user, member }) => {
           await record(organization.id, 'member.removed', user, { type: 'user', id: member.userId, name: user.email });
@@ -100,11 +149,12 @@ export const auth = betterAuth({
         await sendOrganizationInvitation({
           email: data.email,
           workspace: data.organization.name,
-          inviterName: inviter.name?.trim() || inviter.email,
+          inviterName: displayName(inviter),
           inviterEmail: inviter.email,
-          role: data.role || 'member',
+          role: primaryRole(data.role),
           url: `${env.APP_URL}/accept-invitation/${data.id}`,
           expiresAt: new Date(data.invitation.expiresAt),
+          sentAt: new Date(),
         });
       },
     }),

@@ -69,7 +69,7 @@ export function describeUserAgent(userAgent: string | undefined) {
   return browser ?? system;
 }
 
-/** First hop of X-Forwarded-For, or the value itself. */
+/** A single address, or the first entry of a list. Callers must pass an already-trusted address (see apps/server clientAddress). */
 export const clientIp = (forwardedFor: string | null | undefined) => forwardedFor?.split(',')[0]?.trim() || undefined;
 
 export const hostOf = (url: string) => {
