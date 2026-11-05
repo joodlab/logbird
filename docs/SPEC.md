@@ -48,9 +48,11 @@ inserted in one statement. A Postgres/queue buffer can be added later behind the
 
 ## 3. Recommended event envelope
 
-Supplied `occurredAt` must be ISO-8601 or epoch milliseconds between receive time minus 3650 days
-and plus 24 hours. Unparseable/out-of-window values are rejected per event, with an epoch-seconds hint
-for numeric magnitudes below 1e11. Omitted values use receive time.
+Supplied `occurredAt` should be ISO-8601 or epoch milliseconds between receive time minus 3650 days
+and plus 24 hours. Because only `action` is required, an unusable value (unparseable, out of window, or epoch seconds
+— numeric magnitudes below 1e11) never drops the event: it is stored at receive time, the original is kept in
+`attributes['trailmark.occurredAt.rejected']`, and the ingest response reports it in `warnings[]` (additive field).
+Omitted values use receive time.
 
 ```jsonc
 {

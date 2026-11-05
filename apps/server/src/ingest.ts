@@ -41,12 +41,14 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
     throw new ApiError(413, 'payload_too_large', 'Maximum 1000 events and 256 KB per event.');
   const rows: import('@trailmark/clickhouse').EventRow[] = [],
     ids: string[] = [],
-    rejected: { index: number; reason: string }[] = [];
+    rejected: { index: number; reason: string }[] = [],
+    warnings: { index: number; reason: string }[] = [];
   for (const [index, event] of events.entries()) {
     const normalized = normalizeEvent(event, { projectId, receivedAt: new Date(), sdk });
     if (normalized.ok) {
       rows.push(normalized.row);
       ids.push(normalized.id);
+      if (normalized.warning) warnings.push({ index, reason: normalized.warning });
     } else rejected.push({ index, reason: normalized.reason });
   }
   await withProjectLock(
@@ -67,7 +69,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
     },
     { mode: 'shared' },
   );
-  return ingestResponseSchema.parse({ accepted: ids.length, ids, rejected });
+  return ingestResponseSchema.parse({ accepted: ids.length, ids, rejected, warnings });
 }
 export function audit(c: Context<AppEnv>, action: string, target: { type: string; id: string; name?: string }, changes?: unknown[]) {
   return ingest(`ws:${c.get('activeOrganizationId')}`, {

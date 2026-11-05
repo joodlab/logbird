@@ -87,6 +87,8 @@ export const ingestResponseSchema = z.object({
   accepted: z.number().int(),
   ids: z.array(z.string()),
   rejected: z.array(z.object({ index: z.number().int(), reason: z.string() })),
+  /** Accepted events that were adjusted, e.g. an unusable occurredAt stored at receive time (original kept in attributes). */
+  warnings: z.array(z.object({ index: z.number().int(), reason: z.string() })).default([]),
 });
 export type IngestResponse = z.infer<typeof ingestResponseSchema>;
 

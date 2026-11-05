@@ -6200,6 +6200,27 @@
                         "type": "object"
                       },
                       "type": "array"
+                    },
+                    "warnings": {
+                      "default": [],
+                      "items": {
+                        "properties": {
+                          "index": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "reason"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
                     }
                   },
                   "required": [
@@ -8290,6 +8311,27 @@
                         "type": "object"
                       },
                       "type": "array"
+                    },
+                    "warnings": {
+                      "default": [],
+                      "items": {
+                        "properties": {
+                          "index": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "reason"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
                     }
                   },
                   "required": [
@@ -8972,7 +9014,7 @@
   "servers": [
     {
       "description": "This Trailmark instance",
-      "url": "http://localhost:4600"
+      "url": "http://localhost:4900"
     }
   ]
 }

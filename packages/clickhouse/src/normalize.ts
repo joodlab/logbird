@@ -68,14 +68,23 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     tenant = object(e.tenant),
     context = object(e.context),
     imp = object(e.impersonator);
-  const date = typeof e.occurredAt === 'string' || typeof e.occurredAt === 'number' ? new Date(e.occurredAt) : ctx.receivedAt;
-  if (e.occurredAt !== undefined && typeof e.occurredAt !== 'string' && typeof e.occurredAt !== 'number')
-    return { ok: false as const, reason: 'occurredAt must be ISO-8601 or epoch milliseconds' };
-  if (typeof e.occurredAt === 'number' && Math.abs(e.occurredAt) < 1e11)
-    return { ok: false as const, reason: 'occurredAt looks like epoch seconds; send milliseconds or ISO-8601' };
-  if (!Number.isFinite(date.getTime())) return { ok: false as const, reason: 'occurredAt is not a valid date' };
-  if (date.getTime() < ctx.receivedAt.getTime() - 3650 * 86_400_000 || date.getTime() > ctx.receivedAt.getTime() + 86_400_000)
-    return { ok: false as const, reason: 'occurredAt must be within the last 3650 days and the next 24 hours (epoch milliseconds or ISO-8601)' };
+  // Only `action` is required: a bad occurredAt never drops the event. It is stored at receive time, the original value
+  // is kept in attributes['trailmark.occurredAt.rejected'] (and in payload), and the caller gets a warning.
+  const occurredAtProblem = (() => {
+    if (e.occurredAt === undefined || e.occurredAt === null || e.occurredAt === '') return null;
+    if (typeof e.occurredAt !== 'string' && typeof e.occurredAt !== 'number') return 'occurredAt must be ISO-8601 or epoch milliseconds';
+    if (typeof e.occurredAt === 'number' && Math.abs(e.occurredAt) < 1e11)
+      return 'occurredAt looks like epoch seconds; send milliseconds or ISO-8601';
+    const t = new Date(e.occurredAt).getTime();
+    if (!Number.isFinite(t)) return 'occurredAt is not a valid date';
+    if (t < ctx.receivedAt.getTime() - 3650 * 86_400_000 || t > ctx.receivedAt.getTime() + 86_400_000)
+      return 'occurredAt must be within the last 3650 days and the next 24 hours';
+    return null;
+  })();
+  const occurredAtValid = e.occurredAt !== undefined && e.occurredAt !== null && e.occurredAt !== '' && !occurredAtProblem;
+  const date = occurredAtValid ? new Date(e.occurredAt as string | number) : ctx.receivedAt;
+  if (occurredAtProblem) attributes['trailmark.occurredAt.rejected'] = value(e.occurredAt).slice(0, 256);
+  const warning = occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null;
   const id = text(e.id, 256) || uuidv7();
   const row = {
     project_id: ctx.projectId,
@@ -117,7 +126,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     payload,
     conformance: Math.round(
       ([
-        e.occurredAt,
+        occurredAtValid,
         actor.id,
         actor.type,
         e.outcome,
@@ -133,6 +142,6 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     schema_version: text(e.schemaVersion, 32),
     sdk: text(ctx.sdk, 128),
   };
-  return { ok: true as const, row, id };
+  return { ok: true as const, row, id, warning };
 }
 export type EventRow = Extract<ReturnType<typeof normalizeEvent>, { ok: true }>['row'];
