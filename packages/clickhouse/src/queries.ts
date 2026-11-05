@@ -458,13 +458,18 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
     query_params: { p, before: before?.toISOString().replace('T', ' ').slice(0, -1) },
     clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
   });
+  await rebuildProjectRollups(ch, p, !!before);
+}
+
+/** Caller holds the project ingestion lock. Rebuild from surviving raw rows. */
+export async function rebuildProjectRollups(ch: ClickHouseClient, p: string, rebuild = true) {
   for (const table of ['events_by_minute', 'entities', 'attribute_keys'])
     await ch.command({
       query: `DELETE FROM ${table} WHERE project_id={p:String}`,
       query_params: { p },
       clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
     });
-  if (before) {
+  if (rebuild) {
     const { readFile } = await import('node:fs/promises');
     const sql = await readFile(new URL('../migrations/002_rollups.sql', import.meta.url), 'utf8');
     for (const statement of sql.split(';')) {

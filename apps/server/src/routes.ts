@@ -26,6 +26,7 @@ import { audit } from './ingest';
 import { generateApiKey } from './keys';
 import { requireProjectAccess, requireSession } from './middlewares';
 import { creatorSelect, serializeKey, serializeProject, serializeView } from './serialize';
+import { invalidateSetup } from './setup-cache';
 import type { AppEnv } from './types';
 
 const doc = (summary: string, schema: z.ZodType, status = 200) =>
@@ -133,7 +134,7 @@ export const managementRoutes = new Hono<AppEnv>()
       if (!result.success) throw new ApiError(422, 'validation_error', 'Invalid request body.', result.error);
     }),
     async (c) => {
-      const { confirm, ...input } = c.req.valid('json');
+      const { confirm, retentionReviewed, setupDismissed, ...input } = c.req.valid('json');
       // Serialize policy changes so concurrent requests cannot bypass slug confirmation.
       const { project, before } = await withProjectLock(c.get('project').id, async (tx) => {
         const id = c.get('project').id;
@@ -141,9 +142,25 @@ export const managementRoutes = new Hono<AppEnv>()
         const current = await tx.project.findUniqueOrThrow({ where: { id } });
         if (input.retentionDays !== undefined && input.retentionDays < current.retentionDays && confirm !== current.slug)
           throw new ApiError(422, 'confirmation_required', 'Type the project slug to lower retention.');
-        return { project: await tx.project.update({ where: { id }, data: input }), before: current.retentionDays };
+        return {
+          project: await tx.project.update({
+            where: { id },
+            data: {
+              ...input,
+              ...(retentionReviewed || (input.retentionDays !== undefined && input.retentionDays !== current.retentionDays)
+                ? { retentionReviewedAt: new Date() }
+                : {}),
+              ...(setupDismissed !== undefined ? { setupDismissedAt: setupDismissed ? new Date() : null } : {}),
+            },
+          }),
+          before: current.retentionDays,
+        };
       });
+      invalidateSetup(project.id);
       if (input.retentionDays !== undefined) await enforceProjectRetention(project.id);
+      if (retentionReviewed) await audit(c, 'project.retention.reviewed', { type: 'project', id: project.id });
+      if (setupDismissed !== undefined)
+        await audit(c, 'project.setup.dismissed', { type: 'project', id: project.id }, [{ field: 'setupDismissed', after: setupDismissed }]);
       await audit(c, 'project.updated', { type: 'project', id: project.id });
       if (input.retentionDays !== undefined && input.retentionDays !== before)
         await audit(c, 'project.retention.changed', { type: 'project', id: project.id }, [
@@ -182,6 +199,7 @@ export const managementRoutes = new Hono<AppEnv>()
         data: { ...input, projectId: c.get('project').id, createdById: c.get('user').id, hash: material.hash, prefix: material.prefix },
         include: creatorSelect,
       });
+      invalidateSetup(c.get('project').id);
       await audit(c, 'api_key.created', { type: 'api_key', id: key.id });
       return c.json({ key: serializeKey(key), secret: material.secret }, 201);
     },
@@ -195,6 +213,7 @@ export const managementRoutes = new Hono<AppEnv>()
         data: { revokedAt: new Date() },
       });
       if (!result.count) throw new ApiError(404, 'not_found', 'API key not found.');
+      invalidateSetup(c.get('project').id);
       await audit(c, 'api_key.revoked', { type: 'api_key', id: c.req.param('keyId') });
       return c.body(null, 204);
     },
