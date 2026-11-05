@@ -31,6 +31,13 @@
   // classic runtime and requires React to remain in scope.
   "overrides": [
     {
+      "includes": [
+        "packages/integrations/vue/**",
+        "packages/integrations/nuxt/**"
+      ],
+      "linter": { "rules": { "correctness": { "useHookAtTopLevel": "off" } } }
+    },
+    {
       "includes": ["packages/email/src/templates/**"],
       "javascript": { "jsxRuntime": "reactClassic" }
     }

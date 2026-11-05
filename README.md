@@ -49,3 +49,8 @@ are at least once, as documented in packages/clickhouse/README.md.
 Retention lowering requires the slug and synchronously purges and rebuilds
 derived tables. Ingestion and worker purges share a Postgres advisory lock
 across processes. Failed rebuilds block ingestion until a successful retry.
+
+## Integrations
+
+First-party [Hono, TanStack Start, Vue and Nuxt integrations](docs/integrations.md) use our hand-written SDK.
+Ingest stays server-side; browser history panels use an authorized backend read proxy.

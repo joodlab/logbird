@@ -1,0 +1,31 @@
+{
+  "measuredAt": "2026-11-05T07:00:29.166Z",
+  "endpoint": "http://127.0.0.1:4731",
+  "results": [
+    {
+      "framework": "hono",
+      "ingest": "real framework route -> SDK -> HTTP 202 -> ClickHouse",
+      "read": "event visible with actor, tenant, target, operation",
+      "history": 200
+    },
+    {
+      "framework": "vue",
+      "ingest": "real framework route -> SDK -> HTTP 202 -> ClickHouse",
+      "read": "event visible with actor, tenant, target, operation",
+      "history": 200
+    },
+    {
+      "framework": "tanstack-start",
+      "ingest": "real framework route -> SDK -> HTTP 202 -> ClickHouse",
+      "read": "event visible with actor, tenant, target, operation",
+      "history": 200
+    },
+    {
+      "framework": "nuxt",
+      "ingest": "real framework route -> SDK -> HTTP 202 -> ClickHouse",
+      "read": "event visible with actor, tenant, target, operation",
+      "history": 200
+    }
+  ],
+  "cleanup": "owned project, keys and events removed in finally; owned processes stopped"
+}
