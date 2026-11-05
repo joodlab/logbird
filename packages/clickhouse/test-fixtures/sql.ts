@@ -25,6 +25,11 @@ export const attacks = [
   'throwIf(1)',
   '`project_id` = 1',
   '"project_id" = 1',
+  '`action\n    Identifier event_id` = 1',
+  "`event_id` = 'x'",
+  '$$x$$ = action',
+  "action = 'a' -- ' ",
+  "action = 'it''s' ; SELECT 1",
   '\u0430ction = 1',
   `${'('.repeat(200)}1${')'.repeat(200)}`,
   'x'.repeat(4097),
@@ -38,4 +43,6 @@ export const positives = [
   String.raw`match(action, '^booking\\.')`,
   "outcome IN ('failure','denied')",
   '1 OR 1',
+  "description LIKE '%#%' AND action != 'a--b'",
+  String.raw`action = 'it''s; fine' OR action = 'x\'y {p:String} /* not a comment */'`,
 ];

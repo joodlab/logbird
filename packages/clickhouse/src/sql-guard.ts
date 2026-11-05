@@ -58,6 +58,32 @@ function walk(node: Node, q: string, scope = new Set<string>(), depth = 0) {
   }
   for (const child of node.children) walk(child, q, scope, depth + 1);
 }
+/**
+ * String-aware pre-check. Outside single-quoted string literals we refuse comments, statement separators, query
+ * parameters, heredoc strings and quoted identifiers. Quoted identifiers matter for safety, not just style: ClickHouse
+ * unescapes them (a backslash-n inside backticks becomes a real newline), and EXPLAIN AST prints identifier names raw, so a newline inside one could forge extra
+ * lines in the indentation-based tree we parse. Allowed columns never need quoting.
+ */
+function lexicalCheck(q: string) {
+  let inString = false;
+  for (let i = 0; i < q.length; i++) {
+    const c = q[i]!;
+    if (inString) {
+      if (c === '\\') i++;
+      else if (c === "'") {
+        if (q[i + 1] === "'") i++;
+        else inString = false;
+      }
+      continue;
+    }
+    if (c === "'") inString = true;
+    else if (c === '`' || c === '"')
+      reject('not_allowed', q, 'Quoted identifiers are not supported; use plain column names and single-quoted strings', i, i + 1);
+    else if (c === ';' || c === '#' || c === '$' || c === '{' || c === '}')
+      reject('not_allowed', q, `"${c}" is not allowed outside string literals (no comments, separators or query parameters)`, i, i + 1);
+    else if ((c === '-' && q[i + 1] === '-') || (c === '/' && q[i + 1] === '*')) reject('not_allowed', q, 'Comments are not allowed', i, i + 2);
+  }
+}
 const caches = new WeakMap<ClickHouseClient, Map<string, number>>();
 const baselines = new WeakMap<ClickHouseClient, Promise<string>>();
 function extract(tree: Node): Node {
@@ -83,7 +109,7 @@ async function explain(ch: ClickHouseClient, q: string) {
 }
 export async function validateSql(ch: ClickHouseClient, q = ''): Promise<string> {
   if (Buffer.byteLength(q) > 4096) reject('too_complex', q, 'SQL exceeds 4096 bytes');
-  if (/;|--|#|\/\*|\{[^}]*:[^}]*\}/.test(q)) reject('not_allowed', q, 'Comments, semicolons and query parameters are not allowed');
+  lexicalCheck(q);
   const expression = q.trim() ? q : '1';
   const cache = caches.get(ch) ?? new Map<string, number>();
   caches.set(ch, cache);
