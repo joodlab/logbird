@@ -48,6 +48,12 @@ inserted in one statement. A Postgres/queue buffer can be added later behind the
 
 ## 3. Recommended event envelope
 
+Supplied `occurredAt` should be ISO-8601 or epoch milliseconds between receive time minus 3650 days
+and plus 24 hours. Because only `action` is required, an unusable value (unparseable, out of window, or epoch seconds
+— numeric magnitudes below 1e11) never drops the event: it is stored at receive time, the original is kept in
+`attributes['trailmark.occurredAt.rejected']`, and the ingest response reports it in `warnings[]` (additive field).
+Omitted values use receive time.
+
 ```jsonc
 {
   "id": "01J…",                     // idempotency key (UUIDv7/ULID). Server generates when absent.
@@ -154,7 +160,7 @@ CREATE TABLE events
 ENGINE = ReplacingMergeTree(received_at)
 PARTITION BY toYYYYMM(timestamp)
 ORDER BY (project_id, timestamp, event_id)
-TTL toDateTime(timestamp) + INTERVAL 3650 DAY DELETE   -- hard cap; per-project retention is enforced by the worker
+TTL toDateTime(least(received_at + INTERVAL 3650 DAY, toDateTime64('2106-02-07 06:28:15', 3, 'UTC'))) DELETE   -- hard cap; per-project retention is enforced by the worker
 SETTINGS index_granularity = 8192;
 ```
 
@@ -168,10 +174,20 @@ Rollups (materialized views, populated on insert):
 - `attribute_keys` (AggregatingMergeTree): `project_id, key, count, max(last_seen), groupUniqArray(5)(value)`
   → Fields page and query autocomplete.
 
-Retention: `apps/worker` runs hourly (and on demand after a retention change):
-`DELETE FROM events WHERE project_id = {p} AND timestamp < now64(3) - toIntervalDay({days})` (lightweight delete),
-same for rollups/entities by their time column. Each run is logged (`RetentionRun` in Postgres) and shown in
-Settings → Retention ("last purge", "oldest event"). Project deletion purges all of its rows.
+Retention: `apps/worker` runs hourly and immediately after retention decreases. Each run is logged
+(`RetentionRun` in Postgres) and shown in Settings. Project deletion purges all of its rows.
+
+Retention skips mutations and exclusive locking when no expired row exists, recording a completed zero-deletion run.
+Retention increases do not trigger a purge. Actual purges delete minute buckets up to the cutoff minute and
+recompute that partial minute exactly from survivors. Only entities and attribute keys present in expired
+rows are recomputed, preserving exact counts and extrema without rebuilding unaffected histories.
+The hard TTL uses receipt time plus 3650 days; event-time policy remains enforced by the retention worker.
+The migration changes TTL metadata without materializing it or removing existing rows.
+
+TTL arithmetic stays in DateTime64 until the final cast and clamps to the DateTime ceiling in 2106, avoiding UInt32 overflow.
+
+Failed/abandoned runs use a full aggregate rebuild on retry, including when their raw deletion already
+finished. This repair path is the exception to the no-op optimization.
 
 Runs heartbeat every 30 seconds with a ten-minute lease (legacy null heartbeats use startedAt).
 Recovery under the project ingestion lock marks expired running runs failed with error `abandoned`.
@@ -203,6 +219,11 @@ set by `event_id` when needed; cursor = `(timestamp, event_id)` keyset; `total` 
 `max_execution_time` guard (fall back to "10k+").
 
 ## 5. Server API
+
+Ingest bodies may be one event, `{ "events": [...] }`, or a bare JSON array of 1-1000 events.
+SDK partial rejections invoke `onDrop` for rejected indices and `onError` with reasons. Permanent HTTP
+errors (except 429) drop the batch and report; transient failures retain it for retry.
+
 
 The **route table and every request/response schema live in `packages/contracts`** — implement them exactly.
 - Internal API (`/api/*`, better-auth session cookie, org membership enforced, project must belong to the

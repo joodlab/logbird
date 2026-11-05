@@ -119,7 +119,7 @@ describe('normalization', () => {
     const r = normalizeEvent(
       {
         action: 'x',
-        occurredAt: 1,
+        occurredAt: ctx.receivedAt.toISOString(),
         actor: { id: 'x', type: 'user' },
         outcome: 'success',
         targets: [{ type: 'x', id: '1' }],
@@ -130,7 +130,20 @@ describe('normalization', () => {
       },
       ctx,
     );
+    expect(r.ok).toBe(true);
     if (r.ok) expect(r.row.conformance).toBe(100);
+  });
+  it('keeps events with an unusable occurredAt at receive time, with a warning and the original value', () => {
+    for (const occurredAt of [1_700_000_000, 'not a date', '2099-01-01T00:00:00Z', { at: 1 }]) {
+      const r = normalizeEvent({ action: 'x', occurredAt }, ctx);
+      expect(r.ok).toBe(true);
+      if (!r.ok) continue;
+      expect(r.warning).toMatch(/stored at receive time/);
+      expect(new Date(r.row.timestamp).getTime()).toBe(ctx.receivedAt.getTime());
+      expect(r.row.attributes['trailmark.occurredAt.rejected']).toBeTruthy();
+    }
+    const ok = normalizeEvent({ action: 'x', occurredAt: ctx.receivedAt.toISOString() }, ctx);
+    expect(ok.ok && ok.warning).toBe(null);
   });
   it.each([null, [], {}, { action: 1 }])('rejects no action %s', (input) => expect(normalizeEvent(input, ctx).ok).toBe(false));
 });

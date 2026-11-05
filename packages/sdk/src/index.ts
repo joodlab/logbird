@@ -143,12 +143,23 @@ export class Trailmark {
         error = e;
       }
       if (response?.ok) {
-        const result = (await response.json()) as { rejected?: unknown[] };
-        if (result.rejected?.length) this.report(new Error(`${result.rejected.length} events rejected by Trailmark`));
+        const result = (await response.json()) as { rejected?: { index: number; reason: string }[] };
+        if (result.rejected?.length) {
+          for (const rejection of result.rejected) {
+            const event = batch[rejection.index];
+            if (event) this.drop(event);
+          }
+          this.report(new Error(`${result.rejected.length} events rejected by Trailmark: ${result.rejected.map((r) => r.reason).join('; ')}`));
+        }
         return;
       }
       const retry = !response || response.status === 429 || response.status >= 500;
-      if (!retry || attempt >= this.retries) throw error ?? new Error(`Trailmark HTTP ${response?.status}`);
+      if (!retry) {
+        for (const event of batch) this.drop(event);
+        this.report(new Error(`Trailmark HTTP ${response?.status}; batch dropped`));
+        return;
+      }
+      if (attempt >= this.retries) throw error ?? new Error(`Trailmark HTTP ${response?.status}`);
       const retryAfter = response?.headers.get('Retry-After');
       const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
       const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** attempt) * (0.5 + Math.random());

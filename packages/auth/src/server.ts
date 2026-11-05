@@ -126,7 +126,14 @@ export const auth = betterAuth({
             }),
           );
         },
+        afterRejectInvitation: async ({ organization, invitation, user }) => {
+          await record(organization.id, 'member.invitation.rejected', user, { type: 'invitation', id: invitation.id, name: invitation.email });
+        },
+        afterCancelInvitation: async ({ organization, invitation, cancelledBy }) => {
+          await record(organization.id, 'member.invitation.canceled', cancelledBy, { type: 'invitation', id: invitation.id, name: invitation.email });
+        },
         afterAcceptInvitation: async ({ organization, invitation, member, user }) => {
+          await record(organization.id, 'member.invitation.accepted', user, { type: 'invitation', id: invitation.id, name: invitation.email });
           if (!invitation.inviterId || invitation.inviterId === user.id) return;
           await notify('member-joined', async () => {
             const inviter = await prisma.user.findUnique({ where: { id: invitation.inviterId }, select: { email: true } });
