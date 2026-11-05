@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import Redis from 'ioredis';
 import { env } from './env';
@@ -10,13 +11,19 @@ rateLimitStore.on('error', () => console.error(JSON.stringify({ level: 'error', 
 const script = `local n = redis.call('INCR', KEYS[1])
 if n == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
 return n`;
+/**
+ * The client address we can trust: with TRUST_PROXY the rightmost X-Forwarded-For entry (appended by our single
+ * trusted proxy; leftmost entries are client-controlled), otherwise the socket peer. Used for rate limits, audit
+ * context and the sign-in email's "requested from" hint.
+ */
+export function clientAddress(c: Context): string | undefined {
+  return env.TRUST_PROXY === 'true'
+    ? c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim() || undefined
+    : (c.env as { incoming?: { socket: { remoteAddress?: string } } })?.incoming?.socket.remoteAddress;
+}
 export function requestRateLimit(scope: string, limit: number, windowMs = 60_000, failOpen = false) {
   return createMiddleware(async (c, next) => {
-    const peer =
-      env.TRUST_PROXY === 'true'
-        ? // Rightmost entry = the address our (single) trusted proxy appended; leftmost entries are client-controlled.
-          c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim()
-        : (c.env as { incoming?: { socket: { remoteAddress?: string } } })?.incoming?.socket.remoteAddress;
+    const peer = clientAddress(c);
     const digest = createHash('sha256')
       .update(peer || 'unknown')
       .digest('hex');

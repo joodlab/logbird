@@ -21,7 +21,7 @@ import { invitationRoutes } from './invitation-routes';
 import { inviteLinkRoutes } from './invite-link-routes';
 import { authorizeMutation } from './middlewares/require-role';
 import { doc, routeDoc } from './openapi';
-import { rateLimit } from './rate-limit';
+import { clientAddress, rateLimit } from './rate-limit';
 import { managementRoutes } from './routes';
 import { setupRoutes } from './setup-routes';
 import type { AppEnv } from './types';
@@ -93,7 +93,7 @@ setAuthAuditHandler((e) =>
 app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   return authAuditContext.run(
-    { actor: session?.user, requestId: c.get('requestId'), ip: c.req.header('x-forwarded-for') ?? '', userAgent: c.req.header('user-agent') ?? '' },
+    { actor: session?.user, requestId: c.get('requestId'), ip: clientAddress(c) ?? '', userAgent: c.req.header('user-agent') ?? '' },
     () => auth.handler(c.req.raw),
   );
 });

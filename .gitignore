@@ -78,3 +78,6 @@ experiments/hey-api/node_modules/
 # Private workstation instructions
 AGENTS.local.md
 CLAUDE.local.md
+
+# react-email preview server cache (apps/email)
+.react-email/
