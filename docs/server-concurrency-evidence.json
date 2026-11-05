@@ -7,7 +7,7 @@
   },
   {
     "after": "ClickHouse DELETE paused; connection_limit=2",
-    "elapsedMs": 3702.7327000000005,
+    "elapsedMs": 5866.581899999999,
     "sessions": [
       {
         "idleTransactions": 0,
@@ -19,638 +19,638 @@
       {
         "group": "B read",
         "status": 200,
-        "ms": 1167.2924000000003,
+        "ms": 528.0356999999999,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1023.5368999999996,
+        "ms": 470.29309999999987,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1069.9233,
+        "ms": 477.7190999999998,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1062.2974999999997,
+        "ms": 491.0843,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1056.4798999999998,
+        "ms": 485.32100000000037,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1602.9808000000003,
+        "ms": 867.3829999999998,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1066.0724,
+        "ms": 496.7451000000001,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 869.5249999999996,
+        "ms": 422.8388,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1128.0469999999996,
+        "ms": 521.8474999999999,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1076.6421000000005,
+        "ms": 498.24580000000014,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1073.2561,
+        "ms": 494.47699999999986,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1111.3096,
+        "ms": 514.0353,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1088.5851000000002,
+        "ms": 518.7040000000002,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1621.8698,
+        "ms": 887.9913999999999,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1114.7797999999998,
+        "ms": 516.7173000000003,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 862.6035000000002,
+        "ms": 424.8299000000002,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1187.0926,
+        "ms": 551.7408,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1141.7347,
+        "ms": 524.8897999999999,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1171.9039000000002,
+        "ms": 523.5562999999997,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1182.4777,
+        "ms": 542.0147000000002,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1184.3740000000003,
+        "ms": 543.5691000000002,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1637.9706,
+        "ms": 884.788,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1162.7213000000002,
+        "ms": 544.7013999999999,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 924.8042,
+        "ms": 423.6729,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1257.5788000000002,
+        "ms": 598.9737,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1179.6525000000001,
+        "ms": 548.0164,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1220.8324000000002,
+        "ms": 553.2207000000003,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1209.0929,
+        "ms": 565.4730000000004,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1209.962,
+        "ms": 570.1767999999997,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1636.2715000000003,
+        "ms": 892.5852,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1212.7873,
+        "ms": 567.3775,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 889.4731000000006,
+        "ms": 428.2044000000001,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1271.2720000000004,
+        "ms": 630.4851000000003,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1247.7019999999998,
+        "ms": 572.6666,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1282.7492000000002,
+        "ms": 593.815,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1267.3225999999995,
+        "ms": 595.0781000000002,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1245.2894000000001,
+        "ms": 600.5056,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1665.426,
+        "ms": 912.5644000000002,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1258.1236000000004,
+        "ms": 599.9386,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 909.0880000000002,
+        "ms": 430.08510000000024,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1323.3495999999996,
+        "ms": 639.5411000000004,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1255.3017999999997,
+        "ms": 603.1368000000002,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1262.3943,
+        "ms": 600.8761,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1324.3490000000002,
+        "ms": 617.9859999999999,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1298.2921999999999,
+        "ms": 617.2940000000003,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1681.8545,
+        "ms": 928.3364999999999,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1296.8640999999998,
+        "ms": 624.4866999999999,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 943.5962,
+        "ms": 430.8346999999999,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1340.1734999999994,
+        "ms": 647.4378999999999,
         "retryAfter": null
       },
       {
         "group": "B read",
         "status": 200,
-        "ms": 1312.1221000000005,
+        "ms": 625.931,
         "retryAfter": null
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1259.3149999999996,
+        "ms": 582.1154999999999,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1248.1436999999996,
+        "ms": 588.0609,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1272.2093,
+        "ms": 590.2282,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1283.1231999999995,
+        "ms": 592.1031000000003,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1269.0995000000003,
+        "ms": 596.0036999999998,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1305.6904,
+        "ms": 597.2896000000001,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1286.8540000000003,
+        "ms": 600.9822000000004,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1284.8298,
+        "ms": 601.241,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1297.2054999999996,
+        "ms": 607.5181000000002,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1308.1387999999997,
+        "ms": 607.2085000000002,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1315.8602999999998,
+        "ms": 612.6387,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1324.6583999999998,
+        "ms": 614.8706999999999,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1328.3296,
+        "ms": 616.3896999999997,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1316.5172000000002,
+        "ms": 618.2828,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1325.2313999999997,
+        "ms": 626.5303999999996,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1329.0791,
+        "ms": 622.8357000000001,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1341.9078,
+        "ms": 629.3274999999999,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1335.0955,
+        "ms": 631.1364999999996,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1335.8881000000006,
+        "ms": 633.9491000000003,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1347.7377999999999,
+        "ms": 636.4874999999997,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1345.8126000000007,
+        "ms": 639.8606,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1345.2813000000006,
+        "ms": 640.4366,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1356.8754,
+        "ms": 642.8000999999999,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1350.9335,
+        "ms": 643.2234000000003,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1348.1311999999998,
+        "ms": 645.8038999999999,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1352.1746999999996,
+        "ms": 646.3018999999999,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1354.7055,
+        "ms": 648.4024,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1360.4219000000003,
+        "ms": 649.0966000000003,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1365.9444000000003,
+        "ms": 652.9753000000001,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1367.9923999999996,
+        "ms": 652.3627000000001,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1371.0485000000003,
+        "ms": 655.0018,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1371.8807000000002,
+        "ms": 655.5754000000002,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1375.5476999999996,
+        "ms": 657.6865000000003,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1376.2603,
+        "ms": 658.6664000000001,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1381.3055,
+        "ms": 660.8798000000002,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1378.9303999999997,
+        "ms": 662.2981,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1387.1686000000004,
+        "ms": 665.0621999999998,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1384.5477,
+        "ms": 664.3011999999999,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1389.9844000000003,
+        "ms": 665.6527000000001,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1393.6397000000006,
+        "ms": 666.8597999999997,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1392.4916999999996,
+        "ms": 667.2103999999999,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1404.0837000000001,
+        "ms": 669.1874000000003,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1395.9241999999995,
+        "ms": 669.7287999999999,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1398.1356999999994,
+        "ms": 670.0933999999997,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1399.0649000000003,
+        "ms": 672.6089000000002,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1399.8615000000004,
+        "ms": 674.3058999999998,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1401.8808,
+        "ms": 673.7651000000001,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1406.6310000000003,
+        "ms": 675.5825999999997,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1408.8581,
+        "ms": 675.8836999999999,
         "retryAfter": "1"
       },
       {
         "group": "A read",
         "status": 503,
-        "ms": 1411.9406,
+        "ms": 676.8086000000003,
         "retryAfter": "1"
       },
       {
         "group": "B ingest",
         "status": 202,
-        "ms": 1537.0559999999996,
+        "ms": 781.0718000000002,
         "retryAfter": null
       },
       {
         "group": "readyz",
         "status": 200,
-        "ms": 37.10519999999997,
+        "ms": 27.89280000000008,
         "retryAfter": null
       },
       {
         "group": "A ingest",
         "status": 503,
-        "ms": 1015.2139999999999,
+        "ms": 3501.1872,
         "retryAfter": "1"
       },
       {
         "group": "A sample removal",
         "status": 503,
-        "ms": 477.7060999999994,
+        "ms": 3394.0737,
         "retryAfter": "1"
       },
       {
         "group": "A project deletion",
         "status": 503,
-        "ms": 1448.4804000000004,
+        "ms": 3855.2513,
         "retryAfter": "1"
       }
     ]
   },
   {
     "purgeCompleted": true,
-    "projectA": "cmw3ezxk40000mcyoiitqfcj7",
-    "projectB": "cmw3ezxro0002mcyob3ujpcks"
+    "projectA": "cmw3fe4vk00002wyosolqw3ba",
+    "projectB": "cmw3fe52400022wyolhbc174o"
   }
 ]

@@ -180,9 +180,13 @@ sweep retries all projects, continuing past individual failures. Live running ru
 and project setup; retention status remains readable. Readiness checks are short non-transactional
 statements, and no read holds a project lock or a Postgres connection during ClickHouse I/O.
 An already-started read/export is not a snapshot and may overlap a purge.
-Writers (ingest, retention, sample replacement/removal and deletion) serialize using session advisory
-locks in a separate pool capped at eight connections per process. pg_try_advisory_lock fails immediately
-on contention (HTTP 503 project_busy, Retry-After: 1); admission is bounded without a wait queue.
+Writers use session advisory locks held on a separate pool (16 connections per process), never a transaction:
+ingest (including Trailmark's own audit writes) takes a **shared** data lock, so concurrent ingests for one project
+coexist; maintenance (retention, sample replacement/removal, deletion, policy changes) takes it **exclusive**. A
+second "gate" lock gives maintenance writer preference: while maintenance waits or runs, new ingests cannot pass the
+gate, so a steady ingest stream cannot starve it, and in-flight ingests (tens of ms) drain first. Every acquisition is
+a non-blocking try with a bounded retry (default 3 s); on timeout the caller gets HTTP 503 project_busy with
+Retry-After: 1 (the SDK retries), and no Prisma connection ever waits behind a purge.
 The lock statements also have a one-second lock timeout and two-second statement/connection budgets.
 No Postgres transaction spans ClickHouse work. Prisma uses its own independent pool; connection_limit
 in DATABASE_URL sets that pool size (default 10). Callbacks are exclusive sections, not transactions.

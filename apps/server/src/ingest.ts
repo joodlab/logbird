@@ -49,13 +49,18 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
       ids.push(normalized.id);
     } else rejected.push({ index, reason: normalized.reason });
   }
-  await withProjectLock(projectId, async (tx) => {
-    if (!projectId.startsWith('ws:') && !(await tx.project.findUnique({ where: { id: projectId } })))
-      throw new ApiError(404, 'not_found', 'Project not found.');
-    await requireRetentionReady(tx, projectId);
-    await insertEvents(clickhouse, rows);
-    invalidateSetup(projectId);
-  });
+  await withProjectLock(
+    projectId,
+    async (tx) => {
+      if (!projectId.startsWith('ws:') && !(await tx.project.findUnique({ where: { id: projectId } })))
+        throw new ApiError(404, 'not_found', 'Project not found.');
+      await requireRetentionReady(tx, projectId);
+      await insertEvents(clickhouse, rows);
+      invalidateSetup(projectId);
+      // Shared: concurrent ingests (several app servers, SDK flushes, audit writes) coexist; maintenance excludes them.
+    },
+    { mode: 'shared' },
+  );
   return ingestResponseSchema.parse({ accepted: ids.length, ids, rejected });
 }
 export function audit(c: Context<AppEnv>, action: string, target: { type: string; id: string; name?: string }, changes?: unknown[]) {

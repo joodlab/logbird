@@ -15,9 +15,10 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 /** Separate, bounded session-lock pool: never occupy Prisma's application pool or a transaction during ClickHouse I/O. */
 const lockUrl = new URL(databaseUrl);
 lockUrl.searchParams.set('application_name', 'trailmark-project-locks');
+const LOCK_POOL_MAX = 16;
 const projectLocks = new Pool({
   connectionString: lockUrl.toString(),
-  max: 8,
+  max: LOCK_POOL_MAX,
   idleTimeoutMillis: 1000,
   connectionTimeoutMillis: 2000,
   options: '-c lock_timeout=1000 -c statement_timeout=2000',
@@ -30,25 +31,68 @@ export class ProjectBusyError extends Error {
     this.name = 'ProjectBusyError';
   }
 }
+export interface ProjectLockOptions {
+  /**
+   * shared    – ingestion: many writers of new events may hold it at once.
+   * exclusive – maintenance (retention purge, sample data, deletion, policy changes): excludes everyone.
+   */
+  mode?: 'shared' | 'exclusive';
+  /** How long to keep trying before ProjectBusyError. Never blocks a Prisma connection or a transaction. */
+  waitMs?: number;
+}
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Two session-level advisory locks per project, held on a dedicated bounded pool:
+ *  - data lock (key 0): shared by ingest, exclusive for maintenance;
+ *  - gate (key 1): writer preference — maintenance holds it while waiting for in-flight ingests to drain, and
+ *    ingest must pass it (momentary shared try-lock) before taking the data lock, so a steady ingest stream
+ *    cannot starve maintenance.
+ * Every acquisition is a non-blocking try with a bounded retry loop: a long purge makes callers fail fast with
+ * ProjectBusyError (503 + Retry-After) instead of queueing pooled connections.
+ */
 export async function withProjectLock<T>(
   projectId: string,
   work: (db: import('./generated/client').Prisma.TransactionClient) => Promise<T>,
+  { mode = 'exclusive', waitMs = 3000 }: ProjectLockOptions = {},
 ): Promise<T> {
-  // No queue behind long maintenance, including connection acquisition in this pool.
-  if (admitted >= 8) throw new ProjectBusyError();
+  const deadline = Date.now() + waitMs;
+  while (admitted >= LOCK_POOL_MAX) {
+    if (Date.now() >= deadline) throw new ProjectBusyError();
+    await sleep(25);
+  }
   admitted++;
   let client: PoolClient | undefined;
-  let locked = false;
+  let data = false,
+    gate = false;
+  const shared = mode === 'shared';
+  const tryLock = async (sql: string) => (await (client as PoolClient).query(sql, [projectId])).rows[0]?.locked === true;
   try {
     client = await projectLocks.connect();
-    const result = await client.query('SELECT pg_try_advisory_lock(hashtextextended($1, 0)) locked', [projectId]);
-    locked = result.rows[0]?.locked === true;
-    if (!locked) throw new ProjectBusyError();
+    for (let delay = 10; ; delay = Math.min(delay * 2, 200)) {
+      if (shared) {
+        // Pass the gate (fails while maintenance is waiting or running), then take the shared data lock.
+        if (await tryLock('SELECT pg_try_advisory_lock_shared(hashtextextended($1, 1)) locked')) {
+          data = await tryLock('SELECT pg_try_advisory_lock_shared(hashtextextended($1, 0)) locked');
+          await client.query('SELECT pg_advisory_unlock_shared(hashtextextended($1, 1))', [projectId]);
+        }
+      } else {
+        gate ||= await tryLock('SELECT pg_try_advisory_lock(hashtextextended($1, 1)) locked');
+        if (gate) data = await tryLock('SELECT pg_try_advisory_lock(hashtextextended($1, 0)) locked');
+      }
+      if (data) break;
+      if (Date.now() >= deadline) throw new ProjectBusyError();
+      await sleep(delay);
+    }
     // Database calls use short, independent statements. The callback is NOT a transaction.
     return await work(prisma);
   } finally {
     try {
-      if (client && locked) await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [projectId]);
+      if (client && data)
+        await client.query(
+          shared ? 'SELECT pg_advisory_unlock_shared(hashtextextended($1, 0))' : 'SELECT pg_advisory_unlock(hashtextextended($1, 0))',
+          [projectId],
+        );
+      if (client && gate) await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 1))', [projectId]);
       client?.release();
     } catch (error) {
       client?.release(error instanceof Error ? error : new Error('Project lock connection failed'));
