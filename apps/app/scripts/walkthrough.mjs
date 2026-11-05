@@ -1,6 +1,9 @@
 // Recorded end-to-end walkthrough against the real local stack (`pnpm dev`, demo data): OTP sign-in via Mailpit → overview →
 // explorer query → event detail → operation → impersonation search → actor/tenant profiles → retention preview → API keys →
-// dark mode → Ledger project, then the query bar v2 flows (Query/SQL modes, autocomplete, inline errors, SQL saved view).
+// dark mode → Ledger project, then the query bar v3 flows (suggestions on focus — recent queries, saved views, fields —,
+// values ranked by count, entity matches, operators, Lucene/KQL conversions, mid-query edits, SQL suggestions with
+// signatures, inline errors, SQL saved view) and a separately recorded investigation built only from suggestions in
+// both modes (query-investigation.webm).
 // Then setup & onboarding sections, each in its own (recorded) browser context with fresh throwaway users:
 //   onboarding  brand-new user → You → Workspace → Project → leave and come back (resumes) → inline ingest key → real `curl`
 //               while the first-event step polls → celebration + received event → overview checklist → Setup envelope
@@ -47,6 +50,7 @@ const step = async (name, fn, section = 'tour') => {
   } catch (e) {
     problems.push(`[step] ${name}: ${e.message.split('\n')[0]}`);
     log(`FAIL ${name}: ${e.message.split('\n')[0]}`);
+    await shot(`FAIL-${name.replace(/[^\w-]+/g, '-').slice(0, 60)}`).catch(() => undefined);
   }
 };
 
@@ -184,7 +188,7 @@ await step('ledger project (accept anything)', async () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Query bar v2: Query / SQL modes (STEPS=query-bar)                   */
+/* Query bar v3: suggestions, Query / SQL modes (STEPS=query-bar)      */
 /* ------------------------------------------------------------------ */
 
 const bar = () => page.locator('textarea[role=combobox]');
@@ -198,45 +202,125 @@ const run = async () => {
   await page.keyboard.press('Control+Enter');
   await settle(1800);
 };
+/** Suggestion panel rows, for asserting what the panel offers. */
+const options = () => page.locator('[data-slot=query-suggestions] [role=option]');
+const expectOption = async (text) => {
+  await options().filter({ hasText: text }).first().waitFor({ timeout: 8000 });
+};
 const qb = (name, fn) => step(name, fn, 'query-bar');
+let tempView = null;
 
-await qb('query bar: key autocomplete + highlighting', async () => {
+await qb('query bar: focus shows recent queries, saved views and top fields', async () => {
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto(`${P}/events?range=7d`);
   await settle(1500);
-  await typeQuery('action:booking.* -tenant:* act');
-  await settle(500);
-  await shot('qb-01-query-keys');
-});
-
-await qb('query bar: value autocomplete (actor names)', async () => {
-  await typeQuery('outcome:success actor:');
-  await page.keyboard.type('fai', { delay: 90 });
-  await settle(900);
-  await shot('qb-02-actor-values');
-  await page.keyboard.press('Tab');
+  // Two runs make two recent queries; a saved view (removed again at the end) shows up next to them.
+  await typeQuery('outcome:failure attempt:>1');
   await run();
-});
-
-await qb('query bar: advanced v2 query with results', async () => {
-  await typeQuery(
-    '(action:/crm\\.(bookings|guests)\\.sync\\.completed/ OR action:booking.*) attempt:>=2 conformance:[50 TO 100] -outcome:(failure OR denied)',
-    18,
+  await typeQuery('action:booking.* -tenant:*');
+  await run();
+  tempView = await page.evaluate(
+    async (pid) =>
+      (
+        await fetch(`/api/projects/${pid}/views`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: `Failed CRM syncs (walkthrough ${new Date().toISOString().slice(11, 19)})`,
+            description: null,
+            state: { q: 'outcome:failure action:business-crm.*', range: '7d' },
+          }),
+        })
+      ).json(),
+    jood.id,
   );
-  await run();
-  await shot('qb-03-advanced-query');
+  await page.goto(`${P}/events?range=7d`);
+  await settle(1200);
+  await bar().click();
+  await expectOption('action:booking.* -tenant:*');
+  await expectOption('Failed CRM syncs');
+  await page.waitForTimeout(400);
+  await shot('qb-01-focus-recent-views-fields');
+});
+
+await qb('query bar: fuzzy field names with type, coverage and description', async () => {
+  await typeQuery('tnm');
+  await expectOption('tenant.name');
+  await shot('qb-02-fuzzy-fields');
+});
+
+await qb('query bar: values ranked by count, then value operators', async () => {
+  await typeQuery('outcome:');
+  await expectOption('failure');
+  await shot('qb-03-values-and-operators');
+});
+
+await qb('query bar: free text finds entities by name (rawd → Rawda Suites)', async () => {
+  await typeQuery('outcome:failure rawd');
+  await expectOption('Rawda Suites');
+  await shot('qb-04-entity-match');
+});
+
+await qb('query bar: number operators and date quick ranges', async () => {
+  await typeQuery('attempt:');
+  await expectOption('Greater than');
+  await shot('qb-05-number-operators');
+  await typeQuery('occurredAt:');
+  await expectOption('Last 7 days');
+  await shot('qb-06-date-quick-ranges');
+});
+
+await qb('query bar: boolean operators lead after a complete term', async () => {
+  await typeQuery('outcome:failure ');
+  await expectOption('Either side matches');
+  await shot('qb-07-after-term-operators');
+  await typeQuery('outcome:(failure ');
+  await expectOption('Any of these values');
+  await shot('qb-08-group-or');
+});
+
+await qb('query bar: editing mid-query replaces only the token under the caret', async () => {
+  await typeQuery('outcome:failure tenant:biz_2 attempt:>1');
+  await page.keyboard.press('Home');
+  for (let i = 0; i < 'outcome:'.length; i += 1) await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Control+Space');
+  await expectOption('partial');
+  await shot('qb-09-mid-query-edit');
+  await options().filter({ hasText: 'partial' }).first().hover();
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(300);
+  const value = await bar().inputValue();
+  if (value !== 'outcome:partial tenant:biz_2 attempt:>1') throw new Error(`mid-query edit produced: ${value}`);
+  await page.keyboard.press('Escape');
+  await shot('qb-10-mid-query-replaced');
+});
+
+await qb('query bar: Lucene / KQL spellings are offered and converted', async () => {
+  await typeQuery('tenant = biz_2 && _exists_:impersonator');
+  await page.keyboard.press('Home');
+  for (let i = 0; i < 4; i += 1) await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Control+Space');
+  await expectOption('tenant:biz_2');
+  await shot('qb-11-kql-did-you-mean');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await settle(1800);
+  const value = await bar().inputValue();
+  if (value !== 'tenant:biz_2 AND impersonator:*') throw new Error(`conversion produced: ${value}`);
+  await shot('qb-12-kql-converted');
 });
 
 await qb('query bar: inline error with span', async () => {
   await typeQuery('action:booking.* attempt:>abc');
   await run();
-  await shot('qb-04-inline-error');
+  await shot('qb-13-inline-error');
 });
 
 await qb('query bar: help cheat-sheet', async () => {
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Query syntax help' }).click();
   await settle(500);
-  await shot('qb-05-help');
+  await shot('qb-14-help');
   await page.keyboard.press('Escape');
 });
 
@@ -245,53 +329,82 @@ await qb('query bar: switch to SQL translates simple terms', async () => {
   await run();
   await page.getByRole('button', { name: 'SQL', exact: true }).click();
   await settle(1500);
-  await shot('qb-06-translated-to-sql');
+  await shot('qb-15-translated-to-sql');
 });
 
-await qb('query bar: SQL autocomplete (columns, attributes, values)', async () => {
-  await typeQuery('job_at');
-  await settle(400);
-  await shot('qb-07-sql-columns');
+await qb('query bar: SQL suggestions (operators, values, attribute keys, signatures, time)', async () => {
+  await typeQuery('outcome ');
+  await expectOption('IN (…)');
+  await shot('qb-16-sql-compare-operators');
   await page.keyboard.press('Tab');
-  await page.keyboard.type(' >= 2 AND attri', { delay: 70 });
-  await settle(400);
+  await expectOption('failure');
+  await shot('qb-17-sql-values');
+  await typeQuery('job_attempt >= 2 AND queue');
+  await expectOption("attributes['metadata.queue']");
+  await shot('qb-18-sql-attribute-by-name');
   await page.keyboard.press('Tab');
-  await page.keyboard.type('queue', { delay: 90 });
-  await settle(700);
-  await shot('qb-08-sql-attribute-keys');
   await page.keyboard.press('Tab');
-  await page.keyboard.type(" = '", { delay: 90 });
-  await settle(900);
-  await shot('qb-09-sql-values');
+  await expectOption('business-crm');
+  await page.keyboard.type('crm', { delay: 70 });
   await page.keyboard.press('Tab');
+  await page.keyboard.type(' ', { delay: 70 });
+  await expectOption('AND');
+  await shot('qb-19-sql-combine');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('has(target_types, ', { delay: 50 });
+  await expectOption('booking');
+  await shot('qb-20-sql-signature-values');
+  await typeQuery('timestamp > ');
+  await expectOption('INTERVAL 7 DAY');
+  await shot('qb-21-sql-time');
+  await typeQuery("job_attempt >= 2 AND attributes['metadata.queue'] = 'business-crm'", 15);
   await run();
-  await shot('qb-10-sql-results');
+  await shot('qb-22-sql-results');
 });
 
 await qb('query bar: rejected SQL (subquery)', async () => {
   await typeQuery('action IN (SELECT action FROM events)', 40);
   await run();
-  await shot('qb-11-sql-rejected');
+  await shot('qb-23-sql-rejected');
 });
 
 await qb('query bar: save + restore a SQL view', async () => {
   await typeQuery("job_attempt >= 2 AND attributes['metadata.queue'] = 'business-crm'", 15);
   await run();
   await page.getByRole('button', { name: /save view/i }).click();
-  await page.getByLabel('Name').fill(`CRM retries (SQL) ${new Date().toISOString().slice(11, 19)}`);
+  const name = `CRM retries (SQL) ${new Date().toISOString().slice(11, 19)}`;
+  await page.getByLabel('Name').fill(name);
   await settle(300);
-  await shot('qb-12-save-sql-view');
+  await shot('qb-24-save-sql-view');
   await page.getByRole('button', { name: 'Save view', exact: true }).last().click();
   await settle(1200);
   await page.goto(`${P}/views`);
   await settle(1200);
-  await shot('qb-13-views-sql-badge');
-  await page.locator('main li a').first().click();
+  await shot('qb-25-views-sql-badge');
+  await page.locator('main li a', { hasText: name }).first().click();
   await settle(1800);
-  await shot('qb-14-sql-view-restored');
-  // Leave the shared demo project as we found it: drop the view this run created.
-  const viewId = new URL(page.url()).searchParams.get('view');
-  if (viewId) await page.evaluate(async ([pid, id]) => fetch(`/api/projects/${pid}/views/${id}`, { method: 'DELETE' }), [jood.id, viewId]);
+  await shot('qb-26-sql-view-restored');
+  // Leave the shared demo project as we found it: drop the view this run created (by name, not list position).
+  const views = await (await context.request.get(`${BASE}/api/projects/${jood.id}/views`)).json();
+  for (const v of views.data ?? views) if (v.name === name) await context.request.delete(`${BASE}/api/projects/${jood.id}/views/${v.id}`);
+});
+
+await qb('query bar: forget a recent query (Shift+Delete)', async () => {
+  await page.goto(`${P}/events?range=7d`);
+  await settle(1200);
+  await bar().click();
+  // The highlighted first row is the newest recent query; Shift+Delete forgets it.
+  const first = options().first();
+  await first.waitFor();
+  if ((await first.getAttribute('aria-selected')) !== 'true') throw new Error('first row is not highlighted');
+  const text = (await first.locator('span').first().textContent())?.trim() ?? '';
+  const recent = page.locator('[data-slot=query-suggestions] [role=option]', { has: page.getByRole('button', { name: `Forget ${text}` }) });
+  if ((await recent.count()) !== 1) throw new Error(`first row is not a recent query: ${text}`);
+  await page.keyboard.press('Shift+Delete');
+  await page.waitForTimeout(400);
+  if ((await recent.count()) !== 0) throw new Error(`recent not removed: ${text}`);
+  await shot('qb-27-recent-forgotten');
+  await page.keyboard.press('Escape');
 });
 
 await qb('query bar: dark mode + phone width', async () => {
@@ -299,10 +412,10 @@ await qb('query bar: dark mode + phone width', async () => {
   await page.goto(`${P}/events?range=7d&lang=sql&q=${encodeURIComponent("job_attempt > 1 AND attributes['actor.role'] = 'admin'")}`);
   await settle(1500);
   await bar().click();
-  await page.keyboard.press('End');
+  await page.keyboard.press('Control+End');
   await page.keyboard.type(' AND has(tar', { delay: 70 });
   await settle(500);
-  await shot('qb-15-dark-sql');
+  await shot('qb-28-dark-sql');
   await page.keyboard.press('Escape');
   await page.emulateMedia({ colorScheme: 'light' });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -311,9 +424,128 @@ await qb('query bar: dark mode + phone width', async () => {
   await typeQuery('tenant.name:');
   await page.keyboard.type('ra', { delay: 90 });
   await settle(900);
-  await shot('qb-16-phone');
+  await shot('qb-29-phone');
   await page.setViewportSize(VIEW);
+  await page.keyboard.press('Escape');
 });
+
+/*
+ * The investigation, recorded on its own (query-investigation.webm): "failed CRM booking syncs for one tenant,
+ * retried more than once, in the last 7 days" typed from an empty bar using only suggestions — a few letters to
+ * narrow, Tab / ↓ to pick — first in the query language, then in SQL mode.
+ */
+await qb('query bar: investigation from empty using only suggestions (Query, then SQL)', async () => {
+  const s = await session('query-investigation', { storageState: await context.storageState() });
+  const p = s.page;
+  const field = () => p.locator('textarea[role=combobox]');
+  const press = async (k, pause = 550) => {
+    await p.keyboard.press(k);
+    await p.waitForTimeout(pause);
+  };
+  const keys = async (t, pause = 650) => {
+    await p.keyboard.type(t, { delay: 120 });
+    await p.waitForTimeout(pause);
+  };
+  const want = async (text) => {
+    await p.locator('[data-slot=query-suggestions] [role=option]').filter({ hasText: text }).first().waitFor({ timeout: 8000 });
+    await p.waitForTimeout(350);
+  };
+  await s.step('query language', async () => {
+    await p.goto(`${P}/events?range=7d`);
+    await s.settle(1500);
+    await field().click();
+    await p.waitForTimeout(1200);
+    await keys('out');
+    await press('Tab');
+    await want('failure');
+    await keys('fa');
+    await press('Tab', 900); // outcome:failure — operators lead after a complete term
+    await keys('jobn');
+    await press('Tab');
+    await want('crm:sync:bookings');
+    await keys('book');
+    await press('Tab', 800); // metadata.jobName:"crm:sync:bookings" (quoted: the value has colons)
+    await keys('rawd');
+    await want('Rawda Suites');
+    await press('Tab', 800); // tenant:biz_2
+    await keys('att');
+    await press('Tab');
+    await want('Greater than');
+    await press('Tab'); // attempt:>
+    await keys('1 ', 800);
+    await keys('occ');
+    await press('Tab');
+    await want('Last 7 days');
+    await press('ArrowDown');
+    await press('Tab', 900);
+    const q = await field().inputValue();
+    if (!/^outcome:failure metadata\.jobName:"crm:sync:bookings" tenant:biz_2 attempt:>1 occurredAt:>\d{4}-\d{2}-\d{2} $/.test(q)) {
+      throw new Error(`query built: ${q}`);
+    }
+    await s.shot('qb-inv-01-query-built');
+    await press('Enter');
+    await s.settle(2200);
+    await s.shot('qb-inv-02-query-results');
+  });
+  await s.step('SQL mode', async () => {
+    await p.getByRole('button', { name: 'Clear query' }).click();
+    await s.settle(800);
+    await p.getByRole('button', { name: 'SQL', exact: true }).click();
+    await s.settle(1200);
+    await field().click();
+    await p.waitForTimeout(1000);
+    await keys('out');
+    await press('Tab'); // outcome → comparison operators
+    await want('IN (…)');
+    await press('Tab'); // =
+    await want('failure');
+    await keys('fa');
+    await press('Tab'); // 'failure'
+    await keys(' ');
+    await want('AND');
+    await press('Tab');
+    await keys('jobn');
+    await want("attributes['metadata.jobName']");
+    await press('Tab');
+    await press('Tab'); // =
+    await want('crm:sync:bookings');
+    await keys('book');
+    await press('Tab');
+    await keys(' ');
+    await press('Tab'); // AND
+    await keys('tenant_i');
+    await press('Tab');
+    await press('Tab'); // tenant_id =
+    await keys('rawd');
+    await want('Rawda Suites');
+    await press('Tab'); // 'biz_2'
+    await keys(' ');
+    await press('Tab'); // AND
+    await keys('job_at');
+    await press('Tab');
+    await keys('> 1 ');
+    await want('AND');
+    await press('Tab');
+    await keys('timest');
+    await press('Tab');
+    await keys('>');
+    await want('INTERVAL 7 DAY');
+    await press('ArrowDown');
+    await press('Tab', 900);
+    const q = await field().inputValue();
+    const expected =
+      "outcome = 'failure' AND attributes['metadata.jobName'] = 'crm:sync:bookings' AND tenant_id = 'biz_2' AND job_attempt > 1 AND timestamp > now() - INTERVAL 7 DAY ";
+    if (q !== expected) throw new Error(`SQL built: ${q}`);
+    await s.shot('qb-inv-03-sql-built');
+    await press('Enter');
+    await s.settle(2200);
+    await s.shot('qb-inv-04-sql-results');
+  });
+  await s.close();
+});
+
+// Remove the saved view created for the focus screenshot.
+if (tempView?.id) await context.request.delete(`${BASE}/api/projects/${jood.id}/views/${tempView.id}`).catch(() => undefined);
 
 await context.close();
 const vids = (await readdir(OUT)).filter((f) => f.endsWith('.webm'));
@@ -349,6 +581,7 @@ async function session(label, { video = true, storageState } = {}) {
     } catch (e) {
       problems.push(`[step] ${label}: ${name}: ${e.message.split('\n')[0]}`);
       log(`FAIL [${label}] ${name}`);
+      await shot(`FAIL-${label}-${name.replace(/[^\w-]+/g, '-').slice(0, 60)}`).catch(() => undefined);
     }
   };
   const close = async () => {

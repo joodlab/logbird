@@ -179,7 +179,8 @@ export function canonicalField(field: string): string {
   return `attr.${field}`;
 }
 
-const NEEDS_QUOTES = /[\s()"\\]|^[[{/<>]|^$/;
+/** The server lexer splits on whitespace and `():[]{}<>`; values containing them (or starting like a regex) need quotes. */
+const NEEDS_QUOTES = /[\s()"\\:[\]{}<>]|^\/|^$/;
 
 export function quoteIfNeeded(value: string): string {
   return NEEDS_QUOTES.test(value) || OPERATORS.has(value) ? `"${value.replace(/["\\]/g, '\\$&')}"` : value;
@@ -318,6 +319,8 @@ export interface Segment {
   cls: SegmentClass;
   /** Inside the server-reported error span. */
   error?: boolean;
+  /** Inside a familiar-but-different spelling the bar will convert (Lucene/KQL). */
+  warn?: boolean;
 }
 
 const NUMBER_OR_DATE = /^-?(\d+(\.\d+)?|\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:\d{2})?)?)$/;
@@ -424,7 +427,7 @@ export function highlightQuery(input: string): Segment[] {
  * Mark the half-open error span [start, end) on top of highlight segments, splitting segments at its
  * edges. A zero-width span (start === end) marks nothing; callers draw a caret at `start` instead.
  */
-export function markErrorSpan(segments: Segment[], start: number | null, end: number | null): Segment[] {
+export function markErrorSpan(segments: Segment[], start: number | null, end: number | null, flag: 'error' | 'warn' = 'error'): Segment[] {
   if (start === null || end === null || end <= start) return segments;
   const out: Segment[] = [];
   for (const s of segments) {
@@ -433,7 +436,7 @@ export function markErrorSpan(segments: Segment[], start: number | null, end: nu
       continue;
     }
     if (s.start < start) out.push({ ...s, end: start });
-    out.push({ ...s, start: Math.max(s.start, start), end: Math.min(s.end, end), error: true });
+    out.push({ ...s, start: Math.max(s.start, start), end: Math.min(s.end, end), [flag]: true });
     if (s.end > end) out.push({ ...s, start: end });
   }
   return out;
@@ -444,56 +447,103 @@ export function markErrorSpan(segments: Segment[], start: number | null, end: nu
 /* ------------------------------------------------------------------ */
 
 export type QueryCompletion =
-  /** Completing a field key (or a bare word). Replace [from, to) with `key:`. */
-  | { kind: 'key'; prefix: string; from: number; to: number }
-  /** Completing the value of `field:`. Replace [from, to) with the (quoted if needed) value. */
-  | { kind: 'value'; field: string; prefix: string; from: number; to: number; op?: string; inGroup: boolean }
+  /**
+   * Completing a field key (or a bare word). Replace [from, to) with `key:`. `afterTerm`: a complete term
+   * precedes the word, so boolean operators make sense here.
+   */
+  | { kind: 'key'; prefix: string; from: number; to: number; afterTerm: boolean }
+  /** Lucene `_exists_:field`: complete field names and rewrite the whole term to `field:*`. */
+  | { kind: 'exists'; prefix: string; from: number; to: number }
+  /**
+   * Completing the value of `field:`. Replace [from, to) with the (quoted if needed) value.
+   * `inGroup`: inside `field:( … )`; `afterMember`: a member precedes the caret there (offer OR).
+   */
+  | {
+      kind: 'value';
+      field: string;
+      prefix: string;
+      from: number;
+      to: number;
+      op?: string;
+      inGroup: boolean;
+      quoted: boolean;
+      afterMember?: boolean;
+    }
+  /** Inside `[a TO b]` / `/regex/` / a free-text phrase: nothing to complete, but the hint row explains the syntax. */
+  | { kind: 'range'; field: string }
+  | { kind: 'regex'; field: string }
+  | { kind: 'phrase' }
   | { kind: 'none' };
 
-/** What the caret is completing. Pure; drives the suggestion list. */
+const isTerm = (t?: QueryToken) => Boolean(t && (t.kind === 'field' || t.kind === 'text' || t.kind === 'phrase' || t.raw === ')'));
+
+/** What the caret is completing. Pure; drives the suggestion list and the syntax hint row. */
 export function queryCompletionAt(q: string, caret: number): QueryCompletion {
   const tokens = tokenize(q);
-  const t =
-    tokens.find((x) => x.kind !== 'space' && caret > x.start && caret <= x.end) ?? tokens.find((x) => x.kind !== 'space' && caret === x.start);
-  if (!t || t.kind === 'paren' || (t.kind === 'operator' && caret === t.start)) return { kind: 'key', prefix: '', from: caret, to: caret };
-  if (t.kind === 'phrase') return { kind: 'none' };
+  const solid = tokens.filter((x) => x.kind !== 'space');
+  const t = solid.find((x) => caret > x.start && caret <= x.end) ?? solid.find((x) => caret === x.start);
+  const key = (from: number, to: number): QueryCompletion => {
+    // The word being completed is not "before" itself; a `)` or term ending at the caret is.
+    const prev = [...solid].reverse().find((x) => x.end <= from && !(x === t && (x.kind === 'text' || x.kind === 'operator' || x.kind === 'field')));
+    // After a leading `-` a term is being negated: no operator can come next.
+    const negating = t !== undefined && t.start < from && (t.negated || t.raw === '-');
+    return { kind: 'key', prefix: q.slice(from, caret), from, to, afterTerm: !negating && isTerm(prev) };
+  };
+  if (!t || t.kind === 'paren' || (t.kind === 'operator' && caret === t.start)) return key(caret, caret);
+  if (t.kind === 'phrase') return caret === t.start ? key(caret, caret) : { kind: 'phrase' };
   if (t.kind === 'operator' || t.kind === 'text') {
-    if (caret === t.start && t.kind === 'text') return { kind: 'key', prefix: '', from: caret, to: caret };
+    if (caret === t.start && t.kind === 'text') return key(caret, caret);
     const from = t.start + (t.negated || t.raw === '-' ? 1 : 0);
     if (caret < from) return { kind: 'none' };
-    return { kind: 'key', prefix: q.slice(from, caret), from, to: t.end };
+    return key(from, t.end);
   }
   // field token
   const keyStart = t.start + (t.negated ? 1 : 0);
   const valueStart = t.valueStart ?? t.end;
   if (caret < keyStart) return { kind: 'none' };
-  if (caret < valueStart) return { kind: 'key', prefix: q.slice(keyStart, caret), from: keyStart, to: valueStart };
+  if (caret < valueStart) return key(keyStart, valueStart);
   const field = t.field ?? '';
+  if (field === '_exists_') return { kind: 'exists', prefix: q.slice(valueStart, caret), from: keyStart, to: t.end };
+  const value = (prefix: string, from: number, to: number, extra: Partial<Extract<QueryCompletion, { kind: 'value' }>> = {}): QueryCompletion => ({
+    kind: 'value',
+    field,
+    prefix,
+    from,
+    to,
+    inGroup: false,
+    quoted: false,
+    ...extra,
+  });
   switch (t.valueKind) {
     case 'regex':
+      return caret === valueStart ? value('', valueStart, t.end) : { kind: 'regex', field };
     case 'range':
-      return { kind: 'none' };
+      return caret === valueStart ? value('', valueStart, t.end) : { kind: 'range', field };
     case 'compare': {
       const from = valueStart + (t.op?.length ?? 0);
-      if (caret < from) return { kind: 'none' };
-      return { kind: 'value', field, prefix: q.slice(from, caret), from, to: t.end, op: t.op, inGroup: false };
+      if (caret < from) return value('', valueStart, t.end);
+      return value(q.slice(from, caret), from, t.end, { op: t.op });
     }
     case 'quoted': {
-      if (caret === valueStart) return { kind: 'value', field, prefix: '', from: valueStart, to: t.end, inGroup: false };
-      return { kind: 'value', field, prefix: unquote(q.slice(valueStart, caret)), from: valueStart, to: t.end, inGroup: false };
+      if (caret === valueStart) return value('', valueStart, t.end, { quoted: true });
+      return value(unquote(q.slice(valueStart, caret)), valueStart, t.end, { quoted: true });
     }
     case 'group': {
-      if (caret === valueStart) return { kind: 'none' };
+      if (caret === valueStart) return value('', valueStart, t.end);
       // Find the member word around the caret inside `( … )`.
       let s = caret;
       while (s > valueStart + 1 && !/[\s()]/.test(q[s - 1] ?? '')) s -= 1;
       let e = caret;
       while (e < t.end && !/[\s()]/.test(q[e] ?? '')) e += 1;
+      if (q[s] === '"') e = Math.min(t.end, scanDelimited(q, s, '"'));
       const word = q.slice(s, caret);
-      if (word === 'OR' || q.slice(s, e) === 'OR') return { kind: 'none' };
-      return { kind: 'value', field, prefix: unquote(word), from: s, to: e, inGroup: true };
+      if (q.slice(s, e) === 'OR') return { kind: 'none' };
+      // A member before the caret (not `(` or `OR`) means the next thing is `OR`.
+      const before = q.slice(valueStart + 1, s).trimEnd();
+      const afterMember = before.length > 0 && !/(^|\s)OR$/.test(before);
+      return value(unquote(word), s, e, { inGroup: true, quoted: q[s] === '"', afterMember });
     }
     default:
-      return { kind: 'value', field, prefix: q.slice(valueStart, caret), from: valueStart, to: t.end, inGroup: false };
+      return value(q.slice(valueStart, caret), valueStart, t.end);
   }
 }
