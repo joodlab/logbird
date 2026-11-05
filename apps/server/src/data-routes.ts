@@ -4,43 +4,32 @@ import { prisma, withProjectLock } from '@trailmark/database';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { stream } from 'hono/streaming';
-import { describeRoute, resolver, validator } from 'hono-openapi';
+import { resolver, validator } from 'hono-openapi';
 import { z } from 'zod';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { ingest, readIngestBody, requireRetentionReady } from './ingest';
 import { requireApiKey, requireProjectAccess, requireSession } from './middlewares';
+import { doc as responseDoc, routeDoc } from './openapi';
 import type { AppEnv } from './types';
 
+const ingestRequestSchema = (await resolver(s.ingestBodySchema).toOpenAPISchema()).schema;
+
 const doc = (summary: string, schema: z.ZodType, status = 200, security = 'session') =>
-  describeRoute({
-    summary,
-    security: [{ [security]: [] }],
-    ...(summary === 'Ingest events'
-      ? {
+  summary === 'Ingest events'
+    ? routeDoc(
+        summary,
+        {
           requestBody: {
             required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object' as const,
-                  description: 'Single event or {events: [...]}. Gzip supported. Maximum 1000 events, 5 MiB decoded body and 256 KiB per event.',
-                },
-              },
-            },
+            description: 'Single event or batch. Gzip supported; 1000 events, 5 MiB decoded body, 256 KiB per event.',
+            content: { 'application/json': { schema: ingestRequestSchema } },
           },
-        }
-      : {}),
-    responses: {
-      [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } },
-      ...Object.fromEntries(
-        [400, 401, 404, 413, 422, 503].map((code) => [
-          code,
-          { description: 'Request error', content: { 'application/json': { schema: resolver(s.apiErrorSchema) } } },
-        ]),
-      ),
-    },
-  });
+          responses: { [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } } },
+        },
+        security,
+      )
+    : responseDoc(summary, schema, status, security);
 const query = <T extends z.ZodType>(schema: T) =>
   validator('query', schema, (r) => {
     if (!r.success) throw new ApiError(422, 'validation_error', 'Invalid query.', r.error);
@@ -137,7 +126,14 @@ export const dataRoutes = new Hono<AppEnv>()
   )
   .get(
     '/projects/:projectId/export',
-    describeRoute({ summary: 'Stream CSV or JSONL', responses: { 200: { description: 'Event export' } } }),
+    routeDoc('Stream CSV or JSONL', {
+      responses: {
+        200: {
+          description: 'Event export',
+          content: { 'text/csv': { schema: { type: 'string' } }, 'application/x-ndjson': { schema: { type: 'string' } } },
+        },
+      },
+    }),
     query(s.rangeQuerySchema.extend({ format: z.enum(['csv', 'jsonl']) })),
     async (c) => {
       const q = c.req.valid('query');

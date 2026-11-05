@@ -5,12 +5,14 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import { requestId } from 'hono/request-id';
-import { describeRoute, openAPIRouteHandler } from 'hono-openapi';
+import { openAPIRouteHandler } from 'hono-openapi';
+import { z } from 'zod';
 import { clickhouse } from './clickhouse';
 import { dataRoutes, publicRoutes } from './data-routes';
 import { env } from './env';
 import { ApiError } from './errors';
 import { ingest } from './ingest';
+import { doc, routeDoc } from './openapi';
 import { managementRoutes } from './routes';
 import { setupRoutes } from './setup-routes';
 import type { AppEnv } from './types';
@@ -68,19 +70,28 @@ app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
     () => auth.handler(c.req.raw),
   );
 });
-app.get('/health', describeRoute({ summary: 'Postgres and ClickHouse readiness' }), async (c) => {
-  const checks = await Promise.allSettled([
-    prisma.$queryRaw`SELECT 1`,
-    clickhouse.query({ query: 'SELECT 1', format: 'JSONEachRow' }).then((r) => r.json()),
-  ]);
-  const postgres = checks[0].status === 'fulfilled';
-  const ch = checks[1].status === 'fulfilled';
-  return c.json({ status: postgres && ch ? 'ok' : 'degraded', postgres, clickhouse: ch }, postgres && ch ? 200 : 503);
-});
+app.get(
+  '/health',
+  doc(
+    'Postgres and ClickHouse readiness',
+    z.object({ status: z.enum(['ok', 'degraded']), postgres: z.boolean(), clickhouse: z.boolean() }),
+    200,
+    'none',
+  ),
+  async (c) => {
+    const checks = await Promise.allSettled([
+      prisma.$queryRaw`SELECT 1`,
+      clickhouse.query({ query: 'SELECT 1', format: 'JSONEachRow' }).then((r) => r.json()),
+    ]);
+    const postgres = checks[0].status === 'fulfilled';
+    const ch = checks[1].status === 'fulfilled';
+    return c.json({ status: postgres && ch ? 'ok' : 'degraded', postgres, clickhouse: ch }, postgres && ch ? 200 : 503);
+  },
+);
 export const routes = app.route('/api', setupRoutes).route('/api', dataRoutes).route('/api', managementRoutes).route('/v1', publicRoutes);
 app.get(
   '/openapi.json',
-  describeRoute({ summary: 'OpenAPI document' }),
+  routeDoc('OpenAPI document', { hide: true }, 'none'),
   openAPIRouteHandler(app, {
     documentation: {
       info: { title: 'Trailmark API', version: '0.1.0' },
