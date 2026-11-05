@@ -3,12 +3,10 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import type { InvitationPreview } from '@trailmark/contracts';
 import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
 import { Button } from '@trailmark/ui/components/ui/button';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { cn } from '@trailmark/ui/lib/utils';
 import { ArrowRightIcon, CircleAlertIcon, CircleCheckIcon, CircleSlashIcon, ClockIcon, Loader2Icon, LogOutIcon, MailIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
-import { BrandLockup } from '@/components/brand';
+import { DetailRow, LoadingCard, PublicInviteLayout, StateCard } from '@/components/invite/public-invite';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { invitationPreviewQuery, keys, meQuery } from '@/lib/api/queries';
@@ -57,20 +55,7 @@ function AcceptInvitationPage() {
       );
   else body = <Invitation invitation={preview.data} signedInAs={session.data?.user.email ?? null} />;
 
-  return (
-    <div className="relative flex min-h-svh flex-col">
-      <div
-        aria-hidden
-        className="tm-grid-bg pointer-events-none absolute inset-0 [mask-image:radial-gradient(ellipse_at_top,black_15%,transparent_65%)]"
-      />
-      <header className="relative flex h-16 items-center px-6">
-        <BrandLockup />
-      </header>
-      <main className="relative flex flex-1 items-start justify-center px-4 pt-[8vh] pb-16">
-        <div className="tm-fade-in w-full max-w-[420px]">{body}</div>
-      </main>
-    </div>
-  );
+  return <PublicInviteLayout>{body}</PublicInviteLayout>;
 }
 
 function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview; signedInAs: string | null }) {
@@ -134,23 +119,23 @@ function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview;
       </div>
 
       <dl className="divide-y rounded-xl border bg-card text-sm shadow-xs">
-        <Row label="Invited email">
+        <DetailRow label="Invited email">
           <span className="font-medium">{invitation.email}</span>
-        </Row>
-        <Row label="Role">
+        </DetailRow>
+        <DetailRow label="Role">
           <span className="flex flex-col items-end">
             <span className="font-medium">{roleLabel(invitation.role)}</span>
             <span className="text-end text-muted-foreground text-xs">{ROLE_INFO[invitation.role as Role]?.description}</span>
           </span>
-        </Row>
-        <Row label="Expires">
+        </DetailRow>
+        <DetailRow label="Expires">
           <Timestamp format="relative" iso={invitation.expiresAt} />
-        </Row>
+        </DetailRow>
       </dl>
 
       {signedInAs === null ? (
         <div className="flex flex-col gap-2">
-          <Button className="h-10" disabled={signInAsInvited.isPending} onClick={() => signInAsInvited.mutate()}>
+          <Button size="lg" disabled={signInAsInvited.isPending} onClick={() => signInAsInvited.mutate()}>
             {signInAsInvited.isPending ? <Loader2Icon className="animate-spin" /> : <MailIcon />}
             Email me a sign-in code
           </Button>
@@ -171,7 +156,7 @@ function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview;
               <span className="font-medium">{invitation.email}</span>. Only that address can accept it.
             </span>
           </p>
-          <Button className="h-10" disabled={signInAsInvited.isPending} onClick={() => signInAsInvited.mutate()}>
+          <Button size="lg" disabled={signInAsInvited.isPending} onClick={() => signInAsInvited.mutate()}>
             {signInAsInvited.isPending ? <Loader2Icon className="animate-spin" /> : <LogOutIcon />}
             Sign out and switch account
           </Button>
@@ -186,7 +171,7 @@ function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview;
               {errorMessage(accept.error)}
             </p>
           ) : null}
-          <Button className="h-10" disabled={accept.isPending || decline.isPending} onClick={() => accept.mutate()}>
+          <Button size="lg" disabled={accept.isPending || decline.isPending} onClick={() => accept.mutate()}>
             {accept.isPending ? <Loader2Icon className="animate-spin" /> : null}
             Accept and join {invitation.organization.name}
             {accept.isPending ? null : <ArrowRightIcon />}
@@ -258,61 +243,4 @@ function ClosedInvitation({ invitation, signedIn }: { invitation: InvitationPrev
         />
       );
   }
-}
-
-function StateCard({
-  icon: Icon,
-  title,
-  description,
-  action,
-  tone = 'neutral',
-  testId,
-}: {
-  icon: typeof ClockIcon;
-  title: string;
-  description: ReactNode;
-  action?: ReactNode;
-  tone?: 'neutral' | 'success' | 'danger';
-  testId?: string;
-}) {
-  return (
-    <div className="flex flex-col items-center gap-4 rounded-xl border bg-card p-8 text-center shadow-xs" data-testid={testId}>
-      <span
-        className={cn(
-          'flex size-11 items-center justify-center rounded-xl border',
-          tone === 'success' && 'border-outcome-success/30 bg-outcome-success/10 text-outcome-success',
-          tone === 'danger' && 'border-destructive/30 bg-destructive/10 text-destructive',
-          tone === 'neutral' && 'bg-muted text-muted-foreground',
-        )}
-      >
-        <Icon className="size-5" />
-      </span>
-      <div className="flex flex-col gap-1.5">
-        <h1 className="font-semibold text-lg tracking-tight">{title}</h1>
-        <p className="text-muted-foreground text-sm">{description}</p>
-      </div>
-      {action}
-    </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-4 px-4 py-3">
-      <dt className="shrink-0 text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 text-end">{children}</dd>
-    </div>
-  );
-}
-
-function LoadingCard() {
-  return (
-    <div aria-busy="true" className="flex flex-col items-center gap-4" role="status">
-      <Skeleton className="size-12 rounded-xl" />
-      <Skeleton className="h-7 w-56" />
-      <Skeleton className="h-4 w-72" />
-      <Skeleton className="mt-2 h-36 w-full rounded-xl" />
-      <Skeleton className="h-10 w-full" />
-    </div>
-  );
 }

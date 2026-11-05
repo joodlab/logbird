@@ -24,7 +24,7 @@ export function useDismissSetup(projectId: string) {
     mutationFn: (dismissed: boolean) => api.projects.update(projectId, { setupDismissed: dismissed }),
     onSuccess: (_, dismissed) => {
       invalidate();
-      if (dismissed) toast('Setup checklist hidden', { description: 'Reopen it any time from Setup in the sidebar.' });
+      if (dismissed) toast('Setup checklist hidden', { description: 'Reopen it any time from Finish setup in the sidebar.' });
     },
     onError: (error) => toast.error('Could not update the checklist', { description: errorMessage(error) }),
   });

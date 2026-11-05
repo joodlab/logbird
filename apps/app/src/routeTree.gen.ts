@@ -15,6 +15,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedWorkspaceRouteImport } from './routes/_authed/_workspace'
 import { Route as AuthedOnboardingRouteImport } from './routes/_authed/onboarding'
 import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accept-invitation.$invitationId'
+import { Route as JoinTokenRouteImport } from './routes/join.$token'
 import { Route as LoginIndexRouteImport } from './routes/login.index'
 import { Route as LoginVerifyRouteImport } from './routes/login.verify'
 import { Route as AuthedWorkspaceAccountRouteImport } from './routes/_authed/_workspace/account'
@@ -76,6 +77,11 @@ const AcceptInvitationInvitationIdRoute =
     path: '/accept-invitation/$invitationId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const JoinTokenRoute = JoinTokenRouteImport.update({
+  id: '/join/$token',
+  path: '/join/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginIndexRoute = LoginIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -261,6 +267,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRouteWithChildren
   '/onboarding': typeof AuthedOnboardingRouteWithChildren
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
+  '/join/$token': typeof JoinTokenRoute
   '/login/verify': typeof LoginVerifyRoute
   '/login/': typeof LoginIndexRoute
   '/account': typeof AuthedWorkspaceAccountRoute
@@ -296,6 +303,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
+  '/join/$token': typeof JoinTokenRoute
   '/login/verify': typeof LoginVerifyRoute
   '/login': typeof LoginIndexRoute
   '/account': typeof AuthedWorkspaceAccountRoute
@@ -334,6 +342,7 @@ export interface FileRoutesById {
   '/_authed/_workspace': typeof AuthedWorkspaceRouteWithChildren
   '/_authed/onboarding': typeof AuthedOnboardingRouteWithChildren
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
+  '/join/$token': typeof JoinTokenRoute
   '/login/verify': typeof LoginVerifyRoute
   '/login/': typeof LoginIndexRoute
   '/_authed/_workspace/account': typeof AuthedWorkspaceAccountRoute
@@ -373,6 +382,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/onboarding'
     | '/accept-invitation/$invitationId'
+    | '/join/$token'
     | '/login/verify'
     | '/login/'
     | '/account'
@@ -408,6 +418,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/accept-invitation/$invitationId'
+    | '/join/$token'
     | '/login/verify'
     | '/login'
     | '/account'
@@ -445,6 +456,7 @@ export interface FileRouteTypes {
     | '/_authed/_workspace'
     | '/_authed/onboarding'
     | '/accept-invitation/$invitationId'
+    | '/join/$token'
     | '/login/verify'
     | '/login/'
     | '/_authed/_workspace/account'
@@ -483,6 +495,7 @@ export interface RootRouteChildren {
   AuthedRoute: typeof AuthedRouteWithChildren
   LoginRoute: typeof LoginRouteWithChildren
   AcceptInvitationInvitationIdRoute: typeof AcceptInvitationInvitationIdRoute
+  JoinTokenRoute: typeof JoinTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -527,6 +540,13 @@ declare module '@tanstack/react-router' {
       path: '/accept-invitation/$invitationId'
       fullPath: '/accept-invitation/$invitationId'
       preLoaderRoute: typeof AcceptInvitationInvitationIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/join/$token': {
+      id: '/join/$token'
+      path: '/join/$token'
+      fullPath: '/join/$token'
+      preLoaderRoute: typeof JoinTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login/': {
@@ -897,6 +917,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthedRoute: AuthedRouteWithChildren,
   LoginRoute: LoginRouteWithChildren,
   AcceptInvitationInvitationIdRoute: AcceptInvitationInvitationIdRoute,
+  JoinTokenRoute: JoinTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

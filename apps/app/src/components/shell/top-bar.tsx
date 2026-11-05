@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useMatches, useParams } from '@tanstack/react-router';
 import { TimeRangePicker } from '@trailmark/ui/components/time-range-picker';
+import { Button } from '@trailmark/ui/components/ui/button';
 import { Kbd } from '@trailmark/ui/components/ui/kbd';
 import { Separator } from '@trailmark/ui/components/ui/separator';
 import { SidebarTrigger } from '@trailmark/ui/components/ui/sidebar';
@@ -85,16 +86,17 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
             value={range}
           />
         ) : null}
-        <button
+        <Button
           aria-label="Open command palette"
-          className="flex h-8 items-center gap-2 rounded-md border bg-background px-2 text-muted-foreground text-sm shadow-xs outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/40 sm:w-52 sm:px-2.5 dark:bg-input/30"
+          className="w-(--control-size-compact) justify-start gap-2 px-0 font-normal text-muted-foreground max-sm:justify-center sm:w-52 sm:px-2.5 sm:pe-1.5"
           onClick={onOpenPalette}
-          type="button"
+          size="sm"
+          variant="outline"
         >
-          <SearchIcon className="size-3.5" />
+          <SearchIcon />
           <span className="hidden flex-1 text-start sm:inline">Jump to…</span>
           <Kbd className="hidden sm:inline-flex">{isMac ? '⌘K' : 'Ctrl K'}</Kbd>
-        </button>
+        </Button>
       </div>
     </header>
   );

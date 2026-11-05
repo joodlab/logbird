@@ -1,4 +1,5 @@
 import { RETENTION_OPTIONS } from '@trailmark/contracts';
+import { FilterChip } from '@trailmark/ui/components/filter-chip';
 import { cn } from '@trailmark/ui/lib/utils';
 import { formatRetention } from '@/lib/format';
 
@@ -29,21 +30,17 @@ export function RetentionPicker({ value, onChange, current }: { value: number; o
       </div>
       <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="All retention options">
         {RETENTION_OPTIONS.map((days) => (
-          // biome-ignore lint/a11y/useSemanticElements: card-style choices; role=radio + aria-checked expose them as a radio group
-          <button
+          <FilterChip
+            active={value === days}
             aria-checked={value === days}
-            className={cn(
-              'h-7 rounded-md border px-2 text-xs tabular-nums outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50',
-              value === days ? 'border-brand bg-brand/10 font-medium text-brand' : 'text-muted-foreground',
-            )}
+            className="tabular-nums"
             key={days}
             onClick={() => onChange(days)}
             role="radio"
-            type="button"
           >
             {formatRetention(days)}
-            {current === days ? <span className="ms-1 text-[10px] opacity-70">current</span> : null}
-          </button>
+            {current === days ? <span className="text-xs opacity-70">current</span> : null}
+          </FilterChip>
         ))}
       </div>
     </div>

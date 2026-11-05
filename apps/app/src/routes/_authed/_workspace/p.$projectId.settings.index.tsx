@@ -1,20 +1,21 @@
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { CopyValue } from '@trailmark/ui/components/copy-button';
 import { Button } from '@trailmark/ui/components/ui/button';
 import { Input } from '@trailmark/ui/components/ui/input';
 import { Label } from '@trailmark/ui/components/ui/label';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { Textarea } from '@trailmark/ui/components/ui/textarea';
-import { Loader2Icon } from 'lucide-react';
+import { ArrowRightIcon, BookOpenIcon, Loader2Icon } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { SettingsSection } from '@/components/settings-section';
+import { ProgressRing } from '@/components/setup/steps';
 import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
-import { keys, projectQuery } from '@/lib/api/queries';
+import { keys, projectQuery, projectSetupQuery } from '@/lib/api/queries';
 import { fieldErrorMessage } from '@/lib/forms';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/')({
@@ -134,6 +135,60 @@ function GeneralForm({ project }: { project: { id: string; name: string; slug: s
           </dd>
         </dl>
       </SettingsSection>
+
+      <IntegrationGuide projectId={project.id} />
     </div>
+  );
+}
+
+/** The Setup page's permanent home once the sidebar stops promoting it (setup completed at least once). */
+function IntegrationGuide({ projectId }: { projectId: string }) {
+  const setup = useQuery(projectSetupQuery(projectId));
+  const data = setup.data;
+  return (
+    <SettingsSection
+      description="Setup checklist, ingest snippets, the recommended event envelope, query language and keyboard shortcuts."
+      title="Integration guide"
+    >
+      <div className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center" data-testid="settings-integration-guide">
+        <span className="flex min-w-0 flex-1 items-center gap-3">
+          {data ? (
+            <ProgressRing className="shrink-0" done={data.progress.done} size={20} total={data.progress.total} />
+          ) : (
+            <BookOpenIcon className="size-5 shrink-0 text-muted-foreground" />
+          )}
+          <span className="flex min-w-0 flex-col">
+            <span className="font-medium text-sm">
+              {!data
+                ? 'Setup'
+                : data.complete
+                  ? 'Setup complete'
+                  : data.completedAt
+                    ? `${data.progress.done} of ${data.progress.total} checks passing`
+                    : `${data.progress.done} of ${data.progress.total} setup steps done`}
+            </span>
+            <span className="text-muted-foreground text-xs">
+              {data?.completedAt ? (
+                <>
+                  First completed <Timestamp format="date" iso={data.completedAt} /> · checks stay live
+                </>
+              ) : (
+                'Checked live against what this project receives.'
+              )}
+            </span>
+          </span>
+        </span>
+        <Button
+          className="self-start sm:self-auto"
+          nativeButton={false}
+          render={<Link params={{ projectId }} to="/p/$projectId/setup" />}
+          size="sm"
+          variant="outline"
+        >
+          Open integration guide
+          <ArrowRightIcon />
+        </Button>
+      </div>
+    </SettingsSection>
   );
 }
