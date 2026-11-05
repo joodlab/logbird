@@ -10,17 +10,17 @@ RUN npm install --global pnpm@10.30.3 && apt-get update && apt-get install -y --
 COPY --from=prune /source/out/json/ .
 RUN pnpm install --frozen-lockfile
 COPY --from=prune /source/out/full/ .
-ARG TRAILMARK_SERVER_URL=http://server:4601
-ENV TRAILMARK_SERVER_URL=$TRAILMARK_SERVER_URL
 ENV DATABASE_URL=postgresql://build:build@localhost:5432/trailmark
 RUN DATABASE_URL=postgresql://build:build@localhost:5432/trailmark pnpm --filter @trailmark/database generate
 RUN pnpm --filter @trailmark/worker... build
 
+RUN pnpm --filter @trailmark/worker deploy --legacy --prod /runtime
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /workspace
-RUN npm install --global pnpm@10.30.3 && apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
-COPY --from=build --chown=node:node /workspace /workspace
+LABEL org.opencontainers.image.source="https://github.com/joodlab/trailmark"       org.opencontainers.image.licenses="MIT"       org.opencontainers.image.title="Trailmark"
+COPY --from=build --chown=node:node /runtime/node_modules ./node_modules
+COPY --from=build --chown=node:node /workspace/apps/worker/dist ./dist
 USER node
-HEALTHCHECK --interval=30s --timeout=10s CMD node --import tsx apps/worker/src/health.ts
-CMD ["node", "apps/worker/dist/index.mjs"]
+HEALTHCHECK --interval=30s --timeout=10s CMD node dist/health.mjs
+CMD ["node", "dist/index.mjs"]

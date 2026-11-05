@@ -1,0 +1,106 @@
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-trailmark}
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_64_POSTGRES:?}
+      POSTGRES_DB: ${POSTGRES_DB:-trailmark}
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.9
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-trailmark}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-trailmark}
+      CLICKHOUSE_PASSWORD: ${SERVICE_PASSWORD_64_CLICKHOUSE:?}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+    volumes: [clickhouse:/var/lib/clickhouse]
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    healthcheck:
+      test: [CMD, wget, --spider, -q, 'http://localhost:8123/ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, 'yes', --maxmemory-policy, noeviction]
+    volumes: [redis:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+  migrate:
+    image: ${TRAILMARK_IMAGE_REGISTRY:-trailmark}/migrate:${TRAILMARK_VERSION:-local}
+    build: {context: ., dockerfile: apps/server/Dockerfile, target: migrate}
+    environment: &runtime
+      NODE_ENV: production
+      APP_URL: ${APP_URL:-${SERVICE_URL_APP_4600:?}}
+      BETTER_AUTH_SECRET: ${SERVICE_PASSWORD_64_AUTH:?}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-trailmark}:${SERVICE_PASSWORD_64_POSTGRES:?}@postgres:5432/${POSTGRES_DB:-trailmark}}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-trailmark}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-trailmark}
+      CLICKHOUSE_PASSWORD: ${SERVICE_PASSWORD_64_CLICKHOUSE:?}
+      CLICKHOUSE_QUERY_USER: trailmark_query
+      CLICKHOUSE_QUERY_PASSWORD: ${SERVICE_HEX_64_QUERY:?}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      BULLMQ_PREFIX: '${BULLMQ_PREFIX:-{trailmark}}'
+      TRUST_PROXY: ${TRUST_PROXY:-true}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-30}
+      PUBLIC_RATE_LIMIT_PER_MINUTE: ${PUBLIC_RATE_LIMIT_PER_MINUTE:-600}
+      AUTH_LOG_SIGN_IN_CODES: ${AUTH_LOG_SIGN_IN_CODES:-false}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-Trailmark <hello@example.com>}
+    depends_on:
+      postgres: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    restart: 'no'
+  server:
+    image: ${TRAILMARK_IMAGE_REGISTRY:-trailmark}/server:${TRAILMARK_VERSION:-local}
+    build: {context: ., dockerfile: apps/server/Dockerfile}
+    environment:
+      <<: *runtime
+      PORT: '4601'
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    restart: unless-stopped
+    stop_grace_period: 45s
+  worker:
+    image: ${TRAILMARK_IMAGE_REGISTRY:-trailmark}/worker:${TRAILMARK_VERSION:-local}
+    build: {context: ., dockerfile: apps/worker/Dockerfile}
+    environment: *runtime
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      server: {condition: service_healthy}
+    restart: unless-stopped
+    stop_grace_period: 5m
+  app:
+    image: ${TRAILMARK_IMAGE_REGISTRY:-trailmark}/app:${TRAILMARK_VERSION:-local}
+    build: {context: ., dockerfile: apps/app/Dockerfile}
+    environment:
+      PORT: '4600'
+      HOST: '0.0.0.0'
+      NODE_ENV: production
+      TRAILMARK_SERVER_URL: ${TRAILMARK_SERVER_URL:-http://server:4601}
+    depends_on:
+      server: {condition: service_healthy}
+    restart: unless-stopped
+volumes:
+  postgres:
+  clickhouse:
+  redis:

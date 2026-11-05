@@ -3,8 +3,9 @@ import { z } from 'zod';
 
 export const env = createEnv({
   server: {
-    SMTP_HOST: z.string().default('127.0.0.1'),
-    SMTP_PORT: z.coerce.number().default(1025),
+    AUTH_LOG_SIGN_IN_CODES: z.enum(['true', 'false']).default('false'),
+    SMTP_HOST: z.string().optional(),
+    SMTP_PORT: z.coerce.number().default(587),
     SMTP_SECURE: z.enum(['true', 'false']).default('false'),
     SMTP_USER: z.string().optional(),
     SMTP_PASSWORD: z.string().optional(),

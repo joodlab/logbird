@@ -19,7 +19,7 @@ audit.example.com {
 }
 ```
 
-Set APP_URL=https://audit.example.com and TRUST_PROXY=true only if the server is reachable solely through trusted ingress. With exactly one trusted proxy in front (e.g. Caddy), the server uses the rightmost `X-Forwarded-For` entry, which that proxy appends. Do not expose the API directly. The app's API proxy target is baked at build time; rebuild when changing it. Development Vite proxies are absent from the production listener.
+Set APP_URL=https://audit.example.com and TRUST_PROXY=true only if the server is reachable solely through trusted ingress. With exactly one trusted proxy in front (e.g. Caddy), the server uses the rightmost `X-Forwarded-For` entry, which that proxy appends. Do not expose the API directly. The app reads TRAILMARK_SERVER_URL at runtime (default http://server:4601); recreate the app container when changing it. Development Vite proxies are absent from the production listener.
 
 ## Acceptance
 
@@ -45,3 +45,5 @@ for public ingest/read; alert on `rate_limit.storage_error`. Authenticated publi
 Keep ingress client-IP handling correct to avoid grouping every browser under the proxy address. Verify security headers, cookie Secure/HttpOnly/SameSite, disallowed CORS and rate limits. Kill/restart each app and test recovery. Stop writes before a rollback; use matched backups if migrations are incompatible.
 
 ClickHouse capacity depends on event size, cardinality, retention and concurrent scans. Measure compressed disk growth using fictional representative traffic, reserve free disk for merges/backups, and keep query memory limits below available RAM. Alert on disk pressure, /readyz failures, HTTP 5xx/429, queue age, failed retention and backup age. Logs contain event names, request IDs, status and timing; do not collect bodies, cookies, API keys or raw URLs with query parameters. This single VM is a first test, not HA.
+
+Compose gates server/worker on a one-shot migrate service. See [self-hosting](self-hosting.md) for the Caddy profile, backup/restore, external services and SMTP/log-code setup, and [Coolify](coolify.md) for Git-based builds. Images are not published; no CI Docker builds are configured.
