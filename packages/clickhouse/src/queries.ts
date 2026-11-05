@@ -16,11 +16,19 @@ import type {
   SearchQuery,
   SearchResponse,
 } from '@trailmark/contracts';
-import { pickHistogramInterval } from '@trailmark/contracts';
+import { pickHistogramInterval, QUERY_FIELDS } from '@trailmark/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
+import { isQueryClient } from './client';
 import type { EventRow } from './normalize';
-import { columns, compileQuery } from './query';
+import { columns, compileQuery, QueryError } from './query';
+import { validateSql } from './sql-guard';
+
+async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }) {
+  if (q.lang !== 'sql') return compileQuery(q.q);
+  if (!isQueryClient(ch)) throw new Error('SQL mode requires the restricted query client');
+  return { sql: await validateSql(ch, q.q), params: {} };
+}
 
 type Params = Record<string, unknown>;
 async function read<T>(ch: ClickHouseClient, query: string, query_params: Params = {}, guard = 10): Promise<T[]> {
@@ -28,7 +36,25 @@ async function read<T>(ch: ClickHouseClient, query: string, query_params: Params
     const value = query_params[key];
     if (typeof value === 'string') query_params[key] = new Date(value).toISOString().replace('T', ' ').slice(0, -1);
   }
-  return (await ch.query({ query, query_params, format: 'JSONEachRow', clickhouse_settings: { max_execution_time: guard } })).json<T>();
+  try {
+    return await (
+      await ch.query({ query, query_params, format: 'JSONEachRow', clickhouse_settings: { max_execution_time: isQueryClient(ch) ? 10 : guard } })
+    ).json<T>();
+  } catch (error) {
+    if (
+      /TOO_MANY_ROWS|TOO_MANY_BYTES|TIMEOUT_EXCEEDED|MEMORY_LIMIT_EXCEEDED|TOO_SLOW|LIMIT_EXCEEDED/.test(
+        (error instanceof Error ? error.message : '') + (error && typeof error === 'object' && 'type' in error ? String(error.type) : ''),
+      )
+    )
+      throw new QueryError('Query exceeded its resource budget', {
+        lang: isQueryClient(ch) ? 'sql' : 'query',
+        reason: 'limit',
+        start: null,
+        end: null,
+        hint: 'Narrow the time range or filter',
+      });
+    throw error;
+  }
 }
 export function timeRange(q: RangeQuery) {
   const to = new Date(q.to ?? Date.now()),
@@ -36,8 +62,8 @@ export function timeRange(q: RangeQuery) {
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
   return { from: from.toISOString(), to: to.toISOString() };
 }
-function where(projectId: string, q: RangeQuery) {
-  const c = compileQuery(q.q);
+async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery) {
+  const c = await filter(ch, q);
   return {
     sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${c.sql})`,
     params: { project: projectId, ...timeRange(q), ...c.params },
@@ -92,7 +118,7 @@ function cursor(s: string): [string, string] {
 }
 export async function searchEvents(ch: ClickHouseClient, projectId: string, q: SearchQuery): Promise<SearchResponse> {
   const start = performance.now(),
-    w = where(projectId, q),
+    w = await where(ch, projectId, q),
     asc = q.order === 'asc',
     op = asc ? '>' : '<',
     order = asc ? 'ASC' : 'DESC';
@@ -151,18 +177,18 @@ export async function getEvent(ch: ClickHouseClient, projectId: string, eventId:
     operationSize: Number(counts?.size ?? 0),
   };
 }
-export async function liveEvents(ch: ClickHouseClient, p: string, q: { since: string; q?: string; limit: number }) {
-  const filter = compileQuery(q.q);
+export async function liveEvents(ch: ClickHouseClient, p: string, q: { since: string; q?: string; lang?: string; limit: number }) {
+  const compiled = await filter(ch, q);
   return (
     await read<EventRow>(
       ch,
-      `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={p:String} AND received_at >= {since:DateTime64(3)} AND (${filter.sql}) ORDER BY received_at DESC,event_id DESC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
-      { p, since: q.since, limit: q.limit, ...filter.params },
+      `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={p:String} AND received_at >= {since:DateTime64(3)} AND (${compiled.sql}) ORDER BY received_at DESC,event_id DESC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
+      { p, since: q.since, limit: q.limit, ...compiled.params },
     )
   ).map(toEvent);
 }
 export async function histogram(ch: ClickHouseClient, p: string, q: z.infer<typeof histogramQuerySchema>): Promise<HistogramResponse> {
-  const w = where(p, q),
+  const w = await where(ch, p, q),
     range = timeRange(q),
     interval = q.interval ?? pickHistogramInterval(Date.parse(range.to) - Date.parse(range.from));
   const step = interval * 1000;
@@ -189,11 +215,10 @@ export async function histogram(ch: ClickHouseClient, p: string, q: z.infer<type
   return { interval, buckets: [...buckets.values()] };
 }
 export async function facets(ch: ClickHouseClient, p: string, q: z.infer<typeof facetQuerySchema>): Promise<FacetResponse> {
-  const w = where(p, q),
+  const w = await where(ch, p, q),
     col = Object.hasOwn(columns, q.field) ? columns[q.field] : undefined;
   let expr = col;
   if (!expr) {
-    if (!q.field.startsWith('attr.')) throw new Error('Invalid facet field');
     expr = 'attributes[{attr:String}]';
   }
   let join = '';
@@ -202,14 +227,18 @@ export async function facets(ch: ClickHouseClient, p: string, q: z.infer<typeof 
     join = 'ARRAY JOIN arrayZip(target_ids,target_names) AS target';
     expr = 'target.1';
     label = 'target.2';
-  } else if (expr === 'target_types') {
-    expr = 'arrayJoin(target_types)';
+  } else if (['target_types', 'target_names', 'changes_fields'].includes(expr)) {
+    expr = `arrayJoin(${expr})`;
     label = expr;
   } else if (['actor', 'tenant', 'executor'].includes(q.field)) label = `${q.field}_name`;
+  if (QUERY_FIELDS.some((f) => f.column === col && ['number', 'date'].includes(f.type))) {
+    expr = `toString(${expr})`;
+    label = expr;
+  }
   const rows = await read<{ value: string; label: string; count: number }>(
     ch,
     `SELECT ${expr} value,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),value) label,count() count FROM events ${join} WHERE ${w.sql} GROUP BY value ORDER BY count DESC,value`,
-    { ...w.params, attr: q.field.slice(5) },
+    { ...w.params, attr: q.field.replace(/^(attr|attributes)\./, '') },
   );
   return {
     field: q.field,
@@ -218,7 +247,7 @@ export async function facets(ch: ClickHouseClient, p: string, q: z.infer<typeof 
   };
 }
 async function metrics(ch: ClickHouseClient, p: string, q: RangeQuery) {
-  const w = where(p, q);
+  const w = await where(ch, p, q);
   return (
     (
       await read<{ events: number; actors: number; tenants: number; failureRate: number; avgConformance: number }>(
@@ -230,7 +259,7 @@ async function metrics(ch: ClickHouseClient, p: string, q: RangeQuery) {
   );
 }
 async function top(ch: ClickHouseClient, p: string, q: RangeQuery, col: string, label: string, type = "''") {
-  const w = where(p, q);
+  const w = await where(ch, p, q);
   return read<{ id: string; label: string; type: string; count: number }>(
     ch,
     `SELECT ${col} id,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),id) label,argMax(${type},timestamp) type,count() count FROM events WHERE ${w.sql} AND ${col}!='' GROUP BY id ORDER BY count DESC,id LIMIT 10`,
@@ -252,8 +281,8 @@ export async function overview(ch: ClickHouseClient, p: string, q: RangeQuery): 
     top(ch, p, q, 'executor_id', 'executor_name', 'executor_type'),
     read<EventRow>(
       ch,
-      `SELECT * FROM events WHERE ${where(p, q).sql} AND (outcome IN ('failure','denied') OR severity='critical') ORDER BY timestamp DESC LIMIT 10`,
-      where(p, q).params,
+      `SELECT * FROM events WHERE ${(await where(ch, p, q)).sql} AND (outcome IN ('failure','denied') OR severity='critical') ORDER BY timestamp DESC LIMIT 10`,
+      (await where(ch, p, q)).params,
     ),
     projectStats(ch, [p]),
     read<{ ts: string; count: number }>(
@@ -311,7 +340,7 @@ export async function listEntities(ch: ClickHouseClient, p: string, q: EntityLis
     `SELECT *,tupleElement(k,1) k1,tupleElement(k,2) k2 FROM (SELECT *,tuple(${order.keys}) k FROM (SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} GROUP BY kind,id HAVING ({q:String}='' OR positionCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0 OR ngramSearchCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0.3) AND ({type:String}='' OR type={type:String}))) ${after} ORDER BY k,id LIMIT {limit:UInt32}`,
     params,
     // Directory pages aggregate the whole kind; keep the guard roomy but bounded.
-    20,
+    isQueryClient(ch) ? 10 : 20,
   );
   const last = rows[q.limit - 1];
   return {
@@ -339,6 +368,9 @@ function entityCursor(s: string, sort: EntitySort): [string, string, string] {
   }
   throw new Error('Invalid cursor');
 }
+function sqlLiteral(s: string) {
+  return `'${s.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+}
 function entityFilter(kind: EntityKind, id: string) {
   return kind === 'target'
     ? `target.type:${JSON.stringify(id.slice(0, id.indexOf(':')))} target:${JSON.stringify(id.slice(id.indexOf(':') + 1))}`
@@ -354,7 +386,11 @@ export async function entityProfile(ch: ClickHouseClient, p: string, kind: Entit
   )[0];
   const entity = raw ? { ...raw, firstSeen: iso(raw.firstSeen), lastSeen: iso(raw.lastSeen), events: Number(raw.events) } : undefined;
   if (!entity) return null;
-  const scoped = { ...q, q: `${q.q ? `(${q.q})` : ''} ${entityFilter(kind, id)}` };
+  const entitySql =
+    kind === 'target'
+      ? `has(target_ids,${sqlLiteral(id.slice(id.indexOf(':') + 1))}) AND has(target_types,${sqlLiteral(id.slice(0, id.indexOf(':')))})`
+      : `${kind}_id = ${sqlLiteral(id)}`;
+  const scoped = { ...q, q: q.lang === 'sql' ? `(${q.q || '1'}) AND (${entitySql})` : `${q.q ? `(${q.q})` : ''} ${entityFilter(kind, id)}` };
   const [series, topActions, outcomes] = await Promise.all([
     histogram(ch, p, scoped),
     top(ch, p, scoped, 'action', 'action'),
@@ -363,7 +399,7 @@ export async function entityProfile(ch: ClickHouseClient, p: string, kind: Entit
   const related: EntityProfile['related'] = [];
   for (const k of ['actor', 'tenant', 'executor', 'target'] as const) {
     if (k === kind) continue;
-    const w = where(p, scoped),
+    const w = await where(ch, p, scoped),
       target = k === 'target',
       idCol = target ? "concat(t.1,':',t.2)" : `${k}_id`,
       nameCol = target ? 't.3' : `${k}_name`,
@@ -378,7 +414,7 @@ export async function entityProfile(ch: ClickHouseClient, p: string, kind: Entit
   return { entity, series, topActions, outcomes: Object.fromEntries(outcomes.values.map((v) => [v.value, v.count])), related };
 }
 export async function listFields(ch: ClickHouseClient, p: string, q: RangeQuery): Promise<z.infer<typeof fieldsResponseSchema>> {
-  const w = where(p, q),
+  const w = await where(ch, p, q),
     m = await metrics(ch, p, q);
   const attrs = await read<{ key: string; n: number; distinct: number; samples: string[]; last: string }>(
     ch,
@@ -394,11 +430,12 @@ export async function listFields(ch: ClickHouseClient, p: string, q: RangeQuery)
     lastSeen: iso(r.last),
   }));
   for (const [key, col] of Object.entries(columns)) {
-    if (col.startsWith('target_') || key === 'env') continue;
+    if (QUERY_FIELDS.find((f) => f.column === col)?.type === 'array' || key === 'env') continue;
+    const value = `toString(${col})`;
     const r = (
       await read<{ n: number; distinct: number; samples: string[]; last: string | null }>(
         ch,
-        `SELECT countIf(${col}!='') n,uniqIf(${col},${col}!='') distinct,groupUniqArrayIf(5)(${col},${col}!='') samples,maxOrNullIf(timestamp,${col}!='') last FROM events WHERE ${w.sql}`,
+        `SELECT countIf(${value}!='') n,uniqIf(${col},${value}!='') distinct,groupUniqArrayIf(5)(${value},${value}!='') samples,maxOrNullIf(timestamp,${value}!='') last FROM events WHERE ${w.sql}`,
         w.params,
       )
     )[0];

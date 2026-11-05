@@ -8,6 +8,8 @@ export const env = createEnv({
     CLICKHOUSE_DATABASE: z.string(),
     CLICKHOUSE_USER: z.string(),
     CLICKHOUSE_PASSWORD: z.string(),
+    CLICKHOUSE_QUERY_USER: z.string().optional(),
+    CLICKHOUSE_QUERY_PASSWORD: z.string().optional(),
   },
   runtimeEnv: process.env,
 });

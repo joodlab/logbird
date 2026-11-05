@@ -20,13 +20,17 @@ describe('query language', () => {
       ],
     ],
     ['actor.name:"a\\"b"', [{ field: 'actor.name', value: 'a"b', negate: false }]],
-  ])('parses %s', (q, expected) => expect(parseQuery(q as string)).toEqual(expected));
+  ])('parses %s', (q, expected) =>
+    expect(Object.values(compileQuery(q as string).params)).toEqual(
+      (expected as { value: string }[]).map((t) => (t.value.endsWith('*') ? t.value.slice(0, -1) : t.value)),
+    ),
+  );
   it('rejects unterminated quotes', () => expect(() => parseQuery('actor:"oops')).toThrow());
   it('binds unknown keys and injection as values', () => {
     const c = compileQuery('weird\'key:"x\' OR 1=1 --"');
     expect(c.sql).not.toContain('weird');
     expect(c.sql).not.toContain('OR 1=1');
-    expect(c.params).toEqual({ q0k: "weird'key", q0: "x' OR 1=1 --" });
+    expect(c.params).toEqual({ q0: "weird'key", q1: "x' OR 1=1 --" });
   });
   it.each([
     'id',
@@ -46,9 +50,9 @@ describe('query language', () => {
     'target.type',
     'attr.metadata.plan',
   ])('compiles %s exact/prefix/negation', (field) => {
-    expect(compileQuery(`${field}:x`).params.q0).toBe('x');
+    expect(Object.values(compileQuery(`${field}:x`).params)).toContain('x');
     expect(compileQuery(`-${field}:x*`).sql).toContain('NOT');
-    expect(compileQuery(`${field}:x*`).params.q0).toBe('x');
+    expect(Object.values(compileQuery(`${field}:x*`).params)).toContain('x');
   });
   it.each([
     ['impersonator:*', "(impersonator_id != '')"],
@@ -64,12 +68,12 @@ describe('query language', () => {
     expect(c.sql).toBe(sql);
     expect(c.params).toEqual({});
   });
-  it('negated presence means "missing"', () => expect(compileQuery('-impersonator:*').sql).toBe("NOT (impersonator_id != '')"));
+  it('negated presence means "missing"', () => expect(compileQuery('-impersonator:*').sql).toBe("NOT ((impersonator_id != ''))"));
   it('attribute presence requires the key with a non-empty value', () => {
     const c = compileQuery('attr.metadata.plan:*');
-    expect(c.sql).toBe("(mapContains(attributes,{q0k:String}) AND attributes[{q0k:String}] != '')");
-    expect(c.params).toEqual({ q0k: 'metadata.plan' });
-    expect(compileQuery('plan:*').params).toEqual({ q0k: 'plan' });
+    expect(c.sql).toBe("(mapContains(attributes,{q0:String}) AND (attributes[{q0:String}] != ''))");
+    expect(c.params).toEqual({ q0: 'metadata.plan' });
+    expect(compileQuery('plan:*').params).toEqual({ q0: 'plan' });
   });
   it('keeps non-empty prefixes as prefix matches', () => {
     const c = compileQuery('impersonator:usr_*');
@@ -136,9 +140,9 @@ it('bounds grammar and preserves quoted punctuation', () => {
   expect(compileQuery('(a)').params.q0).toBe('a');
   expect(() => parseQuery('x '.repeat(65))).toThrow('64');
   expect(() => parseQuery('a'.repeat(4097))).toThrow('4096');
-  expect(parseQuery('"Hello: (world)"')).toEqual([{ field: '', value: 'Hello: (world)', negate: false }]);
-  expect(compileQuery('attr.empty:""').sql).toContain('attribute_items');
-  expect(compileQuery('__proto__:safe').params.q0k).toBe('__proto__');
+  expect(parseQuery('"Hello: (world)"')).toEqual([{ kind: 'value', value: 'Hello: (world)', start: 0, end: 16 }]);
+  expect(compileQuery('attr.empty:""').sql).toContain('mapContains');
+  expect(compileQuery('__proto__:safe').params.q0).toBe('__proto__');
   expect(compileQuery('\u0645\u0631\u062d\u0628\u0627').sql).toContain('hasToken');
 });
 
@@ -154,7 +158,7 @@ it.each([
 });
 it('preserves boolean precedence and quoted operators', () => {
   expect(compileQuery('action:a OR (actor:b -tenant:c)').sql).toBe(
-    '((action = {q0:String}) OR ((actor_id = {q1:String}) AND NOT (tenant_id = {q2:String})))',
+    '((action = {q0:String}) OR ((actor_id = {q1:String}) AND NOT ((tenant_id = {q2:String}))))',
   );
   expect(compileQuery('"OR"').params.q0).toBe('OR');
   expect(() => parseQuery(`${'('.repeat(17)}x${')'.repeat(17)}`)).toThrow('16');

@@ -222,6 +222,8 @@ Replacement is limited to projects with at most 100000 stored rows. Sample mutat
 project ingestion lock and synchronously rebuild project rollups from surviving events.
 
 ### 5.1 Query language (`q`)
+
+Full reference: [query language and SQL expressions](query-language.md).
 ```
 action:hotel.policy.updated        exact
 action:hotel.*                     prefix wildcard

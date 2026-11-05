@@ -6,7 +6,7 @@ import { createMiddleware } from 'hono/factory';
 import { stream } from 'hono/streaming';
 import { resolver, validator } from 'hono-openapi';
 import { z } from 'zod';
-import { clickhouse } from './clickhouse';
+import { clickhouse, queryClickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { ingest, readIngestBody, requireRetentionReady } from './ingest';
 import { requireApiKey, requireProjectAccess, requireSession } from './middlewares';
@@ -30,8 +30,22 @@ const doc = (summary: string, schema: z.ZodType, status = 200, security = 'sessi
         security,
       )
     : responseDoc(summary, schema, status, security);
+function queryClient(q: { lang?: string }) {
+  if (q.lang !== 'sql') return clickhouse;
+  if (!queryClickhouse) throw new ApiError(503, 'sql_mode_unavailable', 'Configure the restricted ClickHouse query user to enable SQL mode.');
+  return queryClickhouse;
+}
 const query = <T extends z.ZodType>(schema: T) =>
-  validator('query', schema, (r) => {
+  validator('query', schema, (r, c) => {
+    const text = c.req.query('q') ?? '';
+    if (Buffer.byteLength(text) > 4096)
+      throw new ch.QueryError('Query exceeds 4096 bytes', {
+        lang: c.req.query('lang') === 'sql' ? 'sql' : 'query',
+        reason: 'too_complex',
+        start: 0,
+        end: text.length,
+        hint: 'Shorten the query to 4096 UTF-8 bytes',
+      });
     if (!r.success) throw new ApiError(422, 'validation_error', 'Invalid query.', r.error);
   });
 const found = <T>(value: T | null) => {
@@ -46,6 +60,16 @@ const projectRead = createMiddleware<AppEnv>(async (c, next) => {
   });
 });
 export const publicRoutes = new Hono<AppEnv>()
+  .use('*', async (c, next) => {
+    if (c.req.query('lang') === 'sql')
+      throw new ApiError(
+        422,
+        'invalid_query',
+        'SQL mode is available only in the console.',
+        s.queryErrorDetailsSchema.parse({ lang: 'sql', reason: 'not_allowed', start: null, end: null, hint: 'Use lang=query with the read-key API' }),
+      );
+    await next();
+  })
   .post('/events', requireApiKey('ingest'), doc('Ingest events', s.ingestResponseSchema, 202, 'ingestKey'), async (c) =>
     c.json(await ingest(c.get('project').id, await readIngestBody(c.req.raw), c.req.header('x-trailmark-sdk') ?? c.req.header('user-agent')), 202),
   )
@@ -55,7 +79,8 @@ export const publicRoutes = new Hono<AppEnv>()
     projectRead,
     doc('Search events', s.searchResponseSchema, 200, 'readKey'),
     query(s.searchQuerySchema),
-    async (c) => c.json(s.searchResponseSchema.parse(await ch.searchEvents(clickhouse, c.get('project').id, c.req.valid('query')))),
+    async (c) =>
+      c.json(s.searchResponseSchema.parse(await ch.searchEvents(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
   )
   .get('/events/:eventId', requireApiKey('read'), projectRead, doc('Event detail', s.eventDetailSchema, 200, 'readKey'), async (c) =>
     c.json(s.eventDetailSchema.parse(found(await ch.getEvent(clickhouse, c.get('project').id, c.req.param('eventId'))))),
@@ -66,12 +91,12 @@ export const dataRoutes = new Hono<AppEnv>()
     const id = c.get('activeOrganizationId');
     if (!id || !(await prisma.member.findFirst({ where: { organizationId: id, userId: c.get('user').id } })))
       throw new ApiError(403, 'organization_required', 'Select a workspace.');
-    return c.json(s.searchResponseSchema.parse(await ch.searchEvents(clickhouse, `ws:${id}`, c.req.valid('query'))));
+    return c.json(s.searchResponseSchema.parse(await ch.searchEvents(queryClient(c.req.valid('query')), `ws:${id}`, c.req.valid('query'))));
   })
   .use('/projects/:projectId/*', requireProjectAccess)
   .use('/projects/:projectId/*', projectRead)
   .get('/projects/:projectId/events', doc('Search events', s.searchResponseSchema), query(s.searchQuerySchema), async (c) =>
-    c.json(s.searchResponseSchema.parse(await ch.searchEvents(clickhouse, c.get('project').id, c.req.valid('query')))),
+    c.json(s.searchResponseSchema.parse(await ch.searchEvents(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
   )
   .get('/projects/:projectId/events/:eventId', doc('Event detail', s.eventDetailSchema), async (c) =>
     c.json(s.eventDetailSchema.parse(found(await ch.getEvent(clickhouse, c.get('project').id, c.req.param('eventId'))))),
@@ -80,16 +105,17 @@ export const dataRoutes = new Hono<AppEnv>()
     '/projects/:projectId/live',
     doc('Live events', z.array(s.eventSchema)),
     query(s.rangeQuerySchema.extend({ since: z.iso.datetime(), limit: z.coerce.number().int().min(1).max(200).default(50) })),
-    async (c) => c.json(z.array(s.eventSchema).parse(await ch.liveEvents(clickhouse, c.get('project').id, c.req.valid('query')))),
+    async (c) =>
+      c.json(z.array(s.eventSchema).parse(await ch.liveEvents(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
   )
   .get('/projects/:projectId/histogram', doc('Histogram', s.histogramResponseSchema), query(s.histogramQuerySchema), async (c) =>
-    c.json(s.histogramResponseSchema.parse(await ch.histogram(clickhouse, c.get('project').id, c.req.valid('query')))),
+    c.json(s.histogramResponseSchema.parse(await ch.histogram(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
   )
   .get('/projects/:projectId/facets', doc('Facets', s.facetResponseSchema), query(s.facetQuerySchema), async (c) =>
-    c.json(s.facetResponseSchema.parse(await ch.facets(clickhouse, c.get('project').id, c.req.valid('query')))),
+    c.json(s.facetResponseSchema.parse(await ch.facets(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
   )
   .get('/projects/:projectId/overview', doc('Overview', s.overviewResponseSchema), query(s.rangeQuerySchema), async (c) =>
-    c.json(s.overviewResponseSchema.parse(await ch.overview(clickhouse, c.get('project').id, c.req.valid('query')))),
+    c.json(s.overviewResponseSchema.parse(await ch.overview(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
   )
   .get('/projects/:projectId/entities', doc('Entities', s.entityListResponseSchema), query(s.entityListQuerySchema), async (c) =>
     c.json(s.entityListResponseSchema.parse(await ch.listEntities(clickhouse, c.get('project').id, c.req.valid('query')))),
@@ -99,12 +125,17 @@ export const dataRoutes = new Hono<AppEnv>()
     if (!kind.success) throw new ApiError(422, 'validation_error', 'Invalid entity kind.');
     return c.json(
       s.entityProfileSchema.parse(
-        found(await ch.entityProfile(clickhouse, c.get('project').id, kind.data, c.req.param('entityId'), c.req.valid('query'))),
+        found(
+          await ch.entityProfile(queryClient(c.req.valid('query')), c.get('project').id, kind.data, c.req.param('entityId'), c.req.valid('query')),
+        ),
       ),
     );
   })
+  .get('/projects/:projectId/suggest', doc('Suggest field values', s.suggestResponseSchema), query(s.suggestQuerySchema), async (c) =>
+    c.json(s.suggestResponseSchema.parse(await ch.suggestValues(clickhouse, c.get('project').id, c.req.valid('query')))),
+  )
   .get('/projects/:projectId/fields', doc('Fields', s.fieldsResponseSchema), query(s.rangeQuerySchema), async (c) =>
-    c.json(s.fieldsResponseSchema.parse(await ch.listFields(clickhouse, c.get('project').id, c.req.valid('query')))),
+    c.json(s.fieldsResponseSchema.parse(await ch.listFields(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
   )
   .get('/projects/:projectId/operations/:operationId', doc('Operation', z.array(s.eventSchema)), async (c) =>
     c.json(z.array(s.eventSchema).parse(await ch.operationEvents(clickhouse, c.get('project').id, c.req.param('operationId')))),
@@ -150,7 +181,7 @@ export const dataRoutes = new Hono<AppEnv>()
       // Keep the same cross-process lock until the HTTP stream closes.
       const task = withProjectLock(c.get('project').id, async (tx) => {
         await requireRetentionReady(tx, c.get('project').id);
-        iterator = ch.exportEvents(clickhouse, c.get('project').id, q);
+        iterator = ch.exportEvents(queryClient(q), c.get('project').id, q);
         try {
           first = await iterator.next();
           markReady();
