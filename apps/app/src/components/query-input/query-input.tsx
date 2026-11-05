@@ -1,16 +1,34 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 import type { QueryLang } from '@trailmark/contracts';
 import { Kbd } from '@trailmark/ui/components/ui/kbd';
 import { SegmentedControl, SegmentedControlItem } from '@trailmark/ui/components/ui/segmented-control';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
 import { cn } from '@trailmark/ui/lib/utils';
-import { CornerDownLeftIcon, Loader2Icon, SearchIcon, XIcon } from 'lucide-react';
+import { SearchIcon, XIcon } from 'lucide-react';
 import { type KeyboardEvent, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { suggestQuery, viewsQuery } from '@/lib/api/queries';
+import { coreField, sqlColumn } from '@/lib/query-catalog';
 import type { QueryProblem } from '@/lib/query-error';
+import { applyFixes, autoFixes } from '@/lib/query-lint';
 import { translateQueryToSql } from '@/lib/query-translate';
+import { useRecentQueries } from '@/lib/recent-queries';
 import { HighlightedText } from './highlighted';
 import { QueryHelp } from './query-help';
+import { SuggestionPanel } from './suggestion-panel';
 import { type Suggestion, useCompletions } from './use-completions';
+
+/** The /suggest field behind a highlighted field / column suggestion, if it has values worth prefetching. */
+function valueSourceFor(s: Suggestion): string | null {
+  if (s.kind === 'key') {
+    const core = coreField(s.label);
+    return core && core.suggest !== 'none' ? core.key : null;
+  }
+  if (s.kind === 'attr' && !s.label.startsWith("attributes['")) return s.label;
+  if (s.kind === 'column') return sqlColumn(s.label)?.suggestField ?? null;
+  return null;
+}
 
 export interface QueryInputHandle {
   focus: () => void;
@@ -25,6 +43,8 @@ export interface QueryInputProps {
   onSubmit: (q: string, lang: QueryLang) => void;
   /** Show the Query | SQL toggle. */
   allowSql?: boolean;
+  /** Offer the project's saved views in the suggestion panel (the main explorer, not embedded timelines). */
+  views?: boolean;
   /** Server rejection of `value`; its span is underlined while the text is unchanged. */
   problem?: QueryProblem | null;
   placeholder?: string;
@@ -41,11 +61,27 @@ const PLACEHOLDER: Record<QueryLang, string> = {
 const TEXT = 'px-2.5 py-[7px] font-mono text-[13px] leading-5 whitespace-pre-wrap [overflow-wrap:anywhere]';
 
 /**
- * Query bar: a transparent auto-growing textarea over a syntax-highlighted mirror (no editor
- * dependency, same metrics, so the caret and selection line up), with key/value autocomplete,
- * a Query | SQL mode toggle and inline server errors.
+ * Query bar: a transparent auto-growing textarea over a syntax-highlighted mirror (no editor dependency, same
+ * metrics, so the caret and selection line up), with a suggestion panel that follows the caret (recent queries,
+ * saved views, fields, operators, values ranked by frequency), a syntax hint row, Lucene/KQL conversions, a
+ * Query | SQL mode toggle and inline server errors.
+ *
+ * Keyboard: ↑/↓ move, Tab (or Enter after moving) accepts, Enter runs, Ctrl/⌘+Enter always runs, Esc closes,
+ * Ctrl+Space reopens, Shift+Delete forgets the highlighted recent query.
  */
-export function QueryInput({ projectId, range, value, lang, onSubmit, allowSql = false, problem, placeholder, className, ref }: QueryInputProps) {
+export function QueryInput({
+  projectId,
+  range,
+  value,
+  lang,
+  onSubmit,
+  allowSql = false,
+  views: showViews = false,
+  problem,
+  placeholder,
+  className,
+  ref,
+}: QueryInputProps) {
   const [draft, setDraft] = useState(value);
   const [caret, setCaret] = useState(0);
   const [open, setOpen] = useState(false);
@@ -53,22 +89,50 @@ export function QueryInput({ projectId, range, value, lang, onSubmit, allowSql =
   /** The user moved through the list (arrows / hover), so Enter means "pick this". */
   const [navigated, setNavigated] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const navigate = useNavigate();
   const listId = `qi-list-${lang}`;
 
   useImperativeHandle(ref, () => ({ focus: () => inputRef.current?.focus() }), []);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-sync the draft when the submitted query or its language changes
   useEffect(() => setDraft(value), [value, lang]);
 
-  const completions = useCompletions({ projectId, range, lang, draft, caret, open });
-  const { suggestions } = completions;
-  const showMenu = open && suggestions.length > 0;
-  const activeSuggestion = suggestions[Math.min(active, suggestions.length - 1)];
+  const recent = useRecentQueries(projectId);
+  const views = useQuery({ ...viewsQuery(projectId), enabled: showViews && open, staleTime: 60_000 });
+  const completions = useCompletions({
+    projectId,
+    range,
+    lang,
+    draft,
+    caret,
+    open,
+    recent: recent.items,
+    views: showViews ? views.data : undefined,
+  });
+  const { suggestions, hint } = completions;
+  const showPanel = open && (suggestions.length > 0 || Boolean(hint?.parts.length));
+  const showList = showPanel && suggestions.length > 0;
+  const activeIndex = Math.min(active, Math.max(0, suggestions.length - 1));
+  const activeSuggestion = showList ? suggestions[activeIndex] : undefined;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset the highlight whenever the list changes shape
-  useEffect(() => setActive(0), [completions.title, completions.context.kind, suggestions.length]);
+  // Reset the highlight whenever the list changes shape (new context, group or length).
+  const shape = `${completions.context.kind}|${suggestions.length}|${suggestions[0]?.id ?? ''}`;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the list's shape on purpose
   useEffect(() => {
-    if (showMenu) document.getElementById(`${listId}-${active}`)?.scrollIntoView({ block: 'nearest' });
-  }, [active, showMenu, listId]);
+    setActive(0);
+    setNavigated(false);
+  }, [shape]);
+  useEffect(() => {
+    if (showList) document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, showList, listId]);
+
+  // Warm the value cache for the highlighted field, so Tab → `field:` shows its values without a spinner.
+  const queryClient = useQueryClient();
+  const warmField = activeSuggestion ? valueSourceFor(activeSuggestion) : null;
+  useEffect(() => {
+    if (!warmField) return;
+    const timer = setTimeout(() => queryClient.prefetchQuery(suggestQuery(projectId, warmField, '')), 120);
+    return () => clearTimeout(timer);
+  }, [warmField, projectId, queryClient]);
 
   /* The caret is restored synchronously after React commits the new text, before the next keystroke. */
   const pendingCaret = useRef<number | null>(null);
@@ -90,14 +154,52 @@ export function QueryInput({ projectId, range, value, lang, onSubmit, allowSql =
     setEdit((n) => n + 1);
   };
 
-  const accept = (s: Suggestion) => {
-    setText(draft.slice(0, s.from) + s.insert + draft.slice(s.to), s.caret);
-    setOpen(Boolean(s.keepOpen));
-  };
-
   const submit = (q = draft, nextLang = lang) => {
     setOpen(false);
-    onSubmit(q.trim(), nextLang);
+    let text = q.trim();
+    // Familiar Lucene / KQL spellings with one clear meaning are converted when the query runs.
+    if (nextLang === 'query' && q === draft) {
+      const fixes = autoFixes(completions.fixes);
+      if (fixes.length) {
+        const original = text;
+        text = applyFixes(draft, fixes).trim();
+        setText(text, text.length);
+        toast('Converted to Trailmark syntax', {
+          description: text,
+          action: { label: 'Undo', onClick: () => onSubmit(original, nextLang) },
+        });
+      }
+    }
+    if (text) recent.add(text, nextLang);
+    onSubmit(text, nextLang);
+  };
+
+  const accept = (s: Suggestion) => {
+    if (s.id === 'loading') return;
+    if (s.view) {
+      setOpen(false);
+      const v = s.view;
+      navigate({
+        to: '/p/$projectId/events',
+        params: { projectId },
+        search: {
+          q: v.state.q || undefined,
+          lang: v.state.lang === 'sql' ? ('sql' as const) : undefined,
+          range: v.state.range,
+          cols: v.state.columns?.join(',') || undefined,
+          view: v.id,
+        },
+      });
+      return;
+    }
+    const text = draft.slice(0, s.from) + s.insert + draft.slice(s.to);
+    setText(text, s.caret);
+    if (s.run) {
+      submit(text);
+      return;
+    }
+    // Stay open: the next suggestions (values after `key:`, the next term after a value) follow the caret.
+    setOpen(true);
   };
 
   const switchLang = (next: QueryLang) => {
@@ -107,7 +209,7 @@ export function QueryInput({ projectId, range, value, lang, onSubmit, allowSql =
     if (!text) {
       submit('', next);
     } else if (next === 'sql') {
-      const sql = translateQueryToSql(text);
+      const sql = translateQueryToSql(applyFixes(text, autoFixes(completions.fixes)));
       if (sql) {
         submit(sql, 'sql');
         toast.success('Translated to SQL', { description: sql, action: restore });
@@ -123,28 +225,43 @@ export function QueryInput({ projectId, range, value, lang, onSubmit, allowSql =
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (showMenu && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    if (e.key === ' ' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      setOpen(true);
+      return;
+    }
+    if (showList && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault();
       setNavigated(true);
       const n = suggestions.length;
-      setActive((i) => (e.key === 'ArrowDown' ? (i + 1) % n : (i - 1 + n) % n));
+      setActive((i) => (e.key === 'ArrowDown' ? (Math.min(i, n - 1) + 1) % n : (Math.min(i, n - 1) - 1 + n) % n));
       return;
     }
-    if (showMenu && e.key === 'Tab' && !e.shiftKey && activeSuggestion) {
+    if (showList && e.key === 'Delete' && e.shiftKey && activeSuggestion?.recent) {
       e.preventDefault();
-      accept(activeSuggestion);
+      recent.remove(activeSuggestion.recent.q, activeSuggestion.recent.lang);
+      return;
+    }
+    if (e.key === 'Tab' && !e.shiftKey && showPanel && (showList || draft.trim())) {
+      // While composing, Tab completes and never moves focus (to the mode toggle, where Enter would switch
+      // modes). Esc closes the panel first; then Tab leaves the bar as usual.
+      e.preventDefault();
+      if (activeSuggestion && activeSuggestion.id !== 'loading') accept(activeSuggestion);
       return;
     }
     if (e.key === 'Enter') {
-      if (e.shiftKey && lang === 'sql' && !(showMenu && navigated)) return; // newline
+      if (e.shiftKey && lang === 'sql' && !(showList && navigated)) return; // newline
       e.preventDefault();
       const prefix = completions.prefix.toLowerCase();
       const partial =
         Boolean(prefix) &&
-        activeSuggestion &&
-        activeSuggestion.label.toLowerCase() !== prefix &&
-        activeSuggestion.insert.trim().toLowerCase() !== prefix;
-      if (showMenu && activeSuggestion && !e.metaKey && !e.ctrlKey && (navigated || partial)) {
+        activeSuggestion !== undefined &&
+        activeSuggestion.kind !== 'recent' &&
+        activeSuggestion.kind !== 'fix' &&
+        // A fully typed name (`impersonator` for `impersonator:*`) is not partial: Enter runs.
+        activeSuggestion.label.toLowerCase().replace(/:\*?$/, '') !== prefix &&
+        activeSuggestion.insert.trim().toLowerCase().replace(/:\*?$/, '') !== prefix;
+      if (activeSuggestion && activeSuggestion.id !== 'loading' && !e.metaKey && !e.ctrlKey && (navigated || partial)) {
         accept(activeSuggestion);
         return;
       }
@@ -152,7 +269,7 @@ export function QueryInput({ projectId, range, value, lang, onSubmit, allowSql =
       return;
     }
     if (e.key === 'Escape') {
-      if (showMenu) {
+      if (showPanel) {
         e.preventDefault();
         e.stopPropagation();
         setOpen(false);
@@ -215,7 +332,7 @@ export function QueryInput({ projectId, range, value, lang, onSubmit, allowSql =
         <div className="relative grid max-h-[9.75rem] min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-y-auto overflow-x-hidden">
           <div aria-hidden className={cn(TEXT, 'pointer-events-none [grid-area:1/1]')}>
             {draft ? (
-              <HighlightedText error={error} lang={lang} typingAt={open ? caret : undefined} value={draft} />
+              <HighlightedText error={error} lang={lang} typingAt={open ? caret : undefined} value={draft} warnings={completions.fixes} />
             ) : (
               <span className="block truncate whitespace-nowrap text-muted-foreground">{placeholder ?? PLACEHOLDER[lang]}</span>
             )}
@@ -223,10 +340,10 @@ export function QueryInput({ projectId, range, value, lang, onSubmit, allowSql =
             {'​'}
           </div>
           <textarea
-            aria-activedescendant={showMenu ? `${listId}-${active}` : undefined}
+            aria-activedescendant={showList ? `${listId}-${activeIndex}` : undefined}
             aria-autocomplete="list"
             aria-controls={listId}
-            aria-expanded={showMenu}
+            aria-expanded={showList}
             aria-invalid={showProblem || undefined}
             aria-label={lang === 'sql' ? 'SQL WHERE expression' : 'Query'}
             autoCapitalize="off"
@@ -279,83 +396,23 @@ export function QueryInput({ projectId, range, value, lang, onSubmit, allowSql =
           <Kbd className="me-1 hidden md:inline-flex">/</Kbd>
         </div>
       </div>
-      {showMenu ? (
-        <div className="absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-lg border bg-popover shadow-lg" id={listId} role="listbox">
-          <div className="flex items-center justify-between gap-3 border-b px-3 py-1.5 text-[11px] text-muted-foreground">
-            <span className="flex min-w-0 items-center gap-1.5 truncate">
-              {completions.title}
-              {completions.loading ? <Loader2Icon className="size-3 animate-spin" /> : null}
-            </span>
-            <span className="hidden shrink-0 items-center gap-1 sm:flex">
-              <Kbd>↑↓</Kbd> select <Kbd>Tab</Kbd> complete{' '}
-              <Kbd>
-                <CornerDownLeftIcon className="size-3" />
-              </Kbd>{' '}
-              run
-            </span>
-          </div>
-          <div className="max-h-72 overflow-auto p-1">
-            {suggestions.map((s, i) => (
-              // biome-ignore lint/a11y/useFocusableInteractive: listbox options follow the aria-activedescendant pattern; focus stays in the textarea
-              <div
-                aria-selected={i === active}
-                className={cn('flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm', i === active && 'bg-muted')}
-                id={`${listId}-${i}`}
-                key={s.id}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  accept(s);
-                }}
-                onMouseMove={() => {
-                  if (i !== active) {
-                    setActive(i);
-                    setNavigated(true);
-                  }
-                }}
-                role="option"
-              >
-                <span
-                  className={cn(
-                    'min-w-0 shrink truncate',
-                    s.named ? 'text-[13px] text-foreground' : 'font-mono text-[12px]',
-                    s.kind === 'key' || s.kind === 'column' || s.kind === 'attr' ? 'text-syntax-key' : '',
-                    s.kind === 'function' || s.kind === 'keyword' || s.kind === 'snippet' ? 'text-syntax-keyword' : '',
-                  )}
-                >
-                  {s.kind === 'term' || s.label.startsWith("attributes['") ? <HighlightedText lang={lang} value={s.label} /> : s.label}
-                </span>
-                {s.badge ? (
-                  <span className="shrink-0 rounded bg-muted px-1 font-mono text-[9.5px] text-muted-foreground uppercase leading-4 tracking-wide">
-                    {s.badge}
-                  </span>
-                ) : null}
-                {s.detail ? (
-                  <span
-                    className={cn(
-                      'min-w-0 flex-1 truncate text-muted-foreground text-xs',
-                      (s.named || s.kind === 'function') && 'font-mono text-[11px]',
-                    )}
-                  >
-                    {s.detail}
-                  </span>
-                ) : (
-                  <span className="flex-1" />
-                )}
-                {s.meta ? <span className="shrink-0 text-muted-foreground text-xs tabular-nums">{s.meta}</span> : null}
-              </div>
-            ))}
-          </div>
-          {completions.context.kind === 'key' ? (
-            <div className="hidden border-t px-3 py-1.5 text-[11px] text-muted-foreground sm:block">
-              Terms are ANDed. Use <span className="font-mono font-semibold text-syntax-keyword">OR</span> and parentheses for either:{' '}
-              <span className="font-mono">(outcome:failure OR outcome:denied) attempt:&gt;1</span>
-            </div>
-          ) : completions.context.kind === 'ident' ? (
-            <div className="hidden border-t px-3 py-1.5 text-[11px] text-muted-foreground sm:block">
-              A WHERE expression only — <span className="font-mono">Shift</span>+<span className="font-mono">Enter</span> for a new line.
-            </div>
-          ) : null}
-        </div>
+      {showPanel ? (
+        <SuggestionPanel
+          active={activeIndex}
+          hint={hint}
+          lang={lang}
+          listId={listId}
+          loading={completions.loading}
+          onAccept={accept}
+          onHover={(i) => {
+            if (i !== activeIndex) {
+              setActive(i);
+              setNavigated(true);
+            }
+          }}
+          onRemoveRecent={(r) => recent.remove(r.q, r.lang)}
+          suggestions={suggestions}
+        />
       ) : null}
     </div>
   );

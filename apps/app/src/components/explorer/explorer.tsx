@@ -305,6 +305,7 @@ export function Explorer({
             range={range}
             ref={queryBar}
             value={q}
+            views={!embedded}
           />
           <Tooltip>
             <TooltipTrigger

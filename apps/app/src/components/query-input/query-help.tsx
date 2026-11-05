@@ -39,6 +39,16 @@ const QUERY_SECTIONS: { title: string; rows: Example[] }[] = [
       { code: '(outcome:failure OR outcome:denied) attempt:>1', note: 'OR, AND, NOT and parentheses' },
     ],
   },
+  {
+    title: 'Coming from Lucene / Kibana / Datadog',
+    rows: [
+      { code: 'impersonator:*', note: '_exists_:impersonator is converted' },
+      { code: 'tenant:biz_7', note: 'tenant = biz_7 (KQL) is converted' },
+      { code: '-outcome:success', note: 'outcome != success and !outcome:success too' },
+      { code: 'attempt:>=2', note: 'attempt >= 2 is converted' },
+      { code: 'a AND b', note: '&& and || work; operators are upper-case' },
+    ],
+  },
 ];
 
 const SQL_SECTIONS: { title: string; rows: Example[] }[] = [
