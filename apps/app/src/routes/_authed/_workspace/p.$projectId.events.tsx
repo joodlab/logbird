@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { queryLangSchema } from '@trailmark/contracts';
 import { Button } from '@trailmark/ui/components/ui/button';
 import { BookmarkIcon, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
@@ -12,6 +13,8 @@ import { useRange } from '@/lib/use-range';
 
 const searchSchema = z.object({
   q: z.string().optional(),
+  /** `sql` = q is a SQL WHERE expression; absent = query language. */
+  lang: queryLangSchema.optional().catch(undefined),
   cols: z.string().optional(),
   ev: z.string().optional(),
   live: z.boolean().optional(),
@@ -21,11 +24,11 @@ const searchSchema = z.object({
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/events')({
   validateSearch: searchSchema,
   staticData: { crumb: 'Explorer', range: true },
-  loaderDeps: ({ search }) => ({ q: search.q ?? '', range: search.range }),
+  loaderDeps: ({ search }) => ({ q: search.q ?? '', lang: search.lang ?? 'query', range: search.range }),
   loader: ({ context, params, deps }) => {
     const range = deps.range && isValidRange(deps.range) ? deps.range : DEFAULT_RANGE;
-    context.queryClient.prefetchInfiniteQuery(eventsInfiniteQuery(params.projectId, range, deps.q));
-    context.queryClient.prefetchQuery(histogramQuery(params.projectId, range, deps.q));
+    context.queryClient.prefetchInfiniteQuery(eventsInfiniteQuery(params.projectId, range, deps.q, deps.lang));
+    context.queryClient.prefetchQuery(histogramQuery(params.projectId, range, deps.q, deps.lang));
   },
   head: () => ({ meta: [{ title: 'Explorer · Trailmark' }] }),
   component: ExplorerPage,
@@ -41,6 +44,7 @@ function ExplorerPage() {
 
   const state: ExplorerState = {
     q: search.q ?? '',
+    lang: search.lang ?? 'query',
     range,
     columns: parseColumns(search.cols),
     ev: search.ev,
@@ -56,12 +60,15 @@ function ExplorerPage() {
         search: (prev) => {
           const next = { ...prev };
           if ('q' in patch) next.q = patch.q || undefined;
+          if ('lang' in patch) next.lang = patch.lang === 'sql' ? 'sql' : undefined;
           if ('range' in patch) next.range = patch.range === DEFAULT_RANGE ? undefined : patch.range;
           if ('columns' in patch) next.cols = patch.columns ? serializeColumns(patch.columns) : undefined;
           if ('ev' in patch) next.ev = patch.ev;
           if ('live' in patch) next.live = patch.live || undefined;
           // A saved view stays "open" only while its query is untouched.
-          if (view && ('q' in patch || 'range' in patch) && (next.q ?? '') !== (view.state.q ?? '')) next.view = undefined;
+          const viewLang = view?.state.lang === 'sql' ? 'sql' : undefined;
+          if (view && ('q' in patch || 'lang' in patch || 'range' in patch) && ((next.q ?? '') !== (view.state.q ?? '') || next.lang !== viewLang))
+            next.view = undefined;
           return next;
         },
       });

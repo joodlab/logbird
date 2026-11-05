@@ -1,12 +1,15 @@
 /**
- * Client-side model of the Trailmark query language (docs/SPEC.md §5.1).
+ * Client-side model of the Trailmark query language (docs/SPEC.md §5.1 + §5.1.1 v2).
  *
- * The server owns parsing → SQL. The console only needs a *lossless* tokenizer to
- * highlight the query bar, drive autocomplete, and add/remove filter terms from facets,
- * charts and entity pages without destroying what the user typed.
+ * The server owns parsing → SQL. The console only needs a *lossless* tokenizer to highlight the
+ * query bar, drive autocomplete, and add/remove filter terms from facets, charts and entity pages
+ * without destroying what the user typed.
  */
+import { attributeKey, coreField } from './query-catalog';
 
 export type TokenKind = 'field' | 'text' | 'phrase' | 'operator' | 'paren' | 'space';
+/** Shape of a field term's value (v2). */
+export type ValueKind = 'plain' | 'quoted' | 'regex' | 'range' | 'compare' | 'group';
 
 export interface QueryToken {
   kind: TokenKind;
@@ -17,100 +20,81 @@ export interface QueryToken {
   negated: boolean;
   /** For `field` tokens. */
   field?: string;
-  /** Unquoted value for `field` / `phrase` / `text` tokens. */
+  /** Unquoted value for `field` / `phrase` / `text` tokens (comparison values exclude the operator). */
   value?: string;
+  valueKind?: ValueKind;
+  /** Offset of the first value character (after `:`) for `field` tokens. */
+  valueStart?: number;
+  /** `>`, `>=`, `<`, `<=` for comparisons. */
+  op?: string;
 }
 
-export interface FieldSpec {
-  key: string;
-  description: string;
-  example: string;
-  /** Facet field used to suggest values, when there is one. */
-  facet?: string;
-  /** Suggest the facet's labels (names) instead of its values (ids). */
-  byLabel?: boolean;
-  /** Entity directory used to suggest ids (by name or id) for high-cardinality fields. */
-  entity?: 'actor' | 'tenant' | 'executor' | 'target';
-  /** What `field:*` (field present, non-empty) means; offered as the first value suggestion. */
-  presence?: string;
-  /** Also offer the full `field:*` term among the field suggestions. */
-  presenceShortcut?: boolean;
-}
-
-/** Query fields apps/server understands (SPEC §5.1), in the order autocomplete offers them. */
-export const QUERY_FIELDS: FieldSpec[] = [
-  { key: 'action', description: 'Exact action, or a prefix with *', example: 'action:hotel.*', facet: 'action' },
-  { key: 'outcome', description: 'success · failure · denied · partial · unknown', example: 'outcome:failure', facet: 'outcome' },
-  { key: 'severity', description: 'info · notice · warning · critical', example: 'severity:critical', facet: 'severity' },
-  { key: 'actor', description: 'Who caused it (actor id)', example: 'actor:usr_42', entity: 'actor', presence: 'Any actor (events with an actor)' },
-  { key: 'actor.name', description: 'Actor display name', example: 'actor.name:"Raed B"', facet: 'actor', byLabel: true },
-  { key: 'actor.email', description: 'Actor email', example: 'actor.email:raed@example.com', presence: 'Any email (actor has an email)' },
-  { key: 'actor.type', description: 'user · service · system · api_key · integration', example: 'actor.type:user', facet: 'actor.type' },
-  {
-    key: 'impersonator',
-    description: 'Support user acting as the actor',
-    example: 'impersonator:usr_1',
-    presence: 'Events done while impersonating',
-    presenceShortcut: true,
-  },
-  {
-    key: 'tenant',
-    description: 'Customer account (tenant id)',
-    example: 'tenant:biz_7',
-    entity: 'tenant',
-    presence: 'Any tenant (events with a tenant)',
-  },
-  { key: 'tenant.name', description: 'Tenant display name', example: 'tenant.name:"Azure Hotels"', facet: 'tenant', byLabel: true },
-  {
-    key: 'executor',
-    description: 'Worker, job or API that performed it',
-    example: 'executor:crm-worker',
-    entity: 'executor',
-    presence: 'Any executor (events with an executor)',
-  },
-  { key: 'executor.name', description: 'Executor display name', example: 'executor.name:"CRM worker"', facet: 'executor', byLabel: true },
-  { key: 'executor.type', description: 'api · worker · scheduler · webhook', example: 'executor.type:worker', facet: 'executor.type' },
-  { key: 'job', description: 'Job id the executor ran', example: 'job:456', presence: 'Events run by a job' },
-  {
-    key: 'target',
-    description: 'Record the event touched (target id)',
-    example: 'target:hotel_123',
-    entity: 'target',
-    presence: 'Events that touched a record',
-  },
-  { key: 'target.type', description: 'Record type', example: 'target.type:hotel', facet: 'target.type' },
-  { key: 'category', description: 'First segment of the action', example: 'category:booking', facet: 'category' },
-  { key: 'env', description: 'Environment', example: '-env:staging', facet: 'environment' },
-  {
-    key: 'source',
-    description: 'External system that supplied the change',
-    example: 'source:staybook',
-    facet: 'source',
-    presence: 'Changes supplied by an external system',
-  },
-  {
-    key: 'operation',
-    description: 'Operation id (request + spawned jobs)',
-    example: 'operation:op_101',
-    presence: 'Events that belong to an operation',
-  },
-  { key: 'parent', description: 'Parent event id (direct children)', example: 'parent:evt_123', presence: 'Events caused by another event' },
-  { key: 'request', description: 'Request id', example: 'request:req_abc', presence: 'Events with a request id' },
-  { key: 'trace', description: 'Trace id', example: 'trace:4bf92f…', presence: 'Events with a trace id' },
-  { key: 'id', description: 'Event id', example: 'id:01J…' },
-  { key: 'attr.', description: 'Any attribute, e.g. attr.metadata.plan', example: 'attr.metadata.plan:pro' },
-];
-
-const FIELD_RE = /^(-?)([A-Za-z_][\w.]*):("(?:[^"\\]|\\.)*"?|[^\s()]*)/;
-const PHRASE_RE = /^(-?)"((?:[^"\\]|\\.)*)"?/;
-const WORD_RE = /^(-?)([^\s()"]+)/;
+const KEY_RE = /^(-?)([A-Za-z_][\w.$@-]*):/;
+const OPERATORS = new Set(['OR', 'AND', 'NOT']);
 
 function unquote(value: string): string {
   if (value.startsWith('"')) {
     const inner = value.endsWith('"') && value.length > 1 ? value.slice(1, -1) : value.slice(1);
-    return inner.replaceAll('\\"', '"');
+    return inner.replace(/\\(.)/g, '$1');
   }
   return value;
+}
+
+/** End offset (exclusive) of a delimited run starting at `i` (`"…"`, `/…/`), honouring backslash escapes. */
+function scanDelimited(input: string, i: number, close: string): number {
+  let j = i + 1;
+  while (j < input.length) {
+    const ch = input[j];
+    if (ch === '\\') {
+      j += 2;
+      continue;
+    }
+    j += 1;
+    if (ch === close) return j;
+  }
+  return input.length;
+}
+
+/** End of a `( … )` value group, respecting quotes and nesting. Unclosed groups run to the end. */
+function scanGroup(input: string, i: number): number {
+  let depth = 0;
+  let j = i;
+  while (j < input.length) {
+    const ch = input[j];
+    if (ch === '"') {
+      j = scanDelimited(input, j, '"');
+      continue;
+    }
+    if (ch === '(') depth += 1;
+    if (ch === ')') {
+      depth -= 1;
+      if (depth === 0) return j + 1;
+    }
+    j += 1;
+  }
+  return input.length;
+}
+
+function scanPlain(input: string, i: number): number {
+  let j = i;
+  if (input[j] === '"') return scanDelimited(input, j, '"');
+  while (j < input.length && !/[\s()]/.test(input[j] ?? '')) j += 1;
+  return j;
+}
+
+/** Lex the value after `key:` starting at `i`. */
+function scanValue(input: string, i: number): { end: number; kind: ValueKind; op?: string } {
+  const ch = input[i];
+  if (ch === '"') return { end: scanDelimited(input, i, '"'), kind: 'quoted' };
+  if (ch === '/') return { end: scanDelimited(input, i, '/'), kind: 'regex' };
+  if (ch === '[' || ch === '{') {
+    const close = /[\]}]/.exec(input.slice(i + 1));
+    return { end: close ? i + 1 + close.index + 1 : input.length, kind: 'range' };
+  }
+  if (ch === '(') return { end: scanGroup(input, i), kind: 'group' };
+  const op = /^(>=|<=|>|<)/.exec(input.slice(i))?.[0];
+  if (op) return { end: scanPlain(input, i + op.length), kind: 'compare', op };
+  return { end: scanPlain(input, i), kind: 'plain' };
 }
 
 /** Tokenize a query. Concatenating every token's `raw` reproduces the input exactly. */
@@ -126,46 +110,53 @@ export function tokenize(input: string): QueryToken[] {
       continue;
     }
     const ch = rest[0] ?? '';
-    if (ch === '(' || ch === ')') {
-      tokens.push({ kind: 'paren', raw: ch, start: i, end: i + 1, negated: false });
-      i += 1;
+    if (ch === '(' || ch === ')' || (ch === '-' && rest[1] === '(')) {
+      const raw = ch === '-' ? '-(' : ch;
+      tokens.push({ kind: 'paren', raw, start: i, end: i + raw.length, negated: ch === '-' });
+      i += raw.length;
       continue;
     }
-    const field = FIELD_RE.exec(rest);
-    if (field) {
-      const raw = field[0];
+    const key = KEY_RE.exec(rest);
+    if (key) {
+      const valueStart = i + key[0].length;
+      const v = scanValue(input, valueStart);
+      const raw = input.slice(i, v.end);
+      const valueRaw = input.slice(valueStart + (v.op?.length ?? 0), v.end);
       tokens.push({
         kind: 'field',
         raw,
         start: i,
-        end: i + raw.length,
-        negated: field[1] === '-',
+        end: v.end,
+        negated: key[1] === '-',
         // Case is significant: unknown fields are attribute keys (attr.metadata.supportTicket).
-        field: field[2] ?? '',
-        value: unquote(field[3] ?? ''),
+        field: key[2] ?? '',
+        value: v.kind === 'plain' || v.kind === 'quoted' || v.kind === 'compare' ? unquote(valueRaw) : valueRaw,
+        valueKind: v.kind,
+        valueStart,
+        op: v.op,
       });
-      i += raw.length;
+      i = v.end;
       continue;
     }
-    const phrase = PHRASE_RE.exec(rest);
-    if (phrase) {
-      const raw = phrase[0];
-      tokens.push({ kind: 'phrase', raw, start: i, end: i + raw.length, negated: phrase[1] === '-', value: phrase[2] ?? '' });
-      i += raw.length;
+    const neg = ch === '-' && rest[1] === '"' ? 1 : 0;
+    if (rest[neg] === '"') {
+      const end = scanDelimited(input, i + neg, '"');
+      const raw = input.slice(i, end);
+      tokens.push({ kind: 'phrase', raw, start: i, end, negated: neg === 1, value: unquote(raw.slice(neg)) });
+      i = end;
       continue;
     }
-    const word = WORD_RE.exec(rest);
+    const word = /^(-?)([^\s()"]+)/.exec(rest);
     if (word) {
       const raw = word[0];
-      // `OR` is the only keyword; adjacency means AND (SPEC §5.1).
-      const isOperator = raw === 'OR';
+      const isOperator = OPERATORS.has(raw);
       tokens.push({
         kind: isOperator ? 'operator' : 'text',
         raw,
         start: i,
         end: i + raw.length,
-        negated: !isOperator && word[1] === '-',
-        value: word[2] ?? raw,
+        negated: !isOperator && word[1] === '-' && raw.length > 1,
+        value: raw.length > 1 ? (word[2] ?? raw) : raw,
       });
       i += raw.length;
       continue;
@@ -177,14 +168,21 @@ export function tokenize(input: string): QueryToken[] {
   return tokens;
 }
 
-/** Normalize aliases so `env` and `environment` compare equal. */
+/**
+ * Canonical form of a field key so aliases compare equal: `environment` → env, `timestamp` → occurredAt,
+ * and every attribute spelling (`metadata.plan`, `attributes.metadata.plan`) → `attr.metadata.plan`.
+ */
 export function canonicalField(field: string): string {
-  if (field === 'environment') return 'env';
-  return field;
+  if (/^(attr|attributes)\./.test(field)) return `attr.${attributeKey(field)}`;
+  const core = coreField(field);
+  if (core) return core.key;
+  return `attr.${field}`;
 }
 
-function quoteIfNeeded(value: string): string {
-  return /[\s()"]/.test(value) || value === '' ? `"${value.replaceAll('"', '\\"')}"` : value;
+const NEEDS_QUOTES = /[\s()"\\]|^[[{/<>]|^$/;
+
+export function quoteIfNeeded(value: string): string {
+  return NEEDS_QUOTES.test(value) || OPERATORS.has(value) ? `"${value.replace(/["\\]/g, '\\$&')}"` : value;
 }
 
 export function formatTerm(field: string, value: string, negated = false): string {
@@ -203,14 +201,17 @@ function tidy(tokens: QueryToken[]): QueryToken[] {
     solid.forEach((t, i) => {
       const prev = solid[i - 1];
       const next = solid[i + 1];
-      if (t.kind === 'operator' && (!prev || !next || prev.raw === '(' || next.raw === ')' || next.kind === 'operator')) drop.add(t);
-      if (t.raw === '(' && next?.raw === ')') {
+      const opens = (x?: QueryToken) => x?.kind === 'paren' && x.raw !== ')';
+      if (t.kind === 'operator' && t.raw !== 'NOT' && (!prev || !next || opens(prev) || next.raw === ')' || next.kind === 'operator')) drop.add(t);
+      if (t.raw === 'NOT' && (!next || next.raw === ')' || (next.kind === 'operator' && next.raw !== 'NOT'))) drop.add(t);
+      if (opens(t) && next?.raw === ')') {
         drop.add(t);
         drop.add(next);
       }
     });
     current.forEach((t, i) => {
-      if (t.kind === 'space' && (current[i - 1]?.raw === '(' || current[i + 1]?.raw === ')')) drop.add(t);
+      const prev = current[i - 1];
+      if (t.kind === 'space' && ((prev?.kind === 'paren' && prev.raw !== ')') || current[i + 1]?.raw === ')')) drop.add(t);
     });
     if (drop.size === 0) return current;
     current = current.filter((t) => !drop.has(t));
@@ -230,9 +231,14 @@ export function fieldTerms(q: string): QueryToken[] {
   return tokenize(q).filter((t) => t.kind === 'field');
 }
 
+/** Only plain `field:value` / `field:"value"` terms count as a facet value being selected. */
+const isSimple = (t: QueryToken) => t.valueKind === 'plain' || t.valueKind === 'quoted';
+
 export function hasTerm(q: string, field: string, value: string, negated?: boolean): boolean {
   const f = canonicalField(field);
-  return fieldTerms(q).some((t) => canonicalField(t.field ?? '') === f && t.value === value && (negated === undefined || t.negated === negated));
+  return fieldTerms(q).some(
+    (t) => isSimple(t) && canonicalField(t.field ?? '') === f && t.value === value && (negated === undefined || t.negated === negated),
+  );
 }
 
 /** Remove every term for `field` (optionally only one value / polarity). */
@@ -243,7 +249,7 @@ export function removeTerm(q: string, field: string, value?: string, negated?: b
       !(
         t.kind === 'field' &&
         canonicalField(t.field ?? '') === f &&
-        (value === undefined || t.value === value) &&
+        (value === undefined || (isSimple(t) && t.value === value)) &&
         (negated === undefined || t.negated === negated)
       ),
   );
@@ -274,20 +280,220 @@ export function toggleTerm(q: string, field: string, value: string, mode: 'inclu
   return hasTerm(q, field, value, true) ? removeTerm(q, field, value, true) : excludeTerm(q, field, value);
 }
 
-/** The token under the caret, for autocomplete. */
+/** The token under the caret. */
 export function tokenAt(q: string, caret: number): QueryToken | undefined {
   return tokenize(q).find((t) => t.kind !== 'space' && caret >= t.start && caret <= t.end);
-}
-
-/** Autocomplete spec for a query field; `attr.*` keys suggest values from their own facet. */
-export function fieldSpec(field: string): FieldSpec | undefined {
-  const f = canonicalField(field);
-  if (f.startsWith('attr.')) return { key: f, description: 'Attribute', example: `${f}:…`, facet: f };
-  return QUERY_FIELDS.find((spec) => spec.key === f);
 }
 
 /** Map facet API field names back to query fields. */
 export function queryFieldForFacet(facet: string): string {
   if (facet === 'environment') return 'env';
   return facet;
+}
+
+/* ------------------------------------------------------------------ */
+/* Highlighting                                                        */
+/* ------------------------------------------------------------------ */
+
+export type SegmentClass =
+  | 'plain'
+  | 'key'
+  | 'negation'
+  | 'punct'
+  | 'operator'
+  | 'keyword'
+  | 'value'
+  | 'string'
+  | 'number'
+  | 'regex'
+  | 'wildcard'
+  | 'ident'
+  | 'unknown'
+  | 'function'
+  | 'comment';
+
+export interface Segment {
+  start: number;
+  end: number;
+  cls: SegmentClass;
+  /** Inside the server-reported error span. */
+  error?: boolean;
+}
+
+const NUMBER_OR_DATE = /^-?(\d+(\.\d+)?|\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:\d{2})?)?)$/;
+
+function pushValueWord(out: Segment[], input: string, start: number, end: number) {
+  if (start >= end) return;
+  const raw = input.slice(start, end);
+  if (raw.startsWith('"')) {
+    out.push({ start, end, cls: 'string' });
+    return;
+  }
+  if (raw === '*') {
+    out.push({ start, end, cls: 'wildcard' });
+    return;
+  }
+  if (raw.endsWith('*')) {
+    out.push({ start, end: end - 1, cls: 'value' }, { start: end - 1, end, cls: 'wildcard' });
+    return;
+  }
+  out.push({ start, end, cls: NUMBER_OR_DATE.test(raw) ? 'number' : 'value' });
+}
+
+/** Split `[a TO b]` / `(a OR b)` interiors into words, keywords and punctuation. */
+function pushCompound(out: Segment[], input: string, start: number, end: number, keyword: string) {
+  let i = start;
+  while (i < end) {
+    const ch = input[i] ?? '';
+    if (/\s/.test(ch)) {
+      const s = /^\s+/.exec(input.slice(i, end))?.[0].length ?? 1;
+      out.push({ start: i, end: i + s, cls: 'plain' });
+      i += s;
+    } else if ('[]{}()'.includes(ch)) {
+      out.push({ start: i, end: i + 1, cls: 'punct' });
+      i += 1;
+    } else if (ch === '"') {
+      const e = Math.min(end, scanDelimited(input, i, '"'));
+      out.push({ start: i, end: e, cls: 'string' });
+      i = e;
+    } else {
+      let e = i;
+      while (e < end && !/[\s[\]{}()"]/.test(input[e] ?? '')) e += 1;
+      const word = input.slice(i, e);
+      if (word === keyword || word === 'OR') out.push({ start: i, end: e, cls: 'keyword' });
+      else pushValueWord(out, input, i, e);
+      i = e;
+    }
+  }
+}
+
+/** Highlight segments for a query. Segments cover the input exactly, in order. */
+export function highlightQuery(input: string): Segment[] {
+  const out: Segment[] = [];
+  for (const t of tokenize(input)) {
+    switch (t.kind) {
+      case 'space':
+        out.push({ start: t.start, end: t.end, cls: 'plain' });
+        break;
+      case 'paren':
+        if (t.negated) out.push({ start: t.start, end: t.start + 1, cls: 'negation' });
+        out.push({ start: t.end - 1, end: t.end, cls: 'punct' });
+        break;
+      case 'operator':
+        out.push({ start: t.start, end: t.end, cls: 'keyword' });
+        break;
+      case 'phrase':
+        out.push({ start: t.start, end: t.end, cls: t.negated ? 'negation' : 'string' });
+        break;
+      case 'text':
+        if (t.negated) out.push({ start: t.start, end: t.end, cls: 'negation' });
+        else pushValueWord(out, input, t.start, t.end);
+        break;
+      case 'field': {
+        const keyStart = t.start + (t.negated ? 1 : 0);
+        const colon = keyStart + (t.field?.length ?? 0);
+        const valueStart = t.valueStart ?? colon + 1;
+        if (t.negated) out.push({ start: t.start, end: keyStart, cls: 'negation' });
+        out.push({ start: keyStart, end: colon, cls: t.negated ? 'negation' : 'key' }, { start: colon, end: valueStart, cls: 'punct' });
+        if (t.valueKind === 'compare') {
+          const opEnd = valueStart + (t.op?.length ?? 0);
+          out.push({ start: valueStart, end: opEnd, cls: 'operator' });
+          pushValueWord(out, input, opEnd, t.end);
+        } else if (t.valueKind === 'regex') {
+          const closed = t.end - valueStart > 1 && input[t.end - 1] === '/' && input[t.end - 2] !== '\\';
+          out.push({ start: valueStart, end: valueStart + 1, cls: 'punct' });
+          out.push({ start: valueStart + 1, end: closed ? t.end - 1 : t.end, cls: 'regex' });
+          if (closed) out.push({ start: t.end - 1, end: t.end, cls: 'punct' });
+        } else if (t.valueKind === 'range') {
+          pushCompound(out, input, valueStart, t.end, 'TO');
+        } else if (t.valueKind === 'group') {
+          pushCompound(out, input, valueStart, t.end, 'OR');
+        } else {
+          pushValueWord(out, input, valueStart, t.end);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return out.filter((s) => s.end > s.start);
+}
+
+/**
+ * Mark the half-open error span [start, end) on top of highlight segments, splitting segments at its
+ * edges. A zero-width span (start === end) marks nothing; callers draw a caret at `start` instead.
+ */
+export function markErrorSpan(segments: Segment[], start: number | null, end: number | null): Segment[] {
+  if (start === null || end === null || end <= start) return segments;
+  const out: Segment[] = [];
+  for (const s of segments) {
+    if (s.end <= start || s.start >= end) {
+      out.push(s);
+      continue;
+    }
+    if (s.start < start) out.push({ ...s, end: start });
+    out.push({ ...s, start: Math.max(s.start, start), end: Math.min(s.end, end), error: true });
+    if (s.end > end) out.push({ ...s, start: end });
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Autocomplete context                                                */
+/* ------------------------------------------------------------------ */
+
+export type QueryCompletion =
+  /** Completing a field key (or a bare word). Replace [from, to) with `key:`. */
+  | { kind: 'key'; prefix: string; from: number; to: number }
+  /** Completing the value of `field:`. Replace [from, to) with the (quoted if needed) value. */
+  | { kind: 'value'; field: string; prefix: string; from: number; to: number; op?: string; inGroup: boolean }
+  | { kind: 'none' };
+
+/** What the caret is completing. Pure; drives the suggestion list. */
+export function queryCompletionAt(q: string, caret: number): QueryCompletion {
+  const tokens = tokenize(q);
+  const t =
+    tokens.find((x) => x.kind !== 'space' && caret > x.start && caret <= x.end) ?? tokens.find((x) => x.kind !== 'space' && caret === x.start);
+  if (!t || t.kind === 'paren' || (t.kind === 'operator' && caret === t.start)) return { kind: 'key', prefix: '', from: caret, to: caret };
+  if (t.kind === 'phrase') return { kind: 'none' };
+  if (t.kind === 'operator' || t.kind === 'text') {
+    if (caret === t.start && t.kind === 'text') return { kind: 'key', prefix: '', from: caret, to: caret };
+    const from = t.start + (t.negated || t.raw === '-' ? 1 : 0);
+    if (caret < from) return { kind: 'none' };
+    return { kind: 'key', prefix: q.slice(from, caret), from, to: t.end };
+  }
+  // field token
+  const keyStart = t.start + (t.negated ? 1 : 0);
+  const valueStart = t.valueStart ?? t.end;
+  if (caret < keyStart) return { kind: 'none' };
+  if (caret < valueStart) return { kind: 'key', prefix: q.slice(keyStart, caret), from: keyStart, to: valueStart };
+  const field = t.field ?? '';
+  switch (t.valueKind) {
+    case 'regex':
+    case 'range':
+      return { kind: 'none' };
+    case 'compare': {
+      const from = valueStart + (t.op?.length ?? 0);
+      if (caret < from) return { kind: 'none' };
+      return { kind: 'value', field, prefix: q.slice(from, caret), from, to: t.end, op: t.op, inGroup: false };
+    }
+    case 'quoted': {
+      if (caret === valueStart) return { kind: 'value', field, prefix: '', from: valueStart, to: t.end, inGroup: false };
+      return { kind: 'value', field, prefix: unquote(q.slice(valueStart, caret)), from: valueStart, to: t.end, inGroup: false };
+    }
+    case 'group': {
+      if (caret === valueStart) return { kind: 'none' };
+      // Find the member word around the caret inside `( … )`.
+      let s = caret;
+      while (s > valueStart + 1 && !/[\s()]/.test(q[s - 1] ?? '')) s -= 1;
+      let e = caret;
+      while (e < t.end && !/[\s()]/.test(q[e] ?? '')) e += 1;
+      const word = q.slice(s, caret);
+      if (word === 'OR' || q.slice(s, e) === 'OR') return { kind: 'none' };
+      return { kind: 'value', field, prefix: unquote(word), from: s, to: e, inGroup: true };
+    }
+    default:
+      return { kind: 'value', field, prefix: q.slice(valueStart, caret), from: valueStart, to: t.end, inGroup: false };
+  }
 }

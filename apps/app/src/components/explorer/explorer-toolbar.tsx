@@ -1,6 +1,7 @@
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
+import type { QueryLang } from '@trailmark/contracts';
 import { Button } from '@trailmark/ui/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@trailmark/ui/components/ui/dialog';
 import {
@@ -20,7 +21,8 @@ import { BookmarkPlusIcon, Columns3Icon, DownloadIcon, Loader2Icon } from 'lucid
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
-import { api } from '@/lib/api/client';
+import { HighlightedText } from '@/components/query-input/highlighted';
+import { api, langParam } from '@/lib/api/client';
 import { errorMessage, toApiError } from '@/lib/api/errors';
 import { keys } from '@/lib/api/queries';
 import { fieldErrorMessage } from '@/lib/forms';
@@ -62,13 +64,15 @@ export function ColumnPicker({ columns, onChange }: { columns: string[]; onChang
   );
 }
 
-export function ExportMenu({ projectId, range, q }: { projectId: string; range: string; q: string }) {
+export function ExportMenu({ projectId, range, q, lang = 'query' }: { projectId: string; range: string; q: string; lang?: QueryLang }) {
   const [busy, setBusy] = useState(false);
   const download = async (format: 'csv' | 'jsonl') => {
     setBusy(true);
     try {
       const r = resolveRange(range);
-      const response = await fetch(api.events.exportUrl(projectId, { from: r.from, to: r.to, q: q || undefined, format }));
+      const response = await fetch(
+        api.events.exportUrl(projectId, { from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, format }),
+      );
       if (!response.ok) throw await toApiError(response);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -105,13 +109,25 @@ export function ExportMenu({ projectId, range, q }: { projectId: string; range: 
 
 const nameSchema = z.string().trim().min(1, 'Name the view.').max(80);
 
-export function SaveViewButton({ projectId, q, range, columns }: { projectId: string; q: string; range: string; columns: string[] }) {
+export function SaveViewButton({
+  projectId,
+  q,
+  lang = 'query',
+  range,
+  columns,
+}: {
+  projectId: string;
+  q: string;
+  lang?: QueryLang;
+  range: string;
+  columns: string[];
+}) {
   const [open, setOpen] = useState(false);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const create = useMutation({
     mutationFn: (value: { name: string; description: string }) =>
-      api.views.create(projectId, { name: value.name.trim(), description: value.description.trim() || null, state: { q, range, columns } }),
+      api.views.create(projectId, { name: value.name.trim(), description: value.description.trim() || null, state: { q, lang, range, columns } }),
     onSuccess: async (view) => {
       await queryClient.invalidateQueries({ queryKey: [...keys.project(projectId), 'views'] });
       setOpen(false);
@@ -149,10 +165,17 @@ export function SaveViewButton({ projectId, q, range, columns }: { projectId: st
           >
             <DialogHeader>
               <DialogTitle>Save view</DialogTitle>
-              <DialogDescription>Saves the query, time range and visible columns. Everyone in the workspace can open it.</DialogDescription>
+              <DialogDescription>
+                Saves the query, its mode, the time range and visible columns. Everyone in the workspace can open it.
+              </DialogDescription>
             </DialogHeader>
             <div className="rounded-lg border bg-muted/40 px-3 py-2 font-mono text-[12px]">
-              <div className="truncate">{q || <span className="text-muted-foreground">All events</span>}</div>
+              <div className="flex min-w-0 items-center gap-2">
+                {lang === 'sql' ? <SqlBadge /> : null}
+                <span className="truncate">
+                  {q ? <HighlightedText lang={lang} value={q} /> : <span className="text-muted-foreground">All events</span>}
+                </span>
+              </div>
               <div className="mt-0.5 font-sans text-muted-foreground text-xs">
                 {rangeLabel(range)} · {columns.length} columns
               </div>
@@ -205,5 +228,16 @@ export function SaveViewButton({ projectId, q, range, columns }: { projectId: st
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/** Marks a saved view (or query) written in SQL mode. */
+export function SqlBadge({ className }: { className?: string }) {
+  return (
+    <span
+      className={`inline-flex h-4 shrink-0 items-center rounded border border-syntax-keyword/30 bg-syntax-keyword/10 px-1 font-mono font-semibold text-[9.5px] text-syntax-keyword tracking-wide ${className ?? ''}`}
+    >
+      SQL
+    </span>
   );
 }
