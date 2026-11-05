@@ -57,6 +57,8 @@ export function computeSetup(project: SetupProjectFacts, events: SetupEventFacts
     complete: steps.every((s) => s.status === 'done'),
     nextStep: order.find((s) => s.status !== 'done')?.id ?? null,
     dismissedAt: project.setupDismissedAt?.toISOString() ?? null,
+    // Placeholder until Project.setupCompletedAt is persisted (feat/invite-links-backend).
+    completedAt: null,
     ingest: {
       activeIngestKeys: ingest.length,
       firstEvent: events.firstEvent,
