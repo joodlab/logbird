@@ -16,6 +16,7 @@ import { CheckCircle2Icon, ChevronDownIcon, Link2Icon, Loader2Icon, LockIcon, Pl
 import { useId, useState } from 'react';
 import { Timestamp } from '@/components/timestamp';
 import { errorMessage } from '@/lib/api/errors';
+import { creatorLabel } from '@/lib/events';
 import { formatFull } from '@/lib/format';
 import { fieldErrorMessage } from '@/lib/forms';
 import {
@@ -206,11 +207,11 @@ function InviteLinkRow({ link }: { link: InviteLink }) {
             </span>
           </>
         ) : null}
-        {link.createdBy ? (
+        {creatorLabel(link.createdBy) ? (
           <>
             <Dot />
             <span className="truncate" dir="auto">
-              by {link.createdBy.name}
+              by {creatorLabel(link.createdBy)}
             </span>
           </>
         ) : null}

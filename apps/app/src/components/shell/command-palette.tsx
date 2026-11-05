@@ -15,6 +15,7 @@ import {
 } from '@trailmark/ui/components/ui/command';
 import { useTheme } from '@trailmark/ui/theme';
 import {
+  ActivityIcon,
   BookmarkIcon,
   FileSearchIcon,
   GitBranchIcon,
@@ -24,6 +25,7 @@ import {
   RocketIcon,
   SearchIcon,
   SunIcon,
+  TimerResetIcon,
   UsersIcon,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -157,6 +159,22 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
             >
               <KeyRoundIcon />
               API keys
+            </CommandItem>
+            <CommandItem
+              keywords={['retention', 'delete', 'ttl', 'days', 'policy', 'keep', 'purge']}
+              onSelect={() => go(() => navigate({ to: '/p/$projectId/settings/retention', params: { projectId } }))}
+              value="Retention settings"
+            >
+              <TimerResetIcon />
+              Retention
+            </CommandItem>
+            <CommandItem
+              keywords={['activity', 'audit', 'management', 'history', 'log', 'who']}
+              onSelect={() => go(() => navigate({ to: '/p/$projectId/settings/activity', params: { projectId } }))}
+              value="Workspace activity"
+            >
+              <ActivityIcon />
+              Workspace activity
             </CommandItem>
             <CommandItem
               keywords={['invite', 'team', 'teammates', 'link', 'join', 'people']}

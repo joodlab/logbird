@@ -29,11 +29,11 @@ Examples retained from v0:
 action:hotel.policy.updated
 action:hotel.*
 outcome:failure -env:staging
-actor:usr_42 actor.type:user actor.name:"Raed B"
+actor:usr_42 actor.type:user actor.name:"Lina Haddad"
 tenant:biz_7 tenant.name:"Azure Hotels" executor:crm-worker executor.type:worker
-executor.name:"CRM worker" actor.email:raed@example.com impersonator:usr_1
+executor.name:"CRM worker" actor.email:lina@example.com impersonator:usr_1
 parent:evt_123 job:456
-target:hotel_123 target.type:hotel operation:op_101 request:req_abc trace:abc source:staybook
+target:hotel_123 target.type:hotel operation:op_101 request:req_abc trace:abc source:channel-manager
 attr.metadata.plan:pro
 impersonator:* -tenant:*
 severity:critical category:hotel id:evt_123

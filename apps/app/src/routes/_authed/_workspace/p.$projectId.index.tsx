@@ -17,7 +17,7 @@ import { RankList } from '@/components/rank-list';
 import { SampleDataBanner } from '@/components/setup/sample-data-banner';
 import { SetupChecklistCard } from '@/components/setup/setup-checklist-card';
 import { Timestamp } from '@/components/timestamp';
-import { overviewQuery, projectQuery } from '@/lib/api/queries';
+import { overviewQuery, projectQuery, projectSetupQuery } from '@/lib/api/queries';
 import { eventSentence } from '@/lib/events';
 import { delta, formatNumber, formatPercent } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
@@ -25,6 +25,7 @@ import { DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/')({
+  head: () => ({ meta: [{ title: 'Overview · Trailmark' }] }),
   staticData: { crumb: 'Overview', range: true },
   loaderDeps: ({ search }) => ({ range: search.range }),
   loader: ({ context, params, deps }) => {
@@ -40,6 +41,9 @@ function OverviewPage() {
   const navigate = useNavigate();
   const project = useQuery(projectQuery(projectId));
   const overview = useQuery(overviewQuery(projectId, range));
+  // The setup checklist scores real events only; say so here while sample data is mixed into this average.
+  const setup = useQuery(projectSetupQuery(projectId));
+  const hasSampleData = (setup.data?.ingest.sampleEvents ?? 0) > 0;
   const data = overview.data;
   const loading = overview.isPending;
   const k = data?.kpis;
@@ -116,6 +120,7 @@ function OverviewPage() {
               </div>
             ) : null
           }
+          hint={hasSampleData ? 'in range · includes sample data' : undefined}
           label="Avg conformance"
           loading={loading}
           onClick={() => navigate({ to: '/p/$projectId/fields', params: { projectId } })}

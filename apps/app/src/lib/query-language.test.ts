@@ -21,7 +21,7 @@ function classes(q: string, segments: Segment[] = highlightQuery(q)): string[] {
 describe('tokenize', () => {
   it('is lossless for v0 and v2 syntax', () => {
     for (const q of [
-      '(outcome:failure OR outcome:denied) -env:staging actor.name:"Raed B" "free text" attr.metadata.plan:pro',
+      '(outcome:failure OR outcome:denied) -env:staging actor.name:"Omar N" "free text" attr.metadata.plan:pro',
       'attempt:>=2 duration_ms:[100 TO 500} action:/booking\\.(created|cancelled)/ -outcome:(failure OR denied)',
       'occurredAt:[2026-11-01 TO 2026-11-03T12:00:00Z] NOT a AND b -(x OR y) trace:abc:def',
       'action:(booking.* OR "a b"', // unclosed group
@@ -99,7 +99,7 @@ describe('tokenize', () => {
 
 describe('highlightQuery', () => {
   it('covers the input exactly', () => {
-    const q = 'action:booking.* attempt:>2 -tenant:* (a OR b) "x y" actor.name:"Raed B"';
+    const q = 'action:booking.* attempt:>2 -tenant:* (a OR b) "x y" actor.name:"Omar N"';
     const segs = highlightQuery(q);
     expect(segs.map((s) => q.slice(s.start, s.end)).join('')).toBe(q);
     segs.forEach((s, i) => {
@@ -213,7 +213,7 @@ describe('queryCompletionAt', () => {
   });
 
   it('handles quoted values (unquoted prefix, replaces through the closing quote)', () => {
-    expect(queryCompletionAt('actor.name:"Raed B', 18)).toMatchObject({ kind: 'value', prefix: 'Raed B', from: 11, to: 18, quoted: true });
+    expect(queryCompletionAt('actor.name:"Omar N', 18)).toMatchObject({ kind: 'value', prefix: 'Omar N', from: 11, to: 18, quoted: true });
     expect(queryCompletionAt('tenant.name:"Azure Hotels" x', 16)).toMatchObject({ kind: 'value', prefix: 'Azu', from: 12, to: 26, quoted: true });
   });
 

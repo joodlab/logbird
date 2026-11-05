@@ -24,6 +24,7 @@ import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { formatTerm } from '@/lib/query-language';
 import { rangeLabel } from '@/lib/range';
+import { useDocumentTitle } from '@/lib/use-document-title';
 
 const RELATED_LABEL: Record<EntityKind, string> = { actor: 'Actors', tenant: 'Tenants', executor: 'Executors', target: 'Records' };
 
@@ -43,6 +44,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   const p = profile.data;
   const displayId = kind === 'target' ? splitTargetId(entityId).id : entityId;
   useSetCrumb(p?.entity.name || displayId);
+  useDocumentTitle(`${p?.entity.name || displayId} · ${meta.singular} · Trailmark`);
   const baseQuery = entityQuery(kind, entityId);
 
   if (profile.isError && !p) {

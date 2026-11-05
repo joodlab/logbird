@@ -28,7 +28,7 @@ const EMPTY_EXPLAINERS: Record<EntitySection, { lead: ReactNode; snippet: string
         Send <Code>{'actor: { type, id, name }'}</Code> on your events.
       </>
     ),
-    snippet: '"actor": { "type": "user", "id": "usr_42", "name": "Raed" }',
+    snippet: '"actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" }',
     note: (
       <>
         Scheduled jobs use <Code>type: "system"</Code>.
