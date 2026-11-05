@@ -15,6 +15,6 @@ it('runs the framework request middleware and passes typed audit through next', 
   await handler({ request: new Request('http://local'), pathname: '/', context: {}, handlerType: 'router', next } as unknown as Parameters<
     typeof handler
   >[0]);
-  expect(track.mock.calls[0]?.[0].actor?.id).toBe('actor');
   await integration.shutdown();
+  expect(track.mock.calls[0]?.[0].actor?.id).toBe('actor');
 });

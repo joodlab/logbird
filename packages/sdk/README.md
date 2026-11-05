@@ -78,3 +78,67 @@ the original value is kept in `attributes['trailmark.occurredAt.rejected']` and 
 in `warnings[]` with the reason. Events without an `action` are per-event `rejected[]` entries; valid siblings are
 durably inserted. SDK partial rejections invoke `onDrop` for rejected indices and `onError` with reasons. Permanent
 HTTP errors (except 429) drop the batch and report; transient failures retain it for retry.
+
+## Host context options (0.2)
+
+```ts
+import { Trailmark, redact } from '@trailmark/sdk';
+const client = new Trailmark({
+  endpoint: process.env.TRAILMARK_ENDPOINT,
+  apiKey: process.env.TRAILMARK_INGEST_KEY,
+  enabled: Boolean(process.env.TRAILMARK_INGEST_KEY),
+  defaults: { environment: 'staging' },
+  beforeSend: redact(),
+  onError: console.error,
+});
+client.track({ action: 'record.updated', metadata: { token: 'never stored' } });
+await client.shutdown();
+```
+
+An unset key requires `enabled: false`. Disabled clients require neither endpoint nor key;
+track does nothing and flush/shutdown resolve immediately. Enabled clients require both.
+Defaults are shallow merged under events; context and metadata merge one level deep.
+Explicit undefined values override defaults. beforeSend runs after defaults and id/time
+stamping, before serialization and size checks. Returning null/undefined silently filters;
+a throwing hook fails closed and reports onError. Neither counts as an overflow drop.
+
+`redact({ keys?, changeFields?, replacement? })` deep copies the event, redacts matching
+object keys throughout objects/arrays (except top-level id/action), and replaces present
+before/after values of matching change fields. Default replacement is `[redacted]`.
+`DEFAULT_SECRET_KEYS` matches passwords, secrets, tokens, OTPs, API keys, authorization,
+cookies, credentials and private keys. Add email/phone patterns for your PII policy;
+the default secret pattern does not cover all PII. Hooks compose:
+
+```ts
+const hide = redact({ keys: /email|phone|token|secret/i });
+const beforeSend = event => event.action === 'health.checked' ? null : hide(event);
+```
+
+## Requests and workers
+
+`createAudit(options, hostContext, request)` from `@trailmark/sdk/integration` captures
+stable header/UUID correlation fallbacks once. actor/tenant/executor/ip/requestId/operationId
+resolvers run at each audit call, including after route authentication. Explicit partial
+fields skip their resolver, even when undefined. Resolver failures report onError and omit
+only that field. audit(action, partial?) synchronously returns the stamped event id and
+never awaits delivery; occurredAt is stamped at call time. `audit.pending()` waits for
+resolution/tracking, not transport. Adapter shutdown waits for resolution then delivery.
+The host owns Node lifecycle hooks; edge adapters use waitUntil.
+
+```ts
+import { jobAudit } from '@trailmark/sdk/integration';
+const parentEventId = audit('export.requested');
+const carrier = await audit.carrier({ parentEventId }); // JSON-serializable job data
+// On the worker, using job.data.carrier:
+const workerAudit = jobAudit({ client, job, carrier: job.data.carrier });
+const childId = workerAudit('export.completed');
+const nestedCarrier = await workerAudit.carrier({ parentEventId: childId });
+await workerAudit.pending();
+await client.shutdown();
+```
+
+AuditCarrier carries operationId, requestId, traceId, parentEventId, actor and tenant.
+Treat carriers as trusted internal data, not authentication. Worker executor uses queue/name,
+string jobId and attemptsMade + 1. Explicit actor/tenant override the carrier; absent actor
+uses system/scheduler. No BullMQ dependency is required. Use integration `shutdown(options)`
+when pending captures may still exist rather than calling client.shutdown directly.

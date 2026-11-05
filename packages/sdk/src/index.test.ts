@@ -139,3 +139,55 @@ it.each([
   expect(fetch).toHaveBeenCalledTimes(2);
   await sdk.shutdown();
 });
+it('disables capture without credentials and validates enabled credentials', async () => {
+  const fetcher = vi.fn();
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = new Trailmark({ enabled: false });
+  sdk.track({ action: 'ignored' });
+  await sdk.flush();
+  await sdk.shutdown();
+  expect(sdk.queueSize).toBe(0);
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(() => new Trailmark({})).toThrow('required');
+});
+it('merges defaults one level deep before stamping and applying hooks', async () => {
+  const hook = vi.fn((event) => event);
+  const fetcher = vi.fn().mockResolvedValue(new Response('{}', { status: 202 }));
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = new Trailmark({
+    apiKey: 'fake',
+    endpoint: 'http://test',
+    defaults: { environment: 'staging', metadata: { keep: true, nested: { old: true } }, context: { requestId: 'default', operationId: 'op' } },
+    beforeSend: hook,
+  });
+  sdk.track({ action: 'x', environment: 'preview', metadata: { nested: { fresh: true } }, context: { requestId: 'host' } });
+  await sdk.shutdown();
+  expect(hook.mock.calls[0]?.[0]).toMatchObject({
+    id: expect.any(String),
+    occurredAt: expect.any(String),
+    environment: 'preview',
+    metadata: { keep: true, nested: { fresh: true } },
+    context: { requestId: 'host', operationId: 'op' },
+  });
+  expect(hook.mock.calls[0]?.[0].metadata.nested).toEqual({ fresh: true });
+});
+it.each(['null', 'undefined', 'throw'])('filters %s without overflow diagnostics', async (mode) => {
+  const onError = vi.fn(),
+    onDrop = vi.fn();
+  const sdk = new Trailmark({
+    apiKey: 'fake',
+    endpoint: 'http://test',
+    onError,
+    onDrop,
+    beforeSend: () => {
+      if (mode === 'throw') throw new Error('closed');
+      return mode === 'null' ? null : undefined;
+    },
+  });
+  sdk.track({ action: 'secret' });
+  await sdk.shutdown();
+  expect(sdk.queueSize).toBe(0);
+  expect(sdk.dropped).toBe(0);
+  expect(onDrop).not.toHaveBeenCalled();
+  expect(onError).toHaveBeenCalledTimes(mode === 'throw' ? 1 : 0);
+});

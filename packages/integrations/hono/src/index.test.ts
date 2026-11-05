@@ -60,3 +60,71 @@ it('registers edge flush without blocking the response', async () => {
   expect(waitUntil).toHaveBeenCalledTimes(1);
   expect(flush).toHaveBeenCalledOnce();
 });
+
+it('sees per-route guard identity and host request ids in explicit and automatic events', async () => {
+  const client = new Trailmark({ enabled: false });
+  const track = vi.spyOn(client, 'track');
+  const app = new Hono<{ Variables: AuditVariables & { user: string; requestId: string } }>();
+  const capture = trailmark({
+    client,
+    actor: (c) => (c.get('user') ? { id: c.get('user') } : undefined),
+    requestId: (c) => c.get('requestId'),
+    autoTrack: {},
+  });
+  app.use(capture);
+  app.post(
+    '/',
+    async (c, next) => {
+      c.set('user', 'guard-user');
+      c.set('requestId', 'host-request');
+      await next();
+    },
+    (c) => {
+      c.var.audit('guard.event');
+      return c.text('ok');
+    },
+  );
+  await app.request('/', { method: 'POST' });
+  await capture.shutdown();
+  expect(track).toHaveBeenCalledTimes(2);
+  for (const [event] of track.mock.calls) expect(event).toMatchObject({ actor: { id: 'guard-user' }, context: { requestId: 'host-request' } });
+});
+
+it('edge waitUntil waits for async identity before flushing', async () => {
+  const client = new Trailmark({ enabled: false });
+  const track = vi.spyOn(client, 'track');
+  const flush = vi.spyOn(client, 'flush');
+  let resolve!: (actor: { id: string }) => void;
+  const app = new Hono<{ Variables: AuditVariables }>();
+  app.use(
+    trailmark({
+      client,
+      actor: () =>
+        new Promise<{ id: string }>((done) => {
+          resolve = done;
+        }),
+    }),
+  );
+  app.post('/', (c) => {
+    c.var.audit('edge');
+    return c.text('ok');
+  });
+  const waitUntil = vi.fn();
+  const response = await app.fetch(
+    new Request('http://host/', { method: 'POST' }),
+    {},
+    {
+      waitUntil,
+      passThroughOnException() {
+        /* unused by this fixture */
+      },
+      props: {},
+    },
+  );
+  expect(response.status).toBe(200);
+  expect(flush).not.toHaveBeenCalled();
+  resolve({ id: 'edge-user' });
+  await waitUntil.mock.calls[0]?.[0];
+  expect(track.mock.calls[0]?.[0].actor?.id).toBe('edge-user');
+  expect(flush).toHaveBeenCalledOnce();
+});

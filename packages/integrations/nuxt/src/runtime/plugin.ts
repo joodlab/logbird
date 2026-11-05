@@ -8,7 +8,7 @@ export default defineNitroPlugin((nitro) => {
   const client = new Trailmark({ endpoint: config.endpoint, apiKey: config.ingestKey, onError: hooks.onError });
   nitro.hooks.hook('request', (event) => attachAudit(event, client, hooks));
   nitro.hooks.hook('afterResponse', (event) => {
-    event.waitUntil(client.flush().catch((error) => report(hooks.onError, error)));
+    event.waitUntil((event.context.audit?.pending() ?? Promise.resolve()).then(() => client.flush()).catch((error) => report(hooks.onError, error)));
   });
   nitro.hooks.hook('close', () => shutdown({ client, onError: hooks.onError }));
 });

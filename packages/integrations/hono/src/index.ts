@@ -32,7 +32,13 @@ export function trailmark(options: TrailmarkOptions): MiddlewareHandler<{ Variab
       } catch {
         /* Node host owns shutdown */
       }
-      if (execution) execution.waitUntil(options.client.flush().catch((error) => report(options.onError, error)));
+      if (execution)
+        execution.waitUntil(
+          audit
+            .pending()
+            .then(() => options.client.flush())
+            .catch((error) => report(options.onError, error)),
+        );
     }
   };
   return Object.assign(middleware, { shutdown: () => shutdown(options) });
