@@ -60,8 +60,8 @@ export function AppSidebar({ projectId }: { projectId?: string }) {
   const views = useQuery({ ...viewsQuery(projectId ?? ''), enabled: Boolean(projectId) });
 
   return (
-    <Sidebar collapsible="icon" variant="sidebar">
-      <SidebarHeader className="gap-1 border-sidebar-border border-b p-2">
+    <Sidebar collapsible="icon" variant="inset">
+      <SidebarHeader className="gap-1">
         <WorkspaceSwitcher projectId={projectId} />
       </SidebarHeader>
       <SidebarContent className="gap-0 py-1">
@@ -130,7 +130,7 @@ export function AppSidebar({ projectId }: { projectId?: string }) {
           </SidebarGroup>
         )}
       </SidebarContent>
-      <SidebarFooter className="border-sidebar-border border-t p-2">
+      <SidebarFooter>
         <SidebarMenu>
           {projectId ? (
             <SidebarMenuItem>

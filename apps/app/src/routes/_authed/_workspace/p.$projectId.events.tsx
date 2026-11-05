@@ -70,7 +70,7 @@ function ExplorerPage() {
   );
 
   return (
-    <div className="flex h-[calc(100svh-3rem)] min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       {view ? (
         <div className="flex items-center justify-between gap-3 border-b bg-brand/[0.04] px-4 py-2 text-sm">
           <span className="flex min-w-0 items-center gap-2">
