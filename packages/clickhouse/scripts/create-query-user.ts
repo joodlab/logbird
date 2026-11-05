@@ -36,6 +36,32 @@ try {
       .some((line) => !/^GRANT SELECT ON trailmark\.(events|events_by_minute|entities|attribute_keys) TO trailmark_query$/.test(line))
   )
     throw new Error('Query user has unexpected grants; operator review required');
+  const probe = createClickHouseClient({ ...process.env, CLICKHOUSE_USER: 'trailmark_query', CLICKHOUSE_PASSWORD: password });
+  try {
+    const settings = await (
+      await probe.query({
+        query:
+          "SELECT name,value FROM system.settings WHERE name IN ('readonly','allow_ddl','max_execution_time','max_memory_usage','max_rows_to_read','max_bytes_to_read','max_result_rows','result_overflow_mode','timeout_overflow_mode','read_overflow_mode')",
+        format: 'JSONEachRow',
+      })
+    ).json<{ name: string; value: string }>();
+    const expected: Record<string, string> = {
+      readonly: '1',
+      allow_ddl: '0',
+      max_execution_time: '10',
+      max_memory_usage: '1073741824',
+      max_rows_to_read: '5000000',
+      max_bytes_to_read: '1073741824',
+      max_result_rows: '100000',
+      result_overflow_mode: 'throw',
+      timeout_overflow_mode: 'throw',
+      read_overflow_mode: 'throw',
+    };
+    if (settings.length !== Object.keys(expected).length || settings.some((s) => expected[s.name] !== s.value))
+      throw new Error('Existing query profile settings differ; operator review required');
+  } finally {
+    await probe.close();
+  }
   for (let i = 0; i < files.length; i++) {
     let addition = '';
     if (!/^CLICKHOUSE_QUERY_USER=/m.test(contents[i]!)) addition += '\nCLICKHOUSE_QUERY_USER=trailmark_query';

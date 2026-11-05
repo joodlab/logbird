@@ -53,6 +53,7 @@ describe('v2', () => {
       expect(d).toMatchObject({ lang: 'query', reason, start, end });
     }
   });
+  it('rejects RE2 repetition overflow without executing the regex', () => expect(() => compileQuery('action:/a{1001}/')).toThrow());
   it('spans use UTF-16', () => {
     expect(parseQuery('\u{1F600} action:x')[0]).toMatchObject({ start: 0, end: 2 });
   });

@@ -16,7 +16,7 @@ Trailmark searches one authorized project within a half-open UTC time range. The
 | Range | duration_ms:[100 TO 500} | Inclusive [ ], exclusive { }; mixed brackets allowed |
 | Open range | attempt:[2 TO *] | Asterisk omits that bound |
 | Date | occurredAt:>2026-11-01 | UTC date or ISO-8601 with zone, e.g. 2026-11-03T12:00:00Z |
-| Regex | action:/booking\.(created|cancelled)/ | Whole-value anchored RE2; escape slash as \/; no lookaround/backreferences |
+| Regex | action:/booking\.(created\|cancelled)/ | Whole-value anchored RE2; escape slash as \/; no lookaround/backreferences |
 | Value group | action:(booking.created OR booking.cancelled) | Scalar exact values compile to IN; negation excludes the group |
 | Prefix group | action:(booking.* OR hotel.*) | OR of prefix matches |
 | Attribute | metadata.channel:whatsapp | Unknown keys are attribute lookups; attr. and attributes. prefixes are aliases |
@@ -108,7 +108,7 @@ Every SQL request uses the separate trailmark_query account; missing credentials
 
 The profile enforces readonly=1, allow_ddl=0, 10 seconds per statement, 5 million rows read, 1 GiB each for bytes read and memory, 100,000 result rows with throw overflow, 64 KiB total server statement size, AST depth 128 and four threads. These provide room for the 300k-event demo while bounding a single request. SELECT grants cover events and the three rollups used by overview/entity paths. No write or external-source grants are added.
 
-**Shared-server limitation:** ClickHouse implicitly permits some system metadata reads (observed system.tables, system.databases, system.settings) regardless of these explicit table grants. Direct system.users/system.numbers reads, other database data and writes are denied. The expression AST guard blocks all system-table access over HTTP. Complete direct-client metadata denial additionally requires the instance operator's access_control_improvements.select_from_system_db_requires_grant server configuration; this setup script deliberately does not change shared server configuration.
+**Shared-server limitation:** ClickHouse implicitly permits some system metadata reads (observed system.tables, system.databases, system.settings) regardless of these explicit table grants. Direct system.users/system.numbers reads, other database data and writes are denied. The expression AST guard blocks all system-table access over HTTP. The instance-level access_control_improvements.select_from_system_db_requires_grant setting tightens system access, but ClickHouse still exempts tables/columns/databases and several constant tables. Therefore blanket direct-client denial of every system table cannot be established with the requested user grants alone. See [ClickHouse's access-control configuration](https://github.com/ClickHouse/ClickHouse/blob/master/programs/server/config.xml#L799-L822). This setup script deliberately does not change shared server configuration.
 
 A free-form SQL console is out of scope for Trailmark Cloud; it may come later as a self-host instance-admin feature.
 

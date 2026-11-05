@@ -25,7 +25,7 @@ export const attacks = [
   'throwIf(1)',
   '`project_id` = 1',
   '"project_id" = 1',
-  '?ction = 1',
+  '\u0430ction = 1',
   `${'('.repeat(200)}1${')'.repeat(200)}`,
   'x'.repeat(4097),
 ];

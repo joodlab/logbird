@@ -128,8 +128,9 @@ export function compileQuery(q = '') {
     const x = info?.type === 'array' ? 'x' : expr;
     if (token.kind === 'regex') {
       try {
-        const regex = new RegExp(token.value);
-        regex.test('');
+        const pattern = new RegExp(token.value);
+        if ([...pattern.source.matchAll(/(?<!\\)\{(\d+)(?:,(\d*))?\}/g)].some((m) => Number(m[1]) > 1000 || Number(m[2] ?? 0) > 1000))
+          throw new Error('RE2 repetitions are limited to 1000');
         if (/\(\?[=!<]|\\[1-9]|\(\?>/.test(token.value)) throw new Error('Unsupported RE2 construct');
       } catch {
         fail('type', token.start, token.end, 'Use a valid RE2 regex without lookaround or backreferences');

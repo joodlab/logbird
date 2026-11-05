@@ -56,6 +56,11 @@ describe.runIf(enabled)('Search v2 HTTP on real local services', () => {
       const r = await api(`/api/projects/${p}/${path}${path.includes('?') ? '&' : '?'}${q}`);
       expect(r.status).toBe(200);
     }
+    expect((await api(`/api/projects/${p}/entities/target/booking%3Abk_1?${q}`)).status).toBe(200);
+    const activity = await (await api(`/api/workspace/activity?${q}`)).json();
+    expect(activity.data.every((e: { projectId: string }) => e.projectId.startsWith('ws:'))).toBe(true);
+    const openapi = await (await api('/openapi.json')).json();
+    expect(openapi.paths['/api/projects/{projectId}/suggest']).toBeDefined();
     const pub = await fetch(`${endpoint}/v1/events?${q}`, { headers: { Authorization: `Bearer ${readKey}` } });
     expect(pub.status).toBe(422);
   });
