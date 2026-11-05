@@ -50,7 +50,9 @@ it('does not retry permanent errors', async () => {
   vi.stubGlobal('fetch', fetch);
   const sdk = new Trailmark({ apiKey: 'fake', endpoint: 'http://test' });
   sdk.track({ action: 'x' });
-  await expect(sdk.shutdown()).rejects.toThrow('401');
+  await sdk.shutdown();
+  expect(sdk.dropped).toBe(1);
+  expect(sdk.queueSize).toBe(0);
   expect(fetch).toHaveBeenCalledTimes(1);
 });
 
@@ -91,4 +93,28 @@ it.each(['oldest', 'newest'] as const)('bounds queued and retried events with %s
   await sdk.shutdown();
   const delivered = fetcher.mock.calls.slice(1).flatMap((call) => JSON.parse(call[1].body).events.map((e: { action: string }) => e.action));
   expect(delivered).toEqual(dropPolicy === 'oldest' ? ['7', '8', '9'] : ['0', '1', '2']);
+});
+
+it('drops partial rejections and permanent poison batches without wedging later events', async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ rejected: [{ index: 0, reason: 'bad timestamp' }] }), { status: 202 }))
+    .mockResolvedValueOnce(new Response('{}', { status: 422 }))
+    .mockResolvedValueOnce(new Response('{}', { status: 202 }));
+  vi.stubGlobal('fetch', fetcher);
+  const onDrop = vi.fn(),
+    onError = vi.fn();
+  const sdk = new Trailmark({ apiKey: 'fake', endpoint: 'http://test', onDrop, onError });
+  sdk.track({ action: 'poison' });
+  sdk.track({ action: 'good' });
+  await sdk.flush();
+  expect(onDrop.mock.calls.map(([e]) => e.action)).toEqual(['poison']);
+  sdk.track({ action: 'permanent' });
+  await sdk.flush();
+  sdk.track({ action: 'later' });
+  await sdk.shutdown();
+  expect(sdk.queueSize).toBe(0);
+  expect(sdk.dropped).toBe(2);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(onError).toHaveBeenCalledTimes(2);
 });

@@ -77,7 +77,11 @@ export const eventInputSchema = z.looseObject({
 export type EventInput = z.infer<typeof eventInputSchema>;
 
 /** Ingest body: a single event or a batch. Max 1000 events / 5 MB per request. */
-export const ingestBodySchema = z.union([z.object({ events: z.array(z.unknown()).min(1).max(1000) }), z.record(z.string(), z.unknown())]);
+export const ingestBodySchema = z.union([
+  z.array(z.unknown()).min(1).max(1000),
+  z.object({ events: z.array(z.unknown()).min(1).max(1000) }),
+  z.record(z.string(), z.unknown()),
+]);
 
 export const ingestResponseSchema = z.object({
   accepted: z.number().int(),

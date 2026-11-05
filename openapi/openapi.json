@@ -654,6 +654,9 @@
                               "anyOf": [
                                 {
                                   "properties": {
+                                    "email": {
+                                      "type": "string"
+                                    },
                                     "id": {
                                       "type": "string"
                                     },
@@ -3335,6 +3338,9 @@
                             "anyOf": [
                               {
                                 "properties": {
+                                  "email": {
+                                    "type": "string"
+                                  },
                                   "id": {
                                     "type": "string"
                                   },
@@ -3507,6 +3513,9 @@
                           "anyOf": [
                             {
                               "properties": {
+                                "email": {
+                                  "type": "string"
+                                },
                                 "id": {
                                   "type": "string"
                                 },
@@ -6276,6 +6285,9 @@
                             "anyOf": [
                               {
                                 "properties": {
+                                  "email": {
+                                    "type": "string"
+                                  },
                                   "id": {
                                     "type": "string"
                                   },
@@ -6474,6 +6486,9 @@
                       "anyOf": [
                         {
                           "properties": {
+                            "email": {
+                              "type": "string"
+                            },
                             "id": {
                               "type": "string"
                             },
@@ -7817,10 +7832,7 @@
             "in": "query",
             "name": "lang",
             "schema": {
-              "enum": [
-                "query",
-                "sql"
-              ],
+              "const": "query",
               "type": "string"
             }
           },
@@ -8208,6 +8220,12 @@
               },
               "schema": {
                 "anyOf": [
+                  {
+                    "items": {},
+                    "maxItems": 1000,
+                    "minItems": 1,
+                    "type": "array"
+                  },
                   {
                     "properties": {
                       "events": {

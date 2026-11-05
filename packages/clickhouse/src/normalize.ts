@@ -69,11 +69,18 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     context = object(e.context),
     imp = object(e.impersonator);
   const date = typeof e.occurredAt === 'string' || typeof e.occurredAt === 'number' ? new Date(e.occurredAt) : ctx.receivedAt;
+  if (e.occurredAt !== undefined && typeof e.occurredAt !== 'string' && typeof e.occurredAt !== 'number')
+    return { ok: false as const, reason: 'occurredAt must be ISO-8601 or epoch milliseconds' };
+  if (typeof e.occurredAt === 'number' && Math.abs(e.occurredAt) < 1e11)
+    return { ok: false as const, reason: 'occurredAt looks like epoch seconds; send milliseconds or ISO-8601' };
+  if (!Number.isFinite(date.getTime())) return { ok: false as const, reason: 'occurredAt is not a valid date' };
+  if (date.getTime() < ctx.receivedAt.getTime() - 3650 * 86_400_000 || date.getTime() > ctx.receivedAt.getTime() + 86_400_000)
+    return { ok: false as const, reason: 'occurredAt must be within the last 3650 days and the next 24 hours (epoch milliseconds or ISO-8601)' };
   const id = text(e.id, 256) || uuidv7();
   const row = {
     project_id: ctx.projectId,
     event_id: id,
-    timestamp: (Number.isFinite(date.getTime()) ? date : ctx.receivedAt).toISOString(),
+    timestamp: date.toISOString(),
     received_at: ctx.receivedAt.toISOString(),
     action: text(e.action, 200),
     environment: text(e.environment, 64) || 'production',

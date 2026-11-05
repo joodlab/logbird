@@ -35,7 +35,7 @@ export async function readIngestBody(request: Request): Promise<unknown> {
   }
 }
 export async function ingest(projectId: string, body: unknown, sdk = '') {
-  const events = body && typeof body === 'object' && 'events' in body ? (body as { events: unknown }).events : [body];
+  const events = Array.isArray(body) ? body : body && typeof body === 'object' && 'events' in body ? (body as { events: unknown }).events : [body];
   if (!Array.isArray(events) || !events.length) throw new ApiError(422, 'validation_error', 'events must be a nonempty array.');
   if (events.length > 1000 || events.some((e) => Buffer.byteLength(JSON.stringify(e)) > 256 * 1024))
     throw new ApiError(413, 'payload_too_large', 'Maximum 1000 events and 256 KB per event.');
@@ -55,7 +55,13 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
       if (!projectId.startsWith('ws:') && !(await tx.project.findUnique({ where: { id: projectId } })))
         throw new ApiError(404, 'not_found', 'Project not found.');
       await requireRetentionReady(tx, projectId);
-      await insertEvents(clickhouse, rows);
+      try {
+        await insertEvents(clickhouse, rows);
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && ['6', '27', '38', '41', '53', '69', '72'].includes(String(error.code)))
+          throw new ApiError(422, 'invalid_event', 'Storage could not parse this batch. Check event field types and timestamps.');
+        throw error;
+      }
       invalidateSetup(projectId);
       // Shared: concurrent ingests (several app servers, SDK flushes, audit writes) coexist; maintenance excludes them.
     },

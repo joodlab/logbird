@@ -76,7 +76,7 @@ export const publicRoutes = new Hono<AppEnv>()
     requireApiKey('read'),
     projectRead,
     doc('Search events', s.searchResponseSchema, 200, 'readKey'),
-    query(s.searchQuerySchema),
+    query(s.publicSearchQuerySchema),
     async (c) =>
       c.json(s.searchResponseSchema.parse(await ch.searchEvents(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
   )

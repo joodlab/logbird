@@ -69,3 +69,11 @@ Read adapters expose failures: Vue `useAuditTrail` sets `error` and clears `load
 render that error before treating an empty `data` array as success. Its `refresh()` resolves
 with the error in reactive state, including SSR; never throw it from `serverPrefetch`.
 The examples return 502 on read failure. Set `TRAILMARK_ENDPOINT` for both capture and read.
+
+Ingest accepts a single event object, `{ "events": [...] }`, or a bare JSON array (1-1000 events).
+`occurredAt` defaults to receive time when omitted. Supplied values must be parseable ISO-8601 or epoch
+milliseconds within receive time minus 3650 days through plus 24 hours. Numeric values below 1e11 in
+absolute magnitude are rejected with an epoch-seconds hint. Invalid timestamps are per-event `rejected[]`
+entries; valid siblings are durably inserted. SDK partial rejections invoke `onDrop` for rejected indices
+and `onError` with reasons. Permanent HTTP errors (except 429) drop the batch and report; transient
+failures retain it for retry.
