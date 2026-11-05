@@ -82,7 +82,7 @@ export function QueryHelp({ lang, projectId, onInsert }: { lang: QueryLang; proj
         render={
           <button
             aria-label={lang === 'sql' ? 'SQL syntax help' : 'Query syntax help'}
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="flex size-(--query-bar-inner) items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
             type="button"
           />
         }

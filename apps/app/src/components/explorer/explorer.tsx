@@ -288,7 +288,7 @@ export function Explorer({
           </Button>
           {baseQuery ? (
             <span
-              className="hidden h-9 max-w-56 shrink-0 items-center truncate rounded-lg border border-dashed bg-muted/40 px-2.5 font-mono text-[12px] text-muted-foreground md:flex"
+              className="hidden h-(--control-size-compact) max-w-56 shrink-0 items-center truncate rounded-md border border-dashed bg-muted/40 px-2.5 font-mono text-[12px] text-muted-foreground md:flex"
               title={`Always applied: ${baseQuery}`}
             >
               {baseLabel ?? baseQuery}
@@ -304,6 +304,7 @@ export function Explorer({
             projectId={projectId}
             range={range}
             ref={queryBar}
+            size="sm"
             value={q}
             views={!embedded}
           />
@@ -312,7 +313,7 @@ export function Explorer({
               render={
                 <div
                   className={cn(
-                    'flex h-8 shrink-0 items-center gap-2 rounded-md border px-2.5 text-sm shadow-xs max-sm:ms-auto',
+                    'flex h-(--control-size-compact) shrink-0 items-center gap-2 rounded-md border px-2.5 text-sm shadow-xs max-sm:ms-auto',
                     liveActive && 'border-outcome-success/40 bg-outcome-success/5',
                     !relative && 'opacity-60',
                   )}

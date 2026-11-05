@@ -4,6 +4,7 @@ import type { QueryLang } from '@trailmark/contracts';
 import { Kbd } from '@trailmark/ui/components/ui/kbd';
 import { SegmentedControl, SegmentedControlItem } from '@trailmark/ui/components/ui/segmented-control';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
+import type { ControlSize } from '@trailmark/ui/lib/control';
 import { cn } from '@trailmark/ui/lib/utils';
 import { SearchIcon, XIcon } from 'lucide-react';
 import { type KeyboardEvent, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
@@ -48,6 +49,8 @@ export interface QueryInputProps {
   /** Server rejection of `value`; its span is underlined while the text is unchanged. */
   problem?: QueryProblem | null;
   placeholder?: string;
+  /** Height of one line on the shared control scale (packages/ui lib/control.ts); `sm` in toolbars. */
+  size?: ControlSize;
   className?: string;
   ref?: Ref<QueryInputHandle>;
 }
@@ -57,8 +60,22 @@ const PLACEHOLDER: Record<QueryLang, string> = {
   sql: "job_attempt > 2 AND attributes['metadata.channel'] = 'whatsapp'",
 };
 
-/* Mirror and textarea must share every metric that affects wrapping. */
-const TEXT = 'px-2.5 py-[7px] font-mono text-[13px] leading-5 whitespace-pre-wrap [overflow-wrap:anywhere]';
+/*
+ * Heights follow the shared control scale (packages/ui lib/control.ts): one line of text plus the border is exactly
+ * --query-bar-height (the size's --control-size-* token, 44px on touch). Everything else is derived from it: the
+ * inner controls (mode toggle, clear, help) fill the height minus the border and the group inset, and the icons sit on
+ * the first line. No hand-set pixel heights.
+ */
+const SIZE: Record<ControlSize, string> = {
+  sm: '[--query-bar-height:var(--control-size-compact)]',
+  default: '[--query-bar-height:var(--control-size-default)]',
+  lg: '[--query-bar-height:var(--control-size-large)]',
+};
+const INNER = '[--query-bar-inner:calc(var(--query-bar-height)-2px-2*var(--control-group-inset))]';
+/** Mirror and textarea must share every metric that affects wrapping (20px line). */
+const TEXT = 'px-2.5 py-[calc((var(--query-bar-height)-2px-1.25rem)/2)] font-mono text-[13px] leading-5 whitespace-pre-wrap [overflow-wrap:anywhere]';
+/** A 16px icon centred on the first line. */
+const FIRST_LINE_ICON = 'mt-[calc((var(--query-bar-height)-2px-1rem)/2)]';
 
 /**
  * Query bar: a transparent auto-growing textarea over a syntax-highlighted mirror (no editor dependency, same
@@ -79,6 +96,7 @@ export function QueryInput({
   views: showViews = false,
   problem,
   placeholder,
+  size = 'default',
   className,
   ref,
 }: QueryInputProps) {
@@ -283,10 +301,10 @@ export function QueryInput({
   const error = showProblem ? { start: problem?.details?.start ?? null, end: problem?.details?.end ?? null } : null;
 
   return (
-    <div className={cn('relative min-w-0 flex-1', className)}>
+    <div className={cn('relative min-w-0 flex-1', SIZE[size], INNER, className)}>
       <div
         className={cn(
-          'relative flex min-h-9 items-start rounded-lg border bg-background shadow-xs transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30 dark:bg-input/30',
+          'relative flex min-h-(--query-bar-height) items-start rounded-md border bg-background shadow-xs transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30 dark:bg-input/30',
           showProblem && 'border-destructive/50 focus-within:border-destructive/60 focus-within:ring-destructive/20',
         )}
       >
@@ -296,8 +314,8 @@ export function QueryInput({
               render={
                 <SegmentedControl
                   aria-label="Query language"
-                  className="m-[3px] shrink-0 flex-nowrap [--segmented-height:1.75rem]"
-                  density="compact"
+                  className="m-(--control-group-inset) shrink-0 flex-nowrap [--segmented-height:var(--query-bar-inner)]!"
+                  size="sm"
                   role="group"
                 />
               }
@@ -322,22 +340,27 @@ export function QueryInput({
             <TooltipContent>{lang === 'sql' ? 'SQL mode: a ClickHouse WHERE expression' : 'Query language (Lucene-like)'}</TooltipContent>
           </Tooltip>
         ) : (
-          <SearchIcon className="pointer-events-none ms-3 mt-[9px] size-4 shrink-0 text-muted-foreground" />
+          <SearchIcon className={cn('pointer-events-none ms-3 size-4 shrink-0 text-muted-foreground', FIRST_LINE_ICON)} />
         )}
         {lang === 'sql' ? (
-          <span className="mt-[9px] shrink-0 select-none ps-1.5 font-mono font-semibold text-[10.5px] text-syntax-keyword/70 tracking-wide">
+          <span
+            className={cn('shrink-0 select-none ps-1.5 font-mono font-semibold text-[10.5px] text-syntax-keyword/70 tracking-wide', FIRST_LINE_ICON)}
+          >
             WHERE
           </span>
         ) : null}
         <div className="relative grid max-h-[9.75rem] min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-y-auto overflow-x-hidden">
           <div aria-hidden className={cn(TEXT, 'pointer-events-none [grid-area:1/1]')}>
             {draft ? (
-              <HighlightedText error={error} lang={lang} typingAt={open ? caret : undefined} value={draft} warnings={completions.fixes} />
+              <>
+                <HighlightedText error={error} lang={lang} typingAt={open ? caret : undefined} value={draft} warnings={completions.fixes} />
+                {/* Keep a trailing newline measurable so the mirror grows with the textarea. */}
+                {'​'}
+              </>
             ) : (
+              // One line only: a block placeholder plus the newline guard would make the empty bar two lines tall.
               <span className="block truncate whitespace-nowrap text-muted-foreground">{placeholder ?? PLACEHOLDER[lang]}</span>
             )}
-            {/* Keep a trailing newline measurable so the mirror grows with the textarea. */}
-            {'​'}
           </div>
           <textarea
             aria-activedescendant={showList ? `${listId}-${activeIndex}` : undefined}
@@ -371,11 +394,11 @@ export function QueryInput({
             value={draft}
           />
         </div>
-        <div className="flex shrink-0 items-center gap-0.5 pe-1 pt-[3px]">
+        <div className="flex shrink-0 items-center gap-0.5 pe-(--control-group-inset) pt-(--control-group-inset)">
           {draft ? (
             <button
               aria-label="Clear query"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="flex size-(--query-bar-inner) items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
               onClick={() => {
                 setDraft('');
                 submit('');
