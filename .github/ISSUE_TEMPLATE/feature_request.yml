@@ -1,0 +1,9 @@
+name: Feature Request
+description: Suggest an improvement
+body:
+  - type: textarea
+    attributes:
+      label: Problem, expected behavior and reproduction
+      description: Include version and environment. Remove secrets and personal data.
+    validations:
+      required: true

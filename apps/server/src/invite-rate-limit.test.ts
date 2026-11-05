@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { expect, it } from 'vitest';
 import { ApiError } from './errors';
@@ -9,7 +10,9 @@ it('limits each peer and route independently and returns the standard error', as
   app.onError((e, c) => (e instanceof ApiError ? c.json({ error: { code: e.code, message: e.message } }, e.status) : c.text('unexpected', 500)));
   app.get('/preview/:token', limit, (c) => c.text('ok'));
   app.post('/accept/:token', limit, (c) => c.text('ok'));
-  const request = (path: string, ip: string, method = 'GET') => app.request(path, { method }, { incoming: { socket: { remoteAddress: ip } } });
+  const namespace = randomUUID();
+  const request = (path: string, ip: string, method = 'GET') =>
+    app.request(path, { method }, { incoming: { socket: { remoteAddress: `${namespace}:${ip}` } } });
   expect((await request('/preview/a', '1')).status).toBe(200);
   const blocked = await request('/preview/b', '1');
   expect(blocked.status).toBe(429);

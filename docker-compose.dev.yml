@@ -1,0 +1,17 @@
+services:
+  postgres:
+    extends: {file: docker-compose.yml, service: postgres}
+    ports: ['127.0.0.1:5432:5432']
+  clickhouse:
+    extends: {file: docker-compose.yml, service: clickhouse}
+    ports: ['127.0.0.1:8123:8123']
+  redis:
+    extends: {file: docker-compose.yml, service: redis}
+    ports: ['127.0.0.1:6379:6379']
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports: ['127.0.0.1:1025:1025', '127.0.0.1:8025:8025']
+volumes:
+  postgres:
+  clickhouse:
+  redis:

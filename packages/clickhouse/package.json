@@ -1,6 +1,6 @@
 {
   "name": "@trailmark/clickhouse",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "license": "MIT",
   "type": "module",
   "private": true,
@@ -10,8 +10,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "migrate": "node --env-file=../../.env --import tsx scripts/migrate.ts",
-    "create-query-user": "node --env-file=../../.env --import tsx scripts/create-query-user.ts"
+    "migrate": "node --env-file-if-exists=../../.env --import tsx scripts/migrate.ts",
+    "create-query-user": "node --env-file-if-exists=../../.env --import tsx scripts/create-query-user.ts"
   },
   "dependencies": {
     "@clickhouse/client": "1.23.1",

@@ -32,11 +32,22 @@ function record(organizationId: string, action: string, fallback: AuditUser, tar
     context,
   });
 }
-const env = createEnv({ server: { APP_URL: z.url(), BETTER_AUTH_SECRET: z.string().min(32) }, runtimeEnv: process.env });
+const env = createEnv({
+  server: { APP_URL: z.url(), TRUSTED_ORIGINS: z.string().default(''), BETTER_AUTH_SECRET: z.string().min(32) },
+  runtimeEnv: process.env,
+});
+if (
+  process.env.NODE_ENV === 'production' &&
+  new URL(env.APP_URL).protocol !== 'https:' &&
+  !['localhost', '127.0.0.1'].includes(new URL(env.APP_URL).hostname)
+)
+  throw new Error('APP_URL must use HTTPS in production');
 export const auth = betterAuth({
   baseURL: env.APP_URL,
+  // The API boundary enforces shared Redis limits across replicas.
+  rateLimit: { enabled: false },
   secret: env.BETTER_AUTH_SECRET,
-  trustedOrigins: [env.APP_URL],
+  trustedOrigins: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)],
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
   advanced: { useSecureCookies: new URL(env.APP_URL).protocol === 'https:', defaultCookieAttributes: { httpOnly: true, sameSite: 'lax' } },
   databaseHooks: {

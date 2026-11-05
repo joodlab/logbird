@@ -1,6 +1,6 @@
 # Local setup-status verification
 
-Captured 2026-11-05T03:45:53.919Z against server 4621 and shared services. Demo and test records are fictional. Fixture workspace removed after capture.
+Captured 2026-11-05T03:45:53.919Z against server 4621 and local dependencies. Demo and test records are fictional. Fixture workspace removed after capture.
 
 ### JoodCMS uncached
 
