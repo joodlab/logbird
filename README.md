@@ -26,6 +26,8 @@ Complete migrations and restricted query-user setup in [self-hosting](docs/self-
 Create a workspace and project in the console, copy its ingest key, and send:
 
 ```sh
+BASE_URL=http://localhost:4600          # your console URL (it proxies /v1); e.g. https://audit.example.com
+TRAILMARK_INGEST_KEY=tm_ingest_...      # from Settings → API keys (shown once)
 curl "$BASE_URL/v1/events" -H "Authorization: Bearer $TRAILMARK_INGEST_KEY" -H 'Content-Type: application/json' -d '{"action":"document.updated"}'
 ```
 
