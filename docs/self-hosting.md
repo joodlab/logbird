@@ -42,7 +42,7 @@ One .env.example serves source development and containers. Empty URL overrides l
 | SMTP_USER / SMTP_PASSWORD / MAIL_FROM | Provider credentials / verified sender |
 | AUTH_LOG_SIGN_IN_CODES | false; true logs sign-in codes, warns at boot, bypasses SMTP only without SMTP_HOST |
 | TRAILMARK_SERVER_URL | Production runtime proxy target, http://server:4601; recreate app to change, no rebuild |
-| TRUST_PROXY / TRUSTED_ORIGINS | false / empty; ingress rules below |
+| TRUST_PROXY / TRUSTED_ORIGINS | Trusted proxy hops: 1 in Compose (the console), 2 behind one reverse proxy; source dev 0 / empty. See ingress rules below |
 | AUTH_RATE_LIMIT_PER_MINUTE / PUBLIC_RATE_LIMIT_PER_MINUTE | 30 / 600, shared Redis limits |
 | TRAILMARK_BIND / TRAILMARK_HTTP_PORT | 127.0.0.1 / 4600; only app is published |
 | TRAILMARK_IMAGE_REGISTRY / TRAILMARK_VERSION | trailmark / local; both image names and local build instructions |
@@ -61,13 +61,13 @@ Without SMTP explicitly enable AUTH_LOG_SIGN_IN_CODES=true. Each auth.sign_in_co
 
 ## Caddy TLS
 
-Point DNS to the host and allow 80/443. Set APP_URL=https://audit.example.com, TRAILMARK_DOMAIN=audit.example.com, optional ACME_EMAIL, and TRUST_PROXY=true. Run `docker compose --profile tls up -d`. Pinned Caddy 2 uses the committed Caddyfile, automatic HTTPS and persistent caddy_data/caddy_config volumes.
+Point DNS to the host and allow 80/443. Set APP_URL=https://audit.example.com, TRAILMARK_DOMAIN=audit.example.com, optional ACME_EMAIL, and TRUST_PROXY=2 (Caddy plus the console). Run `docker compose --profile tls up -d`. Pinned Caddy 2 uses the committed Caddyfile, automatic HTTPS and persistent caddy_data/caddy_config volumes.
 
 Set TRUST_PROXY explicitly: profiles cannot change another service's environment. Local TLS tests can mount a Caddyfile with `tls internal`, choose TRAILMARK_TLS_HTTP_PORT / TRAILMARK_TLS_HTTPS_PORT, and run `curl -k --resolve hostname:port:127.0.0.1 https://hostname:port/readyz`. Internal test certificates are not publicly trusted.
 
 ## Any reverse proxy
 
-Forward the whole origin to port 4600, including /api, /v1 and readiness. The runtime app proxy retains CSP/security headers. Set APP_URL to the exact public HTTPS origin. Leave TRUST_PROXY=false for direct access. Enable only with a private API and one trusted ingress that appends/replaces X-Forwarded-For; Trailmark uses its rightmost entry. The app preserves that header without adding a hop. Never expose server:4601. Additional proxies require explicit sanitization at the final trusted hop.
+Forward the whole origin to port 4600, including /api, /v1 and readiness. The runtime app proxy retains CSP/security headers. Set APP_URL to the exact public HTTPS origin. Client addresses drive per-client rate limits, audit context and the sign-in email's "requested from" line. The console is always one trusted hop: it appends the address it received the request from to X-Forwarded-For. Keep the default TRUST_PROXY=1 when browsers and SDKs reach port 4600 directly. Set TRUST_PROXY=2 behind exactly one reverse proxy that appends the real client address (Caddy, Nginx `$proxy_add_x_forwarded_for` or `$remote_addr`, Traefik, Coolify), and add one per additional trusted proxy. Trailmark reads the X-Forwarded-For entry that many places from the right, so entries a client sends are ignored. A count that is too high lets clients choose their own address; too low groups everyone under the proxy's address. Never expose server:4601.
 
 Nginx inside an existing TLS server block (configure certificates separately):
 

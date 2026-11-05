@@ -19,7 +19,7 @@ audit.example.com {
 }
 ```
 
-Set APP_URL=https://audit.example.com and TRUST_PROXY=true only if the server is reachable solely through trusted ingress. With exactly one trusted proxy in front (e.g. Caddy), the server uses the rightmost `X-Forwarded-For` entry, which that proxy appends. Do not expose the API directly. The app reads TRAILMARK_SERVER_URL at runtime (default http://server:4601); recreate the app container when changing it. Development Vite proxies are absent from the production listener.
+Set APP_URL=https://audit.example.com and TRUST_PROXY=2: Caddy and the console each append one X-Forwarded-For entry, and the server reads the entry written by the outermost trusted proxy (see [self-hosting](self-hosting.md#any-reverse-proxy)). Do not expose the API directly. The app reads TRAILMARK_SERVER_URL at runtime (default http://server:4601); recreate the app container when changing it. Development Vite proxies are absent from the production listener.
 
 ## Acceptance
 

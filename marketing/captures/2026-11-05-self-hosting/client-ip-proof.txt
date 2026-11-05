@@ -1,0 +1,11 @@
+Client address through the console (2026-11-05, isolated project trailmark-selfhost-test, SMTP -> shared Mailpit)
+Network: gateway 172.23.0.1 (the host-side client as Docker sees it), app container 172.23.0.6, caddy 172.23.0.8
+
+Before (PR head 17ea3b4, TRUST_PROXY=false default): sign-in email via Postmark reported "IP address ::ffff:172.23.0.7"
+  = the console container. Every browser and SDK shared one rate-limit bucket (30/min auth, 600/min ingest).
+
+After, default Compose (TRUST_PROXY=1, clients hit :14600 directly), client spoofs X-Forwarded-For: 6.6.6.6
+  send-otp HTTP 200 -> email "IP address: 172.23.0.1"   (spoof ignored, console address not used)
+
+After, Caddy tls profile + TRUST_PROXY=2, https://trailmark.test:14612 (tls internal), same spoofed header
+  send-otp HTTP 200 -> email "IP address: 172.23.0.1"   (not Caddy 172.23.0.8, not 6.6.6.6); /readyz via Caddy 200
