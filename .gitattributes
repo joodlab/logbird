@@ -4,3 +4,11 @@
 *.mp4 binary
 *.webm binary
 *.gif binary
+# Marketing media (screenshots, clips) live in Git LFS
+marketing/**/*.png filter=lfs diff=lfs merge=lfs -text
+marketing/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+marketing/**/*.jpeg filter=lfs diff=lfs merge=lfs -text
+marketing/**/*.webp filter=lfs diff=lfs merge=lfs -text
+marketing/**/*.gif filter=lfs diff=lfs merge=lfs -text
+marketing/**/*.mp4 filter=lfs diff=lfs merge=lfs -text
+marketing/**/*.webm filter=lfs diff=lfs merge=lfs -text

@@ -26,7 +26,7 @@ packages load it with `dotenv -e ../../.env --`. Never print credentials, never 
 - Work on a feature branch in your own worktree under `C:/Users/raedb/AppData/Local/OpenAI/Codex/worktrees/`
   (`git worktree add <path> -b <branch> origin/master`). Keep PRs focused, rebase on `origin/master` before
   opening/updating, open a **ready (non-draft)** PR with a clear body (what/why/how verified). For UI PRs attach
-  screenshots (and a short video when interaction matters) — commit them under `docs/media/<pr-topic>/` and
+  screenshots (and a short video when interaction matters) — commit them under `marketing/captures/<yyyy-mm-dd>-<pr-topic>/` (Git LFS) and
   reference them from the PR body.
 - Commit messages: conventional (`feat(server): …`). End with:
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` only if you are a Claude agent.

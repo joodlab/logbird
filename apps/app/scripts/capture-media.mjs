@@ -5,7 +5,7 @@
  *   flows: shots phone signin onboarding explorer follow settings
  *
  * Sign-in codes come from Mailpit's API. Videos are recorded per flow at 1280×800 (webm, a few MB each) and
- * screenshots go to docs/media/ui-real-api/. `onboarding` creates a fresh user + workspace + project, sends the
+ * screenshots go to marketing/captures/2026-11-04-ui-real-api/. `onboarding` creates a fresh user + workspace + project, sends the
  * copied curl snippet with bash, then streams back-dated events (Arabic and very long names included) so the
  * retention flow has something to preview. Every console warning/error and failed /api call is reported.
  */
@@ -17,7 +17,7 @@ import { chromium } from '@playwright/test';
 import { signIn, watch } from './qa-shoot.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.resolve(here, '../../../docs/media/ui-real-api');
+const OUT = path.resolve(here, '../../../marketing/captures/2026-11-04-ui-real-api');
 const TMP = path.join(OUT, '.video-tmp');
 const BASE = process.env.BASE_URL ?? 'http://localhost:4600';
 const DEMO = process.env.DEMO_EMAIL ?? 'demo@trailmark.local';

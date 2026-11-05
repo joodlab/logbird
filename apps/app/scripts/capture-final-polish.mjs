@@ -1,7 +1,7 @@
 /**
  * Evidence for the final-polish PR against the REAL stack (`pnpm dev` at the repo root, demo data seeded):
  * overview, actors directory, explorer with `impersonator:*` (+ the autocomplete that suggests it), the onboarding
- * name step and account settings, in light and dark at 1440×900, into docs/media/final-polish/.
+ * name step and account settings, in light and dark at 1440×900, into marketing/captures/2026-11-04-final-polish/.
  *
  *   node scripts/capture-final-polish.mjs
  *
@@ -16,7 +16,7 @@ import { chromium } from '@playwright/test';
 import { latestOtp, signIn, watch } from './qa-shoot.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.resolve(here, '../../../docs/media/final-polish');
+const OUT = path.resolve(here, '../../../marketing/captures/2026-11-04-final-polish');
 const BASE = process.env.BASE_URL ?? 'http://localhost:4600';
 const DEMO = process.env.DEMO_EMAIL ?? 'demo@trailmark.local';
 const TZ = process.env.TZ_ID ?? 'Europe/Berlin';
