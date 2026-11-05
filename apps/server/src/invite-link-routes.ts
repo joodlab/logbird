@@ -64,7 +64,7 @@ export const inviteLinkRoutes = new Hono<AppEnv>()
       return { organizationId: link.organizationId, role: link.role };
     });
     c.set('activeOrganizationId', result.organizationId);
-    await audit(c, 'member.joined_via_link', { type: 'user', id: c.get('user').id });
+    await audit(c, 'member.joined_via_link', { type: 'user', id: c.get('user').id, name: c.get('user').email });
     return c.json(acceptInviteLinkResponseSchema.parse(result));
   })
   .get('/workspace/invite-links', doc('List invite links', inviteLinkListResponseSchema), requireSession, async (c) => {
@@ -96,7 +96,7 @@ export const inviteLinkRoutes = new Hono<AppEnv>()
         },
         include,
       });
-      await audit(c, 'invite_link.created', { type: 'invite_link', id: link.id });
+      await audit(c, 'invite_link.created', { type: 'invite_link', id: link.id, name: link.role });
       return c.json(serialize(link), 201);
     },
   )
@@ -107,9 +107,10 @@ export const inviteLinkRoutes = new Hono<AppEnv>()
     async (c) => {
       const organizationId = (await requireRole(c)).organizationId;
       const where = { id: c.req.param('linkId'), organizationId };
-      if (!(await prisma.inviteLink.findFirst({ where }))) throw new ApiError(404, 'invite_link_not_found', 'This invite link does not exist.');
+      const link = await prisma.inviteLink.findFirst({ where });
+      if (!link) throw new ApiError(404, 'invite_link_not_found', 'This invite link does not exist.');
       await prisma.inviteLink.updateMany({ where: { ...where, revokedAt: null }, data: { revokedAt: new Date() } });
-      await audit(c, 'invite_link.revoked', { type: 'invite_link', id: where.id });
+      await audit(c, 'invite_link.revoked', { type: 'invite_link', id: where.id, name: link.role });
       return c.body(null, 204);
     },
   );

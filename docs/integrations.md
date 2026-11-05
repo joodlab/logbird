@@ -47,5 +47,27 @@ lives in these package READMEs, so integrations do not change the console or cop
 The SDK's structural read types are compile-checked against packages/contracts in read.test.ts.
 Run `node --env-file=.env --import tsx scripts/verify-integrations.ts` to provision only a disposable
 project, run all examples, assert real readback and remove its keys/events/project in finally.
-The runner must have ports 4730/4731 free and uses existing shared services. Private diagnostics
+The runner must have ports 4872/4871 free and uses existing shared services. Private diagnostics
 stay in .tmp; the credential-free receipt is docs/verification/sdk-integrations/runtime-results.json.
+
+## Outage backpressure
+
+The SDK retains at most `maxQueueSize` queued events (default 10,000), plus one in-flight
+batch (at most `batchSize`, default 100). Each event is capped at 256 KiB; this is an event
+count limit, not a byte budget. Size the queue for your payloads and memory budget.
+`dropPolicy: 'oldest'` (default) keeps recent events; `'newest'` preserves queued history.
+`onDrop(event)` reports each overflow discard and `client.dropped` counts them;
+`client.queueSize` reports queued events. Exceptions from diagnostic callbacks never escape
+`track`. Failed batches re-enter the same bounded queue with the same drop policy.
+`track` is best effort; `flush` and `shutdown` reject on delivery failure so callers must
+handle them. Call shutdown in the host lifecycle and await it before exiting.
+
+```ts
+const client = new Trailmark({ endpoint, apiKey, maxQueueSize: 1000,
+  dropPolicy: 'oldest', onDrop: () => metrics.increment('audit.dropped') });
+```
+
+Read adapters expose failures: Vue `useAuditTrail` sets `error` and clears `loading`;
+render that error before treating an empty `data` array as success. Its `refresh()` resolves
+with the error in reactive state, including SSR; never throw it from `serverPrefetch`.
+The examples return 502 on read failure. Set `TRAILMARK_ENDPOINT` for both capture and read.

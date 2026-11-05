@@ -45,6 +45,7 @@
             "in": "query",
             "name": "q",
             "schema": {
+              "example": "action:document.updated",
               "maxLength": 4096,
               "type": "string"
             }
@@ -439,6 +440,9 @@
         "requestBody": {
           "content": {
             "application/json": {
+              "example": {
+                "action": "document.updated"
+              },
               "schema": {
                 "anyOf": [
                   {
@@ -1183,5 +1187,11 @@
         ]
       }
     }
-  }
+  },
+  "servers": [
+    {
+      "description": "This Trailmark instance",
+      "url": "http://localhost:4600"
+    }
+  ]
 }

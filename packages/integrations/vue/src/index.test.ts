@@ -54,3 +54,24 @@ it('ignores a stale response after the record changes', async () => {
   expect(wrapper.text()).toBe('new');
   wrapper.unmount();
 });
+
+it('exposes initial read failure and recovers on refresh', async () => {
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValue({ data: [{ id: 'recovered' }], nextCursor: null });
+  let trail!: ReturnType<typeof useAuditTrail>;
+  const wrapper = mount({
+    setup() {
+      trail = useAuditTrail({ fetcher });
+      return () => h('span', trail.error.value?.message ?? (trail.loading.value ? 'loading' : 'ready'));
+    },
+  });
+  await flushPromises();
+  expect(wrapper.text()).toBe('offline');
+  expect(trail.loading.value).toBe(false);
+  await expect(trail.refresh()).resolves.toBeUndefined();
+  expect(trail.error.value).toBeUndefined();
+  expect(trail.data.value[0]?.id).toBe('recovered');
+  wrapper.unmount();
+});

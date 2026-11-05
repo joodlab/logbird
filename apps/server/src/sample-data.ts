@@ -19,21 +19,43 @@ export async function loadSampleData(projectId: string) {
   const actions = ['reservation.created', 'reservation.confirmed', 'invoice.issued', 'payment.processed', 'room.updated'];
   const rows = Array.from({ length: SAMPLE_DATA_EVENTS }, (_, i) => {
     const occurredAt = new Date(now - ((SAMPLE_DATA_EVENTS - 1 - i) / SAMPLE_DATA_EVENTS) * 7 * 86_400_000);
-    const action = actions[i % actions.length];
+    const reservation = Math.floor(i / 5);
+    const step = i % 5;
+    const retry = reservation % 17 === 0;
+    const failed = retry && step === 3;
+    const action = retry && step === 4 ? 'payment.processed' : actions[step];
+    const actor = actors[reservation % actors.length];
+    const tenant = tenants[reservation % tenants.length];
+    const worker = step >= 2 && (step < 4 || retry);
+    const changes = [
+      { field: 'status', after: 'pending' },
+      { field: 'status', before: 'pending', after: 'confirmed' },
+      { field: 'invoice.status', before: 'draft', after: 'issued' },
+      { field: 'payment.status', before: 'pending', after: failed ? 'failed' : 'paid' },
+      retry ? { field: 'payment.status', before: 'failed', after: 'paid' } : { field: 'availability', before: 'available', after: 'reserved' },
+    ];
     const event = normalizeEvent(
       {
         action,
         occurredAt: occurredAt.toISOString(),
         source: SAMPLE_DATA_SOURCE,
-        actor: { id: `sample-user-${i % 4}`, type: 'user', name: actors[i % 4] },
-        tenant: { id: `sample-tenant-${i % 3}`, name: tenants[i % 3] },
-        executor: { id: i % 3 ? 'reservation-api' : 'billing-worker', type: i % 3 ? 'api' : 'worker' },
-        targets: [{ type: 'reservation', id: `sample-reservation-${Math.floor(i / 5)}`, name: `Reservation ${1000 + Math.floor(i / 5)}` }],
-        outcome: i % 17 === 0 ? 'failure' : 'success',
-        severity: i % 17 === 0 ? 'warning' : 'info',
-        description: `${actors[i % 4]} ${action?.replace('.', ' ')} at ${tenants[i % 3]}`,
-        context: { operationId: `sample-operation-${Math.floor(i / 5)}` },
-        changes: [{ field: 'status', before: 'pending', after: i % 17 === 0 ? 'failed' : 'confirmed' }],
+        actor: { id: `sample-user-${reservation % actors.length}`, type: 'user', name: actor },
+        tenant: { id: `sample-tenant-${reservation % tenants.length}`, name: tenant },
+        executor: {
+          id: worker ? 'billing-worker' : 'reservation-api',
+          type: worker ? 'worker' : 'api',
+          ...(worker ? { jobId: `sample-billing-${reservation}`, attempt: retry && step === 4 ? 2 : 1 } : {}),
+        },
+        targets:
+          step === 4 && !retry
+            ? [{ type: 'room', id: `sample-room-${reservation}`, name: `Room ${reservation}` }]
+            : [{ type: 'reservation', id: `sample-reservation-${reservation}`, name: `Reservation ${reservation}` }],
+        outcome: failed ? 'failure' : 'success',
+        severity: failed ? 'warning' : 'info',
+        description: `${actor} ${action?.replace('.', ' ')} at ${tenant}`,
+        context: { operationId: `sample-operation-${reservation}`, ...(step ? { parentEventId: `sample-event-${i - 1}` } : {}) },
+        id: `sample-event-${i}`,
+        changes: [changes[step]],
         metadata: { channel: i % 2 ? 'web' : 'mobile' },
       },
       { projectId, receivedAt: occurredAt, sdk: 'trailmark-sample' },

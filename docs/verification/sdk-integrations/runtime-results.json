@@ -1,6 +1,6 @@
 {
-  "measuredAt": "2026-11-05T07:10:23.543Z",
-  "endpoint": "http://127.0.0.1:4731",
+  "measuredAt": "2026-11-05T11:19:39.192Z",
+  "endpoint": "http://127.0.0.1:4871",
   "results": [
     {
       "framework": "hono",
@@ -25,6 +25,12 @@
       "ingest": "real framework route -> SDK -> HTTP 202 -> ClickHouse",
       "read": "event visible with actor, tenant, target, operation",
       "history": 200
+    },
+    {
+      "framework": "vue-read-failure",
+      "history": 502,
+      "process": "survived; next mutation 200",
+      "flush": "captured event read back after failure"
     }
   ],
   "cleanup": "owned project, keys and events removed in finally; owned processes stopped"
