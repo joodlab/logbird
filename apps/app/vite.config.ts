@@ -12,7 +12,8 @@ import { defineConfig, loadEnv } from 'vite';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const rootEnv = loadEnv(mode, '../..', '');
-  const serverTarget = env.TRAILMARK_SERVER_URL ?? rootEnv.SERVER_URL?.replace('localhost', '127.0.0.1') ?? 'http://127.0.0.1:4601';
+  const serverTarget =
+    process.env.TRAILMARK_SERVER_URL ?? env.TRAILMARK_SERVER_URL ?? rootEnv.SERVER_URL?.replace('localhost', '127.0.0.1') ?? 'http://127.0.0.1:4601';
 
   return {
     resolve: { tsconfigPaths: true },
@@ -65,6 +66,17 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       nitro({
         routeRules: {
+          '/**': {
+            headers: {
+              'Content-Security-Policy':
+                "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
+              'X-Content-Type-Options': 'nosniff',
+              'Referrer-Policy': 'strict-origin-when-cross-origin',
+            },
+          },
+          '/health': { proxy: `${serverTarget}/health` },
+          '/livez': { proxy: `${serverTarget}/livez` },
+          '/readyz': { proxy: `${serverTarget}/readyz` },
           '/api/**': { proxy: `${serverTarget}/api/**` },
           '/v1/**': { proxy: `${serverTarget}/v1/**` },
         },

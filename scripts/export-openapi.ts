@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { prisma } from '@trailmark/database';
 import { app } from '../apps/server/src/app';
 import { clickhouse } from '../apps/server/src/clickhouse';
+import { rateLimitStore } from '../apps/server/src/rate-limit';
 import { closeRetentionQueue } from '../apps/worker/src/queue';
 
 function stable(value: unknown): unknown {
@@ -40,6 +41,7 @@ try {
     await writeFile(`openapi/${name}.json`, `${JSON.stringify(stable({ ...spec, paths }), null, 2)}\n`);
   console.log(`Exported ${ids.size} operations in-process (no listening server).`);
 } finally {
+  await rateLimitStore.quit();
   await closeRetentionQueue();
   await clickhouse.close();
   await prisma.$disconnect();
