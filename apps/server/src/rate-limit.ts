@@ -35,8 +35,8 @@ export function requestRateLimit(scope: string, limit: number, windowMs = 60_000
     await next();
   });
 }
-const authLimiter = requestRateLimit('auth', 30);
-const publicLimiter = requestRateLimit('public', 600, 60_000, true);
+const authLimiter = requestRateLimit('auth', env.AUTH_RATE_LIMIT_PER_MINUTE);
+const publicLimiter = requestRateLimit('public', env.PUBLIC_RATE_LIMIT_PER_MINUTE, 60_000, true);
 // Only state-changing auth calls (send code, sign in, accept…) are limited; session reads happen on every navigation.
 export const rateLimit = createMiddleware((c, next) => {
   if (c.req.path.startsWith('/api/auth/')) return c.req.method === 'GET' ? next() : authLimiter(c, next);
