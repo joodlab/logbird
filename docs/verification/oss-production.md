@@ -7,8 +7,9 @@ Local verification on 2026-11-05. No deployment, public visibility change, packa
 - `pnpm install --frozen-lockfile`: passed using pnpm 10.30.3.
 - `pnpm typecheck`: 16 successful tasks.
 - `pnpm check`: passed with 65 existing warning-level diagnostics, no errors.
-- `pnpm test`: nine successful tasks. Server: 19 passed, 48 skipped; app: 42 passed. The optional HTTP search matrix remains disabled. Real Postgres, ClickHouse, SMTP and Redis integration tests ran. Server tests run serially; the setup test allows 240 seconds for real ClickHouse sample rebuilds and teardown (the original 120-second budget timed out during cleanup).
-- `pnpm build`: all five build tasks passed, including server, worker and console. Declaration generation now uses a dedicated RPC tsconfig so builds do not emit declarations beside test fixtures or scripts.
+- `pnpm test`: 18 successful tasks after the SDK integration rebase. Server: 19 passed, 48 skipped; app: 42 passed. The optional HTTP search matrix remains disabled. Real Postgres, ClickHouse, SMTP and Redis integration tests ran. Server tests run serially; the setup test allows 240 seconds for real ClickHouse sample rebuilds and teardown (the original 120-second budget timed out during cleanup).
+- `pnpm build`: all 10 build tasks passed, including server, worker and console. Declaration generation now uses a dedicated RPC tsconfig so builds do not emit declarations beside test fixtures or scripts.
+- `pnpm release:check`: passed on the combined branch (16 typecheck tasks, 18 test tasks and 10 build tasks; Turbo reused applicable earlier results).
 - `pnpm openapi:export` and `git diff --exit-code -- openapi`: passed; 41 documented operations. Contracts unchanged; liveness/readiness are operational endpoints.
 - Both Compose files pass `docker compose ... config --quiet`. No backing containers were started.
 - All three multi-stage images build successfully and configure user `node`. Workspace pruning retains migration tooling; these are not minimal production-dependency-only images.
