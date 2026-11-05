@@ -80,6 +80,11 @@ export const projectSetupSchema = z.object({
   nextStep: setupStepIdSchema.nullable(),
   /** Set via PATCH project { setupDismissed: true }; cleared with false. Workspace-wide, not per user. */
   dismissedAt: z.string().nullable(),
+  /**
+   * First time every step was done (persisted, never cleared). Once set, the console stops promoting setup: no overview
+   * card, no sidebar "Finish setup", even if a step later regresses (the Setup page stays reachable from Settings).
+   */
+  completedAt: z.string().nullable(),
   steps: z.array(setupStepSchema),
   ingest: z.object({
     activeIngestKeys: z.number().int(),
@@ -139,6 +144,7 @@ export const workspaceSetupSchema = z.object({
       complete: z.boolean(),
       nextStep: setupStepIdSchema.nullable(),
       dismissedAt: z.string().nullable(),
+      completedAt: z.string().nullable(),
       firstEventAt: z.string().nullable(),
     }),
   ),
