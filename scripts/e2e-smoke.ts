@@ -135,7 +135,7 @@ try {
   const stats = s.projectSchema.parse(await (await api(base)).json());
   assert.ok(stats.eventsLast24h >= 4);
   assert.ok(stats.lastEventAt);
-  await api(base, 'DELETE');
+  await api(`${base}?confirm=${encodeURIComponent(p.slug)}`, 'DELETE');
   for (const table of ['events', 'events_by_minute', 'entities', 'attribute_keys']) {
     const rows = await (
       await ch.query({ query: `SELECT count() n FROM ${table} WHERE project_id={p:String}`, query_params: { p: p.id }, format: 'JSONEachRow' })

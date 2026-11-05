@@ -18,6 +18,7 @@ export const routes = {
     create: { method: 'POST', path: '/api/projects', auth: 'session' },
     get: { method: 'GET', path: '/api/projects/:projectId', auth: 'session' },
     update: { method: 'PATCH', path: '/api/projects/:projectId', auth: 'session' },
+    /** Requires ?confirm=<project slug>. */
     remove: { method: 'DELETE', path: '/api/projects/:projectId', auth: 'session' },
     /** Retention status for Settings → Retention (oldest event, last purge run). */
     retention: { method: 'GET', path: '/api/projects/:projectId/retention', auth: 'session' },

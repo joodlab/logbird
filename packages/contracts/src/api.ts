@@ -271,3 +271,6 @@ export const apiErrorSchema = z.object({
   error: z.object({ code: z.string(), message: z.string(), details: z.unknown().optional() }),
 });
 export type ApiError = z.infer<typeof apiErrorSchema>;
+
+/** DELETE project query: missing/wrong confirmation is rejected before deletion. */
+export const deleteProjectQuerySchema = z.object({ confirm: z.string().optional() });

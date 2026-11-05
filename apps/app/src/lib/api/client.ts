@@ -127,7 +127,8 @@ export const api = {
         setupDismissed?: boolean;
       },
     ) => request(projectSchema, 'PATCH', pathFor(routes.projects.update.path, { projectId }), { body }) as Promise<Project>,
-    remove: (projectId: string) => request(ok, 'DELETE', pathFor(routes.projects.remove.path, { projectId })),
+    remove: (projectId: string, confirm: string) =>
+      request(ok, 'DELETE', pathFor(routes.projects.remove.path, { projectId }), { query: { confirm } }),
     /** `preview` (days) also counts the events a lower retention window would delete. */
     retention: (projectId: string, preview?: number, signal?: AbortSignal) =>
       request(retentionStatusSchema, 'GET', pathFor(routes.projects.retention.path, { projectId }), { query: { preview }, signal }),
