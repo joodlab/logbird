@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { QueryLang } from '@trailmark/contracts';
 import { OutcomeDot } from '@trailmark/ui/components/badges';
+import { Button } from '@trailmark/ui/components/ui/button';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
 import { cn } from '@trailmark/ui/lib/utils';
@@ -134,7 +135,7 @@ function FacetGroup({
       <div className="flex items-center">
         <button
           aria-expanded={open}
-          className="flex h-8 flex-1 items-center gap-1 rounded-md px-1.5 text-start font-medium text-[13px] outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="flex h-(--control-size-compact) flex-1 items-center gap-1 rounded-md px-1.5 text-start font-medium text-[13px] outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
           onClick={() => setOpen((o) => !o)}
           type="button"
         >
@@ -145,19 +146,15 @@ function FacetGroup({
           ) : null}
         </button>
         {activeCount > 0 ? (
-          <button
-            className="rounded px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-            onClick={() => onChange(ops.without(q))}
-            type="button"
-          >
+          <Button className="px-2 text-muted-foreground text-xs" onClick={() => onChange(ops.without(q))} size="sm" variant="ghost">
             Clear
-          </button>
+          </Button>
         ) : null}
       </div>
       {open ? (
         <div className="flex flex-col gap-px pb-2 ps-2">
           {facet.isPending ? (
-            placeholderKeys(3).map((k) => <Skeleton className="my-0.5 h-6 w-full" key={k} />)
+            placeholderKeys(3).map((k) => <Skeleton className="h-(--control-size-compact) w-full" key={k} />)
           ) : values.length === 0 ? (
             <p className="px-2 py-1 text-muted-foreground text-xs">No values in this range.</p>
           ) : (
@@ -169,7 +166,7 @@ function FacetGroup({
                   <button
                     aria-pressed={included}
                     className={cn(
-                      'relative flex h-7 min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-md px-2 text-start text-[12.5px] outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring/50',
+                      'relative flex h-(--control-size-compact) min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-md px-2 text-start text-[12.5px] outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring/50',
                       included && 'bg-brand/10 text-foreground',
                       excluded && 'text-muted-foreground line-through decoration-outcome-failure/60',
                     )}
@@ -201,14 +198,15 @@ function FacetGroup({
                   <Tooltip>
                     <TooltipTrigger
                       render={
-                        <button
+                        <Button
                           aria-label={`Exclude ${v.label}`}
                           className={cn(
-                            'absolute end-1 flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 outline-none hover:bg-background hover:text-outcome-failure focus-visible:opacity-100 group-hover/facet:opacity-100',
+                            'absolute end-1 text-muted-foreground opacity-0 hover:bg-background hover:text-outcome-failure focus-visible:opacity-100 group-hover/facet:opacity-100 dark:hover:bg-background',
                             excluded && 'text-outcome-failure opacity-100',
                           )}
                           onClick={() => onChange(ops.toggle(q, v.value, 'exclude'))}
-                          type="button"
+                          size="icon-xs"
+                          variant="ghost"
                         />
                       }
                     >
@@ -221,13 +219,9 @@ function FacetGroup({
             })
           )}
           {values.length > limit ? (
-            <button
-              className="self-start px-2 py-1 text-[12px] text-muted-foreground hover:text-foreground"
-              onClick={() => setLimit((l) => l + 10)}
-              type="button"
-            >
+            <Button className="self-start px-2 text-muted-foreground text-xs" onClick={() => setLimit((l) => l + 10)} size="sm" variant="ghost">
               Show more ({values.length - limit})
-            </button>
+            </Button>
           ) : null}
         </div>
       ) : null}

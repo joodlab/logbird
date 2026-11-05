@@ -28,6 +28,8 @@ const CLASS: Record<SegmentClass, string> = {
 };
 
 const ERROR = 'rounded-[2px] bg-destructive/10 underline decoration-destructive decoration-wavy decoration-[1.5px] underline-offset-[3px]';
+/* Lucene / KQL spelling the bar converts: a calm dotted underline, not an error. */
+const WARN = 'underline decoration-amber-500/80 decoration-dotted decoration-[1.5px] underline-offset-[3px]';
 
 export interface HighlightError {
   start: number | null;
@@ -52,32 +54,39 @@ export function HighlightedText({
   lang = 'query',
   error,
   typingAt,
+  warnings,
 }: {
   value: string;
   lang?: QueryLang;
   error?: HighlightError | null;
   /** Caret offset while editing: the word being typed is not flagged as unknown yet. */
   typingAt?: number;
+  /** Spans to underline as "will be converted" (query-lint fixes). */
+  warnings?: readonly { start: number; end: number }[];
 }) {
   const nodes = useMemo(() => {
     const base = lang === 'sql' ? highlightSql(value) : highlightQuery(value);
     const start = error?.start ?? null;
     const end = error?.end ?? null;
-    const segments = markErrorSpan(base, start, end);
+    let segments = markErrorSpan(base, start, end);
+    for (const w of warnings ?? []) segments = markErrorSpan(segments, w.start, w.end, 'warn');
     // Zero-width spans, and spans that point past the text (e.g. "unexpected end"), draw a caret instead.
     const caretAt = start !== null && (end === null || end <= start || start >= value.length) ? Math.min(start, value.length) : null;
     const out: ReactNode[] = [];
     for (const s of segments) {
       if (caretAt !== null && caretAt === s.start) out.push(<CaretMarker key="caret" />);
       out.push(
-        <span className={cn(CLASS[s.cls === 'unknown' && typingAt === s.end ? 'ident' : s.cls], s.error && ERROR)} key={`${s.start}-${s.end}`}>
+        <span
+          className={cn(CLASS[s.cls === 'unknown' && typingAt === s.end ? 'ident' : s.cls], s.warn && WARN, s.error && ERROR)}
+          key={`${s.start}-${s.end}`}
+        >
           {value.slice(s.start, s.end)}
         </span>,
       );
     }
     if (caretAt !== null && caretAt >= value.length) out.push(<CaretMarker key="caret" />);
     return out;
-  }, [value, lang, error?.start, error?.end, typingAt]);
+  }, [value, lang, error?.start, error?.end, typingAt, warnings]);
   return <>{nodes}</>;
 }
 

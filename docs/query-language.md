@@ -134,6 +134,19 @@ Query language: 4096 UTF-8 bytes, 64 terms and 16 nesting levels. SQL: 4096 UTF-
 
 GET /api/projects/:projectId/suggest?field=actor&prefix=ra&limit=10 returns {field,values:[{value,label,count}]}. Prefix is case-insensitive contains matching over value and label. Results rank by count, then value. Entities use the entities rollup (display name labels); low-cardinality values use events_by_minute over seven days; column values scan at most 50,000 recent events in seven days. Attribute samples use attribute_keys; count is the key's total frequency, not an individual sampled value frequency. Sources are approximate rollups and can include pre-retention history until rebuilt. Unsupported suggestion sources return an empty list. Authorization precedes every lookup.
 
+## Query bar (console)
+
+The explorer's query bar suggests as you type, at any caret position; accepting a suggestion replaces only the token under the caret.
+
+- **On focus (empty bar):** recent queries for this project (per browser, at most 20, newest first, removable with × or Shift+Delete), the project's saved views, then fields — the ones the project actually uses first, with type, coverage and description.
+- **Field names:** prefix, word-segment (`name` → `actor.name`), substring and fuzzy (`tnm` → `tenant.name`) matches over core fields, aliases and attribute keys. Free text of three or more letters also searches entity names and actions (`rawd` → `tenant:biz_2` "Rawda Suites").
+- **After `field:`:** values from `/suggest` ranked by count (entity ids show their display names), then value operators: `*` present, `"…"` exact, `(a OR b)` any of, `/regex/`; numbers get `>` `>=` `<` `<=` `[a TO b]`; dates get quick ranges (last 24 hours / 7 / 30 days). Values with spaces or any of `: ( ) [ ] { } < > "` are quoted. Value lists are cached per field and prefix, debounced while typing, prefetched while a field is highlighted, and filtered locally when the unfiltered list is already complete.
+- **After a complete term:** `OR`, `AND`, `NOT`, `-` and `( )` lead, then fields; inside `field:( … )` after a member, `OR` leads.
+- **Syntax hint row:** one line under the bar says what the current token expects (`attempt · number — attempt:>2 …`, the range / regex / phrase rules, or in SQL mode the signature of the function around the caret with the current argument emphasised).
+- **Familiar spellings:** Lucene `_exists_:f` → `f:*`, KQL `f = v` / `f != v` / `f >= 10` → `f:v` / `-f:v` / `f:>=10`, `f: v` → `f:v`, `!f:v` → `-f:v`, `&&` / `||` → `AND` / `OR`. They are underlined, offered as the first suggestion, and converted when the query runs (with Undo). Lower-case `and` / `or` / `not` are only flagged, since they may be words you are searching for.
+- **SQL mode:** columns, `attributes['…']` keys (also found by the key's own name: `queue` → `attributes['metadata.queue']`), functions with signatures, comparison operators after a column, `AND` / `OR` after an operand, values after `=`, `IN (`, `has(col,` (quoted for you), and relative times after `timestamp >`.
+- **Keyboard:** ↑/↓ move, Tab completes (and never moves focus while you compose), Enter runs (or picks a row you moved to), Ctrl/⌘+Enter always runs, Esc closes the panel, Ctrl+Space opens it, `/` focuses the bar.
+
 ## Local verification
 
 See [recorded HTTP evidence](search-v2-evidence.jsonl) and scripts/search-v2-proof.ts. Search total saturates at 10001 (the existing count cap); this is not an exact count above the cap. Run the HTTP tests with SEARCH_V2_HTTP=1, SERVER_URL=http://127.0.0.1:4631, APP_URL=http://localhost:4630 and the server running on port 4631. The ClickHouse integration tests require the root environment. Tests only create fictional records; HTTP security fixtures are retained with a Search v2 security name for inspection.

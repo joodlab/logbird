@@ -167,11 +167,14 @@ export const fieldsQuery = (projectId: string, range: string) =>
     retry: noRetryOn4xx,
   });
 
+/** Values per /suggest request. A shorter answer means the list is complete and can be filtered locally. */
+export const SUGGEST_LIMIT = 12;
+
 /** Value suggestions for the query bar; cached per field + prefix so retyping is instant. */
 export const suggestQuery = (projectId: string, field: string, prefix: string) =>
   queryOptions({
     queryKey: [...keys.project(projectId), 'suggest', field, prefix] as const,
-    queryFn: ({ signal }) => api.suggest(projectId, { field, prefix: prefix || undefined, limit: 12 }, signal),
+    queryFn: ({ signal }) => api.suggest(projectId, { field, prefix: prefix || undefined, limit: SUGGEST_LIMIT }, signal),
     staleTime: 60_000,
     retry: false,
   });

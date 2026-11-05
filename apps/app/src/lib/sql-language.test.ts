@@ -5,6 +5,7 @@ import {
   appendSqlPredicate,
   hasSqlPredicate,
   highlightSql,
+  sqlCallAt,
   sqlCompletionAt,
   sqlConjuncts,
   sqlString,
@@ -57,6 +58,30 @@ describe('tokenizeSql / highlightSql', () => {
     expect(classes('CAST(job_attempt AS String) = 2').filter((c) => c.endsWith(':unknown'))).toEqual([]);
   });
 
+  it('marks unterminated strings and quoted attribute keys as open', () => {
+    const open = tokenizeSql("attributes['metadata.ch").find((t) => t.kind === 'string');
+    expect(open).toMatchObject({ raw: "'metadata.ch", closed: false });
+    const closed = tokenizeSql("action = 'it''s'").find((t) => t.kind === 'string');
+    expect(closed).toMatchObject({ raw: "'it''s'", closed: true });
+  });
+
+  it('keeps offsets exact and splits operators from operands without spaces', () => {
+    const q = "job_attempt>=2 AND outcome IN('failure')";
+    const solid = tokenizeSql(q).filter((t) => t.kind !== 'space');
+    expect(solid.map((t) => [t.kind, t.raw])).toEqual([
+      ['ident', 'job_attempt'],
+      ['operator', '>='],
+      ['number', '2'],
+      ['keyword', 'AND'],
+      ['ident', 'outcome'],
+      ['keyword', 'IN'],
+      ['punct', '('],
+      ['string', "'failure'"],
+      ['punct', ')'],
+    ]);
+    for (const t of solid) expect(q.slice(t.start, t.end)).toBe(t.raw);
+  });
+
   it('treats function names case-insensitively but columns case-sensitively', () => {
     expect(classes('LOWER(action)')).toEqual(['LOWER:function', '(:punct', 'action:ident', '):punct']);
     expect(classes('ACTION')).toEqual(['ACTION:unknown']);
@@ -70,10 +95,40 @@ describe('sqlCompletionAt', () => {
     expect(sqlCompletionAt('has(', 4, suggestFieldFor)).toEqual({ kind: 'ident', prefix: '', from: 4, to: 4 });
   });
 
-  it('stays closed after a comparison operator, number or string', () => {
-    expect(sqlCompletionAt('job_attempt > ', 14, suggestFieldFor)).toEqual({ kind: 'none' });
+  it('offers comparison operators after a column and AND / OR after an operand', () => {
+    expect(sqlCompletionAt('job_attempt ', 12, suggestFieldFor)).toEqual({
+      kind: 'ident',
+      prefix: '',
+      from: 12,
+      to: 12,
+      after: 'column',
+      column: 'job_attempt',
+    });
+    expect(sqlCompletionAt("attributes['metadata.queue'] ", 29, suggestFieldFor)).toMatchObject({
+      kind: 'ident',
+      after: 'column',
+      column: "attributes['metadata.queue']",
+    });
+    expect(sqlCompletionAt('job_attempt > 2 ', 16, suggestFieldFor)).toMatchObject({ kind: 'ident', prefix: '', after: 'operand' });
+    expect(sqlCompletionAt("action = 'x' AN", 15, suggestFieldFor)).toMatchObject({ kind: 'ident', prefix: 'AN', from: 13, after: 'operand' });
+    expect(sqlCompletionAt('(a = 1 OR b = 2) ', 17, suggestFieldFor)).toMatchObject({ kind: 'ident', after: 'operand' });
+    expect(sqlCompletionAt('timestamp > now() - INTERVAL 7 DAY ', 35, suggestFieldFor)).toMatchObject({ kind: 'ident', after: 'operand' });
+    expect(sqlCompletionAt('impersonator_id IS NULL ', 24, suggestFieldFor)).toMatchObject({ kind: 'ident', after: 'operand' });
+  });
+
+  it('waits for a space after a literal, and explains operands without suggestions', () => {
     expect(sqlCompletionAt('job_attempt > 2', 15, suggestFieldFor)).toEqual({ kind: 'none' });
     expect(sqlCompletionAt("action = 'x'", 12, suggestFieldFor)).toEqual({ kind: 'none' });
+    expect(sqlCompletionAt('job_attempt > ', 14, suggestFieldFor)).toEqual({ kind: 'operand', column: 'job_attempt' });
+  });
+
+  it('completes at the caret in the middle of a longer expression', () => {
+    const q = "outcome = 'failure' AND job_att > 2";
+    // Renaming the second column touches only that identifier.
+    expect(sqlCompletionAt(q, 31, suggestFieldFor)).toMatchObject({ kind: 'ident', prefix: 'job_att', from: 24, to: 31 });
+    expect(sqlCompletionAt(q, 31, suggestFieldFor)).not.toHaveProperty('after');
+    // Back inside the first string: values for that column, closing quote already present.
+    expect(sqlCompletionAt(q, 13, suggestFieldFor)).toMatchObject({ kind: 'value', field: 'outcome', prefix: 'fa', closeQuote: false });
   });
 
   it("completes attribute keys inside attributes['…", () => {
@@ -113,6 +168,57 @@ describe('sqlCompletionAt', () => {
     });
     // Columns without a suggestion source stay quiet.
     expect(sqlCompletionAt("request_id = 'r", 15, suggestFieldFor)).toEqual({ kind: 'none' });
+  });
+
+  it('offers whole literals before the quote is typed (after =, IN ( and has(col, )', () => {
+    expect(sqlCompletionAt('outcome = ', 10, suggestFieldFor)).toEqual({
+      kind: 'value',
+      field: 'outcome',
+      column: 'outcome',
+      prefix: '',
+      from: 10,
+      to: 10,
+      closeQuote: true,
+      openQuote: true,
+    });
+    expect(sqlCompletionAt('outcome IN (', 12, suggestFieldFor)).toMatchObject({ kind: 'value', field: 'outcome', openQuote: true });
+    expect(sqlCompletionAt("outcome NOT IN ('failure', ", 27, suggestFieldFor)).toMatchObject({ kind: 'value', field: 'outcome', openQuote: true });
+    expect(sqlCompletionAt('has(target_types, ', 18, suggestFieldFor)).toMatchObject({ kind: 'value', field: 'target.type', openQuote: true });
+    expect(sqlCompletionAt("attributes['metadata.queue'] = ", 31, suggestFieldFor)).toMatchObject({
+      kind: 'value',
+      field: 'attr.metadata.queue',
+      openQuote: true,
+    });
+  });
+
+  it('keeps searching values when a bare word is typed where a value belongs', () => {
+    expect(sqlCompletionAt('tenant_id = rawd', 16, suggestFieldFor)).toEqual({
+      kind: 'value',
+      field: 'tenant',
+      column: 'tenant_id',
+      prefix: 'rawd',
+      from: 12,
+      to: 16,
+      closeQuote: true,
+      openQuote: true,
+    });
+    // A complete allowed column on the right-hand side is still a column (column = column comparisons).
+    expect(sqlCompletionAt('tenant_id = actor_id', 20, suggestFieldFor)).toMatchObject({ kind: 'ident', prefix: 'actor_id' });
+  });
+});
+
+describe('sqlCallAt (signature help)', () => {
+  it('finds the innermost call and the argument index', () => {
+    expect(sqlCallAt("has(target_types, 'bo", 21)).toEqual({ name: 'has', arg: 1 });
+    expect(sqlCallAt('has(', 4)).toEqual({ name: 'has', arg: 0 });
+    expect(sqlCallAt('arrayExists(x -> startsWith(x, ', 31)).toEqual({ name: 'startsWith', arg: 1 });
+    expect(sqlCallAt("toFloat64OrNull(attributes['a']) > 2", 30)).toEqual({ name: 'toFloat64OrNull', arg: 0 });
+  });
+
+  it('ignores IN lists, brackets and closed calls', () => {
+    expect(sqlCallAt("outcome IN ('a', ", 17)).toBeNull();
+    expect(sqlCallAt('has(a, b) AND ', 14)).toBeNull();
+    expect(sqlCallAt("lower(outcome) IN ('a', ", 24)).toBeNull();
   });
 });
 
