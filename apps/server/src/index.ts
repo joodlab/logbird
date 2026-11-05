@@ -9,6 +9,13 @@ import { rateLimitStore } from './rate-limit';
 const server = serve({ fetch: app.fetch, port: env.PORT }, () =>
   console.log(JSON.stringify({ level: 'info', event: 'server.ready', port: env.PORT })),
 );
+// Keep idle keep-alive sockets open longer than any proxy in front of us (Vite's dev proxy, Caddy, load balancers
+// typically 60 s). With Node's 5 s default, a proxy can reuse a socket at the moment Node closes it and the user gets an
+// ECONNRESET → 500/502. headersTimeout must stay above keepAliveTimeout.
+if ('keepAliveTimeout' in server) {
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 66_000;
+}
 let stopping = false;
 function shutdown() {
   if (stopping) return;
