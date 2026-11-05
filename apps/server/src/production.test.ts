@@ -15,16 +15,21 @@ it('does not grant CORS to an unconfigured origin', async () => {
   expect(response.headers.get('access-control-allow-origin')).toBeNull();
 });
 it('shares atomic auth limits across middleware instances using real Redis', async () => {
-  const first = new Hono().use('*', rateLimit).get('/api/auth/probe', (c) => c.text('ok'));
-  const second = new Hono().use('*', rateLimit).get('/api/auth/probe', (c) => c.text('ok'));
+  const first = new Hono().use('*', rateLimit).post('/api/auth/probe', (c) => c.text('ok'));
+  const second = new Hono().use('*', rateLimit).post('/api/auth/probe', (c) => c.text('ok'));
   const bindings = { incoming: { socket: { remoteAddress: randomUUID() } } };
   for (let i = 0; i < 30; i++) {
-    const response = await first.request('/api/auth/probe', {}, bindings);
+    const response = await first.request('/api/auth/probe', { method: 'POST' }, bindings);
     expect(response.status).toBe(200);
   }
-  const blocked = await second.request('/api/auth/probe', {}, bindings);
+  const blocked = await second.request('/api/auth/probe', { method: 'POST' }, bindings);
   expect(blocked.status).toBe(429);
   expect(blocked.headers.get('retry-after')).toBe('60');
+});
+it('never limits session reads (GET /api/auth/*), which run on every navigation', async () => {
+  const server = new Hono().use('*', rateLimit).get('/api/auth/get-session', (c) => c.text('ok'));
+  const bindings = { incoming: { socket: { remoteAddress: randomUUID() } } };
+  for (let i = 0; i < 60; i++) expect((await server.request('/api/auth/get-session', {}, bindings)).status).toBe(200);
 });
 
 it('returns a structured error for oversized management requests', async () => {

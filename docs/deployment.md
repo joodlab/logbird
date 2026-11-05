@@ -19,7 +19,7 @@ audit.example.com {
 }
 ```
 
-Set APP_URL=https://audit.example.com and TRUST_PROXY=true only if the server is reachable solely through trusted ingress. Caddy must overwrite forwarded client addresses. Do not expose the API directly. The app's API proxy target is baked at build time; rebuild when changing it. Development Vite proxies are absent from the production listener.
+Set APP_URL=https://audit.example.com and TRUST_PROXY=true only if the server is reachable solely through trusted ingress. With exactly one trusted proxy in front (e.g. Caddy), the server uses the rightmost `X-Forwarded-For` entry, which that proxy appends. Do not expose the API directly. The app's API proxy target is baked at build time; rebuild when changing it. Development Vite proxies are absent from the production listener.
 
 ## Acceptance
 

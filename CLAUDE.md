@@ -1,3 +1,6 @@
 # Agent guide
 
-Read [AGENTS.md](AGENTS.md) and, when present, the gitignored AGENTS.local.md.
+@AGENTS.md
+
+<!-- Owner-specific local environment notes (gitignored; absent in public clones). -->
+@AGENTS.local.md
