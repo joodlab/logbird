@@ -33,7 +33,8 @@
     {
       "includes": [
         "packages/integrations/vue/**",
-        "packages/integrations/nuxt/**"
+        "packages/integrations/nuxt/**",
+        "examples/vue/**"
       ],
       "linter": { "rules": { "correctness": { "useHookAtTopLevel": "off" } } }
     },

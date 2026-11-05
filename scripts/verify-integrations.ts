@@ -117,7 +117,9 @@ try {
       assert.ok(found, `${name} event must be visible through real read API`);
       const history = await fetch(`http://127.0.0.1:4730/${name === 'nuxt' ? 'api/_trailmark/events' : 'history'}`);
       assert.equal(history.status, 200, `${name} history status`);
-      assert.ok((await history.text()).includes(`${name}.record.updated`), `${name} history contains event`);
+      const historyBody = await history.text();
+      assert.ok(historyBody.includes(`${name}.record.updated`), `${name} history contains event`);
+      assert.ok(!historyBody.includes(ingest.secret) && !historyBody.includes(read.secret), `${name} keys stay server-side`);
       results.push({
         framework: name,
         ingest: 'real framework route -> SDK -> HTTP 202 -> ClickHouse',

@@ -1,10 +1,10 @@
 import { serve } from '@hono/node-server';
 import { type AuditVariables, trailmark } from '@trailmark/hono';
 import { readAuditTrail, trailQuery } from '@trailmark/sdk/read';
-import { AuditTimeline } from '@trailmark/vue';
+import { useAuditTrail } from '@trailmark/vue';
 import { renderToString } from '@vue/server-renderer';
 import { Hono } from 'hono';
-import { createSSRApp, h } from 'vue';
+import { createSSRApp, h, onServerPrefetch } from 'vue';
 import { options } from './audit.server';
 
 const app = new Hono<{ Variables: AuditVariables }>();
@@ -17,15 +17,16 @@ app.post('/demo', (c) => {
   return c.json({ ok: true });
 });
 app.get('/history', async (c) => {
-  const page = await read();
-  // SSR prefetch uses the application's backend read function; no keys enter component props.
   const view = createSSRApp({
-    render: () =>
-      h(
-        AuditTimeline,
-        { options: { fetcher: async () => page, target: { id: 'demo-record' } } },
-        { default: () => h('pre', JSON.stringify(page.data.map((event) => ({ id: event.id, action: event.action })))) },
-      ),
+    setup() {
+      // The fetcher is server-owned; keys are never serialized to component props.
+      const trail = useAuditTrail({ fetcher: read, target: { id: 'demo-record' } });
+      onServerPrefetch(async () => {
+        await trail.refresh();
+        if (trail.error.value) throw trail.error.value;
+      });
+      return () => h('pre', JSON.stringify(trail.data.value.map((event) => ({ id: event.id, action: event.action }))));
+    },
   });
   return c.html(await renderToString(view));
 });
