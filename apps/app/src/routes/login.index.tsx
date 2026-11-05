@@ -7,7 +7,7 @@ import { ArrowRightIcon, Loader2Icon, MailIcon } from 'lucide-react';
 import { useState } from 'react';
 import { z } from 'zod';
 import { meQuery } from '@/lib/api/queries';
-import { authCall, authClient } from '@/lib/auth-client';
+import { sendSignInCode } from '@/lib/auth-client';
 import { fieldErrorMessage } from '@/lib/forms';
 import { markOtpSent } from '@/lib/otp';
 import { safeRedirect } from '@/lib/session';
@@ -33,7 +33,7 @@ function EmailStep() {
       setServerError(null);
       const email = value.email.trim().toLowerCase();
       try {
-        await authCall(authClient.emailOtp.sendVerificationOtp({ email, type: 'sign-in' }));
+        await sendSignInCode(email);
         markOtpSent(email);
         await navigate({ to: '/login/verify', search: { email, redirect: target } });
       } catch (error) {
@@ -99,7 +99,7 @@ function EmailStep() {
           {(submitting) => (
             <Button size="lg" disabled={submitting} type="submit">
               {submitting ? <Loader2Icon className="animate-spin" /> : null}
-              {submitting ? 'Sending code…' : 'Continue with email'}
+              {submitting ? 'Sending code…' : serverError ? 'Try again' : 'Continue with email'}
               {submitting ? null : <ArrowRightIcon />}
             </Button>
           )}

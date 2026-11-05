@@ -34,7 +34,7 @@ import {
   workspaceSetupSchema,
 } from '@trailmark/contracts';
 import { z } from 'zod';
-import { toApiError } from './errors';
+import { timeoutError, toApiError } from './errors';
 
 type Query = Record<string, string | number | boolean | null | undefined>;
 
@@ -64,23 +64,46 @@ export function withQuery(path: string, query?: Query): string {
   return qs ? `${path}?${qs}` : path;
 }
 
+/**
+ * Longest the console waits for one API response. Past it the request is aborted and surfaces as a `timeout` error
+ * with a retry, instead of a spinner that never ends.
+ */
+export const REQUEST_DEADLINE_MS = 30_000;
+
 async function request<S extends z.ZodType>(schema: S, method: string, path: string, options: RequestOptions = {}): Promise<z.output<S>> {
-  const response = await fetch(withQuery(path, options.query), {
-    method,
-    credentials: 'same-origin',
-    signal: options.signal,
-    headers: options.body === undefined ? { accept: 'application/json' } : { accept: 'application/json', 'content-type': 'application/json' },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-  });
-  if (!response.ok) throw await toApiError(response);
-  if (response.status === 204) return schema.parse({ ok: true });
-  const json: unknown = await response.json();
-  const parsed = schema.safeParse(json);
-  if (!parsed.success) {
-    console.error(`[api] ${method} ${path} returned an unexpected shape`, parsed.error.issues);
-    throw parsed.error;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_DEADLINE_MS);
+  const forwardAbort = () => controller.abort(options.signal?.reason);
+  if (options.signal?.aborted) forwardAbort();
+  options.signal?.addEventListener('abort', forwardAbort, { once: true });
+  try {
+    const response = await fetch(withQuery(path, options.query), {
+      method,
+      credentials: 'same-origin',
+      signal: controller.signal,
+      headers: options.body === undefined ? { accept: 'application/json' } : { accept: 'application/json', 'content-type': 'application/json' },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    });
+    if (!response.ok) throw await toApiError(response);
+    if (response.status === 204) return schema.parse({ ok: true });
+    const json: unknown = await response.json();
+    const parsed = schema.safeParse(json);
+    if (!parsed.success) {
+      console.error(`[api] ${method} ${path} returned an unexpected shape`, parsed.error.issues);
+      throw parsed.error;
+    }
+    return parsed.data;
+  } catch (error) {
+    if (timedOut) throw timeoutError();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener('abort', forwardAbort);
   }
-  return parsed.data;
 }
 
 /** Lists are `{ data: [...] }` (contracts/console.ts). */

@@ -76,7 +76,9 @@ if (response.status !== 202) throw new Error(await response.text());`;
 /** Read the audit trail from a product backend (read keys only). */
 export function readFetchSnippet(key?: string): string {
   const auth = key ? `'Bearer ${key}'` : `\`Bearer \${process.env.${READ_ENV}}\``;
-  return `const params = new URLSearchParams({ q: 'tenant:biz_7', limit: '20' });
+  return `// Latest events, newest first. Filter with the query language, e.g. one customer's history:
+// new URLSearchParams({ q: 'tenant:biz_7', limit: '20' })
+const params = new URLSearchParams({ limit: '20' });
 const response = await fetch(\`${ingestOrigin()}/v1/events?\${params}\`, {
   headers: { Authorization: ${auth} },
 });
@@ -108,9 +110,20 @@ trailmark.track({
   context: { operationId: job.data.operationId },
 });`;
 
+/**
+ * Read the trail with a read key. The first call is unfiltered so it returns the starter events right after
+ * onboarding (they are all `outcome:success`); the second, labelled call shows a query-language filter.
+ */
 export function readCurlSnippet(key?: string): string {
-  return `curl --get "${ingestOrigin()}/v1/events" \\
-  -H "Authorization: Bearer ${key ?? `$${READ_ENV}`}" \\
+  const auth = `-H "Authorization: Bearer ${key ?? `$${READ_ENV}`}"`;
+  return `# Latest events, newest first (includes the ones you just sent)
+curl --get "${ingestOrigin()}/v1/events" \\
+  ${auth} \\
+  --data-urlencode "limit=20"
+
+# Only failures: filter with the query language
+curl --get "${ingestOrigin()}/v1/events" \\
+  ${auth} \\
   --data-urlencode "q=outcome:failure" \\
   --data-urlencode "limit=20"`;
 }

@@ -2,6 +2,7 @@ import { SidebarInset, SidebarProvider } from '@trailmark/ui/components/ui/sideb
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import { CrumbProvider } from '@/lib/crumbs';
 import { AppSidebar } from './app-sidebar';
+import { BusyNotice } from './busy-notice';
 import { CommandPalette } from './command-palette';
 import { TopBar } from './top-bar';
 
@@ -28,6 +29,7 @@ export function AppShell({ projectId, children }: { projectId?: string; children
         <AppSidebar projectId={projectId} />
         <SidebarInset className="min-w-0 overflow-hidden md:peer-data-[variant=inset]:border md:peer-data-[variant=inset]:border-border/80">
           <TopBar onOpenPalette={() => setPaletteOpen(true)} />
+          <BusyNotice />
           <div
             className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain"
             data-scroll-restoration-id="app-main"

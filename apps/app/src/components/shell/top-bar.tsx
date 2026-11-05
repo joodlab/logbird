@@ -9,6 +9,7 @@ import { ChevronRightIcon, SearchIcon } from 'lucide-react';
 import { useMemo } from 'react';
 import { projectQuery } from '@/lib/api/queries';
 import { useCrumb } from '@/lib/crumbs';
+import { modKeyLabel, useIsMac } from '@/lib/platform';
 import { absoluteRange, RANGE_PRESETS, rangeLabel, rangeShortLabel, resolveRange } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
 
@@ -25,7 +26,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
 
   const sections = matches.filter((m) => m.staticData?.crumb).map((m) => ({ id: m.id, label: m.staticData.crumb as string, path: m.pathname }));
   const showRange = matches.some((m) => m.staticData?.range);
-  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+  const isMac = useIsMac();
 
   return (
     <header className="relative z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3 sm:px-4">
@@ -95,7 +96,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         >
           <SearchIcon />
           <span className="hidden flex-1 text-start sm:inline">Jump to…</span>
-          <Kbd className="hidden sm:inline-flex">{isMac ? '⌘K' : 'Ctrl K'}</Kbd>
+          <Kbd className="hidden sm:inline-flex">{modKeyLabel(isMac, 'K')}</Kbd>
         </Button>
       </div>
     </header>

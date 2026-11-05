@@ -16,6 +16,23 @@ const VERB_PAST: Record<string, string> = {
 
 const INTRANSITIVE = new Set(['signed_in', 'signed_out', 'logged_in', 'logged_out', 'signed_up']);
 
+/** Words that read better upper-cased inside a sentence ("API key", not "api key"). */
+const ACRONYMS: Record<string, string> = { api: 'API', id: 'ID', ip: 'IP', sso: 'SSO', url: 'URL', otp: 'OTP', sdk: 'SDK', csv: 'CSV' };
+
+/** "api_key" → "API key", "invite_link" → "invite link", "project.sample_data" → "project sample data". */
+export function humanizeNoun(value: string): string {
+  return value
+    .split(/[._\s]+/)
+    .filter(Boolean)
+    .map((word) => ACRONYMS[word.toLowerCase()] ?? word)
+    .join(' ');
+}
+
+/** Who to credit: a person's name, else their email (people who joined by link may have no name yet), else the id. */
+export function personLabel(p: { name?: string; email?: string; id?: string } | null | undefined): string {
+  return p?.name?.trim() || p?.email?.trim() || p?.id || '';
+}
+
 /**
  * The human sentence for an event. Prefer the producer's `description`; otherwise build
  * "<actor> <verb> <target>" from the envelope so even off-standard events read naturally.
@@ -26,19 +43,34 @@ export function eventSentence(e: AuditEvent): string {
   // Work done by a worker/scheduler/webhook reads best credited to the executor ("CRM worker upserted …");
   // the actor who caused it stays visible in the actor column and the detail panel.
   const performedByMachine = e.executor && ['worker', 'scheduler', 'webhook', 'job'].includes(e.executor.type);
-  const who = (performedByMachine ? e.executor?.name || e.executor?.id : '') || e.actor?.name || e.actor?.id || e.executor?.name || 'Something';
+  const who = (performedByMachine ? e.executor?.name || e.executor?.id : '') || personLabel(e.actor) || e.executor?.name || e.executor?.id || '';
   const parts = e.action.split('.');
   const verb = parts.at(-1) ?? e.action;
-  const noun = parts.slice(0, -1).join(' ');
-  if (INTRANSITIVE.has(verb)) return `${who} ${verb.replaceAll('_', ' ')}`;
+  const noun = parts.slice(0, -1).join('.');
   const target = e.targets[0];
-  // Prefer a name; an opaque id reads worse than the action's own noun ("changed project retention").
-  const object = target?.name || noun || (target ? `${target.type} ${target.id}` : '');
-  return `${who} ${VERB_PAST[verb] ?? verb.replaceAll('_', ' ')} ${object}`.trim();
+  // Nobody to credit: the action itself is the most honest summary ("validator.key.check").
+  if (!who) return target?.name ? `${e.action} · ${target.name}` : e.action;
+  if (INTRANSITIVE.has(verb)) return `${who} ${verb.replaceAll('_', ' ')}`;
+  const verbText = VERB_PAST[verb] ?? verb.replaceAll('_', ' ');
+  // "joined via link" with the joiner as the target: the object would only repeat the subject.
+  if (target && e.actor && target.id === e.actor.id && target.type === (e.actor.type || 'user')) return `${who} ${verbText}`;
+  // A named target of the action's own kind reads "API key ‘Production’"; another kind just by its name
+  // ("updated Hotel Sunrise" for hotel.policy.updated). An opaque id reads worse than the action's own noun.
+  const ownKind = target && noun && target.type.replaceAll('_', '.') === noun.replaceAll('_', '.');
+  const object = target?.name
+    ? ownKind
+      ? `${humanizeNoun(noun)} ‘${target.name}’`
+      : target.name
+    : noun
+      ? humanizeNoun(noun)
+      : target
+        ? `${humanizeNoun(target.type)} ${target.id}`
+        : '';
+  return `${who} ${verbText} ${object}`.trim();
 }
 
 export function actorLabel(e: AuditEvent): string {
-  return e.actor?.name || e.actor?.id || 'No actor';
+  return personLabel(e.actor) || 'No actor';
 }
 
 /** Split "hotel.policy.updated" into dim namespace + strong verb for display. */

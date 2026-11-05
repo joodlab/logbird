@@ -21,6 +21,7 @@ import { BookmarkPlusIcon, Columns3Icon, DownloadIcon, Loader2Icon } from 'lucid
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
+import { DisabledReason } from '@/components/admin-gate';
 import { HighlightedText } from '@/components/query-input/highlighted';
 import { api, langParam } from '@/lib/api/client';
 import { errorMessage, toApiError } from '@/lib/api/errors';
@@ -115,12 +116,15 @@ export function SaveViewButton({
   lang = 'query',
   range,
   columns,
+  disabledReason,
 }: {
   projectId: string;
   q: string;
   lang?: QueryLang;
   range: string;
   columns: string[];
+  /** Why the current state cannot be saved (e.g. the query is rejected). Disables the button and explains on hover. */
+  disabledReason?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -141,10 +145,19 @@ export function SaveViewButton({
   });
   return (
     <>
-      <Button onClick={() => setOpen(true)} size="sm" variant="outline">
-        <BookmarkPlusIcon />
-        <span className="hidden xl:inline">Save view</span>
-      </Button>
+      <DisabledReason reason={disabledReason}>
+        <Button
+          aria-label={disabledReason ? `Save view: ${disabledReason}` : undefined}
+          data-testid="save-view"
+          disabled={Boolean(disabledReason)}
+          onClick={() => setOpen(true)}
+          size="sm"
+          variant="outline"
+        >
+          <BookmarkPlusIcon />
+          <span className="hidden xl:inline">Save view</span>
+        </Button>
+      </DisabledReason>
       <Dialog
         onOpenChange={(next) => {
           setOpen(next);
@@ -153,7 +166,7 @@ export function SaveViewButton({
             create.reset();
           }
         }}
-        open={open}
+        open={open && !disabledReason}
       >
         <DialogContent className="sm:max-w-md">
           <form

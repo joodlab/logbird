@@ -5,11 +5,12 @@ import { Button } from '@trailmark/ui/components/ui/button';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
 import { cn } from '@trailmark/ui/lib/utils';
-import { ChevronRightIcon, MinusIcon } from 'lucide-react';
+import { ChevronRightIcon, CircleAlertIcon, Loader2Icon, MinusIcon } from 'lucide-react';
 import { useState } from 'react';
 import { facetQuery } from '@/lib/api/queries';
 import { formatCompact } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
+import { altClickLabel, useIsMac } from '@/lib/platform';
 import { coreField } from '@/lib/query-catalog';
 import { fieldTerms, hasTerm, queryFieldForFacet, removeTerm, toggleTerm } from '@/lib/query-language';
 import { hasSqlPredicate, isColumnPredicate, removeSqlConjuncts, sqlConjuncts, sqlString, toggleSqlPredicate } from '@/lib/sql-language';
@@ -46,6 +47,8 @@ interface FacetSidebarProps {
   lang?: QueryLang;
   /** Count against this query instead of `q` (the last one that ran, while `q` is rejected). */
   counts?: { q: string; lang: QueryLang };
+  /** Why every count is out of date (the current query was rejected or failed). Dims all groups and says so. */
+  staleReason?: string | null;
   onChange: (q: string) => void;
   className?: string;
 }
@@ -87,15 +90,39 @@ function sqlOps(field: string): FacetOps {
 }
 
 /** Facet groups with counts. Click includes a value, ⌥/Alt-click (or −) excludes it. */
-export function FacetSidebar({ projectId, range, q, lang = 'query', counts, onChange, className }: FacetSidebarProps) {
+export function FacetSidebar({ projectId, range, q, lang = 'query', counts, staleReason, onChange, className }: FacetSidebarProps) {
+  const isMac = useIsMac();
   return (
     <aside aria-label="Filters" className={cn('flex flex-col overflow-y-auto py-2', className)}>
       <div className="flex items-center justify-between px-3 pb-1">
         <span className="font-medium text-[11px] text-muted-foreground uppercase tracking-wider">Filters</span>
-        <span className="text-[10px] text-muted-foreground">⌥-click excludes</span>
+        <span className="text-[10px] text-muted-foreground" data-testid="facet-exclude-hint">
+          {altClickLabel(isMac)} excludes
+        </span>
       </div>
+      {staleReason ? (
+        <p
+          className="mx-3 mb-1.5 flex items-start gap-1.5 rounded-md bg-muted/70 px-2 py-1.5 text-[11px] text-muted-foreground leading-snug"
+          data-testid="facets-stale"
+          role="status"
+        >
+          <CircleAlertIcon className="mt-px size-3 shrink-0" />
+          {staleReason}
+        </p>
+      ) : null}
       {FACETS.map((f) => (
-        <FacetGroup counts={counts} key={f.field} lang={lang} onChange={onChange} projectId={projectId} q={q} range={range} spec={f} />
+        <FacetGroup
+          counts={counts}
+          isMac={isMac}
+          key={f.field}
+          lang={lang}
+          onChange={onChange}
+          projectId={projectId}
+          q={q}
+          range={range}
+          spec={f}
+          stale={Boolean(staleReason)}
+        />
       ))}
     </aside>
   );
@@ -108,6 +135,8 @@ function FacetGroup({
   q,
   lang,
   counts,
+  stale,
+  isMac,
   onChange,
 }: {
   spec: FacetSpec;
@@ -116,6 +145,8 @@ function FacetGroup({
   q: string;
   lang: QueryLang;
   counts?: { q: string; lang: QueryLang };
+  stale: boolean;
+  isMac: boolean;
   onChange: (q: string) => void;
 }) {
   const queryField = queryFieldForFacet(spec.field);
@@ -129,6 +160,10 @@ function FacetGroup({
   const facet = useQuery({ ...facetQuery(projectId, spec.field, range, scopedQ, 20, base.lang), enabled: open });
   const values = facet.data?.values ?? [];
   const max = Math.max(...values.map((v) => v.count), 1);
+  // Counts still belong to the previous query (keepPreviousData) until this group's own response arrives.
+  const updating = facet.isPlaceholderData || (facet.isFetching && !facet.isPending);
+  const failed = facet.isError && !facet.isFetching;
+  const dimmed = stale || facet.isPlaceholderData || failed;
 
   return (
     <section className="px-1.5">
@@ -144,6 +179,14 @@ function FacetGroup({
           {activeCount > 0 ? (
             <span className="ms-1 rounded-full bg-brand px-1.5 font-medium text-[10px] text-brand-foreground tabular-nums">{activeCount}</span>
           ) : null}
+          {open && updating ? (
+            <span className="ms-auto flex items-center gap-1 font-normal text-[10.5px] text-muted-foreground" data-testid="facet-updating">
+              <Loader2Icon className="size-3 animate-spin" />
+              updating
+            </span>
+          ) : open && failed ? (
+            <span className="ms-auto font-normal text-[10.5px] text-destructive">counts unavailable</span>
+          ) : null}
         </button>
         {activeCount > 0 ? (
           <Button className="px-2 text-muted-foreground text-xs" onClick={() => onChange(ops.without(q))} size="sm" variant="ghost">
@@ -152,9 +195,21 @@ function FacetGroup({
         ) : null}
       </div>
       {open ? (
-        <div className="flex flex-col gap-px pb-2 ps-2">
-          {facet.isPending ? (
+        <div
+          aria-busy={updating || undefined}
+          className={cn('flex flex-col gap-px pb-2 ps-2 transition-opacity', dimmed && values.length > 0 && 'opacity-50')}
+          data-stale={dimmed || undefined}
+        >
+          {facet.isPending && !facet.isError ? (
             placeholderKeys(3).map((k) => <Skeleton className="h-(--control-size-compact) w-full" key={k} />)
+          ) : failed && values.length === 0 ? (
+            <button
+              className="self-start px-2 py-1 text-start text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
+              onClick={() => facet.refetch()}
+              type="button"
+            >
+              Could not load these counts. Retry
+            </button>
           ) : values.length === 0 ? (
             <p className="px-2 py-1 text-muted-foreground text-xs">No values in this range.</p>
           ) : (
@@ -171,7 +226,7 @@ function FacetGroup({
                       excluded && 'text-muted-foreground line-through decoration-outcome-failure/60',
                     )}
                     onClick={(e) => onChange(ops.toggle(q, v.value, e.altKey ? 'exclude' : 'include'))}
-                    title={`${spec.named && v.label !== v.value ? `${v.label} (${v.value})` : v.label} — click to filter, ⌥-click to exclude`}
+                    title={`${spec.named && v.label !== v.value ? `${v.label} (${v.value})` : v.label} — click to filter, ${altClickLabel(isMac)} to exclude`}
                     type="button"
                   >
                     <span

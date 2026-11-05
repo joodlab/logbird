@@ -1,7 +1,8 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { redirect } from '@tanstack/react-router';
 import type { WorkspaceSetup } from '@trailmark/contracts';
-import { projectsQuery, workspaceSetupQuery } from '@/lib/api/queries';
+import { meQuery, projectsQuery, workspaceSetupQuery } from '@/lib/api/queries';
+import { activeRole, canDo } from '@/lib/permissions';
 import { lastProject } from '@/lib/session';
 
 const SKIP_KEY = (projectId: string) => `trailmark.onboarding.skippedFirstEvent.${projectId}`;
@@ -42,9 +43,12 @@ export async function resolveOnboarding(queryClient: QueryClient) {
     // Setup summary unavailable: fall back to "first project" so the console stays reachable.
     const projects = await queryClient.fetchQuery(projectsQuery());
     const first = projects[0];
-    return first ? redirect({ to: '/p/$projectId', params: { projectId: first.id } }) : redirect({ to: '/onboarding/project' });
+    return first ? redirect({ to: '/p/$projectId', params: { projectId: first.id } }) : redirect({ to: '/projects' });
   }
   const { next, projectId } = setup.onboarding;
+  // Members cannot create projects or keys: never park them on a step only an admin can finish.
+  const admin = canDo(activeRole(queryClient.getQueryData(meQuery().queryKey)), 'project.create');
+  if (!admin && (next === 'project' || next === 'first_event')) return overviewOf(setup, projectId);
   switch (next) {
     case 'profile':
       return redirect({ to: '/onboarding/profile' });

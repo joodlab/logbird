@@ -17,12 +17,14 @@ import { CheckCircle2Icon, KeyRoundIcon, Loader2Icon, PlusIcon, TriangleAlertIco
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
+import { AdminNote, AdminOnly } from '@/components/admin-gate';
 import { SettingsSection } from '@/components/settings-section';
 import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keysQuery, keys as queryKeys } from '@/lib/api/queries';
 import { fieldErrorMessage } from '@/lib/forms';
+import { useCan } from '@/lib/permissions';
 import { placeholderKeys } from '@/lib/placeholders';
 import { curlSnippet, readCurlSnippet } from '@/lib/snippets';
 
@@ -43,6 +45,8 @@ function KeysSettings() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const [createOpen, setCreateOpen] = useState(false);
+  const can = useCan();
+  const manage = can('keys.manage');
   const revoke = useMutation({
     mutationFn: (key: ApiKey) => api.keys.revoke(projectId, key.id),
     onSuccess: (_, key) => {
@@ -60,11 +64,14 @@ function KeysSettings() {
         description="Keys are bound to this project. Trailmark stores only a hash and the prefix shown here — the full secret is displayed once, when you create it."
         title="API keys"
       >
-        <div className="flex justify-end">
-          <Button onClick={() => setCreateOpen(true)} size="sm">
-            <PlusIcon />
-            Create key
-          </Button>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+          {manage ? null : <AdminNote className="flex-1">You can see this project's keys. Owners and admins create and revoke them.</AdminNote>}
+          <AdminOnly allowed={manage} className="self-end sm:self-auto">
+            <Button disabled={!manage} onClick={() => setCreateOpen(true)} size="sm">
+              <PlusIcon />
+              Create key
+            </Button>
+          </AdminOnly>
         </div>
         {list.isPending ? (
           <div className="flex flex-col gap-2">
@@ -108,7 +115,7 @@ function KeysSettings() {
                       'Never used'
                     )}
                   </span>
-                  {k.revokedAt ? null : (
+                  {k.revokedAt || !manage ? null : (
                     <Button
                       className="text-destructive hover:text-destructive"
                       disabled={revoke.isPending && revoke.variables?.id === k.id}
@@ -133,7 +140,7 @@ function KeysSettings() {
           </ul>
         )}
       </SettingsSection>
-      <CreateKeyDialog onOpenChange={setCreateOpen} open={createOpen} projectId={projectId} />
+      {manage ? <CreateKeyDialog onOpenChange={setCreateOpen} open={createOpen} projectId={projectId} /> : null}
     </div>
   );
 }

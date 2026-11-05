@@ -10,6 +10,7 @@ import { Textarea } from '@trailmark/ui/components/ui/textarea';
 import { ArrowRightIcon, BookOpenIcon, Loader2Icon } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
+import { AdminNote } from '@/components/admin-gate';
 import { SettingsSection } from '@/components/settings-section';
 import { ProgressRing } from '@/components/setup/steps';
 import { Timestamp } from '@/components/timestamp';
@@ -17,6 +18,7 @@ import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keys, projectQuery, projectSetupQuery } from '@/lib/api/queries';
 import { fieldErrorMessage } from '@/lib/forms';
+import { useCan } from '@/lib/permissions';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/')({
   staticData: { crumb: 'General' },
@@ -34,6 +36,7 @@ function GeneralSettings() {
 
 function GeneralForm({ project }: { project: { id: string; name: string; slug: string; description: string | null; createdAt: string } }) {
   const queryClient = useQueryClient();
+  const manage = useCan()('project.update');
   const save = useMutation({
     mutationFn: (value: { name: string; description: string }) =>
       api.projects.update(project.id, { name: value.name.trim(), description: value.description.trim() || null }),
@@ -64,24 +67,27 @@ function GeneralForm({ project }: { project: { id: string; name: string; slug: s
         <SettingsSection
           description="How this project appears across the console."
           footer={
-            <form.Subscribe selector={(s) => [s.isDirty, s.isSubmitting, s.canSubmit] as const}>
-              {([dirty, submitting, canSubmit]) => (
-                <>
-                  {dirty ? (
-                    <Button onClick={() => form.reset()} size="sm" type="button" variant="ghost">
-                      Discard
+            manage ? (
+              <form.Subscribe selector={(s) => [s.isDirty, s.isSubmitting, s.canSubmit] as const}>
+                {([dirty, submitting, canSubmit]) => (
+                  <>
+                    {dirty ? (
+                      <Button onClick={() => form.reset()} size="sm" type="button" variant="ghost">
+                        Discard
+                      </Button>
+                    ) : null}
+                    <Button disabled={!dirty || submitting || !canSubmit} size="sm" type="submit">
+                      {submitting ? <Loader2Icon className="animate-spin" /> : null}
+                      Save changes
                     </Button>
-                  ) : null}
-                  <Button disabled={!dirty || submitting || !canSubmit} size="sm" type="submit">
-                    {submitting ? <Loader2Icon className="animate-spin" /> : null}
-                    Save changes
-                  </Button>
-                </>
-              )}
-            </form.Subscribe>
+                  </>
+                )}
+              </form.Subscribe>
+            ) : undefined
           }
           title="Project"
         >
+          {manage ? null : <AdminNote>Only workspace owners and admins can rename this project or change its description.</AdminNote>}
           <form.Field name="name" validators={{ onChange: nameSchema }}>
             {(field) => {
               const message = fieldErrorMessage(field.state.meta.errors);
@@ -90,6 +96,7 @@ function GeneralForm({ project }: { project: { id: string; name: string; slug: s
                   <Label htmlFor="settings-name">Name</Label>
                   <Input
                     aria-invalid={Boolean(message) || undefined}
+                    disabled={!manage}
                     id="settings-name"
                     onChange={(e) => field.handleChange(e.target.value)}
                     value={field.state.value}
@@ -105,6 +112,7 @@ function GeneralForm({ project }: { project: { id: string; name: string; slug: s
                 <Label htmlFor="settings-description">Description</Label>
                 <Textarea
                   className="min-h-20"
+                  disabled={!manage}
                   id="settings-description"
                   maxLength={280}
                   onChange={(e) => field.handleChange(e.target.value)}

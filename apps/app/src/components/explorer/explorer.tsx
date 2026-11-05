@@ -243,7 +243,17 @@ export function Explorer({
 
   const facetsPanel = (
     <FacetSidebar
-      counts={problem ? lastGood.current.query : undefined}
+      // A rejected query has no counts of its own: show the last query that ran, or the whole range on a cold load.
+      counts={problem ? (lastGood.current.query ?? { q: '', lang: 'query' }) : undefined}
+      staleReason={
+        problem
+          ? lastGood.current.query
+            ? 'This query was not run. Counts are from the last query that ran.'
+            : 'This query was not run. Counts cover the whole range.'
+          : events.isError
+            ? 'The search failed. These counts may not match the current query.'
+            : null
+      }
       lang={lang}
       onChange={(next) => onChange({ q: next, ev: undefined })}
       projectId={projectId}
@@ -342,7 +352,14 @@ export function Explorer({
           {embedded ? null : (
             <div className="hidden items-center gap-2 md:flex">
               <ColumnPicker columns={columns} onChange={(cols) => onChange({ columns: cols })} />
-              <SaveViewButton columns={columns} lang={lang} projectId={projectId} q={q} range={range} />
+              <SaveViewButton
+                columns={columns}
+                disabledReason={problem ? 'Fix the query first — a view must run without errors.' : null}
+                lang={lang}
+                projectId={projectId}
+                q={q}
+                range={range}
+              />
               <ExportMenu lang={lang} projectId={projectId} q={effectiveQ} range={range} />
             </div>
           )}

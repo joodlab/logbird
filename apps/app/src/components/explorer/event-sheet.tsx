@@ -34,7 +34,7 @@ import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
-import { eventSentence } from '@/lib/events';
+import { eventSentence, personLabel } from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
 import { formatTerm } from '@/lib/query-language';
 import { eventCurl } from '@/lib/snippets';
@@ -283,8 +283,8 @@ function EventDetailBody({
               <VenetianMaskIcon className="mt-0.5 size-4 shrink-0 text-outcome-denied" />
               <span>
                 <span className="font-medium">{e.impersonator.name || e.impersonator.id}</span> did this while impersonating{' '}
-                <span className="font-medium">{e.actor?.name || e.actor?.id}</span>. The actor is who it was done as; the impersonator is who was at
-                the keyboard.
+                <span className="font-medium">{personLabel(e.actor)}</span>. The actor is who it was done as; the impersonator is who was at the
+                keyboard.
               </span>
             </p>
           ) : null}
@@ -295,7 +295,7 @@ function EventDetailBody({
                   {projectId ? (
                     <EntityLink id={e.actor.id} kind="actor" name={e.actor.name} projectId={projectId} type={e.actor.type} />
                   ) : (
-                    <span className="truncate text-sm">{e.actor.name || e.actor.id}</span>
+                    <span className="truncate text-sm">{personLabel(e.actor)}</span>
                   )}
                   <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
                     <TypePill>{e.actor.type || 'unknown'}</TypePill>

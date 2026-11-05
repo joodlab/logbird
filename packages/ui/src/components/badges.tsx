@@ -65,7 +65,7 @@ export function TypePill({
   return (
     <span
       className={cn(
-        'inline-flex h-5 items-center rounded-md px-1.5 font-mono text-[11px] ring-1 ring-inset',
+        'inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-md px-1.5 font-mono text-[11px] ring-1 ring-inset',
         tone === 'neutral' && 'bg-muted text-muted-foreground ring-border',
         tone === 'brand' && 'bg-brand/10 text-brand ring-brand/20',
         tone === 'warning' && 'bg-outcome-denied/10 text-outcome-denied ring-outcome-denied/25',
