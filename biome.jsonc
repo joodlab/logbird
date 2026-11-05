@@ -18,7 +18,13 @@
       "!**/*.svg",
       "!**/routeTree.gen.ts",
       "!**/src/generated",
-      "!**/components/ui"
+      "!**/components/ui",
+      "!experiments/forge/public",
+      "!experiments/forge/console",
+      "!experiments/hey-api/public",
+      "!experiments/hey-api/console",
+      "!experiments/forge/*.input.json",
+      "!openapi/*.json"
     ]
   },
   // Email templates run directly through tsx in production, where JSX uses the

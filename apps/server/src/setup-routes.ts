@@ -1,19 +1,16 @@
 import { projectSetupSchema, sampleDataResponseSchema, workspaceSetupSchema } from '@trailmark/contracts';
 import { prisma, withProjectLock } from '@trailmark/database';
 import { Hono } from 'hono';
-import { describeRoute, resolver } from 'hono-openapi';
-import type { z } from 'zod';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { audit, requireRetentionReady } from './ingest';
 import { requireProjectAccess, requireSession } from './middlewares';
+import { doc, routeDoc } from './openapi';
 import { loadSampleData, removeSampleData } from './sample-data';
 import { invalidateSetup, setupFacts } from './setup-cache';
 import { computeSetup } from './setup-status';
 import type { AppEnv } from './types';
 
-const doc = (summary: string, schema: z.ZodType) =>
-  describeRoute({ summary, responses: { 200: { description: summary, content: { 'application/json': { schema: resolver(schema) } } } } });
 async function teamFacts(organizationId: string) {
   const [members, pendingInvitations] = await Promise.all([
     prisma.member.count({ where: { organizationId } }),
@@ -83,17 +80,13 @@ export const setupRoutes = new Hono<AppEnv>()
     await audit(c, 'project.sample_data.loaded', { type: 'project', id: projectId });
     return c.json(sampleDataResponseSchema.parse(result));
   })
-  .delete(
-    '/projects/:projectId/sample-data',
-    describeRoute({ summary: 'Remove sample data', responses: { 204: { description: 'Removed' } } }),
-    async (c) => {
-      const projectId = c.get('project').id;
-      await withProjectLock(projectId, async (tx) => {
-        await requireRetentionReady(tx, projectId);
-        invalidateSetup(projectId);
-        await removeSampleData(projectId);
-      });
-      await audit(c, 'project.sample_data.removed', { type: 'project', id: projectId });
-      return c.body(null, 204);
-    },
-  );
+  .delete('/projects/:projectId/sample-data', routeDoc('Remove sample data', { responses: { 204: { description: 'Removed' } } }), async (c) => {
+    const projectId = c.get('project').id;
+    await withProjectLock(projectId, async (tx) => {
+      await requireRetentionReady(tx, projectId);
+      invalidateSetup(projectId);
+      await removeSampleData(projectId);
+    });
+    await audit(c, 'project.sample_data.removed', { type: 'project', id: projectId });
+    return c.body(null, 204);
+  });

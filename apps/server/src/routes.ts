@@ -18,19 +18,18 @@ import { Prisma, prisma, withProjectLock } from '@trailmark/database';
 import { retentionQueue } from '@trailmark/worker/queue';
 import { enforceProjectRetention } from '@trailmark/worker/retention';
 import { Hono } from 'hono';
-import { describeRoute, resolver, validator } from 'hono-openapi';
+import { validator } from 'hono-openapi';
 import { z } from 'zod';
 import { clickhouse, purgeProjectEvents } from './clickhouse';
 import { ApiError } from './errors';
 import { audit } from './ingest';
 import { generateApiKey } from './keys';
 import { requireProjectAccess, requireSession } from './middlewares';
+import { doc, routeDoc } from './openapi';
 import { creatorSelect, serializeKey, serializeProject, serializeView } from './serialize';
 import { invalidateSetup } from './setup-cache';
 import type { AppEnv } from './types';
 
-const doc = (summary: string, schema: z.ZodType, status = 200) =>
-  describeRoute({ summary, responses: { [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } } } });
 async function activeOrganization(c: import('hono').Context<AppEnv>) {
   const id = c.get('activeOrganizationId');
   if (!id || !(await prisma.member.findFirst({ where: { organizationId: id, userId: c.get('user').id } })))
@@ -169,7 +168,7 @@ export const managementRoutes = new Hono<AppEnv>()
       return c.json(serializeProject(project));
     },
   )
-  .delete('/projects/:projectId', describeRoute({ summary: 'Delete project', responses: { 204: { description: 'Deleted' } } }), async (c) => {
+  .delete('/projects/:projectId', routeDoc('Delete project', { responses: { 204: { description: 'Deleted' } } }), async (c) => {
     const projectId = c.get('project').id;
     await withProjectLock(projectId, async (tx) => {
       await tx.apiKey.updateMany({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
@@ -204,20 +203,16 @@ export const managementRoutes = new Hono<AppEnv>()
       return c.json({ key: serializeKey(key), secret: material.secret }, 201);
     },
   )
-  .delete(
-    '/projects/:projectId/keys/:keyId',
-    describeRoute({ summary: 'Revoke API key', responses: { 204: { description: 'Revoked' } } }),
-    async (c) => {
-      const result = await prisma.apiKey.updateMany({
-        where: { id: c.req.param('keyId'), projectId: c.get('project').id },
-        data: { revokedAt: new Date() },
-      });
-      if (!result.count) throw new ApiError(404, 'not_found', 'API key not found.');
-      invalidateSetup(c.get('project').id);
-      await audit(c, 'api_key.revoked', { type: 'api_key', id: c.req.param('keyId') });
-      return c.body(null, 204);
-    },
-  )
+  .delete('/projects/:projectId/keys/:keyId', routeDoc('Revoke API key', { responses: { 204: { description: 'Revoked' } } }), async (c) => {
+    const result = await prisma.apiKey.updateMany({
+      where: { id: c.req.param('keyId'), projectId: c.get('project').id },
+      data: { revokedAt: new Date() },
+    });
+    if (!result.count) throw new ApiError(404, 'not_found', 'API key not found.');
+    invalidateSetup(c.get('project').id);
+    await audit(c, 'api_key.revoked', { type: 'api_key', id: c.req.param('keyId') });
+    return c.body(null, 204);
+  })
   .get('/projects/:projectId/views', doc('List saved views', z.object({ data: z.array(savedViewSchema) })), async (c) =>
     c.json({
       data: (
@@ -240,13 +235,9 @@ export const managementRoutes = new Hono<AppEnv>()
       return c.json(serializeView(view), 201);
     },
   )
-  .delete(
-    '/projects/:projectId/views/:viewId',
-    describeRoute({ summary: 'Delete saved view', responses: { 204: { description: 'Deleted' } } }),
-    async (c) => {
-      const result = await prisma.savedView.deleteMany({ where: { id: c.req.param('viewId'), projectId: c.get('project').id } });
-      if (!result.count) throw new ApiError(404, 'not_found', 'Saved view not found.');
-      await audit(c, 'saved_view.deleted', { type: 'saved_view', id: c.req.param('viewId') });
-      return c.body(null, 204);
-    },
-  );
+  .delete('/projects/:projectId/views/:viewId', routeDoc('Delete saved view', { responses: { 204: { description: 'Deleted' } } }), async (c) => {
+    const result = await prisma.savedView.deleteMany({ where: { id: c.req.param('viewId'), projectId: c.get('project').id } });
+    if (!result.count) throw new ApiError(404, 'not_found', 'Saved view not found.');
+    await audit(c, 'saved_view.deleted', { type: 'saved_view', id: c.req.param('viewId') });
+    return c.body(null, 204);
+  });
