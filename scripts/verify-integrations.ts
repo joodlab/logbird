@@ -131,9 +131,9 @@ try {
       await stop(child);
     }
   }
-  await mkdir('docs/media/sdk-integrations', { recursive: true });
+  await mkdir('docs/verification/sdk-integrations', { recursive: true });
   await writeFile(
-    'docs/media/sdk-integrations/runtime-results.json',
+    'docs/verification/sdk-integrations/runtime-results.json',
     `${JSON.stringify({ measuredAt: new Date().toISOString(), endpoint, results, cleanup: 'owned project, keys and events removed in finally; owned processes stopped' }, null, 2)}\n`,
   );
 } finally {

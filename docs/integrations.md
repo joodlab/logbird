@@ -48,4 +48,4 @@ The SDK's structural read types are compile-checked against packages/contracts i
 Run `node --env-file=.env --import tsx scripts/verify-integrations.ts` to provision only a disposable
 project, run all examples, assert real readback and remove its keys/events/project in finally.
 The runner must have ports 4730/4731 free and uses existing shared services. Private diagnostics
-stay in .tmp; the credential-free receipt is docs/media/sdk-integrations/runtime-results.json.
+stay in .tmp; the credential-free receipt is docs/verification/sdk-integrations/runtime-results.json.
