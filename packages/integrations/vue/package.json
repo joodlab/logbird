@@ -1,0 +1,42 @@
+{
+  "name": "@trailmark/vue",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@trailmark/sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "vue": "3.5.22"
+  },
+  "devDependencies": {
+    "vue": "3.5.22",
+    "@trailmark/tsconfig": "workspace:*",
+    "@trailmark/contracts": "workspace:*",
+    "@types/node": "22.20.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "tsdown": "0.22.14",
+    "@vue/test-utils": "2.4.6",
+    "happy-dom": "20.0.11"
+  }
+}

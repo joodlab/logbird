@@ -1,0 +1,19 @@
+{
+  "name": "@trailmark/example-hono",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx index.ts"
+  },
+  "dependencies": {
+    "@trailmark/hono": "workspace:*",
+    "@trailmark/sdk": "workspace:*",
+    "@hono/node-server": "2.1.1",
+    "hono": "4.13.5",
+    "vue": "3.5.22",
+    "@vue/server-renderer": "3.5.22"
+  },
+  "devDependencies": {
+    "tsx": "4.23.13"
+  }
+}

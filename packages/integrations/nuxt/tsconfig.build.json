@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "paths": {
+      "@trailmark/sdk": ["../../sdk/dist/index.d.mts"],
+      "@trailmark/sdk/*": ["../../sdk/dist/*.d.mts"],
+      "@trailmark/vue": ["../vue/dist/index.d.mts"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}
