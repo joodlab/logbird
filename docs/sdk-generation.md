@@ -203,4 +203,3 @@ ClickHouse tests, generated-client compile checks, repeated spec hashes and real
 No browser UI changed, so terminal assertions and committed JSON receipts replace screenshots/video.
 Cleanup review covered only this spike's metadata, scripts and generated artifacts; shared schema conversion
 removed a duplicated hand-written ingest union. No production wiring or unrelated refactor was added.
-
