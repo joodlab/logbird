@@ -14,6 +14,7 @@ import { ActionName } from '@/components/action-name';
 import { OutcomeAreaChart } from '@/components/charts/outcome-area-chart';
 import { EntityProfileLink } from '@/components/entity-link';
 import { RankList } from '@/components/rank-list';
+import { SampleDataBanner } from '@/components/setup/sample-data-banner';
 import { SetupChecklistCard } from '@/components/setup/setup-checklist-card';
 import { Timestamp } from '@/components/timestamp';
 import { overviewQuery, projectQuery } from '@/lib/api/queries';
@@ -72,6 +73,7 @@ function OverviewPage() {
         </Button>
       </div>
 
+      <SampleDataBanner className="rounded-lg border" projectId={projectId} />
       <SetupChecklistCard projectId={projectId} projectName={project.data?.name} />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">

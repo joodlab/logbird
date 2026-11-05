@@ -3,6 +3,7 @@ import { Kbd } from '@trailmark/ui/components/ui/kbd';
 import { ArrowUpRightIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { HighlightedQuery } from '@/components/query-input/highlighted';
+import { modKeyLabel, useIsMac } from '@/lib/platform';
 
 /* Reference material that used to live on the Quickstart page; the Setup page renders it below the checklist. */
 
@@ -29,21 +30,24 @@ export const QUERY_SYNTAX: [string, string][] = [
   ['"cancellation policy"', 'Free text over description, actor, tenant and target names'],
 ];
 
-export const SHORTCUTS: [ReactNode, string][] = [
-  [<Kbd key="k">⌘K</Kbd>, 'Command palette: pages, entities, event and operation ids, projects, theme'],
-  [<Kbd key="s">/</Kbd>, 'Focus the query bar in the explorer'],
-  [
-    <span className="flex gap-1" key="jk">
-      <Kbd>j</Kbd>
-      <Kbd>k</Kbd>
-    </span>,
-    'Move down / up through events (also inside the event panel)',
-  ],
-  [<Kbd key="e">Enter</Kbd>, 'Open the highlighted event'],
-  [<Kbd key="esc">Esc</Kbd>, 'Close the event panel or autocomplete'],
-  [<Kbd key="alt">⌥ click</Kbd>, 'Exclude a facet value instead of including it'],
-  [<Kbd key="b">⌘B</Kbd>, 'Collapse or expand the sidebar'],
-];
+/** Keyboard shortcuts with the modifier names of the viewer's platform (⌘/⌥ on Mac, Ctrl/Alt elsewhere). */
+export function shortcuts(isMac: boolean): [ReactNode, string][] {
+  return [
+    [<Kbd key="k">{modKeyLabel(isMac, 'K')}</Kbd>, 'Command palette: pages, entities, event and operation ids, projects, theme'],
+    [<Kbd key="s">/</Kbd>, 'Focus the query bar in the explorer'],
+    [
+      <span className="flex gap-1" key="jk">
+        <Kbd>j</Kbd>
+        <Kbd>k</Kbd>
+      </span>,
+      'Move down / up through events (also inside the event panel)',
+    ],
+    [<Kbd key="e">Enter</Kbd>, 'Open the highlighted event'],
+    [<Kbd key="esc">Esc</Kbd>, 'Close the event panel or autocomplete'],
+    [<Kbd key="alt">{isMac ? '⌥ click' : 'Alt click'}</Kbd>, 'Exclude a facet value instead of including it'],
+    [<Kbd key="b">{modKeyLabel(isMac, 'B')}</Kbd>, 'Collapse or expand the sidebar'],
+  ];
+}
 
 /** Actor vs executor vs operation: the semantics people get wrong first. */
 export function EnvelopeSemantics() {
@@ -98,9 +102,10 @@ export function QueryCheatsheet({ projectId }: { projectId: string }) {
 }
 
 export function ShortcutList() {
+  const isMac = useIsMac();
   return (
-    <ul className="divide-y rounded-xl border bg-card shadow-xs">
-      {SHORTCUTS.map(([key, label]) => (
+    <ul className="divide-y rounded-xl border bg-card shadow-xs" data-testid="shortcut-list">
+      {shortcuts(isMac).map(([key, label]) => (
         <li className="flex items-center gap-4 px-4 py-2 text-sm" key={label}>
           <span className="w-24 shrink-0">{key}</span>
           <span className="text-muted-foreground">{label}</span>

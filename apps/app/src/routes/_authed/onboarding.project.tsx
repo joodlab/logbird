@@ -5,7 +5,7 @@ import { Button } from '@trailmark/ui/components/ui/button';
 import { Input } from '@trailmark/ui/components/ui/input';
 import { Label } from '@trailmark/ui/components/ui/label';
 import { Textarea } from '@trailmark/ui/components/ui/textarea';
-import { ArrowRightIcon, Loader2Icon } from 'lucide-react';
+import { ArrowRightIcon, Loader2Icon, LockIcon } from 'lucide-react';
 import { useState } from 'react';
 import { z } from 'zod';
 import { RetentionPicker } from '@/components/retention-picker';
@@ -15,6 +15,7 @@ import { keys } from '@/lib/api/queries';
 import { formatRetention } from '@/lib/format';
 import { fieldErrorMessage } from '@/lib/forms';
 import { stashSecret } from '@/lib/one-time-secrets';
+import { activeRole, canDo } from '@/lib/permissions';
 import { ensureActiveWorkspace } from '@/lib/session';
 
 export const Route = createFileRoute('/_authed/onboarding/project')({
@@ -52,6 +53,33 @@ function ProjectStep() {
       }
     },
   });
+
+  if (!canDo(activeRole(me), 'project.create')) {
+    return (
+      <div className="flex max-w-xl flex-col gap-6" data-testid="project-admins-only">
+        <div className="flex flex-col gap-1.5">
+          <h1 className="font-semibold text-2xl tracking-tight">Ask an admin for a project</h1>
+          <p className="text-muted-foreground text-sm">
+            Only owners and admins can create projects{workspace ? ` in ${workspace.name}` : ''}. Ask one of them to add one — it shows up for you
+            right away. Or start a workspace of your own.
+          </p>
+        </div>
+        <p className="flex items-start gap-2 rounded-lg border border-dashed px-3 py-2.5 text-muted-foreground text-sm">
+          <LockIcon className="mt-0.5 size-4 shrink-0" />
+          You are a member of this workspace: you can explore events, follow entities and save views.
+        </p>
+        <div className="flex items-center gap-3">
+          <Button nativeButton={false} render={<Link to="/projects" />}>
+            Go to projects
+            <ArrowRightIcon />
+          </Button>
+          <Button nativeButton={false} render={<Link search={{ another: true }} to="/onboarding" />} variant="ghost">
+            New workspace instead
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex max-w-xl flex-col gap-6">

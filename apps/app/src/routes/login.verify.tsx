@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router';
+import { signInCodeLifetimeLabel } from '@trailmark/contracts';
 import { Button } from '@trailmark/ui/components/ui/button';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@trailmark/ui/components/ui/input-otp';
 import { useOtpResendCountdown } from '@trailmark/ui/hooks/use-otp-resend-countdown';
@@ -9,7 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { meQuery } from '@/lib/api/queries';
-import { authCall, authClient } from '@/lib/auth-client';
+import { sendSignInCode, verifySignInCode } from '@/lib/auth-client';
 import { markOtpSent, otpCooldownLeft } from '@/lib/otp';
 import { safeRedirect } from '@/lib/session';
 
@@ -56,7 +57,7 @@ function VerifyStep() {
     setVerifying(true);
     setError(null);
     try {
-      await authCall(authClient.signIn.emailOtp({ email, otp }));
+      await verifySignInCode(email, otp);
       setVerified(true);
       await queryClient.invalidateQueries({ queryKey: meQuery().queryKey });
       await navigate({ to: safeRedirect(target), replace: true });
@@ -71,7 +72,7 @@ function VerifyStep() {
     setResending(true);
     setError(null);
     try {
-      await authCall(authClient.emailOtp.sendVerificationOtp({ email, type: 'sign-in' }));
+      await sendSignInCode(email);
       markOtpSent(email);
       startCountdown();
       toast.success('New code sent', { description: `Check ${email}.` });
@@ -87,7 +88,7 @@ function VerifyStep() {
       <div className="flex flex-col gap-1.5">
         <h1 className="font-semibold text-2xl tracking-tight">Check your email</h1>
         <p className="text-muted-foreground text-sm">
-          Enter the 6-digit code we sent to <span className="font-medium text-foreground">{email}</span>. It expires in 5 minutes.
+          Enter the 6-digit code we sent to <span className="font-medium text-foreground">{email}</span>. It expires in {signInCodeLifetimeLabel()}.
         </p>
       </div>
       <form

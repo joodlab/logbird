@@ -6,10 +6,12 @@ import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
 import { Button } from '@trailmark/ui/components/ui/button';
 import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { FolderPlusIcon, PlusIcon } from 'lucide-react';
+import { AdminOnly } from '@/components/admin-gate';
 import { AppShell } from '@/components/shell/app-shell';
 import { Timestamp } from '@/components/timestamp';
 import { projectsQuery } from '@/lib/api/queries';
 import { formatNumber, formatRetention } from '@/lib/format';
+import { useCan } from '@/lib/permissions';
 import { placeholderKeys } from '@/lib/placeholders';
 
 export const Route = createFileRoute('/_authed/_workspace/projects')({
@@ -22,15 +24,25 @@ export const Route = createFileRoute('/_authed/_workspace/projects')({
 function ProjectsPage() {
   const { workspace } = Route.useRouteContext();
   const projects = useQuery(projectsQuery());
+  const canCreate = useCan()('project.create');
   return (
     <AppShell>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6">
         <PageHeader
           actions={
-            <Button nativeButton={false} render={<Link to="/onboarding/project" />} size="sm">
-              <PlusIcon />
-              New project
-            </Button>
+            canCreate ? (
+              <Button nativeButton={false} render={<Link to="/onboarding/project" />} size="sm">
+                <PlusIcon />
+                New project
+              </Button>
+            ) : (
+              <AdminOnly allowed={false}>
+                <Button disabled size="sm">
+                  <PlusIcon />
+                  New project
+                </Button>
+              </AdminOnly>
+            )
           }
           description={`Every product sending events to ${workspace.name}.`}
           title="Projects"
@@ -45,10 +57,20 @@ function ProjectsPage() {
           <ErrorState error={projects.error} onRetry={() => projects.refetch()} />
         ) : projects.data.length === 0 ? (
           <div className="rounded-xl border border-dashed">
-            <EmptyState description="Create a project for the first product that should send events." icon={FolderPlusIcon} title="No projects yet">
-              <Button nativeButton={false} render={<Link to="/onboarding/project" />} size="sm">
-                Create project
-              </Button>
+            <EmptyState
+              description={
+                canCreate
+                  ? 'Create a project for the first product that should send events.'
+                  : 'Ask a workspace owner or admin to create one. Projects appear here as soon as they exist.'
+              }
+              icon={FolderPlusIcon}
+              title="No projects yet"
+            >
+              {canCreate ? (
+                <Button nativeButton={false} render={<Link to="/onboarding/project" />} size="sm">
+                  Create project
+                </Button>
+              ) : null}
             </EmptyState>
           </div>
         ) : (

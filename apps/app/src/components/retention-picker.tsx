@@ -6,18 +6,30 @@ import { formatRetention } from '@/lib/format';
 const COMMON = [30, 90, 365] as const;
 
 /** Retention chooser: three common windows as cards plus every supported option in a compact row. */
-export function RetentionPicker({ value, onChange, current }: { value: number; onChange: (days: number) => void; current?: number }) {
+export function RetentionPicker({
+  value,
+  onChange,
+  current,
+  disabled = false,
+}: {
+  value: number;
+  onChange: (days: number) => void;
+  current?: number;
+  /** Read-only (members): shows the current window without letting it change. */
+  disabled?: boolean;
+}) {
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Retention">
+      <div aria-disabled={disabled || undefined} aria-label="Retention" className="grid grid-cols-3 gap-2" role="radiogroup">
         {COMMON.map((days) => (
           // biome-ignore lint/a11y/useSemanticElements: card-style choices; role=radio + aria-checked expose them as a radio group
           <button
             aria-checked={value === days}
             className={cn(
-              'flex flex-col items-start gap-0.5 rounded-lg border bg-card p-3 text-start outline-none transition-colors hover:border-foreground/25 focus-visible:ring-3 focus-visible:ring-ring/40',
-              value === days && 'border-brand ring-1 ring-brand',
+              'flex flex-col items-start gap-0.5 rounded-lg border bg-card p-3 text-start outline-none transition-colors hover:border-foreground/25 focus-visible:ring-3 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-border',
+              value === days && 'border-brand ring-1 ring-brand disabled:hover:border-brand',
             )}
+            disabled={disabled}
             key={days}
             onClick={() => onChange(days)}
             role="radio"
@@ -28,12 +40,13 @@ export function RetentionPicker({ value, onChange, current }: { value: number; o
           </button>
         ))}
       </div>
-      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="All retention options">
+      <div aria-disabled={disabled || undefined} aria-label="All retention options" className="flex flex-wrap gap-1.5" role="radiogroup">
         {RETENTION_OPTIONS.map((days) => (
           <FilterChip
             active={value === days}
             aria-checked={value === days}
             className="tabular-nums"
+            disabled={disabled}
             key={days}
             onClick={() => onChange(days)}
             role="radio"

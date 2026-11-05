@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createEnv } from '@t3-oss/env-core';
+import { SIGN_IN_CODE_TTL_SECONDS } from '@trailmark/contracts';
 import { prisma } from '@trailmark/database';
 import { sendOrganizationInvitation, sendSignInCode } from '@trailmark/email';
 import { betterAuth } from 'better-auth';
@@ -71,7 +72,7 @@ export const auth = betterAuth({
     emailOTP({
       otpLength: 6,
       storeOTP: 'hashed',
-      expiresIn: 600,
+      expiresIn: SIGN_IN_CODE_TTL_SECONDS,
       disableSignUp: false,
       async sendVerificationOTP({ email, otp }) {
         await sendSignInCode(email, otp);

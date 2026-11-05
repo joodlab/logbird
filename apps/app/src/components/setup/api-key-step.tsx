@@ -14,6 +14,8 @@ import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keysQuery } from '@/lib/api/queries';
 import { ingestSecretId, readSecretId, stashSecret, useSecret } from '@/lib/one-time-secrets';
+import { useCan } from '@/lib/permissions';
+import { AdminNote } from '../admin-gate';
 import { Timestamp } from '../timestamp';
 import { useInvalidateSetup } from './use-setup';
 
@@ -44,6 +46,7 @@ export function ApiKeyStep({ projectId, kind }: { projectId: string; kind: Kind 
   const [creating, setCreating] = useState(false);
   const [revealed, setRevealed] = useState<{ key: ApiKey; secret: string } | null>(null);
   const [pasted, setPasted] = useState('');
+  const manage = useCan()('keys.manage');
   const create = useMutation({
     mutationFn: () => api.keys.create(projectId, { name: name.trim() || COPY[kind].defaultName, kind }),
     onSuccess: (result) => {
@@ -106,7 +109,14 @@ export function ApiKeyStep({ projectId, kind }: { projectId: string; kind: Kind 
         </div>
       ) : null}
 
-      {active.length === 0 || creating ? (
+      {(active.length === 0 || creating) && !manage ? (
+        <AdminNote>
+          {active.length === 0
+            ? `Ask a workspace owner or admin to create ${COPY[kind].label === 'ingest key' ? 'an' : 'a'} ${COPY[kind].label} — only they can create keys.`
+            : 'Only workspace owners and admins can create keys.'}{' '}
+          Already have one? Paste it below to fill the snippets.
+        </AdminNote>
+      ) : active.length === 0 || creating ? (
         form
       ) : (
         <ul className="divide-y rounded-lg border">
@@ -130,7 +140,7 @@ export function ApiKeyStep({ projectId, kind }: { projectId: string; kind: Kind 
       )}
       {create.isError ? <p className="text-destructive text-sm">{errorMessage(create.error)}</p> : null}
 
-      {active.length > 0 && !creating && !secret ? (
+      {(active.length > 0 || !manage) && !creating && !secret ? (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`${id}-paste`}>Paste your key to fill the snippets</Label>
           <div className="flex gap-2">
@@ -148,16 +158,22 @@ export function ApiKeyStep({ projectId, kind }: { projectId: string; kind: Kind 
             </Button>
           </div>
           <p className="text-muted-foreground text-xs">
-            Stays in this tab only. Lost it? Create a new key — old ones can be revoked in{' '}
-            <Link className="text-foreground underline underline-offset-2" params={{ projectId }} to="/p/$projectId/settings/keys">
-              Settings → API keys
-            </Link>
-            .
+            {manage ? (
+              <>
+                Stays in this tab only. Lost it? Create a new key — old ones can be revoked in{' '}
+                <Link className="text-foreground underline underline-offset-2" params={{ projectId }} to="/p/$projectId/settings/keys">
+                  Settings → API keys
+                </Link>
+                .
+              </>
+            ) : (
+              'Stays in this tab only. Lost it? Ask an owner or admin for a new key.'
+            )}
           </p>
         </div>
       ) : null}
 
-      {active.length > 0 && !creating ? (
+      {active.length > 0 && !creating && manage ? (
         <Button className="self-start" onClick={() => setCreating(true)} size="sm" variant="ghost">
           <PlusIcon />
           Create another {COPY[kind].label}

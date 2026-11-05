@@ -2,6 +2,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/r
 import { toast } from 'sonner';
 import { keys, meQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
+import { activeRole, isAdminRole } from '@/lib/permissions';
 
 export type Role = 'owner' | 'admin' | 'member';
 export const INVITE_ROLES: Role[] = ['member', 'admin'];
@@ -64,7 +65,8 @@ export function useOrganization() {
     self,
     myRole,
     owners,
-    canManage: myRole === 'owner' || myRole === 'admin',
+    // /api/me is loaded before any workspace page, so this is right even before the member list arrives.
+    canManage: isAdminRole(self?.role ?? activeRole(me.data)),
     pending: (org.data?.invitations ?? []).filter((i) => isPendingInvitation(i)),
   };
 }

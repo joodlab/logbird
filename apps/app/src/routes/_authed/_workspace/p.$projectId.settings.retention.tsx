@@ -20,6 +20,7 @@ import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { Loader2Icon, TriangleAlertIcon } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { toast } from 'sonner';
+import { AdminNote } from '@/components/admin-gate';
 import { RetentionPicker } from '@/components/retention-picker';
 import { SettingsSection } from '@/components/settings-section';
 import { Timestamp } from '@/components/timestamp';
@@ -27,6 +28,7 @@ import { api } from '@/lib/api/client';
 import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { keys, projectQuery, retentionQuery } from '@/lib/api/queries';
 import { formatNumber, formatRetention, pluralize } from '@/lib/format';
+import { useCan } from '@/lib/permissions';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/retention')({
   staticData: { crumb: 'Retention' },
@@ -47,6 +49,7 @@ function RetentionForm({ project }: { project: Project }) {
   const status = useQuery(retentionQuery(project.id));
   const [days, setDays] = useState(project.retentionDays);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const manage = useCan()('retention.manage');
   const lowering = days < project.retentionDays;
   const changed = days !== project.retentionDays;
   const cutoff = new Date(Date.now() - days * DAY);
@@ -83,26 +86,29 @@ function RetentionForm({ project }: { project: Project }) {
           </>
         }
         footer={
-          <>
-            {changed ? (
-              <Button onClick={() => setDays(project.retentionDays)} size="sm" variant="ghost">
-                Cancel
+          manage ? (
+            <>
+              {changed ? (
+                <Button onClick={() => setDays(project.retentionDays)} size="sm" variant="ghost">
+                  Cancel
+                </Button>
+              ) : null}
+              <Button
+                disabled={!changed || save.isPending}
+                onClick={() => (lowering ? setConfirmOpen(true) : save.mutate(undefined))}
+                size="sm"
+                variant={lowering ? 'destructive' : 'default'}
+              >
+                {save.isPending && !lowering ? <Loader2Icon className="animate-spin" /> : null}
+                {lowering ? 'Lower retention…' : 'Save retention'}
               </Button>
-            ) : null}
-            <Button
-              disabled={!changed || save.isPending}
-              onClick={() => (lowering ? setConfirmOpen(true) : save.mutate(undefined))}
-              size="sm"
-              variant={lowering ? 'destructive' : 'default'}
-            >
-              {save.isPending && !lowering ? <Loader2Icon className="animate-spin" /> : null}
-              {lowering ? 'Lower retention…' : 'Save retention'}
-            </Button>
-          </>
+            </>
+          ) : undefined
         }
         title="Retention"
       >
-        <RetentionPicker current={project.retentionDays} onChange={setDays} value={days} />
+        {manage ? null : <AdminNote>Only workspace owners and admins can change how long this project keeps events.</AdminNote>}
+        <RetentionPicker current={project.retentionDays} disabled={!manage} onChange={setDays} value={days} />
         {lowering ? (
           <div
             className="tm-fade-in flex items-start gap-2.5 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2.5 text-sm"

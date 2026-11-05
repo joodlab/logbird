@@ -1,5 +1,6 @@
 import { emailOTPClient, organizationClient } from 'better-auth/client/plugins';
 import { createAuthClient } from 'better-auth/react';
+import { withDeadline } from '@/lib/api/errors';
 
 /**
  * better-auth client. Same origin as the console: `/api/auth/*` is proxied to the Hono server
@@ -8,8 +9,13 @@ import { createAuthClient } from 'better-auth/react';
 export const authClient = createAuthClient({
   baseURL: typeof window === 'undefined' ? 'http://localhost:4600' : window.location.origin,
   basePath: '/api/auth',
+  // Abort auth calls a starved server never answers; callers race a shorter deadline (AUTH_DEADLINE_MS) for the message.
+  fetchOptions: { timeout: 20_000 },
   plugins: [emailOTPClient(), organizationClient()],
 });
+
+/** How long sign-in steps (send code, verify) wait before offering a retry. */
+export const AUTH_DEADLINE_MS = 15_000;
 
 /** Unwrap better-auth's `{ data, error }` result into a value or a thrown Error. */
 export async function authCall<T>(
@@ -23,4 +29,14 @@ export async function authCall<T>(
     throw err;
   }
   return data as T;
+}
+
+/** Email a sign-in code. Bounded: a server that never answers becomes an error the form can retry. */
+export function sendSignInCode(email: string) {
+  return withDeadline(authCall(authClient.emailOtp.sendVerificationOtp({ email, type: 'sign-in' })), AUTH_DEADLINE_MS, 'The Trailmark server');
+}
+
+/** Exchange a sign-in code for a session, bounded like `sendSignInCode`. */
+export function verifySignInCode(email: string, otp: string) {
+  return withDeadline(authCall(authClient.signIn.emailOtp({ email, otp })), AUTH_DEADLINE_MS, 'The Trailmark server');
 }

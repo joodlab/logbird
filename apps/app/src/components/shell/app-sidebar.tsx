@@ -51,6 +51,7 @@ import { BrandMark } from '@/components/brand';
 import { SetupProgress } from '@/components/setup/setup-progress';
 import { meQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
+import { canDo } from '@/lib/permissions';
 import { displayName, hasName } from '@/lib/user';
 import { PROJECT_NAV } from './nav';
 
@@ -164,6 +165,7 @@ function WorkspaceSwitcher({ projectId }: { projectId?: string }) {
   const navigate = useNavigate();
   const workspace = me.data?.organizations.find((o) => o.id === me.data?.activeOrganizationId);
   const project = projects.data?.find((p) => p.id === projectId);
+  const canCreateProject = canDo(workspace?.role, 'project.create');
 
   const switchWorkspace = async (organizationId: string) => {
     try {
@@ -201,10 +203,12 @@ function WorkspaceSwitcher({ projectId }: { projectId?: string }) {
                   {p.id === projectId ? <CheckIcon className="size-4 text-brand" /> : null}
                 </DropdownMenuItem>
               ))}
-              <DropdownMenuItem onClick={() => navigate({ to: '/onboarding/project' })}>
-                <PlusIcon />
-                New project
-              </DropdownMenuItem>
+              {canCreateProject ? (
+                <DropdownMenuItem onClick={() => navigate({ to: '/onboarding/project' })}>
+                  <PlusIcon />
+                  New project
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuSub>

@@ -9,6 +9,7 @@ import { cn } from '@trailmark/ui/lib/utils';
 import { ArrowRightIcon, ChevronDownIcon, XIcon } from 'lucide-react';
 import { useState } from 'react';
 import { projectSetupQuery } from '@/lib/api/queries';
+import { useCan } from '@/lib/permissions';
 import { ProgressBar, ProgressRing, StepStatusIcon, stepAnchor, stepCopy } from './steps';
 import { useDismissSetup } from './use-setup';
 
@@ -36,6 +37,7 @@ function writeExpanded(value: boolean) {
 export function SetupChecklistCard({ projectId, projectName }: { projectId: string; projectName?: string }) {
   const setup = useQuery(projectSetupQuery(projectId));
   const dismiss = useDismissSetup(projectId);
+  const canDismiss = useCan()('setup.manage');
   const [expanded, setExpanded] = useState(readExpanded);
   const data = setup.data;
 
@@ -97,22 +99,24 @@ export function SetupChecklistCard({ projectId, projectName }: { projectId: stri
               <span className="hidden md:inline">{expanded ? 'Less' : 'All steps'}</span>
               <ChevronDownIcon className={cn('transition-transform', expanded && 'rotate-180')} />
             </CollapsibleTrigger>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    aria-label="Dismiss setup checklist"
-                    disabled={dismiss.isPending}
-                    onClick={() => dismiss.mutate(true)}
-                    size="icon-sm"
-                    variant="ghost"
-                  />
-                }
-              >
-                <XIcon />
-              </TooltipTrigger>
-              <TooltipContent>Hide for everyone in the workspace · reopen from Finish setup</TooltipContent>
-            </Tooltip>
+            {canDismiss ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      aria-label="Dismiss setup checklist"
+                      disabled={dismiss.isPending}
+                      onClick={() => dismiss.mutate(true)}
+                      size="icon-sm"
+                      variant="ghost"
+                    />
+                  }
+                >
+                  <XIcon />
+                </TooltipTrigger>
+                <TooltipContent>Hide for everyone in the workspace · reopen from Finish setup</TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
         </div>
         <ProgressBar done={data.progress.done} total={data.progress.total} />
