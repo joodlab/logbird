@@ -161,6 +161,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                       params: { projectId: projectId ?? '' },
                       search: {
                         q: view.state.q || undefined,
+                        lang: view.state.lang === 'sql' ? ('sql' as const) : undefined,
                         range: view.state.range,
                         cols: view.state.columns?.join(',') || undefined,
                         view: view.id,

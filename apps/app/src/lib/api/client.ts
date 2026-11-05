@@ -17,11 +17,13 @@ import {
   overviewResponseSchema,
   type Project,
   projectSchema,
+  type QueryLang,
   retentionStatusSchema,
   routes,
   type SavedView,
   savedViewSchema,
   searchResponseSchema,
+  suggestResponseSchema,
 } from '@trailmark/contracts';
 import { z } from 'zod';
 import { toApiError } from './errors';
@@ -91,7 +93,12 @@ export interface RangeParams {
   from?: string;
   to?: string;
   q?: string;
+  /** Language of `q`; omitted = the query language. */
+  lang?: QueryLang;
 }
+
+/** `lang` is sent only for SQL so query-language URLs stay unchanged. */
+export const langParam = (lang: QueryLang | undefined) => (lang === 'sql' ? 'sql' : undefined);
 
 export const api = {
   me: (signal?: AbortSignal) => request(meResponse, 'GET', routes.me.path, { signal }),
@@ -123,7 +130,7 @@ export const api = {
     get: (projectId: string, eventId: string, signal?: AbortSignal) =>
       request(eventDetailSchema, 'GET', pathFor(routes.events.get.path, { projectId, eventId }), { signal }),
     /** Events with `timestamp >= since`, newest first (polling tail). */
-    live: (projectId: string, query: { since: string; q?: string; limit?: number }, signal?: AbortSignal) =>
+    live: (projectId: string, query: { since: string; q?: string; lang?: QueryLang; limit?: number }, signal?: AbortSignal) =>
       request(z.array(eventSchema), 'GET', pathFor(routes.events.live.path, { projectId }), { query: { ...query }, signal }),
     histogram: (projectId: string, query: RangeParams & { interval?: number }, signal?: AbortSignal) =>
       request(histogramResponseSchema, 'GET', pathFor(routes.events.histogram.path, { projectId }), { query: { ...query }, signal }),
@@ -152,6 +159,10 @@ export const api = {
 
   fields: (projectId: string, query: RangeParams, signal?: AbortSignal) =>
     request(fieldsResponseSchema, 'GET', pathFor(routes.fields.path, { projectId }), { query: { ...query }, signal }),
+
+  /** Value autocomplete for the query bar. */
+  suggest: (projectId: string, query: { field: string; prefix?: string; limit?: number }, signal?: AbortSignal) =>
+    request(suggestResponseSchema, 'GET', pathFor(routes.suggest.path, { projectId }), { query: { ...query }, signal }),
 
   views: {
     list: (projectId: string, signal?: AbortSignal) =>

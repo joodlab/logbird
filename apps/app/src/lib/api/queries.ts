@@ -1,8 +1,8 @@
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from '@tanstack/react-query';
-import type { EntityKind, EntitySort } from '@trailmark/contracts';
+import type { EntityKind, EntitySort, QueryLang } from '@trailmark/contracts';
 import { authClient } from '@/lib/auth-client';
 import { resolveRange } from '@/lib/range';
-import { api } from './client';
+import { api, langParam } from './client';
 import { ApiRequestError } from './errors';
 
 /**
@@ -76,12 +76,16 @@ export const overviewQuery = (projectId: string, range: string, q = '') =>
 
 export const PAGE_SIZE = 100;
 
-export const eventsInfiniteQuery = (projectId: string, range: string, q: string) =>
+export const eventsInfiniteQuery = (projectId: string, range: string, q: string, lang: QueryLang = 'query') =>
   infiniteQueryOptions({
-    queryKey: [...keys.project(projectId), 'events', range, q] as const,
+    queryKey: [...keys.project(projectId), 'events', range, q, q ? lang : 'query'] as const,
     queryFn: ({ pageParam, signal }) => {
       const r = resolveRange(range);
-      return api.events.search(projectId, { from: r.from, to: r.to, q: q || undefined, cursor: pageParam, limit: PAGE_SIZE }, signal);
+      return api.events.search(
+        projectId,
+        { from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, cursor: pageParam, limit: PAGE_SIZE },
+        signal,
+      );
     },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
@@ -89,23 +93,23 @@ export const eventsInfiniteQuery = (projectId: string, range: string, q: string)
     retry: noRetryOn4xx,
   });
 
-export const histogramQuery = (projectId: string, range: string, q: string, interval?: number) =>
+export const histogramQuery = (projectId: string, range: string, q: string, lang: QueryLang = 'query', interval?: number) =>
   queryOptions({
-    queryKey: [...keys.project(projectId), 'histogram', range, q, interval ?? null] as const,
+    queryKey: [...keys.project(projectId), 'histogram', range, q, q ? lang : 'query', interval ?? null] as const,
     queryFn: ({ signal }) => {
       const r = resolveRange(range);
-      return api.events.histogram(projectId, { from: r.from, to: r.to, q: q || undefined, interval }, signal);
+      return api.events.histogram(projectId, { from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, interval }, signal);
     },
     placeholderData: keepPreviousData,
     retry: noRetryOn4xx,
   });
 
-export const facetQuery = (projectId: string, field: string, range: string, q: string, limit = 8) =>
+export const facetQuery = (projectId: string, field: string, range: string, q: string, limit = 8, lang: QueryLang = 'query') =>
   queryOptions({
-    queryKey: [...keys.project(projectId), 'facet', field, range, q, limit] as const,
+    queryKey: [...keys.project(projectId), 'facet', field, range, q, limit, q ? lang : 'query'] as const,
     queryFn: ({ signal }) => {
       const r = resolveRange(range);
-      return api.events.facets(projectId, { field, from: r.from, to: r.to, q: q || undefined, limit }, signal);
+      return api.events.facets(projectId, { field, from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, limit }, signal);
     },
     placeholderData: keepPreviousData,
     staleTime: 30_000,
@@ -159,6 +163,15 @@ export const fieldsQuery = (projectId: string, range: string) =>
     },
     placeholderData: keepPreviousData,
     retry: noRetryOn4xx,
+  });
+
+/** Value suggestions for the query bar; cached per field + prefix so retyping is instant. */
+export const suggestQuery = (projectId: string, field: string, prefix: string) =>
+  queryOptions({
+    queryKey: [...keys.project(projectId), 'suggest', field, prefix] as const,
+    queryFn: ({ signal }) => api.suggest(projectId, { field, prefix: prefix || undefined, limit: 12 }, signal),
+    staleTime: 60_000,
+    retry: false,
   });
 
 export const keysQuery = (projectId: string) =>
