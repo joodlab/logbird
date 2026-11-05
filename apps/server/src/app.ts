@@ -28,7 +28,11 @@ import type { AppEnv } from './types';
 export const app = new Hono<AppEnv>();
 app.use('*', requestId());
 app.use('*', secureHeaders({ strictTransportSecurity: env.APP_URL.startsWith('https:') ? 'max-age=31536000' : false }));
-app.use('*', bodyLimit({ maxSize: 5 * 1024 * 1024 }));
+// Ingest has its own decoded streaming limit, including gzip.
+app.use(
+  '/api/*',
+  bodyLimit({ maxSize: 5 * 1024 * 1024, onError: (c) => c.json({ error: { code: 'payload_too_large', message: 'Request exceeds 5 MB.' } }, 413) }),
+);
 app.use('/api/auth/*', rateLimit);
 app.use('/v1/*', rateLimit);
 app.use('*', cors({ origin: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)], credentials: true, exposeHeaders: ['X-Request-Id'] }));

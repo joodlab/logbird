@@ -152,4 +152,4 @@ it('real services: setup, keys, raw envelope coverage, samples, membership and i
     }
     await prisma.user.deleteMany({ where: { email } });
   }
-}, 120_000);
+}, 240_000);

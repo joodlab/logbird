@@ -26,3 +26,9 @@ it('shares atomic auth limits across middleware instances using real Redis', asy
   expect(blocked.status).toBe(429);
   expect(blocked.headers.get('retry-after')).toBe('60');
 });
+
+it('returns a structured error for oversized management requests', async () => {
+  const response = await app.request('/api/auth/probe', { method: 'POST', headers: { 'Content-Length': String(6 * 1024 * 1024) }, body: 'x' });
+  expect(response.status).toBe(413);
+  expect(await response.json()).toEqual({ error: { code: 'payload_too_large', message: 'Request exceeds 5 MB.' } });
+});

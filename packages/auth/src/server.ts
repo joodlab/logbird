@@ -44,6 +44,8 @@ if (
   throw new Error('APP_URL must use HTTPS in production');
 export const auth = betterAuth({
   baseURL: env.APP_URL,
+  // The API boundary enforces shared Redis limits across replicas.
+  rateLimit: { enabled: false },
   secret: env.BETTER_AUTH_SECRET,
   trustedOrigins: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)],
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
