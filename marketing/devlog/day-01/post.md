@@ -1,0 +1,26 @@
+# Day 1 (draft) — built 2026-11-03 → 2026-11-04
+
+**Post (X / LinkedIn)**
+
+> Day 1. Building an open-source audit log for your product, in public.
+>
+> Send any JSON event with an `action` and Trailmark turns it into a searchable history: who did what, in which
+> customer account, to which record, and how it went.
+>
+> 300,000 events, searched in ~60 ms. Actors, tenants, workers and records each get their own page.
+>
+> <link>
+
+**Clip:** [`explorer-search-filter-zoom.webm`](../../captures/2026-11-04-ui-foundation/explorer-search-filter-zoom.webm)
+— search, filter by a facet, zoom the histogram.
+
+**Replies (one still each)**
+1. "Click any event to see the full story: actor, executor, tenant, records and the before/after of every change." —
+   [`dark-event-detail.png`](../../captures/2026-11-04-ui-foundation/dark-event-detail.png)
+2. "One request, the jobs it spawned and every record they changed, as one tree." —
+   [`entity-follow-operation-tree.webm`](../../captures/2026-11-04-ui-foundation/entity-follow-operation-tree.webm)
+3. "Live tail for when you're watching a deploy." —
+   [`explorer-detail-live-tail.webm`](../../captures/2026-11-04-ui-foundation/explorer-detail-live-tail.webm)
+
+**Alt text (clip):** The Trailmark explorer: a search bar, a bar chart of events over 7 days, and a dense table of
+audit events being filtered to failures.
