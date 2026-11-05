@@ -152,7 +152,7 @@ export function jobAudit(options: JobAuditOptions): Audit {
       type: 'worker',
       id: executor?.id ?? job.queueName ?? 'worker',
       name: executor?.name ?? job.name,
-      jobId: job.id === undefined ? undefined : String(job.id),
+      jobId: String(job.id),
       attempt: (job.attemptsMade ?? 0) + 1,
     },
     context: {
