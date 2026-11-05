@@ -248,7 +248,7 @@ function OverviewPage() {
             loading={loading}
           />
         </Panel>
-        <Panel title="Top workers">
+        <Panel title="Top executors">
           <RankList
             items={(data?.topExecutors ?? []).map((a) => ({
               key: a.id,

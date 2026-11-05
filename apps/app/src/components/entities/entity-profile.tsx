@@ -25,7 +25,7 @@ import { formatNumber } from '@/lib/format';
 import { formatTerm } from '@/lib/query-language';
 import { rangeLabel } from '@/lib/range';
 
-const RELATED_LABEL: Record<EntityKind, string> = { actor: 'Actors', tenant: 'Tenants', executor: 'Workers', target: 'Records' };
+const RELATED_LABEL: Record<EntityKind, string> = { actor: 'Actors', tenant: 'Tenants', executor: 'Executors', target: 'Records' };
 
 interface EntityProfileProps {
   projectId: string;

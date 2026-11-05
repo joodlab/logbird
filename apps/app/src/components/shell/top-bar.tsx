@@ -27,7 +27,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
   return (
-    <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/70 sm:px-4">
+    <header className="relative z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3 sm:px-4">
       <SidebarTrigger className="-ms-1 text-muted-foreground" />
       <Separator className="me-1 h-4 data-[orientation=vertical]:self-center" orientation="vertical" />
       <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1 text-sm">

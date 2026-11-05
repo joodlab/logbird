@@ -27,6 +27,8 @@ export function getRouter() {
     routeTree,
     context: { queryClient },
     scrollRestoration: true,
+    // Pages scroll inside the shell's inset panel, not the window: reset that container on navigation too.
+    scrollToTopSelectors: ['#app-main'],
     defaultPreload: 'intent',
     // Query owns caching; loaders only warm it.
     defaultPreloadStaleTime: 0,

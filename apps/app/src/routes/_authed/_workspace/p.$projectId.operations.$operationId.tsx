@@ -143,7 +143,7 @@ function OperationPage() {
           ['Duration', op.data ? formatDuration(t1 - t0) : ''],
           ['Problems', op.data ? formatNumber(failures) : ''],
           ['Started', nodes[0] ? <Timestamp iso={new Date(t0).toISOString()} key="started" /> : ''],
-          ['Workers', op.data ? formatNumber(executors.length) : ''],
+          ['Executors', op.data ? formatNumber(executors.length) : ''],
         ].map(([label, value]) => (
           <div className="flex flex-col gap-1 bg-card px-4 py-3" key={String(label)}>
             <dt className="text-muted-foreground text-xs">{label}</dt>

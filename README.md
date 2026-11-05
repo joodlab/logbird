@@ -1,10 +1,11 @@
 # Trailmark
 
 Open-source (MIT), self-hostable audit log & activity history. Send any event from your product through the SDK
-or HTTP API, keep it for as long as your project's retention says, and follow every user, tenant, worker and record
+or HTTP API, keep it for as long as your project's retention says, and follow every user, tenant, executor and record
 in a fast console built on ClickHouse.
 
 - Spec: [`docs/SPEC.md`](docs/SPEC.md)
+- Concepts — actors, tenants, executors, records, operations: [`docs/concepts.md`](docs/concepts.md)
 - Agent/contributor guide: [`AGENTS.md`](AGENTS.md)
 
 ```bash

@@ -1,19 +1,44 @@
 import type { EntityKind } from '@trailmark/contracts';
 import { Bot, Building2, Cog, type LucideIcon, Package, User } from 'lucide-react';
 
-/** URL segment ↔ entity kind. "Workers" covers every executor (workers, schedulers, webhooks, api). */
+/**
+ * URL segment ↔ entity kind. The `/workers` URL is kept for compatibility, but the UI calls every executor
+ * (API server, queue worker, scheduler, webhook…) an "Executor". `field` is the envelope key that fills the section.
+ */
 export const ENTITY_SECTIONS = {
-  actors: { kind: 'actor', label: 'Actors', singular: 'Actor', icon: User, blurb: 'People, API keys, integrations and systems that cause events.' },
-  tenants: { kind: 'tenant', label: 'Tenants', singular: 'Tenant', icon: Building2, blurb: 'Customer accounts and workspaces in your product.' },
+  actors: {
+    kind: 'actor',
+    label: 'Actors',
+    singular: 'Actor',
+    icon: User,
+    field: 'actor',
+    blurb: 'Who caused each action: people, API keys, integrations and the scheduler.',
+  },
+  tenants: {
+    kind: 'tenant',
+    label: 'Tenants',
+    singular: 'Tenant',
+    icon: Building2,
+    field: 'tenant',
+    blurb: 'Which customer or account each action happened in.',
+  },
   workers: {
     kind: 'executor',
-    label: 'Workers',
+    label: 'Executors',
     singular: 'Executor',
     icon: Cog,
-    blurb: 'APIs, workers, schedulers and webhooks that performed the work.',
+    field: 'executor',
+    blurb: 'What performed each action: your API server, a queue worker or a cron job — with the attempt number.',
   },
-  records: { kind: 'target', label: 'Records', singular: 'Record', icon: Package, blurb: 'Hotels, bookings, pages — the records events changed.' },
-} as const satisfies Record<string, { kind: EntityKind; label: string; singular: string; icon: LucideIcon; blurb: string }>;
+  records: {
+    kind: 'target',
+    label: 'Records',
+    singular: 'Record',
+    icon: Package,
+    field: 'targets',
+    blurb: 'What was changed: bookings, rooms, users — any record your events target.',
+  },
+} as const satisfies Record<string, { kind: EntityKind; label: string; singular: string; icon: LucideIcon; field: string; blurb: string }>;
 
 export type EntitySection = keyof typeof ENTITY_SECTIONS;
 
