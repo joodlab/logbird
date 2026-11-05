@@ -1,0 +1,30 @@
+{
+  "name": "@trailmark/email-preview",
+  "license": "MIT",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "email dev --dir emails --port 4602",
+    "build": "email export --dir emails --outDir dist --pretty",
+    "send": "pnpm with-env tsx src/send.ts",
+    "with-env": "dotenv -e ../../.env --",
+    "typecheck": "tsc --noEmit",
+    "clean": "git clean -xdf .cache .react-email .turbo dist node_modules"
+  },
+  "dependencies": {
+    "@trailmark/email": "workspace:*",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-email": "^6.9.3"
+  },
+  "devDependencies": {
+    "@react-email/ui": "6.11.6",
+    "@trailmark/tsconfig": "workspace:*",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.18",
+    "dotenv-cli": "^11.0.0",
+    "tsx": "4.23.13",
+    "typescript": "^7.0.2"
+  }
+}

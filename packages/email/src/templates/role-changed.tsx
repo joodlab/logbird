@@ -51,6 +51,8 @@ export function RoleChangedEmail(props: RoleChangedEmailProps) {
 
 export const roleChanged: EmailDefinition<RoleChangedEmailProps> = {
   id: 'role-changed',
+  name: 'Role changed',
+  recipient: 'email',
   subject: (p) => `Your role in ${p.workspace} is now ${roleLabel(p.role)}`,
   preview: (p) => `${p.changedByName} changed your role from ${roleLabel(p.previousRole)} to ${roleLabel(p.role)}.`,
   text: (p) =>

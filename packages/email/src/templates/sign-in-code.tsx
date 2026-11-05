@@ -63,6 +63,8 @@ export function SignInCodeEmail(props: SignInCodeEmailProps) {
 
 export const signInCode: EmailDefinition<SignInCodeEmailProps> = {
   id: 'sign-in-code',
+  name: 'Sign-in code',
+  recipient: 'email',
   // The code leads so it is readable straight from the notification.
   subject: (p) => `${p.code} is your Trailmark ${copy(p.purpose).noun}`,
   preview: (p) => {

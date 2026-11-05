@@ -1,8 +1,7 @@
 import { HtmlValidate } from 'html-validate';
-import { describe, expect, it } from 'vitest';
-import { fixtures } from './fixtures';
+import { describe, expect, it, vi } from 'vitest';
 import { clientIp, describeUserAgent, formatRelative } from './format';
-import { type EmailDefinition, emails, type RenderedEmail, renderEmail } from './index';
+import { createFixtures, type EmailDefinition, emails, fixtures, type RenderedEmail, renderEmail } from './index';
 
 // Email HTML is XHTML-transitional tables by necessity; everything else in the standard + a11y presets applies.
 const validator = new HtmlValidate({
@@ -136,12 +135,12 @@ describe('sign-in code', () => {
 describe('invitation', () => {
   it('names inviter, workspace, role with its meaning, invited address, expiry, button and raw link', async () => {
     const r = await renderEmail(emails.invitation, fixtures.invitation);
-    expect(r.subject).toBe('Raed Bahri invited you to Acme on Trailmark');
+    expect(r.subject).toBe('Sami Nasser invited you to Acme on Trailmark');
     expect(r.preview).toBe('Join as Admin. The invitation expires in 2 days.');
     for (const part of [r.html, r.text]) {
       expect(part).toContain('Join Acme on Trailmark');
-      expect(part).toContain('Raed Bahri');
-      expect(part).toContain('raed@acme.test');
+      expect(part).toContain('Sami Nasser');
+      expect(part).toContain('sami@acme.test');
       expect(part).toContain('Manages projects, API keys, retention and members.');
       expect(part).toContain('lina@acme.test');
       expect(part).toContain('Nov 7, 2026, 14:32 UTC (in 2 days)');
@@ -153,8 +152,8 @@ describe('invitation', () => {
   });
 
   it('does not repeat the address when the inviter has no name', async () => {
-    const r = await renderEmail(emails.invitation, { ...fixtures.invitation, inviterName: 'raed@acme.test' });
-    expect(r.text).not.toContain('raed@acme.test (raed@acme.test)');
+    const r = await renderEmail(emails.invitation, { ...fixtures.invitation, inviterName: 'sami@acme.test' });
+    expect(r.text).not.toContain('sami@acme.test (sami@acme.test)');
   });
 
   it('escapes hostile workspace names and URLs, including inside the raw Outlook button', async () => {
@@ -180,8 +179,42 @@ describe('member joined and role changed', () => {
   it('tells a member their new and previous role and who changed it', async () => {
     const r = await renderEmail(emails.roleChanged, fixtures.roleChanged);
     expect(r.subject).toBe('Your role in Acme is now Admin');
-    expect(r.text).toContain('Raed Bahri (raed@acme.test) changed your role from Member to Admin.');
+    expect(r.text).toContain('Sami Nasser (sami@acme.test) changed your role from Member to Admin.');
     expect(r.html).toContain('Previous role');
+  });
+});
+
+describe('package surface', () => {
+  it('names every email and points its recipient at an address prop', () => {
+    for (const [key, email] of Object.entries(emails)) {
+      const props = fixtures[key as keyof typeof fixtures] as Record<string, unknown>;
+      expect(email.name.length).toBeGreaterThan(3);
+      expect(props[email.recipient as string]).toMatch(/^[^@\s]+@[^@\s]+$/);
+    }
+    expect(new Set(Object.values(emails).map((e) => e.id)).size).toBe(Object.keys(emails).length);
+  });
+
+  it('builds fixtures for another install and clock', () => {
+    const now = new Date('2027-01-01T00:00:00Z');
+    const f = createFixtures({ appUrl: 'https://trail.example.org', now });
+    expect(f.invitation.url).toBe('https://trail.example.org/accept-invitation/inv_7Hc2kP9xQm');
+    expect(f.invitation.expiresAt.toISOString()).toBe('2027-01-03T00:00:00.000Z');
+    expect(f.signInCode.requestedAt).toBe(now);
+  });
+
+  it('renders without SMTP: the main entry never loads nodemailer or the env', async () => {
+    vi.resetModules();
+    vi.doMock('nodemailer', () => {
+      throw new Error('nodemailer imported by @trailmark/email');
+    });
+    vi.doMock('./env', () => {
+      throw new Error('env imported by @trailmark/email');
+    });
+    const entry = await import('./index');
+    const { html } = await entry.renderEmail(entry.emails.signInCode, entry.fixtures.signInCode);
+    expect(html).toContain('482913');
+    vi.doUnmock('nodemailer');
+    vi.doUnmock('./env');
   });
 });
 

@@ -4,7 +4,7 @@ exports[`'invitation' email > has a plain-text part with the footer and no marku
 "Join Acme on Trailmark
 ======================
 
-Raed Bahri (raed@acme.test) invited you to the Acme workspace as an Admin. Trailmark keeps a searchable history of who did what, when and where across your team’s systems.
+Sami Nasser (sami@acme.test) invited you to the Acme workspace as an Admin. Trailmark keeps a searchable history of who did what, when and where across your team’s systems.
 
 Workspace:       Acme
 Role:            Admin
@@ -18,7 +18,7 @@ https://audit.acme.test/accept-invitation/inv_7Hc2kP9xQm
 Not expecting this? You can ignore it — you won’t join Acme unless you accept. To accept, sign in as lina@acme.test; the invitation only works for that address.
 
 --
-You received this email because raed@acme.test invited lina@acme.test to the Acme workspace.
+You received this email because sami@acme.test invited lina@acme.test to the Acme workspace.
 Trailmark · open-source audit logs · audit.acme.test
 https://audit.acme.test
 "
@@ -52,13 +52,13 @@ exports[`'roleChanged' email > has a plain-text part with the footer and no mark
 "Your role in Acme changed
 =========================
 
-Raed Bahri (raed@acme.test) changed your role from Member to Admin.
+Sami Nasser (sami@acme.test) changed your role from Member to Admin.
 
 New role:      Admin
                Manages projects, API keys, retention and members.
 Previous role: Member
 Workspace:     Acme
-Changed by:    Raed Bahri (raed@acme.test)
+Changed by:    Sami Nasser (sami@acme.test)
 When:          Nov 5, 2026, 14:32 UTC
 
 Open Trailmark:

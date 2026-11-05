@@ -39,10 +39,7 @@
       "linter": { "rules": { "correctness": { "useHookAtTopLevel": "off" } } }
     },
     {
-      "includes": [
-        "packages/email/src/templates/**",
-        "packages/email/emails/**"
-      ],
+      "includes": ["packages/email/src/templates/**"],
       "javascript": { "jsxRuntime": "reactClassic" }
     }
   ],

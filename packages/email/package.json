@@ -5,14 +5,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./send": "./src/send.ts"
   },
   "scripts": {
-    "dev": "email dev --dir emails --port 4722",
-    "export": "email export --dir emails --outDir .react-email-out",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "git clean -xdf .cache .turbo .react-email .react-email-out dist node_modules"
+    "clean": "git clean -xdf .cache .turbo dist node_modules"
   },
   "dependencies": {
     "@t3-oss/env-core": "^0.13.11",
@@ -25,7 +24,6 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@react-email/ui": "6.11.6",
     "@trailmark/tsconfig": "workspace:*",
     "@types/node": "^22.20.1",
     "dotenv-cli": "^11.0.0",

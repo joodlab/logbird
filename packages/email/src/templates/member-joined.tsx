@@ -49,6 +49,8 @@ export function MemberJoinedEmail(props: MemberJoinedEmailProps) {
 
 export const memberJoined: EmailDefinition<MemberJoinedEmailProps> = {
   id: 'member-joined',
+  name: 'Member joined',
+  recipient: 'inviterEmail',
   subject: (p) => `${p.memberName} joined ${p.workspace} on Trailmark`,
   preview: (p) => `${p.memberEmail} accepted your invitation and joined as ${roleLabel(p.role)}.`,
   text: (p) =>

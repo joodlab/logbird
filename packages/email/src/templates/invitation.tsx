@@ -59,6 +59,8 @@ export function InvitationEmail(props: InvitationEmailProps) {
 
 export const invitation: EmailDefinition<InvitationEmailProps> = {
   id: 'invitation',
+  name: 'Workspace invitation',
+  recipient: 'email',
   subject: (p) => `${p.inviterName} invited you to ${p.workspace} on Trailmark`,
   preview: (p) => `Join as ${roleLabel(p.role)}. The invitation expires ${formatRelative(p.expiresAt, p.sentAt ?? new Date())}.`,
   text: (p) =>

@@ -79,6 +79,5 @@ experiments/hey-api/node_modules/
 AGENTS.local.md
 CLAUDE.local.md
 
-# react-email preview build output (packages/email)
+# react-email preview server cache (apps/email)
 .react-email/
-.react-email-out/
