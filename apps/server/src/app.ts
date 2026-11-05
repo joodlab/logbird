@@ -14,6 +14,7 @@ import { dataRoutes, publicRoutes } from './data-routes';
 import { env } from './env';
 import { ApiError } from './errors';
 import { ingest } from './ingest';
+import { invitationRoutes } from './invitation-routes';
 import { doc, routeDoc } from './openapi';
 import { managementRoutes } from './routes';
 import { setupRoutes } from './setup-routes';
@@ -92,7 +93,12 @@ app.get(
     return c.json({ status: postgres && ch ? 'ok' : 'degraded', postgres, clickhouse: ch }, postgres && ch ? 200 : 503);
   },
 );
-export const routes = app.route('/api', setupRoutes).route('/api', dataRoutes).route('/api', managementRoutes).route('/v1', publicRoutes);
+export const routes = app
+  .route('/api', invitationRoutes)
+  .route('/api', setupRoutes)
+  .route('/api', dataRoutes)
+  .route('/api', managementRoutes)
+  .route('/v1', publicRoutes);
 app.get(
   '/openapi.json',
   routeDoc('OpenAPI document', { hide: true }, 'none'),
