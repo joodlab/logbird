@@ -117,24 +117,66 @@ describe('markErrorSpan', () => {
 
 describe('queryCompletionAt', () => {
   it('completes keys for bare words, keeping a leading -', () => {
-    expect(queryCompletionAt('act', 3)).toEqual({ kind: 'key', prefix: 'act', from: 0, to: 3 });
-    expect(queryCompletionAt('x -ten', 6)).toEqual({ kind: 'key', prefix: 'ten', from: 3, to: 6 });
-    expect(queryCompletionAt('x ', 2)).toEqual({ kind: 'key', prefix: '', from: 2, to: 2 });
-    expect(queryCompletionAt('(', 1)).toEqual({ kind: 'key', prefix: '', from: 1, to: 1 });
+    expect(queryCompletionAt('act', 3)).toEqual({ kind: 'key', prefix: 'act', from: 0, to: 3, afterTerm: false });
+    expect(queryCompletionAt('x -ten', 6)).toEqual({ kind: 'key', prefix: 'ten', from: 3, to: 6, afterTerm: false });
+    expect(queryCompletionAt('x -', 3)).toEqual({ kind: 'key', prefix: '', from: 3, to: 3, afterTerm: false });
+    expect(queryCompletionAt('', 0)).toEqual({ kind: 'key', prefix: '', from: 0, to: 0, afterTerm: false });
+    expect(queryCompletionAt('(', 1)).toEqual({ kind: 'key', prefix: '', from: 1, to: 1, afterTerm: false });
   });
 
-  it('completes the key part of an existing term', () => {
-    expect(queryCompletionAt('actor:usr_1', 3)).toEqual({ kind: 'key', prefix: 'act', from: 0, to: 6 });
+  it('knows when a complete term precedes the caret (boolean operators make sense)', () => {
+    expect(queryCompletionAt('x ', 2)).toEqual({ kind: 'key', prefix: '', from: 2, to: 2, afterTerm: true });
+    expect(queryCompletionAt('outcome:failure ', 16)).toMatchObject({ kind: 'key', afterTerm: true });
+    expect(queryCompletionAt('outcome:failure O', 17)).toMatchObject({ kind: 'key', prefix: 'O', from: 16, afterTerm: true });
+    expect(queryCompletionAt('"a phrase" ', 11)).toMatchObject({ kind: 'key', afterTerm: true });
+    expect(queryCompletionAt('(a OR b) ', 9)).toMatchObject({ kind: 'key', afterTerm: true });
+    // After an operator or an opening parenthesis a term starts.
+    expect(queryCompletionAt('a OR ', 5)).toMatchObject({ kind: 'key', afterTerm: false });
+    expect(queryCompletionAt('a (', 3)).toMatchObject({ kind: 'key', afterTerm: false });
+    expect(queryCompletionAt('a NOT ', 6)).toMatchObject({ kind: 'key', afterTerm: false });
+  });
+
+  it('completes the key part of an existing term and replaces through its colon only', () => {
+    expect(queryCompletionAt('actor:usr_1', 3)).toEqual({ kind: 'key', prefix: 'act', from: 0, to: 6, afterTerm: false });
+    // Editing in the middle of a longer query touches only that token.
+    expect(queryCompletionAt('outcome:failure tenant:biz_7 attempt:>2', 18)).toEqual({
+      kind: 'key',
+      prefix: 'te',
+      from: 16,
+      to: 23,
+      afterTerm: true,
+    });
+    expect(queryCompletionAt('outcome:failure tenant:biz_7 attempt:>2', 25)).toMatchObject({
+      kind: 'value',
+      field: 'tenant',
+      prefix: 'bi',
+      from: 23,
+      to: 28,
+    });
   });
 
   it('completes values after field:', () => {
-    expect(queryCompletionAt('actor.name:ra', 13)).toEqual({ kind: 'value', field: 'actor.name', prefix: 'ra', from: 11, to: 13, inGroup: false });
-    expect(queryCompletionAt('actor.name:"Raed B', 18)).toMatchObject({ kind: 'value', prefix: 'Raed B', from: 11 });
-    expect(queryCompletionAt('metadata.channel:', 17)).toMatchObject({ kind: 'value', field: 'metadata.channel', prefix: '' });
+    expect(queryCompletionAt('actor.name:ra', 13)).toEqual({
+      kind: 'value',
+      field: 'actor.name',
+      prefix: 'ra',
+      from: 11,
+      to: 13,
+      inGroup: false,
+      quoted: false,
+    });
+    expect(queryCompletionAt('metadata.channel:', 17)).toMatchObject({ kind: 'value', field: 'metadata.channel', prefix: '', quoted: false });
     expect(queryCompletionAt('attempt:>2', 10)).toMatchObject({ kind: 'value', op: '>', prefix: '2', from: 9 });
+    // Right after `attempt:` with an operator typed: still the whole value (the operator can be re-picked).
+    expect(queryCompletionAt('attempt:>2', 8)).toMatchObject({ kind: 'value', prefix: '', from: 8, to: 10 });
   });
 
-  it('completes members of a value group', () => {
+  it('handles quoted values (unquoted prefix, replaces through the closing quote)', () => {
+    expect(queryCompletionAt('actor.name:"Raed B', 18)).toMatchObject({ kind: 'value', prefix: 'Raed B', from: 11, to: 18, quoted: true });
+    expect(queryCompletionAt('tenant.name:"Azure Hotels" x', 16)).toMatchObject({ kind: 'value', prefix: 'Azu', from: 12, to: 26, quoted: true });
+  });
+
+  it('completes members of a value group and knows when OR comes next', () => {
     expect(queryCompletionAt('action:(booking.created OR boo', 30)).toEqual({
       kind: 'value',
       field: 'action',
@@ -142,14 +184,23 @@ describe('queryCompletionAt', () => {
       from: 27,
       to: 30,
       inGroup: true,
+      quoted: false,
+      afterMember: false,
     });
+    expect(queryCompletionAt('outcome:(failure ', 17)).toMatchObject({ kind: 'value', inGroup: true, prefix: '', afterMember: true });
+    expect(queryCompletionAt('outcome:()', 9)).toMatchObject({ kind: 'value', inGroup: true, prefix: '', afterMember: false });
     expect(queryCompletionAt('action:(a OR b)', 11)).toEqual({ kind: 'none' });
   });
 
-  it('does not complete inside regexes, ranges and phrases', () => {
-    expect(queryCompletionAt('action:/boo', 11)).toEqual({ kind: 'none' });
-    expect(queryCompletionAt('attempt:[1 TO', 13)).toEqual({ kind: 'none' });
-    expect(queryCompletionAt('"free te', 8)).toEqual({ kind: 'none' });
+  it('explains regexes, ranges and phrases instead of completing inside them', () => {
+    expect(queryCompletionAt('action:/boo', 11)).toEqual({ kind: 'regex', field: 'action' });
+    expect(queryCompletionAt('attempt:[1 TO', 13)).toEqual({ kind: 'range', field: 'attempt' });
+    expect(queryCompletionAt('"free te', 8)).toEqual({ kind: 'phrase' });
+  });
+
+  it('turns Lucene _exists_:field into a field picker for the whole term', () => {
+    expect(queryCompletionAt('_exists_:ten', 12)).toEqual({ kind: 'exists', prefix: 'ten', from: 0, to: 12 });
+    expect(queryCompletionAt('x -_exists_:imp', 15)).toEqual({ kind: 'exists', prefix: 'imp', from: 3, to: 15 });
   });
 });
 
@@ -187,6 +238,10 @@ describe('include / exclude', () => {
     expect(formatTerm('action', 'OR')).toBe('action:"OR"');
     expect(formatTerm('attr.note', '>5')).toBe('attr.note:">5"');
     expect(formatTerm('attr.path', '/a/b')).toBe('attr.path:"/a/b"');
+    // The server lexer splits on : [ ] { } < > too (metadata.jobName:crm:sync:bookings would not mean one value).
+    expect(formatTerm('metadata.jobName', 'crm:sync:bookings')).toBe('metadata.jobName:"crm:sync:bookings"');
+    expect(formatTerm('attr.range', 'a[1]')).toBe('attr.range:"a[1]"');
+    expect(formatTerm('action', 'booking.created')).toBe('action:booking.created');
   });
 
   it('stacks exclusions and toggles them off', () => {

@@ -269,4 +269,7 @@ export const SQL_FUNCTIONS: SqlFunctionSpec[] = SQL_ALLOWED_FUNCTIONS.filter((f)
   .map((name) => ({ name, signature: SIGNATURES[name] ?? `${name}(…)` }))
   .sort((a, b) => Number(Boolean(SIGNATURES[b.name])) - Number(Boolean(SIGNATURES[a.name])));
 
+/** Signature for a function, e.g. `has(array, value)` (falls back to `name(…)`). */
+export const sqlSignature = (name: string): string => SIGNATURES[name] ?? `${name}(…)`;
+
 export const SQL_KEYWORDS = ['AND', 'OR', 'NOT', 'IN', 'NOT IN', 'LIKE', 'ILIKE', 'IS NULL', 'IS NOT NULL', 'BETWEEN', 'INTERVAL'];
