@@ -279,10 +279,22 @@ for `EXPLAIN AST` of the wrapped statement and walking the tree: the tree must b
 one table, no SETTINGS/FORMAT/UNION/JOIN/WITH), and `<expr>` may contain only literals, identifiers in
 `SQL_ALLOWED_COLUMNS` (plus lambda parameters), and functions in `SQL_ALLOWED_FUNCTIONS`. Subqueries, table
 functions, query parameters, `system.*`, dictionaries, `arrayJoin`, and comments/semicolons are rejected. Queries
-run as ClickHouse user `trailmark_query` (readonly=1, SELECT on `trailmark.events` + rollups only, settings profile
-with max_execution_time, max_rows_to_read, max_memory_usage, max_result_rows). Console endpoints only; `/v1`
+run as ClickHouse user `trailmark_query` (readonly=2 CONST, SELECT on `trailmark.events` + rollups only, settings profile
+with CONST resource/safety limits including max_execution_time, max_rows_to_read, max_memory_usage, max_result_rows). Console endpoints only; `/v1`
 rejects `lang=sql`. A free-form SQL console is out of scope for the cloud product (possibly a future self-host
 instance-admin feature).
+
+Isolation is layered: (1) query-language values compile to parameterized SQL; (2) SQL expressions pass the lexical
+scan, EXPLAIN AST baseline comparison and allowlists; (3) the readonly query account has SELECT-only grants and
+CONST safety/resource limits; (4) row policies on events, events_by_minute, entities and attribute_keys enforce
+`project_id = getSetting('SQL_trailmark_project')` for `trailmark_query`. Each restricted query sends its authorized
+project in `clickhouse_settings`; validation-only EXPLAIN uses a sentinel project. Missing bindings fail closed.
+Companion `USING 1 TO ALL EXCEPT trailmark_query` policies preserve the main user's access. The binding is trusted
+server input, not a substitute for HTTP authorization; holders of database credentials can choose the binding.
+Keep the SQL guard, including rejection of SETTINGS. Self-hosters re-run
+`pnpm --filter @trailmark/clickhouse create-query-user` in a maintenance window before restarting the updated
+server. The idempotent script preserves credentials and checks the accepted `SQL_` custom prefix without changing
+server configuration. See the query-language security model for the verification and operational boundaries.
 
 ## 6. Postgres model (Prisma)
 

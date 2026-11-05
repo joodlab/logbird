@@ -36,9 +36,21 @@ async function read<T>(ch: ClickHouseClient, query: string, query_params: Params
     const value = query_params[key];
     if (typeof value === 'string') query_params[key] = new Date(value).toISOString().replace('T', ' ').slice(0, -1);
   }
+  // These parameters come from the authorized project arguments, never the SQL
+  // expression. Bind per HTTP query, not on the shared client's session.
+  const project = query_params.project ?? query_params.p;
+  if (isQueryClient(ch) && (typeof project !== 'string' || !project)) throw new Error('Restricted query requires one project');
   try {
     return await (
-      await ch.query({ query, query_params, format: 'JSONEachRow', clickhouse_settings: { max_execution_time: isQueryClient(ch) ? 10 : guard } })
+      await ch.query({
+        query,
+        query_params,
+        format: 'JSONEachRow',
+        clickhouse_settings: {
+          max_execution_time: isQueryClient(ch) ? 10 : guard,
+          ...(isQueryClient(ch) ? { SQL_trailmark_project: project as string } : {}),
+        },
+      })
     ).json<T>();
   } catch (error) {
     if (
@@ -479,10 +491,14 @@ export async function projectStats(
   projectIds: string[],
 ): Promise<Record<string, { lastEventAt: string | null; eventsLast24h: number }>> {
   if (!projectIds.length) return {};
+  if (isQueryClient(ch) && projectIds.length > 1) {
+    const results = await Promise.all(projectIds.map((p) => projectStats(ch, [p])));
+    return Object.assign({}, ...results);
+  }
   const rows = await read<{ project_id: string; last: string; n: number }>(
     ch,
     'SELECT project_id,max(timestamp) last,countIf(timestamp>=now()-INTERVAL 24 HOUR) n FROM events WHERE project_id IN {projects:Array(String)} GROUP BY project_id',
-    { projects: projectIds },
+    { projects: projectIds, p: projectIds[0] },
   );
   const result = Object.fromEntries(projectIds.map((p) => [p, { lastEventAt: null as string | null, eventsLast24h: 0 }]));
   for (const r of rows) result[r.project_id] = { lastEventAt: iso(r.last), eventsLast24h: Number(r.n) };
