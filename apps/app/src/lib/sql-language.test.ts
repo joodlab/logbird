@@ -264,7 +264,7 @@ describe('translateQueryToSql', () => {
     expect(translateQueryToSql('')).toBe('');
     expect(translateQueryToSql('outcome:failure -env:staging')).toBe("outcome = 'failure' AND NOT environment = 'staging'");
     expect(translateQueryToSql('action:booking.*')).toBe("startsWith(action, 'booking.')");
-    expect(translateQueryToSql('actor.name:"Raed B" target.type:booking')).toBe("actor_name = 'Raed B' AND has(target_types, 'booking')");
+    expect(translateQueryToSql('actor.name:"Omar N" target.type:booking')).toBe("actor_name = 'Omar N' AND has(target_types, 'booking')");
     expect(translateQueryToSql('impersonator:* -tenant:*')).toBe("impersonator_id != '' AND NOT tenant_id != ''");
   });
 

@@ -17,7 +17,7 @@ const QUERY_SECTIONS: { title: string; rows: Example[] }[] = [
     rows: [
       { code: 'action:booking.*', note: 'Prefix with a trailing *' },
       { code: 'outcome:failure -env:staging', note: 'Terms AND together; - excludes' },
-      { code: 'actor.name:"Raed B"', note: 'Quote values with spaces' },
+      { code: 'actor.name:"Lina Haddad"', note: 'Quote values with spaces' },
       { code: 'impersonator:* -tenant:*', note: 'Present / missing' },
       { code: 'metadata.channel:whatsapp', note: 'Any attribute key' },
     ],

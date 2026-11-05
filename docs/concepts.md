@@ -33,8 +33,8 @@ The executor is the piece of *your* system that physically performed the action:
 attempt 2, 3, … on the same executor. The console labels this page **Executors**; its URL stays `/workers` for
 compatibility.
 
-**The actor is who asked; the executor is what did the work.** A refund that Raed requested but a queue worker
-carried out has `actor = Raed` and `executor = refunds-worker`.
+**The actor is who asked; the executor is what did the work.** A refund that Lina requested but a queue worker
+carried out has `actor = Lina` and `executor = refunds-worker`.
 
 ## Records (targets) — what changed
 
@@ -51,7 +51,7 @@ operation to see the whole chain, or search `operation:<id>`.
 
 ## Worked example: a cancellation and its refund
 
-Raed, a user of the Azure Hotels account, cancels booking #1042 through your API. The API server records the
+Lina, a user of the Azure Hotels account, cancels booking #1042 through your API. The API server records the
 cancellation and enqueues a refund. The refund worker fails on its first try (payment provider timeout — you may
 record that as an `outcome: "failure"` event too) and succeeds on attempt 2.
 
@@ -62,8 +62,8 @@ record that as an `outcome: "failure"` event too) and succeeds on attempt 2.
   "id": "evt_cancel_bk_1042",
   "action": "booking.cancelled",
   "occurredAt": "2026-11-04T14:32:10.123Z",
-  "description": "Raed cancelled booking #1042",
-  "actor": { "type": "user", "id": "usr_42", "name": "Raed" },
+  "description": "Lina cancelled booking #1042",
+  "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
   "executor": { "type": "api", "id": "api-server", "name": "API server" },
   "tenant": { "id": "biz_7", "name": "Azure Hotels" },
   "targets": [
@@ -83,7 +83,7 @@ record that as an `outcome: "failure"` event too) and succeeds on attempt 2.
   "action": "payment.refunded",
   "occurredAt": "2026-11-04T14:32:41.870Z",
   "description": "Refunded €240.00 for booking #1042",
-  "actor": { "type": "user", "id": "usr_42", "name": "Raed" },
+  "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },
   "executor": { "type": "worker", "id": "refunds-worker", "name": "Refunds worker", "jobId": "job_981", "attempt": 2 },
   "tenant": { "id": "biz_7", "name": "Azure Hotels" },
   "targets": [
@@ -95,14 +95,14 @@ record that as an `outcome: "failure"` event too) and succeeds on attempt 2.
 }
 ```
 
-The actor is Raed on both events — he asked for the refund even though he never touched the worker. Only the
+The actor is Lina on both events: Lina asked for the refund, and the worker only carried it out. Only the
 executor changes.
 
 **Where each entity shows up**
 
 | Page | Entry | Events on its timeline |
 | --- | --- | --- |
-| Actors | Raed (`usr_42`, user) | both |
+| Actors | Lina Haddad (`usr_42`, user) | both |
 | Tenants | Azure Hotels (`biz_7`) | both |
 | Executors | API server (`api-server`, api) | event 1 |
 | Executors | Refunds worker (`refunds-worker`, worker) — job `job_981`, attempt 2 | event 2 |
