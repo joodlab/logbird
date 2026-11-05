@@ -25,6 +25,29 @@ function tokenize(q: string): Token[] {
       i++;
       continue;
     }
+    // Only inspect outside quoted/regex tokens, so literal punctuation stays literal.
+    const dialect = /^(?:([\w.]+)\s+(!=|=)\s*("(?:[^"\\]|\\.)*"|[^\s()]+)|(!)(?=[\w.]+:)|(&&|\|\|))/.exec(q.slice(i));
+    if (dialect) {
+      const text = dialect[1]
+        ? `${dialect[2] === '!=' ? '-' : ''}${dialect[1]}:${dialect[3]}`
+        : dialect[4]
+          ? '-'
+          : dialect[5] === '&&'
+            ? ' AND '
+            : ' OR ';
+      throw new QueryError('Use Trailmark query syntax', {
+        lang: 'query',
+        reason: 'syntax',
+        start: i,
+        end: i + dialect[0].length,
+        hint: `Use ${text.trim()}`,
+        replacement: {
+          start: i,
+          end: i + dialect[0].length,
+          text: dialect[5] ? `${i && !/\s/.test(q[i - 1]!) ? ' ' : ''}${text.trim()}${q[i + 2] && !/\s/.test(q[i + 2]!) ? ' ' : ''}` : text,
+        },
+      });
+    }
     const start = i,
       c = q[i++]!;
     if ('():[]{}<>'.includes(c)) {
@@ -54,14 +77,14 @@ function tokenize(q: string): Token[] {
       tokens.push({ kind: c === '/' ? 'regex' : 'value', value, start, end: i });
       continue;
     }
-    while (i < q.length && !/[\s():[\]{}<>]/.test(q[i]!)) i++;
+    while (i < q.length && !/[\s():[\]{}<>]/.test(q[i]!) && !['&&', '||'].includes(q.slice(i, i + 2))) i++;
     const value = q.slice(start, i);
     tokens.push({ kind: ['AND', 'OR', 'NOT', 'TO'].includes(value) ? value : 'value', value, start, end: i });
   }
   return tokens;
 }
 // Parsing and compilation share spans; no user value is emitted into SQL.
-export function compileQuery(q = '') {
+export function compileQuery(q = '', now = Date.now()) {
   const tokens = tokenize(q),
     params: Record<string, string | number> = {};
   let at = 0,
@@ -102,9 +125,18 @@ export function compileQuery(q = '') {
     const numeric = operator !== '=' || info?.type === 'number' || info?.type === 'date';
     if (numeric && token.value !== '*') {
       if (info && !['number', 'date'].includes(info.type)) fail('type', token.start, token.end, `${field} does not support comparisons`);
-      const date = info?.type === 'date' || (!info && /^\d{4}-\d{2}-\d{2}/.test(token.value));
+      const date = info?.type === 'date' || (!info && /^(?:\d{4}-\d{2}-\d{2}|now(?:$|[-+/]))/.test(token.value));
       if (date) {
-        const raw = token.value;
+        let raw = token.value;
+        if (raw.startsWith('now')) {
+          const relative = /^now(?:([+-])(\d+)([smhdw]))?(\/d)?$/.exec(raw);
+          if (!relative) fail('type', token.start, token.end, 'Use now, now-7d or now/d (s/m/h/d/w)');
+          const units: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
+          const instant = now + (relative[1] === '-' ? -1 : 1) * Number(relative[2] ?? 0) * units[relative[3] ?? 's']!;
+          const rounded = relative[4] ? Math.floor(instant / 86_400_000) * 86_400_000 : instant;
+          if (!Number.isFinite(rounded) || Math.abs(rounded) > 8.64e15) fail('type', token.start, token.end, 'Relative date is out of range');
+          raw = new Date(rounded).toISOString();
+        }
         const calendar = raw.slice(0, 10);
         const midnight = new Date(`${calendar}T00:00:00Z`);
         if (!Number.isFinite(midnight.getTime()) || midnight.toISOString().slice(0, 10) !== calendar)
@@ -202,6 +234,10 @@ export function compileQuery(q = '') {
     const v = value(false);
     if (peek()?.kind === ':') {
       at++;
+      if (v.value === '_exists_') {
+        const field = value(false);
+        return `(${predicate(field.value, { ...field, value: '*' })})`;
+      }
       return `(${fieldValue(v.value, depth)})`;
     }
     if (++terms > 64) fail('too_complex', v.start, v.end, 'Query exceeds 64 terms');

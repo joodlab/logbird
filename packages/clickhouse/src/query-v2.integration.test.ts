@@ -3,6 +3,7 @@ import { expect, it } from 'vitest';
 import { createClickHouseClient, insertEvents } from './client';
 import { normalizeEvent } from './normalize';
 import { searchEvents } from './queries';
+import { suggestValues } from './suggest';
 
 it.runIf(process.env.CLICKHOUSE_URL)('executes v2 filters and parameterized values on real ClickHouse', async () => {
   const ch = createClickHouseClient(),
@@ -37,6 +38,9 @@ it.runIf(process.env.CLICKHOUSE_URL)('executes v2 filters and parameterized valu
     };
     for (const [filter, expected] of [
       ['attempt:>2', 1],
+      ['_exists_:actor', 2],
+      ['NOT _exists_:actor', 0],
+      ['occurredAt:[now-24h TO now+1h]', 2],
       ['attempt:[1 TO 3}', 1],
       ['metadata.duration:[100 TO 500]', 1],
       ['metadata.duration:{200 TO *]', 0],
@@ -54,6 +58,9 @@ it.runIf(process.env.CLICKHOUSE_URL)('executes v2 filters and parameterized valu
       const r = await searchEvents(ch, projectId, { ...q, q: filter });
       expect(r.data.length, filter).toBe(expected);
     }
+    const suggestions = await suggestValues(ch, projectId, { ...q, field: 'metadata.duration', limit: 10, q: 'attempt:>2' });
+    expect(suggestions).toMatchObject({ complete: true, values: [{ value: '200', count: 1 }] });
+    expect((await suggestValues(ch, projectId, { field: 'metadata.duration', limit: 1 })).complete).toBe(false);
   } finally {
     await ch.close();
   }

@@ -1,9 +1,9 @@
-import { projectSetupSchema, sampleDataResponseSchema, workspaceSetupSchema } from '@trailmark/contracts';
+import { projectSetupSchema, SETUP_STEPS, sampleDataResponseSchema, workspaceSetupSchema } from '@trailmark/contracts';
 import { prisma, withProjectLock } from '@trailmark/database';
 import { Hono } from 'hono';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
-import { audit, requireRetentionReady } from './ingest';
+import { audit, requireProjectReadable, requireRetentionReady } from './ingest';
 import { requireProjectAccess, requireSession } from './middlewares';
 import { doc, routeDoc } from './openapi';
 import { loadSampleData, removeSampleData } from './sample-data';
@@ -18,18 +18,31 @@ async function teamFacts(organizationId: string) {
   ]);
   return { members, pendingInvitations };
 }
-async function projectSetup(projectId: string, team: Awaited<ReturnType<typeof teamFacts>>) {
-  return withProjectLock(projectId, async (tx) => {
-    await requireRetentionReady(tx, projectId);
-    const project = await tx.project.findUniqueOrThrow({ where: { id: projectId }, include: { keys: { where: { revokedAt: null } } } });
-    const result = computeSetup(project, await setupFacts(projectId), team);
-    if (result.complete && !project.setupCompletedAt) {
-      await tx.project.updateMany({ where: { id: projectId, setupCompletedAt: null }, data: { setupCompletedAt: new Date() } });
-      const saved = await tx.project.findUniqueOrThrow({ where: { id: projectId } });
-      result.completedAt = saved.setupCompletedAt?.toISOString() ?? null;
-    }
-    return result;
-  });
+async function projectSetup(projectId: string, team: Awaited<ReturnType<typeof teamFacts>>, tolerateBusy = false) {
+  try {
+    await requireProjectReadable(projectId);
+  } catch (error) {
+    if (!tolerateBusy || !(error instanceof ApiError) || error.code !== 'retention_unavailable') throw error;
+    const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
+    return {
+      projectId,
+      retentionBusy: true,
+      progress: { done: 0, total: SETUP_STEPS.length },
+      complete: false,
+      nextStep: null,
+      dismissedAt: project.setupDismissedAt?.toISOString() ?? null,
+      completedAt: project.setupCompletedAt?.toISOString() ?? null,
+      ingest: { firstEventAt: null, lastEventAt: null },
+    };
+  }
+  const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, include: { keys: { where: { revokedAt: null } } } });
+  const result = computeSetup(project, await setupFacts(projectId), team);
+  if (result.complete && !project.setupCompletedAt) {
+    await prisma.project.updateMany({ where: { id: projectId, setupCompletedAt: null }, data: { setupCompletedAt: new Date() } });
+    const saved = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
+    result.completedAt = saved.setupCompletedAt?.toISOString() ?? null;
+  }
+  return result;
 }
 export const setupRoutes = new Hono<AppEnv>()
   .use('*', requireSession)
@@ -41,7 +54,7 @@ export const setupRoutes = new Hono<AppEnv>()
     const projects = organizationId
       ? await prisma.project.findMany({ where: { organizationId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] })
       : [];
-    const statuses = await Promise.all(projects.map((p) => projectSetup(p.id, team)));
+    const statuses = await Promise.all(projects.map((p) => projectSetup(p.id, team, true)));
     const active = [...statuses].sort((a, b) => (b.ingest.lastEventAt ?? '').localeCompare(a.ingest.lastEventAt ?? ''))[0];
     const next = !c.get('user').name?.trim()
       ? 'profile'

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeEvent } from './normalize';
-import { compileQuery, parseQuery } from './query';
+import { compileQuery, parseQuery, QueryError } from './query';
 
 describe('query language', () => {
   it.each([
@@ -167,3 +167,38 @@ it('preserves boolean precedence and quoted operators', () => {
 it.each(['OR a', 'a OR', 'a OR OR b', '()', '(a', 'a)', 'a ()'])('rejects malformed boolean grammar %s', (q) =>
   expect(() => parseQuery(q)).toThrow('Invalid query syntax'),
 );
+
+describe('server follow-ups', () => {
+  it('accepts Lucene existence and negation for core and attribute fields', () => {
+    for (const field of ['actor', 'metadata.plan', 'target.type']) {
+      expect(compileQuery(`_exists_:${field}`)).toEqual(compileQuery(`${field}:*`));
+      expect(compileQuery(`NOT _exists_:${field}`)).toEqual(compileQuery(`NOT ${field}:*`));
+    }
+  });
+  it('binds relative times once per compilation and rounds in UTC', () => {
+    const now = Date.parse('2026-11-05T12:34:56Z');
+    expect(Object.values(compileQuery('occurredAt:[now-24h TO now]', now).params)).toEqual(['2026-11-04T12:34:56.000Z', '2026-11-05T12:34:56.000Z']);
+    expect(Object.values(compileQuery('occurredAt:>now-7d/d', now).params)).toEqual(['2026-10-29T00:00:00.000Z']);
+    for (const unit of ['s', 'm', 'h', 'd', 'w']) expect(compileQuery(`occurredAt:>now-1${unit}`, now).sql).not.toContain('now');
+    expect(() => compileQuery('occurredAt:>now-1y')).toThrow();
+  });
+  it.each([
+    ['actor = user', 'actor:user'],
+    ['actor != user', '-actor:user'],
+    ['!actor:user', '-actor:user'],
+    ['a && b', 'a AND b'],
+    ['a||b', 'a OR b'],
+  ])('offers an exact replacement for %s', (q, fixed) => {
+    try {
+      compileQuery(q);
+      throw new Error('Expected error');
+    } catch (error) {
+      expect(error).toBeInstanceOf(QueryError);
+      const r = (error as QueryError).details.replacement!;
+      expect(q.slice(0, r.start) + r.text + q.slice(r.end)).toBe(fixed);
+    }
+  });
+  it('keeps operators inside literals unchanged', () => {
+    expect(Object.values(compileQuery('description:"x = y && !a:b"').params)).toEqual(['x = y && !a:b']);
+  });
+});

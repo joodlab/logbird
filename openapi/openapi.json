@@ -5974,6 +5974,43 @@
           },
           {
             "in": "query",
+            "name": "q",
+            "schema": {
+              "maxLength": 4096,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lang",
+            "schema": {
+              "enum": [
+                "query",
+                "sql"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "prefix",
             "schema": {
               "maxLength": 200,
@@ -6005,6 +6042,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "complete": {
+                      "type": "boolean"
+                    },
                     "field": {
                       "type": "string"
                     },
@@ -6034,6 +6074,7 @@
                     }
                   },
                   "required": [
+                    "complete",
                     "field",
                     "values"
                   ],
@@ -7558,6 +7599,9 @@
                           },
                           "projectId": {
                             "type": "string"
+                          },
+                          "retentionBusy": {
+                            "type": "boolean"
                           },
                           "slug": {
                             "type": "string"

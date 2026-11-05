@@ -183,6 +183,7 @@ model RetentionRun {
   retentionDays Int
   cutoff        DateTime
   startedAt     DateTime  @default(now())
+  heartbeatAt   DateTime? @default(now())
   finishedAt    DateTime?
   status        String
   deletedEvents Int?
