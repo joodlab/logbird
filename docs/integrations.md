@@ -80,3 +80,18 @@ the original value is kept in `attributes['trailmark.occurredAt.rejected']` and 
 in `warnings[]` with the reason. Events without an `action` are per-event `rejected[]` entries; valid siblings are
 durably inserted. SDK partial rejections invoke `onDrop` for rejected indices and `onError` with reasons. Permanent
 HTTP errors (except 429) drop the batch and report; transient failures retain it for retry.
+
+## SDK 0.2 host context and jobs
+
+Request resolvers run lazily per audit call so per-route guards can populate identity.
+requestId/operationId resolvers can use host logging context; headers/UUIDs supply stable
+fallbacks. Explicit partial fields skip resolution. A failed resolver reports onError and
+omits its field while capture continues. Audit now returns the event id synchronously.
+Use audit.pending() before direct flush; adapter shutdown and Hono/Nitro edge hooks drain
+pending resolutions automatically. No API contract change (SDK-only).
+
+Use client defaults for environment and beforeSend for filtering/redaction; disabled local
+clients require `enabled: false` when no key is configured. See [SDK README](../packages/sdk/README.md)
+for merge rules, fail-closed hooks, redaction patterns and carrier/jobAudit examples.
+The verification runner also exercises a global Hono capture with late route identity,
+host request IDs, redacted attributes/raw payload, and worker causation/attempt readback.

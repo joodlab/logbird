@@ -144,6 +144,41 @@ try {
       await stop(child);
     }
   }
+  const host = launch('example-host-context', 'examples/hono', ['--import', 'tsx', 'sdk-host-context.ts'], env);
+  try {
+    await ready('http://127.0.0.1:4872/', host);
+    const response = await fetch('http://127.0.0.1:4872/demo', { method: 'POST' });
+    assert.equal(response.status, 200);
+    const { id: apiId, jobId, operationId } = await response.json();
+    const page = await readAuditTrail({ endpoint, readKey: read.secret }, { q: `operation:"${operationId}"` });
+    const api = page.data.find((event) => event.id === apiId);
+    const job = page.data.find((event) => event.id === jobId);
+    assert.equal(api?.actor?.id, 'fictional-guard-user');
+    assert.equal(api?.context.requestId, 'fictional-host-request');
+    assert.equal(api?.attributes['metadata.secret'], '[redacted]');
+    const detail = await fetch(`${endpoint}/v1/events/${apiId}`, { headers: { Authorization: `Bearer ${read.secret}` } });
+    assert.equal(detail.status, 200);
+    const detailBody = await detail.json();
+    const payload = typeof detailBody.payload === 'string' ? JSON.parse(detailBody.payload) : detailBody.payload;
+    assert.equal(payload.metadata.secret, '[redacted]');
+    assert.equal(job?.executor?.jobId, 'fictional-job');
+    assert.equal(job?.executor?.attempt, 3);
+    assert.equal(job?.context.parentEventId, apiId);
+    assert.equal(job?.context.operationId, operationId);
+    assert.equal(job?.actor?.id, 'fictional-guard-user');
+    results.push({
+      framework: 'sdk-host-context',
+      actor: 'late guard resolved',
+      requestId: 'host-provided',
+      redaction: 'attributes and raw payload verified',
+      worker: 'jobId, attempt 3, parentEventId and operationId verified',
+    });
+    console.log(
+      'sdk-host-context: late actor, host requestId, redacted attributes/payload, worker jobId/attempt/parent/operation passed real readback',
+    );
+  } finally {
+    await stop(host);
+  }
   const broken = launch('example-vue-read-failure', 'examples/vue', ['--import', 'tsx', 'index.ts'], {
     ...env,
     TRAILMARK_READ_KEY: 'fictional-invalid-key',
