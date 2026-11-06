@@ -35,7 +35,7 @@ Checked live on 2026-11-06.
 | npm scope `@logbird` | **free** | — |
 | npm package `logbird` | **free** | — |
 | GitHub org `logbird` | taken by a personal account | — |
-| GitHub org `logbirdhq` | **free**; use this one | — |
+| GitHub | repo stays under the joodlab org: `joodlab/logbird` (renamed 2026-11-06) | — |
 | Bluesky / YouTube `logbird` | taken | — |
 | Bluesky / YouTube `logbirdhq` | free | — |
 
@@ -180,14 +180,17 @@ of log rows with the newest one highlighted, and the domain.
 **Buy on the same day:**
 
 - logbird.dev and logbird.io; optionally logbird.sh.
-- Claim the npm org `logbird`, the GitHub org `logbirdhq`, and `logbirdhq` on Bluesky, YouTube and X. The X handle is
-  unverified because X can't be checked without signing in.
+- Claim the npm org `logbird`, and `logbirdhq` on Bluesky, YouTube and X. The X handle is unverified because X can't be
+  checked without signing in.
+- GitHub stays under the **joodlab** org (owner decision, 2026-11-06); no separate Logbird org. The repo was renamed
+  `joodlab/trailmark` → **`joodlab/logbird`** on 2026-11-06. GitHub redirects the old URL.
 
 **Order of changes:**
 
 1. Merge the open PRs first.
-2. Re-run the rename codemod on the latest master, then merge the rename PR last.
-3. Rename the GitHub repo `joodlab/trailmark` → `joodlab/logbird`. GitHub redirects the old URL.
+2. Re-run the rename codemod on the latest master, then merge the rename PR last. It renames everything, including
+   database, queue and key-prefix names.
+3. At that same moment, with no dev servers running, run the namespace migration on the shared local services.
 
 **Email:**
 
