@@ -43,7 +43,8 @@ One .env.example serves source development and containers. Empty URL overrides l
 | AUTH_LOG_SIGN_IN_CODES | false; true logs sign-in codes, warns at boot, bypasses SMTP only without SMTP_HOST |
 | TRAILMARK_SERVER_URL | Production runtime proxy target, http://server:4601; recreate app to change, no rebuild |
 | TRUST_PROXY / TRUSTED_ORIGINS | Trusted proxy hops: 1 in Compose (the console), 2 behind one reverse proxy; source dev 0 / empty. See ingress rules below |
-| AUTH_RATE_LIMIT_PER_MINUTE / PUBLIC_RATE_LIMIT_PER_MINUTE | 30 / 600, shared Redis limits |
+| AUTH_RATE_LIMIT_PER_MINUTE / PUBLIC_RATE_LIMIT_PER_MINUTE | 30 / 600 per client: sign-in requests and failed public-API authentications |
+| INGEST_RATE_LIMIT_PER_MINUTE / READ_RATE_LIMIT_PER_MINUTE | 3000 / 1200 per project key (shared Redis limits) |
 | TRAILMARK_BIND / TRAILMARK_HTTP_PORT | 127.0.0.1 / 4600; only app is published |
 | TRAILMARK_IMAGE_REGISTRY / TRAILMARK_VERSION | trailmark / local; both image names and local build instructions |
 | TRAILMARK_DOMAIN / ACME_EMAIL | TLS hostname / optional ACME email |
