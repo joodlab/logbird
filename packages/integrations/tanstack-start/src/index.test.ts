@@ -1,11 +1,11 @@
-import { Trailmark } from '@trailmark/sdk';
+import { Logbird } from '@logbird/sdk';
 import { expect, it, vi } from 'vitest';
-import { trailmark } from './index';
+import { logbird } from './index';
 
 it('runs the framework request middleware and passes typed audit through next', async () => {
-  const client = new Trailmark({ endpoint: 'http://unused', apiKey: 'fake' });
+  const client = new Logbird({ endpoint: 'http://unused', apiKey: 'fake' });
   const track = vi.spyOn(client, 'track').mockImplementation(() => undefined);
-  const integration = trailmark({ client, actor: () => ({ id: 'actor' }), tenant: () => ({ id: 'tenant' }) });
+  const integration = logbird({ client, actor: () => ({ id: 'actor' }), tenant: () => ({ id: 'tenant' }) });
   const handler = integration.requestMiddleware.options.server;
   if (!handler) throw new Error('missing middleware');
   const next = vi.fn(async ({ context }) => {

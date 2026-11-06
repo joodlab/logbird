@@ -8,7 +8,7 @@ import {
   type QueryFieldType,
   SQL_ALLOWED_COLUMNS,
   SQL_ALLOWED_FUNCTIONS,
-} from '@trailmark/contracts';
+} from '@logbird/contracts';
 
 export interface QueryKeySpec extends QueryFieldInfo {
   example: string;

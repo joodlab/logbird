@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { createClickHouseClient } from '@trailmark/clickhouse';
-import * as s from '@trailmark/contracts';
-import { prisma } from '@trailmark/database';
-import { Trailmark } from '@trailmark/sdk';
+import { createClickHouseClient } from '@logbird/clickhouse';
+import * as s from '@logbird/contracts';
+import { prisma } from '@logbird/database';
+import { Logbird } from '@logbird/sdk';
 import { client, endpoint, login } from './http';
 
 const ch = createClickHouseClient();
@@ -31,7 +31,7 @@ try {
   const p = created.project,
     base = `/api/projects/${p.id}`;
   const errors: Error[] = [];
-  const sdk = new Trailmark({ apiKey: created.ingestKey.secret, endpoint, onError: (e) => errors.push(e) });
+  const sdk = new Logbird({ apiKey: created.ingestKey.secret, endpoint, onError: (e) => errors.push(e) });
   sdk.track({
     id: 'smoke-root',
     action: 'hotel.updated',
@@ -168,8 +168,8 @@ try {
 } finally {
   if (organizationId) {
     for (const project of await prisma.project.findMany({ where: { organizationId } }))
-      await (await import('@trailmark/clickhouse')).purgeProject(ch, project.id);
-    await (await import('@trailmark/clickhouse')).purgeProject(ch, `ws:${organizationId}`);
+      await (await import('@logbird/clickhouse')).purgeProject(ch, project.id);
+    await (await import('@logbird/clickhouse')).purgeProject(ch, `ws:${organizationId}`);
     await prisma.organization.delete({ where: { id: organizationId } });
   }
   await prisma.user.deleteMany({ where: { email: { in: [email, invitedEmail] } } });

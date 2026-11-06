@@ -1,10 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { Trailmark } from './index';
+import { Logbird } from './index';
 import { createAudit, jobAudit, shutdown } from './integration';
 
 afterEach(() => vi.useRealTimers());
 function fixture() {
-  const client = new Trailmark({ enabled: false });
+  const client = new Logbird({ enabled: false });
   const track = vi.spyOn(client, 'track');
   return { client, track };
 }

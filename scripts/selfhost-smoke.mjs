@@ -5,8 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const base = process.env.BASE_URL || 'http://localhost:14600';
-const project = process.env.COMPOSE_PROJECT_NAME || 'trailmark-selfhost-test';
-assert.ok(project.startsWith('trailmark-selfhost-'), 'Only disposable selfhost test projects');
+const project = process.env.COMPOSE_PROJECT_NAME || 'logbird-selfhost-test';
+assert.ok(project.startsWith('logbird-selfhost-'), 'Only disposable selfhost test projects');
 const envFile = process.env.SELFHOST_ENV || '.env.selfhost-new';
 const stateFile = process.env.SELFHOST_STATE || '.tmp/selfhost-state.json';
 let cookie = '';

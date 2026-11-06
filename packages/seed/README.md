@@ -90,9 +90,9 @@ The campaign model uses CANCELLED/FAILED (rather than inventing PAUSED).
 ## Verification
 
 ```sh
-pnpm --filter @trailmark/seed typecheck
+pnpm --filter @logbird/seed typecheck
 pnpm exec ultracite check packages/seed
-pnpm --filter @trailmark/seed test
+pnpm --filter @logbird/seed test
 ```
 
 Tests stream all 300k fixtures and verify exact counts, determinism, time bounds,
@@ -104,6 +104,6 @@ references. A fixed `now` is necessary for byte-for-byte replay.
 
 `--benchmark` runs local read timings five times; these are local observations,
 not a scale SLA. `inspect.ts` reads only the two named demo projects from the
-`trailmark` database. Direct seed does not create console project memberships,
+`logbird` database. Direct seed does not create console project memberships,
 a demo login, or validate the HTTP ingest path. Screenshots are not needed to
 verify the data package; the PR includes actual read API output as evidence.

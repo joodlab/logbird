@@ -1,6 +1,6 @@
-# Marketing: the Trailmark build log
+# Marketing: the Logbird build log
 
-Every screenshot and video we capture while building Trailmark lives here, so the build can be told later as a devlog
+Every screenshot and video we capture while building Logbird lives here, so the build can be told later as a devlog
 (X, LinkedIn, YouTube Shorts, the website) without re-shooting anything. Same layout as the Hearthroad marketing folder.
 
 **Nothing here is posted by an agent.** The owner publishes. Agents capture media, draft posts, and mark a post as

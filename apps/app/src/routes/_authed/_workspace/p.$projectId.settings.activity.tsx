@@ -1,10 +1,10 @@
+import type { AuditEvent } from '@logbird/contracts';
+import { FilterChip } from '@logbird/ui/components/filter-chip';
+import { EmptyState, ErrorState } from '@logbird/ui/components/states';
+import { Input } from '@logbird/ui/components/ui/input';
 import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import type { AuditEvent } from '@trailmark/contracts';
-import { FilterChip } from '@trailmark/ui/components/filter-chip';
-import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
-import { Input } from '@trailmark/ui/components/ui/input';
 import { ActivityIcon, SearchIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
@@ -17,7 +17,7 @@ import { rangeLabel } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/activity')({
-  head: () => ({ meta: [{ title: 'Workspace activity · Settings · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Workspace activity · Settings · Logbird' }] }),
   validateSearch: z.object({ q: z.string().optional(), ev: z.string().optional() }),
   staticData: { crumb: 'Workspace activity', range: true, defaultRange: '90d' },
   component: WorkspaceActivity,
@@ -57,7 +57,7 @@ function WorkspaceActivity() {
     <div className="flex min-h-[28rem] flex-1 flex-col">
       <div className="flex flex-col gap-3 border-b px-4 py-4 sm:px-6">
         <p className="max-w-3xl text-muted-foreground text-sm">
-          Trailmark records its own management actions — projects, keys, retention, members, views — into this stream. It is the same event model you
+          Logbird records its own management actions — projects, keys, retention, members, views — into this stream. It is the same event model you
           send, shown with the same components.
         </p>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

@@ -1,5 +1,5 @@
-import type { HistogramResponse } from '@trailmark/contracts';
-import type { ChartConfig } from '@trailmark/ui/components/ui/chart';
+import type { HistogramResponse } from '@logbird/contracts';
+import type { ChartConfig } from '@logbird/ui/components/ui/chart';
 import { formatClock, formatDayTime, formatMonthDay, zoneOffsetMs } from '@/lib/format';
 
 export const SERIES = ['success', 'partial', 'denied', 'failure', 'unknown'] as const;

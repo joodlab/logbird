@@ -1,8 +1,8 @@
-# Trailmark — product & technical spec (v0)
+# Logbird — product & technical spec (v0)
 
-Trailmark is an **open-source (MIT), self-hostable audit-log / activity-history platform** with a hosted cloud
+Logbird is an **open-source (MIT), self-hostable audit-log / activity-history platform** with a hosted cloud
 offering (same model as our reference app: one codebase, self-host or cloud). Products send events through an SDK or HTTP
-API; Trailmark stores them in ClickHouse, keeps them for a per-project retention window, and gives the operating
+API; Logbird stores them in ClickHouse, keeps them for a per-project retention window, and gives the operating
 team a fast console to search, follow and understand *who did what, to which record, through which worker, and
 what changed*.
 
@@ -19,7 +19,7 @@ what changed*.
 3. **History starts the day capture starts.** No backfill / reconstruction tooling.
 4. **Retention = permanent deletion.** Each project has `retentionDays`; older events are deleted for good.
    Lowering retention requires typing the project slug and immediately purges data beyond the new window.
-5. **Dogfood.** Trailmark records its own management actions (project created, key created/revoked, retention
+5. **Dogfood.** Logbird records its own management actions (project created, key created/revoked, retention
    changed, member invited…) as events into a per-organization *workspace activity* stream.
 6. **Fast at scale.** Design for 10M+ events/day per project: wide flat table, LowCardinality, bloom-filter skip
    indexes, materialized rollups for dashboards, cursor pagination, no `FINAL` on hot paths.
@@ -36,7 +36,7 @@ packages/clickhouse  @clickhouse/client wrapper, SQL migrations, query builder, 
 packages/auth        better-auth server/client config (email OTP, organization plugin)
 packages/email       react-email templates (OTP sign-in, invitation) + SMTP sender (Mailpit locally)
 packages/ui          shadcn design system (Base UI variant like our reference app), tokens, charts, shared components
-packages/sdk         `@trailmark/sdk` TypeScript client: batching, retries, idempotent ids, flush on exit
+packages/sdk         `@logbird/sdk` TypeScript client: batching, retries, idempotent ids, flush on exit
 packages/seed        StayDesk-shaped synthetic data generator that sends through the public ingest API
 ```
 
@@ -51,7 +51,7 @@ inserted in one statement. A Postgres/queue buffer can be added later behind the
 Supplied `occurredAt` should be ISO-8601 or epoch milliseconds between receive time minus 3650 days
 and plus 24 hours. Because only `action` is required, an unusable value (unparseable, out of window, or epoch seconds
 — numeric magnitudes below 1e11) never drops the event: it is stored at receive time, the original is kept in
-`attributes['trailmark.occurredAt.rejected']`, and the ingest response reports it in `warnings[]` (additive field).
+`attributes['logbird.occurredAt.rejected']`, and the ingest response reports it in `warnings[]` (additive field).
 Omitted values use receive time.
 
 ```jsonc
@@ -197,7 +197,7 @@ and project setup; retention status remains readable. Readiness checks are short
 statements, and no read holds a project lock or a Postgres connection during ClickHouse I/O.
 An already-started read/export is not a snapshot and may overlap a purge.
 Writers use session advisory locks held on a separate pool (16 connections per process), never a transaction:
-ingest (including Trailmark's own audit writes) takes a **shared** data lock, so concurrent ingests for one project
+ingest (including Logbird's own audit writes) takes a **shared** data lock, so concurrent ingests for one project
 coexist; maintenance (retention, sample replacement/removal, deletion, policy changes) takes it **exclusive**. A
 second "gate" lock gives maintenance writer preference: while maintenance waits or runs, new ingests cannot pass the
 gate, so a steady ingest stream cannot starve it, and in-flight ingests (tens of ms) drain first. Every acquisition is
@@ -227,7 +227,7 @@ errors (except 429) drop the batch and report; transient failures retain it for 
 
 The **route table and every request/response schema live in `packages/contracts`** — implement them exactly.
 - Internal API (`/api/*`, better-auth session cookie, org membership enforced, project must belong to the
-  active org). Public API (`/v1/*`, project-bound API keys: `tm_ingest_<random>` may only ingest, `tm_read_<random>`
+  active org). Public API (`/v1/*`, project-bound API keys: `lb_ingest_<random>` may only ingest, `lb_read_<random>`
   may only read). Keys are stored as SHA-256 hash + display prefix; full secret shown once.
 - Errors: `{ error: { code, message, details? } }` with proper HTTP status.
 - `GET /openapi.json` (hono-openapi) + Scalar reference at `/docs`.
@@ -271,7 +271,7 @@ Session-authenticated `GET /api/projects/:projectId/setup` reports the computed 
 `GET /api/workspace/setup` summarizes active-workspace projects and resumable onboarding.
 Postgres facts are fresh; ClickHouse facts may be cached for 30 seconds after a real first event.
 `POST /api/projects/:projectId/sample-data` replaces 2000 fictional events over seven days;
-`DELETE` removes them. The reserved source `trailmark-sample` never counts toward setup.
+`DELETE` removes them. The reserved source `logbird-sample` never counts toward setup.
 Replacement is limited to projects with at most 100000 stored rows. Sample mutations hold the
 project ingestion lock and synchronously rebuild project rollups from surviving events.
 
@@ -334,13 +334,13 @@ for sample bounds and counts. Execution SQL syntax errors use UTF-16 spans as va
 
 #### 5.1.2 SQL mode (`lang=sql`)
 `q` is a ClickHouse boolean expression only (`job_attempt > 2 AND attributes['metadata.channel'] = 'whatsapp'`).
-The server never runs anything but its own statement: `SELECT … FROM trailmark.events WHERE project_id = {p} AND
+The server never runs anything but its own statement: `SELECT … FROM logbird.events WHERE project_id = {p} AND
 timestamp >= {from} AND timestamp < {to} AND (<expr>)`. Before running, it validates `<expr>` by asking ClickHouse
 for `EXPLAIN AST` of the wrapped statement and walking the tree: the tree must be exactly our template (one SELECT,
 one table, no SETTINGS/FORMAT/UNION/JOIN/WITH), and `<expr>` may contain only literals, identifiers in
 `SQL_ALLOWED_COLUMNS` (plus lambda parameters), and functions in `SQL_ALLOWED_FUNCTIONS`. Subqueries, table
 functions, query parameters, `system.*`, dictionaries, `arrayJoin`, and comments/semicolons are rejected. Queries
-run as ClickHouse user `trailmark_query` (readonly=2 CONST, SELECT on `trailmark.events` + rollups only, settings profile
+run as ClickHouse user `logbird_query` (readonly=2 CONST, SELECT on `logbird.events` + rollups only, settings profile
 with CONST resource/safety limits including max_execution_time, max_rows_to_read, max_memory_usage, max_result_rows). Console endpoints only; `/v1`
 rejects `lang=sql`. A free-form SQL console is out of scope for the cloud product (possibly a future self-host
 instance-admin feature).
@@ -348,12 +348,12 @@ instance-admin feature).
 Isolation is layered: (1) query-language values compile to parameterized SQL; (2) SQL expressions pass the lexical
 scan, EXPLAIN AST baseline comparison and allowlists; (3) the readonly query account has SELECT-only grants and
 CONST safety/resource limits; (4) row policies on events, events_by_minute, entities and attribute_keys enforce
-`project_id = getSetting('SQL_trailmark_project')` for `trailmark_query`. Each restricted query sends its authorized
+`project_id = getSetting('SQL_logbird_project')` for `logbird_query`. Each restricted query sends its authorized
 project in `clickhouse_settings`; validation-only EXPLAIN uses a sentinel project. Missing bindings fail closed.
-Companion `USING 1 TO ALL EXCEPT trailmark_query` policies preserve the main user's access. The binding is trusted
+Companion `USING 1 TO ALL EXCEPT logbird_query` policies preserve the main user's access. The binding is trusted
 server input, not a substitute for HTTP authorization; holders of database credentials can choose the binding.
 Keep the SQL guard, including rejection of SETTINGS. Self-hosters re-run
-`pnpm --filter @trailmark/clickhouse create-query-user` in a maintenance window before restarting the updated
+`pnpm --filter @logbird/clickhouse create-query-user` in a maintenance window before restarting the updated
 server. The idempotent script preserves credentials and checks the accepted `SQL_` custom prefix without changing
 server configuration. See the query-language security model for the verification and operational boundaries.
 
@@ -456,7 +456,7 @@ User journeys (each must work end-to-end against the real server):
 9. **Settings**: project general (name, description, slug), **retention** (select from options; lowering opens a
    destructive confirm dialog requiring the slug, explains permanent deletion; shows last purge + oldest event),
    **API keys** (create dialog → secret shown once with copy + snippet; list with kind badges, last used,
-   revoke confirm), workspace members + invite by email, **workspace activity** (Trailmark's own audit stream,
+   revoke confirm), workspace members + invite by email, **workspace activity** (Logbird's own audit stream,
    rendered with the same explorer components), danger zone (delete project).
 10. **Setup** (`/p/$projectId/setup`, replaces Docs / Quickstart; `/docs` redirects): live checklist from
     `GET /api/projects/:projectId/setup` with one section per step (inline ingest/read keys, first event, envelope
@@ -481,4 +481,4 @@ payment provider); actions derived from real models (hotel/room/rate/booking/gue
 website/member/role/integration/media/export/auth.*/crm.sync.*/catalog.sync.*); operation trees (request →
 job → child record changes), retries (attempt 2/3), failures/denied/unknown outcomes at realistic low rates,
 some events deliberately off-standard (missing actor, custom top-level keys) to exercise conformance. Seed also
-creates a dev login user `demo@trailmark.local` as owner of "Acme" (OTP arrives in Mailpit).
+creates a dev login user `demo@logbird.local` as owner of "Acme" (OTP arrives in Mailpit).

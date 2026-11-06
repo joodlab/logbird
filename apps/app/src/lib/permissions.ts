@@ -1,5 +1,5 @@
+import type { MeResponse } from '@logbird/contracts';
 import { useQuery } from '@tanstack/react-query';
-import type { MeResponse } from '@trailmark/contracts';
 import { meQuery } from '@/lib/api/queries';
 
 /**

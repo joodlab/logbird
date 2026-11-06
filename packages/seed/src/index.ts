@@ -1,4 +1,4 @@
-import type { EventInput } from '@trailmark/sdk';
+import type { EventInput } from '@logbird/sdk';
 import { type Action, businesses, hospitalityActions, ledgerActions, support, users } from './catalog';
 
 export interface SeedOptions {

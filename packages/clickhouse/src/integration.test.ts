@@ -10,7 +10,7 @@ import {
   overviewResponseSchema,
   pickHistogramInterval,
   searchResponseSchema,
-} from '@trailmark/contracts';
+} from '@logbird/contracts';
 import { expect, it } from 'vitest';
 import {
   createClickHouseClient,

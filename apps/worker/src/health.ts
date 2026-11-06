@@ -1,4 +1,4 @@
-import { prisma } from '@trailmark/database';
+import { prisma } from '@logbird/database';
 import { closeRetentionQueue, connection } from './queue';
 import { clickhouse } from './retention';
 

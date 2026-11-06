@@ -1,6 +1,6 @@
-import type { QueryLang } from '@trailmark/contracts';
-import { Kbd } from '@trailmark/ui/components/ui/kbd';
-import { cn } from '@trailmark/ui/lib/utils';
+import type { QueryLang } from '@logbird/contracts';
+import { Kbd } from '@logbird/ui/components/ui/kbd';
+import { cn } from '@logbird/ui/lib/utils';
 import { BookmarkIcon, CornerDownLeftIcon, HistoryIcon, Loader2Icon, SparklesIcon, XIcon } from 'lucide-react';
 import { Fragment } from 'react';
 import type { RecentQuery } from '@/lib/recent-queries';

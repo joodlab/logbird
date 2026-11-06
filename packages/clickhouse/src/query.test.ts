@@ -140,7 +140,7 @@ describe('normalization', () => {
       if (!r.ok) continue;
       expect(r.warning).toMatch(/stored at receive time/);
       expect(new Date(r.row.timestamp).getTime()).toBe(ctx.receivedAt.getTime());
-      expect(r.row.attributes['trailmark.occurredAt.rejected']).toBeTruthy();
+      expect(r.row.attributes['logbird.occurredAt.rejected']).toBeTruthy();
     }
     const ok = normalizeEvent({ action: 'x', occurredAt: ctx.receivedAt.toISOString() }, ctx);
     expect(ok.ok && ok.warning).toBe(null);

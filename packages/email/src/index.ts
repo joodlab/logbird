@@ -1,8 +1,8 @@
 /**
- * @trailmark/email — Trailmark's transactional email templates.
+ * @logbird/email — Logbird's transactional email templates.
  *
  * This entry is side-effect free (no env, no SMTP): render any email anywhere — the server, the preview app in
- * `apps/email`, tests. Sending lives in `@trailmark/email/send`.
+ * `apps/email`, tests. Sending lives in `@logbird/email/send`.
  */
 import { invitation } from './templates/invitation';
 import { memberJoined } from './templates/member-joined';
@@ -19,6 +19,6 @@ export { MemberJoinedEmail, type MemberJoinedEmailProps, memberJoined } from './
 export { RoleChangedEmail, type RoleChangedEmailProps, roleChanged } from './templates/role-changed';
 export { type OtpPurpose, SignInCodeEmail, type SignInCodeEmailProps, signInCode } from './templates/sign-in-code';
 
-/** Every email Trailmark sends, keyed like `fixtures`. Tests, previews and the send command iterate over this. */
+/** Every email Logbird sends, keyed like `fixtures`. Tests, previews and the send command iterate over this. */
 export const emails = { signInCode, invitation, memberJoined, roleChanged } as const;
 export type EmailKey = keyof typeof emails;

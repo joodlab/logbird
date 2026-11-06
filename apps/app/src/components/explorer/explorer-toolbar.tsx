@@ -1,9 +1,6 @@
-import { useForm } from '@tanstack/react-form';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
-import type { QueryLang } from '@trailmark/contracts';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@trailmark/ui/components/ui/dialog';
+import type { QueryLang } from '@logbird/contracts';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@logbird/ui/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -13,10 +10,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@trailmark/ui/components/ui/dropdown-menu';
-import { Input } from '@trailmark/ui/components/ui/input';
-import { Label } from '@trailmark/ui/components/ui/label';
-import { Textarea } from '@trailmark/ui/components/ui/textarea';
+} from '@logbird/ui/components/ui/dropdown-menu';
+import { Input } from '@logbird/ui/components/ui/input';
+import { Label } from '@logbird/ui/components/ui/label';
+import { Textarea } from '@logbird/ui/components/ui/textarea';
+import { useForm } from '@tanstack/react-form';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 import { BookmarkPlusIcon, CircleAlertIcon, Columns3Icon, DownloadIcon, Loader2Icon, MoreHorizontalIcon } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -86,7 +86,7 @@ function useExport({ projectId, range, q, lang = 'query' }: { projectId: string;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `trailmark-events-${new Date().toISOString().slice(0, 19).replaceAll(':', '')}.${format}`;
+      a.download = `logbird-events-${new Date().toISOString().slice(0, 19).replaceAll(':', '')}.${format}`;
       a.click();
       URL.revokeObjectURL(url);
       toast.success('Export ready', { description: `${rangeLabel(range)}${q ? ` · ${q}` : ''}` });

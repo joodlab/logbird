@@ -5,7 +5,7 @@
  *
  * Auth:
  *  - `session`: better-auth cookie; caller must be a member of the project's organization.
- *  - `ingestKey` / `readKey`: `Authorization: Bearer tm_ingest_…` / `tm_read_…` bound to one project.
+ *  - `ingestKey` / `readKey`: `Authorization: Bearer lb_ingest_…` / `lb_read_…` bound to one project.
  */
 export const routes = {
   // better-auth handler (email OTP, organizations, sessions)
@@ -56,7 +56,7 @@ export const routes = {
     create: { method: 'POST', path: '/api/projects/:projectId/views', auth: 'session' },
     remove: { method: 'DELETE', path: '/api/projects/:projectId/views/:viewId', auth: 'session' },
   },
-  /** Trailmark's own management actions (project/key/retention/member changes), dogfooded into ClickHouse. */
+  /** Logbird's own management actions (project/key/retention/member changes), dogfooded into ClickHouse. */
   workspaceActivity: { method: 'GET', path: '/api/workspace/activity', auth: 'session' },
   /** Workspace setup summary + resumable onboarding target (WorkspaceSetup, ./setup.ts). */
   workspaceSetup: { method: 'GET', path: '/api/workspace/setup', auth: 'session' },

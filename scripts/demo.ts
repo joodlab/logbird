@@ -1,9 +1,9 @@
 ﻿import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
-import { createClickHouseClient, purgeProject } from '@trailmark/clickhouse';
-import { prisma, withProjectLock } from '@trailmark/database';
-import { Trailmark } from '@trailmark/sdk';
-import { generateEvents } from '@trailmark/seed';
+import { createClickHouseClient, purgeProject } from '@logbird/clickhouse';
+import { prisma, withProjectLock } from '@logbird/database';
+import { Logbird } from '@logbird/sdk';
+import { generateEvents } from '@logbird/seed';
 import { generateApiKey } from '../apps/server/src/keys';
 import { client, endpoint, login } from './http';
 
@@ -18,9 +18,9 @@ if (values.sink !== 'api') throw new Error('Demo supports --sink api only.');
 const ch = createClickHouseClient();
 try {
   const user = await prisma.user.upsert({
-    where: { email: 'demo@trailmark.local' },
+    where: { email: 'demo@logbird.local' },
     update: { name: 'Raed (demo)' },
-    create: { id: randomUUID(), email: 'demo@trailmark.local', name: 'Raed (demo)', emailVerified: true },
+    create: { id: randomUUID(), email: 'demo@logbird.local', name: 'Raed (demo)', emailVerified: true },
   });
   const org = await prisma.organization.upsert({
     where: { slug: 'acme' },
@@ -49,7 +49,7 @@ try {
       data: { projectId: project.id, name: 'Demo run', kind: 'ingest', hash: material.hash, prefix: material.prefix, createdById: user.id },
     });
     const errors: Error[] = [];
-    const sdk = new Trailmark({ apiKey: material.secret, endpoint, batchSize: 1000, onError: (e) => errors.push(e) });
+    const sdk = new Logbird({ apiKey: material.secret, endpoint, batchSize: 1000, onError: (e) => errors.push(e) });
     const start = performance.now();
     let sent = 0;
     for (const event of generateEvents({ events: count, days: Math.min(60, retentionDays - 1), project: name })) {
@@ -75,7 +75,7 @@ try {
       console.log(JSON.stringify({ project: name, route, milliseconds: latencies }));
     }
   }
-  console.log('Login: demo@trailmark.local - OTP is delivered to Mailpit http://127.0.0.1:8025');
+  console.log('Login: demo@logbird.local - OTP is delivered to Mailpit http://127.0.0.1:8025');
 } finally {
   await ch.close();
   await prisma.$disconnect();

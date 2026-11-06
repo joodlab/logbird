@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noArrayIndexKey: Fixed bird pixel coordinates never reorder.
 // The server runs these through tsx with the classic JSX runtime, so React must be in scope.
 import * as React from 'react';
 import { Head, Html, Preview } from 'react-email';
@@ -28,12 +29,56 @@ export interface EmailLayoutProps {
   title: string;
   /** Why this person received the email, completing "You received this email because …". */
   reason: string;
-  /** Public URL of this Trailmark install. */
+  /** Public URL of this Logbird install. */
   appUrl: string;
   children: React.ReactNode;
 }
 
-/** Wordmark: an HTML-only rendition of the app's "T" mark, so it survives image blocking and dark-mode inversion. */
+/** Wordmark: an HTML table bird mark that survives image blocking. */
+function EmailBird() {
+  const rows = [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0],
+    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 2, 2, 2, 2, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  ];
+  return (
+    <table {...table} aria-hidden style={{ width: '26px', height: '26px', borderCollapse: 'collapse' }}>
+      <tbody>
+        {rows.map((row, y) => (
+          <tr key={y}>
+            {row.map((pixel, x) => (
+              <td
+                key={x}
+                style={{
+                  width: '1.625px',
+                  height: '1.625px',
+                  padding: 0,
+                  fontSize: 0,
+                  lineHeight: 0,
+                  backgroundColor: pixel === 2 ? '#818cf8' : pixel === 1 ? light.markText : light.mark,
+                }}
+              />
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function Wordmark({ appUrl }: { appUrl: string }) {
   return (
     <a href={appUrl} style={{ textDecoration: 'none', color: light.text }}>
@@ -59,7 +104,7 @@ function Wordmark({ appUrl }: { appUrl: string }) {
               }}
               width={26}
             >
-              T
+              <EmailBird />
             </td>
             <td
               className={cx.text}
@@ -73,7 +118,7 @@ function Wordmark({ appUrl }: { appUrl: string }) {
                 color: light.text,
               }}
             >
-              Trailmark
+              logbird
             </td>
           </tr>
         </tbody>
@@ -130,7 +175,7 @@ export function EmailLayout({ preview, title, reason, appUrl, children }: EmailL
                         <br />
                         <br />
                         <a className={cx.faint} href={appUrl} style={{ color: light.faint, textDecoration: 'underline' }}>
-                          Trailmark
+                          Logbird
                         </a>{' '}
                         · open-source audit logs · {hostOf(appUrl)}
                       </td>

@@ -4,7 +4,7 @@ Date: 2026-11-04. Research and recommendations only; this PR changes no schema o
 
 ## Decision
 
-Require ClickHouse **26.2+** for the initial Trailmark release. Replace the proposed `tokenbf_v1` index with a `text` index on a named, normalized search column. Index arbitrary attribute **pairs**, retain the project-first sorting key, and ship a small typed AST compiler whose semantics are independent of whichever index is available. Keep autocomplete on bounded server-side metadata queries; do not put event documents into a browser search engine.
+Require ClickHouse **26.2+** for the initial Logbird release. Replace the proposed `tokenbf_v1` index with a `text` index on a named, normalized search column. Index arbitrary attribute **pairs**, retain the project-first sorting key, and ship a small typed AST compiler whose semantics are independent of whichever index is available. Keep autocomplete on bounded server-side metadata queries; do not put event documents into a browser search engine.
 
 Before implementing dashboards, resolve ingest idempotency and retention for derived tables. Neither replacing merges nor insert-triggered materialized views gives exactly-once audit counts.
 
@@ -12,7 +12,7 @@ Before implementing dashboards, resolve ingest idempotency and retention for der
 
 HyperDX was shallow-cloned to `../hyperdx`, commit **253a690d49776c390d2c5b7e4824edeb011f027d**. All `H:` references below are paths and inclusive line ranges inside that clone at that revision. For example, `H:docker/otel-collector/schema/seed/00002_otel_logs.sql:4-44` resolves under that absolute directory. These are source findings, not measured HyperDX production behavior.
 
-Permanent upstream source root: <https://github.com/hyperdxio/hyperdx/tree/253a690d49776c390d2c5b7e4824edeb011f027d>. Trailmark baseline read: `AGENTS.md` and `docs/SPEC.md`, master commit `4204dd6`. No real events were read. The only local data writes were synthetic rows in `trailmark.research_text` and `trailmark.research_pairs`; both tables were dropped.
+Permanent upstream source root: <https://github.com/hyperdxio/hyperdx/tree/253a690d49776c390d2c5b7e4824edeb011f027d>. Logbird baseline read: `AGENTS.md` and `docs/SPEC.md`, master commit `4204dd6`. No real events were read. The only local data writes were synthetic rows in `logbird.research_text` and `logbird.research_pairs`; both tables were dropped.
 
 ## 1. Storage: what HyperDX actually creates
 
@@ -21,7 +21,7 @@ Permanent upstream source root: <https://github.com/hyperdxio/hyperdx/tree/253a6
 `H:docker/otel-collector/schema/seed/00002_otel_logs.sql:4-44` defines:
 
 ```sql
--- Abbreviated: these are HyperDX's expressions, not Trailmark's proposal.
+-- Abbreviated: these are HyperDX's expressions, not Logbird's proposal.
 Timestamp DateTime64(9) CODEC(Delta, ZSTD(3)),
 ServiceName LowCardinality(String) CODEC(ZSTD(3)),
 Body String CODEC(ZSTD(3)),
@@ -54,7 +54,7 @@ It also materializes eight commonly filtered Kubernetes/environment attributes i
 
 For servers below 26.2 the migration runner selects compatibility DDL (`H:packages/otel-collector/cmd/migrate/main.go:641-665,800-815`). The log compatibility schema uses bloom filters for TraceId and map keys/values (granularity 1), plus `lower(Body) TYPE tokenbf_v1(32768,3,0) GRANULARITY 8`; sorting, daily partitions and codecs remain similar (`H:docker/otel-collector/schema/seed/00002_otel_logs_compat.sql:29-42`). Trace compatibility DDL is in `H:docker/otel-collector/schema/seed/00005_otel_traces_compat.sql:1-45`. The current log/trace seed schemas do not define `ngrambf_v1` indexes. Replay sessions still use tokenbf (`H:docker/otel-collector/schema/seed/00004_hyperdx_sessions.sql:27`). Do not describe all HyperDX tables as having migrated identically.
 
-Interpretation: time partitions prune periods and make whole-part TTL removal cheap; time/service clustering limits common observability scans; compression reduces I/O; LowCardinality helps repeating dimensions; inverted indexes locate rare tokens/IDs/pairs without reading every map value. `ttl_only_drop_parts=1` trades exact expiration timing for cheaper deletion of fully expired parts. These are inferred design consequences, not a throughput benchmark. Trailmark is multi-project: copying HyperDX's service-first trace key would lose the most important tenant isolation/pruning prefix.
+Interpretation: time partitions prune periods and make whole-part TTL removal cheap; time/service clustering limits common observability scans; compression reduces I/O; LowCardinality helps repeating dimensions; inverted indexes locate rare tokens/IDs/pairs without reading every map value. `ttl_only_drop_parts=1` trades exact expiration timing for cheaper deletion of fully expired parts. These are inferred design consequences, not a throughput benchmark. Logbird is multi-project: copying HyperDX's service-first trace key would lose the most important tenant isolation/pruning prefix.
 
 ## 2. Query language and SQL compilation
 
@@ -62,11 +62,11 @@ Interpretation: time partitions prune periods and make whole-part TTL removal ch
 
 `H:packages/common-utils/src/queryParser.ts:1,31-115` imports **`@hyperdx/lucene`**, wraps its parser with special-token encoding, and supplies escaping for LIKE metacharacters. The dependency is declared in `H:packages/common-utils/package.json:17`. The grammar implementation is a dependency, not a parser generator source checked into this clone. AST walking/serialization is in `queryParser.ts:2049-2238`; query-to-SQL entry points are at `2250-2310`.
 
-Important semantic difference from Trailmark: quoted explicit fields take the exact-equality path (`queryParser.ts:2074-2078`); ordinary string field terms can take substring `ILIKE '%term%'` (`1490-1527,1682-1684`). Numeric/boolean fields use typed equality. Trailmark promises **exact** `field:value`, even unquoted; preserve that promise rather than copying HyperDX's default substring behavior.
+Important semantic difference from Logbird: quoted explicit fields take the exact-equality path (`queryParser.ts:2074-2078`); ordinary string field terms can take substring `ILIKE '%term%'` (`1490-1527,1682-1684`). Numeric/boolean fields use typed equality. Logbird promises **exact** `field:value`, even unquoted; preserve that promise rather than copying HyperDX's default substring behavior.
 
 Field resolution checks physical/materialized columns first, then resolves a Map prefix and keeps the remaining dotted suffix as the key (`queryParser.ts:1700-1787`). For example, `LogAttributes.http.method` resolves to `LogAttributes['http.method']`, not nested map access. Metadata can redirect hot attributes to materialized columns. Map existence `indexHint(mapContains(...))` is added in relevant positive cases; it is an optimizer hint, not a replacement for the real predicate.
 
-Exact map matches can compile to `has(LogAttributeItems, concat(key,'=',value))` when metadata detects the paired text index (`queryParser.ts:555-575,2030-2044`). Empty-string equality needs special handling because a missing map key returns `''`: HyperDX explicitly includes missing keys for that equality, and changes the negated form accordingly. Trailmark should specify presence semantics explicitly.
+Exact map matches can compile to `has(LogAttributeItems, concat(key,'=',value))` when metadata detects the paired text index (`queryParser.ts:555-575,2030-2044`). Empty-string equality needs special handling because a missing map key returns `''`: HyperDX explicitly includes missing keys for that equality, and changes the negated form accordingly. Logbird should specify presence semantics explicitly.
 
 ### Full text and avoiding scans
 
@@ -74,7 +74,7 @@ The implicit/body-field compiler (`queryParser.ts:1536-1684`) detects index meta
 
 Without that text path it checks a bloom filter over `tokens(...)`, emits `hasAll(tokens(...), tokens(term))`, or falls back to `hasToken(lower(column), lower(token))`; multi-token cases retain a LIKE residual. Wildcards use lower/LIKE. Other string field searches can use ILIKE. These functions do not magically guarantee index use: expression/tokenizer alignment, selectivity, negation and wildcard shape matter. Broad/negative queries still need time/project bounds and budgets. A cast or a differently normalized expression can prevent index matching.
 
-HyperDX uses SQL escaping/serialization (`SqlString.format`) and also parameterized chart SQL. Trailmark should use ClickHouse named typed parameters end to end, plus allowlisted column identifiers, rather than transplanting arbitrary raw SQL support or metadata-dependent field semantics.
+HyperDX uses SQL escaping/serialization (`SqlString.format`) and also parameterized chart SQL. Logbird should use ClickHouse named typed parameters end to end, plus allowlisted column identifiers, rather than transplanting arbitrary raw SQL support or metadata-dependent field semantics.
 
 ### Orama and autocomplete
 
@@ -86,11 +86,11 @@ The raw fallback `getKeyValues` defaults to 20 values, caches by connection/tabl
 
 ## 3. Pagination, charts, facets and budgets
 
-* **Event pagination:** the explorer hook generates time windows and uses an OFFSET within each window (`H:packages/app/src/hooks/useOffsetPaginatedQuery.tsx:110-178,220-266`). The shared renderer emits parameterized LIMIT/OFFSET (`H:packages/common-utils/src/core/renderChartConfig.ts:1720-1729`). The external v2 search API documents maxResults 100 by default/2000 maximum, offset maximum 10,000, and warns that timestamp ties make offset results nondeterministic (`H:packages/api/src/routers/external-api/v2/search.ts:121-137`). Do not claim HyperDX universally uses stable keyset pagination. Keep Trailmark's `(timestamp,event_id)` cursor.
+* **Event pagination:** the explorer hook generates time windows and uses an OFFSET within each window (`H:packages/app/src/hooks/useOffsetPaginatedQuery.tsx:110-178,220-266`). The shared renderer emits parameterized LIMIT/OFFSET (`H:packages/common-utils/src/core/renderChartConfig.ts:1720-1729`). The external v2 search API documents maxResults 100 by default/2000 maximum, offset maximum 10,000, and warns that timestamp ties make offset results nondeterministic (`H:packages/api/src/routers/external-api/v2/search.ts:121-137`). Do not claim HyperDX universally uses stable keyset pagination. Keep Logbird's `(timestamp,event_id)` cursor.
 * **Histograms:** automatic or explicit intervals become `toStartOfInterval(toDateTime(timestamp), INTERVAL ...)` (`renderChartConfig.ts:870-889`). Additional fill-range construction is at `1015-1041`. Aggregate rendering supports sample weights for already sampled spans (`575-640`); that is distinct from ClickHouse physical `SAMPLE` pruning.
 * **Facet distributions/top values:** `getValuesDistribution` defaults to 100,000 target samples and 100 groups, obtains a count/sample factor, applies a `cityHash64(timestamp,rand()) % sample_factor` predicate, groups values and orders percentages descending (`H:packages/common-utils/src/core/metadata.ts:2511-2587`). The code explicitly says the sampling condition still reads rows; it saves value-column work, not all scanning. Group cardinality is bounded with `max_rows_to_group_by=limit*10`, overflow `any`; this may yield incomplete distributions. It is not an exact audit count.
 * **Budgets:** the shared client supplies configured `max_execution_time`, cancellation on client close, lazy materialization and top-K/skip-index settings when supported (`H:packages/common-utils/src/clickhouse/index.ts:596-668`). Metadata paths use row limits, caching and deadlines; some deliberately remove max_rows_to_read when another bound is used. A result LIMIT alone is not a scan limit.
-* **PREWHERE:** the generic builder should not be described as always explicitly emitting PREWHERE; ClickHouse can move predicates there automatically. The shared client disables subcolumn-size calculation to avoid expensive per-part Map planning on SharedMergeTree (`clickhouse/index.ts:661-667`). Trailmark should explicitly PREWHERE its own project/time envelope, keep complex search in WHERE, and inspect the plan rather than assuming all predicates prune.
+* **PREWHERE:** the generic builder should not be described as always explicitly emitting PREWHERE; ClickHouse can move predicates there automatically. The shared client disables subcolumn-size calculation to avoid expensive per-part Map planning on SharedMergeTree (`clickhouse/index.ts:661-667`). Logbird should explicitly PREWHERE its own project/time envelope, keep complex search in WHERE, and inspect the plan rather than assuming all predicates prune.
 
 ## 4. Ingestion, retry and deduplication
 
@@ -100,7 +100,7 @@ The raw fallback `getKeyValues` defaults to 20 values, caches by connection/tabl
 
 The exporter implementation is **external**, selected by `H:packages/otel-collector/builder-config.yaml:124-127`; the clone's tracked `.env:54` selects OTel **0.155.0**. The pinned upstream [exporter config](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.155.0/exporter/clickhouseexporter/config.go) defaults async insertion on (lines 62-65), subject to endpoint/connection/server overrides. [Log export](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.155.0/exporter/clickhouseexporter/exporter_logs.go#L96-L175) prepares a batch, appends normalized OTLP records, then sends it. HyperDX's local config does not explicitly set `wait_for_async_insert`; do not infer its durability contract solely from those settings. Those upstream files are not vendored into the clone.
 
-Log/trace tables are ordinary MergeTree: no event-ID uniqueness or ReplacingMergeTree deduplication. The binary includes optional `logdedup` (`H:packages/otel-collector/builder-config.yaml:82-84`) but default pipeline processor lists do not activate it. Retried delivery is not an exactly-once event guarantee. Trailmark should keep explicit `async_insert=1, wait_for_async_insert=1`, bound batch bytes as well as rows, and treat response loss/retries as an idempotency problem distinct from insert buffering.
+Log/trace tables are ordinary MergeTree: no event-ID uniqueness or ReplacingMergeTree deduplication. The binary includes optional `logdedup` (`H:packages/otel-collector/builder-config.yaml:82-84`) but default pipeline processor lists do not activate it. Retried delivery is not an exactly-once event guarantee. Logbird should keep explicit `async_insert=1, wait_for_async_insert=1`, bound batch bytes as well as rows, and treat response loss/retries as an idempotency problem distinct from insert buffering.
 
 ## 5. Materialized views and rollups
 
@@ -114,7 +114,7 @@ Official [text-index documentation](https://clickhouse.com/docs/reference/engine
 
 ### Observed on a local test server
 
-HTTP POST to `http://127.0.0.1:8123/?database=trailmark`, authenticated from the primary checkout's `.env` without printing values, returned **26.9.19.9** and database **trailmark**. Observed settings included `enable_full_text_index=1`, `use_skip_indexes=1`, `query_plan_direct_read_from_text_index=1`; the legacy-named `allow_experimental_full_text_index` setting also read 1. That setting name/value is not evidence that this release's feature is experimental. No settings were changed.
+HTTP POST to `http://127.0.0.1:8123/?database=logbird`, authenticated from the primary checkout's `.env` without printing values, returned **26.9.19.9** and database **logbird**. Observed settings included `enable_full_text_index=1`, `use_skip_indexes=1`, `query_plan_direct_read_from_text_index=1`; the legacy-named `allow_experimental_full_text_index` setting also read 1. That setting name/value is not evidence that this release's feature is experimental. No settings were changed.
 
 Executed two 100,000-row synthetic tests using ordinary MergeTree, granularity 8192, rare marker at id 12345:
 
@@ -129,10 +129,10 @@ Executed two 100,000-row synthetic tests using ordinary MergeTree, granularity 8
 
 The text plans reported direct text-index virtual predicates; pair/body queries also appeared in automatic PREWHERE. Different table layouts yielded 12 versus 13 total granules; this is a plan receipt, not a speed ratio or capacity claim. No latency, ingestion throughput, disk overhead, concurrent-query or 10M/day qualification was performed. A first console-output encoding failure interrupted printing one plan; cleanup ran and the complete test was rerun with UTF-8 output.
 
-Reproduction core (use only `trailmark.research_*`; credentials through the existing environment):
+Reproduction core (use only `logbird.research_*`; credentials through the existing environment):
 
 ```sql
-CREATE TABLE trailmark.research_pairs
+CREATE TABLE logbird.research_pairs
 (
   id UInt64,
   body String,
@@ -144,15 +144,15 @@ CREATE TABLE trailmark.research_pairs
   INDEX idx_body body TYPE text(tokenizer = splitByNonAlpha)
 )
 ENGINE = MergeTree ORDER BY id SETTINGS index_granularity = 8192;
-INSERT INTO trailmark.research_pairs
+INSERT INTO logbird.research_pairs
 SELECT number, if(number=12345,'مرحبا hotel updated','ordinary'),
        map('metadata.plan',if(number=12345,'pro','free'))
 FROM numbers(100000);
-EXPLAIN indexes=1 SELECT id FROM trailmark.research_pairs
+EXPLAIN indexes=1 SELECT id FROM logbird.research_pairs
 WHERE has(attribute_items, '13:metadata.planpro');
-EXPLAIN indexes=1 SELECT id FROM trailmark.research_pairs
+EXPLAIN indexes=1 SELECT id FROM logbird.research_pairs
 WHERE hasToken(body, 'مرحبا');
-DROP TABLE trailmark.research_pairs;
+DROP TABLE logbird.research_pairs;
 ```
 
 The pair encoding uses **UTF-8 byte length** of the key, not JavaScript string length, to avoid ambiguity if either keys or values contain `=` or `:`. Prefer composing the token in SQL with `length({key:String})`. Native Map `keyValuePairs` is a future alternative from current docs; it was not tested here and should not be made a 26.2 compatibility requirement without version-specific verification.
@@ -188,7 +188,7 @@ Apply the following replacement inside the proposed CREATE TABLE; this is a spec
 
 Keep `ORDER BY (project_id,timestamp,event_id)`, granularity 8192, payload ZSTD(3), and initially keep the existing equality Bloom indexes for IDs/arrays until representative selectivity/storage tests justify replacing them. Do not add text/bloom indexes to every column indiscriminately. Daily partitions are the initial recommendation for the stated 10M+/day/project workload; measure part counts across project fan-out and late arrivals. Keep normal row TTL behavior, **do not copy** `ttl_only_drop_parts=1` while promising immediate per-project retention. TTL is a hard-cap safety net, not the immediate retention workflow.
 
-Require 26.2+ in quickstart/startup checks. For an existing deployment, add/materialize indexes in a separately scheduled migration and measure write amplification; ADD INDEX alone does not index old parts. The exact combined Trailmark DDL/codecs have not been executed here; the index and pair expressions above have.
+Require 26.2+ in quickstart/startup checks. For an existing deployment, add/materialize indexes in a separately scheduled migration and measure write amplification; ADD INDEX alone does not index old parts. The exact combined Logbird DDL/codecs have not been executed here; the index and pair expressions above have.
 
 ### P0 — §4: specify idempotency before choosing the final engine
 

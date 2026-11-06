@@ -30,7 +30,7 @@ export function formatRelative(target: Date, now: Date) {
 
 export const roleLabel = (role: string) => (role ? role.charAt(0).toUpperCase() + role.slice(1) : 'Member');
 
-/** One line per role: what someone with it can actually do in Trailmark. */
+/** One line per role: what someone with it can actually do in Logbird. */
 export const ROLE_SUMMARY: Record<string, string> = {
   owner: 'Full control of the workspace, including deleting it and managing other owners.',
   admin: 'Manages projects, API keys, retention and members.',

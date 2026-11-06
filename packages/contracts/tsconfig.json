@@ -1,4 +1,4 @@
 {
-  "extends": "@trailmark/tsconfig/base.json",
+  "extends": "@logbird/tsconfig/base.json",
   "include": ["src"]
 }

@@ -1,32 +1,32 @@
-import type { AuditEvent } from '@trailmark/contracts';
+import type { AuditEvent } from '@logbird/contracts';
 
 /** Origin the SDK/curl should talk to. The app origin proxies `/v1` to the server. */
 export function ingestOrigin(): string {
   return typeof window === 'undefined' ? 'http://localhost:4600' : window.location.origin;
 }
 
-export const SDK_INSTALL = 'pnpm add @trailmark/sdk';
+export const SDK_INSTALL = 'pnpm add @logbird/sdk';
 
 /**
  * Snippets are meant to be pasted and run as-is. With a freshly created secret they embed it;
  * without one they read the key from the environment instead of showing a fake placeholder.
  */
-const INGEST_ENV = 'TRAILMARK_INGEST_KEY';
-const READ_ENV = 'TRAILMARK_READ_KEY';
+const INGEST_ENV = 'LOGBIRD_INGEST_KEY';
+const READ_ENV = 'LOGBIRD_READ_KEY';
 
-/** `@trailmark/sdk`: `new Trailmark({ apiKey, endpoint })`, `track()` queues, `flush()`/`shutdown()` deliver. */
+/** `@logbird/sdk`: `new Logbird({ apiKey, endpoint })`, `track()` queues, `flush()`/`shutdown()` deliver. */
 export function sdkSnippet(key?: string): string {
   const apiKey = key ? `'${key}'` : `process.env.${INGEST_ENV}!`;
-  return `import { Trailmark } from '@trailmark/sdk';
+  return `import { Logbird } from '@logbird/sdk';
 
-const trailmark = new Trailmark({
+const logbird = new Logbird({
   apiKey: ${apiKey},
   endpoint: '${ingestOrigin()}',
-  onError: (error) => console.error('[trailmark]', error.message),
+  onError: (error) => console.error('[logbird]', error.message),
 });
 
 // track() never throws: it queues the event and sends it in batches.
-trailmark.track({
+logbird.track({
   action: 'hotel.policy.updated',
   outcome: 'success',
   description: 'Lina changed the cancellation policy of Hotel Sunrise',
@@ -37,7 +37,7 @@ trailmark.track({
 });
 
 // Deliver everything queued before the process exits.
-await trailmark.shutdown();`;
+await logbird.shutdown();`;
 }
 
 export function curlSnippet(key?: string): string {
@@ -100,11 +100,11 @@ export const ENVELOPE_CORE = `{
 
 export const OPERATION_EXAMPLE = `// 1. The API handler starts an operation and passes its id along (job payload, message headers…)
 const operationId = request.id; // any stable id: request id, trace id, ULID
-trailmark.track({ action: 'booking.created', context: { operationId }, /* … */ });
+logbird.track({ action: 'booking.created', context: { operationId }, /* … */ });
 await queue.add('send-confirmation', { bookingId, operationId });
 
 // 2. The worker reuses it, so the job's events join the same operation
-trailmark.track({
+logbird.track({
   action: 'booking.confirmation.sent',
   executor: { type: 'worker', id: 'mail-worker', jobId: job.id },
   context: { operationId: job.data.operationId },

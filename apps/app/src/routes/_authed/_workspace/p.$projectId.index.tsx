@@ -1,14 +1,14 @@
+import type { AuditEvent } from '@logbird/contracts';
+import { OutcomeDot, SeverityBadge } from '@logbird/ui/components/badges';
+import { EntityChip } from '@logbird/ui/components/entity-chip';
+import { Panel } from '@logbird/ui/components/page-header';
+import { Sparkline } from '@logbird/ui/components/sparkline';
+import { StatCard } from '@logbird/ui/components/stat-card';
+import { EmptyState, ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import type { AuditEvent } from '@trailmark/contracts';
-import { OutcomeDot, SeverityBadge } from '@trailmark/ui/components/badges';
-import { EntityChip } from '@trailmark/ui/components/entity-chip';
-import { Panel } from '@trailmark/ui/components/page-header';
-import { Sparkline } from '@trailmark/ui/components/sparkline';
-import { StatCard } from '@trailmark/ui/components/stat-card';
-import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { ArrowRightIcon, CheckCircle2Icon, RadioIcon, Rows3Icon } from 'lucide-react';
 import { ActionName } from '@/components/action-name';
 import { OutcomeAreaChart } from '@/components/charts/outcome-area-chart';
@@ -25,7 +25,7 @@ import { DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/')({
-  head: () => ({ meta: [{ title: 'Overview · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Overview · Logbird' }] }),
   staticData: { crumb: 'Overview', range: true },
   loaderDeps: ({ search }) => ({ range: search.range }),
   loader: ({ context, params, deps }) => {

@@ -1,4 +1,4 @@
-import type { InviteLinkState } from '@trailmark/contracts';
+import type { InviteLinkState } from '@logbird/contracts';
 
 export function inviteLinkState(
   link: { revokedAt: Date | null; expiresAt: Date; maxUses: number | null; uses: number },

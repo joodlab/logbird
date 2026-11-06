@@ -1,11 +1,11 @@
+import type { MeResponse } from '@logbird/contracts';
 import type { QueryClient } from '@tanstack/react-query';
 import { redirect } from '@tanstack/react-router';
-import type { MeResponse } from '@trailmark/contracts';
 import { ApiRequestError } from '@/lib/api/errors';
 import { meQuery } from '@/lib/api/queries';
 import { authClient } from '@/lib/auth-client';
 
-const LAST_PROJECT_KEY = 'trailmark.lastProject';
+const LAST_PROJECT_KEY = 'logbird.lastProject';
 
 /** Load the signed-in user, or send them to /login (keeping where they were going). */
 export async function requireMe(queryClient: QueryClient, href?: string): Promise<MeResponse> {

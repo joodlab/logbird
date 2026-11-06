@@ -1,5 +1,5 @@
 {
-  "name": "@trailmark/database",
+  "name": "@logbird/database",
   "license": "MIT",
   "version": "0.1.0",
   "private": true,
@@ -25,7 +25,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@trailmark/tsconfig": "workspace:*",
+    "@logbird/tsconfig": "workspace:*",
     "@types/node": "^22.20.1",
     "@types/pg": "^8.23.1",
     "dotenv-cli": "^11.0.0",

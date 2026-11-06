@@ -1,4 +1,4 @@
-import { cn } from '@trailmark/ui/lib/utils';
+import { cn } from '@logbird/ui/lib/utils';
 import type { ReactNode } from 'react';
 
 /** Settings block: title + explanation on the left (desktop), controls on the right. */

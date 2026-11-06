@@ -7,7 +7,7 @@
  *
  * It also checks that every absolute timestamp is labelled with the one browser zone: hovering a pre-DST (October)
  * and a post-DST (November) event must both name the zone and neither may print a "GMT±n" offset.
- * The onboarding shot signs up a throwaway `newcomer-*@trailmark.local` user; run `pnpm demo:clean --yes` after.
+ * The onboarding shot signs up a throwaway `newcomer-*@logbird.local` user; run `pnpm demo:clean --yes` after.
  */
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -18,7 +18,7 @@ import { latestOtp, signIn, watch } from './qa-shoot.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(here, '../../../marketing/captures/2026-11-04-final-polish');
 const BASE = process.env.BASE_URL ?? 'http://localhost:4600';
-const DEMO = process.env.DEMO_EMAIL ?? 'demo@trailmark.local';
+const DEMO = process.env.DEMO_EMAIL ?? 'demo@logbird.local';
 const TZ = process.env.TZ_ID ?? 'Europe/Berlin';
 const VIEW = { width: 1440, height: 900 };
 const problems = [];
@@ -123,7 +123,7 @@ for (const z of zoneChecks) {
 }
 
 // Onboarding: a brand-new OTP user lands on the name step.
-const email = `newcomer-${Date.now().toString(36)}@trailmark.local`;
+const email = `newcomer-${Date.now().toString(36)}@logbird.local`;
 for (const theme of ['light', 'dark']) {
   const context = await browser.newContext({ viewport: VIEW, colorScheme: theme, timezoneId: TZ });
   const page = await context.newPage();

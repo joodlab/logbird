@@ -1,13 +1,13 @@
-# @trailmark/sdk
+# @logbird/sdk
 
 Dependency-free capture for Node 22+ and modern browsers with Fetch and Web Crypto.
 The structural `EventInput` type is copied from contracts so publishing does not
 require a private workspace package. Keep envelope additions synchronized with contracts.
 
 ```ts
-import { Trailmark } from '@trailmark/sdk';
-const audit = new Trailmark({
-  endpoint: 'http://localhost:4601', apiKey: process.env.TRAILMARK_INGEST_KEY!,
+import { Logbird } from '@logbird/sdk';
+const audit = new Logbird({
+  endpoint: 'http://localhost:4601', apiKey: (process.env.LOGBIRD_INGEST_KEY)!,
   onError: error => console.error(error.message),
 });
 audit.track({ action: 'hotel.updated', actor: { type: 'user', id: 'user_42' } });
@@ -61,20 +61,20 @@ count limit, not a byte budget. Size the queue for your payloads and memory budg
 handle them. Call shutdown in the host lifecycle and await it before exiting.
 
 ```ts
-const client = new Trailmark({ endpoint, apiKey, maxQueueSize: 1000,
+const client = new Logbird({ endpoint, apiKey, maxQueueSize: 1000,
   dropPolicy: 'oldest', onDrop: () => metrics.increment('audit.dropped') });
 ```
 
 Read adapters expose failures: Vue `useAuditTrail` sets `error` and clears `loading`;
 render that error before treating an empty `data` array as success. Its `refresh()` resolves
 with the error in reactive state, including SSR; never throw it from `serverPrefetch`.
-The examples return 502 on read failure. Set `TRAILMARK_ENDPOINT` for both capture and read.
+The examples return 502 on read failure. Set `LOGBIRD_ENDPOINT` for both capture and read.
 
 Ingest accepts a single event object, `{ "events": [...] }`, or a bare JSON array (1-1000 events).
 `occurredAt` defaults to receive time when omitted. Supplied values should be ISO-8601 or epoch milliseconds within
 receive time minus 3650 days through plus 24 hours. Only `action` is required, so an unusable `occurredAt` (unparsable,
 epoch **seconds** — numbers below 1e11 —, or outside that window) never drops the event: it is stored at receive time,
-the original value is kept in `attributes['trailmark.occurredAt.rejected']` and the payload, and the response lists it
+the original value is kept in `attributes['logbird.occurredAt.rejected']` and the payload, and the response lists it
 in `warnings[]` with the reason. Events without an `action` are per-event `rejected[]` entries; valid siblings are
 durably inserted. SDK partial rejections invoke `onDrop` for rejected indices and `onError` with reasons. Permanent
 HTTP errors (except 429) drop the batch and report; transient failures retain it for retry.
@@ -82,11 +82,11 @@ HTTP errors (except 429) drop the batch and report; transient failures retain it
 ## Host context options (0.2)
 
 ```ts
-import { Trailmark, redact } from '@trailmark/sdk';
-const client = new Trailmark({
-  endpoint: process.env.TRAILMARK_ENDPOINT,
-  apiKey: process.env.TRAILMARK_INGEST_KEY,
-  enabled: Boolean(process.env.TRAILMARK_INGEST_KEY),
+import { Logbird, redact } from '@logbird/sdk';
+const client = new Logbird({
+  endpoint: process.env.LOGBIRD_ENDPOINT,
+  apiKey: process.env.LOGBIRD_INGEST_KEY,
+  enabled: Boolean(process.env.LOGBIRD_INGEST_KEY),
   defaults: { environment: 'staging' },
   beforeSend: redact(),
   onError: console.error,
@@ -116,7 +116,7 @@ const beforeSend = event => event.action === 'health.checked' ? null : hide(even
 
 ## Requests and workers
 
-`createAudit(options, hostContext, request)` from `@trailmark/sdk/integration` captures
+`createAudit(options, hostContext, request)` from `@logbird/sdk/integration` captures
 stable header/UUID correlation fallbacks once. actor/tenant/executor/ip/requestId/operationId
 resolvers run at each audit call, including after route authentication. Explicit partial
 fields skip their resolver, even when undefined. Resolver failures report onError and omit
@@ -126,7 +126,7 @@ resolution/tracking, not transport. Adapter shutdown waits for resolution then d
 The host owns Node lifecycle hooks; edge adapters use waitUntil.
 
 ```ts
-import { jobAudit } from '@trailmark/sdk/integration';
+import { jobAudit } from '@logbird/sdk/integration';
 const parentEventId = audit('export.requested');
 const carrier = await audit.carrier({ parentEventId }); // JSON-serializable job data
 // On the worker, using job.data.carrier:

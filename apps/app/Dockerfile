@@ -2,7 +2,7 @@ FROM node:22-bookworm-slim AS prune
 WORKDIR /source
 RUN npm install --global pnpm@10.30.3 turbo@2.10.12
 COPY . .
-RUN turbo prune @trailmark/app --docker
+RUN turbo prune @logbird/app --docker
 
 FROM node:22-bookworm-slim AS build
 WORKDIR /workspace
@@ -10,14 +10,14 @@ RUN npm install --global pnpm@10.30.3 && apt-get update && apt-get install -y --
 COPY --from=prune /source/out/json/ .
 RUN pnpm install --frozen-lockfile
 COPY --from=prune /source/out/full/ .
-ENV DATABASE_URL=postgresql://build:build@localhost:5432/trailmark
+ENV DATABASE_URL=postgresql://build:build@localhost:5432/logbird
 # Console has no database client generation step.
-RUN pnpm --filter @trailmark/app... build
+RUN pnpm --filter @logbird/app... build
 
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /workspace
 ENV NODE_ENV=production
-LABEL org.opencontainers.image.source="https://github.com/joodlab/trailmark"       org.opencontainers.image.licenses="MIT"       org.opencontainers.image.title="Trailmark"
+LABEL org.opencontainers.image.source="https://github.com/joodlab/logbird"       org.opencontainers.image.licenses="MIT"       org.opencontainers.image.title="Logbird"
 COPY --from=build --chown=node:node /workspace/apps/app/.output ./.output
 USER node
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD node -e 'fetch("http://127.0.0.1:"+(process.env.PORT||"4600")+"/").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'

@@ -1,8 +1,8 @@
-# Trailmark
+# Logbird
 
 Open-source audit logs and activity history for your product. Send events through HTTP or the TypeScript SDK, then search who did what, follow records and background jobs, and trace changes across an operation.
 
-![Trailmark explorer](marketing/captures/2026-11-04-final-polish/light-explorer-autocomplete.png)
+![Logbird explorer](marketing/captures/2026-11-04-final-polish/light-explorer-autocomplete.png)
 
 - Structured filters, autocomplete and guarded SQL expressions.
 - Actor, tenant, executor and record timelines; before/after changes and causation trees.
@@ -15,8 +15,8 @@ Open-source audit logs and activity history for your product. Send events throug
 Self-host the application with Docker Compose:
 
 ```sh
-git clone https://github.com/joodlab/trailmark.git
-cd trailmark
+git clone https://github.com/joodlab/logbird.git
+cd logbird
 sh scripts/selfhost-init.sh
 # Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
 docker compose up -d
@@ -25,8 +25,8 @@ docker compose up -d
 Open http://localhost:4600, sign in using the emailed code (or server logs when explicitly enabled), and create a workspace and project. Copy its ingest key and send:
 
 ```sh
-export TRAILMARK_INGEST_KEY=tm_ingest_...
-curl http://localhost:4600/v1/events -H "Authorization: Bearer $TRAILMARK_INGEST_KEY" -H 'Content-Type: application/json' -d '{"action":"document.updated"}'
+export LOGBIRD_INGEST_KEY=lb_ingest_...
+curl http://localhost:4600/v1/events -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" -H 'Content-Type: application/json' -d '{"action":"document.updated"}'
 ```
 
 Only action is required. Never send passwords or tokens. See [self-hosting](docs/self-hosting.md) for TLS, proxies, upgrades and backups; [Coolify](docs/coolify.md) for Compose builds; [CONTRIBUTING.md](CONTRIBUTING.md) for source development; the [SDK](packages/sdk/README.md), [concepts](docs/concepts.md), [query language](docs/query-language.md), [integrations](docs/integrations.md), [examples](examples), and your server's `/docs` API reference.

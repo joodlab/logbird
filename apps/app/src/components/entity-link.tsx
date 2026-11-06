@@ -1,7 +1,7 @@
+import type { EntityKind } from '@logbird/contracts';
+import { EntityChip } from '@logbird/ui/components/entity-chip';
+import { cn } from '@logbird/ui/lib/utils';
 import { Link } from '@tanstack/react-router';
-import type { EntityKind } from '@trailmark/contracts';
-import { EntityChip } from '@trailmark/ui/components/entity-chip';
-import { cn } from '@trailmark/ui/lib/utils';
 import type { ReactNode } from 'react';
 import { sectionForKind, typeIcon } from '@/lib/entities';
 

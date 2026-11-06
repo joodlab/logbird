@@ -1,11 +1,11 @@
-# @trailmark/tanstack-start
+# @logbird/tanstack-start
 
 Server-only setup:
 ```ts
 import { createStart, createServerFn } from '@tanstack/react-start';
-import { Trailmark } from '@trailmark/sdk';
-import { trailmark, readAuditTrail, trailQuery } from '@trailmark/tanstack-start';
-const capture = trailmark({ client: new Trailmark({ endpoint: process.env.TRAILMARK_ENDPOINT!, apiKey: process.env.TRAILMARK_INGEST_KEY!, onError: console.error }), actor: request => ({ id: 'resolved-session-user', type: 'user' }), tenant: request => ({ id: 'resolved-session-tenant' }) });
+import { Logbird } from '@logbird/sdk';
+import { logbird, readAuditTrail, trailQuery } from '@logbird/tanstack-start';
+const capture = logbird({ client: new Logbird({ endpoint: (process.env.LOGBIRD_ENDPOINT)!, apiKey: (process.env.LOGBIRD_INGEST_KEY)!, onError: console.error }), actor: request => ({ id: 'resolved-session-user', type: 'user' }), tenant: request => ({ id: 'resolved-session-tenant' }) });
 export const startInstance = createStart(() => ({ requestMiddleware: [capture.requestMiddleware] }));
 export const update = createServerFn({ method: 'POST' }).middleware([capture.functionMiddleware]).handler(({ context }) => {
   context.audit('record.updated', { targets: [{ type: 'record', id: '123' }] });

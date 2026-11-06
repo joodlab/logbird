@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { prisma } from '@trailmark/database';
+import { prisma } from '@logbird/database';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { ApiError } from '../errors';
-import { generateApiKey } from '../keys';
+import { generateApiKey, hashApiKey } from '../keys';
 import type { AppEnv } from '../types';
 import { requireApiKey } from './require-api-key';
 
@@ -11,6 +11,12 @@ const organizationId = randomUUID();
 let projectId: string;
 const ingest = generateApiKey('ingest');
 const read = generateApiKey('read');
+const legacy = (kind: 'ingest' | 'read') => {
+  const secret = `tm_${kind}_${randomUUID().replaceAll('-', '')}`;
+  return { secret, hash: hashApiKey(secret), prefix: secret.slice(0, 14) };
+};
+const legacyIngest = legacy('ingest'),
+  legacyRead = legacy('read');
 const app = new Hono<AppEnv>()
   .onError((error, c) => c.json({ error: error.message }, error instanceof ApiError ? error.status : 500))
   .get('/ingest', requireApiKey('ingest'), (c) => c.json({ projectId: c.get('project').id }))
@@ -23,6 +29,8 @@ beforeAll(async () => {
   for (const [kind, material] of [
     ['ingest', ingest],
     ['read', read],
+    ['ingest', legacyIngest],
+    ['read', legacyRead],
   ] as const)
     await prisma.apiKey.create({ data: { projectId, name: kind, kind, hash: material.hash, prefix: material.prefix } });
 });
@@ -38,6 +46,11 @@ it('binds keys to projects, rejects wrong scopes and malformed or unknown secret
   expect((await request('/read', ingest.secret)).status).toBe(401);
   expect(await (await request('/ingest', ingest.secret)).json()).toEqual({ projectId });
   expect((await request('/read', read.secret)).status).toBe(200);
+  expect((await request('/read', legacyRead.secret)).status).toBe(200);
+  expect((await request('/ingest', legacyIngest.secret)).status).toBe(200);
+  expect((await request('/read', legacyIngest.secret)).status).toBe(401);
+  await prisma.apiKey.update({ where: { hash: legacyIngest.hash }, data: { revokedAt: new Date() } });
+  expect((await request('/ingest', legacyIngest.secret)).status).toBe(401);
 });
 it('atomically throttles lastUsedAt writes and rejects revoked keys', async () => {
   await prisma.apiKey.update({ where: { hash: read.hash }, data: { lastUsedAt: null } });

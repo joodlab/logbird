@@ -1,10 +1,10 @@
+import type { QueryLang } from '@logbird/contracts';
+import { OutcomeDot } from '@logbird/ui/components/badges';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
-import type { QueryLang } from '@trailmark/contracts';
-import { OutcomeDot } from '@trailmark/ui/components/badges';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
-import { cn } from '@trailmark/ui/lib/utils';
 import { ChevronRightIcon, CircleAlertIcon, Loader2Icon, MinusIcon } from 'lucide-react';
 import { useState } from 'react';
 import { facetQuery } from '@/lib/api/queries';

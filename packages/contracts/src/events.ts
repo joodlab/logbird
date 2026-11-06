@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Trailmark accepts ANY JSON object as an event. Only `action` is required.
+ * Logbird accepts ANY JSON object as an event. Only `action` is required.
  * The fields below are the *recommended* envelope: when present they are lifted
  * into first-class, indexed ClickHouse columns. Everything else is flattened into
  * `attributes` (searchable) and the raw document is always kept in `payload`.

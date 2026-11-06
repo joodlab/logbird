@@ -5,8 +5,8 @@ import {
   inviteLinkListResponseSchema,
   inviteLinkPreviewSchema,
   inviteLinkSchema,
-} from '@trailmark/contracts';
-import { Prisma, prisma } from '@trailmark/database';
+} from '@logbird/contracts';
+import { Prisma, prisma } from '@logbird/database';
 import { Hono } from 'hono';
 import { validator } from 'hono-openapi';
 import { env } from './env';

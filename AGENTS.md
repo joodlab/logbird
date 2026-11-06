@@ -1,7 +1,7 @@
-# Trailmark contributor and agent guide
+# Logbird contributor and agent guide
 Read docs/SPEC.md first. packages/contracts is the API source of truth; change contracts and implementations together and describe changes in the PR.
 
-Use Node 22.18+ and pnpm 10.30.3. Packages use @trailmark names and source-first exports. The stack is Hono, Prisma/Postgres, ClickHouse, BullMQ/Redis, better-auth and TanStack Start. Reuse packages/ui components.
+Use Node 22.18+ and pnpm 10.30.3. Packages use @logbird names and source-first exports. The stack is Hono, Prisma/Postgres, ClickHouse, BullMQ/Redis, better-auth and TanStack Start. Reuse packages/ui components.
 
 See CONTRIBUTING.md for setup and checks. AGENTS.local.md may contain private machine-specific instructions and is gitignored. Never commit credentials or personal environment configuration. Preserve existing data and other contributors' changes.
 

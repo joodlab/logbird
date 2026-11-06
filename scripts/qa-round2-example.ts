@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { createClickHouseClient, listEntities, purgeProject } from '@trailmark/clickhouse';
-import { prisma } from '@trailmark/database';
-import { Trailmark } from '@trailmark/sdk';
+import { createClickHouseClient, listEntities, purgeProject } from '@logbird/clickhouse';
+import { prisma } from '@logbird/database';
+import { Logbird } from '@logbird/sdk';
 import { generateApiKey } from '../apps/server/src/keys';
 
 const id = randomUUID(),
@@ -13,7 +13,7 @@ const project = await prisma.project.create({ data: { organizationId: id, name: 
 const key = generateApiKey('ingest');
 await prisma.apiKey.create({ data: { projectId: project.id, name: 'Fictional example', kind: 'ingest', hash: key.hash, prefix: key.prefix } });
 const child = spawn(process.execPath, ['--import', 'tsx', 'examples/hono/index.ts'], {
-  env: { ...process.env, PORT: '4902', TRAILMARK_ENDPOINT: 'http://127.0.0.1:4901', TRAILMARK_INGEST_KEY: key.secret },
+  env: { ...process.env, PORT: '4902', LOGBIRD_ENDPOINT: 'http://127.0.0.1:4901', LOGBIRD_INGEST_KEY: key.secret },
   stdio: 'ignore',
   windowsHide: true,
 });
@@ -44,7 +44,7 @@ try {
   assert(executor, 'Executors lists Demo API');
   const drops: string[] = [],
     errors: string[] = [];
-  const sdk = new Trailmark({
+  const sdk = new Logbird({
     apiKey: key.secret,
     endpoint: 'http://127.0.0.1:4901',
     onDrop: (e) => drops.push(e.action),

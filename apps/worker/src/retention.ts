@@ -1,5 +1,5 @@
-import { createClickHouseClient, hasExpiredEvents, purgeProject, rebuildProjectRollups } from '@trailmark/clickhouse';
-import { prisma, recoverAbandonedRetention, withProjectLock } from '@trailmark/database';
+import { createClickHouseClient, hasExpiredEvents, purgeProject, rebuildProjectRollups } from '@logbird/clickhouse';
+import { prisma, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 export const clickhouse = createClickHouseClient();
 export async function enforceProjectRetention(projectId: string) {
   const current = await prisma.project.findUnique({ where: { id: projectId } });

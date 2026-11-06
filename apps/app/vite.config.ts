@@ -13,8 +13,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const rootEnv = loadEnv(mode, '../..', '');
   const serverTarget =
-    // `||`, not `??`: .env.example ships an empty TRAILMARK_SERVER_URL= (the production runtime proxy target).
-    process.env.TRAILMARK_SERVER_URL || env.TRAILMARK_SERVER_URL || rootEnv.SERVER_URL?.replace('localhost', '127.0.0.1') || 'http://127.0.0.1:4601';
+    // `||`, not `??`: .env.example ships an empty LOGBIRD_SERVER_URL= (the production runtime proxy target).
+    process.env.LOGBIRD_SERVER_URL || env.LOGBIRD_SERVER_URL || rootEnv.SERVER_URL?.replace('localhost', '127.0.0.1') || 'http://127.0.0.1:4601';
 
   return {
     resolve: { tsconfigPaths: true },

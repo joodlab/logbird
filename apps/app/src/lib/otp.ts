@@ -1,6 +1,6 @@
-import { OTP_RESEND_COOLDOWN_SECONDS } from '@trailmark/ui/hooks/use-otp-resend-countdown';
+import { OTP_RESEND_COOLDOWN_SECONDS } from '@logbird/ui/hooks/use-otp-resend-countdown';
 
-const KEY = 'trailmark.otpSentAt';
+const KEY = 'logbird.otpSentAt';
 
 export function markOtpSent(email: string): void {
   try {

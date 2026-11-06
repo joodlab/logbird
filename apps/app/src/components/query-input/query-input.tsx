@@ -1,11 +1,11 @@
+import type { QueryLang } from '@logbird/contracts';
+import { Kbd } from '@logbird/ui/components/ui/kbd';
+import { SegmentedControl, SegmentedControlItem } from '@logbird/ui/components/ui/segmented-control';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
+import type { ControlSize } from '@logbird/ui/lib/control';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import type { QueryLang } from '@trailmark/contracts';
-import { Kbd } from '@trailmark/ui/components/ui/kbd';
-import { SegmentedControl, SegmentedControlItem } from '@trailmark/ui/components/ui/segmented-control';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
-import type { ControlSize } from '@trailmark/ui/lib/control';
-import { cn } from '@trailmark/ui/lib/utils';
 import { SearchIcon, XIcon } from 'lucide-react';
 import { type KeyboardEvent, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -182,7 +182,7 @@ export function QueryInput({
         const original = text;
         text = applyFixes(draft, fixes).trim();
         setText(text, text.length);
-        toast('Converted to Trailmark syntax', {
+        toast('Converted to Logbird syntax', {
           description: text,
           action: { label: 'Undo', onClick: () => onSubmit(original, nextLang) },
         });

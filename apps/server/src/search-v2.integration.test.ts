@@ -1,4 +1,4 @@
-import { queryErrorDetailsSchema } from '@trailmark/contracts';
+import { queryErrorDetailsSchema } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import { attacks, positives } from '../../../packages/clickhouse/test-fixtures/sql';
 import { client, endpoint, login } from '../../../scripts/http';
@@ -7,7 +7,7 @@ const enabled = process.env.SEARCH_V2_HTTP === '1';
 describe.runIf(enabled)('Search v2 HTTP on real local services', () => {
   let cookie: string, p: string, api: ReturnType<typeof client>, readKey: string;
   it('creates two isolated fictional projects with distinct events', async () => {
-    cookie = await login('demo@trailmark.local');
+    cookie = await login('demo@logbird.local');
     api = client(cookie);
     const me = await (await api('/api/me')).json();
     await api('/api/auth/organization/set-active', 'POST', { organizationId: me.organizations.find((o: { name: string }) => o.name === 'Acme').id });

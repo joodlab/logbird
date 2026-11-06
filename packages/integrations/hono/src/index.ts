@@ -1,14 +1,14 @@
-import { type Audit, type CaptureOptions, createAudit, report, shutdown } from '@trailmark/sdk/integration';
+import { type Audit, type CaptureOptions, createAudit, report, shutdown } from '@logbird/sdk/integration';
 import type { Context, MiddlewareHandler } from 'hono';
 
-export type { Audit } from '@trailmark/sdk/integration';
+export type { Audit } from '@logbird/sdk/integration';
 export interface AuditVariables {
   audit: Audit;
 }
-export interface TrailmarkOptions extends CaptureOptions<Context> {
+export interface LogbirdOptions extends CaptureOptions<Context> {
   autoTrack?: { methods?: string[]; skip?: (context: Context) => boolean };
 }
-export function trailmark(options: TrailmarkOptions): MiddlewareHandler<{ Variables: AuditVariables }> & { shutdown: () => Promise<void> } {
+export function logbird(options: LogbirdOptions): MiddlewareHandler<{ Variables: AuditVariables }> & { shutdown: () => Promise<void> } {
   const middleware: MiddlewareHandler<{ Variables: AuditVariables }> = async (c, next) => {
     const audit = await createAudit(options, c, c.req.raw);
     c.set('audit', audit);

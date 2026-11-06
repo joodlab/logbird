@@ -1,19 +1,19 @@
+import type { AuditEvent, EventDetail } from '@logbird/contracts';
+import { OutcomeBadge, OutcomeDot, SeverityBadge, TypePill } from '@logbird/ui/components/badges';
+import { CopyButton, CopyValue } from '@logbird/ui/components/copy-button';
+import { EntityAvatar } from '@logbird/ui/components/entity-chip';
+import { JsonViewer } from '@logbird/ui/components/json-viewer';
+import { ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@logbird/ui/components/ui/collapsible';
+import { Kbd } from '@logbird/ui/components/ui/kbd';
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@logbird/ui/components/ui/sheet';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
+import { useCopy } from '@logbird/ui/hooks/use-copy';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import type { AuditEvent, EventDetail } from '@trailmark/contracts';
-import { OutcomeBadge, OutcomeDot, SeverityBadge, TypePill } from '@trailmark/ui/components/badges';
-import { CopyButton, CopyValue } from '@trailmark/ui/components/copy-button';
-import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
-import { JsonViewer } from '@trailmark/ui/components/json-viewer';
-import { ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@trailmark/ui/components/ui/collapsible';
-import { Kbd } from '@trailmark/ui/components/ui/kbd';
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@trailmark/ui/components/ui/sheet';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
-import { useCopy } from '@trailmark/ui/hooks/use-copy';
-import { cn } from '@trailmark/ui/lib/utils';
 import {
   ArrowRightIcon,
   ChevronDownIcon,

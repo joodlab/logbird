@@ -1,9 +1,9 @@
+import { ConfirmProvider } from '@logbird/ui/components/ui/confirm';
+import { Toaster } from '@logbird/ui/components/ui/sonner';
+import { TooltipProvider } from '@logbird/ui/components/ui/tooltip';
+import { getThemeScript, THEME_STORAGE_KEY, ThemeProvider } from '@logbird/ui/theme';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { createRootRouteWithContext, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
-import { ConfirmProvider } from '@trailmark/ui/components/ui/confirm';
-import { Toaster } from '@trailmark/ui/components/ui/sonner';
-import { TooltipProvider } from '@trailmark/ui/components/ui/tooltip';
-import { getThemeScript, THEME_STORAGE_KEY, ThemeProvider } from '@trailmark/ui/theme';
 import type { ReactNode } from 'react';
 import type { RouterContext } from '@/router';
 import appCss from '@/styles.css?url';
@@ -13,7 +13,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
-      { title: 'Trailmark' },
+      { title: 'Logbird' },
       { name: 'description', content: 'Open-source audit log and activity history console.' },
       { name: 'robots', content: 'noindex' },
     ],

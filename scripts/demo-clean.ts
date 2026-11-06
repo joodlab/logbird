@@ -7,7 +7,7 @@
  *
  * Only throwaway data is matched:
  * - users whose email matches THROWAWAY_EMAIL (newcomer-*, ui-smoke-*, smoke-*, e2e-*, invite(d)-*, foundation-*, qa-*
- *   at trailmark.local / example.test), with their sessions, accounts and pending verifications;
+ *   at logbird.local / example.test), with their sessions, accounts and pending verifications;
  * - workspaces whose every member is such a user (plus "Smoke fixture" workspaces left without members), with their
  *   projects, keys, views, retention runs and ClickHouse rows (events + rollups + workspace activity);
  * - named smoke projects (SMOKE_PROJECT) inside kept workspaces, e.g. "Backend gaps <uuid>" inside "Acme", and the
@@ -19,13 +19,13 @@
  * go through `purgeProject` (the same code retention and project deletion use).
  */
 import { parseArgs } from 'node:util';
-import { createClickHouseClient, purgeProject } from '@trailmark/clickhouse';
-import { prisma, withProjectLock } from '@trailmark/database';
+import { createClickHouseClient, purgeProject } from '@logbird/clickhouse';
+import { prisma, withProjectLock } from '@logbird/database';
 
-export const THROWAWAY_EMAIL = /^(newcomer|ui-smoke|smoke|e2e|invite|invited|foundation|qa)-[\w.+-]*@(trailmark\.local|example\.test)$/i;
+export const THROWAWAY_EMAIL = /^(newcomer|ui-smoke|smoke|e2e|invite|invited|foundation|qa)-[\w.+-]*@(logbird\.local|example\.test)$/i;
 export const SMOKE_PROJECT = [/^Backend gaps [0-9a-f-]{36}$/i, /^Smoke (project|fixture)$/i];
 const SMOKE_WORKSPACE = /^Smoke fixture$/i;
-const PROTECTED = { email: 'demo@trailmark.local', orgSlug: 'acme', projectSlugs: ['staydesk', 'ledger-demo'] };
+const PROTECTED = { email: 'demo@logbird.local', orgSlug: 'acme', projectSlugs: ['staydesk', 'ledger-demo'] };
 
 const { values } = parseArgs({ options: { yes: { type: 'boolean', default: false }, orphans: { type: 'boolean', default: false } } });
 const apply = values.yes;

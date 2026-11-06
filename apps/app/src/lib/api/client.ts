@@ -32,7 +32,7 @@ import {
   searchResponseSchema,
   suggestResponseSchema,
   workspaceSetupSchema,
-} from '@trailmark/contracts';
+} from '@logbird/contracts';
 import { z } from 'zod';
 import { timeoutError, toApiError } from './errors';
 

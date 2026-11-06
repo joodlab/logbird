@@ -1,3 +1,3 @@
-import { trailmark } from '@trailmark/tanstack-start';
+import { logbird } from '@logbird/tanstack-start';
 import { options } from '../audit.server';
-export const integration = trailmark(options);
+export const integration = logbird(options);

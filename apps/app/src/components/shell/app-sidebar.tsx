@@ -1,6 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
+import { EntityAvatar } from '@logbird/ui/components/entity-chip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,7 +12,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from '@trailmark/ui/components/ui/dropdown-menu';
+} from '@logbird/ui/components/ui/dropdown-menu';
 import {
   Sidebar,
   SidebarContent,
@@ -30,8 +28,10 @@ import {
   SidebarMenuSubItem,
   SidebarRail,
   useSidebar,
-} from '@trailmark/ui/components/ui/sidebar';
-import { useTheme } from '@trailmark/ui/theme';
+} from '@logbird/ui/components/ui/sidebar';
+import { useTheme } from '@logbird/ui/theme';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import {
   ActivityIcon,
   BookOpenIcon,
@@ -303,7 +303,7 @@ function UserMenu() {
             </DropdownMenuRadioGroup>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
-          <DropdownMenuItem render={<a href="https://github.com/joodlab/trailmark/blob/master/docs/SPEC.md" rel="noreferrer" target="_blank" />}>
+          <DropdownMenuItem render={<a href="https://github.com/joodlab/logbird/blob/master/docs/SPEC.md" rel="noreferrer" target="_blank" />}>
             <BookOpenIcon />
             Product spec
           </DropdownMenuItem>

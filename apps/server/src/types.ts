@@ -1,5 +1,5 @@
-import type { AuthSession } from '@trailmark/auth';
-import type { Project } from '@trailmark/database';
+import type { AuthSession } from '@logbird/auth';
+import type { Project } from '@logbird/database';
 export type AppEnv = {
   Variables: {
     requestId: string;

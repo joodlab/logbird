@@ -1,4 +1,4 @@
-import type { SearchQuery as ContractQuery, SearchResponse as ContractResponse } from '@trailmark/contracts';
+import type { SearchQuery as ContractQuery, SearchResponse as ContractResponse } from '@logbird/contracts';
 import { expect, expectTypeOf, it } from 'vitest';
 import { type SearchQuery, type SearchResponse, trailQuery } from './read';
 

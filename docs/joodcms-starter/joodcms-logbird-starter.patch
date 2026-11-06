@@ -6,8 +6,8 @@ index 7cd896d3c..d1ed84421 100644
      "@tanstack/ai-groq": "0.6.7",
      "@tanstack/ai-openai": "0.21.1",
      "@tanstack/ai-openrouter": "0.18.3",
-+    "@trailmark/hono": "^0.2.0",
-+    "@trailmark/sdk": "^0.2.0",
++    "@logbird/hono": "^0.2.0",
++    "@logbird/sdk": "^0.2.0",
      "@vercel/sdk": "^1.28.1",
      "ai": "^6.0.208",
      "bullmq": "^5.79.1",
@@ -51,11 +51,11 @@ index 339b52acf..9eb501896 100644
      TIKTOK_ADS_CLIENT_ID: z.string().optional(),
      TIKTOK_ADS_CLIENT_SECRET: z.string().optional(),
      TIKTOK_ADS_REDIRECT_URI: z.url().optional(),
-+    // Trailmark audit log. Capture is disabled unless TRAILMARK_INGEST_KEY is set.
-+    TRAILMARK_ENDPOINT: z.url().optional(),
-+    TRAILMARK_ENVIRONMENT: z.enum(['production', 'staging', 'preview', 'development']).optional(),
-+    TRAILMARK_INGEST_KEY: z.string().startsWith('tm_ingest_').optional(),
-+    TRAILMARK_READ_KEY: z.string().startsWith('tm_read_').optional(),
++    // Logbird audit log. Capture is disabled unless LOGBIRD_INGEST_KEY is set.
++    LOGBIRD_ENDPOINT: z.url().optional(),
++    LOGBIRD_ENVIRONMENT: z.enum(['production', 'staging', 'preview', 'development']).optional(),
++    LOGBIRD_INGEST_KEY: z.string().startsWith('lb_ingest_').optional(),
++    LOGBIRD_READ_KEY: z.string().startsWith('lb_read_').optional(),
      USAGE_CONCURRENCY: z.coerce.number().default(10),
  
      // Vercel Configuration
@@ -88,7 +88,7 @@ index 000000000..1fa0bfe28
 +/**
 + * The audit action catalogue. Every audit() call must use one of these names so typos fail typecheck and
 + * the catalogue doubles as documentation. Naming: <entity>[.<sub>].<verb in past tense>.
-+ * Waves follow trailmark docs/staydesk-integration.md §3: wave 1 ships before production shadow.
++ * Waves follow logbird docs/staydesk-integration.md §3: wave 1 ships before production shadow.
 + */
 +export const AUDIT_ACTIONS = {
 +  // Wave 1: identity, access, security, destructive and PII-export actions
@@ -235,9 +235,9 @@ index 000000000..a1bd54df5
 @@ -0,0 +1,137 @@
 +import { prisma } from '@staydesk/database';
 +import { logger } from '@staydesk/observability/server';
-+import { type EventInput, Trailmark } from '@trailmark/sdk';
-+import { type AuditCarrier, jobAudit } from '@trailmark/sdk/integration';
-+import { trailmark } from '@trailmark/hono';
++import { type EventInput, Logbird } from '@logbird/sdk';
++import { type AuditCarrier, jobAudit } from '@logbird/sdk/integration';
++import { logbird } from '@logbird/hono';
 +import type { Context } from 'hono';
 +import { getContext } from 'hono/context-storage';
 +import { env } from '@/env';
@@ -247,16 +247,16 @@ index 000000000..a1bd54df5
 +import { auditBeforeSend } from './redaction';
 +
 +/**
-+ * Trailmark audit capture. Disabled (a no-op) unless TRAILMARK_INGEST_KEY is set, so local
++ * Logbird audit capture. Disabled (a no-op) unless LOGBIRD_INGEST_KEY is set, so local
 + * development, tests and previews without a key are unaffected. Delivery is batched per process
-+ * and never blocks or fails a request. See trailmark docs/staydesk-integration.md.
++ * and never blocks or fails a request. See logbird docs/staydesk-integration.md.
 + */
-+export const auditClient = new Trailmark({
-+  apiKey: env.TRAILMARK_INGEST_KEY ?? '',
++export const auditClient = new Logbird({
++  apiKey: env.LOGBIRD_INGEST_KEY ?? '',
 +  beforeSend: auditBeforeSend,
-+  defaults: { environment: env.TRAILMARK_ENVIRONMENT ?? env.NODE_ENV, schemaVersion: 'staydesk.1' },
-+  enabled: Boolean(env.TRAILMARK_INGEST_KEY),
-+  endpoint: env.TRAILMARK_ENDPOINT ?? '',
++  defaults: { environment: env.LOGBIRD_ENVIRONMENT ?? env.NODE_ENV, schemaVersion: 'staydesk.1' },
++  enabled: Boolean(env.LOGBIRD_INGEST_KEY),
++  endpoint: env.LOGBIRD_ENDPOINT ?? '',
 +  maxQueueSize: 20_000,
 +  onDrop: (event) => logger.warn({ audit_drop: { action: event.action } }, 'audit.dropped'),
 +  onError: (error) => logger.warn({ error }, 'audit.delivery_error'),
@@ -314,7 +314,7 @@ index 000000000..a1bd54df5
 + * Global middleware. Mount after enrichEvlogRequestLifecycle so `requestId` exists. Actor and tenant
 + * are resolved when audit() is called, i.e. after the route guards have set user/apiKey/website.
 + */
-+export const auditMiddleware = trailmark({
++export const auditMiddleware = logbird({
 +  actor: resolveActor,
 +  client: auditClient,
 +  executor: () => ({ id: 'staydesk-api', name: 'StayDesk API', type: 'api' }),
@@ -376,12 +376,12 @@ index 000000000..67156158d
 --- /dev/null
 +++ b/apps/server/src/lib/audit/redaction.ts
 @@ -0,0 +1,22 @@
-+import { DEFAULT_SECRET_KEYS, type EventInput, redact } from '@trailmark/sdk';
++import { DEFAULT_SECRET_KEYS, type EventInput, redact } from '@logbird/sdk';
 +import { AUDIT_ACTIONS } from './catalog';
 +
 +/**
 + * Safety net only: call sites must not send secrets or end-customer PII in the first place
-+ * (trailmark docs/staydesk-integration.md §3.4). Guests, bookings, contact messages, newsletter
++ * (logbird docs/staydesk-integration.md §3.4). Guests, bookings, contact messages, newsletter
 + * subscribers and review authors are referenced by id; their personal fields are replaced here
 + * if they ever reach metadata or changes. Staff identity on actor/impersonator is allowed.
 + */
@@ -406,7 +406,7 @@ index b4c292863..f511aa3b8 100644
  import type { ApiKey, Verification } from '@staydesk/database';
  import type { OwnershipCheck } from '@staydesk/shared/policies';
  import type { CurrentWebsite } from '@staydesk/validators/schema';
-+import type { AuditVariables } from '@trailmark/hono';
++import type { AuditVariables } from '@logbird/hono';
  import type { EvlogVariables } from 'evlog/hono';
  import { getContext } from 'hono/context-storage';
  import type { LanguageVariables } from 'hono/language';
@@ -482,7 +482,7 @@ index 5f5d86120..83befbf34 100644
        },
        'Created business role',
      );
-+    // Dual-write during shadow; the evlog record above is removed once Trailmark is on.
++    // Dual-write during shadow; the evlog record above is removed once Logbird is on.
 +    audit('business.role.created', { targets: [{ id: saved.id, name: saved.name, type: 'role' }] });
      return ctx.json({ data: roleResponse(saved) }, 201);
    })
@@ -491,7 +491,7 @@ index 5f5d86120..83befbf34 100644
        },
        'Updated business role',
      );
-+    // Dual-write during shadow; the evlog record above is removed once Trailmark is on.
++    // Dual-write during shadow; the evlog record above is removed once Logbird is on.
 +    audit('business.role.updated', { targets: [{ id: saved.id, name: saved.name, type: 'role' }] });
      return ctx.json({ data: roleResponse(saved) }, 200);
    })
@@ -537,7 +537,7 @@ index 901d59aa5..4e7f7132d 100644
  
  baseApp.use('*', enrichEvlogRequestLifecycle);
  
-+// Trailmark audit capture: c.var.audit / audit(). Actor and tenant resolve at call time, after route guards.
++// Logbird audit capture: c.var.audit / audit(). Actor and tenant resolve at call time, after route guards.
 +baseApp.use('*', auditMiddleware);
 +
  // global middlewares

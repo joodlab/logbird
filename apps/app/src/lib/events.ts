@@ -1,4 +1,4 @@
-import type { AuditEvent } from '@trailmark/contracts';
+import type { AuditEvent } from '@logbird/contracts';
 import { formatRetention } from './format';
 
 const VERB_PAST: Record<string, string> = {
@@ -153,7 +153,7 @@ export function changeSentence(changes: AuditEvent['changes'] | undefined, targe
   return `changed ${owner} ${label}`;
 }
 
-/** Trailmark's own management actions whose generic sentence would mislead ("loaded ‹project›"). */
+/** Logbird's own management actions whose generic sentence would mislead ("loaded ‹project›"). */
 function specialSentence(e: AuditEvent, who: string, noun: string, verb: string): string | null {
   const target = e.targets[0];
   const name = target?.name;

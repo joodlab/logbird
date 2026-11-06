@@ -1,12 +1,12 @@
-import { prisma } from '@trailmark/database';
+import { prisma } from '@logbird/database';
 import { createMiddleware } from 'hono/factory';
 import { hashApiKey } from '../keys';
 import { publicRateLimits } from '../rate-limit';
 import type { AppEnv } from '../types';
 export const requireApiKey = (kind: 'ingest' | 'read', limits = publicRateLimits) =>
   createMiddleware<AppEnv>(async (c, next) => {
-    const secret = c.req.header('authorization')?.match(/^Bearer (tm_(?:ingest|read)_[A-Za-z0-9]{32})$/)?.[1];
-    if (!secret?.startsWith(`tm_${kind}_`)) {
+    const secret = c.req.header('authorization')?.match(/^Bearer ((?:lb|tm)_(?:ingest|read)_[A-Za-z0-9]{32})$/)?.[1];
+    if (!secret || !new RegExp(`^(?:lb|tm)_${kind}_`).test(secret)) {
       if (await limits.precheck(c)) return limits.denied(c);
       return limits.reject(c);
     }

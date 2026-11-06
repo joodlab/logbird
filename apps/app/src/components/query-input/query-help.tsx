@@ -1,7 +1,7 @@
+import type { QueryLang } from '@logbird/contracts';
+import { Popover, PopoverContent, PopoverTrigger } from '@logbird/ui/components/ui/popover';
+import { cn } from '@logbird/ui/lib/utils';
 import { Link } from '@tanstack/react-router';
-import type { QueryLang } from '@trailmark/contracts';
-import { Popover, PopoverContent, PopoverTrigger } from '@trailmark/ui/components/ui/popover';
-import { cn } from '@trailmark/ui/lib/utils';
 import { ArrowUpRightIcon, CircleHelpIcon, ShieldCheckIcon } from 'lucide-react';
 import { useState } from 'react';
 import { HighlightedText } from './highlighted';
@@ -119,7 +119,7 @@ export function QueryHelp({ lang, projectId, onInsert }: { lang: QueryLang; proj
           <div className="flex gap-2 rounded-md border bg-muted/40 p-2 text-[11.5px] text-muted-foreground leading-relaxed">
             <ShieldCheckIcon className="mt-0.5 size-3.5 shrink-0" />
             <p>
-              Only a <span className="font-medium text-foreground">WHERE expression</span> is accepted. Trailmark wraps it in its own query, scoped to
+              Only a <span className="font-medium text-foreground">WHERE expression</span> is accepted. Logbird wraps it in its own query, scoped to
               this project and time range, and runs it read-only. Subqueries, table functions, SETTINGS/FORMAT, comments and semicolons are rejected —
               a free-form SQL console is intentionally not offered.
             </p>

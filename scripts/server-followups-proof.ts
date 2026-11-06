@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
-import { prisma } from '@trailmark/database';
+import { prisma } from '@logbird/database';
 import { closeRetentionQueue } from '../apps/worker/src/queue';
 import { clickhouse, enforceProjectRetention } from '../apps/worker/src/retention';
 import { client, endpoint, login } from './http';
@@ -93,7 +93,7 @@ try {
   // Read-only timing probe of the existing 300k-event project.
   const demo = await prisma.project.findFirst({ where: { name: 'StayDesk' } });
   if (demo) {
-    const { suggestValues } = await import('@trailmark/clickhouse');
+    const { suggestValues } = await import('@logbird/clickhouse');
     for (let i = 0; i < 5; i++) {
       const started = performance.now();
       const result = await suggestValues(clickhouse, demo.id, { field: 'metadata.locale', limit: 10 });

@@ -5,7 +5,7 @@ import { afterAll } from 'vitest';
 
 // Each test file gets real Redis storage without sharing rate limits or retention
 // jobs with another test file or the contributor's running worker.
-const prefix = `{trailmark-test-${randomUUID()}}`;
+const prefix = `{logbird-test-${randomUUID()}}`;
 process.env.BULLMQ_PREFIX = prefix;
 
 afterAll(async () => {

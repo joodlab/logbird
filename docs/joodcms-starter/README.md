@@ -1,33 +1,33 @@
-# StayDesk × Trailmark starter
+# StayDesk × Logbird starter
 
 A ready-to-apply starting point for [staydesk-integration.md](../staydesk-integration.md). **Nothing here has been
 applied to StayDesk.** Applying it needs the owner's sign-off and a StayDesk PR that follows StayDesk's own rules
 (topic branch, `pnpm fix --unsafe`, Commitizen, merge commit).
 
-- `staydesk-trailmark-starter.patch`: `git apply` against StayDesk `master` (`0f712673a`, checked with
+- `staydesk-logbird-starter.patch`: `git apply` against StayDesk `master` (`0f712673a`, checked with
   `git apply --check`). 576 lines; three new files plus about 50 inserted lines in 11 existing files.
-  `lib/audit/*.ts` compiles under `tsc --strict` (TypeScript 7.0.2) against the `@trailmark/sdk` /
-  `@trailmark/hono` 0.2.0 sources from PR #43, with StayDesk imports stubbed to their real shapes. It has not yet been
+  `lib/audit/*.ts` compiles under `tsc --strict` (TypeScript 7.0.2) against the `@logbird/sdk` /
+  `@logbird/hono` 0.2.0 sources from PR #43, with StayDesk imports stubbed to their real shapes. It has not yet been
   type-checked inside StayDesk, because installing StayDesk dependencies needs the owner's sign-off.
 - The snippets below cover the parts that need StayDesk judgment (auth hooks, jobs, admin links, phase-2 history).
 
 ## Prerequisites
 
-1. Trailmark roadmap **P0-1** merged and released as `@trailmark/sdk@0.2.0` / `@trailmark/hono@0.2.0`. The patch
+1. Logbird roadmap **P0-1** merged and released as `@logbird/sdk@0.2.0` / `@logbird/hono@0.2.0`. The patch
    uses the lazy resolvers, `requestId` resolver, `enabled`, `defaults`, `beforeSend`, `redact`, `jobAudit` and
    `audit.carrier()`.
 2. Decision **D1**: published packages (add them to `minimumReleaseAge` exclusions), or vendored copies under
-   `packages/trailmark-*` with the dependency entries changed to `workspace:*`.
-3. A Trailmark project per environment and keys (integration doc §4.4), stored as k8s secrets.
+   `packages/logbird-*` with the dependency entries changed to `workspace:*`.
+3. A Logbird project per environment and keys (integration doc §4.4), stored as k8s secrets.
 
 ## What the patch does
 
 | File | Change |
 | --- | --- |
-| `apps/server/src/lib/audit/client.ts` (new) | One `Trailmark` client per process (`enabled` only with `TRAILMARK_INGEST_KEY`); global Hono middleware with lazy actor/tenant resolvers (business tenant from validated context only, standalone website fallback, cached names), StayDesk `requestId`, trusted IP; typed `audit()` helper usable anywhere in a request (via `contextStorage`) that adds the impersonator from the session; `auditCarrier()` for job data; `auditJob()` for processors; `shutdownAudit()` |
+| `apps/server/src/lib/audit/client.ts` (new) | One `Logbird` client per process (`enabled` only with `LOGBIRD_INGEST_KEY`); global Hono middleware with lazy actor/tenant resolvers (business tenant from validated context only, standalone website fallback, cached names), StayDesk `requestId`, trusted IP; typed `audit()` helper usable anywhere in a request (via `contextStorage`) that adds the impersonator from the session; `auditCarrier()` for job data; `auditJob()` for processors; `shutdownAudit()` |
 | `apps/server/src/lib/audit/catalog.ts` (new) | Typed catalogue of wave 1 and wave 2 actions with default severity; `AuditAction` type |
 | `apps/server/src/lib/audit/redaction.ts` (new) | `beforeSend` safety net: secrets everywhere, guest PII keys outside actor/impersonator, catalogue severity |
-| `apps/server/src/env.ts` | Optional `TRAILMARK_ENDPOINT`, `TRAILMARK_ENVIRONMENT`, `TRAILMARK_INGEST_KEY`, `TRAILMARK_READ_KEY` |
+| `apps/server/src/env.ts` | Optional `LOGBIRD_ENDPOINT`, `LOGBIRD_ENVIRONMENT`, `LOGBIRD_INGEST_KEY`, `LOGBIRD_READ_KEY` |
 | `apps/server/src/lib/hono/context.ts` | `HonoVariables` includes `AuditVariables` (`c.var.audit`) |
 | `apps/server/src/server.ts` | Mounts the middleware after `enrichEvlogRequestLifecycle` |
 | `apps/server/src/index.ts`, `apps/worker/src/index.ts`, `apps/server/src/worker-runtime.ts` | Flush on shutdown before `flushObservability()` |
@@ -35,18 +35,18 @@ applied to StayDesk.** Applying it needs the owner's sign-off and a StayDesk PR 
 | `apps/server/src/actions/impersonation.ts` | `admin.impersonation.started` / `.ended` |
 | `apps/server/src/modules/admin/api-keys/handlers.ts` | `api_key.created`, `.permissions_updated`, `.regenerated`, `.revoked` |
 | `apps/server/src/modules/app/business/modules/roles/handlers.ts` | `business.role.created` / `.updated`, dual-written next to evlog |
-| `apps/server/package.json` | `@trailmark/hono`, `@trailmark/sdk` |
+| `apps/server/package.json` | `@logbird/hono`, `@logbird/sdk` |
 
 Apply and verify in StayDesk:
 
 ```sh
-git switch -c feat/trailmark-audit origin/master
-git apply staydesk-trailmark-starter.patch
+git switch -c feat/logbird-audit origin/master
+git apply staydesk-logbird-starter.patch
 pnpm install && pnpm fix --unsafe
 pnpm --filter @staydesk/server typecheck && pnpm --filter @staydesk/server test
 ```
 
-Without `TRAILMARK_INGEST_KEY` the client is a no-op, so the patch is safe to merge before any environment has keys.
+Without `LOGBIRD_INGEST_KEY` the client is a no-op, so the patch is safe to merge before any environment has keys.
 
 ## Auth events (packages/auth)
 
@@ -106,15 +106,15 @@ track('crm.export.generated', { metadata: { rows }, outcome: 'success', targets:
 Scheduled jobs without a carrier are recorded with `actor.type = 'system'`. Sync jobs emit
 `crm.sync.completed` / `catalog.sync.completed` with counts, never one event per synced row.
 
-## Admin history links (phase 1, no Trailmark change)
+## Admin history links (phase 1, no Logbird change)
 
 Expose the console base URL and production project id to `apps/admin` as non-secret build variables, e.g.
-`VITE_TRAILMARK_CONSOLE_URL` and `VITE_TRAILMARK_PROJECT_ID`, and add a "History" link on the website, business, hotel
+`VITE_LOGBIRD_CONSOLE_URL` and `VITE_LOGBIRD_PROJECT_ID`, and add a "History" link on the website, business, hotel
 and user detail views:
 
 ```ts
 const historyUrl = (kind: 'records' | 'tenants' | 'actors', id: string) =>
-  `${import.meta.env.VITE_TRAILMARK_CONSOLE_URL}/p/${import.meta.env.VITE_TRAILMARK_PROJECT_ID}/${kind}/${encodeURIComponent(id)}`;
+  `${import.meta.env.VITE_LOGBIRD_CONSOLE_URL}/p/${import.meta.env.VITE_LOGBIRD_PROJECT_ID}/${kind}/${encodeURIComponent(id)}`;
 // records use "<type>:<id>", e.g. historyUrl('records', `website:${website.id}`); tenants use the business id.
 ```
 
@@ -128,7 +128,7 @@ const historyUrl = (kind: 'records' | 'tenants' | 'actors', id: string) =>
   const { targetType, targetId, cursor } = ctx.req.valid('query');
   await assertTargetInBusinessScope(business.id, targetType, targetId, ctx.get('user')); // hotel/website scopes
   const page = await readAuditTrail(
-    { endpoint: env.TRAILMARK_ENDPOINT!, readKey: env.TRAILMARK_READ_KEY! },
+    { endpoint: env.LOGBIRD_ENDPOINT!, readKey: env.LOGBIRD_READ_KEY! },
     { ...trailQuery({ tenant: business.id, target: { type: targetType, id: targetId }, cursor, limit: 50 }), from: retentionStart(), order: 'desc' },
   );
   return ctx.json({

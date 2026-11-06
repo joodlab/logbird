@@ -1,12 +1,12 @@
+import type { ProjectSetup, SetupStep, SetupStepId } from '@logbird/contracts';
+import { CodeBlock, CodeTabs } from '@logbird/ui/components/code-block';
+import { ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@logbird/ui/components/ui/collapsible';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, useLocation } from '@tanstack/react-router';
-import type { ProjectSetup, SetupStep, SetupStepId } from '@trailmark/contracts';
-import { CodeBlock, CodeTabs } from '@trailmark/ui/components/code-block';
-import { ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@trailmark/ui/components/ui/collapsible';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { cn } from '@trailmark/ui/lib/utils';
 import { ArrowRightIcon, ArrowUpRightIcon, CheckIcon, ChevronDownIcon, EyeIcon, EyeOffIcon, Loader2Icon, PartyPopperIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { EnvelopeSemantics, QueryCheatsheet, ShortcutList } from '@/components/docs/reference';
@@ -25,7 +25,7 @@ import { OPERATION_EXAMPLE, readCurlSnippet, readFetchSnippet } from '@/lib/snip
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/setup')({
   staticData: { crumb: 'Setup' },
-  head: () => ({ meta: [{ title: 'Setup · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Setup · Logbird' }] }),
   loader: ({ context, params }) => {
     context.queryClient.prefetchQuery(projectSetupQuery(params.projectId));
   },
@@ -81,8 +81,8 @@ function SetupHeader({ projectId, setup }: { projectId: string; setup?: ProjectS
       <div className="flex flex-col gap-1.5">
         <h1 className="font-semibold text-2xl tracking-tight">Setup</h1>
         <p className="max-w-2xl text-muted-foreground">
-          Everything a production integration needs, checked live against what your project actually receives. Trailmark accepts any JSON object with
-          an <span className="font-mono text-foreground">action</span> — start small, then grow into the recommended envelope.
+          Everything a production integration needs, checked live against what your project actually receives. Logbird accepts any JSON object with an{' '}
+          <span className="font-mono text-foreground">action</span> — start small, then grow into the recommended envelope.
         </p>
       </div>
       {setup ? (

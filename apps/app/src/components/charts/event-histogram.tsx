@@ -1,6 +1,6 @@
-import type { HistogramResponse } from '@trailmark/contracts';
-import { ChartContainer, ChartTooltip } from '@trailmark/ui/components/ui/chart';
-import { cn } from '@trailmark/ui/lib/utils';
+import type { HistogramResponse } from '@logbird/contracts';
+import { ChartContainer, ChartTooltip } from '@logbird/ui/components/ui/chart';
+import { cn } from '@logbird/ui/lib/utils';
 import { useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ReferenceArea, XAxis, YAxis } from 'recharts';
 import { formatAxis } from '@/lib/format';

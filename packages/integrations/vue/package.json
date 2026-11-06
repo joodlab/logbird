@@ -1,5 +1,5 @@
 {
-  "name": "@trailmark/vue",
+  "name": "@logbird/vue",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
@@ -23,15 +23,15 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@trailmark/sdk": "workspace:*"
+    "@logbird/sdk": "workspace:*"
   },
   "peerDependencies": {
     "vue": "3.5.22"
   },
   "devDependencies": {
     "vue": "3.5.22",
-    "@trailmark/tsconfig": "workspace:*",
-    "@trailmark/contracts": "workspace:*",
+    "@logbird/tsconfig": "workspace:*",
+    "@logbird/contracts": "workspace:*",
     "@types/node": "22.20.1",
     "typescript": "7.0.2",
     "vitest": "4.1.11",

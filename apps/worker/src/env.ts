@@ -7,7 +7,7 @@ export const env = createEnv({
     BULLMQ_PREFIX: z
       .string()
       .refine((v) => /^\{[^{}]+\}$/.test(v))
-      .default('{trailmark}'),
+      .default('{logbird}'),
     CLICKHOUSE_URL: z.url(),
     CLICKHOUSE_DATABASE: z.string(),
     CLICKHOUSE_USER: z.string(),

@@ -33,10 +33,10 @@ export async function authCall<T>(
 
 /** Email a sign-in code. Bounded: a server that never answers becomes an error the form can retry. */
 export function sendSignInCode(email: string) {
-  return withDeadline(authCall(authClient.emailOtp.sendVerificationOtp({ email, type: 'sign-in' })), AUTH_DEADLINE_MS, 'The Trailmark server');
+  return withDeadline(authCall(authClient.emailOtp.sendVerificationOtp({ email, type: 'sign-in' })), AUTH_DEADLINE_MS, 'The Logbird server');
 }
 
 /** Exchange a sign-in code for a session, bounded like `sendSignInCode`. */
 export function verifySignInCode(email: string, otp: string) {
-  return withDeadline(authCall(authClient.signIn.emailOtp({ email, otp })), AUTH_DEADLINE_MS, 'The Trailmark server');
+  return withDeadline(authCall(authClient.signIn.emailOtp({ email, otp })), AUTH_DEADLINE_MS, 'The Logbird server');
 }

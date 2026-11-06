@@ -1,16 +1,16 @@
 {
-  "name": "@trailmark/example-vue",
+  "name": "@logbird/example-vue",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tsx index.ts"
   },
   "dependencies": {
-    "@trailmark/vue": "workspace:*",
-    "@trailmark/sdk": "workspace:*",
+    "@logbird/vue": "workspace:*",
+    "@logbird/sdk": "workspace:*",
     "@hono/node-server": "2.1.1",
     "hono": "4.13.5",
-    "@trailmark/hono": "workspace:*",
+    "@logbird/hono": "workspace:*",
     "vue": "3.5.22",
     "@vue/server-renderer": "3.5.22"
   },

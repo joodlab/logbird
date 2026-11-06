@@ -1,4 +1,4 @@
-import { apiErrorSchema } from '@trailmark/contracts';
+import { apiErrorSchema } from '@logbird/contracts';
 
 /** Every failed API call surfaces as this error, mapped from the contract's `{ error: { code, message } }`. */
 export class ApiRequestError extends Error {
@@ -33,7 +33,7 @@ export class ApiRequestError extends Error {
 /** The client gave up waiting (see `REQUEST_DEADLINE_MS`): the server is up but not answering. */
 export const TIMEOUT_CODE = 'timeout';
 
-export const timeoutError = (what = 'Trailmark') =>
+export const timeoutError = (what = 'Logbird') =>
   new ApiRequestError(504, TIMEOUT_CODE, `${what} did not answer in time. Check your connection, then try again.`);
 
 /** 503s that clear on their own: a retention purge holds the project for a moment. */
@@ -60,9 +60,9 @@ const STATUS_MESSAGES: Record<number, string> = {
   413: 'The request is too large.',
   429: 'Too many requests. Try again in a moment.',
   500: 'The server hit an unexpected error.',
-  502: 'The Trailmark server is not reachable.',
-  503: 'The Trailmark server is not available right now.',
-  504: 'The Trailmark server took too long to answer.',
+  502: 'The Logbird server is not reachable.',
+  503: 'The Logbird server is not available right now.',
+  504: 'The Logbird server took too long to answer.',
 };
 
 /** `Retry-After` in seconds (delta form; HTTP dates are converted). */

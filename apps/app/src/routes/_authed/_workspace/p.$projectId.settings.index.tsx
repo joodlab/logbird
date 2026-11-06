@@ -1,12 +1,12 @@
+import { CopyValue } from '@logbird/ui/components/copy-button';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Input } from '@logbird/ui/components/ui/input';
+import { Label } from '@logbird/ui/components/ui/label';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { Textarea } from '@logbird/ui/components/ui/textarea';
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { CopyValue } from '@trailmark/ui/components/copy-button';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Input } from '@trailmark/ui/components/ui/input';
-import { Label } from '@trailmark/ui/components/ui/label';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { Textarea } from '@trailmark/ui/components/ui/textarea';
 import { ArrowRightIcon, BookOpenIcon, Loader2Icon } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
@@ -21,7 +21,7 @@ import { fieldErrorMessage } from '@/lib/forms';
 import { useCan } from '@/lib/permissions';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/')({
-  head: () => ({ meta: [{ title: 'General · Settings · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'General · Settings · Logbird' }] }),
   staticData: { crumb: 'General' },
   component: GeneralSettings,
 });

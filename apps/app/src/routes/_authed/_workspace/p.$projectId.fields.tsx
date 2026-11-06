@@ -1,12 +1,12 @@
+import { TypePill } from '@logbird/ui/components/badges';
+import { Panel } from '@logbird/ui/components/page-header';
+import { EmptyState, ErrorState } from '@logbird/ui/components/states';
+import { Input } from '@logbird/ui/components/ui/input';
+import { SegmentedControl, SegmentedControlItem } from '@logbird/ui/components/ui/segmented-control';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { TypePill } from '@trailmark/ui/components/badges';
-import { Panel } from '@trailmark/ui/components/page-header';
-import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
-import { Input } from '@trailmark/ui/components/ui/input';
-import { SegmentedControl, SegmentedControlItem } from '@trailmark/ui/components/ui/segmented-control';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { cn } from '@trailmark/ui/lib/utils';
 import { CheckIcon, ListTreeIcon, MinusIcon, SearchIcon, XIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { z } from 'zod';
@@ -24,7 +24,7 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/fields')(
   loader: ({ context, params, deps }) => {
     context.queryClient.prefetchQuery(fieldsQuery(params.projectId, deps.range && isValidRange(deps.range) ? deps.range : DEFAULT_RANGE));
   },
-  head: () => ({ meta: [{ title: 'Fields · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Fields · Logbird' }] }),
   component: FieldsPage,
 });
 
@@ -101,7 +101,7 @@ function FieldsPage() {
       <div className="flex flex-col gap-1">
         <h1 className="font-semibold text-xl tracking-tight">Fields</h1>
         <p className="text-muted-foreground text-sm">
-          Every field Trailmark has seen in {rangeLabel(range).toLowerCase()}: recommended envelope fields and the attributes you send on top.
+          Every field Logbird has seen in {rangeLabel(range).toLowerCase()}: recommended envelope fields and the attributes you send on top.
         </p>
       </div>
 

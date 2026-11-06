@@ -1,7 +1,7 @@
+import { queryLangSchema } from '@logbird/contracts';
+import { Button } from '@logbird/ui/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { queryLangSchema } from '@trailmark/contracts';
-import { Button } from '@trailmark/ui/components/ui/button';
 import { BookmarkIcon, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
 import { z } from 'zod';
@@ -31,7 +31,7 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/events')(
     context.queryClient.prefetchInfiniteQuery(eventsInfiniteQuery(params.projectId, range, deps.q, deps.lang));
     context.queryClient.prefetchQuery(histogramQuery(params.projectId, range, deps.q, deps.lang));
   },
-  head: () => ({ meta: [{ title: 'Explorer · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Explorer · Logbird' }] }),
   component: ExplorerPage,
 });
 

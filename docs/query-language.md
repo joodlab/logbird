@@ -1,6 +1,6 @@
 # Query language and SQL expressions
 
-Trailmark searches one authorized project within a half-open UTC time range. The default range is the last 24 hours. All query language values and attribute keys are ClickHouse parameters. SQL mode accepts a boolean expression on console endpoints only.
+Logbird searches one authorized project within a half-open UTC time range. The default range is the last 24 hours. All query language values and attribute keys are ClickHouse parameters. SQL mode accepts a boolean expression on console endpoints only.
 
 ## Query language (lang=query, default)
 
@@ -109,27 +109,27 @@ The server validates an events SELECT wrapper containing project_id and timestam
 
 Subqueries, UNION, WITH, SETTINGS, FORMAT injection, table functions, arrayJoin, dictionaries, external reads, project_id, arbitrary parameters, comments, semicolons, heredoc strings and quoted identifiers (backticks or double quotes) are rejected outside single-quoted string literals; inside a string literal any character is fine (`description LIKE '%#%'`). The outer project/time conditions remain effective even for 1 OR 1. Successful validations cache for 30 seconds, at most 256 expressions per client. Errors are never cached.
 
-Every SQL request uses the separate trailmark_query account; missing credentials cause 503 sql_mode_unavailable. There is no privileged fallback. The read-key /v1 API rejects SQL with 422. Entity profiles and workspace activity preserve their authorized scope. Export pages retain the filter and use throwing limits; a mid-stream limit terminates the stream, so clients must treat a failed stream as incomplete. Exports do not silently truncate, but pagewise limits are not a total-export budget.
+Every SQL request uses the separate logbird_query account; missing credentials cause 503 sql_mode_unavailable. There is no privileged fallback. The read-key /v1 API rejects SQL with 422. Entity profiles and workspace activity preserve their authorized scope. Export pages retain the filter and use throwing limits; a mid-stream limit terminates the stream, so clients must treat a failed stream as incomplete. Exports do not silently truncate, but pagewise limits are not a total-export budget.
 
 The profile enforces readonly=2 CONST, allow_ddl=0 CONST, 10 seconds per statement, 5 million rows read, 1 GiB each for bytes read and memory, 100,000 result rows with throw overflow, 64 KiB total server statement size, AST depth 128 and four threads. Every listed resource and safety setting is CONST, so neither larger values nor zero (unlimited) can bypass the budget. readonly=2 allows the request custom setting while still refusing writes and DDL. These provide room for the 300k-event demo while bounding a single request. SELECT grants cover events and the three rollups used by overview/entity paths. No write or external-source grants are added.
 
-The isolation layers are: (1) the query language compiles to parameterized SQL; (2) SQL mode uses the string-aware lexical scan, EXPLAIN AST baseline comparison and identifier/function allowlists above; (3) the separate readonly account has CONST limits and SELECT-only grants; (4) database row policies on `trailmark.events`, `events_by_minute`, `entities` and `attribute_keys` enforce `project_id = getSetting('SQL_trailmark_project')` for `trailmark_query`. The server binds the authorized project on **every query** via `clickhouse_settings`, including rollup reads and each export page. EXPLAIN AST uses a validation-only project. Bindings are per request, never shared mutable client/session state. A missing setting raises UNKNOWN_SETTING on table reads. A filter bypass such as `1 OR 1` cannot expose another project's rows.
+The isolation layers are: (1) the query language compiles to parameterized SQL; (2) SQL mode uses the string-aware lexical scan, EXPLAIN AST baseline comparison and identifier/function allowlists above; (3) the separate readonly account has CONST limits and SELECT-only grants; (4) database row policies on `logbird.events`, `events_by_minute`, `entities` and `attribute_keys` enforce `project_id = getSetting('SQL_logbird_project')` for `logbird_query`. The server binds the authorized project on **every query** via `clickhouse_settings`, including rollup reads and each export page. EXPLAIN AST uses a validation-only project. Bindings are per request, never shared mutable client/session state. A missing setting raises UNKNOWN_SETTING on table reads. A filter bypass such as `1 OR 1` cannot expose another project's rows.
 
 The database trusts the server's binding: anyone holding the restricted database credentials can deliberately choose another project setting. This protects against omitted or broadened SQL filters; it does not replace HTTP authorization or protect against stolen database credentials, privileged administrators, or arbitrary SQL that overrides the trusted binding. Keep the AST guard (including its SETTINGS rejection) and credentials private.
 
-Companion `trailmark_unrestricted` policies use `USING 1 TO ALL EXCEPT trailmark_query` to preserve other users' existing access across ClickHouse configurations (policies do not themselves grant SELECT). A disposable-table integration test confirms the main user sees both rows without a companion on local 26.9.19.9 and still sees both with it; all four real tables also retain main-client visibility of both fictional projects. No shared server configuration changes are needed. On local ClickHouse 26.9.19.9 the `custom_settings_prefixes` server-settings query returns no row; an actual `getSetting` round trip confirms the built-in `SQL_` prefix works. Provisioning fails if that round trip is unsupported.
+Companion `logbird_unrestricted` policies use `USING 1 TO ALL EXCEPT logbird_query` to preserve other users' existing access across ClickHouse configurations (policies do not themselves grant SELECT). A disposable-table integration test confirms the main user sees both rows without a companion on local 26.9.19.9 and still sees both with it; all four real tables also retain main-client visibility of both fictional projects. No shared server configuration changes are needed. On local ClickHouse 26.9.19.9 the `custom_settings_prefixes` server-settings query returns no row; an actual `getSetting` round trip confirms the built-in `SQL_` prefix works. Provisioning fails if that round trip is unsupported.
 
 Self-hosters must re-provision before enabling the updated SQL readers (during a maintenance window, since access-control DDL is not transactional):
 
 ```sh
-pnpm --filter @trailmark/clickhouse create-query-user
+pnpm --filter @logbird/clickhouse create-query-user
 ```
 
-Run from the repository root with its configured `.env` and a main user allowed to manage Trailmark users, profiles, row policies and SELECT grants. The script upgrades existing profiles/policies idempotently and preserves credentials. It compares main-user table counts before/after; concurrent ingestion may require a quiet retry. Restart the server after provisioning. Tests use isolated fictional project IDs, retain their event fixtures, and remove only their own temporary semantics-probe table/policies.
+Run from the repository root with its configured `.env` and a main user allowed to manage Logbird users, profiles, row policies and SELECT grants. The script upgrades existing profiles/policies idempotently and preserves credentials. It compares main-user table counts before/after; concurrent ingestion may require a quiet retry. Restart the server after provisioning. Tests use isolated fictional project IDs, retain their event fixtures, and remove only their own temporary semantics-probe table/policies.
 
 **Shared-server limitation:** ClickHouse implicitly permits some system metadata reads (observed system.tables, system.databases, system.settings) regardless of these explicit table grants. Direct system.users/system.numbers reads, other database data and writes are denied. The expression AST guard blocks all system-table access over HTTP. The instance-level access_control_improvements.select_from_system_db_requires_grant setting tightens system access, but ClickHouse still exempts tables/columns/databases and several constant tables. Therefore blanket direct-client denial of every system table cannot be established with the requested user grants alone. See [ClickHouse's access-control configuration](https://github.com/ClickHouse/ClickHouse/blob/master/programs/server/config.xml#L799-L822). This setup script deliberately does not change shared server configuration.
 
-A free-form SQL console is out of scope for Trailmark Cloud; it may come later as a self-host instance-admin feature.
+A free-form SQL console is out of scope for Logbird Cloud; it may come later as a self-host instance-admin feature.
 
 ## Limits and errors
 
@@ -154,7 +154,7 @@ failed retention rebuild; the retention status endpoint reports failures.
 
 KQL-style syntax errors include optional `details.replacement: {start,end,text}` with
 UTF-16 offsets. Applying that edit converts `f = v`, `f != v`, `!f:v`, `&&` or `||` to
-Trailmark syntax. Operators inside quoted values and regexes remain literal. SQL syntax
+Logbird syntax. Operators inside quoted values and regexes remain literal. SQL syntax
 errors from validation and execution map ClickHouse byte positions to UTF-16 spans.
 
 ## Query bar (console)

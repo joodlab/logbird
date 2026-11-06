@@ -1,7 +1,7 @@
-import { createClickHouseClient, entityProfile, facets, operationEvents, overview, searchEvents } from '@trailmark/clickhouse';
+import { createClickHouseClient, entityProfile, facets, operationEvents, overview, searchEvents } from '@logbird/clickhouse';
 
 // Deliberately restricted local acceptance receipt; never reads other projects.
-if (process.env.CLICKHOUSE_DATABASE !== 'trailmark') throw new Error('Expected local trailmark database');
+if (process.env.CLICKHOUSE_DATABASE !== 'logbird') throw new Error('Expected local logbird database');
 const ch = createClickHouseClient();
 const range = { from: new Date(Date.now() - 61 * 86_400_000).toISOString(), to: new Date().toISOString() };
 try {

@@ -1,4 +1,4 @@
-import { type QueryErrorDetails, type QueryLang, queryErrorDetailsSchema } from '@trailmark/contracts';
+import { type QueryErrorDetails, type QueryLang, queryErrorDetailsSchema } from '@logbird/contracts';
 import { ApiRequestError } from './api/errors';
 
 /** A search failure the query bar explains inline (instead of blanking the results). */

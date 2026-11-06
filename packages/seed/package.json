@@ -1,5 +1,5 @@
 {
-  "name": "@trailmark/seed",
+  "name": "@logbird/seed",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
@@ -13,11 +13,11 @@
     "seed": "node --env-file=../../.env --import tsx src/cli.ts"
   },
   "dependencies": {
-    "@trailmark/sdk": "workspace:*",
-    "@trailmark/clickhouse": "workspace:*"
+    "@logbird/sdk": "workspace:*",
+    "@logbird/clickhouse": "workspace:*"
   },
   "devDependencies": {
-    "@trailmark/tsconfig": "workspace:*",
+    "@logbird/tsconfig": "workspace:*",
     "@types/node": "^22.20.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11"

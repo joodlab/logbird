@@ -1,8 +1,6 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
-import type { Project, RetentionStatus } from '@trailmark/contracts';
-import { OutcomeDot } from '@trailmark/ui/components/badges';
-import { ErrorState } from '@trailmark/ui/components/states';
+import type { Project, RetentionStatus } from '@logbird/contracts';
+import { OutcomeDot } from '@logbird/ui/components/badges';
+import { ErrorState } from '@logbird/ui/components/states';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -12,11 +10,13 @@ import {
   AlertDialogHeader,
   AlertDialogMedia,
   AlertDialogTitle,
-} from '@trailmark/ui/components/ui/alert-dialog';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Input } from '@trailmark/ui/components/ui/input';
-import { Label } from '@trailmark/ui/components/ui/label';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
+} from '@logbird/ui/components/ui/alert-dialog';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Input } from '@logbird/ui/components/ui/input';
+import { Label } from '@logbird/ui/components/ui/label';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { createFileRoute } from '@tanstack/react-router';
 import { Loader2Icon, TriangleAlertIcon } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { toast } from 'sonner';
@@ -31,7 +31,7 @@ import { formatNumber, formatRetention, pluralize } from '@/lib/format';
 import { useCan } from '@/lib/permissions';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/retention')({
-  head: () => ({ meta: [{ title: 'Retention · Settings · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Retention · Settings · Logbird' }] }),
   staticData: { crumb: 'Retention' },
   component: RetentionSettings,
 });

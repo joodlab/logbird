@@ -1,9 +1,9 @@
 import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
-import { insertEvents, normalizeEvent } from '@trailmark/clickhouse';
-import { ingestResponseSchema } from '@trailmark/contracts';
-import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@trailmark/database';
-import { enqueueProjectRetention } from '@trailmark/worker/queue';
+import { insertEvents, normalizeEvent } from '@logbird/clickhouse';
+import { ingestResponseSchema } from '@logbird/contracts';
+import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
+import { enqueueProjectRetention } from '@logbird/worker/queue';
 import type { Context } from 'hono';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
@@ -40,7 +40,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
   if (!Array.isArray(events) || !events.length) throw new ApiError(422, 'validation_error', 'events must be a nonempty array.');
   if (events.length > 1000 || events.some((e) => Buffer.byteLength(JSON.stringify(e)) > 256 * 1024))
     throw new ApiError(413, 'payload_too_large', 'Maximum 1000 events and 256 KB per event.');
-  const rows: import('@trailmark/clickhouse').EventRow[] = [],
+  const rows: import('@logbird/clickhouse').EventRow[] = [],
     ids: string[] = [],
     rejected: { index: number; reason: string }[] = [],
     warnings: { index: number; reason: string }[] = [];
@@ -85,7 +85,7 @@ export function audit(c: Context<AppEnv>, action: string, target: { type: string
   });
 }
 
-export async function requireRetentionReady(tx: import('@trailmark/database').Prisma.TransactionClient, projectId: string) {
+export async function requireRetentionReady(tx: import('@logbird/database').Prisma.TransactionClient, projectId: string) {
   const recovered = await recoverAbandonedRetention(tx, projectId);
   if (recovered.count) await enqueueProjectRetention(projectId);
   const latest = await tx.retentionRun.findFirst({ where: { projectId, status: 'running' } });

@@ -1,4 +1,4 @@
-import { apiErrorSchema } from '@trailmark/contracts';
+import { apiErrorSchema } from '@logbird/contracts';
 import { expect, it } from 'vitest';
 import { app } from './app';
 
