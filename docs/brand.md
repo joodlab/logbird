@@ -32,7 +32,7 @@ Checked live on 2026-11-06.
 | logbird.so | free | about $57.50 at Dynadot |
 | logbird.app | taken | — |
 | logbird.com | taken since 2004 (Network Solutions), no site; approach the holder later | — |
-| npm scope `@logbird` | **free** | — |
+| npm scope `@logbird` | **claimed 2026-11-06** (org `logbird`, plus company org `joodlab`) | — |
 | npm package `logbird` | **free** | — |
 | GitHub org `logbird` | taken by a personal account | — |
 | GitHub | repo stays under the joodlab org: `joodlab/logbird` (renamed 2026-11-06) | — |
@@ -180,8 +180,10 @@ of log rows with the newest one highlighted, and the domain.
 **Buy on the same day:**
 
 - logbird.dev and logbird.io; optionally logbird.sh.
-- Claim the npm org `logbird`, and `logbirdhq` on Bluesky, YouTube and X. The X handle is unverified because X can't be
-  checked without signing in.
+- ~~Claim the npm org `logbird`~~ **Done 2026-11-06:** npm orgs `logbird` (product packages, `@logbird/*`) and
+  `joodlab` (company umbrella), both owned by the `lord007tn` account on the free public plan.
+- Claim `logbirdhq` on Bluesky, YouTube and X. The X handle is unverified because X can't be checked without signing
+  in.
 - GitHub stays under the **joodlab** org (owner decision, 2026-11-06); no separate Logbird org. The repo was renamed
   `joodlab/trailmark` → **`joodlab/logbird`** on 2026-11-06. GitHub redirects the old URL.
 
@@ -194,9 +196,10 @@ of log rows with the newest one highlighted, and the domain.
 
 **Email:**
 
-- After logbird.dev is DKIM-verified in Postmark, switch `MAIL_FROM` from `trailmark@joodlab.com` to an address such as
+- **Done 2026-11-06:** the Postmark server is now "logbird" (id 21236377), sending as `Logbird <logbird@joodlab.com>`
+  through the DKIM-verified joodlab.com domain.
+- After logbird.dev is bought and DKIM-verified in Postmark, switch `MAIL_FROM` to an address such as
   `hello@logbird.dev`.
-- Rename the Postmark server "trailmark" to "logbird".
 
 **Filing:** get counsel's clearance (section 8) before filing.
 
