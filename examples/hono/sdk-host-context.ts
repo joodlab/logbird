@@ -1,17 +1,17 @@
 import { serve } from '@hono/node-server';
-import { type AuditVariables, trailmark } from '@trailmark/hono';
-import { redact, Trailmark } from '@trailmark/sdk';
-import { jobAudit } from '@trailmark/sdk/integration';
+import { type AuditVariables, logbird } from '@logbird/hono';
+import { Logbird, redact } from '@logbird/sdk';
+import { jobAudit } from '@logbird/sdk/integration';
 import { Hono } from 'hono';
 
-const client = new Trailmark({
-  endpoint: process.env.TRAILMARK_ENDPOINT,
-  apiKey: process.env.TRAILMARK_INGEST_KEY,
+const client = new Logbird({
+  endpoint: process.env.LOGBIRD_ENDPOINT,
+  apiKey: process.env.LOGBIRD_INGEST_KEY,
   defaults: { environment: 'staging' },
   beforeSend: redact(),
 });
 const app = new Hono<{ Variables: AuditVariables & { user: string; requestId: string } }>();
-const capture = trailmark({
+const capture = logbird({
   client,
   actor: (c) => (c.get('user') ? { type: 'user', id: c.get('user') } : undefined),
   requestId: (c) => c.get('requestId'),

@@ -19,7 +19,7 @@ audit.example.com {
 }
 ```
 
-Set APP_URL=https://audit.example.com and TRUST_PROXY=2: Caddy and the console each append one X-Forwarded-For entry, and the server reads the entry written by the outermost trusted proxy (see [self-hosting](self-hosting.md#any-reverse-proxy)). Do not expose the API directly. The app reads TRAILMARK_SERVER_URL at runtime (default http://server:4601); recreate the app container when changing it. Development Vite proxies are absent from the production listener.
+Set APP_URL=https://audit.example.com and TRUST_PROXY=2: Caddy and the console each append one X-Forwarded-For entry, and the server reads the entry written by the outermost trusted proxy (see [self-hosting](self-hosting.md#any-reverse-proxy)). Do not expose the API directly. The app reads LOGBIRD_SERVER_URL at runtime (default http://server:4601); recreate the app container when changing it. Development Vite proxies are absent from the production listener.
 
 ## Acceptance
 
@@ -27,7 +27,7 @@ Record git SHA, image IDs, configuration key names (never values), migration out
 
 ```sh
 BASE_URL=https://audit.example.com pnpm smoke:prod
-# Supply private TRAILMARK_INGEST_KEY and TRAILMARK_READ_KEY to test event readback.
+# Supply private LOGBIRD_INGEST_KEY and LOGBIRD_READ_KEY to test event readback.
 # SMOKE_COOKIE + SMOKE_PROJECT_ID enables console Query/SQL assertions.
 # SMOKE_EMAIL sends an OTP; SMOKE_OTP optionally verifies it.
 ```

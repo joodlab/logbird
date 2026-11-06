@@ -1,5 +1,5 @@
 {
-  "name": "@trailmark/contracts",
+  "name": "@logbird/contracts",
   "license": "MIT",
   "version": "0.1.0",
   "private": true,
@@ -15,7 +15,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@trailmark/tsconfig": "workspace:*",
+    "@logbird/tsconfig": "workspace:*",
     "typescript": "^7.0.2"
   }
 }

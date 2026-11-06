@@ -1,4 +1,4 @@
-import { SidebarInset, SidebarProvider } from '@trailmark/ui/components/ui/sidebar';
+import { SidebarInset, SidebarProvider } from '@logbird/ui/components/ui/sidebar';
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import { CrumbProvider } from '@/lib/crumbs';
 import { AppSidebar } from './app-sidebar';

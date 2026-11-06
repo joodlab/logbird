@@ -1,9 +1,9 @@
-import { SQL_ALLOWED_COLUMNS, SQL_ALLOWED_FUNCTIONS } from '@trailmark/contracts';
+import { SQL_ALLOWED_COLUMNS, SQL_ALLOWED_FUNCTIONS } from '@logbird/contracts';
 import type { ClickHouseClient } from './client';
 import { QueryError } from './query';
 
 const prefix =
-  'SELECT event_id FROM trailmark.events WHERE project_id = {p:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (';
+  'SELECT event_id FROM logbird.events WHERE project_id = {p:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (';
 const parameters = { p: '__validation__', from: '2000-01-01 00:00:00', to: '2000-01-02 00:00:00' };
 type Node = { text: string; children: Node[] };
 type Reason = 'not_allowed' | 'unknown_field' | 'too_complex' | 'syntax';
@@ -132,7 +132,7 @@ async function explain(ch: ClickHouseClient, q: string) {
   const result = await ch.query({
     query: `EXPLAIN AST ${prefix}${q})`,
     query_params: parameters,
-    clickhouse_settings: { SQL_trailmark_project: parameters.p },
+    clickhouse_settings: { SQL_logbird_project: parameters.p },
     format: 'TabSeparatedRaw',
   });
   return parseTree(await result.text());

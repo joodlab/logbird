@@ -22,9 +22,9 @@ export interface InvitationEmailProps {
 
 const inviter = (p: InvitationEmailProps) => (p.inviterName === p.inviterEmail ? p.inviterEmail : `${p.inviterName} (${p.inviterEmail})`);
 const expiry = (p: InvitationEmailProps) => `${formatDateTime(p.expiresAt)} (${formatRelative(p.expiresAt, p.sentAt ?? new Date())})`;
-const title = (p: InvitationEmailProps) => `Join ${p.workspace} on Trailmark`;
+const title = (p: InvitationEmailProps) => `Join ${p.workspace} on Logbird`;
 const lead = (p: InvitationEmailProps) =>
-  `${inviter(p)} invited you to the ${p.workspace} workspace as ${withArticle(roleLabel(p.role))}. Trailmark keeps a searchable history of who did what, when and where across your team’s systems.`;
+  `${inviter(p)} invited you to the ${p.workspace} workspace as ${withArticle(roleLabel(p.role))}. Logbird keeps a searchable history of who did what, when and where across your team’s systems.`;
 
 const details = (p: InvitationEmailProps) => [
   { label: 'Workspace', value: p.workspace },
@@ -45,7 +45,7 @@ export function InvitationEmail(props: InvitationEmailProps) {
       <Paragraph>
         <Strong>{props.inviterName}</Strong>
         {props.inviterName === props.inviterEmail ? null : ` (${props.inviterEmail})`} invited you to the <Strong>{props.workspace}</Strong> workspace
-        as {withArticle(roleLabel(props.role))}. Trailmark keeps a searchable history of who did what, when and where across your team’s systems.
+        as {withArticle(roleLabel(props.role))}. Logbird keeps a searchable history of who did what, when and where across your team’s systems.
       </Paragraph>
       <Spacer height={4} />
       <DetailRows rows={details(props)} />
@@ -61,7 +61,7 @@ export const invitation: EmailDefinition<InvitationEmailProps> = {
   id: 'invitation',
   name: 'Workspace invitation',
   recipient: 'email',
-  subject: (p) => `${p.inviterName} invited you to ${p.workspace} on Trailmark`,
+  subject: (p) => `${p.inviterName} invited you to ${p.workspace} on Logbird`,
   preview: (p) => `Join as ${roleLabel(p.role)}. The invitation expires ${formatRelative(p.expiresAt, p.sentAt ?? new Date())}.`,
   text: (p) =>
     plainText({

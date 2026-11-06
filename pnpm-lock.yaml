@@ -11,24 +11,33 @@ importers:
       '@biomejs/biome':
         specifier: 2.5.11
         version: 2.5.11
-      '@trailmark/clickhouse':
+      '@logbird/clickhouse':
         specifier: workspace:*
         version: link:packages/clickhouse
-      '@trailmark/contracts':
+      '@logbird/contracts':
         specifier: workspace:*
         version: link:packages/contracts
-      '@trailmark/database':
+      '@logbird/database':
         specifier: workspace:*
         version: link:packages/database
-      '@trailmark/sdk':
+      '@logbird/sdk':
         specifier: workspace:*
         version: link:packages/sdk
-      '@trailmark/seed':
+      '@logbird/seed':
         specifier: workspace:*
         version: link:packages/seed
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:packages/tsconfig
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      ioredis:
+        specifier: ^6.0.0
+        version: 6.0.0
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
       tsx:
         specifier: 4.23.13
         version: 4.23.13
@@ -47,6 +56,12 @@ importers:
 
   apps/app:
     dependencies:
+      '@logbird/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@logbird/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.4(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))
@@ -71,12 +86,6 @@ importers:
       '@tanstack/react-virtual':
         specifier: ^3.13.12
         version: 3.14.26(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@trailmark/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
-      '@trailmark/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       better-auth:
         specifier: ^1.7.2
         version: 1.7.17(@prisma/client@7.10.0(prisma@7.10.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@tanstack/react-start@1.169.4(esbuild@0.28.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.2.16)(rollup@4.67.5)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(mysql2@3.15.3)(next@16.4.3(@playwright/test@1.64.1)(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(pg@8.23.1)(prisma@7.10.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@4.1.12(@types/node@22.20.5)(happy-dom@20.0.11)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(vue@3.5.22(typescript@7.0.2))
@@ -102,12 +111,12 @@ importers:
         specifier: ^4.5.4
         version: 4.6.7
     devDependencies:
+      '@logbird/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
       '@playwright/test':
         specifier: ^1.63.0
         version: 1.64.1
-      '@trailmark/tsconfig':
-        specifier: workspace:*
-        version: link:../../packages/tsconfig
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.5
@@ -129,7 +138,7 @@ importers:
 
   apps/email:
     dependencies:
-      '@trailmark/email':
+      '@logbird/email':
         specifier: workspace:*
         version: link:../../packages/email
       react:
@@ -142,12 +151,12 @@ importers:
         specifier: ^6.9.3
         version: 6.11.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
     devDependencies:
+      '@logbird/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
       '@react-email/ui':
         specifier: 6.11.6
         version: 6.11.6(@playwright/test@1.64.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@trailmark/tsconfig':
-        specifier: workspace:*
-        version: link:../../packages/tsconfig
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
@@ -175,27 +184,27 @@ importers:
       '@hono/standard-validator':
         specifier: ^0.4.1
         version: 0.4.1(@standard-schema/spec@1.1.0)(hono@4.13.16)
+      '@logbird/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@logbird/clickhouse':
+        specifier: workspace:*
+        version: link:../../packages/clickhouse
+      '@logbird/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@logbird/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@logbird/worker':
+        specifier: workspace:*
+        version: link:../worker
       '@scalar/hono-api-reference':
         specifier: ^0.12.0
         version: 0.12.17(hono@4.13.16)
       '@t3-oss/env-core':
         specifier: ^0.13.11
         version: 0.13.11(typescript@7.0.2)(valibot@1.4.2(typescript@7.0.2))(zod@4.6.7)
-      '@trailmark/auth':
-        specifier: workspace:*
-        version: link:../../packages/auth
-      '@trailmark/clickhouse':
-        specifier: workspace:*
-        version: link:../../packages/clickhouse
-      '@trailmark/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
-      '@trailmark/database':
-        specifier: workspace:*
-        version: link:../../packages/database
-      '@trailmark/worker':
-        specifier: workspace:*
-        version: link:../worker
       bullmq:
         specifier: ^6.2.0
         version: 6.7.0(ioredis@6.0.0)(pg@8.23.1)
@@ -212,7 +221,7 @@ importers:
         specifier: ^4.5.4
         version: 4.6.7
     devDependencies:
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
       '@types/node':
@@ -236,15 +245,15 @@ importers:
       '@clickhouse/client':
         specifier: 1.23.1
         version: 1.23.1
+      '@logbird/clickhouse':
+        specifier: workspace:*
+        version: link:../../packages/clickhouse
+      '@logbird/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       '@t3-oss/env-core':
         specifier: ^0.13.11
         version: 0.13.11(typescript@7.0.2)(valibot@1.4.2(typescript@7.0.2))(zod@4.6.7)
-      '@trailmark/clickhouse':
-        specifier: workspace:*
-        version: link:../../packages/clickhouse
-      '@trailmark/database':
-        specifier: workspace:*
-        version: link:../../packages/database
       bullmq:
         specifier: ^6.2.0
         version: 6.7.0(ioredis@6.0.0)(pg@8.23.1)
@@ -255,7 +264,7 @@ importers:
         specifier: ^4.5.4
         version: 4.6.7
     devDependencies:
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
       '@types/node':
@@ -279,10 +288,10 @@ importers:
       '@hono/node-server':
         specifier: 2.1.1
         version: 2.1.1(hono@4.13.5)
-      '@trailmark/hono':
+      '@logbird/hono':
         specifier: workspace:*
         version: link:../../packages/integrations/hono
-      '@trailmark/sdk':
+      '@logbird/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
       '@vue/server-renderer':
@@ -301,10 +310,10 @@ importers:
 
   examples/nuxt:
     dependencies:
-      '@trailmark/nuxt':
+      '@logbird/nuxt':
         specifier: workspace:*
         version: link:../../packages/integrations/nuxt
-      '@trailmark/sdk':
+      '@logbird/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
       nuxt:
@@ -317,18 +326,18 @@ importers:
 
   examples/tanstack-start:
     dependencies:
+      '@logbird/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+      '@logbird/tanstack-start':
+        specifier: workspace:*
+        version: link:../../packages/integrations/tanstack-start
       '@tanstack/react-router':
         specifier: 1.170.32
         version: 1.170.32(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tanstack/react-start':
         specifier: 1.168.49
         version: 1.168.49(crossws@0.4.17(srvx@1.0.8))(esbuild@0.28.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rolldown@1.2.16)(rollup@4.67.5)(vite@8.2.2(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))
-      '@trailmark/sdk':
-        specifier: workspace:*
-        version: link:../../packages/sdk
-      '@trailmark/tanstack-start':
-        specifier: workspace:*
-        version: link:../../packages/integrations/tanstack-start
       nitro:
         specifier: 3.0.260522-beta
         version: 3.0.260522-beta(@electric-sql/pglite@0.4.3)(dotenv@17.4.2)(giget@3.3.1)(jiti@2.7.0)(mysql2@3.15.3)(rollup@4.67.5)(vite@8.2.2(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))
@@ -354,13 +363,13 @@ importers:
       '@hono/node-server':
         specifier: 2.1.1
         version: 2.1.1(hono@4.13.5)
-      '@trailmark/hono':
+      '@logbird/hono':
         specifier: workspace:*
         version: link:../../packages/integrations/hono
-      '@trailmark/sdk':
+      '@logbird/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
-      '@trailmark/vue':
+      '@logbird/vue':
         specifier: workspace:*
         version: link:../../packages/integrations/vue
       '@vue/server-renderer':
@@ -379,18 +388,18 @@ importers:
 
   packages/auth:
     dependencies:
+      '@logbird/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@logbird/database':
+        specifier: workspace:*
+        version: link:../database
+      '@logbird/email':
+        specifier: workspace:*
+        version: link:../email
       '@t3-oss/env-core':
         specifier: ^0.13.11
         version: 0.13.11(typescript@7.0.2)(valibot@1.4.2(typescript@7.0.2))(zod@4.6.7)
-      '@trailmark/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@trailmark/database':
-        specifier: workspace:*
-        version: link:../database
-      '@trailmark/email':
-        specifier: workspace:*
-        version: link:../email
       better-auth:
         specifier: ^1.7.2
         version: 1.7.17(@prisma/client@7.10.0(prisma@7.10.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2))(@tanstack/react-start@1.169.4(esbuild@0.28.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.2.16)(rollup@4.67.5)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(mysql2@3.15.3)(next@16.4.3(@playwright/test@1.64.1)(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(pg@8.23.1)(prisma@7.10.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@4.1.12(@types/node@22.20.5)(happy-dom@20.0.11)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(vue@3.5.22(typescript@7.0.2))
@@ -401,7 +410,7 @@ importers:
         specifier: ^4.5.4
         version: 4.6.7
     devDependencies:
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@types/node':
@@ -425,11 +434,11 @@ importers:
       '@clickhouse/client':
         specifier: 1.23.1
         version: 1.23.1
-      '@trailmark/contracts':
+      '@logbird/contracts':
         specifier: workspace:*
         version: link:../contracts
     devDependencies:
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@types/node':
@@ -448,7 +457,7 @@ importers:
         specifier: ^4.5.4
         version: 4.6.7
     devDependencies:
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       typescript:
@@ -473,7 +482,7 @@ importers:
         specifier: ^4.5.4
         version: 4.6.7
     devDependencies:
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@types/node':
@@ -525,7 +534,7 @@ importers:
         specifier: ^4.5.4
         version: 4.6.7
     devDependencies:
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@types/node':
@@ -552,14 +561,14 @@ importers:
 
   packages/integrations/hono:
     dependencies:
-      '@trailmark/sdk':
+      '@logbird/sdk':
         specifier: workspace:*
         version: link:../../sdk
     devDependencies:
-      '@trailmark/contracts':
+      '@logbird/contracts':
         specifier: workspace:*
         version: link:../../contracts
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../../tsconfig
       '@types/node':
@@ -580,23 +589,23 @@ importers:
 
   packages/integrations/nuxt:
     dependencies:
+      '@logbird/sdk':
+        specifier: workspace:*
+        version: link:../../sdk
+      '@logbird/vue':
+        specifier: workspace:*
+        version: link:../vue
       '@nuxt/kit':
         specifier: 4.1.3
         version: 4.1.3(magicast@0.3.5)
-      '@trailmark/sdk':
-        specifier: workspace:*
-        version: link:../../sdk
-      '@trailmark/vue':
-        specifier: workspace:*
-        version: link:../vue
       h3:
         specifier: 1.15.4
         version: 1.15.4
     devDependencies:
-      '@trailmark/contracts':
+      '@logbird/contracts':
         specifier: workspace:*
         version: link:../../contracts
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../../tsconfig
       '@types/node':
@@ -623,19 +632,19 @@ importers:
 
   packages/integrations/tanstack-start:
     dependencies:
-      '@trailmark/sdk':
+      '@logbird/sdk':
         specifier: workspace:*
         version: link:../../sdk
     devDependencies:
+      '@logbird/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
+      '@logbird/tsconfig':
+        specifier: workspace:*
+        version: link:../../tsconfig
       '@tanstack/react-start':
         specifier: 1.168.49
         version: 1.168.49(crossws@0.4.17(srvx@1.0.8))(esbuild@0.28.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.2.16)(rollup@4.67.5)(vite@8.3.5(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))
-      '@trailmark/contracts':
-        specifier: workspace:*
-        version: link:../../contracts
-      '@trailmark/tsconfig':
-        specifier: workspace:*
-        version: link:../../tsconfig
       '@types/node':
         specifier: 22.20.1
         version: 22.20.1
@@ -651,14 +660,14 @@ importers:
 
   packages/integrations/vue:
     dependencies:
-      '@trailmark/sdk':
+      '@logbird/sdk':
         specifier: workspace:*
         version: link:../../sdk
     devDependencies:
-      '@trailmark/contracts':
+      '@logbird/contracts':
         specifier: workspace:*
         version: link:../../contracts
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../../tsconfig
       '@types/node':
@@ -685,10 +694,10 @@ importers:
 
   packages/sdk:
     devDependencies:
-      '@trailmark/contracts':
+      '@logbird/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@types/node':
@@ -706,14 +715,14 @@ importers:
 
   packages/seed:
     dependencies:
-      '@trailmark/clickhouse':
+      '@logbird/clickhouse':
         specifier: workspace:*
         version: link:../clickhouse
-      '@trailmark/sdk':
+      '@logbird/sdk':
         specifier: workspace:*
         version: link:../sdk
     devDependencies:
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@types/node':
@@ -785,7 +794,7 @@ importers:
         specifier: ^1.4.0
         version: 1.4.0
     devDependencies:
-      '@trailmark/tsconfig':
+      '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@types/node':

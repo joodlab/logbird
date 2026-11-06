@@ -1,13 +1,13 @@
+import { TypePill } from '@logbird/ui/components/badges';
+import { CopyButton } from '@logbird/ui/components/copy-button';
+import { EmptyState, ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { useConfirm } from '@logbird/ui/components/ui/confirm';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@logbird/ui/components/ui/dropdown-menu';
+import { NativeSelect, NativeSelectOption } from '@logbird/ui/components/ui/native-select';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
 import { createFileRoute } from '@tanstack/react-router';
-import { TypePill } from '@trailmark/ui/components/badges';
-import { CopyButton } from '@trailmark/ui/components/copy-button';
-import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { useConfirm } from '@trailmark/ui/components/ui/confirm';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@trailmark/ui/components/ui/dropdown-menu';
-import { NativeSelect, NativeSelectOption } from '@trailmark/ui/components/ui/native-select';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
 import { Loader2Icon, MailIcon, MoreHorizontalIcon, RotateCwIcon, ShieldIcon, UserMinusIcon, XIcon } from 'lucide-react';
 import { UserAvatar } from '@/components/account/user-avatar';
 import { InviteForm } from '@/components/members/invite-form';
@@ -28,7 +28,7 @@ import { placeholderKeys } from '@/lib/placeholders';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/members')({
   staticData: { crumb: 'Members' },
-  head: () => ({ meta: [{ title: 'Members · Settings · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Members · Settings · Logbird' }] }),
   component: MembersSettings,
 });
 

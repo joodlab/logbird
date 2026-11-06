@@ -1,5 +1,5 @@
 ﻿import { randomUUID } from 'node:crypto';
-import { compileQuery, projectStats, retentionStats, validateSql } from '@trailmark/clickhouse';
+import { compileQuery, projectStats, retentionStats, validateSql } from '@logbird/clickhouse';
 import {
   apiKeySchema,
   createApiKeyResponseSchema,
@@ -14,10 +14,10 @@ import {
   retentionStatusSchema,
   savedViewSchema,
   updateProjectSchema,
-} from '@trailmark/contracts';
-import { prisma, withProjectLock } from '@trailmark/database';
-import { retentionQueue } from '@trailmark/worker/queue';
-import { enforceProjectRetention } from '@trailmark/worker/retention';
+} from '@logbird/contracts';
+import { prisma, withProjectLock } from '@logbird/database';
+import { retentionQueue } from '@logbird/worker/queue';
+import { enforceProjectRetention } from '@logbird/worker/retention';
 import { Hono } from 'hono';
 import { validator } from 'hono-openapi';
 import { z } from 'zod';

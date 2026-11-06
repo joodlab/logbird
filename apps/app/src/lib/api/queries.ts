@@ -1,5 +1,5 @@
+import type { EntityKind, EntitySort, QueryLang } from '@logbird/contracts';
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from '@tanstack/react-query';
-import type { EntityKind, EntitySort, QueryLang } from '@trailmark/contracts';
 import { authClient } from '@/lib/auth-client';
 import { resolveRange } from '@/lib/range';
 import { api, langParam } from './client';
@@ -50,13 +50,13 @@ export const meQuery = () =>
     // better-auth's get-session answers 200/null when signed out, so a signed-out visit never
     // produces a failed request; /api/me is only called with a live session.
     queryFn: async () => {
-      const session = await withDeadline(authClient.getSession(), SESSION_DEADLINE_MS, 'The Trailmark server');
+      const session = await withDeadline(authClient.getSession(), SESSION_DEADLINE_MS, 'The Logbird server');
       // A 5xx from get-session means "could not check", not "signed out": show an error with Retry, not /login.
       if (session.error && (session.error.status ?? 0) >= 500)
         throw new ApiRequestError(
           session.error.status,
           'session_unavailable',
-          'The Trailmark server could not check your session. Try again in a moment.',
+          'The Logbird server could not check your session. Try again in a moment.',
         );
       if (!session.data) throw new ApiRequestError(401, 'unauthorized', 'Sign in to continue.');
       return api.me();

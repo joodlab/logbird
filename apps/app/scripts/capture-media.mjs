@@ -20,7 +20,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.resolve(here, '../../../marketing/captures/2026-11-04-ui-real-api');
 const TMP = path.join(OUT, '.video-tmp');
 const BASE = process.env.BASE_URL ?? 'http://localhost:4600';
-const DEMO = process.env.DEMO_EMAIL ?? 'demo@trailmark.local';
+const DEMO = process.env.DEMO_EMAIL ?? 'demo@logbird.local';
 const VIDEO = { width: 1280, height: 800 };
 const flows = process.argv.slice(2);
 const want = (name) => flows.length === 0 || flows.includes(name);
@@ -241,7 +241,7 @@ if (want('signin')) {
 /* ------------------------------------------------------------------ */
 let onboarded;
 if (want('onboarding')) {
-  const email = `newcomer-${Date.now().toString(36)}@trailmark.local`;
+  const email = `newcomer-${Date.now().toString(36)}@logbird.local`;
   const { page, context, done } = await recorded('onboarding-first-event', { permissions: ['clipboard-read', 'clipboard-write'] });
   await page.goto(`${BASE}/login`);
   await page.getByLabel('Work email').click();
@@ -298,7 +298,7 @@ if (want('onboarding')) {
   await page.getByText('First event received').waitFor({ timeout: 30_000 });
   await page.waitForTimeout(1800);
   await page.screenshot({ path: path.join(OUT, 'light-onboarding-first-event-received.png') });
-  const key = /Bearer (tm_ingest_\w+)/.exec(snippet)?.[1];
+  const key = /Bearer (lb_ingest_\w+)/.exec(snippet)?.[1];
   await page.getByText('Open overview').click();
   await settle(page, 2500);
   await snap(page, 'step');
@@ -503,7 +503,7 @@ if (want('settings') && onboarded) {
     .getByRole('dialog')
     .getByRole('button', { name: /create key/i })
     .click();
-  await page.getByText(/only time Trailmark shows/).waitFor();
+  await page.getByText(/only time Logbird shows/).waitFor();
   await page.waitForTimeout(2500);
   await page.getByRole('button', { name: /i have stored the key/i }).click();
   await settle(page, 900);

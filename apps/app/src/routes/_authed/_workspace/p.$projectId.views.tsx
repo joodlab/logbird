@@ -1,13 +1,13 @@
+import type { SavedView } from '@logbird/contracts';
+import { CopyButton } from '@logbird/ui/components/copy-button';
+import { EntityChip } from '@logbird/ui/components/entity-chip';
+import { PageHeader } from '@logbird/ui/components/page-header';
+import { EmptyState, ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { useConfirm } from '@logbird/ui/components/ui/confirm';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import type { SavedView } from '@trailmark/contracts';
-import { CopyButton } from '@trailmark/ui/components/copy-button';
-import { EntityChip } from '@trailmark/ui/components/entity-chip';
-import { PageHeader } from '@trailmark/ui/components/page-header';
-import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { useConfirm } from '@trailmark/ui/components/ui/confirm';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { BookmarkIcon, Rows3Icon, Trash2Icon } from 'lucide-react';
 import { toast } from 'sonner';
 import { SqlBadge } from '@/components/explorer/explorer-toolbar';
@@ -23,7 +23,7 @@ import { rangeLabel } from '@/lib/range';
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/views')({
   staticData: { crumb: 'Saved views' },
   loader: ({ context, params }) => context.queryClient.prefetchQuery(viewsQuery(params.projectId)),
-  head: () => ({ meta: [{ title: 'Saved views · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Saved views · Logbird' }] }),
   component: ViewsPage,
 });
 

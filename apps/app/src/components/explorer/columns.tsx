@@ -1,7 +1,7 @@
-import type { AuditEvent } from '@trailmark/contracts';
-import { OutcomeDot, SeverityBadge, TypePill } from '@trailmark/ui/components/badges';
-import { EntityChip } from '@trailmark/ui/components/entity-chip';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
+import type { AuditEvent } from '@logbird/contracts';
+import { OutcomeDot, SeverityBadge, TypePill } from '@logbird/ui/components/badges';
+import { EntityChip } from '@logbird/ui/components/entity-chip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
 import { VenetianMaskIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ActionName } from '@/components/action-name';

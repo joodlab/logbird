@@ -1,5 +1,5 @@
 {
-  "name": "@trailmark/clickhouse",
+  "name": "@logbird/clickhouse",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
@@ -15,10 +15,10 @@
   },
   "dependencies": {
     "@clickhouse/client": "1.23.1",
-    "@trailmark/contracts": "workspace:*"
+    "@logbird/contracts": "workspace:*"
   },
   "devDependencies": {
-    "@trailmark/tsconfig": "workspace:*",
+    "@logbird/tsconfig": "workspace:*",
     "@types/node": "^22.20.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11"

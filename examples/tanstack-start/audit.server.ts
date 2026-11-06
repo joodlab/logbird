@@ -1,8 +1,8 @@
-import { Trailmark } from '@trailmark/sdk';
-export const endpoint = process.env.TRAILMARK_ENDPOINT ?? 'http://127.0.0.1:4731';
-export const client = new Trailmark({
+import { Logbird } from '@logbird/sdk';
+export const endpoint = process.env.LOGBIRD_ENDPOINT ?? 'http://127.0.0.1:4731';
+export const client = new Logbird({
   endpoint,
-  apiKey: process.env.TRAILMARK_INGEST_KEY ?? '',
+  apiKey: process.env.LOGBIRD_INGEST_KEY ?? '',
   onError: console.error,
 });
 export const options = {

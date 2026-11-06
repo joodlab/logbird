@@ -9,7 +9,7 @@ import { DEFAULT_RANGE, isValidRange } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/records/$entityId')({
-  head: () => ({ meta: [{ title: 'Record · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Record · Logbird' }] }),
   validateSearch: z.object({ q: z.string().optional(), ev: z.string().optional(), live: z.boolean().optional() }),
   staticData: { crumb: 'Records', range: true },
   loaderDeps: ({ search }) => ({ range: search.range }),

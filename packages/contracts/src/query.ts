@@ -5,11 +5,11 @@ import { z } from 'zod';
 /* ------------------------------------------------------------------ */
 
 /**
- * `query` – the Trailmark query language (Lucene-like, docs/SPEC.md §5.1). Default everywhere.
+ * `query` – the Logbird query language (Lucene-like, docs/SPEC.md §5.1). Default everywhere.
  * `sql`   – a ClickHouse boolean WHERE expression only. The server wraps it in its own
  *           `SELECT … FROM events WHERE project_id = {p} AND timestamp BETWEEN … AND (<expr>)`, validates it with
  *           `EXPLAIN AST` against SQL_ALLOWED_COLUMNS / SQL_ALLOWED_FUNCTIONS and runs it as the restricted
- *           `trailmark_query` ClickHouse user. Accepted on console (`/api/*`) endpoints only; `/v1/*` rejects it.
+ *           `logbird_query` ClickHouse user. Accepted on console (`/api/*`) endpoints only; `/v1/*` rejects it.
  *           A free-form SQL console is intentionally out of scope (docs/query-language.md).
  */
 export const QUERY_LANGS = ['query', 'sql'] as const;
@@ -93,7 +93,7 @@ export const QUERY_FIELDS: readonly QueryFieldInfo[] = [
   { key: 'ip', type: 'string', column: 'ip', description: 'Client IP', suggest: 'none' },
   { key: 'conformance', type: 'number', column: 'conformance', description: 'Envelope conformance 0–100', suggest: 'none' },
   { key: 'occurredAt', aliases: ['timestamp'], type: 'date', column: 'timestamp', description: 'When it happened (UTC)', suggest: 'none' },
-  { key: 'receivedAt', type: 'date', column: 'received_at', description: 'When Trailmark received it (UTC)', suggest: 'none' },
+  { key: 'receivedAt', type: 'date', column: 'received_at', description: 'When Logbird received it (UTC)', suggest: 'none' },
   { key: 'description', type: 'text', column: 'description', description: 'Human-readable summary', suggest: 'none' },
 ];
 

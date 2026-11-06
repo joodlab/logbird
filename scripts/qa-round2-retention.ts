@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { hasExpiredEvents, purgeProject } from '@trailmark/clickhouse';
-import { closeProjectLocks, prisma } from '@trailmark/database';
+import { hasExpiredEvents, purgeProject } from '@logbird/clickhouse';
+import { closeProjectLocks, prisma } from '@logbird/database';
 import { requireProjectReadable } from '../apps/server/src/ingest';
 import { generateApiKey } from '../apps/server/src/keys';
 import { clickhouse, enforceProjectRetention } from '../apps/worker/src/retention';

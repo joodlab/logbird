@@ -12,8 +12,8 @@ async function request(path: string, options: RequestInit = {}, status = 200) {
 await request('/');
 for (const path of ['/health', '/livez', '/readyz']) await request(path);
 await request('/v1/events', {}, 401);
-const ingest = process.env.TRAILMARK_INGEST_KEY;
-const read = process.env.TRAILMARK_READ_KEY;
+const ingest = process.env.LOGBIRD_INGEST_KEY;
+const read = process.env.LOGBIRD_READ_KEY;
 if (ingest && read) {
   const id = randomUUID();
   await request(
@@ -21,7 +21,7 @@ if (ingest && read) {
     {
       method: 'POST',
       headers: { Authorization: `Bearer ${ingest}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, action: 'smoke.production', source: 'trailmark-smoke' }),
+      body: JSON.stringify({ id, action: 'smoke.production', source: 'logbird-smoke' }),
     },
     202,
   );

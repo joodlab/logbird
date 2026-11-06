@@ -1,4 +1,4 @@
-import { cn } from '@trailmark/ui/lib/utils';
+import { cn } from '@logbird/ui/lib/utils';
 import { splitAction } from '@/lib/events';
 
 /** Mono action with a dim namespace and a strong verb: `hotel.policy.`**updated**. */

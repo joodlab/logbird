@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { insertEvents, normalizeEvent, purgeProject, setupEventFacts } from '@trailmark/clickhouse';
-import * as s from '@trailmark/contracts';
-import { prisma } from '@trailmark/database';
+import { insertEvents, normalizeEvent, purgeProject, setupEventFacts } from '@logbird/clickhouse';
+import * as s from '@logbird/contracts';
+import { prisma } from '@logbird/database';
 import { expect, it } from 'vitest';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
@@ -15,10 +15,14 @@ it('real services: setup, keys, raw envelope coverage, samples, membership and i
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   expect((await request('/api/auth/email-otp/send-verification-otp', 'POST', { email, type: 'sign-in' })).status).toBe(200);
-  const mailbox = (await (await fetch('http://127.0.0.1:8025/api/v1/messages')).json()) as { messages: { ID: string; To: { Address: string }[] }[] };
+  const mailbox = (await (await fetch(`${process.env.MAILPIT_URL || 'http://127.0.0.1:8025'}/api/v1/messages`)).json()) as {
+    messages: { ID: string; To: { Address: string }[] }[];
+  };
   const message = mailbox.messages.find((m) => m.To.some((t) => t.Address === email));
   expect(message).toBeDefined();
-  const content = (await (await fetch(`http://127.0.0.1:8025/api/v1/message/${message?.ID}`)).json()) as { Text: string };
+  const content = (await (await fetch(`${process.env.MAILPIT_URL || 'http://127.0.0.1:8025'}/api/v1/message/${message?.ID}`)).json()) as {
+    Text: string;
+  };
   const login = await request('/api/auth/sign-in/email-otp', 'POST', { email, otp: content.Text.match(/\b\d{6}\b/)?.[0] });
   expect(login.status).toBe(200);
   const cookie = login.headers
@@ -45,10 +49,7 @@ it('real services: setup, keys, raw envelope coverage, samples, membership and i
     projectIds.push(p);
     const neighbor = await prisma.project.create({ data: { organizationId: orgId, name: 'Neighbor fixture', slug: randomUUID() } });
     projectIds.push(neighbor.id);
-    const neighborEvent = normalizeEvent(
-      { action: 'neighbor.sample', source: s.SAMPLE_DATA_SOURCE },
-      { projectId: neighbor.id, receivedAt: new Date() },
-    );
+    const neighborEvent = normalizeEvent({ action: 'neighbor.sample', source: 'logbird-sample' }, { projectId: neighbor.id, receivedAt: new Date() });
     if (!neighborEvent.ok) throw new Error(neighborEvent.reason);
     await insertEvents(clickhouse, [neighborEvent.row]);
 
@@ -95,6 +96,10 @@ it('real services: setup, keys, raw envelope coverage, samples, membership and i
     const key = s.createApiKeyResponseSchema.parse(await (await api(`${base}/keys`, 'POST', { name: 'Fixture ingest', kind: 'ingest' })).json());
     await api(`${base}/keys`, 'POST', { name: 'Fixture read', kind: 'read' });
     expect((await status()).readKeys.active).toBe(1);
+    const legacy = normalizeEvent({ action: 'legacy.sample', source: 'logbird-sample' }, { projectId: p, receivedAt: new Date() });
+    if (!legacy.ok) throw new Error(legacy.reason);
+    await insertEvents(clickhouse, [legacy.row]);
+    expect((await status()).ingest.sampleEvents).toBe(1);
     expect((await api(`${base}/sample-data`, 'POST')).status).toBe(200);
     state = await status();
     expect(state.ingest.sampleEvents).toBe(2000);

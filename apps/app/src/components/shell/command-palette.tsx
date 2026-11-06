@@ -1,8 +1,5 @@
-import { useDebouncedValue } from '@tanstack/react-pacer';
-import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
-import type { EntityKind } from '@trailmark/contracts';
-import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
+import type { EntityKind } from '@logbird/contracts';
+import { EntityAvatar } from '@logbird/ui/components/entity-chip';
 import {
   CommandDialog,
   CommandEmpty,
@@ -12,8 +9,11 @@ import {
   CommandList,
   CommandSeparator,
   CommandShortcut,
-} from '@trailmark/ui/components/ui/command';
-import { useTheme } from '@trailmark/ui/theme';
+} from '@logbird/ui/components/ui/command';
+import { useTheme } from '@logbird/ui/theme';
+import { useDebouncedValue } from '@tanstack/react-pacer';
+import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 import {
   ActivityIcon,
   BookmarkIcon,

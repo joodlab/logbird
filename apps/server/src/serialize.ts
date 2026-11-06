@@ -1,5 +1,5 @@
-import { apiKeySchema, projectSchema, savedViewSchema } from '@trailmark/contracts';
-import type { ApiKey, Project, SavedView } from '@trailmark/database';
+import { apiKeySchema, projectSchema, savedViewSchema } from '@logbird/contracts';
+import type { ApiKey, Project, SavedView } from '@logbird/database';
 
 type Creator = { createdBy: { id: string; name: string; email: string } | null };
 export const serializeProject = (project: Project) =>

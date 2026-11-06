@@ -1,5 +1,5 @@
 {
-  "name": "@trailmark/email-preview",
+  "name": "@logbird/email-preview",
   "license": "MIT",
   "version": "0.0.0",
   "private": true,
@@ -13,14 +13,14 @@
     "clean": "git clean -xdf .cache .react-email .turbo dist node_modules"
   },
   "dependencies": {
-    "@trailmark/email": "workspace:*",
+    "@logbird/email": "workspace:*",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-email": "^6.9.3"
   },
   "devDependencies": {
     "@react-email/ui": "6.11.6",
-    "@trailmark/tsconfig": "workspace:*",
+    "@logbird/tsconfig": "workspace:*",
     "@types/node": "^22.20.1",
     "@types/react": "^19.2.18",
     "dotenv-cli": "^11.0.0",

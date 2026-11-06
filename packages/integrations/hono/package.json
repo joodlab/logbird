@@ -1,5 +1,5 @@
 {
-  "name": "@trailmark/hono",
+  "name": "@logbird/hono",
   "version": "0.2.0",
   "license": "MIT",
   "type": "module",
@@ -23,15 +23,15 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@trailmark/sdk": "workspace:*"
+    "@logbird/sdk": "workspace:*"
   },
   "peerDependencies": {
     "hono": "4.13.5"
   },
   "devDependencies": {
     "hono": "4.13.5",
-    "@trailmark/tsconfig": "workspace:*",
-    "@trailmark/contracts": "workspace:*",
+    "@logbird/tsconfig": "workspace:*",
+    "@logbird/contracts": "workspace:*",
     "@types/node": "22.20.1",
     "typescript": "7.0.2",
     "vitest": "4.1.11",

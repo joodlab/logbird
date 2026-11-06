@@ -1,5 +1,5 @@
-import { type InvitationState, invitationPreviewSchema } from '@trailmark/contracts';
-import { prisma } from '@trailmark/database';
+import { type InvitationState, invitationPreviewSchema } from '@logbird/contracts';
+import { prisma } from '@logbird/database';
 import { Hono } from 'hono';
 import { ApiError } from './errors';
 import { limitInviteRequests } from './invite-rate-limit';

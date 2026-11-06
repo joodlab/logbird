@@ -1,4 +1,4 @@
-import { type EventInput, type Trailmark, uuidv7 } from './index';
+import { type EventInput, type Logbird, uuidv7 } from './index';
 export interface AuditCarrier {
   operationId: string;
   requestId?: string;
@@ -14,7 +14,7 @@ export interface Audit {
 }
 type Resolver<C, T> = (context: C) => T | Promise<T>;
 export interface CaptureOptions<C> {
-  client: Trailmark;
+  client: Logbird;
   actor?: Resolver<C, EventInput['actor']>;
   tenant?: Resolver<C, EventInput['tenant']>;
   executor?: Resolver<C, EventInput['executor']>;
@@ -44,14 +44,14 @@ export function report(onError: CaptureOptions<unknown>['onError'], error: unkno
   }
 }
 export async function createAudit<C>(options: CaptureOptions<C>, context: C, request: Request): Promise<Audit> {
-  if (typeof window !== 'undefined') throw new Error('Trailmark ingest is server-only');
+  if (typeof window !== 'undefined') throw new Error('Logbird ingest is server-only');
   const header = (name: string) => request.headers.get(name)?.slice(0, 256) || undefined;
   const trace = request.headers.get('traceparent')?.match(/^[\da-f]{2}-([\da-f]{32})-([\da-f]{16})-[\da-f]{2}$/);
   return capture(options, context, {
     action: '',
     executor: { type: 'api' },
     context: {
-      operationId: header('x-trailmark-operation') ?? uuidv7(),
+      operationId: header('x-logbird-operation') ?? uuidv7(),
       requestId: header('x-request-id') ?? uuidv7(),
       traceId: trace && trace[1] !== '0'.repeat(32) && trace[2] !== '0'.repeat(16) ? trace[1] : undefined,
       userAgent: request.headers.get('user-agent')?.slice(0, 1024) ?? undefined,
@@ -134,7 +134,7 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
   return audit;
 }
 export interface JobAuditOptions {
-  client: Trailmark;
+  client: Logbird;
   job: { id?: string | number; name?: string; queueName?: string; attemptsMade?: number };
   carrier?: AuditCarrier;
   executor?: { id?: string; name?: string };

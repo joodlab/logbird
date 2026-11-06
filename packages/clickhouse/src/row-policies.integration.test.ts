@@ -8,7 +8,7 @@ const enabled = !!process.env.CLICKHOUSE_QUERY_PASSWORD;
 const main = enabled ? createClickHouseClient() : null;
 const restricted = enabled ? createQueryClickHouseClient() : null;
 const projects = [`row-policy-a-${randomUUID()}`, `row-policy-b-${randomUUID()}`];
-const ddlTable = `trailmark_row_policy_probe_${randomUUID().replaceAll('-', '')}`;
+const ddlTable = `logbird_row_policy_probe_${randomUUID().replaceAll('-', '')}`;
 const now = new Date();
 const range = {
   lang: 'sql' as const,
@@ -18,14 +18,14 @@ const range = {
 };
 const tables = ['events', 'events_by_minute', 'entities', 'attribute_keys'];
 afterAll(async () => {
-  if (main) await main.command({ query: `DROP TABLE IF EXISTS trailmark.${ddlTable}` });
+  if (main) await main.command({ query: `DROP TABLE IF EXISTS logbird.${ddlTable}` });
   await main?.close();
   await restricted?.close();
 });
 
 describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)', () => {
   beforeAll(async () => {
-    await main!.command({ query: `CREATE TABLE trailmark.${ddlTable} (project_id String) ENGINE=Memory` });
+    await main!.command({ query: `CREATE TABLE logbird.${ddlTable} (project_id String) ENGINE=Memory` });
     for (const projectId of projects) {
       const row = normalizeEvent(
         {
@@ -43,30 +43,30 @@ describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)',
   });
 
   it('checks no-policy semantics and preserves other users with a companion policy', async () => {
-    await main!.command({ query: `INSERT INTO trailmark.${ddlTable} VALUES ('a'),('b')` });
+    await main!.command({ query: `INSERT INTO logbird.${ddlTable} VALUES ('a'),('b')` });
     await main!.command({
-      query: `CREATE ROW POLICY trailmark_semantics_probe ON trailmark.${ddlTable} USING project_id = getSetting('SQL_trailmark_project') TO trailmark_query`,
+      query: `CREATE ROW POLICY logbird_semantics_probe ON logbird.${ddlTable} USING project_id = getSetting('SQL_logbird_project') TO logbird_query`,
     });
     try {
       const count = async () =>
-        (await (await main!.query({ query: `SELECT count() n FROM trailmark.${ddlTable}`, format: 'JSONEachRow' })).json<{ n: number }>())[0]!.n;
+        (await (await main!.query({ query: `SELECT count() n FROM logbird.${ddlTable}`, format: 'JSONEachRow' })).json<{ n: number }>())[0]!.n;
       const withoutCompanion = await count();
       expect([0, 2]).toContain(Number(withoutCompanion));
       process.stdout.write(`${JSON.stringify({ mainRowsWithoutCompanion: withoutCompanion })}\n`);
       await main!.command({
-        query: `CREATE ROW POLICY trailmark_semantics_companion ON trailmark.${ddlTable} USING 1 TO ALL EXCEPT trailmark_query`,
+        query: `CREATE ROW POLICY logbird_semantics_companion ON logbird.${ddlTable} USING 1 TO ALL EXCEPT logbird_query`,
       });
       expect(Number(await count())).toBe(2);
     } finally {
-      await main!.command({ query: `DROP ROW POLICY IF EXISTS trailmark_semantics_probe ON trailmark.${ddlTable}` });
-      await main!.command({ query: `DROP ROW POLICY IF EXISTS trailmark_semantics_companion ON trailmark.${ddlTable}` });
+      await main!.command({ query: `DROP ROW POLICY IF EXISTS logbird_semantics_probe ON logbird.${ddlTable}` });
+      await main!.command({ query: `DROP ROW POLICY IF EXISTS logbird_semantics_companion ON logbird.${ddlTable}` });
     }
   });
 
   it.each(tables)('%s enforces policy without validateSql or application project predicates', async (table) => {
     const baseline = await (
       await main!.query({
-        query: `SELECT count() n FROM trailmark.${table} WHERE project_id={p:String}`,
+        query: `SELECT count() n FROM logbird.${table} WHERE project_id={p:String}`,
         query_params: { p: projects[0] },
         format: 'JSONEachRow',
       })
@@ -75,8 +75,8 @@ describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)',
     for (const predicate of ['1 OR 1', "project_id != ''"]) {
       const rows = await (
         await restricted!.query({
-          query: `SELECT project_id,count() n FROM trailmark.${table} WHERE ${predicate} GROUP BY project_id`,
-          clickhouse_settings: { SQL_trailmark_project: projects[0]! },
+          query: `SELECT project_id,count() n FROM logbird.${table} WHERE ${predicate} GROUP BY project_id`,
+          clickhouse_settings: { SQL_logbird_project: projects[0]! },
           format: 'JSONEachRow',
         })
       ).json<{ project_id: string; n: number }>();
@@ -85,7 +85,7 @@ describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)',
     }
     const mainRows = await (
       await main!.query({
-        query: `SELECT DISTINCT project_id FROM trailmark.${table} WHERE project_id IN {projects:Array(String)}`,
+        query: `SELECT DISTINCT project_id FROM logbird.${table} WHERE project_id IN {projects:Array(String)}`,
         query_params: { projects },
         format: 'JSONEachRow',
       })
@@ -94,7 +94,7 @@ describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)',
   });
 
   it.each(tables)('%s fails closed without a setting, including after a bound query on the same client', async (table) => {
-    await expect(restricted!.query({ query: `SELECT count() FROM trailmark.${table}` })).rejects.toThrow(/UNKNOWN_SETTING|Unknown setting/);
+    await expect(restricted!.query({ query: `SELECT count() FROM logbird.${table}` })).rejects.toThrow(/UNKNOWN_SETTING|Unknown setting/);
   });
 
   it('direct count sees exactly one fixture event and concurrent request bindings do not leak', async () => {
@@ -102,8 +102,8 @@ describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)',
       [...projects, ...projects].map(async (project) =>
         (
           await restricted!.query({
-            query: 'SELECT project_id,count() n FROM trailmark.events GROUP BY project_id',
-            clickhouse_settings: { SQL_trailmark_project: project! },
+            query: 'SELECT project_id,count() n FROM logbird.events GROUP BY project_id',
+            clickhouse_settings: { SQL_logbird_project: project! },
             format: 'JSONEachRow',
           })
         ).json<{ project_id: string; n: number }>(),
@@ -112,8 +112,8 @@ describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)',
     for (const [i, rows] of results.entries()) expect(rows).toEqual([{ project_id: projects[i % 2], n: 1 }]);
     const rows = await (
       await restricted!.query({
-        query: 'SELECT count() n FROM trailmark.events',
-        clickhouse_settings: { SQL_trailmark_project: projects[0]! },
+        query: 'SELECT count() n FROM logbird.events',
+        clickhouse_settings: { SQL_logbird_project: projects[0]! },
         format: 'JSONEachRow',
       })
     ).json();
@@ -137,7 +137,7 @@ describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)',
     'max_ast_depth=0',
   ])('denies settings escalation: %s', async (setting) => {
     await expect(
-      restricted!.query({ query: `SELECT 1 SETTINGS ${setting}`, clickhouse_settings: { SQL_trailmark_project: projects[0]! } }),
+      restricted!.query({ query: `SELECT 1 SETTINGS ${setting}`, clickhouse_settings: { SQL_logbird_project: projects[0]! } }),
     ).rejects.toThrow(/READONLY|constraint|Cannot modify|should not/i);
   });
 
@@ -145,8 +145,8 @@ describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)',
     const rows = await (
       await restricted!.query({
         query:
-          "SELECT project_id,getSetting('readonly') readonly,getSetting('max_execution_time') budget FROM trailmark.events SETTINGS profile='default'",
-        clickhouse_settings: { SQL_trailmark_project: projects[0]! },
+          "SELECT project_id,getSetting('readonly') readonly,getSetting('max_execution_time') budget FROM logbird.events SETTINGS profile='default'",
+        clickhouse_settings: { SQL_logbird_project: projects[0]! },
         format: 'JSONEachRow',
       })
     ).json();
@@ -157,12 +157,12 @@ describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)',
   });
 
   it.each([
-    "INSERT INTO trailmark.events (project_id,action) VALUES ('row-policy-forbidden','forbidden')",
-    'ALTER TABLE trailmark.events ADD COLUMN trailmark_forbidden UInt8',
-    'CREATE TABLE trailmark.trailmark_forbidden (x UInt8) ENGINE=Memory',
-    `DROP TABLE trailmark.${ddlTable}`,
+    "INSERT INTO logbird.events (project_id,action) VALUES ('row-policy-forbidden','forbidden')",
+    'ALTER TABLE logbird.events ADD COLUMN logbird_forbidden UInt8',
+    'CREATE TABLE logbird.logbird_forbidden (x UInt8) ENGINE=Memory',
+    `DROP TABLE logbird.${ddlTable}`,
   ])('denies writes and DDL: %s', async (query) => {
-    await expect(restricted!.query({ query, clickhouse_settings: { SQL_trailmark_project: projects[0]! } })).rejects.toThrow(
+    await expect(restricted!.query({ query, clickhouse_settings: { SQL_logbird_project: projects[0]! } })).rejects.toThrow(
       /READONLY|read.?only|not allowed|ACCESS_DENIED|Not enough privileges/i,
     );
   });

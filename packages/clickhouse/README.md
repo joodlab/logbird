@@ -1,4 +1,4 @@
-# @trailmark/clickhouse
+# @logbird/clickhouse
 
 Pure library, no HTTP. Requires ClickHouse 26.2+ (native text indexes). Run
 `pnpm ch:migrate` from the root with the gitignored `.env` populated. The factory
@@ -92,16 +92,16 @@ cleaned up in finally. No other databases are touched.
 
 ## Restricted SQL query account
 
-Run `pnpm --filter @trailmark/clickhouse create-query-user` from an environment with CREATE USER,
-CREATE SETTINGS PROFILE and SELECT grant option on the Trailmark tables. The script is idempotent,
+Run `pnpm --filter @logbird/clickhouse create-query-user` from an environment with CREATE USER,
+CREATE SETTINGS PROFILE and SELECT grant option on the Logbird tables. The script is idempotent,
 does not rotate existing credentials, and appends CLICKHOUSE_QUERY_USER / CLICKHOUSE_QUERY_PASSWORD
-to the root .env. For an isolated worktree, set TRAILMARK_PRIMARY_ENV to the primary checkout's .env
+to the root .env. For an isolated worktree, set LOGBIRD_PRIMARY_ENV to the primary checkout's .env
 path to append the same generated credentials there too. Never commit these files.
 
 The SQL console stays unavailable until both credentials are present. Restart the server after provisioning.
 The profile and security boundaries, including the shared-server system-metadata exception, are described in
 [the query reference](../../docs/query-language.md). Table/database names in the setup and SQL guard are the
-Trailmark schema `trailmark`; use the supplied schema name when self-hosting this feature.
+Logbird schema `logbird`; use the supplied schema name when self-hosting this feature.
 
 `parseQuery` now returns lexical tokens with UTF-16 source spans. `compileQuery` accepts the source string
 and returns parameterized SQL with string/number parameter values.

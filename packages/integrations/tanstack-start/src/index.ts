@@ -1,10 +1,10 @@
+import { type Audit, type CaptureOptions, createAudit, shutdown } from '@logbird/sdk/integration';
 import { createMiddleware } from '@tanstack/react-start';
 import { getRequest } from '@tanstack/react-start/server';
-import { type Audit, type CaptureOptions, createAudit, shutdown } from '@trailmark/sdk/integration';
 
-export type { Audit } from '@trailmark/sdk/integration';
-export { readAuditTrail, trailQuery } from '@trailmark/sdk/read';
-export function trailmark(options: CaptureOptions<Request>) {
+export type { Audit } from '@logbird/sdk/integration';
+export { readAuditTrail, trailQuery } from '@logbird/sdk/read';
+export function logbird(options: CaptureOptions<Request>) {
   const requests = new WeakMap<Request, Promise<Audit>>();
   const forRequest = (request: Request) => {
     let audit = requests.get(request);

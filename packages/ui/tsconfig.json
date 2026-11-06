@@ -1,5 +1,5 @@
 {
-  "extends": "@trailmark/tsconfig/react.json",
+  "extends": "@logbird/tsconfig/react.json",
   "compilerOptions": {
     "types": ["node"]
   },

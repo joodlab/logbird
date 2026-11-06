@@ -1,4 +1,4 @@
-import { QUERY_FIELDS, queryErrorDetailsSchema } from '@trailmark/contracts';
+import { QUERY_FIELDS, queryErrorDetailsSchema } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import { compileQuery, parseQuery, QueryError } from './query';
 

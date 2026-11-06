@@ -1,13 +1,13 @@
 {
-  "name": "@trailmark/example-hono",
+  "name": "@logbird/example-hono",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tsx index.ts"
   },
   "dependencies": {
-    "@trailmark/hono": "workspace:*",
-    "@trailmark/sdk": "workspace:*",
+    "@logbird/hono": "workspace:*",
+    "@logbird/sdk": "workspace:*",
     "@hono/node-server": "2.1.1",
     "hono": "4.13.5",
     "vue": "3.5.22",

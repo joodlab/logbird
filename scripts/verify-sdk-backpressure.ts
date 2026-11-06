@@ -1,8 +1,8 @@
 ﻿import assert from 'node:assert/strict';
-import { Trailmark } from '@trailmark/sdk';
+import { Logbird } from '@logbird/sdk';
 
 // Fictional payloads, assigned closed example port; no service data is written.
-const client = new Trailmark({ apiKey: 'fictional', endpoint: 'http://127.0.0.1:4875', batchSize: 1000, maxRetries: 1 });
+const client = new Logbird({ apiKey: 'fictional', endpoint: 'http://127.0.0.1:4875', batchSize: 1000, maxRetries: 1 });
 const before = process.memoryUsage().heapUsed;
 for (let i = 0; i < 50_000; i++) client.track({ action: 'validator.backpressure', metadata: { pad: 'x'.repeat(200) } });
 await assert.rejects(client.flush());

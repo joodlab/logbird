@@ -1,8 +1,8 @@
+import type { EnvelopeField, ProjectSetup } from '@logbird/contracts';
+import { CodeBlock } from '@logbird/ui/components/code-block';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@logbird/ui/components/ui/collapsible';
+import { cn } from '@logbird/ui/lib/utils';
 import { Link } from '@tanstack/react-router';
-import type { EnvelopeField, ProjectSetup } from '@trailmark/contracts';
-import { CodeBlock } from '@trailmark/ui/components/code-block';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@trailmark/ui/components/ui/collapsible';
-import { cn } from '@trailmark/ui/lib/utils';
 import { ArrowUpRightIcon, ChevronDownIcon } from 'lucide-react';
 import { pluralize } from '@/lib/format';
 import { ENVELOPE_CORE, ENVELOPE_EXAMPLE } from '@/lib/snippets';

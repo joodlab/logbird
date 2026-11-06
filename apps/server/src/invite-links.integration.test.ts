@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { purgeProject } from '@trailmark/clickhouse';
-import * as s from '@trailmark/contracts';
-import { prisma } from '@trailmark/database';
+import { purgeProject } from '@logbird/clickhouse';
+import * as s from '@logbird/contracts';
+import { prisma } from '@logbird/database';
 import { expect, it } from 'vitest';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
@@ -18,11 +18,13 @@ it('real services: invite lifecycle, permissions, tenancy, atomic usage and pers
     });
   async function login(email: string) {
     expect((await request('/api/auth/email-otp/send-verification-otp', 'POST', { email, type: 'sign-in' })).status).toBe(200);
-    const mailbox = (await (await fetch('http://127.0.0.1:8025/api/v1/messages?limit=100')).json()) as {
+    const mailbox = (await (await fetch(`${process.env.MAILPIT_URL || 'http://127.0.0.1:8025'}/api/v1/messages?limit=100`)).json()) as {
       messages: { ID: string; To: { Address: string }[] }[];
     };
     const message = mailbox.messages.find((m) => m.To.some((t) => t.Address === email));
-    const content = (await (await fetch(`http://127.0.0.1:8025/api/v1/message/${message?.ID}`)).json()) as { Text: string };
+    const content = (await (await fetch(`${process.env.MAILPIT_URL || 'http://127.0.0.1:8025'}/api/v1/message/${message?.ID}`)).json()) as {
+      Text: string;
+    };
     const response = await request('/api/auth/sign-in/email-otp', 'POST', { email, otp: content.Text.match(/\b\d{6}\b/)?.[0] });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { user: { id: string } };
@@ -35,10 +37,10 @@ it('real services: invite lifecycle, permissions, tenancy, atomic usage and pers
         .join('; '),
     };
   }
-  const owner = await login(`links-${randomUUID()}@trailmark.local`);
+  const owner = await login(`links-${randomUUID()}@logbird.local`);
   const joiners: { id: string; cookie: string }[] = [];
   try {
-    for (let i = 0; i < 5; i++) joiners.push(await login(`join-${randomUUID()}@trailmark.local`));
+    for (let i = 0; i < 5; i++) joiners.push(await login(`join-${randomUUID()}@logbird.local`));
     const [first, second] = joiners;
     if (!first || !second) throw new Error('Missing join fixtures');
     const org = await request('/api/auth/organization/create', 'POST', { name: 'Invite fixture', slug: `invite-${randomUUID()}` }, owner.cookie);
@@ -86,7 +88,7 @@ it('real services: invite lifecycle, permissions, tenancy, atomic usage and pers
     expect(await expiry.json()).toMatchObject({ error: { details: { state: 'expired' } } });
     expect((await request('/api/invite-links/unknown')).status).toBe(404);
     expect((await request(base, 'POST', { role: 'owner' }, owner.cookie)).status).toBe(422);
-    const raced = await create({ maxUses: 1, role: 'admin', allowedDomain: 'TRAILMARK.LOCAL' });
+    const raced = await create({ maxUses: 1, role: 'admin', allowedDomain: 'LOGBIRD.LOCAL' });
     const results = await Promise.all(joiners.slice(1).map((user) => accept(raced, user.cookie)));
     expect(results.map((r) => r.status).sort()).toEqual([200, 410, 410, 410]);
     expect((await prisma.inviteLink.findUniqueOrThrow({ where: { id: raced.id } })).uses).toBe(1);

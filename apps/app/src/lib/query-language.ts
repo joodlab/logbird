@@ -1,5 +1,5 @@
 /**
- * Client-side model of the Trailmark query language (docs/SPEC.md §5.1 + §5.1.1 v2).
+ * Client-side model of the Logbird query language (docs/SPEC.md §5.1 + §5.1.1 v2).
  *
  * The server owns parsing → SQL. The console only needs a *lossless* tokenizer to highlight the
  * query bar, drive autocomplete, and add/remove filter terms from facets, charts and entity pages

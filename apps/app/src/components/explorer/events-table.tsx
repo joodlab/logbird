@@ -1,12 +1,13 @@
 // biome-ignore-all lint/a11y/useSemanticElements: rows are virtualized, absolutely positioned divs; ARIA table roles keep the grid accessible
 // biome-ignore-all lint/a11y/useFocusableInteractive: rows are activated by click or by the explorer's j/k + Enter shortcuts
+
+import type { AuditEvent } from '@logbird/contracts';
+import { OutcomeDot } from '@logbird/ui/components/badges';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { useIsMobile } from '@logbird/ui/hooks/use-mobile';
+import { cn } from '@logbird/ui/lib/utils';
 import { type ColumnDef, columnVisibilityFeature, createColumnHelper, tableFeatures, useTable } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { AuditEvent } from '@trailmark/contracts';
-import { OutcomeDot } from '@trailmark/ui/components/badges';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { useIsMobile } from '@trailmark/ui/hooks/use-mobile';
-import { cn } from '@trailmark/ui/lib/utils';
 import { Loader2Icon } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef } from 'react';
 import { ActionName } from '@/components/action-name';

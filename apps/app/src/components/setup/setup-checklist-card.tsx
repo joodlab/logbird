@@ -1,11 +1,11 @@
+import type { ProjectSetup, SetupStep } from '@logbird/contracts';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@logbird/ui/components/ui/collapsible';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import type { ProjectSetup, SetupStep } from '@trailmark/contracts';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@trailmark/ui/components/ui/collapsible';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
-import { cn } from '@trailmark/ui/lib/utils';
 import { ArrowRightIcon, ChevronDownIcon, XIcon } from 'lucide-react';
 import { useState } from 'react';
 import { projectSetupQuery } from '@/lib/api/queries';
@@ -13,7 +13,7 @@ import { useCan } from '@/lib/permissions';
 import { ProgressBar, ProgressRing, StepStatusIcon, stepAnchor, stepCopy } from './steps';
 import { useDismissSetup } from './use-setup';
 
-const EXPANDED_KEY = 'trailmark.setupCard.expanded';
+const EXPANDED_KEY = 'logbird.setupCard.expanded';
 function readExpanded() {
   try {
     return window.localStorage.getItem(EXPANDED_KEY) === '1';

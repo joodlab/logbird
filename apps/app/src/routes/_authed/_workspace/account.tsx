@@ -1,8 +1,8 @@
+import { CopyValue } from '@logbird/ui/components/copy-button';
+import { PageHeader } from '@logbird/ui/components/page-header';
+import { Button } from '@logbird/ui/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { CopyValue } from '@trailmark/ui/components/copy-button';
-import { PageHeader } from '@trailmark/ui/components/page-header';
-import { Button } from '@trailmark/ui/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -16,7 +16,7 @@ import { displayName, hasName } from '@/lib/user';
 
 export const Route = createFileRoute('/_authed/_workspace/account')({
   staticData: { crumb: 'Account' },
-  head: () => ({ meta: [{ title: 'Account · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Account · Logbird' }] }),
   component: AccountPage,
 });
 
@@ -37,7 +37,7 @@ function AccountPage() {
           description={
             hasName(user)
               ? 'Change the name your teammates see. Your initials avatar follows it everywhere.'
-              : 'You signed in with a code, so Trailmark only knows your email. Add the name your team knows you by.'
+              : 'You signed in with a code, so Logbird only knows your email. Add the name your team knows you by.'
           }
           title="Profile"
         >

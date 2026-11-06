@@ -1,6 +1,6 @@
-import * as ch from '@trailmark/clickhouse';
-import * as s from '@trailmark/contracts';
-import { prisma } from '@trailmark/database';
+import * as ch from '@logbird/clickhouse';
+import * as s from '@logbird/contracts';
+import { prisma } from '@logbird/database';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { stream } from 'hono/streaming';
@@ -76,7 +76,7 @@ export const publicRoutes = new Hono<AppEnv>()
     publicQueryLanguage,
     doc('Ingest events', s.ingestResponseSchema, 202, 'ingestKey'),
     async (c) =>
-      c.json(await ingest(c.get('project').id, await readIngestBody(c.req.raw), c.req.header('x-trailmark-sdk') ?? c.req.header('user-agent')), 202),
+      c.json(await ingest(c.get('project').id, await readIngestBody(c.req.raw), c.req.header('x-logbird-sdk') ?? c.req.header('user-agent')), 202),
   )
   .get(
     '/events',

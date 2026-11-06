@@ -1,24 +1,24 @@
 /**
- * Send Trailmark's emails, rendered from the shared fixtures, through the configured SMTP server (Mailpit locally).
+ * Send Logbird's emails, rendered from the shared fixtures, through the configured SMTP server (Mailpit locally).
  *
- *   pnpm --filter @trailmark/email-preview send                       every email to preview@trailmark.local
- *   pnpm --filter @trailmark/email-preview send --to me@trailmark.local --only invitation,signInCode
- *   pnpm --filter @trailmark/email-preview send --list
+ *   pnpm --filter @logbird/email-preview send                       every email to preview@logbird.local
+ *   pnpm --filter @logbird/email-preview send --to me@logbird.local --only invitation,signInCode
+ *   pnpm --filter @logbird/email-preview send --list
  *
  * Links point at APP_URL and dates are relative to now, so what lands in the inbox is what a user would get.
  * Recipients outside test domains need --allow-external, so a production SMTP config cannot mail real people by accident.
  */
 import { parseArgs } from 'node:util';
-import { createFixtures, type EmailDefinition, type EmailKey, emails } from '@trailmark/email';
-import { sendEmail, smtpTarget } from '@trailmark/email/send';
+import { createFixtures, type EmailDefinition, type EmailKey, emails } from '@logbird/email';
+import { sendEmail, smtpTarget } from '@logbird/email/send';
 
-const SAFE_RECIPIENT = /@([\w-]+\.)*(trailmark\.local|localhost|test|example|invalid|example\.(com|net|org))$/i;
+const SAFE_RECIPIENT = /@([\w-]+\.)*(logbird\.local|localhost|test|example|invalid|example\.(com|net|org))$/i;
 
 const { values } = parseArgs({
   // `pnpm … send -- --to x` forwards the separator itself; accept both spellings.
   args: process.argv.slice(2).filter((arg) => arg !== '--'),
   options: {
-    to: { type: 'string', default: 'preview@trailmark.local' },
+    to: { type: 'string', default: 'preview@logbird.local' },
     only: { type: 'string' },
     list: { type: 'boolean', default: false },
     'allow-external': { type: 'boolean', default: false },

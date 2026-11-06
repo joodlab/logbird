@@ -2,7 +2,7 @@
  * Recent explorer queries, per project, in localStorage (a per-browser convenience, never synced). Newest first,
  * de-duplicated per language, at most MAX_RECENT. Other tabs see changes through the `storage` event.
  */
-import type { QueryLang } from '@trailmark/contracts';
+import type { QueryLang } from '@logbird/contracts';
 import { useCallback, useSyncExternalStore } from 'react';
 
 export interface RecentQuery {
@@ -13,8 +13,8 @@ export interface RecentQuery {
 }
 
 export const MAX_RECENT = 20;
-const EVENT = 'trailmark:recent-queries';
-const storageKey = (projectId: string) => `trailmark:recent-queries:${projectId}`;
+const EVENT = 'logbird:recent-queries';
+const storageKey = (projectId: string) => `logbird:recent-queries:${projectId}`;
 
 function parse(raw: string | null): RecentQuery[] {
   if (!raw) return [];

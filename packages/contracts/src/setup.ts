@@ -66,7 +66,8 @@ export const ENVELOPE_MISSING_QUERIES: Record<EnvelopeField, string | null> = {
 };
 
 /** Events loaded by "Load sample data" carry this `source`; they never count toward setup steps. */
-export const SAMPLE_DATA_SOURCE = 'trailmark-sample';
+export const SAMPLE_DATA_SOURCE = 'logbird-sample';
+export const SAMPLE_DATA_SOURCES = [SAMPLE_DATA_SOURCE];
 export const SAMPLE_DATA_EVENTS = 2000;
 
 export const projectSetupSchema = z.object({

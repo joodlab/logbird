@@ -1,4 +1,4 @@
-import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
+import { EntityAvatar } from '@logbird/ui/components/entity-chip';
 import { displayName } from '@/lib/user';
 
 /**

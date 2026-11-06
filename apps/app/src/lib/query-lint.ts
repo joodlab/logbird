@@ -1,6 +1,6 @@
 /**
- * Familiar syntax from other search bars (Lucene / Kibana KQL / Datadog / GitHub) that the Trailmark query
- * language spells differently. Pure: finds the spans and proposes the Trailmark form. The query bar shows each
+ * Familiar syntax from other search bars (Lucene / Kibana KQL / Datadog / GitHub) that the Logbird query
+ * language spells differently. Pure: finds the spans and proposes the Logbird form. The query bar shows each
  * fix as the first suggestion with a hint, and applies the unambiguous ones when the query is run.
  *
  * Nothing here changes what the server accepts (the server parser is the source of truth).

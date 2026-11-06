@@ -9,7 +9,7 @@ export const env = createEnv({
       .string()
       .optional()
       .refine((v) => v === undefined || /^(true|false|\d+)?$/i.test(v.trim()), 'TRUST_PROXY must be false, true or a hop count'),
-    BULLMQ_PREFIX: z.string().default('{trailmark}'),
+    BULLMQ_PREFIX: z.string().default('{logbird}'),
     TRUSTED_ORIGINS: z.string().default(''),
     /** Auth calls per peer; public authentication failures per peer; valid public calls per project and kind. */
     AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(30),

@@ -24,7 +24,7 @@ def request(method, path, body=None, cookie=None, status=200):
     assert int(code) == status, f"{method} {path}: expected {status}, got {code}: {content[:300]}"
     return json.loads(content) if content else None
 
-with tempfile.TemporaryDirectory(prefix="trailmark-smoke-") as temporary:
+with tempfile.TemporaryDirectory(prefix="logbird-smoke-") as temporary:
     cookie = pathlib.Path(temporary) / "cookies"
     suffix = uuid.uuid4().hex[:10]
     email = f"foundation-{suffix}@example.test"
@@ -44,13 +44,13 @@ with tempfile.TemporaryDirectory(prefix="trailmark-smoke-") as temporary:
     assert me["activeOrganizationId"] == org["id"]
     created = request("POST", "/api/projects", {"name": "Foundation smoke", "retentionDays": 90}, cookie, 201)
     project = created["project"]
-    assert re.fullmatch(r"tm_ingest_[A-Za-z0-9]{32}", created["ingestKey"]["secret"])
+    assert re.fullmatch(r"lb_ingest_[A-Za-z0-9]{32}", created["ingestKey"]["secret"])
     path = "/api/projects/" + project["id"]
     listed = request("GET", path + "/keys", cookie=cookie)
     assert "secret" not in json.dumps(listed) and "hash" not in json.dumps(listed)
     assert len(listed["data"]) == 1
     key = request("POST", path + "/keys", {"name": "Smoke read key", "kind": "read"}, cookie, 201)
-    assert re.fullmatch(r"tm_read_[A-Za-z0-9]{32}", key["secret"])
+    assert re.fullmatch(r"lb_read_[A-Za-z0-9]{32}", key["secret"])
     request("DELETE", path + "/keys/" + key["key"]["id"], cookie=cookie, status=204)
     assert next(k for k in request("GET", path + "/keys", cookie=cookie)["data"] if k["id"] == key["key"]["id"])["revokedAt"]
     error = request("PATCH", path, {"retentionDays": 7}, cookie, 422)

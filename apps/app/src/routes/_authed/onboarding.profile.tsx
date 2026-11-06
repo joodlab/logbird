@@ -1,5 +1,5 @@
+import { Button } from '@logbird/ui/components/ui/button';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { Button } from '@trailmark/ui/components/ui/button';
 import { ArrowRightIcon, Loader2Icon } from 'lucide-react';
 import { useState } from 'react';
 import { NameForm } from '@/components/account/name-form';
@@ -7,7 +7,7 @@ import { UserAvatar } from '@/components/account/user-avatar';
 import { displayName } from '@/lib/user';
 
 export const Route = createFileRoute('/_authed/onboarding/profile')({
-  head: () => ({ meta: [{ title: 'Your name · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Your name · Logbird' }] }),
   component: ProfileStep,
 });
 

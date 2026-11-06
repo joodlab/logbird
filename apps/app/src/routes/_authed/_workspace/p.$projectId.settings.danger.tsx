@@ -1,5 +1,3 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -9,11 +7,13 @@ import {
   AlertDialogHeader,
   AlertDialogMedia,
   AlertDialogTitle,
-} from '@trailmark/ui/components/ui/alert-dialog';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Input } from '@trailmark/ui/components/ui/input';
-import { Label } from '@trailmark/ui/components/ui/label';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
+} from '@logbird/ui/components/ui/alert-dialog';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Input } from '@logbird/ui/components/ui/input';
+import { Label } from '@logbird/ui/components/ui/label';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { Loader2Icon, Trash2Icon } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -26,7 +26,7 @@ import { formatNumber } from '@/lib/format';
 import { useCan } from '@/lib/permissions';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/danger')({
-  head: () => ({ meta: [{ title: 'Danger zone · Settings · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Danger zone · Settings · Logbird' }] }),
   staticData: { crumb: 'Danger zone' },
   component: DangerZone,
 });

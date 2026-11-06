@@ -13,11 +13,11 @@ A project read key is project-wide; a query filter is not authorization.
 
 Actor means who caused the action; executor means the API or worker performing it. Resolve
 actor and tenant from authenticated server state, never directly from untrusted headers.
-Each request gets an operationId (x-trailmark-operation or UUID), requestId and validated W3C
+Each request gets an operationId (x-logbird-operation or UUID), requestId and validated W3C
 trace ID. Propagate operationId and parentEventId explicitly into jobs; this is correlation,
 not proof of identity. Forwarded IP headers are deliberately ignored: supply a trusted IP through the optional ip(context) resolver.
 
-The synchronous audit(action, partialEvent) queues an envelope through Trailmark.track. It never
+The synchronous audit(action, partialEvent) queues an envelope through Logbird.track. It never
 awaits delivery. Resolver and capture failures call onError; diagnostic failures cannot crash the host.
 SDK transport errors use the SDK's own onError hook. Request context is isolated per request;
 partial events can override actor/executor for delegated work and add parentEventId.
@@ -26,7 +26,7 @@ Edge hosts register flush with executionCtx.waitUntil. A returned response alone
 
 Hono exposes c.var.audit and optional non-GET autoTrack. TanStack exposes request and function
 middleware with context.audit; install request middleware once to share correlation across functions.
-Nuxt installs a Nitro request plugin and close hook. Its /api/_trailmark/events proxy denies by
+Nuxt installs a Nitro request plugin and close hook. Its /api/_logbird/events proxy denies by
 default: configure a server-only authorization module exporting authorize(event, query) and optional
 actor/tenant/executor resolvers. Authorization returns a trusted SearchQuery or false; only the trusted
 query is forwarded, allowing enforced tenant scope without unsafe string concatenation.
@@ -36,13 +36,13 @@ refresh and loadMore, discards stale responses and renders through an optional h
 ## Local examples
 
 See examples/hono, examples/tanstack-start, examples/vue and examples/nuxt. Run one at a time on
-4730 with Trailmark on 4731. Supply keys through server environment variables only. Examples use
+4730 with Logbird on 4731. Supply keys through server environment variables only. Examples use
 fictional records and are not production authorization policies. See each README for commands.
 
 ## Console snippets and maintenance
 
 The in-app setup/key snippets remain in apps/app/src/lib/snippets.ts (search for
-`X-Trailmark-SDK` if this file moves); they demonstrate direct SDK/HTTP capture. Framework setup
+`X-Logbird-SDK` if this file moves); they demonstrate direct SDK/HTTP capture. Framework setup
 lives in these package READMEs, so integrations do not change the console or copy secret values.
 The SDK's structural read types are compile-checked against packages/contracts in read.test.ts.
 Run `node --env-file=.env --import tsx scripts/verify-integrations.ts` to provision only a disposable
@@ -63,20 +63,20 @@ count limit, not a byte budget. Size the queue for your payloads and memory budg
 handle them. Call shutdown in the host lifecycle and await it before exiting.
 
 ```ts
-const client = new Trailmark({ endpoint, apiKey, maxQueueSize: 1000,
+const client = new Logbird({ endpoint, apiKey, maxQueueSize: 1000,
   dropPolicy: 'oldest', onDrop: () => metrics.increment('audit.dropped') });
 ```
 
 Read adapters expose failures: Vue `useAuditTrail` sets `error` and clears `loading`;
 render that error before treating an empty `data` array as success. Its `refresh()` resolves
 with the error in reactive state, including SSR; never throw it from `serverPrefetch`.
-The examples return 502 on read failure. Set `TRAILMARK_ENDPOINT` for both capture and read.
+The examples return 502 on read failure. Set `LOGBIRD_ENDPOINT` for both capture and read.
 
 Ingest accepts a single event object, `{ "events": [...] }`, or a bare JSON array (1-1000 events).
 `occurredAt` defaults to receive time when omitted. Supplied values should be ISO-8601 or epoch milliseconds within
 receive time minus 3650 days through plus 24 hours. Only `action` is required, so an unusable `occurredAt` (unparsable,
 epoch **seconds** — numbers below 1e11 —, or outside that window) never drops the event: it is stored at receive time,
-the original value is kept in `attributes['trailmark.occurredAt.rejected']` and the payload, and the response lists it
+the original value is kept in `attributes['logbird.occurredAt.rejected']` and the payload, and the response lists it
 in `warnings[]` with the reason. Events without an `action` are per-event `rejected[]` entries; valid siblings are
 durably inserted. SDK partial rejections invoke `onDrop` for rejected indices and `onError` with reasons. Permanent
 HTTP errors (except 429) drop the batch and report; transient failures retain it for retry.

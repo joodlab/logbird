@@ -1,7 +1,7 @@
-import { type ReadOptions, readAuditTrail } from '@trailmark/sdk/read';
+import { type ReadOptions, readAuditTrail } from '@logbird/sdk/read';
 import { createError, defineEventHandler, getQuery, setResponseHeader } from 'h3';
-import type { TrailmarkHooks } from './hooks';
-export function createReadHandler(options: ReadOptions, hooks: TrailmarkHooks) {
+import type { LogbirdHooks } from './hooks';
+export function createReadHandler(options: ReadOptions, hooks: LogbirdHooks) {
   return defineEventHandler(async (event) => {
     setResponseHeader(event, 'Cache-Control', 'private, no-store');
     const query: Record<string, unknown> = getQuery(event);

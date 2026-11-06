@@ -1,9 +1,9 @@
+import { auth, authAuditContext, setAuthAuditHandler } from '@logbird/auth';
+import { QueryError } from '@logbird/clickhouse';
+import { queryErrorDetailsSchema } from '@logbird/contracts';
+import { Prisma, ProjectBusyError, prisma } from '@logbird/database';
+import { connection } from '@logbird/worker/queue';
 import { apiReference } from '@scalar/hono-api-reference';
-import { auth, authAuditContext, setAuthAuditHandler } from '@trailmark/auth';
-import { QueryError } from '@trailmark/clickhouse';
-import { queryErrorDetailsSchema } from '@trailmark/contracts';
-import { Prisma, ProjectBusyError, prisma } from '@trailmark/database';
-import { connection } from '@trailmark/worker/queue';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
@@ -180,8 +180,8 @@ app.get(
   routeDoc('OpenAPI document', { hide: true }, 'none'),
   openAPIRouteHandler(app, {
     documentation: {
-      info: { title: 'Trailmark API', version: '0.1.0' },
-      servers: [{ url: env.APP_URL, description: 'This Trailmark instance' }],
+      info: { title: 'Logbird API', version: '0.1.0' },
+      servers: [{ url: env.APP_URL, description: 'This Logbird instance' }],
       components: {
         securitySchemes: {
           session: { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' },

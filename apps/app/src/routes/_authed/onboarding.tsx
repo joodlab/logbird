@@ -1,7 +1,7 @@
+import { Button } from '@logbird/ui/components/ui/button';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { cn } from '@trailmark/ui/lib/utils';
 import { CheckIcon, LogOutIcon } from 'lucide-react';
 import { useEffect } from 'react';
 import { BrandLockup } from '@/components/brand';
@@ -10,7 +10,7 @@ import { authClient } from '@/lib/auth-client';
 import { hasName } from '@/lib/user';
 
 export const Route = createFileRoute('/_authed/onboarding')({
-  head: () => ({ meta: [{ title: 'Get started · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Get started · Logbird' }] }),
   component: OnboardingLayout,
 });
 

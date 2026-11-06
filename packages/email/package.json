@@ -1,5 +1,5 @@
 {
-  "name": "@trailmark/email",
+  "name": "@logbird/email",
   "license": "MIT",
   "version": "0.1.0",
   "private": true,
@@ -24,7 +24,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@trailmark/tsconfig": "workspace:*",
+    "@logbird/tsconfig": "workspace:*",
     "@types/node": "^22.20.1",
     "dotenv-cli": "^11.0.0",
     "html-validate": "^11.18.0",

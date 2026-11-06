@@ -60,12 +60,12 @@ await step(
     if (!STEPS.has('tour')) {
       // Query-bar-only runs still sign in for real, just without the login screenshot pauses.
       await page.goto(`${BASE}/login`);
-      await page.getByLabel('Work email').fill('demo@trailmark.local');
+      await page.getByLabel('Work email').fill('demo@logbird.local');
       const sentAt = Date.now() - 2000;
       await page.getByRole('button', { name: /continue with email/i }).click();
       const otp = page.getByRole('textbox', { name: 'One-time code' });
       await otp.waitFor();
-      const code = await latestOtp('demo@trailmark.local', sentAt);
+      const code = await latestOtp('demo@logbird.local', sentAt);
       await otp.click();
       await page.keyboard.type(code, { delay: 40 });
       await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30_000 });
@@ -74,13 +74,13 @@ await step(
     }
     await page.goto(`${BASE}/login`);
     await settle(800);
-    await page.getByLabel('Work email').pressSequentially('demo@trailmark.local', { delay: 40 });
+    await page.getByLabel('Work email').pressSequentially('demo@logbird.local', { delay: 40 });
     await shot('01-login');
     const sentAt = Date.now() - 2000;
     await page.getByRole('button', { name: /continue with email/i }).click();
     const otp = page.getByRole('textbox', { name: 'One-time code' });
     await otp.waitFor();
-    const code = await latestOtp('demo@trailmark.local', sentAt);
+    const code = await latestOtp('demo@logbird.local', sentAt);
     await otp.click();
     await page.keyboard.type(code, { delay: 120 });
     await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30_000 });
@@ -621,7 +621,7 @@ async function latestMail(to, after) {
 /* ------------------------------------------------------------------ */
 /* onboarding: a brand-new user, first event via real curl             */
 /* ------------------------------------------------------------------ */
-const owner = { email: `setup-owner-${RUN}@trailmark.local`, state: path.join(OUT, `.state-owner-${RUN}.json`), projectId: '' };
+const owner = { email: `setup-owner-${RUN}@logbird.local`, state: path.join(OUT, `.state-owner-${RUN}.json`), projectId: '' };
 
 async function onboarding() {
   const { context, page, settle, shot, step, close } = await session('onboarding');
@@ -659,7 +659,7 @@ async function onboarding() {
     await page.getByRole('button', { name: /create another ingest key/i }).click();
     await page.getByRole('button', { name: /^create ingest key/i }).click();
     secret = (await page.getByTestId('ingest-secret').textContent())?.trim() ?? '';
-    if (!secret.startsWith('tm_ingest_')) throw new Error('no secret revealed');
+    if (!secret.startsWith('lb_ingest_')) throw new Error('no secret revealed');
     await page.getByTestId('first-event-listening').scrollIntoViewIfNeeded();
     await settle(600);
     await shot('22-first-event-listening');
@@ -795,8 +795,8 @@ async function setup() {
 /* invite: Mailpit email → second user accepts                         */
 /* ------------------------------------------------------------------ */
 async function invite() {
-  const invitee = `setup-invitee-${RUN}@trailmark.local`;
-  const other = `setup-other-${RUN}@trailmark.local`;
+  const invitee = `setup-invitee-${RUN}@logbird.local`;
+  const other = `setup-other-${RUN}@logbird.local`;
   const { context, page, settle, shot, step, close } = await session('invite-owner', { video: false, storageState: owner.state });
   const P = `${BASE}/p/${owner.projectId}`;
   let link = '';

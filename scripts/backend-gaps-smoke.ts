@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { client, endpoint, login } from './http';
 
 // Real HTTP regression receipt; curl headers remain private and are never logged.
-const cookie = await login('demo@trailmark.local');
+const cookie = await login('demo@logbird.local');
 const api = client(cookie);
 const me = (await (await api('/api/me')).json()) as { organizations: { id: string; slug: string }[] };
 const organizationId = me.organizations.find((org) => org.slug === 'jood')?.id;

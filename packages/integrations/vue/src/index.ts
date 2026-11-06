@@ -1,4 +1,4 @@
-import { type SearchQuery, type SearchResponse, type TrailQuery, trailQuery } from '@trailmark/sdk/read';
+import { type SearchQuery, type SearchResponse, type TrailQuery, trailQuery } from '@logbird/sdk/read';
 import { defineComponent, type MaybeRefOrGetter, onScopeDispose, type PropType, shallowRef, toValue, watch } from 'vue';
 export type AuditFetcher = (query: Partial<SearchQuery>, signal?: AbortSignal) => Promise<SearchResponse>;
 export interface AuditTrailOptions extends TrailQuery {

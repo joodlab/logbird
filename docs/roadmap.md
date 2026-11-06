@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-11-05. The next phase makes Trailmark the audit log of **JoodCMS** (see
+Updated 2026-11-05. The next phase makes Logbird the audit log of **JoodCMS** (see
 [joodcms-integration.md](joodcms-integration.md) for the event catalogue, architecture and rollout). Items are kept
 only when JoodCMS's code shows the need. Product decisions stay fixed: any event shape, capture is the client's job, no
 backfill, per-project retention with permanent deletion, console for operators, products read through the read API,
@@ -14,7 +14,7 @@ Sizes: **S** ≤ 1 day, **M** 2–4 days, **L** 1–2 weeks.
 | --- | --- | --- | --- | --- |
 | P0-1 | **Host-context SDK:** resolve actor/tenant/executor/ip lazily per `audit()` call; host-supplied `requestId`/`operationId`; `audit()` returns the event id; client `enabled`, `defaults` (environment), `beforeSend` + `redact()`; `jobAudit()` and `audit.carrier()` for workers | Auth is per route (`createRouteConfig({ guard: [isAuthenticated…] })`), so a global middleware sees no user; evlog owns `requestId` (`apps/server/src/server.ts:59-61`); guest PII in ~15 models; ~80 BullMQ job types (`apps/worker/src/processors.ts`) | M | PR #43 |
 | P0-2 | **Per-project public rate limits:** budgets per project and key kind; the per-peer limit counts only failed authentication; `RateLimit-*` headers | 4–6 API + 4 worker pods behind one egress (`k8s/values/production.yaml:26-27`), each flushing every 1 s, against 600 req/min per peer per route (`apps/server/src/rate-limit.ts`) | S | PR #42 |
-| P0-3 | **Distribution** of `@trailmark/sdk` and `@trailmark/hono` to JoodCMS: npm publish or a vendored copy | JoodCMS installs only from public npm (`.npmrc` empty, `minimumReleaseAge`), builds Docker images with `turbo prune --frozen-lockfile` | S | Owner decision D1, after the naming work lands |
+| P0-3 | **Distribution** of `@logbird/sdk` and `@logbird/hono` to JoodCMS: npm publish or a vendored copy | JoodCMS installs only from public npm (`.npmrc` empty, `minimumReleaseAge`), builds Docker images with `turbo prune --frozen-lockfile` | S | Owner decision D1, after the naming work lands |
 | P0-4 | **JoodCMS starter kit:** client, middleware, typed catalogue, redaction, worker helper, history route, as a patch for owner approval | ~596 mutating endpoints need one consistent helper | S | PR #41 (`docs/joodcms-starter/`) |
 
 Nothing else blocks staging: `GET /v1/events` already filters by `target:`/`tenant:`, paginates by cursor and accepts
@@ -43,8 +43,8 @@ any range, and Jood staff can open the console's record, tenant and actor pages 
 
 ## Decisions needed from the owner
 
-- **D1 Distribution:** publish `@trailmark/*` to npm (after the rename) or vendor them into JoodCMS for staging?
-- **D2 Hosting:** JoodCMS on Trailmark cloud, or the self-hosted build on JoodCMS's k3s cluster (private network)?
+- **D1 Distribution:** publish `@logbird/*` to npm (after the rename) or vendor them into JoodCMS for staging?
+- **D2 Hosting:** JoodCMS on Logbird cloud, or the self-hosted build on JoodCMS's k3s cluster (private network)?
 - **D3 Tenant:** business (with website fallback), as proposed, versus website as the evlog enricher does today.
 - **D4 Retention and PII:** production retention (proposal 365 days) and whether staff email + IP may be kept for it.
 - **D5 Delivery guarantee:** in-memory SDK queue (≤ ~1 s loss on hard kill), or a BullMQ outbox for wave 1?

@@ -1,4 +1,4 @@
-import type { TrailmarkHooks } from './hooks';
+import type { LogbirdHooks } from './hooks';
 
-const hooks: TrailmarkHooks = { authorize: () => false };
+const hooks: LogbirdHooks = { authorize: () => false };
 export default hooks;

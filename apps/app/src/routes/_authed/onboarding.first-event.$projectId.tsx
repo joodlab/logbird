@@ -1,6 +1,6 @@
+import { Button } from '@logbird/ui/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, notFound, useNavigate } from '@tanstack/react-router';
-import { Button } from '@trailmark/ui/components/ui/button';
 import { ArrowRightIcon, KeyRoundIcon, SendIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { NotFound } from '@/components/not-found';
@@ -12,7 +12,7 @@ import { skipFirstEvent } from '@/lib/onboarding';
 import { ensureActiveWorkspace } from '@/lib/session';
 
 export const Route = createFileRoute('/_authed/onboarding/first-event/$projectId')({
-  head: () => ({ meta: [{ title: 'Send your first event · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Send your first event · Logbird' }] }),
   beforeLoad: async ({ context }) => ({ me: await ensureActiveWorkspace(context.queryClient, context.me) }),
   loader: async ({ context, params }) => {
     try {

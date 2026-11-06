@@ -1,5 +1,5 @@
 {
-  "extends": "@trailmark/tsconfig/base.json",
+  "extends": "@logbird/tsconfig/base.json",
   "compilerOptions": {
     "lib": ["ES2023", "DOM"],
     "types": ["node"]

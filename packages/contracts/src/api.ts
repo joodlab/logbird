@@ -8,7 +8,7 @@ import { queryLangSchema } from './query';
 
 /**
  * Every read endpoint accepts a time range and a query string.
- * `q` uses the Trailmark query language (see docs/SPEC.md §5.1) unless `lang=sql`:
+ * `q` uses the Logbird query language (see docs/SPEC.md §5.1) unless `lang=sql`:
  *   action:hotel.*  outcome:failure  actor:usr_123  -env:staging  attempt:>2  metadata.channel:whatsapp  "free text"
  * With `lang=sql`, `q` is a ClickHouse WHERE expression (see ./query.ts). Invalid queries answer 422
  * `invalid_query` with `details: QueryErrorDetails`.
@@ -219,7 +219,7 @@ export const apiKeySchema = z.object({
   projectId: z.string(),
   name: z.string(),
   kind: z.enum(API_KEY_KINDS),
-  prefix: z.string(), // e.g. "tm_ingest_7Hq2"; full secret only returned once on create
+  prefix: z.string(), // e.g. "lb_ingest_7Hq2"; full secret only returned once on create
   createdAt: z.string(),
   createdBy: z.object({ id: z.string(), name: z.string(), email: z.string().optional() }).nullable(),
   lastUsedAt: z.string().nullable(),

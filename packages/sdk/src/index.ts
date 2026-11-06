@@ -39,7 +39,7 @@ export function uuidv7(): string {
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
-export interface TrailmarkOptions {
+export interface LogbirdOptions {
   apiKey?: string;
   endpoint?: string;
   enabled?: boolean;
@@ -53,7 +53,7 @@ export interface TrailmarkOptions {
   dropPolicy?: 'oldest' | 'newest';
   onDrop?: (event: EventInput) => void;
 }
-export class Trailmark {
+export class Logbird {
   private readonly queue: EventInput[] = [];
   private timer: ReturnType<typeof setTimeout> | undefined;
   private pending: Promise<void> | undefined;
@@ -77,7 +77,7 @@ export class Trailmark {
       /* Diagnostics cannot break capture. */
     }
   }
-  constructor(private readonly options: TrailmarkOptions) {
+  constructor(private readonly options: LogbirdOptions) {
     if (options.enabled !== false && (!options.apiKey || !options.endpoint)) throw new Error('apiKey and endpoint are required when enabled');
     this.capacity = options.maxQueueSize ?? 10_000;
     this.batchSize = options.batchSize ?? 100;
@@ -107,7 +107,7 @@ export class Trailmark {
   track(event: EventInput): void {
     if (this.options.enabled === false) return;
     try {
-      if (this.closed) throw new Error('Trailmark is shut down');
+      if (this.closed) throw new Error('Logbird is shut down');
       const defaults = this.options.defaults;
       let prepared: EventInput = {
         ...defaults,
@@ -154,7 +154,7 @@ export class Trailmark {
       try {
         response = await fetch(`${this.options.endpoint!.replace(/\/$/, '')}/v1/events`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${this.options.apiKey}`, 'Content-Type': 'application/json', 'X-Trailmark-SDK': 'typescript/0.2.0' },
+          headers: { Authorization: `Bearer ${this.options.apiKey}`, 'Content-Type': 'application/json', 'X-Logbird-SDK': 'typescript/0.2.0' },
           body,
           signal: AbortSignal.timeout(30_000),
         });
@@ -168,17 +168,17 @@ export class Trailmark {
             const event = batch[rejection.index];
             if (event) this.drop(event);
           }
-          this.report(new Error(`${result.rejected.length} events rejected by Trailmark: ${result.rejected.map((r) => r.reason).join('; ')}`));
+          this.report(new Error(`${result.rejected.length} events rejected by Logbird: ${result.rejected.map((r) => r.reason).join('; ')}`));
         }
         return;
       }
       const retry = !response || response.status === 429 || response.status >= 500;
       if (!retry) {
         for (const event of batch) this.drop(event);
-        this.report(new Error(`Trailmark HTTP ${response?.status}; batch dropped`));
+        this.report(new Error(`Logbird HTTP ${response?.status}; batch dropped`));
         return;
       }
-      if (attempt >= this.retries) throw error ?? new Error(`Trailmark HTTP ${response?.status}`);
+      if (attempt >= this.retries) throw error ?? new Error(`Logbird HTTP ${response?.status}`);
       const retryAfter = response?.headers.get('Retry-After');
       const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
       const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** attempt) * (0.5 + Math.random());

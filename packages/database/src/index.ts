@@ -14,7 +14,7 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
 /** Separate, bounded session-lock pool: never occupy Prisma's application pool or a transaction during ClickHouse I/O. */
 const lockUrl = new URL(databaseUrl);
-lockUrl.searchParams.set('application_name', 'trailmark-project-locks');
+lockUrl.searchParams.set('application_name', 'logbird-project-locks');
 const LOCK_POOL_MAX = 16;
 const projectLocks = new Pool({
   connectionString: lockUrl.toString(),

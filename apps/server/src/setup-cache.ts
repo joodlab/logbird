@@ -1,4 +1,4 @@
-import { type SetupEventFacts, setupEventFacts } from '@trailmark/clickhouse';
+import { type SetupEventFacts, setupEventFacts } from '@logbird/clickhouse';
 import { clickhouse } from './clickhouse';
 
 const cache = new Map<string, { expires: number; facts: SetupEventFacts }>();

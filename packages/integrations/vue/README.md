@@ -1,7 +1,7 @@
-# @trailmark/vue
+# @logbird/vue
 
 ```ts
-import { useAuditTrail } from '@trailmark/vue';
+import { useAuditTrail } from '@logbird/vue';
 const trail = useAuditTrail({
   target: { type: 'record', id: '123' },
   fetcher: async (query, signal) => {
@@ -19,6 +19,6 @@ replace newer selectors. Pagination deduplicates event IDs.
 
 `AuditTimeline` accepts `options` and a default slot receiving the same state. It renders no markup.
 Ingest and read keys stay on your backend. Authenticate the browser request, authorize tenant and
-record, then call `readAuditTrail` from `@trailmark/sdk/read` on the server with an enforced query.
+record, then call `readAuditTrail` from `@logbird/sdk/read` on the server with an enforced query.
 Never trust a browser's tenant or q as authorization. Proxy errors should keep their HTTP failure status.
 See [design](../../../docs/integrations.md) and [example](../../../examples/vue).

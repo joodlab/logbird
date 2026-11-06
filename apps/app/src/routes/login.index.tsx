@@ -1,8 +1,8 @@
+import { Button } from '@logbird/ui/components/ui/button';
+import { Input } from '@logbird/ui/components/ui/input';
+import { Label } from '@logbird/ui/components/ui/label';
 import { useForm } from '@tanstack/react-form';
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Input } from '@trailmark/ui/components/ui/input';
-import { Label } from '@trailmark/ui/components/ui/label';
 import { ArrowRightIcon, Loader2Icon, MailIcon } from 'lucide-react';
 import { useState } from 'react';
 import { z } from 'zod';
@@ -45,7 +45,7 @@ function EmailStep() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1.5">
-        <h1 className="font-semibold text-2xl tracking-tight">Sign in to Trailmark</h1>
+        <h1 className="font-semibold text-2xl tracking-tight">Sign in to Logbird</h1>
         <p className="text-muted-foreground text-sm">We will email you a 6-digit code. New here? The same step creates your account.</p>
       </div>
       <form

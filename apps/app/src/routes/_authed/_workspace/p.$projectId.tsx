@@ -24,7 +24,7 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
       throw error;
     }
   },
-  head: ({ loaderData }) => ({ meta: [{ title: loaderData ? `${loaderData.project.name} · Trailmark` : 'Trailmark' }] }),
+  head: ({ loaderData }) => ({ meta: [{ title: loaderData ? `${loaderData.project.name} · Logbird` : 'Logbird' }] }),
   pendingComponent: () => (
     <AppShell>
       <PageSkeleton />

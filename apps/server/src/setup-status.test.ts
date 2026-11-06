@@ -1,4 +1,4 @@
-import { ENVELOPE_FIELDS, SETUP_STEPS } from '@trailmark/contracts';
+import { ENVELOPE_FIELDS, SETUP_STEPS } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import { computeSetup } from './setup-status';
 

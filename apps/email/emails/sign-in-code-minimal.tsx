@@ -1,4 +1,4 @@
-import { fixtures, SignInCodeEmail } from '@trailmark/email';
+import { fixtures, SignInCodeEmail } from '@logbird/email';
 
 /** Sign-in code without request hints (no User-Agent / X-Forwarded-For, e.g. local dev): those rows are omitted. */
 export default function SignInCodeMinimal() {
