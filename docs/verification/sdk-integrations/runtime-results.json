@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-11-05T11:19:39.192Z",
+  "measuredAt": "2026-11-05T16:22:22.583Z",
   "endpoint": "http://127.0.0.1:4871",
   "results": [
     {
@@ -25,6 +25,13 @@
       "ingest": "real framework route -> SDK -> HTTP 202 -> ClickHouse",
       "read": "event visible with actor, tenant, target, operation",
       "history": 200
+    },
+    {
+      "framework": "sdk-host-context",
+      "actor": "late guard resolved",
+      "requestId": "host-provided",
+      "redaction": "attributes and raw payload verified",
+      "worker": "jobId, attempt 3, parentEventId and operationId verified"
     },
     {
       "framework": "vue-read-failure",

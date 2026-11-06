@@ -40,8 +40,11 @@ export function uuidv7(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 export interface TrailmarkOptions {
-  apiKey: string;
-  endpoint: string;
+  apiKey?: string;
+  endpoint?: string;
+  enabled?: boolean;
+  defaults?: Partial<EventInput>;
+  beforeSend?: (event: EventInput) => EventInput | null | undefined;
   batchSize?: number;
   flushIntervalMs?: number;
   maxRetries?: number;
@@ -75,6 +78,7 @@ export class Trailmark {
     }
   }
   constructor(private readonly options: TrailmarkOptions) {
+    if (options.enabled !== false && (!options.apiKey || !options.endpoint)) throw new Error('apiKey and endpoint are required when enabled');
     this.capacity = options.maxQueueSize ?? 10_000;
     this.batchSize = options.batchSize ?? 100;
     this.interval = options.flushIntervalMs ?? 1000;
@@ -101,9 +105,24 @@ export class Trailmark {
     }
   }
   track(event: EventInput): void {
+    if (this.options.enabled === false) return;
     try {
       if (this.closed) throw new Error('Trailmark is shut down');
-      const serialized = JSON.stringify({ ...event, id: event.id ?? uuidv7(), occurredAt: event.occurredAt ?? new Date().toISOString() });
+      const defaults = this.options.defaults;
+      let prepared: EventInput = {
+        ...defaults,
+        ...event,
+        context: { ...defaults?.context, ...event.context },
+        metadata: { ...defaults?.metadata, ...event.metadata },
+      };
+      prepared.id ??= uuidv7();
+      prepared.occurredAt ??= new Date().toISOString();
+      if (this.options.beforeSend) {
+        const result = this.options.beforeSend(prepared);
+        if (result == null) return;
+        prepared = result;
+      }
+      const serialized = JSON.stringify(prepared);
       if (new TextEncoder().encode(serialized).length > 256 * 1024) throw new Error('Event exceeds 256 KB');
       const copy = JSON.parse(serialized) as EventInput;
       if (this.queue.length >= this.capacity) {
@@ -133,9 +152,9 @@ export class Trailmark {
     for (let attempt = 0; ; attempt++) {
       let response: Response | undefined, error: unknown;
       try {
-        response = await fetch(`${this.options.endpoint.replace(/\/$/, '')}/v1/events`, {
+        response = await fetch(`${this.options.endpoint!.replace(/\/$/, '')}/v1/events`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${this.options.apiKey}`, 'Content-Type': 'application/json', 'X-Trailmark-SDK': 'typescript/0.1.0' },
+          headers: { Authorization: `Bearer ${this.options.apiKey}`, 'Content-Type': 'application/json', 'X-Trailmark-SDK': 'typescript/0.2.0' },
           body,
           signal: AbortSignal.timeout(30_000),
         });
@@ -167,6 +186,7 @@ export class Trailmark {
     }
   }
   flush(): Promise<void> {
+    if (this.options.enabled === false) return Promise.resolve();
     if (this.pending) return this.pending;
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
@@ -204,4 +224,34 @@ export class Trailmark {
     this.timer = undefined;
     await this.flush();
   }
+}
+
+export const DEFAULT_SECRET_KEYS = /passw(or)?d|secret|token|otp|api[-_]?key|authorization|cookie|credential|private[-_]?key/i;
+/** Redact a deep copy; combine this hook with application-specific filtering as needed. */
+export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacement?: string } = {}): (event: EventInput) => EventInput {
+  const keys = options.keys ?? DEFAULT_SECRET_KEYS;
+  const fields = options.changeFields ?? keys;
+  const replacement = options.replacement ?? '[redacted]';
+  const matches = (pattern: RegExp, key: string) => {
+    pattern.lastIndex = 0;
+    return pattern.test(key);
+  };
+  return (event) => {
+    const copy = structuredClone(event);
+    function walk(value: unknown, top = false): void {
+      if (!value || typeof value !== 'object') return;
+      for (const [key, child] of Object.entries(value)) {
+        if (top && (key === 'id' || key === 'action')) continue;
+        if (matches(keys, key)) (value as Record<string, unknown>)[key] = replacement;
+        else walk(child);
+      }
+    }
+    for (const change of copy.changes ?? []) {
+      if (!matches(fields, change.field)) continue;
+      if (Object.hasOwn(change, 'before')) change.before = replacement;
+      if (Object.hasOwn(change, 'after')) change.after = replacement;
+    }
+    walk(copy, true);
+    return copy;
+  };
 }

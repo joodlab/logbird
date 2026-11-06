@@ -1,5 +1,13 @@
 # Changelog
 
+## SDK and Hono 0.2.0 - Unreleased
+
+- Resolve host identity lazily per audit call; isolate resolver failures.
+- Audit returns the event id; drain pending resolutions before shutdown/edge flush.
+- Add JSON carriers and structural worker jobAudit with causation and attempts.
+- Add disabled clients, defaults, fail-closed beforeSend and deep-copy redact.
+- No API contract change (SDK-only).
+
 ## 0.1.0 - Unreleased
 
 Initial release, seeded from merged PRs #1-20.
