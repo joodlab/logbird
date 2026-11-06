@@ -155,7 +155,8 @@ try {
     for (const entry of journal)
       if (entry.count !== null && (await count('logbird', entry.name)) !== entry.count) throw new Error(`Final row count mismatch: ${entry.name}`);
     const policies = await rows<{ name: string; database: string; table: string }>(
-      "SELECT name,database,table FROM system.row_policies WHERE startsWith(name,'trailmark_') AND database IN ('trailmark','logbird')",
+      // `name` is the full "short ON db.table" form; DROP needs the short name or IF EXISTS silently matches nothing.
+      "SELECT short_name AS name,database,table FROM system.row_policies WHERE startsWith(short_name,'trailmark_') AND database IN ('trailmark','logbird')",
     );
     for (const p of policies) await ch.command({ query: `DROP ROW POLICY IF EXISTS ${ident(p.name)} ON ${ident(p.database)}.${ident(p.table)}` });
     await ch.command({ query: 'DROP USER IF EXISTS trailmark_query' });
