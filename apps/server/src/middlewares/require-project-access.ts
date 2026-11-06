@@ -1,4 +1,4 @@
-import { prisma } from '@trailmark/database';
+import { prisma } from '@logbird/database';
 import { createMiddleware } from 'hono/factory';
 import { ApiError } from '../errors';
 import type { AppEnv } from '../types';

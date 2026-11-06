@@ -1,6 +1,6 @@
 # Backend gaps verification
 
-Local evidence, 2026-11-04; isolated test namespace `trailmark`, branch server port 4602.
+Local evidence, 2026-11-04; isolated test namespace `logbird`, branch server port 4602.
 No CI, deployment, production, apps/app or packages/ui changes.
 
 ## Checks

@@ -12,11 +12,11 @@
   },
   "iconLibrary": "lucide",
   "aliases": {
-    "components": "@trailmark/ui/components",
-    "utils": "@trailmark/ui/lib/utils",
-    "ui": "@trailmark/ui/components/ui",
-    "lib": "@trailmark/ui/lib",
-    "hooks": "@trailmark/ui/hooks"
+    "components": "@logbird/ui/components",
+    "utils": "@logbird/ui/lib/utils",
+    "ui": "@logbird/ui/components/ui",
+    "lib": "@logbird/ui/lib",
+    "hooks": "@logbird/ui/hooks"
   },
   "menuColor": "default",
   "menuAccent": "subtle",

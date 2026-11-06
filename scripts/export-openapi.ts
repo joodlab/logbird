@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { prisma } from '@trailmark/database';
+import { prisma } from '@logbird/database';
 import { app } from '../apps/server/src/app';
 import { clickhouse } from '../apps/server/src/clickhouse';
 import { rateLimitStore } from '../apps/server/src/rate-limit';

@@ -69,7 +69,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     context = object(e.context),
     imp = object(e.impersonator);
   // Only `action` is required: a bad occurredAt never drops the event. It is stored at receive time, the original value
-  // is kept in attributes['trailmark.occurredAt.rejected'] (and in payload), and the caller gets a warning.
+  // is kept in attributes['logbird.occurredAt.rejected'] (and in payload), and the caller gets a warning.
   const occurredAtProblem = (() => {
     if (e.occurredAt === undefined || e.occurredAt === null || e.occurredAt === '') return null;
     if (typeof e.occurredAt !== 'string' && typeof e.occurredAt !== 'number') return 'occurredAt must be ISO-8601 or epoch milliseconds';
@@ -83,7 +83,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   })();
   const occurredAtValid = e.occurredAt !== undefined && e.occurredAt !== null && e.occurredAt !== '' && !occurredAtProblem;
   const date = occurredAtValid ? new Date(e.occurredAt as string | number) : ctx.receivedAt;
-  if (occurredAtProblem) attributes['trailmark.occurredAt.rejected'] = value(e.occurredAt).slice(0, 256);
+  if (occurredAtProblem) attributes['logbird.occurredAt.rejected'] = value(e.occurredAt).slice(0, 256);
   const warning = occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null;
   const id = text(e.id, 256) || uuidv7();
   const row = {

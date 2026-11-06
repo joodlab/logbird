@@ -1,11 +1,11 @@
-# @trailmark/hono
+# @logbird/hono
 
 ```ts
 import { Hono } from 'hono';
-import { Trailmark } from '@trailmark/sdk';
-import { trailmark, type AuditVariables } from '@trailmark/hono';
-const client = new Trailmark({ endpoint: process.env.TRAILMARK_ENDPOINT!, apiKey: process.env.TRAILMARK_INGEST_KEY!, onError: console.error });
-const capture = trailmark({ client, actor: c => ({ type: 'user', id: 'resolved-session-user' }), tenant: c => ({ id: 'resolved-session-tenant' }), autoTrack: {} });
+import { Logbird } from '@logbird/sdk';
+import { logbird, type AuditVariables } from '@logbird/hono';
+const client = new Logbird({ endpoint: (process.env.LOGBIRD_ENDPOINT)!, apiKey: (process.env.LOGBIRD_INGEST_KEY)!, onError: console.error });
+const capture = logbird({ client, actor: c => ({ type: 'user', id: 'resolved-session-user' }), tenant: c => ({ id: 'resolved-session-tenant' }), autoTrack: {} });
 const app = new Hono<{ Variables: AuditVariables }>();
 app.use(capture);
 app.post('/records', c => { c.var.audit('record.created', { targets: [{ type: 'record', id: '123' }] }); return c.json({ ok: true }); });
@@ -26,7 +26,7 @@ const app = new Hono<{ Variables: AuditVariables & {
 } }>();
 // Host logging middleware sets requestId before capture.
 app.use(hostLoggingMiddleware);
-const capture = trailmark({
+const capture = logbird({
   client,
   actor: c => c.get('user') ? { type: 'user', id: c.get('user').id } : undefined,
   requestId: c => c.get('requestId'),

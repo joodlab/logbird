@@ -43,7 +43,7 @@ export function RoleChangedEmail(props: RoleChangedEmailProps) {
       <Spacer height={4} />
       <DetailRows rows={details(props)} />
       <Spacer height={24} />
-      <Button href={props.appUrl}>Open Trailmark</Button>
+      <Button href={props.appUrl}>Open Logbird</Button>
       <Note title={NOTE_TITLE}>{NOTE}</Note>
     </EmailLayout>
   );
@@ -60,7 +60,7 @@ export const roleChanged: EmailDefinition<RoleChangedEmailProps> = {
       title: title(p),
       appUrl: p.appUrl,
       reason: reason(p),
-      blocks: [lead(p), { details: details(p) }, { action: 'Open Trailmark', url: p.appUrl }, { title: NOTE_TITLE, note: NOTE }],
+      blocks: [lead(p), { details: details(p) }, { action: 'Open Logbird', url: p.appUrl }, { title: NOTE_TITLE, note: NOTE }],
     }),
   Component: RoleChangedEmail,
 };

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { getEvent, insertEvents, normalizeEvent, purgeProject } from '@trailmark/clickhouse';
-import { prisma } from '@trailmark/database';
-import { enforceProjectRetention } from '@trailmark/worker/retention';
+import { getEvent, insertEvents, normalizeEvent, purgeProject } from '@logbird/clickhouse';
+import { prisma } from '@logbird/database';
+import { enforceProjectRetention } from '@logbird/worker/retention';
 import { expect, it } from 'vitest';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
@@ -50,7 +50,7 @@ it('R2-1/2/6/7/10: real HTTP ingest, timestamp readback, exact retention and pub
     for (let i = 0; i < stamps.length; i++) {
       const stored = await getEvent(clickhouse, project.id, `event-${i}`);
       expect(!!stored).toBe(true);
-      if (i >= 3) expect(JSON.stringify(stored)).toContain('trailmark.occurredAt.rejected');
+      if (i >= 3) expect(JSON.stringify(stored)).toContain('logbird.occurredAt.rejected');
     }
     const spec = await (await app.request('/openapi.json')).json();
     const lang = spec.paths['/v1/events'].get.parameters.find((p: { name: string }) => p.name === 'lang');

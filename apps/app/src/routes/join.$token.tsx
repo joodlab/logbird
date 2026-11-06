@@ -1,11 +1,11 @@
+import type { InviteLinkPreview, MeResponse } from '@logbird/contracts';
+import { EntityAvatar } from '@logbird/ui/components/entity-chip';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Input } from '@logbird/ui/components/ui/input';
+import { Label } from '@logbird/ui/components/ui/label';
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import type { InviteLinkPreview, MeResponse } from '@trailmark/contracts';
-import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Input } from '@trailmark/ui/components/ui/input';
-import { Label } from '@trailmark/ui/components/ui/label';
 import {
   ArrowRightIcon,
   CircleAlertIcon,
@@ -38,7 +38,7 @@ import { markOtpSent } from '@/lib/otp';
  * (`/` then resumes onboarding, e.g. the profile step for brand-new accounts).
  */
 export const Route = createFileRoute('/join/$token')({
-  head: () => ({ meta: [{ title: 'Join a workspace · Trailmark' }, { name: 'robots', content: 'noindex, nofollow' }] }),
+  head: () => ({ meta: [{ title: 'Join a workspace · Logbird' }, { name: 'robots', content: 'noindex, nofollow' }] }),
   component: JoinPage,
 });
 
@@ -155,10 +155,10 @@ function JoinLink({ link, me }: { link: InviteLinkPreview; me: MeResponse | null
           <p className="text-muted-foreground text-sm">
             {link.inviter ? (
               <>
-                <span className="font-medium text-foreground">{link.inviter.name}</span> invited you to their Trailmark workspace.
+                <span className="font-medium text-foreground">{link.inviter.name}</span> invited you to their Logbird workspace.
               </>
             ) : (
-              'You were invited to a Trailmark workspace.'
+              'You were invited to a Logbird workspace.'
             )}
           </p>
         </div>
@@ -329,7 +329,7 @@ function JoinSignIn({ link }: { link: InviteLinkPreview }) {
         )}
       </form.Subscribe>
       <p className="text-center text-muted-foreground text-xs">
-        We email you a 6-digit code. New to Trailmark? The same code creates your account, then you come back here to join.
+        We email you a 6-digit code. New to Logbird? The same code creates your account, then you come back here to join.
       </p>
     </form>
   );
@@ -377,7 +377,7 @@ function OpenOrSignIn({ me }: { me: MeResponse | null }) {
   if (me) {
     return (
       <Button nativeButton={false} render={<Link to="/" />} variant="outline">
-        Open Trailmark
+        Open Logbird
         <ArrowRightIcon />
       </Button>
     );

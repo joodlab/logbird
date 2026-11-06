@@ -3,9 +3,9 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createClickHouseClient, purgeProject } from '@trailmark/clickhouse';
-import { prisma, withProjectLock } from '@trailmark/database';
-import { readAuditTrail } from '@trailmark/sdk/read';
+import { createClickHouseClient, purgeProject } from '@logbird/clickhouse';
+import { prisma, withProjectLock } from '@logbird/database';
+import { readAuditTrail } from '@logbird/sdk/read';
 import { generateApiKey } from '../apps/server/src/keys';
 
 const root = process.cwd();
@@ -80,9 +80,9 @@ try {
   const env = {
     PORT: '4872',
     NITRO_PORT: '4872',
-    TRAILMARK_ENDPOINT: endpoint,
-    TRAILMARK_INGEST_KEY: ingest.secret,
-    TRAILMARK_READ_KEY: read.secret,
+    LOGBIRD_ENDPOINT: endpoint,
+    LOGBIRD_INGEST_KEY: ingest.secret,
+    LOGBIRD_READ_KEY: read.secret,
   };
   const results: object[] = [];
   const specification = await (await fetch(`${endpoint}/openapi.json`)).json();
@@ -111,7 +111,7 @@ try {
       const operation = `smoke-${name}-${id}`;
       const response = await fetch(`http://127.0.0.1:4872/${name === 'nuxt' ? 'api/' : ''}demo`, {
         method: 'POST',
-        headers: { 'x-trailmark-operation': operation },
+        headers: { 'x-logbird-operation': operation },
       });
       assert.equal(response.status, 200, `${name} mutation status`);
       let found = false;
@@ -128,7 +128,7 @@ try {
         await new Promise((done) => setTimeout(done, 500));
       }
       assert.ok(found, `${name} event must be visible through real read API`);
-      const history = await fetch(`http://127.0.0.1:4872/${name === 'nuxt' ? 'api/_trailmark/events' : 'history'}`);
+      const history = await fetch(`http://127.0.0.1:4872/${name === 'nuxt' ? 'api/_logbird/events' : 'history'}`);
       assert.equal(history.status, 200, `${name} history status`);
       const historyBody = await history.text();
       assert.ok(historyBody.includes(`${name}.record.updated`), `${name} history contains event`);
@@ -181,12 +181,12 @@ try {
   }
   const broken = launch('example-vue-read-failure', 'examples/vue', ['--import', 'tsx', 'index.ts'], {
     ...env,
-    TRAILMARK_READ_KEY: 'fictional-invalid-key',
+    LOGBIRD_READ_KEY: 'fictional-invalid-key',
   });
   try {
     await ready('http://127.0.0.1:4872/', broken);
     const operation = `smoke-vue-read-failure-${id}`;
-    assert.equal((await fetch('http://127.0.0.1:4872/demo', { method: 'POST', headers: { 'x-trailmark-operation': operation } })).status, 200);
+    assert.equal((await fetch('http://127.0.0.1:4872/demo', { method: 'POST', headers: { 'x-logbird-operation': operation } })).status, 200);
     const failure = await fetch('http://127.0.0.1:4872/history');
     assert.equal(failure.status, 502);
     assert.ok((await failure.text()).includes('Audit history unavailable'));

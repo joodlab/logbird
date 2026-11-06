@@ -1,8 +1,8 @@
+import { Input } from '@logbird/ui/components/ui/input';
+import { Label } from '@logbird/ui/components/ui/label';
+import type { ControlSize } from '@logbird/ui/lib/control';
 import { useForm } from '@tanstack/react-form';
 import { useQueryClient } from '@tanstack/react-query';
-import { Input } from '@trailmark/ui/components/ui/input';
-import { Label } from '@trailmark/ui/components/ui/label';
-import type { ControlSize } from '@trailmark/ui/lib/control';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { z } from 'zod';

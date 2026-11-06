@@ -1,5 +1,5 @@
+import type { InviteLink, InviteLinkState } from '@logbird/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { InviteLink, InviteLinkState } from '@trailmark/contracts';
 import { toast } from 'sonner';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';

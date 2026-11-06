@@ -1,13 +1,13 @@
+import type { EntityKind, EntityProfile as Profile } from '@logbird/contracts';
+import { outcomeColor, TypePill } from '@logbird/ui/components/badges';
+import { CopyValue } from '@logbird/ui/components/copy-button';
+import { EntityAvatar } from '@logbird/ui/components/entity-chip';
+import { Panel } from '@logbird/ui/components/page-header';
+import { EmptyState, ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
-import type { EntityKind, EntityProfile as Profile } from '@trailmark/contracts';
-import { outcomeColor, TypePill } from '@trailmark/ui/components/badges';
-import { CopyValue } from '@trailmark/ui/components/copy-button';
-import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
-import { Panel } from '@trailmark/ui/components/page-header';
-import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { ArrowLeftIcon, Rows3Icon, SearchXIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ActionName } from '@/components/action-name';
@@ -44,7 +44,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   const p = profile.data;
   const displayId = kind === 'target' ? splitTargetId(entityId).id : entityId;
   useSetCrumb(p?.entity.name || displayId);
-  useDocumentTitle(`${p?.entity.name || displayId} · ${meta.singular} · Trailmark`);
+  useDocumentTitle(`${p?.entity.name || displayId} · ${meta.singular} · Logbird`);
   const baseQuery = entityQuery(kind, entityId);
 
   if (profile.isError && !p) {

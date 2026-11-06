@@ -10,7 +10,7 @@ pnpm install
 pnpm db:generate
 pnpm db:deploy
 pnpm ch:migrate
-pnpm --filter @trailmark/clickhouse create-query-user
+pnpm --filter @logbird/clickhouse create-query-user
 pnpm dev
 ```
 

@@ -1,9 +1,9 @@
+import { cn } from '@logbird/ui/lib/utils';
 import { createFileRoute, Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { cn } from '@trailmark/ui/lib/utils';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings')({
   staticData: { crumb: 'Settings' },
-  head: () => ({ meta: [{ title: 'Settings · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Settings · Logbird' }] }),
   component: SettingsLayout,
 });
 

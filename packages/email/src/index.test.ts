@@ -90,7 +90,7 @@ describe.each(cases)('$key email', ({ email, props }) => {
     const { text } = await get();
     expect(text).not.toMatch(/<[a-z/!]/i);
     expect(text).toContain('You received this email because');
-    expect(text).toContain('Trailmark · open-source audit logs · audit.acme.test');
+    expect(text).toContain('Logbird · open-source audit logs · audit.acme.test');
     expect(text).toMatchSnapshot();
   });
 
@@ -104,7 +104,7 @@ describe.each(cases)('$key email', ({ email, props }) => {
 describe('sign-in code', () => {
   it('puts the code in the subject, the body and the text part, with expiry and request details', async () => {
     const r = await renderEmail(emails.signInCode, fixtures.signInCode);
-    expect(r.subject).toBe('482913 is your Trailmark sign-in code');
+    expect(r.subject).toBe('482913 is your Logbird sign-in code');
     expect(r.preview).toBe('Expires in 10 minutes. Requested from Chrome on Windows, 203.0.113.24.');
     for (const part of [r.html, r.text]) {
       expect(part).toContain('482913');
@@ -127,7 +127,7 @@ describe('sign-in code', () => {
 
   it('uses verification wording for non-sign-in codes', async () => {
     const r = await renderEmail(emails.signInCode, { ...fixtures.signInCode, purpose: 'email-verification' });
-    expect(r.subject).toBe('482913 is your Trailmark verification code');
+    expect(r.subject).toBe('482913 is your Logbird verification code');
     expect(r.html).toContain('Your verification code');
   });
 });
@@ -135,10 +135,10 @@ describe('sign-in code', () => {
 describe('invitation', () => {
   it('names inviter, workspace, role with its meaning, invited address, expiry, button and raw link', async () => {
     const r = await renderEmail(emails.invitation, fixtures.invitation);
-    expect(r.subject).toBe('Sami Nasser invited you to Acme on Trailmark');
+    expect(r.subject).toBe('Sami Nasser invited you to Acme on Logbird');
     expect(r.preview).toBe('Join as Admin. The invitation expires in 2 days.');
     for (const part of [r.html, r.text]) {
-      expect(part).toContain('Join Acme on Trailmark');
+      expect(part).toContain('Join Acme on Logbird');
       expect(part).toContain('Sami Nasser');
       expect(part).toContain('sami@acme.test');
       expect(part).toContain('Manages projects, API keys, retention and members.');
@@ -171,7 +171,7 @@ describe('invitation', () => {
 describe('member joined and role changed', () => {
   it('tells the inviter who joined, with which role', async () => {
     const r = await renderEmail(emails.memberJoined, fixtures.memberJoined);
-    expect(r.subject).toBe('Lina Haddad joined Acme on Trailmark');
+    expect(r.subject).toBe('Lina Haddad joined Acme on Logbird');
     expect(r.text).toContain('Lina Haddad accepted your invitation and is now a member of Acme as an Admin.');
     expect(r.text).toContain('you invited lina@acme.test to the Acme workspace.');
   });
@@ -205,10 +205,10 @@ describe('package surface', () => {
   it('renders without SMTP: the main entry never loads nodemailer or the env', async () => {
     vi.resetModules();
     vi.doMock('nodemailer', () => {
-      throw new Error('nodemailer imported by @trailmark/email');
+      throw new Error('nodemailer imported by @logbird/email');
     });
     vi.doMock('./env', () => {
-      throw new Error('env imported by @trailmark/email');
+      throw new Error('env imported by @logbird/email');
     });
     const entry = await import('./index');
     const { html } = await entry.renderEmail(entry.emails.signInCode, entry.fixtures.signInCode);

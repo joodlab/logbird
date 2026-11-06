@@ -1,13 +1,13 @@
 # SDK generation spike
 
-Measured locally on 2026-11-05. Recommend **hey-api for a future `@trailmark/client` read client**,
+Measured locally on 2026-11-05. Recommend **hey-api for a future `@logbird/client` read client**,
 with pinned generator dependencies and reviewed generated diffs. Keep Forge experimental.
-The hand-written **`@trailmark/sdk` remains the ingest SDK**, including batching, retries and backpressure.
+The hand-written **`@logbird/sdk` remains the ingest SDK**, including batching, retries and backpressure.
 Nothing under `experiments/` is a workspace package or imported by production code.
 
 ## Sources and exact versions
 
-- [Forge repository](https://github.com/cloudflare/forge), Apache-2.0, cloned outside Trailmark at
+- [Forge repository](https://github.com/cloudflare/forge), Apache-2.0, cloned outside Logbird at
   `../forge`, commit `68134895e81dd3a0a005981b05a3c5e0baaff3f9`, version 0.1.0.
 - [Cloudflare announcement](https://blog.cloudflare.com/forge-open-source-generation-pipeline/), published
   September 28, 2026. Its pipeline describes broader ambitions than the standalone command currently exposes.
@@ -49,7 +49,7 @@ that are in the contracts but not implemented yet (e.g. suggest) must use `route
 
 ## Reproduction
 
-From the isolated Trailmark worktree in PowerShell (configure the root `.env` first; never print it):
+From the isolated Logbird worktree in PowerShell (configure the root `.env` first; never print it):
 
 ```powershell
 pnpm install
@@ -78,10 +78,10 @@ Then in WSL:
 
 ```sh
 FORGE=../forge/target/debug/forge
-cd ../trailmark
+cd ../logbird
 "$FORGE" experiments/forge/public.input.json --target ts --out experiments/forge/public
 "$FORGE" experiments/forge/console.input.json --target ts --out experiments/forge/console
-"$FORGE" openapi/public.json --target cli --out /tmp/trailmark-forge-cli
+"$FORGE" openapi/public.json --target cli --out /tmp/logbird-forge-cli
 ```
 
 The final command deliberately demonstrates the unavailable CLI target; it exits nonzero.
@@ -93,7 +93,7 @@ Start the owned server in a separate terminal, then verify and measure:
 
 ```powershell
 $env:PORT='4641'; $env:APP_URL='http://localhost:4640'
-pnpm --filter @trailmark/server with-env tsx src/index.ts
+pnpm --filter @logbird/server with-env tsx src/index.ts
 # In another terminal at the worktree root:
 pnpm sdk:verify
 pnpm exec tsc -p experiments/tsconfig.json
@@ -120,15 +120,15 @@ No seed/reset/backfill or retention mutation is performed. Stop the owned server
    the build succeeded with the already installed `cargo +stable build --bin forge` in 24.27 seconds.
 3. Without Forge extensions the generated client is silently empty. The adaptation above is mandatory.
 4. `--target cli`: `unrecognized target cli, possible values: ts, capnweb, or wasm://PATH`.
-   No Trailmark CLI was generated or tested; Cap'n Web is an RPC target, not a CLI replacement.
+   No Logbird CLI was generated or tested; Cap'n Web is an RPC target, not a CLI replacement.
 5. Hey-api loaded against root TypeScript 7 fails at `ts.SyntaxKind.AnyKeyword`:
    `TypeError: Cannot read properties of undefined (reading 'AnyKeyword')`.
    A scoped pnpm override still resolved the root peer under the hoisted linker. Isolating the generator with
-   TS 6.0.3 fixes it without downgrading Trailmark. An initial isolated install used host pnpm 12.6.0; pinning
+   TS 6.0.3 fixes it without downgrading Logbird. An initial isolated install used host pnpm 12.6.0; pinning
    the nested packageManager to 10.30.3 and reinstalling under `CI=true` reconciled its modules layout.
 6. Hey-api interprets `openapi/public.json` as registry shorthand and fails `Invalid Hey API shorthand format`.
    Use `./openapi/public.json` (as committed). Always run generation from the repository root.
-7. Initial generated-client compilation with Trailmark's ES2023-only libraries reports `Temporal`,
+7. Initial generated-client compilation with Logbird's ES2023-only libraries reports `Temporal`,
    `HeadersInit` and `BodyInit` missing. Both trees compile with `ESNext`, `DOM`, `DOM.Iterable`; Forge's
    console live request contains `since: Temporal.Instant`. Runtime Temporal support/polyfill is a separate
    concern; DOM types alone do not provide it. No generated output was hand-edited to hide failures.
@@ -181,7 +181,7 @@ not network transfer timings or production telemetry. Forge's Apache license is 
 
 ## Production path and remaining work
 
-Adopt the deterministic spec export now. If adopting generation, create a separate `@trailmark/client`
+Adopt the deterministic spec export now. If adopting generation, create a separate `@logbird/client`
 package from public.json using pinned hey-api, compiled dual ESM/CJS or an explicit ESM-only support policy,
 stable exported schema names, package exports and a documented Node/edge matrix. Keep console methods private.
 Split read-only output from ingest or clearly document that generated ingest is low-level only. Lock operation
@@ -189,7 +189,7 @@ IDs independently of display summaries before publishing the first version.
 
 In this CI-less repo, maintainers run setup, `pnpm sdk:generate`, inspect the spec/client diff, typecheck,
 tests and real-server smoke test locally, then commit generated output with the source contract change.
-Publish `@trailmark/client` only in a separately authorized release with semver/change notes and registry
+Publish `@logbird/client` only in a separately authorized release with semver/change notes and registry
 credentials. Do not add PR Docker builds. Add drift detection and release automation if CI arrives later.
 
 Estimate: 1–2 engineering days for packaging, auth examples, named response models, smoke fixtures and Node 22/

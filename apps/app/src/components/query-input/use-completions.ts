@@ -1,6 +1,6 @@
+import type { QueryLang, SavedView, SuggestResponse } from '@logbird/contracts';
 import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useQueries, useQuery } from '@tanstack/react-query';
-import type { QueryLang, SavedView, SuggestResponse } from '@trailmark/contracts';
 import { useMemo } from 'react';
 import { fieldsQuery, SUGGEST_LIMIT, suggestQuery } from '@/lib/api/queries';
 import { formatCompact } from '@/lib/format';

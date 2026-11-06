@@ -1,4 +1,4 @@
-import { auth } from '@trailmark/auth';
+import { auth } from '@logbird/auth';
 import { createMiddleware } from 'hono/factory';
 import { ApiError } from '../errors';
 import type { AppEnv } from '../types';

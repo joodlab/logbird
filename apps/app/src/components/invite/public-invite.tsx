@@ -1,5 +1,5 @@
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { cn } from '@trailmark/ui/lib/utils';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { cn } from '@logbird/ui/lib/utils';
 import type { ClockIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { BrandLockup } from '@/components/brand';

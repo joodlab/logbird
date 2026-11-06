@@ -2,20 +2,20 @@
 
 Status: **proposal, 2026-11-05**. Nothing here has been applied to JoodCMS; every JoodCMS change needs the owner's
 sign-off. Evidence paths are relative to the JoodCMS repository root (read-only study of `master` at `0f712673a`).
-The Trailmark-side work is tracked in [roadmap.md](roadmap.md); a ready-to-apply starter is in
+The Logbird-side work is tracked in [roadmap.md](roadmap.md); a ready-to-apply starter is in
 [joodcms-starter/](joodcms-starter/README.md).
 
 ## 1. What JoodCMS is, as an audit source
 
-| Fact | Evidence | Consequence for Trailmark |
+| Fact | Evidence | Consequence for Logbird |
 | --- | --- | --- |
-| API is Hono 4 on long-running Node (`@hono/node-server`), graceful SIGTERM shutdown | `apps/server/package.json`, `apps/server/src/index.ts` (`cleanup()`) | `@trailmark/sdk` + `@trailmark/hono` fit; batched async delivery; flush in `cleanup()` |
+| API is Hono 4 on long-running Node (`@hono/node-server`), graceful SIGTERM shutdown | `apps/server/package.json`, `apps/server/src/index.ts` (`cleanup()`) | `@logbird/sdk` + `@logbird/hono` fit; batched async delivery; flush in `cleanup()` |
 | Production: API HPA 4–6 pods, 4 worker pods, k3s on Hetzner; envs `ha-staging`, `production`, per-PR previews | `k8s/values/production.yaml:26-27`, `k8s/README.md`, `.github/workflows/deploy.yml` | Per-pod SDK queues; many processes behind one egress IP (see roadmap P0-2) |
 | Auth is **per route**, not global: `createRouteConfig({ guard: [isAuthenticated, …] })` | `apps/server/src/lib/hono/route-config.ts`, `apps/server/src/middlewares/guard/*` | A global middleware sees no user; actor/tenant must resolve lazily at `audit()` time (roadmap P0-1) |
 | Hono `contextStorage()` is on; `requestId` is owned by evlog | `apps/server/src/server.ts:30,59-61` | `audit()` can be called from actions via `getContext()`; reuse JoodCMS's `requestId` for log correlation |
 | ~596 mutating endpoints (295 POST, 151 PUT, 43 PATCH, 99 DELETE) + 2 better-auth catch-alls; ~80 BullMQ job types; 4 inbound webhooks | `apps/server/src/modules/**/handlers.ts`, `apps/worker/src/processors.ts`, `modules/public/webhooks/*` | Instrument in waves (§3); jobs and webhooks are system/integration actors |
 | Admin (`apps/admin`, Jood staff) and app (`apps/app`, customers) are Vue 3 + Vite SPAs on Cloudflare Workers, TanStack Vue Query, Hono RPC, RTL-first i18n | `apps/admin/wrangler.jsonc`, `apps/*/src/services/api.ts`, `App.vue` `ConfigProvider dir` | Read keys stay in the API; UIs call JoodCMS endpoints that proxy the read API; JoodCMS renders its own (Arabic/English) sentences |
-| Dependencies come from public npm only; `minimumReleaseAge` policy; Docker builds use `turbo prune` + `--frozen-lockfile` | `.npmrc` (empty), `pnpm-workspace.yaml`, `apps/server/Dockerfile` | Trailmark packages must be published or vendored (owner decision D1) |
+| Dependencies come from public npm only; `minimumReleaseAge` policy; Docker builds use `turbo prune` + `--frozen-lockfile` | `.npmrc` (empty), `pnpm-workspace.yaml`, `apps/server/Dockerfile` | Logbird packages must be published or vendored (owner decision D1) |
 
 ### Existing audit-like data
 
@@ -34,7 +34,7 @@ the two evlog audit sites (kept during shadow, then removed from evlog) and What
 
 ## 2. Envelope mapping
 
-| Trailmark field | JoodCMS source | Rule |
+| Logbird field | JoodCMS source | Rule |
 | --- | --- | --- |
 | `actor` (signed-in) | `c.get('user')` after `isAuthenticated` | `{ type: 'user', id: user.id, name: user.fullName ?? user.name, email: user.email, role: user.role }` — `role` is the platform role (`USER`, `SUPPORT`, `ADMIN`, `SUPER_ADMIN`; `packages/shared/src/constants/roles.ts`) and lands in `attributes['actor.role']` |
 | `actor` (API key) | `c.get('apiKey')` (`middlewares/guard/has-api-key.ts:17-51`) | `{ type: 'api_key', id: apiKey.id, name: apiKey.name }` — never the key or its prefix |
@@ -47,7 +47,7 @@ the two evlog audit sites (kept during shadow, then removed from evlog) and What
 | `targets[]` | handler | Primary record first, then its parents: always the `website` when website-scoped, the `hotel` for room/policy/facility changes, the `business` for business-level records. Type names are singular snake_case (`hotel_room`, `crm_campaign`) |
 | `changes[]` | handler diff | Only for settings-like updates (§3.3); field names are JoodCMS model fields; values follow §3.4 |
 | `context.requestId` | `c.get('requestId')` (evlog) | Same id as the `X-Request-Id` response header and HyperDX logs |
-| `context.operationId` | `x-trailmark-operation` header or new UUIDv7 | Carried into jobs |
+| `context.operationId` | `x-logbird-operation` header or new UUIDv7 | Carried into jobs |
 | `context.ip` | `getClientIpFromHeaders` (`lib/ip/extract.ts:38-80`) | Trusted resolver only, never raw headers |
 | `environment` | client `defaults` | `production`, `staging`, or `preview` |
 | `description` | handler | English operator sentence ("Lina published hotel Sunrise"); in-app UIs do **not** display it (§5) |
@@ -136,7 +136,7 @@ visitor analytics, AI chat and search; theme draft autosaves; health scans; cach
 2. **End-customer PII stays in JoodCMS.** Guests (`WebsiteGuest`, `BusinessGuest`: email, phone, names, birthDate,
    nationality, gender, notes), booking `customerEmail`, contact messages, newsletter subscribers, review authors and
    WhatsApp phone numbers are referenced **by id only**. Target names for guests are `"Guest <first 8 of id>"`. Diffs
-   of these fields carry `[redacted]`. Why: Trailmark retention is per project, not per data subject, so an erasure
+   of these fields carry `[redacted]`. Why: Logbird retention is per project, not per data subject, so an erasure
    request in JoodCMS must not leave copies in the audit log.
 3. **Staff identity is allowed:** JoodCMS users' id, name and email as actor/impersonator; IP and user agent in
    `context`. These are security records under the project's retention (owner decision D4).
@@ -149,7 +149,7 @@ visitor analytics, AI chat and search; theme draft autosaves; health scans; cach
 ## 4. Integration architecture
 
 ```
-apps/admin, apps/app (Vue SPA, Workers) ──► JoodCMS API (Hono/Node, 4–6 pods) ──► Trailmark /v1/events (ingest key)
+apps/admin, apps/app (Vue SPA, Workers) ──► JoodCMS API (Hono/Node, 4–6 pods) ──► Logbird /v1/events (ingest key)
                                               │  c.var.audit(...) after commit         ▲
                                               │  history routes ── read key ───────────┘ (GET /v1/events)
                                               └─ BullMQ job data carries AuditCarrier ──► apps/worker (4 pods) ─► /v1/events
@@ -157,23 +157,23 @@ apps/admin, apps/app (Vue SPA, Workers) ──► JoodCMS API (Hono/Node, 4–6 
 
 ### 4.1 Capture
 
-- `apps/server/src/lib/audit/` owns one `Trailmark` client per process (`enabled` only when `TRAILMARK_INGEST_KEY`
+- `apps/server/src/lib/audit/` owns one `Logbird` client per process (`enabled` only when `LOGBIRD_INGEST_KEY`
   is set, so local dev and tests are no-ops), the Hono middleware mounted globally **after**
   `enrichEvlogRequestLifecycle` (`server.ts`), and a typed `audit(action, partial)` helper that reads
   `getContext().var.audit` so actions outside handlers can audit too.
 - Resolvers read `user`, `session`, `apiKey`, `website`, `businessContext` lazily at call time (requires roadmap
   P0-1). Call `audit()` **after** the Prisma write/transaction resolves; on known failures emit `outcome: 'failure'`
   only for wave-1 actions; denials come from the guards.
-- `@trailmark/hono` `autoTrack` stays **off** in production (it would double every mutation). During shadow it may be
+- `@logbird/hono` `autoTrack` stays **off** in production (it would double every mutation). During shadow it may be
   enabled on staging as a coverage sentinel (`http.*` events show mutations without a catalogue event).
 - `packages/auth` gets an optional `onAuditEvent` callback injected by the server, so the shared auth package does not
-  depend on Trailmark.
+  depend on Logbird.
 
 ### 4.2 Batching and failure behaviour
 
 - SDK defaults: batch 100, flush every 1 s, 5 retries with backoff, bounded queue 10,000 events per process,
   `dropPolicy: 'oldest'`, 256 KiB per event. JoodCMS sets `maxQueueSize: 20_000`.
-- A request never waits for Trailmark and never fails because of it. During a Trailmark outage each pod buffers in
+- A request never waits for Logbird and never fails because of it. During a Logbird outage each pod buffers in
   memory; overflow increments `client.dropped` and calls `onDrop`, which JoodCMS forwards to evlog
   (`audit.dropped`, level warn) and an OTel counter so HyperDX can alert.
 - Shutdown: `await audit.shutdown()` in `apps/server/src/index.ts` `cleanup()` before `flushObservability()`, and
@@ -181,7 +181,7 @@ apps/admin, apps/app (Vue SPA, Workers) ──► JoodCMS API (Hono/Node, 4–6 
   enough).
 - **Loss window:** a pod killed without SIGTERM loses at most ~1 s of events. If the owner wants zero-loss for wave-1
   events, JoodCMS can write them to a BullMQ `audit` outbox on Dragonfly and let the worker ship them (decision D5).
-- Trailmark answers 503 `project_busy` during retention maintenance and 429 when over budget; the SDK retries both.
+- Logbird answers 503 `project_busy` during retention maintenance and 429 when over budget; the SDK retries both.
 
 ### 4.3 Jobs and webhooks
 
@@ -193,24 +193,24 @@ apps/admin, apps/app (Vue SPA, Workers) ──► JoodCMS API (Hono/Node, 4–6 
 
 ### 4.4 Projects, keys and environments
 
-| Trailmark project | JoodCMS env | Retention | Keys |
+| Logbird project | JoodCMS env | Retention | Keys |
 | --- | --- | --- | --- |
 | `joodcms-production` | `production` | decision D4 (proposal 365 days) | ingest `joodcms-api`, ingest `joodcms-worker`, read `joodcms-api-history` |
 | `joodcms-staging` | `ha-staging` | 30 days | same three |
 | `joodcms-preview` | every PR preview, `environment: 'preview'`, `metadata.preview` = PR number | 7 days | one ingest, one read |
-| local dev | none by default (client disabled); developers may point at their own Trailmark | — | — |
+| local dev | none by default (client disabled); developers may point at their own Logbird | — | — |
 
 One workspace, "Jood", owns all projects; Jood engineers and support are invited as members (Member can search;
-Owner/Admin manage keys). Keys live only in k8s secrets as `TRAILMARK_ENDPOINT`, `TRAILMARK_INGEST_KEY`,
-`TRAILMARK_READ_KEY`; never in `apps/admin`, `apps/app` or theme bundles. Separate API and worker ingest keys allow
-rotation without a full redeploy. Where Trailmark runs (cloud vs the self-hosted build on the same k3s cluster) is
+Owner/Admin manage keys). Keys live only in k8s secrets as `LOGBIRD_ENDPOINT`, `LOGBIRD_INGEST_KEY`,
+`LOGBIRD_READ_KEY`; never in `apps/admin`, `apps/app` or theme bundles. Separate API and worker ingest keys allow
+rotation without a full redeploy. Where Logbird runs (cloud vs the self-hosted build on the same k3s cluster) is
 decision D2.
 
 ### 4.5 Reading history
 
-**Phase 1, Jood staff (no Trailmark change):** `apps/admin` detail pages get a "History" link that opens the
-Trailmark console at `/p/<projectId>/records/<type>:<id>` (records), `/tenants/<businessId>` or `/actors/<userId>`.
-Staff already are Trailmark workspace members; the console is the operator tool.
+**Phase 1, Jood staff (no Logbird change):** `apps/admin` detail pages get a "History" link that opens the
+Logbird console at `/p/<projectId>/records/<type>:<id>` (records), `/tenants/<businessId>` or `/actors/<userId>`.
+Staff already are Logbird workspace members; the console is the operator tool.
 
 **Phase 2, customers in `apps/app`:** a History sheet modelled on `BusinessReservationActivitySheet.vue` (opened from
 `BusinessBookingDetailView.vue:513-562`), first on hotel, website and role detail pages, behind a new permission
@@ -224,7 +224,7 @@ Staff already are Trailmark workspace members; the console is the operator tool.
   is always forced server-side; user input never becomes raw `q`.** Each cursor page rebuilds the same query.
 - The response is projected before returning: drop `impersonator`, `context.ip`, `context.userAgent`, `actor.email`
   and attributes; map Jood staff actors (`actor.role` ≠ `USER`) to "Jood support". The UI renders localized sentences
-  from `action` + `targets` + `changes` with `@joodcms/i18n` (RTL-safe), not Trailmark's English `description`.
+  from `action` + `targets` + `changes` with `@joodcms/i18n` (RTL-safe), not Logbird's English `description`.
 - Before customers see history, roadmap P1-1 (tenant-scoped read tokens) replaces the project-wide read key on this
   path so a JoodCMS bug cannot read another tenant's events.
 
@@ -238,9 +238,9 @@ still finds it).
 
 ## 5. What JoodCMS must change
 
-1. **Dependency** on `@trailmark/sdk` and `@trailmark/hono` (published or vendored, D1); add to the
+1. **Dependency** on `@logbird/sdk` and `@logbird/hono` (published or vendored, D1); add to the
    `minimumReleaseAge` exclude list if published fresh.
-2. **Env** (`apps/server/src/env.ts`, worker env): `TRAILMARK_ENDPOINT`, `TRAILMARK_INGEST_KEY`, `TRAILMARK_READ_KEY`
+2. **Env** (`apps/server/src/env.ts`, worker env): `LOGBIRD_ENDPOINT`, `LOGBIRD_INGEST_KEY`, `LOGBIRD_READ_KEY`
    (all optional; capture is disabled without the ingest key). k8s secrets per environment.
 3. **New** `apps/server/src/lib/audit/{client,middleware,catalog,redaction}.ts` (starter kit).
 4. **Mount** the middleware in `apps/server/src/server.ts` after `enrichEvlogRequestLifecycle`; **flush** in
@@ -264,17 +264,17 @@ No Prisma schema change and no data migration is required.
 
 | Stage | Scope | Exit criteria |
 | --- | --- | --- |
-| 0. Prerequisites | Trailmark roadmap P0s merged; Trailmark host deployed (D2); projects and keys created | Smoke `pnpm smoke:prod` passes on the target Trailmark |
+| 0. Prerequisites | Logbird roadmap P0s merged; Logbird host deployed (D2); projects and keys created | Smoke `pnpm smoke:prod` passes on the target Logbird |
 | 1. Local + preview | Starter merged behind missing keys (no-op); `joodcms-preview` key on previews | JoodCMS unit tests green; preview events visible; no request-latency change |
 | 2. Staging (`ha-staging`) | Wave 1, then wave 2; `autoTrack` coverage sentinel on | 7 days: `client.dropped = 0`, no 429/503 storms, average conformance ≥ 90, every wave-1 route covered (sentinel `http.*` without a sibling catalogue event ≈ 0), p95 API latency unchanged (±1 ms) |
 | 3. Production shadow | Waves 1–2 to `joodcms-production`; nobody depends on it; sentinel off | 14 days: drops 0, ingest p99 < 500 ms, daily volume and ClickHouse disk growth measured, counts match HyperDX `route_key` mutation counts within 1% for instrumented routes |
 | 4. On | Jood staff use console links (phase 1); evlog audit dual-write removed; wave 3 begins | Owner sign-off; alerting on drops and ingest silence live |
 | 5. Customer history | Phase 2 History sheet after roadmap P1-1/P1-2 | Security review of the history route; tenant-isolation tests |
 
-Rollback at any stage: remove `TRAILMARK_INGEST_KEY` (the client becomes a no-op). Nothing in JoodCMS reads Trailmark
+Rollback at any stage: remove `LOGBIRD_INGEST_KEY` (the client becomes a no-op). Nothing in JoodCMS reads Logbird
 until stage 5.
 
-## 7. Gap analysis (Trailmark)
+## 7. Gap analysis (Logbird)
 
 | Need | Today | Gap | Roadmap |
 | --- | --- | --- | --- |

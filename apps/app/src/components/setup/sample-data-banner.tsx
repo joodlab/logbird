@@ -1,7 +1,7 @@
+import { SAMPLE_DATA_SOURCE } from '@logbird/contracts';
+import { Button } from '@logbird/ui/components/ui/button';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
-import { SAMPLE_DATA_SOURCE } from '@trailmark/contracts';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { cn } from '@trailmark/ui/lib/utils';
 import { DatabaseIcon, Loader2Icon, Trash2Icon } from 'lucide-react';
 import { projectSetupQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ProjectBusyError, withProjectLock } from '@trailmark/database';
+import { ProjectBusyError, withProjectLock } from '@logbird/database';
 import { describe, expect, it } from 'vitest';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

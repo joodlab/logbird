@@ -1,5 +1,5 @@
+import { entitySortSchema } from '@logbird/contracts';
 import { createFileRoute } from '@tanstack/react-router';
-import { entitySortSchema } from '@trailmark/contracts';
 import { z } from 'zod';
 import { EntityDirectory } from '@/components/entities/entity-directory';
 import { entityListQuery } from '@/lib/api/queries';
@@ -11,7 +11,7 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/workers/'
   loader: ({ context, params, deps }) => {
     context.queryClient.prefetchInfiniteQuery(entityListQuery(params.projectId, 'executor', deps.q, deps.type, deps.sort));
   },
-  head: () => ({ meta: [{ title: 'Executors · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Executors · Logbird' }] }),
   component: DirectoryPage,
 });
 

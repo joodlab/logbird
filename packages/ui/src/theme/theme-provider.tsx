@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 export type Theme = 'light' | 'dark' | 'system';
 type ResolvedTheme = Exclude<Theme, 'system'>;
 
-export const THEME_STORAGE_KEY = 'trailmark.theme';
+export const THEME_STORAGE_KEY = 'logbird.theme';
 
 interface ThemeContextValue {
   theme: Theme;

@@ -1,5 +1,5 @@
 {
-  "name": "@trailmark/app",
+  "name": "@logbird/app",
   "license": "MIT",
   "version": "0.1.0",
   "private": true,
@@ -23,8 +23,8 @@
     "@tanstack/react-start": "^1.168.49",
     "@tanstack/react-table": "^9.2.6",
     "@tanstack/react-virtual": "^3.13.12",
-    "@trailmark/contracts": "workspace:*",
-    "@trailmark/ui": "workspace:*",
+    "@logbird/contracts": "workspace:*",
+    "@logbird/ui": "workspace:*",
     "better-auth": "^1.7.2",
     "lucide-react": "^1.39.0",
     "nitro": "3.0.260522-beta",
@@ -36,7 +36,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
-    "@trailmark/tsconfig": "workspace:*",
+    "@logbird/tsconfig": "workspace:*",
     "@types/node": "^22.20.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",

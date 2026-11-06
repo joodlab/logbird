@@ -9,8 +9,8 @@ export const env = createEnv({
     SMTP_SECURE: z.enum(['true', 'false']).default('false'),
     SMTP_USER: z.string().optional(),
     SMTP_PASSWORD: z.string().optional(),
-    MAIL_FROM: z.string().default('Trailmark <hello@trailmark.local>'),
-    /** Public URL of this Trailmark install; every email links back to it (self-hosters get their own domain). */
+    MAIL_FROM: z.string().default('Logbird <hello@logbird.local>'),
+    /** Public URL of this Logbird install; every email links back to it (self-hosters get their own domain). */
     APP_URL: z.url().default('http://localhost:4600'),
   },
   runtimeEnv: process.env,

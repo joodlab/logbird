@@ -1,12 +1,12 @@
-import { insertEvents, normalizeEvent, rebuildProjectRollups } from '@trailmark/clickhouse';
-import { SAMPLE_DATA_EVENTS, SAMPLE_DATA_SOURCE } from '@trailmark/contracts';
+import { insertEvents, normalizeEvent, rebuildProjectRollups } from '@logbird/clickhouse';
+import { SAMPLE_DATA_EVENTS, SAMPLE_DATA_SOURCE, SAMPLE_DATA_SOURCES } from '@logbird/contracts';
 import { clickhouse } from './clickhouse';
 
 /** Caller holds the same cross-process project lock as ingestion and retention. */
 export async function removeSampleData(projectId: string) {
   await clickhouse.command({
-    query: 'DELETE FROM events WHERE project_id={p:String} AND source={source:String}',
-    query_params: { p: projectId, source: SAMPLE_DATA_SOURCE },
+    query: 'DELETE FROM events WHERE project_id={p:String} AND source IN {source:Array(String)}',
+    query_params: { p: projectId, source: SAMPLE_DATA_SOURCES },
     clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
   });
   await rebuildProjectRollups(clickhouse, projectId);
@@ -58,7 +58,7 @@ export async function loadSampleData(projectId: string) {
         changes: [changes[step]],
         metadata: { channel: i % 2 ? 'web' : 'mobile' },
       },
-      { projectId, receivedAt: occurredAt, sdk: 'trailmark-sample' },
+      { projectId, receivedAt: occurredAt, sdk: 'logbird-sample' },
     );
     if (!event.ok) throw new Error(event.reason);
     return event.row;

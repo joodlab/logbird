@@ -4,7 +4,7 @@
 
 > Day 1. Building an open-source audit log for your product, in public.
 >
-> Send any JSON event with an `action` and Trailmark turns it into a searchable history: who did what, in which
+> Send any JSON event with an `action` and Logbird turns it into a searchable history: who did what, in which
 > customer account, to which record, and how it went.
 >
 > 300,000 events, searched in ~60 ms. Actors, tenants, workers and records each get their own page.
@@ -22,5 +22,5 @@
 3. "Live tail for when you're watching a deploy." —
    [`explorer-detail-live-tail.webm`](../../captures/2026-11-04-ui-foundation/explorer-detail-live-tail.webm)
 
-**Alt text (clip):** The Trailmark explorer: a search bar, a bar chart of events over 7 days, and a dense table of
+**Alt text (clip):** The Logbird explorer: a search bar, a bar chart of events over 7 days, and a dense table of
 audit events being filtered to failures.

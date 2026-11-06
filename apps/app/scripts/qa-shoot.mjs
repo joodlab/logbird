@@ -73,7 +73,7 @@ if (cmd === 'login') {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
   const problems = watch(page);
-  await signIn(page, args[0] ?? 'demo@trailmark.local');
+  await signIn(page, args[0] ?? 'demo@logbird.local');
   await settle(page);
   console.log('signed in →', page.url());
   await ctx.storageState({ path: STATE });

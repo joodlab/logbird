@@ -1,5 +1,5 @@
-import type { QueryLang } from '@trailmark/contracts';
-import { cn } from '@trailmark/ui/lib/utils';
+import type { QueryLang } from '@logbird/contracts';
+import { cn } from '@logbird/ui/lib/utils';
 import { type ReactNode, useMemo } from 'react';
 import { highlightQuery, markErrorSpan, type SegmentClass } from '@/lib/query-language';
 import { highlightSql } from '@/lib/sql-language';

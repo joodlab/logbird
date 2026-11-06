@@ -1,6 +1,6 @@
-import { EmptyState } from '@trailmark/ui/components/states';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { cn } from '@trailmark/ui/lib/utils';
+import { EmptyState } from '@logbird/ui/components/states';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { cn } from '@logbird/ui/lib/utils';
 import type { ReactNode } from 'react';
 import { formatCompact } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';

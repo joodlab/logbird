@@ -1,11 +1,11 @@
+import type { WorkspaceSetup } from '@logbird/contracts';
 import type { QueryClient } from '@tanstack/react-query';
 import { redirect } from '@tanstack/react-router';
-import type { WorkspaceSetup } from '@trailmark/contracts';
 import { meQuery, projectsQuery, workspaceSetupQuery } from '@/lib/api/queries';
 import { activeRole, canDo } from '@/lib/permissions';
 import { lastProject } from '@/lib/session';
 
-const SKIP_KEY = (projectId: string) => `trailmark.onboarding.skippedFirstEvent.${projectId}`;
+const SKIP_KEY = (projectId: string) => `logbird.onboarding.skippedFirstEvent.${projectId}`;
 
 /** "Skip for now" on the first-event step: `/` stops sending this browser back there for that project. */
 export function skipFirstEvent(projectId: string) {

@@ -1,4 +1,4 @@
-import type { EntityKind } from '@trailmark/contracts';
+import type { EntityKind } from '@logbird/contracts';
 import { Bot, Building2, Cog, type LucideIcon, Package, User } from 'lucide-react';
 
 /**

@@ -1,5 +1,5 @@
-import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
-import { cn } from '@trailmark/ui/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
+import { cn } from '@logbird/ui/lib/utils';
 import { formatDate, formatFull, formatRelative, formatTimeMs, formatTimestamp, formatUtc } from '@/lib/format';
 
 const FORMATS = {

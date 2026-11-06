@@ -1,5 +1,5 @@
-import type { ProjectSetup, SetupStep, SetupStepId } from '@trailmark/contracts';
-import { cn } from '@trailmark/ui/lib/utils';
+import type { ProjectSetup, SetupStep, SetupStepId } from '@logbird/contracts';
+import { cn } from '@logbird/ui/lib/utils';
 import { CheckIcon, CircleAlertIcon } from 'lucide-react';
 import { formatRelative, formatRetention, pluralize } from '@/lib/format';
 

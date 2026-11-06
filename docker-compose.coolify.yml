@@ -2,9 +2,9 @@ services:
   postgres:
     image: postgres:17-bookworm
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-trailmark}
+      POSTGRES_USER: ${POSTGRES_USER:-logbird}
       POSTGRES_PASSWORD: ${SERVICE_PASSWORD_64_POSTGRES:?}
-      POSTGRES_DB: ${POSTGRES_DB:-trailmark}
+      POSTGRES_DB: ${POSTGRES_DB:-logbird}
     volumes: [postgres:/var/lib/postgresql/data]
     healthcheck:
       test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
@@ -15,8 +15,8 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:26.9
     environment:
-      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-trailmark}
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-trailmark}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-logbird}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-logbird}
       CLICKHOUSE_PASSWORD: ${SERVICE_PASSWORD_64_CLICKHOUSE:?}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
     volumes: [clickhouse:/var/lib/clickhouse]
@@ -39,21 +39,21 @@ services:
       retries: 10
     restart: unless-stopped
   migrate:
-    image: ${TRAILMARK_IMAGE_REGISTRY:-trailmark}/migrate:${TRAILMARK_VERSION:-local}
+    image: ${LOGBIRD_IMAGE_REGISTRY:-logbird}/migrate:${LOGBIRD_VERSION:-local}
     build: {context: ., dockerfile: apps/server/Dockerfile, target: migrate}
     environment: &runtime
       NODE_ENV: production
       APP_URL: ${APP_URL:-${SERVICE_URL_APP_4600:?}}
       BETTER_AUTH_SECRET: ${SERVICE_PASSWORD_64_AUTH:?}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-trailmark}:${SERVICE_PASSWORD_64_POSTGRES:?}@postgres:5432/${POSTGRES_DB:-trailmark}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-logbird}:${SERVICE_PASSWORD_64_POSTGRES:?}@postgres:5432/${POSTGRES_DB:-logbird}}
       CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
-      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-trailmark}
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-trailmark}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-logbird}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-logbird}
       CLICKHOUSE_PASSWORD: ${SERVICE_PASSWORD_64_CLICKHOUSE:?}
-      CLICKHOUSE_QUERY_USER: trailmark_query
+      CLICKHOUSE_QUERY_USER: logbird_query
       CLICKHOUSE_QUERY_PASSWORD: ${SERVICE_HEX_64_QUERY:?}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      BULLMQ_PREFIX: '${BULLMQ_PREFIX:-{trailmark}}'
+      BULLMQ_PREFIX: '${BULLMQ_PREFIX:-{logbird}}'
       TRUST_PROXY: ${TRUST_PROXY:-2}
       TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
       AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-30}
@@ -66,14 +66,14 @@ services:
       SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      MAIL_FROM: ${MAIL_FROM:-Trailmark <hello@example.com>}
+      MAIL_FROM: ${MAIL_FROM:-Logbird <hello@example.com>}
     depends_on:
       postgres: {condition: service_healthy}
       clickhouse: {condition: service_healthy}
       redis: {condition: service_healthy}
     restart: 'no'
   server:
-    image: ${TRAILMARK_IMAGE_REGISTRY:-trailmark}/server:${TRAILMARK_VERSION:-local}
+    image: ${LOGBIRD_IMAGE_REGISTRY:-logbird}/server:${LOGBIRD_VERSION:-local}
     build: {context: ., dockerfile: apps/server/Dockerfile}
     environment:
       <<: *runtime
@@ -83,7 +83,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 45s
   worker:
-    image: ${TRAILMARK_IMAGE_REGISTRY:-trailmark}/worker:${TRAILMARK_VERSION:-local}
+    image: ${LOGBIRD_IMAGE_REGISTRY:-logbird}/worker:${LOGBIRD_VERSION:-local}
     build: {context: ., dockerfile: apps/worker/Dockerfile}
     environment: *runtime
     depends_on:
@@ -92,13 +92,13 @@ services:
     restart: unless-stopped
     stop_grace_period: 5m
   app:
-    image: ${TRAILMARK_IMAGE_REGISTRY:-trailmark}/app:${TRAILMARK_VERSION:-local}
+    image: ${LOGBIRD_IMAGE_REGISTRY:-logbird}/app:${LOGBIRD_VERSION:-local}
     build: {context: ., dockerfile: apps/app/Dockerfile}
     environment:
       PORT: '4600'
       HOST: '0.0.0.0'
       NODE_ENV: production
-      TRAILMARK_SERVER_URL: ${TRAILMARK_SERVER_URL:-http://server:4601}
+      LOGBIRD_SERVER_URL: ${LOGBIRD_SERVER_URL:-http://server:4601}
       # Declared on the service that receives the domain, as in Coolify's examples: routes the public URL to app:4600.
       SERVICE_URL_APP_4600: ${SERVICE_URL_APP_4600}
     depends_on:

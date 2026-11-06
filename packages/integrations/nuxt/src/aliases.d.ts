@@ -1,5 +1,5 @@
-declare module '#trailmark-hooks' {
-  const hooks: import('./runtime/hooks').TrailmarkHooks;
+declare module '#logbird-hooks' {
+  const hooks: import('./runtime/hooks').LogbirdHooks;
   export default hooks;
 }
 declare module '#imports' {

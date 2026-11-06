@@ -1,9 +1,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { SIGN_IN_CODE_TTL_SECONDS } from '@logbird/contracts';
+import { prisma } from '@logbird/database';
+import { clientIp, primaryRole } from '@logbird/email';
+import { sendMemberJoined, sendOrganizationInvitation, sendRoleChanged, sendSignInCode } from '@logbird/email/send';
 import { createEnv } from '@t3-oss/env-core';
-import { SIGN_IN_CODE_TTL_SECONDS } from '@trailmark/contracts';
-import { prisma } from '@trailmark/database';
-import { clientIp, primaryRole } from '@trailmark/email';
-import { sendMemberJoined, sendOrganizationInvitation, sendRoleChanged, sendSignInCode } from '@trailmark/email/send';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { emailOTP, organization } from 'better-auth/plugins';
@@ -66,7 +66,11 @@ export const auth = betterAuth({
   secret: env.BETTER_AUTH_SECRET,
   trustedOrigins: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)],
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
-  advanced: { useSecureCookies: new URL(env.APP_URL).protocol === 'https:', defaultCookieAttributes: { httpOnly: true, sameSite: 'lax' } },
+  advanced: {
+    cookiePrefix: 'logbird',
+    useSecureCookies: new URL(env.APP_URL).protocol === 'https:',
+    defaultCookieAttributes: { httpOnly: true, sameSite: 'lax' },
+  },
   databaseHooks: {
     session: {
       create: {

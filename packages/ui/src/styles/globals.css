@@ -6,7 +6,7 @@
 
 /* The package is consumed as a symlinked workspace dependency, which Tailwind v4's
    automatic content detection skips. Scan our own sources explicitly so classes used
-   only inside @trailmark/ui are generated. */
+   only inside @logbird/ui are generated. */
 @source "../**/*.{ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));
@@ -79,7 +79,7 @@
   --radius-xl: calc(var(--radius) * 1.4);
 }
 
-/* Trailmark palette — a true-neutral "ink & paper" console with ONE accent (indigo,
+/* Logbird palette — a true-neutral "ink & paper" console with ONE accent (indigo,
    `--brand`) carried by focus rings, active navigation, links, selection and the
    primary chart series. Primary buttons stay ink-on-paper so the accent keeps its
    meaning. Outcome and severity colors are a separate, fixed semantic scale and are

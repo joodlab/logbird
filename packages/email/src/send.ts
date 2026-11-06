@@ -1,5 +1,5 @@
 /**
- * @trailmark/email/send — delivers rendered emails over SMTP (Mailpit locally). Reads SMTP_* / MAIL_FROM / APP_URL.
+ * @logbird/email/send — delivers rendered emails over SMTP (Mailpit locally). Reads SMTP_* / MAIL_FROM / APP_URL.
  */
 import nodemailer from 'nodemailer';
 import { env } from './env';
@@ -46,7 +46,7 @@ export async function sendEmail<P extends { appUrl: string }>(email: EmailDefini
     html: rendered.html,
     text: rendered.text,
     // RFC 3834: tells mail servers and vacation responders not to auto-reply.
-    headers: { 'Auto-Submitted': 'auto-generated', 'X-Trailmark-Email': email.id },
+    headers: { 'Auto-Submitted': 'auto-generated', 'X-Logbird-Email': email.id },
   });
   return { ...rendered, to, messageId: info.messageId };
 }

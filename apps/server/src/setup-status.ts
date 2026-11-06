@@ -1,4 +1,4 @@
-import type { SetupEventFacts } from '@trailmark/clickhouse';
+import type { SetupEventFacts } from '@logbird/clickhouse';
 import {
   ENVELOPE_MISSING_QUERIES,
   type ProjectSetup,
@@ -6,7 +6,7 @@ import {
   SETUP_REQUIRED_STEPS,
   SETUP_STEPS,
   type SetupStepId,
-} from '@trailmark/contracts';
+} from '@logbird/contracts';
 
 export interface SetupProjectFacts {
   id: string;

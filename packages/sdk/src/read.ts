@@ -65,13 +65,13 @@ export interface ReadOptions {
   fetch?: typeof fetch;
 }
 export async function readAuditTrail(options: ReadOptions, query: Partial<SearchQuery>, signal?: AbortSignal): Promise<SearchResponse> {
-  if (typeof window !== 'undefined') throw new Error('Trailmark read keys are server-only');
+  if (typeof window !== 'undefined') throw new Error('Logbird read keys are server-only');
   const url = new URL(`${options.endpoint.replace(/\/$/, '')}/v1/events`);
   for (const [key, value] of Object.entries(query)) if (value !== undefined) url.searchParams.set(key, String(value));
   const response = await (options.fetch ?? fetch)(url, {
     headers: { Authorization: `Bearer ${options.readKey}` },
     signal: signal ?? AbortSignal.timeout(30_000),
   });
-  if (!response.ok) throw new Error(`Trailmark read HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`Logbird read HTTP ${response.status}`);
   return response.json() as Promise<SearchResponse>;
 }

@@ -1,6 +1,6 @@
+import { EmptyState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
 import { Link } from '@tanstack/react-router';
-import { EmptyState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
 import { CompassIcon } from 'lucide-react';
 
 export function NotFound({ title = 'Nothing here', description }: { title?: string; description?: string }) {
@@ -12,7 +12,7 @@ export function NotFound({ title = 'Nothing here', description }: { title?: stri
         title={title}
       >
         <Button render={<Link to="/" />} size="sm" variant="outline">
-          Back to Trailmark
+          Back to Logbird
         </Button>
       </EmptyState>
     </div>

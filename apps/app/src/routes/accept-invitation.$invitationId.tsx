@@ -1,8 +1,8 @@
+import type { InvitationPreview } from '@logbird/contracts';
+import { EntityAvatar } from '@logbird/ui/components/entity-chip';
+import { Button } from '@logbird/ui/components/ui/button';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import type { InvitationPreview } from '@trailmark/contracts';
-import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
-import { Button } from '@trailmark/ui/components/ui/button';
 import { ArrowRightIcon, CircleAlertIcon, CircleCheckIcon, CircleSlashIcon, ClockIcon, Loader2Icon, LogOutIcon, MailIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
@@ -20,7 +20,7 @@ import { markOtpSent } from '@/lib/otp';
  * Signed out → one click emails a code to the invited address and comes back here after verification.
  */
 export const Route = createFileRoute('/accept-invitation/$invitationId')({
-  head: () => ({ meta: [{ title: 'Join a workspace · Trailmark' }, { name: 'robots', content: 'noindex, nofollow' }] }),
+  head: () => ({ meta: [{ title: 'Join a workspace · Logbird' }, { name: 'robots', content: 'noindex, nofollow' }] }),
   component: AcceptInvitationPage,
 });
 
@@ -109,10 +109,10 @@ function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview;
           <p className="text-muted-foreground text-sm">
             {invitation.inviter ? (
               <>
-                <span className="font-medium text-foreground">{invitation.inviter.name}</span> invited you to their Trailmark workspace.
+                <span className="font-medium text-foreground">{invitation.inviter.name}</span> invited you to their Logbird workspace.
               </>
             ) : (
-              'You were invited to a Trailmark workspace.'
+              'You were invited to a Logbird workspace.'
             )}
           </p>
         </div>
@@ -140,7 +140,7 @@ function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview;
             Email me a sign-in code
           </Button>
           <p className="text-center text-muted-foreground text-xs">
-            We send a 6-digit code to the invited email. New to Trailmark? The same code creates your account, then you come back here to accept.
+            We send a 6-digit code to the invited email. New to Logbird? The same code creates your account, then you come back here to accept.
           </p>
         </div>
       ) : mismatch ? (
@@ -190,7 +190,7 @@ function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview;
 function ClosedInvitation({ invitation, signedIn }: { invitation: InvitationPreview; signedIn: boolean }) {
   const go = signedIn ? (
     <Button nativeButton={false} render={<Link to="/" />}>
-      Open Trailmark
+      Open Logbird
       <ArrowRightIcon />
     </Button>
   ) : (

@@ -1,18 +1,18 @@
+import type { ApiKey } from '@logbird/contracts';
+import { TypePill } from '@logbird/ui/components/badges';
+import { CodeBlock } from '@logbird/ui/components/code-block';
+import { CopyButton } from '@logbird/ui/components/copy-button';
+import { EmptyState, ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { useConfirm } from '@logbird/ui/components/ui/confirm';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@logbird/ui/components/ui/dialog';
+import { Input } from '@logbird/ui/components/ui/input';
+import { Label } from '@logbird/ui/components/ui/label';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { cn } from '@logbird/ui/lib/utils';
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import type { ApiKey } from '@trailmark/contracts';
-import { TypePill } from '@trailmark/ui/components/badges';
-import { CodeBlock } from '@trailmark/ui/components/code-block';
-import { CopyButton } from '@trailmark/ui/components/copy-button';
-import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { useConfirm } from '@trailmark/ui/components/ui/confirm';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@trailmark/ui/components/ui/dialog';
-import { Input } from '@trailmark/ui/components/ui/input';
-import { Label } from '@trailmark/ui/components/ui/label';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { cn } from '@trailmark/ui/lib/utils';
 import { CheckCircle2Icon, KeyRoundIcon, Loader2Icon, PlusIcon, TriangleAlertIcon } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -30,7 +30,7 @@ import { placeholderKeys } from '@/lib/placeholders';
 import { curlSnippet, readCurlSnippet } from '@/lib/snippets';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/keys')({
-  head: () => ({ meta: [{ title: 'API keys · Settings · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'API keys · Settings · Logbird' }] }),
   staticData: { crumb: 'API keys' },
   loader: ({ context, params }) => context.queryClient.prefetchQuery(keysQuery(params.projectId)),
   component: KeysSettings,
@@ -63,7 +63,7 @@ function KeysSettings() {
   return (
     <div className="flex flex-col gap-5">
       <SettingsSection
-        description="Keys are bound to this project. Trailmark stores only a hash and the prefix shown here — the full secret is displayed once, when you create it."
+        description="Keys are bound to this project. Logbird stores only a hash and the prefix shown here — the full secret is displayed once, when you create it."
         title="API keys"
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
@@ -186,7 +186,7 @@ function CreateKeyDialog({ open, onOpenChange, projectId }: { open: boolean; onO
                 <CheckCircle2Icon className="size-5 text-outcome-success" />
                 Key created
               </DialogTitle>
-              <DialogDescription>Copy it now — this is the only time Trailmark shows the full secret.</DialogDescription>
+              <DialogDescription>Copy it now — this is the only time Logbird shows the full secret.</DialogDescription>
             </DialogHeader>
             <div className="flex items-center gap-2 rounded-lg border bg-muted/40 py-1.5 ps-3 pe-1.5">
               <code className="min-w-0 flex-1 truncate font-mono text-[13px]">{created.secret}</code>

@@ -15,8 +15,8 @@ import type {
   RangeQuery,
   SearchQuery,
   SearchResponse,
-} from '@trailmark/contracts';
-import { pickHistogramInterval, QUERY_FIELDS } from '@trailmark/contracts';
+} from '@logbird/contracts';
+import { pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import { isQueryClient } from './client';
@@ -50,7 +50,7 @@ export async function read<T>(ch: ClickHouseClient, query: string, parameters: P
         format: 'JSONEachRow',
         clickhouse_settings: {
           max_execution_time: isQueryClient(ch) ? 10 : guard,
-          ...(isQueryClient(ch) ? { SQL_trailmark_project: project as string } : {}),
+          ...(isQueryClient(ch) ? { SQL_logbird_project: project as string } : {}),
         },
       })
     ).json<T>();

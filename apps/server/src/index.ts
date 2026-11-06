@@ -1,6 +1,6 @@
 import { serve } from '@hono/node-server';
-import { closeProjectLocks, prisma } from '@trailmark/database';
-import { closeRetentionQueue } from '@trailmark/worker/queue';
+import { closeProjectLocks, prisma } from '@logbird/database';
+import { closeRetentionQueue } from '@logbird/worker/queue';
 import { app } from './app';
 import { clickhouse, queryClickhouse } from './clickhouse';
 import { env } from './env';

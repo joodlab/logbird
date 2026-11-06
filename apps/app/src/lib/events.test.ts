@@ -1,4 +1,4 @@
-import type { AuditEvent } from '@trailmark/contracts';
+import type { AuditEvent } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import { actorLabel, eventSentence, humanizeNoun } from './events';
 
@@ -29,7 +29,7 @@ function event(patch: Partial<AuditEvent>): AuditEvent {
   } as AuditEvent;
 }
 
-const vera = { type: 'user', id: 'usr_vera', name: 'Vera Validator', email: 'vera@trailmark.local' };
+const vera = { type: 'user', id: 'usr_vera', name: 'Vera Validator', email: 'vera@logbird.local' };
 
 describe('eventSentence', () => {
   it('keeps a producer description', () => {
@@ -52,10 +52,10 @@ describe('eventSentence', () => {
   });
 
   it('credits a nameless user by email', () => {
-    const joiner = { type: 'user', id: 'eDfVurSJNLRLYBx3fzSXdguaj2B79GOg', name: '', email: 'max@trailmark.local' };
+    const joiner = { type: 'user', id: 'eDfVurSJNLRLYBx3fzSXdguaj2B79GOg', name: '', email: 'max@logbird.local' };
     const e = event({ action: 'member.joined_via_link', actor: joiner, targets: [{ type: 'user', id: joiner.id, name: '' }] });
-    expect(eventSentence(e)).toBe('max@trailmark.local joined via link');
-    expect(actorLabel(e)).toBe('max@trailmark.local');
+    expect(eventSentence(e)).toBe('max@logbird.local joined via link');
+    expect(actorLabel(e)).toBe('max@logbird.local');
   });
 
   it('never says "Something" for an action-only event', () => {
@@ -92,8 +92,8 @@ describe('eventSentence', () => {
   });
 });
 
-describe('eventSentence for Trailmark management actions', () => {
-  const ada = { type: 'user', id: 'usr_ada', name: 'Ada Admin', email: 'ada@trailmark.local' };
+describe('eventSentence for Logbird management actions', () => {
+  const ada = { type: 'user', id: 'usr_ada', name: 'Ada Admin', email: 'ada@logbird.local' };
   const audit = (patch: Partial<AuditEvent>) =>
     event({ actor: ada, executor: { type: 'api', id: 'api-server', name: '', jobId: '', attempt: 0 }, ...patch });
 
@@ -101,10 +101,10 @@ describe('eventSentence for Trailmark management actions', () => {
     const e = audit({
       action: 'member.role.changed',
       description: 'member.role.changed',
-      targets: [{ type: 'user', id: 'usr_2', name: 'member2@trailmark.local' }],
+      targets: [{ type: 'user', id: 'usr_2', name: 'member2@logbird.local' }],
       changes: [{ field: 'role', before: 'admin', after: 'member' }],
     });
-    expect(eventSentence(e)).toBe('Ada Admin changed member2@trailmark.local’s role from Admin to Member');
+    expect(eventSentence(e)).toBe('Ada Admin changed member2@logbird.local’s role from Admin to Member');
   });
 
   it('reads a retention change in days', () => {

@@ -1,4 +1,4 @@
-import { QUERY_FIELDS, type QueryErrorDetails } from '@trailmark/contracts';
+import { QUERY_FIELDS, type QueryErrorDetails } from '@logbird/contracts';
 export class QueryError extends Error {
   constructor(
     message: string,
@@ -35,7 +35,7 @@ function tokenize(q: string): Token[] {
           : dialect[5] === '&&'
             ? ' AND '
             : ' OR ';
-      throw new QueryError('Use Trailmark query syntax', {
+      throw new QueryError('Use Logbird query syntax', {
         lang: 'query',
         reason: 'syntax',
         start: i,

@@ -4,7 +4,7 @@ import { BrandLockup } from '@/components/brand';
 
 export const Route = createFileRoute('/login')({
   validateSearch: z.object({ redirect: z.string().optional(), email: z.string().optional() }),
-  head: () => ({ meta: [{ title: 'Sign in · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Sign in · Logbird' }] }),
   component: LoginLayout,
 });
 
@@ -26,7 +26,7 @@ function LoginLayout() {
       <footer className="relative flex h-14 items-center justify-center gap-3 text-muted-foreground text-xs">
         <span>Open-source audit trail · MIT</span>
         <span aria-hidden>·</span>
-        <a className="hover:text-foreground" href="https://github.com/joodlab/trailmark" rel="noreferrer" target="_blank">
+        <a className="hover:text-foreground" href="https://github.com/joodlab/logbird" rel="noreferrer" target="_blank">
           GitHub
         </a>
       </footer>

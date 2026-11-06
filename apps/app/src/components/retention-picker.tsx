@@ -1,6 +1,6 @@
-import { RETENTION_OPTIONS } from '@trailmark/contracts';
-import { FilterChip } from '@trailmark/ui/components/filter-chip';
-import { cn } from '@trailmark/ui/lib/utils';
+import { RETENTION_OPTIONS } from '@logbird/contracts';
+import { FilterChip } from '@logbird/ui/components/filter-chip';
+import { cn } from '@logbird/ui/lib/utils';
 import { formatRetention } from '@/lib/format';
 
 const COMMON = [30, 90, 365] as const;

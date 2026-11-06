@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { prisma } from '@trailmark/database';
+import { prisma } from '@logbird/database';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { env } from './env';

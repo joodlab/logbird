@@ -1,10 +1,10 @@
+import { EntityAvatar } from '@logbird/ui/components/entity-chip';
+import { PageHeader } from '@logbird/ui/components/page-header';
+import { EmptyState, ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { EntityAvatar } from '@trailmark/ui/components/entity-chip';
-import { PageHeader } from '@trailmark/ui/components/page-header';
-import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { FolderPlusIcon, PlusIcon } from 'lucide-react';
 import { AdminOnly } from '@/components/admin-gate';
 import { AppShell } from '@/components/shell/app-shell';
@@ -17,7 +17,7 @@ import { placeholderKeys } from '@/lib/placeholders';
 export const Route = createFileRoute('/_authed/_workspace/projects')({
   staticData: { crumb: 'Projects' },
   loader: ({ context }) => context.queryClient.ensureQueryData(projectsQuery()),
-  head: () => ({ meta: [{ title: 'Projects · Trailmark' }] }),
+  head: () => ({ meta: [{ title: 'Projects · Logbird' }] }),
   component: ProjectsPage,
 });
 

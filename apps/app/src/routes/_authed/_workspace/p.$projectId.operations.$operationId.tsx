@@ -1,12 +1,12 @@
+import type { AuditEvent } from '@logbird/contracts';
+import { OutcomeDot, TypePill } from '@logbird/ui/components/badges';
+import { CopyValue } from '@logbird/ui/components/copy-button';
+import { EmptyState, ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import type { AuditEvent } from '@trailmark/contracts';
-import { OutcomeDot, TypePill } from '@trailmark/ui/components/badges';
-import { CopyValue } from '@trailmark/ui/components/copy-button';
-import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { cn } from '@trailmark/ui/lib/utils';
 import { GitBranchIcon, Rows3Icon, SearchXIcon } from 'lucide-react';
 import { useMemo } from 'react';
 import { z } from 'zod';
@@ -27,7 +27,7 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/operation
   loader: ({ context, params }) => {
     context.queryClient.prefetchQuery(operationQuery(params.projectId, params.operationId));
   },
-  head: ({ params }) => ({ meta: [{ title: `Operation ${params.operationId} · Trailmark` }] }),
+  head: ({ params }) => ({ meta: [{ title: `Operation ${params.operationId} · Logbird` }] }),
   component: OperationPage,
 });
 

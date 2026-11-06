@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { purgeProject } from '@trailmark/clickhouse';
-import { prisma } from '@trailmark/database';
-import { Trailmark } from '@trailmark/sdk';
+import { purgeProject } from '@logbird/clickhouse';
+import { prisma } from '@logbird/database';
+import { Logbird } from '@logbird/sdk';
 import { expect, it } from 'vitest';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
@@ -17,11 +17,13 @@ it('QA backend: invalid views, coherent sample data, named audit targets, SQL gu
   async function login() {
     const email = `authz-${randomUUID()}@example.test`;
     expect((await request('', '/api/auth/email-otp/send-verification-otp', 'POST', { email, type: 'sign-in' })).status).toBe(200);
-    const mailbox = (await (await fetch('http://127.0.0.1:8025/api/v1/messages?limit=100')).json()) as {
+    const mailbox = (await (await fetch(`${process.env.MAILPIT_URL || 'http://127.0.0.1:8025'}/api/v1/messages?limit=100`)).json()) as {
       messages: { ID: string; To: { Address: string }[] }[];
     };
     const message = mailbox.messages.find((m) => m.To.some((t) => t.Address === email));
-    const content = (await (await fetch(`http://127.0.0.1:8025/api/v1/message/${message?.ID}`)).json()) as { Text: string };
+    const content = (await (await fetch(`${process.env.MAILPIT_URL || 'http://127.0.0.1:8025'}/api/v1/message/${message?.ID}`)).json()) as {
+      Text: string;
+    };
     const response = await request('', '/api/auth/sign-in/email-otp', 'POST', { email, otp: content.Text.match(/\b\d{6}\b/)?.[0] });
     expect(response.status).toBe(200);
     const { user } = (await response.json()) as { user: { id: string } };
@@ -164,7 +166,7 @@ it('QA backend: invalid views, coherent sample data, named audit targets, SQL gu
 }, 180_000);
 
 it('T4 bounds the queue with a real dead endpoint', async () => {
-  const sdk = new Trailmark({ apiKey: 'fictional', endpoint: 'http://127.0.0.1:4875', maxRetries: 0, maxQueueSize: 10, batchSize: 1000 });
+  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://127.0.0.1:4875', maxRetries: 0, maxQueueSize: 10, batchSize: 1000 });
   for (let i = 0; i < 5000; i++) sdk.track({ action: 'outage.fixture' });
   expect(sdk.queueSize).toBe(10);
   expect(sdk.dropped).toBe(4990);

@@ -1,4 +1,4 @@
-import { closeProjectLocks, prisma } from '@trailmark/database';
+import { closeProjectLocks, prisma } from '@logbird/database';
 import { Worker } from 'bullmq';
 import { env } from './env';
 import { closeRetentionQueue, connection, retentionQueue, retentionQueueName } from './queue';

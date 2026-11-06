@@ -1,4 +1,4 @@
-import { apiErrorSchema } from '@trailmark/contracts';
+import { apiErrorSchema } from '@logbird/contracts';
 import { type DescribeRouteOptions, describeRoute, resolver } from 'hono-openapi';
 import type { z } from 'zod';
 

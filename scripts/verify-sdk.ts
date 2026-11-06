@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { prisma } from '@trailmark/database';
+import { prisma } from '@logbird/database';
 import { generateApiKey } from '../apps/server/src/keys';
 import { ApiError, createClient as forgeClient } from '../experiments/forge/public';
 import { createClient } from '../experiments/hey-api/public/client';

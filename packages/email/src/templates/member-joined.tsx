@@ -41,7 +41,7 @@ export function MemberJoinedEmail(props: MemberJoinedEmailProps) {
       <Spacer height={4} />
       <DetailRows rows={details(props)} />
       <Spacer height={24} />
-      <Button href={props.appUrl}>Open Trailmark</Button>
+      <Button href={props.appUrl}>Open Logbird</Button>
       <Note title={NOTE_TITLE}>{note(props)}</Note>
     </EmailLayout>
   );
@@ -51,14 +51,14 @@ export const memberJoined: EmailDefinition<MemberJoinedEmailProps> = {
   id: 'member-joined',
   name: 'Member joined',
   recipient: 'inviterEmail',
-  subject: (p) => `${p.memberName} joined ${p.workspace} on Trailmark`,
+  subject: (p) => `${p.memberName} joined ${p.workspace} on Logbird`,
   preview: (p) => `${p.memberEmail} accepted your invitation and joined as ${roleLabel(p.role)}.`,
   text: (p) =>
     plainText({
       title: title(p),
       appUrl: p.appUrl,
       reason: reason(p),
-      blocks: [lead(p), { details: details(p) }, { action: 'Open Trailmark', url: p.appUrl }, { title: NOTE_TITLE, note: note(p) }],
+      blocks: [lead(p), { details: details(p) }, { action: 'Open Logbird', url: p.appUrl }, { title: NOTE_TITLE, note: note(p) }],
     }),
   Component: MemberJoinedEmail,
 };

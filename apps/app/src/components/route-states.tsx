@@ -1,7 +1,7 @@
+import { ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { type ErrorComponentProps, useRouter } from '@tanstack/react-router';
-import { ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { RefreshCwIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { ApiRequestError, isBusyError, isTimeoutError } from '@/lib/api/errors';
@@ -9,12 +9,12 @@ import { placeholderKeys } from '@/lib/placeholders';
 
 /** Title and message for an error that broke a whole route. */
 function describeRouteError(error: unknown): { title: string; error: unknown } {
-  if (isTimeoutError(error)) return { title: 'Trailmark is taking too long to respond', error };
+  if (isTimeoutError(error)) return { title: 'Logbird is taking too long to respond', error };
   if (isBusyError(error)) return { title: 'This project is busy', error };
   if (error instanceof TypeError || (error instanceof ApiRequestError && error.status >= 502))
     return {
       title: 'Cannot reach the server',
-      error: new Error('The Trailmark server did not answer. Check that it is running on port 4601, then retry.'),
+      error: new Error('The Logbird server did not answer. Check that it is running on port 4601, then retry.'),
     };
   return { title: 'This page failed to load', error };
 }
@@ -77,7 +77,7 @@ export function FullPageLoader() {
     return (
       <div className="flex min-h-svh items-center justify-center p-6" data-testid="loader-stuck">
         <div className="flex max-w-sm flex-col items-center gap-3 text-center" role="alert">
-          <p className="font-medium text-sm">Trailmark is taking too long to load</p>
+          <p className="font-medium text-sm">Logbird is taking too long to load</p>
           <p className="text-muted-foreground text-sm">The server is reachable but has not answered yet. Reload to try again.</p>
           <Button onClick={() => window.location.reload()} size="sm" variant="outline">
             <RefreshCwIcon />
@@ -92,7 +92,7 @@ export function FullPageLoader() {
       <div className="flex flex-col items-center gap-1.5">
         <div className="flex items-center gap-2 text-muted-foreground text-sm">
           <span className="size-2 animate-pulse rounded-full bg-brand" />
-          Loading Trailmark…
+          Loading Logbird…
         </div>
         {stage === 'slow' ? <p className="tm-fade-in text-muted-foreground text-xs">Still waiting for the server…</p> : null}
       </div>

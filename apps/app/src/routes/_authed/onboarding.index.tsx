@@ -1,9 +1,9 @@
+import { Button } from '@logbird/ui/components/ui/button';
+import { Input } from '@logbird/ui/components/ui/input';
+import { Label } from '@logbird/ui/components/ui/label';
 import { useForm } from '@tanstack/react-form';
 import { useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Input } from '@trailmark/ui/components/ui/input';
-import { Label } from '@trailmark/ui/components/ui/label';
 import { ArrowRightIcon, Loader2Icon } from 'lucide-react';
 import { useState } from 'react';
 import { z } from 'zod';
@@ -42,8 +42,7 @@ function WorkspaceStep() {
   const suggested = me.user.email.split('@')[1]?.split('.')[0] ?? '';
   const form = useForm({
     defaultValues: {
-      name:
-        suggested && !/gmail|outlook|hotmail|yahoo|icloud|trailmark/.test(suggested) ? suggested.charAt(0).toUpperCase() + suggested.slice(1) : '',
+      name: suggested && !/gmail|outlook|hotmail|yahoo|icloud|logbird/.test(suggested) ? suggested.charAt(0).toUpperCase() + suggested.slice(1) : '',
     },
     onSubmit: async ({ value }) => {
       setServerError(null);

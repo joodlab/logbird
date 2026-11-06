@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { purgeProject } from '@trailmark/clickhouse';
-import { createApiKeyResponseSchema, createProjectResponseSchema, savedViewSchema } from '@trailmark/contracts';
-import { prisma } from '@trailmark/database';
+import { purgeProject } from '@logbird/clickhouse';
+import { createApiKeyResponseSchema, createProjectResponseSchema, savedViewSchema } from '@logbird/contracts';
+import { prisma } from '@logbird/database';
 import { expect, it } from 'vitest';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
@@ -21,11 +21,13 @@ it('real services: every console mutation by role, ADMIN-1 regressions, confirma
   async function login() {
     const email = `authz-${randomUUID()}@example.test`;
     expect((await request('', '/api/auth/email-otp/send-verification-otp', 'POST', { email, type: 'sign-in' })).status).toBe(200);
-    const mailbox = (await (await fetch('http://127.0.0.1:8025/api/v1/messages?limit=100')).json()) as {
+    const mailbox = (await (await fetch(`${process.env.MAILPIT_URL || 'http://127.0.0.1:8025'}/api/v1/messages?limit=100`)).json()) as {
       messages: { ID: string; To: { Address: string }[] }[];
     };
     const message = mailbox.messages.find((m) => m.To.some((t) => t.Address === email));
-    const content = (await (await fetch(`http://127.0.0.1:8025/api/v1/message/${message?.ID}`)).json()) as { Text: string };
+    const content = (await (await fetch(`${process.env.MAILPIT_URL || 'http://127.0.0.1:8025'}/api/v1/message/${message?.ID}`)).json()) as {
+      Text: string;
+    };
     const response = await request('', '/api/auth/sign-in/email-otp', 'POST', { email, otp: content.Text.match(/\b\d{6}\b/)?.[0] });
     expect(response.status).toBe(200);
     const { user } = (await response.json()) as { user: { id: string } };

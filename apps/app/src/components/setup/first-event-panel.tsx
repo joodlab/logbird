@@ -1,14 +1,14 @@
+import { type AuditEvent, type ProjectSetup, SAMPLE_DATA_EVENTS, SAMPLE_DATA_SOURCE } from '@logbird/contracts';
+import { OutcomeDot, SeverityBadge } from '@logbird/ui/components/badges';
+import { CodeTabs } from '@logbird/ui/components/code-block';
+import { EntityChip } from '@logbird/ui/components/entity-chip';
+import { ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { useConfirm } from '@logbird/ui/components/ui/confirm';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { type AuditEvent, type ProjectSetup, SAMPLE_DATA_EVENTS, SAMPLE_DATA_SOURCE } from '@trailmark/contracts';
-import { OutcomeDot, SeverityBadge } from '@trailmark/ui/components/badges';
-import { CodeTabs } from '@trailmark/ui/components/code-block';
-import { EntityChip } from '@trailmark/ui/components/entity-chip';
-import { ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { useConfirm } from '@trailmark/ui/components/ui/confirm';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
-import { cn } from '@trailmark/ui/lib/utils';
 import { ArrowRightIcon, CheckIcon, DatabaseIcon, Loader2Icon, PanelRightOpenIcon, Rows3Icon, SendIcon, Trash2Icon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -41,8 +41,8 @@ export function SendEventSnippets({ projectId }: { projectId: string }) {
       />
       {key ? null : (
         <p className="text-muted-foreground text-xs">
-          No key in this tab, so the snippets read <span className="font-mono text-foreground">TRAILMARK_INGEST_KEY</span> from the environment.
-          Create or paste a key above to fill them in.
+          No key in this tab, so the snippets read <span className="font-mono text-foreground">LOGBIRD_INGEST_KEY</span> from the environment. Create
+          or paste a key above to fill them in.
         </p>
       )}
     </div>

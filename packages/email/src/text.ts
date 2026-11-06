@@ -33,7 +33,7 @@ export function plainText({ title, blocks, reason, appUrl }: { title: string; bl
     '',
     '--',
     `You received this email because ${reason}`,
-    `Trailmark · open-source audit logs · ${hostOf(appUrl)}`,
+    `Logbird · open-source audit logs · ${hostOf(appUrl)}`,
     appUrl,
     '',
   ].join('\n');

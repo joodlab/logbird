@@ -1,5 +1,5 @@
-import { projectSetupSchema, SETUP_STEPS, sampleDataResponseSchema, workspaceSetupSchema } from '@trailmark/contracts';
-import { prisma, withProjectLock } from '@trailmark/database';
+import { projectSetupSchema, SETUP_STEPS, sampleDataResponseSchema, workspaceSetupSchema } from '@logbird/contracts';
+import { prisma, withProjectLock } from '@logbird/database';
 import { Hono } from 'hono';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';

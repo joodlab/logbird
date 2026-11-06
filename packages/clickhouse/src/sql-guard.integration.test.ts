@@ -49,8 +49,8 @@ describe.runIf(enabled)('real ClickHouse SQL guard', () => {
     for (const query of [
       'SELECT * FROM system.users',
       'SELECT * FROM default.no_such_table',
-      "INSERT INTO trailmark.events (action) VALUES ('x')",
-      'CREATE TABLE trailmark.forbidden (x UInt8) ENGINE=Memory',
+      "INSERT INTO logbird.events (action) VALUES ('x')",
+      'CREATE TABLE logbird.forbidden (x UInt8) ENGINE=Memory',
     ])
       await expect(restricted?.query({ query })).rejects.toThrow();
   });

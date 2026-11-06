@@ -1,6 +1,6 @@
 export type { AuditedH3Event } from './runtime/capture';
 
-export type { TrailmarkHooks } from './runtime/hooks';
+export type { LogbirdHooks } from './runtime/hooks';
 
 import { addImports, addServerHandler, addServerPlugin, createResolver, defineNuxtModule } from '@nuxt/kit';
 export interface ModuleOptions {
@@ -11,20 +11,20 @@ export interface ModuleOptions {
   hooks?: string;
 }
 export default defineNuxtModule<ModuleOptions>({
-  meta: { name: '@trailmark/nuxt', configKey: 'trailmark' },
+  meta: { name: '@logbird/nuxt', configKey: 'logbird' },
   defaults: { endpoint: 'http://127.0.0.1:4731', ingestKey: '', readKey: '' },
   setup(options, nuxt) {
     const resolver = createResolver(import.meta.url);
-    nuxt.options.runtimeConfig.trailmark = {
+    nuxt.options.runtimeConfig.logbird = {
       endpoint: options.endpoint,
       ingestKey: options.ingestKey,
       readKey: options.readKey,
-      ...(nuxt.options.runtimeConfig.trailmark as object),
+      ...(nuxt.options.runtimeConfig.logbird as object),
     };
     nuxt.options.nitro.alias ??= {};
-    nuxt.options.nitro.alias['#trailmark-hooks'] = options.hooks ?? resolver.resolve('./runtime/deny');
+    nuxt.options.nitro.alias['#logbird-hooks'] = options.hooks ?? resolver.resolve('./runtime/deny');
     addServerPlugin(resolver.resolve('./runtime/plugin'));
-    addServerHandler({ route: '/api/_trailmark/events', method: 'get', handler: resolver.resolve('./runtime/events') });
+    addServerHandler({ route: '/api/_logbird/events', method: 'get', handler: resolver.resolve('./runtime/events') });
     addImports({ name: 'useAuditTrail', from: resolver.resolve('./runtime/composable') });
   },
 });

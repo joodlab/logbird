@@ -1,4 +1,4 @@
-import { QUERY_FIELDS, type SuggestResponse, type suggestQuerySchema } from '@trailmark/contracts';
+import { QUERY_FIELDS, type SuggestResponse, type suggestQuerySchema } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import { read, where } from './queries';

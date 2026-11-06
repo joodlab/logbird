@@ -1,6 +1,6 @@
 # Concepts: actors, tenants, executors, records and operations
 
-Trailmark accepts any JSON object as an event; only `action` is required. A handful of envelope fields
+Logbird accepts any JSON object as an event; only `action` is required. A handful of envelope fields
 ([SPEC §3](SPEC.md#3-recommended-event-envelope)) are lifted into indexed columns, and each of them fills one
 of the console's directory pages. Every entity on those pages has its own profile with a timeline of every
 event that mentions it.

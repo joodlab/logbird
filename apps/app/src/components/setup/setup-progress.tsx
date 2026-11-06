@@ -1,6 +1,6 @@
+import { SidebarMenuButton, SidebarMenuItem, useSidebar } from '@logbird/ui/components/ui/sidebar';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { SidebarMenuButton, SidebarMenuItem, useSidebar } from '@trailmark/ui/components/ui/sidebar';
 import { projectSetupQuery } from '@/lib/api/queries';
 import { ProgressRing, stepCopy } from './steps';
 

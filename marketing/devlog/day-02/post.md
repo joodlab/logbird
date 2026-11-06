@@ -4,7 +4,7 @@
 
 > Day 2. Building an open-source audit log for your product, in public.
 >
-> Trailmark now checks your integration for you: send one event and the setup page lights up 1.8 s later, then tells
+> Logbird now checks your integration for you: send one event and the setup page lights up 1.8 s later, then tells
 > you which fields your events are missing and links straight to them.
 >
 > <link>
@@ -22,5 +22,5 @@ real `curl` → the event appears live.
 4. "The sidebar tells you how far setup is, and disappears once you're done." —
    [`25-overview-checklist.png`](../../captures/2026-11-05-walkthrough/25-overview-checklist.png)
 
-**Alt text (clip):** A terminal sends one curl request; in the browser, Trailmark's setup page shows "It works — your
+**Alt text (clip):** A terminal sends one curl request; in the browser, Logbird's setup page shows "It works — your
 first event just arrived" with the event's actor, tenant and record.

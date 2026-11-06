@@ -1,5 +1,5 @@
+import { Kbd } from '@logbird/ui/components/ui/kbd';
 import { Link } from '@tanstack/react-router';
-import { Kbd } from '@trailmark/ui/components/ui/kbd';
 import { ArrowUpRightIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { HighlightedQuery } from '@/components/query-input/highlighted';

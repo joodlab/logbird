@@ -1,16 +1,16 @@
 import { serve } from '@hono/node-server';
-import { type AuditVariables, trailmark } from '@trailmark/hono';
-import { readAuditTrail, trailQuery } from '@trailmark/sdk/read';
-import { useAuditTrail } from '@trailmark/vue';
+import { type AuditVariables, logbird } from '@logbird/hono';
+import { readAuditTrail, trailQuery } from '@logbird/sdk/read';
+import { useAuditTrail } from '@logbird/vue';
 import { renderToString } from '@vue/server-renderer';
 import { Hono } from 'hono';
 import { createSSRApp, h, onServerPrefetch } from 'vue';
 import { endpoint, options } from './audit.server';
 
 const app = new Hono<{ Variables: AuditVariables }>();
-const capture = trailmark(options);
+const capture = logbird(options);
 app.use(capture);
-const read = () => readAuditTrail({ endpoint, readKey: process.env.TRAILMARK_READ_KEY ?? '' }, trailQuery({ target: { id: 'demo-record' } }));
+const read = () => readAuditTrail({ endpoint, readKey: process.env.LOGBIRD_READ_KEY ?? '' }, trailQuery({ target: { id: 'demo-record' } }));
 app.post('/demo', (c) => {
   c.var.audit('vue.record.updated', { targets: [{ type: 'record', id: 'demo-record' }] });
   return c.json({ ok: true });

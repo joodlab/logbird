@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { Trailmark } from './index';
+import { Logbird } from './index';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -12,7 +12,7 @@ it('batches and retries the identical body with UUIDv7 ids', async () => {
     .mockResolvedValueOnce(new Response('', { status: 429 }))
     .mockResolvedValueOnce(new Response('{}', { status: 202 }));
   vi.stubGlobal('fetch', fetch);
-  const sdk = new Trailmark({ apiKey: 'fake', endpoint: 'http://test', batchSize: 2 });
+  const sdk = new Logbird({ apiKey: 'fake', endpoint: 'http://test', batchSize: 2 });
   sdk.track({ action: 'x' });
   sdk.track({ action: 'y' });
   await vi.runAllTimersAsync();
@@ -23,7 +23,7 @@ it('batches and retries the identical body with UUIDv7 ids', async () => {
   expect(body.events[0].id).toMatch(/^[\da-f]{8}-[\da-f]{4}-7/);
 });
 it('never throws from track even if onError throws', async () => {
-  const sdk = new Trailmark({
+  const sdk = new Logbird({
     apiKey: 'fake',
     endpoint: 'http://test',
     onError: () => {
@@ -39,7 +39,7 @@ it('retains a failed batch for an explicit retry', async () => {
     .mockRejectedValueOnce(new Error('offline'))
     .mockResolvedValue(new Response('{}', { status: 202 }));
   vi.stubGlobal('fetch', fetch);
-  const sdk = new Trailmark({ apiKey: 'fake', endpoint: 'http://test', maxRetries: 0 });
+  const sdk = new Logbird({ apiKey: 'fake', endpoint: 'http://test', maxRetries: 0 });
   sdk.track({ action: 'x', id: 'supplied' });
   await expect(sdk.flush()).rejects.toThrow('offline');
   await sdk.shutdown();
@@ -48,7 +48,7 @@ it('retains a failed batch for an explicit retry', async () => {
 it('does not retry permanent errors', async () => {
   const fetch = vi.fn().mockResolvedValue(new Response('', { status: 401 }));
   vi.stubGlobal('fetch', fetch);
-  const sdk = new Trailmark({ apiKey: 'fake', endpoint: 'http://test' });
+  const sdk = new Logbird({ apiKey: 'fake', endpoint: 'http://test' });
   sdk.track({ action: 'x' });
   await sdk.shutdown();
   expect(sdk.dropped).toBe(1);
@@ -69,7 +69,7 @@ it.each(['oldest', 'newest'] as const)('bounds queued and retried events with %s
     .mockImplementation(async () => new Response('{}', { status: 202 }));
   vi.stubGlobal('fetch', fetcher);
   const drops: string[] = [];
-  const sdk = new Trailmark({
+  const sdk = new Logbird({
     apiKey: 'fake',
     endpoint: 'http://test',
     batchSize: 2,
@@ -104,7 +104,7 @@ it('drops partial rejections and permanent poison batches without wedging later 
   vi.stubGlobal('fetch', fetcher);
   const onDrop = vi.fn(),
     onError = vi.fn();
-  const sdk = new Trailmark({ apiKey: 'fake', endpoint: 'http://test', onDrop, onError });
+  const sdk = new Logbird({ apiKey: 'fake', endpoint: 'http://test', onDrop, onError });
   sdk.track({ action: 'poison' });
   sdk.track({ action: 'good' });
   await sdk.flush();
@@ -129,7 +129,7 @@ it.each([
     .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': header } }))
     .mockResolvedValue(new Response('{}', { status: 202 }));
   vi.stubGlobal('fetch', fetch);
-  const sdk = new Trailmark({ apiKey: 'fake', endpoint: 'http://test' });
+  const sdk = new Logbird({ apiKey: 'fake', endpoint: 'http://test' });
   sdk.track({ action: 'retry.fixture' });
   const flushed = sdk.flush();
   await vi.advanceTimersByTimeAsync(delay - 1);
@@ -142,19 +142,19 @@ it.each([
 it('disables capture without credentials and validates enabled credentials', async () => {
   const fetcher = vi.fn();
   vi.stubGlobal('fetch', fetcher);
-  const sdk = new Trailmark({ enabled: false });
+  const sdk = new Logbird({ enabled: false });
   sdk.track({ action: 'ignored' });
   await sdk.flush();
   await sdk.shutdown();
   expect(sdk.queueSize).toBe(0);
   expect(fetcher).not.toHaveBeenCalled();
-  expect(() => new Trailmark({})).toThrow('required');
+  expect(() => new Logbird({})).toThrow('required');
 });
 it('merges defaults one level deep before stamping and applying hooks', async () => {
   const hook = vi.fn((event) => event);
   const fetcher = vi.fn().mockResolvedValue(new Response('{}', { status: 202 }));
   vi.stubGlobal('fetch', fetcher);
-  const sdk = new Trailmark({
+  const sdk = new Logbird({
     apiKey: 'fake',
     endpoint: 'http://test',
     defaults: { environment: 'staging', metadata: { keep: true, nested: { old: true } }, context: { requestId: 'default', operationId: 'op' } },
@@ -174,7 +174,7 @@ it('merges defaults one level deep before stamping and applying hooks', async ()
 it.each(['null', 'undefined', 'throw'])('filters %s without overflow diagnostics', async (mode) => {
   const onError = vi.fn(),
     onDrop = vi.fn();
-  const sdk = new Trailmark({
+  const sdk = new Logbird({
     apiKey: 'fake',
     endpoint: 'http://test',
     onError,

@@ -4,7 +4,7 @@ import { MSO_HEAD } from './templates/components';
 
 /** One email: everything needed to produce subject, preheader, HTML and plain text from the same props. */
 export interface EmailDefinition<P> {
-  /** Stable id (tests, previews, logs, the X-Trailmark-Email header). */
+  /** Stable id (tests, previews, logs, the X-Logbird-Email header). */
   id: string;
   /** Human name for previews and the send command. */
   name: string;

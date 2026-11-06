@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { client, endpoint, login } from './http';
 
-const cookie = await login('demo@trailmark.local'),
+const cookie = await login('demo@logbird.local'),
   api = client(cookie);
 const me = await (await api('/api/me')).json();
 await api('/api/auth/organization/set-active', 'POST', { organizationId: me.organizations.find((o: { name: string }) => o.name === 'Jood').id });

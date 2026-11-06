@@ -12,7 +12,7 @@ export interface SignInCodeEmailProps {
   /** Address the code was sent to. */
   email: string;
   code: string;
-  /** better-auth's OTP type; Trailmark only signs in with codes, the rest share the "verification" wording. */
+  /** better-auth's OTP type; Logbird only signs in with codes, the rest share the "verification" wording. */
   purpose?: OtpPurpose;
   expiresInMinutes: number;
   requestedAt: Date;
@@ -23,8 +23,8 @@ export interface SignInCodeEmailProps {
 
 const copy = (purpose: OtpPurpose = 'sign-in') =>
   purpose === 'sign-in'
-    ? { noun: 'sign-in code', title: 'Your sign-in code', action: 'sign in', lead: 'Enter this code on the Trailmark sign-in page to continue as' }
-    : { noun: 'verification code', title: 'Your verification code', action: 'verify this address', lead: 'Enter this code in Trailmark to verify' };
+    ? { noun: 'sign-in code', title: 'Your sign-in code', action: 'sign in', lead: 'Enter this code on the Logbird sign-in page to continue as' }
+    : { noun: 'verification code', title: 'Your verification code', action: 'verify this address', lead: 'Enter this code in Logbird to verify' };
 
 const expiresAt = (p: SignInCodeEmailProps) => new Date(p.requestedAt.getTime() + p.expiresInMinutes * 60_000);
 const caption = (p: SignInCodeEmailProps) => `Expires in ${p.expiresInMinutes} minutes, at ${formatTime(expiresAt(p))}`;
@@ -42,7 +42,7 @@ function details(p: SignInCodeEmailProps) {
 const reason = (p: SignInCodeEmailProps) => `a ${copy(p.purpose).noun} was requested for ${p.email} on ${hostOf(p.appUrl)}.`;
 const NOTE_TITLE = 'Didn’t request this?';
 const note = (p: SignInCodeEmailProps) =>
-  `You can ignore this email — nobody can ${copy(p.purpose).action} without this code. Never share it: Trailmark will never ask you for it.`;
+  `You can ignore this email — nobody can ${copy(p.purpose).action} without this code. Never share it: Logbird will never ask you for it.`;
 
 export function SignInCodeEmail(props: SignInCodeEmailProps) {
   const c = copy(props.purpose);
@@ -66,7 +66,7 @@ export const signInCode: EmailDefinition<SignInCodeEmailProps> = {
   name: 'Sign-in code',
   recipient: 'email',
   // The code leads so it is readable straight from the notification.
-  subject: (p) => `${p.code} is your Trailmark ${copy(p.purpose).noun}`,
+  subject: (p) => `${p.code} is your Logbird ${copy(p.purpose).noun}`,
   preview: (p) => {
     const device = describeUserAgent(p.userAgent);
     const from = [device, p.ip].filter(Boolean).join(', ');

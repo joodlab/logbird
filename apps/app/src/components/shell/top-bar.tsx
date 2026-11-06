@@ -1,10 +1,10 @@
+import { TimeRangePicker } from '@logbird/ui/components/time-range-picker';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Kbd } from '@logbird/ui/components/ui/kbd';
+import { Separator } from '@logbird/ui/components/ui/separator';
+import { SidebarTrigger } from '@logbird/ui/components/ui/sidebar';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useMatches, useParams } from '@tanstack/react-router';
-import { TimeRangePicker } from '@trailmark/ui/components/time-range-picker';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Kbd } from '@trailmark/ui/components/ui/kbd';
-import { Separator } from '@trailmark/ui/components/ui/separator';
-import { SidebarTrigger } from '@trailmark/ui/components/ui/sidebar';
 import { ChevronRightIcon, SearchIcon } from 'lucide-react';
 import { useMemo } from 'react';
 import { projectQuery } from '@/lib/api/queries';

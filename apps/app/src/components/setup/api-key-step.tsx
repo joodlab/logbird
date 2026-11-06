@@ -1,13 +1,13 @@
+import type { ApiKey } from '@logbird/contracts';
+import { TypePill } from '@logbird/ui/components/badges';
+import { CopyButton } from '@logbird/ui/components/copy-button';
+import { ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Input } from '@logbird/ui/components/ui/input';
+import { Label } from '@logbird/ui/components/ui/label';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import type { ApiKey } from '@trailmark/contracts';
-import { TypePill } from '@trailmark/ui/components/badges';
-import { CopyButton } from '@trailmark/ui/components/copy-button';
-import { ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Input } from '@trailmark/ui/components/ui/input';
-import { Label } from '@trailmark/ui/components/ui/label';
-import { Skeleton } from '@trailmark/ui/components/ui/skeleton';
 import { CheckIcon, KeyRoundIcon, Loader2Icon, PlusIcon, TriangleAlertIcon } from 'lucide-react';
 import { useId, useState } from 'react';
 import { api } from '@/lib/api/client';
@@ -22,8 +22,8 @@ import { useInvalidateSetup } from './use-setup';
 type Kind = ApiKey['kind'];
 
 const COPY: Record<Kind, { defaultName: string; label: string; prefix: string }> = {
-  ingest: { defaultName: 'Production backend', label: 'ingest key', prefix: 'tm_ingest_' },
-  read: { defaultName: 'Product read access', label: 'read key', prefix: 'tm_read_' },
+  ingest: { defaultName: 'Production backend', label: 'ingest key', prefix: 'lb_ingest_' },
+  read: { defaultName: 'Product read access', label: 'read key', prefix: 'lb_read_' },
 };
 
 /** The secret for `kind` known in this browser session (created here, at project creation, or pasted). */
@@ -103,7 +103,7 @@ export function ApiKeyStep({ projectId, kind }: { projectId: string; kind: Kind 
           </div>
           <p className="flex items-start gap-1.5 text-muted-foreground text-xs">
             <TriangleAlertIcon className="mt-px size-3.5 shrink-0 text-outcome-denied" />
-            This is the only time the full key is shown. Store it in your secrets manager — Trailmark keeps only a hash. The snippets on this page use
+            This is the only time the full key is shown. Store it in your secrets manager — Logbird keeps only a hash. The snippets on this page use
             it until you reload.
           </p>
         </div>

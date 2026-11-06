@@ -1,11 +1,11 @@
+import type { AuditEvent, HistogramResponse, QueryLang, SearchResponse } from '@logbird/contracts';
+import { EmptyState, ErrorState } from '@logbird/ui/components/states';
+import { Button } from '@logbird/ui/components/ui/button';
+import { Sheet, SheetContent, SheetTitle } from '@logbird/ui/components/ui/sheet';
+import { Switch } from '@logbird/ui/components/ui/switch';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
+import { cn } from '@logbird/ui/lib/utils';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import type { AuditEvent, HistogramResponse, QueryLang, SearchResponse } from '@trailmark/contracts';
-import { EmptyState, ErrorState } from '@trailmark/ui/components/states';
-import { Button } from '@trailmark/ui/components/ui/button';
-import { Sheet, SheetContent, SheetTitle } from '@trailmark/ui/components/ui/sheet';
-import { Switch } from '@trailmark/ui/components/ui/switch';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@trailmark/ui/components/ui/tooltip';
-import { cn } from '@trailmark/ui/lib/utils';
 import { ArrowUpIcon, ChevronDownIcon, CircleAlertIcon, FilterIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, SearchXIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -47,7 +47,7 @@ interface ExplorerProps {
   className?: string;
 }
 
-const FACETS_KEY = 'trailmark.explorer.facets';
+const FACETS_KEY = 'logbird.explorer.facets';
 
 function newestArrival(events: AuditEvent[]): string | undefined {
   return events.reduce<string | undefined>((max, e) => (!max || e.receivedAt > max ? e.receivedAt : max), undefined);

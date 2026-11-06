@@ -10,8 +10,8 @@ import {
   overview,
   purgeProject,
   searchEvents,
-} from '@trailmark/clickhouse';
-import { Trailmark } from '@trailmark/sdk';
+} from '@logbird/clickhouse';
+import { Logbird } from '@logbird/sdk';
 import { generateEvents } from './index';
 
 const { values } = parseArgs({
@@ -49,7 +49,7 @@ const generator = generateEvents({ events, days, project: values.project, seed: 
 if (values.sink === 'api') {
   if (!values.key) throw new Error('--key is required for the api sink');
   let ingestError: Error | undefined;
-  const sdk = new Trailmark({
+  const sdk = new Logbird({
     apiKey: values.key,
     endpoint: values.endpoint,
     batchSize: 1000,
