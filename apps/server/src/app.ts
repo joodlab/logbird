@@ -35,8 +35,14 @@ app.use(
   bodyLimit({ maxSize: 5 * 1024 * 1024, onError: (c) => c.json({ error: { code: 'payload_too_large', message: 'Request exceeds 5 MB.' } }, 413) }),
 );
 app.use('/api/auth/*', rateLimit);
-app.use('/v1/*', rateLimit);
-app.use('*', cors({ origin: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)], credentials: true, exposeHeaders: ['X-Request-Id'] }));
+app.use(
+  '*',
+  cors({
+    origin: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)],
+    credentials: true,
+    exposeHeaders: ['X-Request-Id', 'RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset', 'Retry-After'],
+  }),
+);
 app.use('*', async (c, next) => {
   const start = Date.now();
   await next();

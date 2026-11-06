@@ -7,9 +7,11 @@ export const env = createEnv({
     TRUST_PROXY: z.enum(['true', 'false']).default('false'),
     BULLMQ_PREFIX: z.string().default('{trailmark}'),
     TRUSTED_ORIGINS: z.string().default(''),
-    /** Requests per minute per client: state-changing /api/auth/* calls, and /v1/* (ingest + read API). */
+    /** Auth calls per peer; public authentication failures per peer; valid public calls per project and kind. */
     AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(30),
     PUBLIC_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(600),
+    INGEST_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(3000),
+    READ_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(1200),
     PORT: z.coerce.number().int().min(1).max(65_535).default(4601),
     APP_URL: z.url(),
     CLICKHOUSE_URL: z.url(),

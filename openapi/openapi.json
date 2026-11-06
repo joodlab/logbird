@@ -8187,7 +8187,84 @@
                 }
               }
             },
-            "description": "Search events"
+            "description": "Search events",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds before retrying; budget headers apply only after authentication",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -8343,7 +8420,84 @@
                 }
               }
             },
-            "description": "Ingest events"
+            "description": "Ingest events",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds before retrying; budget headers apply only after authentication",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -8965,7 +9119,84 @@
                 }
               }
             },
-            "description": "Event detail"
+            "description": "Event detail",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds before retrying; budget headers apply only after authentication",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -9014,7 +9245,7 @@
   "servers": [
     {
       "description": "This Trailmark instance",
-      "url": "http://localhost:4900"
+      "url": "http://localhost:4600"
     }
   ]
 }
