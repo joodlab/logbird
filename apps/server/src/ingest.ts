@@ -7,6 +7,7 @@ import { enqueueProjectRetention } from '@trailmark/worker/queue';
 import type { Context } from 'hono';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
+import { clientAddress } from './rate-limit';
 import { invalidateSetup } from './setup-cache';
 import type { AppEnv } from './types';
 
@@ -80,7 +81,7 @@ export function audit(c: Context<AppEnv>, action: string, target: { type: string
     targets: [target],
     changes,
     description: action,
-    context: { requestId: c.get('requestId'), ip: c.req.header('x-forwarded-for') ?? '', userAgent: c.req.header('user-agent') ?? '' },
+    context: { requestId: c.get('requestId'), ip: clientAddress(c) ?? '', userAgent: c.req.header('user-agent') ?? '' },
   });
 }
 

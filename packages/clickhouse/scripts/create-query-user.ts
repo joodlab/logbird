@@ -10,16 +10,40 @@ try {
   await (await ch.query({ query: 'SHOW ACCESS', format: 'TabSeparatedRaw' })).text();
   if (!/CREATE USER|ALL ON/.test(grants) || !/CREATE SETTINGS PROFILE|ALL ON/.test(grants))
     throw new Error('Requires CREATE USER and CREATE SETTINGS PROFILE (and SELECT grant option on Trailmark tables)');
+  const fromEnvironment = Boolean(process.env.CLICKHOUSE_QUERY_PASSWORD);
   const files = [resolve('../../.env'), ...(process.env.TRAILMARK_PRIMARY_ENV ? [resolve(process.env.TRAILMARK_PRIMARY_ENV)] : [])];
-  const contents = await Promise.all(files.map((f) => readFile(f, 'utf8')));
-  const passwords = contents.map((c) => c.match(/^CLICKHOUSE_QUERY_PASSWORD=(.*)$/m)?.[1]).filter(Boolean);
+  const contents = await Promise.all(
+    files.map((file) =>
+      readFile(file, 'utf8').catch((error: NodeJS.ErrnoException) => {
+        // Containers need no env file; still compare any existing source-install files.
+        if (fromEnvironment && error.code === 'ENOENT') return '';
+        throw error;
+      }),
+    ),
+  );
+  const passwords = [process.env.CLICKHOUSE_QUERY_PASSWORD, ...contents.map((c) => c.match(/^CLICKHOUSE_QUERY_PASSWORD=(.*)$/m)?.[1])].filter(
+    Boolean,
+  );
   if (new Set(passwords).size > 1) throw new Error('Existing query credentials differ; refusing to replace them');
   const existing = await (await ch.query({ query: "SELECT name FROM system.users WHERE name='trailmark_query'", format: 'JSONEachRow' })).json();
   if (existing.length && !passwords.length) throw new Error('trailmark_query already exists without configured credentials; refusing to rotate');
   const password = passwords[0] ?? randomBytes(32).toString('hex');
   if (!/^[a-f0-9]{64}$/.test(password)) throw new Error('Existing password is not in the generated credential format; refusing to modify it');
-  if (contents.some((c) => /^CLICKHOUSE_QUERY_USER=(?!trailmark_query$).+$/m.test(c)))
+  if (
+    (process.env.CLICKHOUSE_QUERY_USER && process.env.CLICKHOUSE_QUERY_USER !== 'trailmark_query') ||
+    contents.some((c) => /^CLICKHOUSE_QUERY_USER=(?!trailmark_query$).+$/m.test(c))
+  )
     throw new Error('Existing query username differs; refusing to replace it');
+  if (existing.length) {
+    const existingUser = createClickHouseClient({ ...process.env, CLICKHOUSE_USER: 'trailmark_query', CLICKHOUSE_PASSWORD: password });
+    try {
+      await (await existingUser.query({ query: 'SELECT 1' })).text();
+    } catch {
+      throw new Error('Existing query credentials do not authenticate; refusing to rotate');
+    } finally {
+      await existingUser.close();
+    }
+  }
   // SQL_ is ClickHouse's built-in custom-setting prefix on 26.9. Probe rather
   // than changing server configuration (it may not appear in server_settings).
   await (
@@ -89,13 +113,13 @@ try {
   } finally {
     await probe.close();
   }
-  for (let i = 0; i < files.length; i++) {
+  for (let i = 0; !fromEnvironment && i < files.length; i++) {
     let addition = '';
     if (!/^CLICKHOUSE_QUERY_USER=/m.test(contents[i]!)) addition += '\nCLICKHOUSE_QUERY_USER=trailmark_query';
     if (!/^CLICKHOUSE_QUERY_PASSWORD=/m.test(contents[i]!)) addition += `\nCLICKHOUSE_QUERY_PASSWORD=${password}`;
     if (addition) await appendFile(files[i]!, `${addition}\n`);
   }
-  console.log('Restricted Trailmark query user ready; credentials appended without replacing existing keys.');
+  console.log('Restricted Trailmark query user ready; configured credentials preserved.');
 } finally {
   await ch.close();
 }

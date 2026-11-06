@@ -4,7 +4,11 @@ export const env = createEnv({
   server: {
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     REDIS_URL: z.url(),
-    TRUST_PROXY: z.enum(['true', 'false']).default('false'),
+    /** Trusted proxy hops in front of the API (false/empty = 0, true = 1); see client-address.ts. */
+    TRUST_PROXY: z
+      .string()
+      .optional()
+      .refine((v) => v === undefined || /^(true|false|\d+)?$/i.test(v.trim()), 'TRUST_PROXY must be false, true or a hop count'),
     BULLMQ_PREFIX: z.string().default('{trailmark}'),
     TRUSTED_ORIGINS: z.string().default(''),
     /** Auth calls per peer; public authentication failures per peer; valid public calls per project and kind. */

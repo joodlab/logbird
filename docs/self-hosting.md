@@ -1,28 +1,144 @@
 # Self-hosting
 
-Use a Linux VM with Docker Engine and Compose v2. Start with 4 vCPU, 8 GB RAM and SSD storage for a bounded production test; this is a starting allocation, not a throughput guarantee. Pin tested image digests before rollout. Back up volumes off-host. Postgres 17, ClickHouse 26.9 and Redis 7 are the Compose baseline. Dragonfly can replace Redis with the documented hashtag queue prefix and compatible locking configuration.
+## Five-minute quickstart
 
-## First run
-
-Copy .env.example to .env and restrict permissions (`chmod 600 .env`). Generate unique Postgres, ClickHouse and auth secrets privately. Set NODE_ENV=production and APP_URL to the public HTTPS origin. Set DATABASE_URL host to postgres, CLICKHOUSE_URL to http://clickhouse:8123, REDIS_URL to redis://redis:6379/0, and configure SMTP. URL-encode special characters in connection strings. Keep CLICKHOUSE_DATABASE=trailmark: query-user policies currently target this database explicitly.
+Install Docker Engine and Compose >=2.24.4 (Linux containers). First builds can take longer depending on CPU/network. No images are published yet.
 
 ```sh
-docker compose build
-docker compose up -d postgres clickhouse redis
-docker compose run --rm server pnpm --filter @trailmark/database migrate:deploy
-docker compose run --rm server pnpm --filter @trailmark/clickhouse migrate
-# Provisioning writes generated credentials to the mounted env, without rotation.
-# The invoking container user must have write access to this file.
-docker compose run --rm --user "$(id -u):$(id -g)" -v "$PWD/.env:/workspace/.env" server pnpm --filter @trailmark/clickhouse create-query-user
-docker compose up -d --force-recreate server app worker
+git clone https://github.com/joodlab/trailmark.git
+cd trailmark
+sh scripts/selfhost-init.sh
+# Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
+docker compose up -d
 ```
 
-Provisioning requires ClickHouse CREATE USER / SETTINGS PROFILE / ROW POLICY and grant authority. It installs SELECT-only query credentials with constant resource limits and project row policies on all four event tables. It verifies existing grants and preserves existing credentials. Do not insert blank query-user keys in .env before running it. See [query isolation](query-language.md#sql-mode-langsql). Keep all database and API ports private. Optional development mail: `docker compose --profile mail up -d mailpit`; SMTP_HOST=mailpit, SMTP_PORT=1025. Never use Mailpit for public production delivery.
+Open http://localhost:4600. Enter your email; read the code in your inbox, or privately run `docker compose logs server` when the log fallback is enabled. Create a workspace and project, copy its ingest key (shown once), then send:
 
-## Operations
+```sh
+export TRAILMARK_INGEST_KEY=tm_ingest_...
+curl http://localhost:4600/v1/events -H "Authorization: Bearer $TRAILMARK_INGEST_KEY" -H 'Content-Type: application/json' -d '{"action":"document.updated"}'
+```
 
-The worker registers hourly retention enforcement and handles requested purges. Monitor worker.ready, retention.failed, RetentionRun records and queue lag; a live HTTP server does not prove retention is running. Graceful shutdown waits for the active job. Retention deletes are permanent, including when lowering a project's retention.
+Expect HTTP 202 and the event in Explorer. Only action is required. Never send secrets. `/livez` checks the API process; `/readyz` checks Postgres, ClickHouse and Redis through the app.
 
-Back up Postgres with pg_dump, ClickHouse with native BACKUP to a configured off-host destination, Redis AOF and the private env file. Coordinate snapshots or pause ingestion and the worker for a consistent recovery point. Encrypt backups and rehearse restoration to a separate installation before customer use. Never use `docker compose down -v` on retained data.
+Init supports POSIX sh on Linux/macOS/Git Bash, creates .env if absent, fills only empty/missing secrets, preserves populated values and sets mode 600. Manual generation: `openssl rand -hex 32`, then paste privately into .env. Init falls back to /dev/urandom without OpenSSL. Never commit credentials.
 
-For upgrades record the source SHA and image IDs, back up, stop writers/worker, build the new revision, apply Postgres and ClickHouse migrations, restart and run the deployment smoke checks. There are no automatic schema downgrades: rollback binaries only if schemas remain compatible; otherwise restore the matched backup to an isolated installation and verify before switching traffic.
+## Environment reference
+
+One .env.example serves source development and containers. Empty URL overrides let Compose construct internal URLs. Existing contributor files keep working. Source development must set DATABASE_URL, CLICKHOUSE_URL and REDIS_URL to host services; Mailpit uses SMTP_HOST=127.0.0.1 and SMTP_PORT=1025. Container localhost refers to itself.
+
+| Key | Requirement / default |
+| --- | --- |
+| BETTER_AUTH_SECRET | Required, >=32 characters; init generates 64 hex characters |
+| POSTGRES_PASSWORD, CLICKHOUSE_PASSWORD | Required; generated by init |
+| CLICKHOUSE_QUERY_PASSWORD | Required, 64 lowercase hex characters; must authenticate existing user, never rotated |
+| CLICKHOUSE_QUERY_USER | Fixed trailmark_query for provisioning |
+| APP_URL | Public origin, http://localhost:4600; HTTPS required except localhost/127.0.0.1 |
+| POSTGRES_USER / POSTGRES_DB | trailmark / trailmark |
+| DATABASE_URL | Optional complete URL; otherwise composed from credentials |
+| CLICKHOUSE_URL / CLICKHOUSE_USER / CLICKHOUSE_DATABASE | http://clickhouse:8123 / trailmark / trailmark; keep database trailmark because restricted policies name it explicitly |
+| REDIS_URL / BULLMQ_PREFIX | redis://redis:6379/0 / {trailmark} |
+| SMTP_HOST / SMTP_PORT / SMTP_SECURE | No host default / 587 / false (STARTTLS); true for implicit TLS, usually 465 |
+| SMTP_USER / SMTP_PASSWORD / MAIL_FROM | Provider credentials / verified sender |
+| AUTH_LOG_SIGN_IN_CODES | false; true logs sign-in codes, warns at boot, bypasses SMTP only without SMTP_HOST |
+| TRAILMARK_SERVER_URL | Production runtime proxy target, http://server:4601; recreate app to change, no rebuild |
+| TRUST_PROXY / TRUSTED_ORIGINS | Trusted proxy hops: 1 in Compose (the console), 2 behind one reverse proxy; source dev 0 / empty. See ingress rules below |
+| AUTH_RATE_LIMIT_PER_MINUTE / PUBLIC_RATE_LIMIT_PER_MINUTE | 30 / 600 per client: sign-in requests and failed public-API authentications |
+| INGEST_RATE_LIMIT_PER_MINUTE / READ_RATE_LIMIT_PER_MINUTE | 3000 / 1200 per project key (shared Redis limits) |
+| TRAILMARK_BIND / TRAILMARK_HTTP_PORT | 127.0.0.1 / 4600; only app is published |
+| TRAILMARK_IMAGE_REGISTRY / TRAILMARK_VERSION | trailmark / local; both image names and local build instructions |
+| TRAILMARK_DOMAIN / ACME_EMAIL | TLS hostname / optional ACME email |
+| NODE_ENV / PORT | Source development / 4601; containers force production and service ports |
+| SERVER_URL | Source smoke API target |
+| TRAILMARK_PRIMARY_ENV | Optional second developer env file for source query provisioning |
+
+URL-encode special characters in manual connection URLs. Generated hex values need no encoding. .env.example preserves optional BASE_URL, SMOKE_* and TRAILMARK_*_KEY smoke inputs. No automated image builds or registry pushes run.
+
+## SMTP and first login
+
+Configure SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASSWORD and MAIL_FROM using provider settings. Examples: Amazon SES regional SMTP endpoint and SMTP credentials; Postmark smtp.postmarkapp.com:587 and server token credentials; Brevo smtp-relay.brevo.com:587 and SMTP credentials. Verify sender/domain and SPF/DKIM/DMARC with the provider.
+
+Without SMTP explicitly enable AUTH_LOG_SIGN_IN_CODES=true. Each auth.sign_in_code JSON line contains recipient/code: log readers can sign in. Only sign-in bypasses SMTP, never invitations or other OTP purposes. With SMTP configured it logs and sends. After SMTP works, disable the flag and run `docker compose up -d server worker`; handle existing log retention appropriately. Missing SMTP with the flag off fails delivery. Invitations/courtesy emails need SMTP.
+
+## Caddy TLS
+
+Point DNS to the host and allow 80/443. Set APP_URL=https://audit.example.com, TRAILMARK_DOMAIN=audit.example.com, optional ACME_EMAIL, and TRUST_PROXY=2 (Caddy plus the console). Run `docker compose --profile tls up -d`. Pinned Caddy 2 uses the committed Caddyfile, automatic HTTPS and persistent caddy_data/caddy_config volumes.
+
+Set TRUST_PROXY explicitly: profiles cannot change another service's environment. Local TLS tests can mount a Caddyfile with `tls internal`, choose TRAILMARK_TLS_HTTP_PORT / TRAILMARK_TLS_HTTPS_PORT, and run `curl -k --resolve hostname:port:127.0.0.1 https://hostname:port/readyz`. Internal test certificates are not publicly trusted.
+
+## Any reverse proxy
+
+Forward the whole origin to port 4600, including /api, /v1 and readiness. The runtime app proxy retains CSP/security headers. Set APP_URL to the exact public HTTPS origin. Client addresses drive per-client rate limits, audit context and the sign-in email's "requested from" line. The console is always one trusted hop: it appends the address it received the request from to X-Forwarded-For. Keep the default TRUST_PROXY=1 when browsers and SDKs reach port 4600 directly. Set TRUST_PROXY=2 behind exactly one reverse proxy that appends the real client address (Caddy, Nginx `$proxy_add_x_forwarded_for` or `$remote_addr`, Traefik, Coolify), and add one per additional trusted proxy. Trailmark reads the X-Forwarded-For entry that many places from the right, so entries a client sends are ignored. A count that is too high lets clients choose their own address; too low groups everyone under the proxy's address. Never expose server:4601.
+
+Nginx inside an existing TLS server block (configure certificates separately):
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:4600;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_buffering off;
+    proxy_read_timeout 300s;
+}
+add_header Strict-Transport-Security "max-age=31536000" always;
+add_header X-Content-Type-Options nosniff always;
+add_header Referrer-Policy strict-origin-when-cross-origin always;
+```
+
+Traefik labels on app (attach app to the proxy network and configure its letsencrypt resolver):
+
+```yaml
+labels:
+  - traefik.enable=true
+  - traefik.http.routers.trailmark.rule=Host(`audit.example.com`)
+  - traefik.http.routers.trailmark.entrypoints=websecure
+  - traefik.http.routers.trailmark.tls.certresolver=letsencrypt
+  - traefik.http.services.trailmark.loadbalancer.server.port=4600
+```
+
+Keep forwardedHeaders.insecure disabled; trust only known upstreams. Live tail polls HTTP; no WebSocket/SSE. Exports stream: disable buffering and allow sufficient read timeouts.
+
+## External services
+
+Set DATABASE_URL, CLICKHOUSE_URL, REDIS_URL and ClickHouse admin/query credentials, then run `docker compose -f docker-compose.yml -f docker-compose.external.yml up -d`. The override uses !reset to remove bundled services and migration dependencies; use Compose >=2.24.4 ([Docker merge reference](https://docs.docker.com/reference/compose-file/merge/)). Base secret validation still applies, including POSTGRES_PASSWORD (unused with DATABASE_URL). External services must already be reachable/ready. Create the trailmark ClickHouse database first.
+
+Postgres needs schema migration rights. ClickHouse needs trailmark schema/table/view DDL and read/write, CREATE/ALTER USER, CREATE/ALTER SETTINGS PROFILE, CREATE/ALTER ROW POLICY, SELECT WITH GRANT OPTION on the four Trailmark tables, SHOW ACCESS/GRANTS and system.users/settings visibility. Use ClickHouse 26.9 with SQL_ settings. Provisioning checks credentials, four SELECT grants, effective limits and unchanged main-user row counts. Stop writes during upgrades; concurrent ingest can fail that safety check.
+
+Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashtags=true`, matching brace-enclosed BullMQ prefixes such as {trailmark} across producers/workers, and no queue eviction. Do not use ioredis keyPrefix.
+
+## Upgrades and backups
+
+Back up first, stop writes and pin a tested Git revision (image tags/digests when published). Stop existing server/worker before upgrading, then `docker compose up -d --build`. One-shot migrate gates new server/worker startup; failure blocks startup. Prisma/ClickHouse apply only unapplied migrations; query credentials stay unchanged. Initialization variables do not rotate stored database passwords. Preserve the original env securely with backups.
+
+```sh
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > trailmark.pg.dump
+# Restore into an empty prepared database while writers are stopped.
+cat trailmark.pg.dump | docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner'
+```
+
+For ClickHouse BACKUP, mount this at /etc/clickhouse-server/config.d/backups.xml and durable storage at /backups, then recreate your ClickHouse container in a maintenance window:
+
+```xml
+<clickhouse>
+  <storage_configuration><disks><backups><type>local</type><path>/backups/</path></backups></disks></storage_configuration>
+  <backups><allowed_disk>backups</allowed_disk><allowed_path>/backups/</allowed_path></backups>
+</clickhouse>
+```
+
+Run with an authenticated client; supply credentials privately:
+
+```sql
+BACKUP DATABASE trailmark TO Disk('backups', 'trailmark-2026-11-05.zip');
+RESTORE DATABASE trailmark FROM Disk('backups', 'trailmark-2026-11-05.zip');
+-- File('/backups/trailmark-2026-11-05.zip') also works with allowed_path.
+-- S3 alternative, scoped credentials supplied privately, not in shell history:
+-- BACKUP DATABASE trailmark TO S3('https://bucket.s3.region.amazonaws.com/path/backup', '<access-key>', '<secret>');
+-- RESTORE DATABASE trailmark FROM S3('https://bucket.s3.region.amazonaws.com/path/backup', '<access-key>', '<secret>');
+```
+
+Restore into isolated empty storage first and verify counts/application reads. Preserve ClickHouse access storage and query credentials, or reprovision before acceptance; database backup alone does not replace access configuration. Redis uses AOF: back up its volume consistently while stopped or follow its backup procedure. Keep matched backups off-host. `docker compose down` preserves volumes; `down -v` permanently deletes them.
+
+## Sizing
+
+Start a bounded evaluation with 4 vCPU, 8 GB RAM and SSD. This is an initial allocation, not measured capacity. Reserve RAM/disk for ClickHouse merges/backups and measure compressed growth with fictional representative traffic. Monitor disk, readiness, 5xx/429, queue age, retention failures and backup age. One VM has no HA. See [deployment](deployment.md) and [Coolify](coolify.md).

@@ -12,26 +12,24 @@ Open-source audit logs and activity history for your product. Send events throug
 
 ## Quickstart
 
-For managed cloud, a public signup URL will be announced by the maintainers. Self-host the same application today:
+Self-host the application with Docker Compose:
 
 ```sh
-cp .env.example .env
-# Fill credentials and URLs per docs/self-hosting.md.
-docker compose build
-docker compose up -d postgres clickhouse redis
+git clone https://github.com/joodlab/trailmark.git
+cd trailmark
+sh scripts/selfhost-init.sh
+# Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
+docker compose up -d
 ```
 
-Complete migrations and restricted query-user setup in [self-hosting](docs/self-hosting.md), then start the applications. For source development see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-Create a workspace and project in the console, copy its ingest key, and send:
+Open http://localhost:4600, sign in using the emailed code (or server logs when explicitly enabled), and create a workspace and project. Copy its ingest key and send:
 
 ```sh
-BASE_URL=http://localhost:4600          # your console URL (it proxies /v1); e.g. https://audit.example.com
-TRAILMARK_INGEST_KEY=tm_ingest_...      # from Settings → API keys (shown once)
-curl "$BASE_URL/v1/events" -H "Authorization: Bearer $TRAILMARK_INGEST_KEY" -H 'Content-Type: application/json' -d '{"action":"document.updated"}'
+export TRAILMARK_INGEST_KEY=tm_ingest_...
+curl http://localhost:4600/v1/events -H "Authorization: Bearer $TRAILMARK_INGEST_KEY" -H 'Content-Type: application/json' -d '{"action":"document.updated"}'
 ```
 
-Only action is required. Never send passwords or tokens. See the [TypeScript SDK](packages/sdk/README.md), [concepts](docs/concepts.md), [query language](docs/query-language.md), and your server's `/docs` API reference. See [Hono, TanStack Start, Vue and Nuxt integrations](docs/integrations.md) and runnable [examples](examples).
+Only action is required. Never send passwords or tokens. See [self-hosting](docs/self-hosting.md) for TLS, proxies, upgrades and backups; [Coolify](docs/coolify.md) for Compose builds; [CONTRIBUTING.md](CONTRIBUTING.md) for source development; the [SDK](packages/sdk/README.md), [concepts](docs/concepts.md), [query language](docs/query-language.md), [integrations](docs/integrations.md), [examples](examples), and your server's `/docs` API reference.
 
 ## Architecture
 
