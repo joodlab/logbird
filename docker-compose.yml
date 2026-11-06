@@ -38,40 +38,88 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
-  server:
-    build: {context: ., dockerfile: apps/server/Dockerfile}
-    env_file: .env
-    environment: {PORT: '4601', NODE_ENV: production}
+  migrate:
+    image: ${TRAILMARK_IMAGE_REGISTRY:-trailmark}/migrate:${TRAILMARK_VERSION:-local}
+    build: {context: ., dockerfile: apps/server/Dockerfile, target: migrate}
+    environment: &runtime
+      NODE_ENV: production
+      APP_URL: ${APP_URL:-http://localhost:4600}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Run sh scripts/selfhost-init.sh}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-trailmark}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-trailmark}}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-trailmark}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-trailmark}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Set CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_QUERY_USER: trailmark_query
+      CLICKHOUSE_QUERY_PASSWORD: ${CLICKHOUSE_QUERY_PASSWORD:?Run sh scripts/selfhost-init.sh}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      BULLMQ_PREFIX: '${BULLMQ_PREFIX:-{trailmark}}'
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-30}
+      PUBLIC_RATE_LIMIT_PER_MINUTE: ${PUBLIC_RATE_LIMIT_PER_MINUTE:-600}
+      INGEST_RATE_LIMIT_PER_MINUTE: ${INGEST_RATE_LIMIT_PER_MINUTE:-3000}
+      READ_RATE_LIMIT_PER_MINUTE: ${READ_RATE_LIMIT_PER_MINUTE:-1200}
+      AUTH_LOG_SIGN_IN_CODES: ${AUTH_LOG_SIGN_IN_CODES:-false}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-Trailmark <hello@example.com>}
     depends_on:
       postgres: {condition: service_healthy}
       clickhouse: {condition: service_healthy}
       redis: {condition: service_healthy}
+    restart: 'no'
+  server:
+    image: ${TRAILMARK_IMAGE_REGISTRY:-trailmark}/server:${TRAILMARK_VERSION:-local}
+    build: {context: ., dockerfile: apps/server/Dockerfile}
+    environment:
+      <<: *runtime
+      PORT: '4601'
+    depends_on:
+      migrate: {condition: service_completed_successfully}
     restart: unless-stopped
     stop_grace_period: 45s
   worker:
+    image: ${TRAILMARK_IMAGE_REGISTRY:-trailmark}/worker:${TRAILMARK_VERSION:-local}
     build: {context: ., dockerfile: apps/worker/Dockerfile}
-    env_file: .env
-    environment: {NODE_ENV: production}
+    environment: *runtime
     depends_on:
+      migrate: {condition: service_completed_successfully}
       server: {condition: service_healthy}
     restart: unless-stopped
     stop_grace_period: 5m
   app:
-    build:
-      context: .
-      dockerfile: apps/app/Dockerfile
-      args: {TRAILMARK_SERVER_URL: 'http://server:4601'}
-    env_file: .env
-    environment: {PORT: '4600', HOST: '0.0.0.0', NODE_ENV: production}
-    ports: ['127.0.0.1:4600:4600']
+    image: ${TRAILMARK_IMAGE_REGISTRY:-trailmark}/app:${TRAILMARK_VERSION:-local}
+    build: {context: ., dockerfile: apps/app/Dockerfile}
+    environment:
+      PORT: '4600'
+      HOST: '0.0.0.0'
+      NODE_ENV: production
+      TRAILMARK_SERVER_URL: ${TRAILMARK_SERVER_URL:-http://server:4601}
+    ports: ['${TRAILMARK_BIND:-127.0.0.1}:${TRAILMARK_HTTP_PORT:-4600}:4600']
     depends_on:
       server: {condition: service_healthy}
     restart: unless-stopped
-  mailpit:
-    image: axllent/mailpit:v1.27
-    profiles: [mail]
-    ports: ['127.0.0.1:8025:8025']
+  caddy:
+    image: caddy:2.10.2-alpine
+    profiles: [tls]
+    environment:
+      TRAILMARK_DOMAIN: ${TRAILMARK_DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports: ['${TRAILMARK_TLS_HTTP_PORT:-80}:80', '${TRAILMARK_TLS_HTTPS_PORT:-443}:443']
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app: {condition: service_healthy}
+    restart: unless-stopped
 volumes:
   postgres:
   clickhouse:
   redis:
+  caddy_data:
+  caddy_config:

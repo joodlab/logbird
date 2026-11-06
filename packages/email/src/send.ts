@@ -9,6 +9,15 @@ import { type MemberJoinedEmailProps, memberJoined } from './templates/member-jo
 import { type RoleChangedEmailProps, roleChanged } from './templates/role-changed';
 import { type SignInCodeEmailProps, signInCode } from './templates/sign-in-code';
 
+if (env.AUTH_LOG_SIGN_IN_CODES === 'true')
+  console.warn(
+    JSON.stringify({
+      level: 'warn',
+      event: 'auth.sign_in_codes_logging_enabled',
+      message: 'WARNING: sign-in codes are written to logs. Anyone with log access can sign in. Disable AUTH_LOG_SIGN_IN_CODES after SMTP setup.',
+    }),
+  );
+
 const transport = nodemailer.createTransport({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,
@@ -26,6 +35,7 @@ export interface SentEmail extends RenderedEmail {
 
 /** Render `email` with `props` and send it to the address in its recipient prop. */
 export async function sendEmail<P extends { appUrl: string }>(email: EmailDefinition<P>, props: SendProps<P>): Promise<SentEmail> {
+  if (!env.SMTP_HOST) throw new Error('SMTP_HOST is not configured');
   const full = { ...props, appUrl: props.appUrl ?? env.APP_URL } as P;
   const to = String(full[email.recipient]);
   const rendered = await renderEmail(email, full);
@@ -41,7 +51,13 @@ export async function sendEmail<P extends { appUrl: string }>(email: EmailDefini
   return { ...rendered, to, messageId: info.messageId };
 }
 
-export const sendSignInCode = (props: SendProps<SignInCodeEmailProps>) => sendEmail(signInCode, props);
+export const sendSignInCode = async (props: SendProps<SignInCodeEmailProps>) => {
+  if (env.AUTH_LOG_SIGN_IN_CODES === 'true' && props.purpose === 'sign-in') {
+    console.log(JSON.stringify({ level: 'warn', event: 'auth.sign_in_code', email: props.email, code: props.code }));
+    if (!env.SMTP_HOST) return;
+  }
+  return sendEmail(signInCode, props);
+};
 export const sendOrganizationInvitation = (props: SendProps<InvitationEmailProps>) => sendEmail(invitation, props);
 export const sendMemberJoined = (props: SendProps<MemberJoinedEmailProps>) => sendEmail(memberJoined, props);
 export const sendRoleChanged = (props: SendProps<RoleChangedEmailProps>) => sendEmail(roleChanged, props);

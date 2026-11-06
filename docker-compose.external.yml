@@ -1,0 +1,11 @@
+# Compose >=2.24.4. Base credentials still validate; no bundled data service starts.
+services:
+  postgres: !reset null
+  clickhouse: !reset null
+  redis: !reset null
+  migrate:
+    depends_on: !reset {}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set external DATABASE_URL}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:?Set external CLICKHOUSE_URL}
+      REDIS_URL: ${REDIS_URL:?Set external REDIS_URL}

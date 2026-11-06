@@ -1,0 +1,53 @@
+$ curl -X POST http://localhost:14600/v1/events -H 'Authorization: Bearer tm_ingest_…' -d '{"action":"invoice.voided","outcome":"success","description":"Sam voided invoice INV-2041 for Northwind Fictional","actor":{"type":"user","id":"usr_sam","name":"Sam Operator"},"tenant":{"id":"acct_42","name":"Northwind Fictional"},"targets":[{"type":"invoice","id":"INV-2041","name":"Invoice INV-2041"}]}'
+{"accepted":1,"ids":["01a1acad-81eb-747f-ad2c-6e5308f6735d"],"rejected":[],"warnings":[]}
+HTTP 202
+
+$ docker compose restart
+
+
+$ docker compose up -d --wait
+
+
+$ docker compose down
+
+
+$ docker compose up -d --wait
+
+
+$ docker compose logs --no-log-prefix migrate
+> @trailmark/database@0.1.0 migrate:deploy /workspace/packages/database
+> pnpm with-env prisma migrate deploy
+
+
+> @trailmark/database@0.1.0 with-env /workspace/packages/database
+> dotenv -e ../../.env -- prisma migrate deploy
+
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma/schema.prisma.
+Datasource "db": PostgreSQL database "trailmark", schema "public" at "postgres:5432"
+
+5 migrations found in prisma/migrations
+
+
+No pending migrations to apply.
+
+> @trailmark/clickhouse@0.1.0 migrate /workspace/packages/clickhouse
+> node --env-file-if-exists=../../.env --import tsx scripts/migrate.ts
+
+../../.env not found. Continuing without it.
+ClickHouse migrations current
+Restricted Trailmark query user ready; configured credentials preserved.
+
+$ docker compose ps --format table {{.Service}}	{{.Image}}	{{.Status}}	{{.Ports}}
+SERVICE      IMAGE                               STATUS                    PORTS
+app          trailmark/app:local                 Up 34 seconds (healthy)   127.0.0.1:14600->4600/tcp
+clickhouse   clickhouse/clickhouse-server:26.9   Up 54 seconds (healthy)   8123/tcp, 9000/tcp, 9009/tcp
+postgres     postgres:17-bookworm                Up 54 seconds (healthy)   5432/tcp
+redis        redis:7-alpine                      Up 54 seconds (healthy)   6379/tcp
+server       trailmark/server:local              Up 40 seconds (healthy)   
+worker       trailmark/worker:local              Up 34 seconds (healthy)
+
+$ curl http://localhost:14600/readyz
+{"status":"ok"}
+HTTP 200

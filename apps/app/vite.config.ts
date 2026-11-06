@@ -7,13 +7,14 @@ import { defineConfig, loadEnv } from 'vite';
 /**
  * The console talks to exactly one origin. In dev, Vite proxies `/api` (better-auth + internal API)
  * and `/v1` (public API) to the Hono server so the better-auth session cookie stays first-party.
- * The production Nitro server does the same through route rules.
+ * The production Nitro middleware reads its target at runtime.
  */
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const rootEnv = loadEnv(mode, '../..', '');
   const serverTarget =
-    process.env.TRAILMARK_SERVER_URL ?? env.TRAILMARK_SERVER_URL ?? rootEnv.SERVER_URL?.replace('localhost', '127.0.0.1') ?? 'http://127.0.0.1:4601';
+    // `||`, not `??`: .env.example ships an empty TRAILMARK_SERVER_URL= (the production runtime proxy target).
+    process.env.TRAILMARK_SERVER_URL || env.TRAILMARK_SERVER_URL || rootEnv.SERVER_URL?.replace('localhost', '127.0.0.1') || 'http://127.0.0.1:4601';
 
   return {
     resolve: { tsconfigPaths: true },
@@ -65,6 +66,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       tailwindcss(),
       nitro({
+        handlers: [{ route: '/**', handler: './server/proxy.ts', middleware: true }],
         routeRules: {
           '/**': {
             headers: {
@@ -74,11 +76,6 @@ export default defineConfig(({ mode }) => {
               'Referrer-Policy': 'strict-origin-when-cross-origin',
             },
           },
-          '/health': { proxy: `${serverTarget}/health` },
-          '/livez': { proxy: `${serverTarget}/livez` },
-          '/readyz': { proxy: `${serverTarget}/readyz` },
-          '/api/**': { proxy: `${serverTarget}/api/**` },
-          '/v1/**': { proxy: `${serverTarget}/v1/**` },
         },
       }),
       tanstackStart({
