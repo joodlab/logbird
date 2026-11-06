@@ -231,7 +231,17 @@ The **route table and every request/response schema live in `packages/contracts`
   may only read). Keys are stored as SHA-256 hash + display prefix; full secret shown once.
 - Errors: `{ error: { code, message, details? } }` with proper HTTP status.
 - `GET /openapi.json` (hono-openapi) + Scalar reference at `/docs`.
-- Rate/size limits on ingest: 1000 events or 5 MB per request.
+- Size limits on ingest: 1000 events or 5 MB per request.
+- Public fixed-window limits are shared in Redis across replicas: 3000 ingest requests/minute
+  and 1200 read requests/minute per project (all keys of the same kind share a bucket).
+  Configure `INGEST_RATE_LIMIT_PER_MINUTE` and `READ_RATE_LIMIT_PER_MINUTE`.
+  Authenticated responses include `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`
+  (seconds until reset). A 429 uses the normal error envelope and `Retry-After` in seconds.
+  `PUBLIC_RATE_LIMIT_PER_MINUTE` (600) counts only failed authentication attempts per peer.
+  Exhausted peers with malformed/wrong-kind credentials are rejected before lookup; well-formed
+  credentials still undergo lookup so valid keys remain usable behind shared NAT. Unknown/revoked
+  well-formed keys therefore still incur lookup. Public limits fail open on Redis errors and log
+  `rate_limit.storage_error`; auth limits remain fail closed.
 - Dev: the app proxies `/api` and `/v1` to `http://127.0.0.1:4601` (Vite `server.proxy`), so cookies are
   same-origin. better-auth `baseURL` = app origin (`http://localhost:4600`), `trustedOrigins` includes it.
 

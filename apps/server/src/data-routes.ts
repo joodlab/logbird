@@ -11,6 +11,7 @@ import { ApiError } from './errors';
 import { ingest, readIngestBody, requireProjectReadable } from './ingest';
 import { requireApiKey, requireProjectAccess, requireSession } from './middlewares';
 import { doc as responseDoc, routeDoc } from './openapi';
+import { publicRateLimits } from './rate-limit';
 import type { AppEnv } from './types';
 
 const ingestRequestSchema = (await resolver(s.ingestBodySchema).toOpenAPISchema()).schema;
@@ -57,31 +58,45 @@ const projectRead = createMiddleware<AppEnv>(async (c, next) => {
   await requireProjectReadable(c.get('project').id);
   await next();
 });
+const publicQueryLanguage = createMiddleware<AppEnv>(async (c, next) => {
+  if (c.req.query('lang') === 'sql')
+    throw new ApiError(
+      422,
+      'invalid_query',
+      'SQL mode is available only in the console.',
+      s.queryErrorDetailsSchema.parse({ lang: 'sql', reason: 'not_allowed', start: null, end: null, hint: 'Use lang=query with the read-key API' }),
+    );
+  await next();
+});
 export const publicRoutes = new Hono<AppEnv>()
-  .use('*', async (c, next) => {
-    if (c.req.query('lang') === 'sql')
-      throw new ApiError(
-        422,
-        'invalid_query',
-        'SQL mode is available only in the console.',
-        s.queryErrorDetailsSchema.parse({ lang: 'sql', reason: 'not_allowed', start: null, end: null, hint: 'Use lang=query with the read-key API' }),
-      );
-    await next();
-  })
-  .post('/events', requireApiKey('ingest'), doc('Ingest events', s.ingestResponseSchema, 202, 'ingestKey'), async (c) =>
-    c.json(await ingest(c.get('project').id, await readIngestBody(c.req.raw), c.req.header('x-trailmark-sdk') ?? c.req.header('user-agent')), 202),
+  .post(
+    '/events',
+    requireApiKey('ingest'),
+    publicRateLimits.authenticated('ingest'),
+    publicQueryLanguage,
+    doc('Ingest events', s.ingestResponseSchema, 202, 'ingestKey'),
+    async (c) =>
+      c.json(await ingest(c.get('project').id, await readIngestBody(c.req.raw), c.req.header('x-trailmark-sdk') ?? c.req.header('user-agent')), 202),
   )
   .get(
     '/events',
     requireApiKey('read'),
+    publicRateLimits.authenticated('read'),
+    publicQueryLanguage,
     projectRead,
     doc('Search events', s.searchResponseSchema, 200, 'readKey'),
     query(s.publicSearchQuerySchema),
     async (c) =>
       c.json(s.searchResponseSchema.parse(await ch.searchEvents(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
   )
-  .get('/events/:eventId', requireApiKey('read'), projectRead, doc('Event detail', s.eventDetailSchema, 200, 'readKey'), async (c) =>
-    c.json(s.eventDetailSchema.parse(found(await ch.getEvent(clickhouse, c.get('project').id, c.req.param('eventId'))))),
+  .get(
+    '/events/:eventId',
+    requireApiKey('read'),
+    publicRateLimits.authenticated('read'),
+    publicQueryLanguage,
+    projectRead,
+    doc('Event detail', s.eventDetailSchema, 200, 'readKey'),
+    async (c) => c.json(s.eventDetailSchema.parse(found(await ch.getEvent(clickhouse, c.get('project').id, c.req.param('eventId'))))),
   );
 export const dataRoutes = new Hono<AppEnv>()
   .use('*', requireSession)

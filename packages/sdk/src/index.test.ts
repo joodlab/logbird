@@ -118,3 +118,24 @@ it('drops partial rejections and permanent poison batches without wedging later 
   expect(fetcher).toHaveBeenCalledTimes(3);
   expect(onError).toHaveBeenCalledTimes(2);
 });
+
+it.each([
+  ['2', 2000],
+  ['999', 60_000],
+])('honours bounded Retry-After %s on 429', async (header, delay) => {
+  vi.useFakeTimers();
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': header } }))
+    .mockResolvedValue(new Response('{}', { status: 202 }));
+  vi.stubGlobal('fetch', fetch);
+  const sdk = new Trailmark({ apiKey: 'fake', endpoint: 'http://test' });
+  sdk.track({ action: 'retry.fixture' });
+  const flushed = sdk.flush();
+  await vi.advanceTimersByTimeAsync(delay - 1);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  await flushed;
+  expect(fetch).toHaveBeenCalledTimes(2);
+  await sdk.shutdown();
+});
