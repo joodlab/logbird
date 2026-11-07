@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/auth-client', () => ({ authClient: {} }));
 
 const { ApiRequestError, timeoutError, toApiError, withDeadline } = await import('./errors');
-const { BUSY_RETRIES, retryDelay, shouldRetry } = await import('./queries');
+const { BUSY_RETRIES, retryDelay, shouldRetry, summaryRetry } = await import('./queries');
 
 const busy = (retryAfter: number | null = 1) => new ApiRequestError(503, 'project_busy', 'busy', undefined, retryAfter);
 
@@ -19,6 +19,44 @@ describe('shouldRetry', () => {
     expect(shouldRetry(0, timeoutError())).toBe(false);
     expect(shouldRetry(0, new TypeError('fetch failed'))).toBe(true);
     expect(shouldRetry(2, new TypeError('fetch failed'))).toBe(false);
+  });
+
+  it('never retries a confirmed resource limit, but still retries a transient storage failure anywhere', () => {
+    // GET /api/projects (or event detail, entities…) hitting a ClickHouse ECONNRESET maps to 503 query_unavailable.
+    const transient = new ApiRequestError(503, 'query_unavailable', 'Storage query failed or exceeded its budget. Narrow the time range and retry.');
+    expect(shouldRetry(0, transient)).toBe(true);
+    expect(shouldRetry(1, transient)).toBe(true);
+    expect(shouldRetry(2, transient)).toBe(false);
+    const limit = new ApiRequestError(422, 'invalid_query', 'Query exceeded its resource budget', {
+      lang: 'query',
+      reason: 'limit',
+      start: null,
+      end: null,
+      hint: null,
+    });
+    expect(shouldRetry(0, limit)).toBe(false);
+    expect(shouldRetry(0, new ApiRequestError(502, 'bad_gateway', 'upstream'))).toBe(true);
+  });
+
+  it('the agent-page summaries never auto-retry a budget or storage failure (the page banner has Retry)', () => {
+    expect(summaryRetry(0, new ApiRequestError(503, 'query_unavailable', 'Storage query failed or exceeded its budget.'))).toBe(false);
+    expect(
+      summaryRetry(
+        0,
+        new ApiRequestError(422, 'invalid_query', 'Query exceeded its resource budget', {
+          lang: 'query',
+          reason: 'limit',
+          start: null,
+          end: null,
+          hint: null,
+        }),
+      ),
+    ).toBe(false);
+    expect(summaryRetry(0, timeoutError())).toBe(false);
+    // Network blips and other 5xx still follow the shared policy, busy projects too.
+    expect(summaryRetry(0, new TypeError('fetch failed'))).toBe(true);
+    expect(summaryRetry(0, new ApiRequestError(502, 'bad_gateway', 'upstream'))).toBe(true);
+    expect(summaryRetry(1, busy())).toBe(true);
   });
 });
 

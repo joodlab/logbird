@@ -3,6 +3,9 @@ import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import { read, where } from './queries';
 
+/** Columns that are empty on most events; their suggestions sample only rows that have a value. */
+const SPARSE_COLUMNS = new Set(['impersonator_id']);
+
 export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<typeof suggestQuerySchema>): Promise<SuggestResponse> {
   const f = QUERY_FIELDS.find((f) => f.key === q.field || f.aliases?.includes(q.field));
   if (f?.suggest === 'none') return { field: q.field, values: [], complete: true };
@@ -20,13 +23,17 @@ export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<
     const to = q.to ?? new Date().toISOString();
     const w = await where(ch, p, { ...q, to, from: q.from ?? new Date(new Date(to).getTime() - 7 * 86_400_000).toISOString() });
     Object.assign(params, w.params);
-    // Select recent rows first, then filter. This bounds attribute scans even for rare predicates.
-    sample =
-      'SELECT * FROM events WHERE project_id={project:String} AND timestamp>={from:DateTime64(3)} AND timestamp<{to:DateTime64(3)} ORDER BY timestamp DESC,event_id DESC LIMIT 50001';
+    // Select recent rows first, then filter. This bounds attribute scans even for rare predicates. A sparse column
+    // (support agents are on ~1% of events) filters inside the sample, or a busy project's newest 50k rows would hide
+    // every agent who acted a few hours ago.
+    const sparse = f && SPARSE_COLUMNS.has(f.column) ? ` AND ${f.column}!=''` : '';
+    sample = `SELECT * FROM events WHERE project_id={project:String} AND timestamp>={from:DateTime64(3)} AND timestamp<{to:DateTime64(3)}${sparse} ORDER BY timestamp DESC,event_id DESC LIMIT 50001`;
     const events = `(SELECT * FROM (${sample}) LIMIT 50000)`;
     const value = !f ? 'attributes[{key:String}]' : f.type === 'array' ? `arrayJoin(${f.column})` : f.column;
     const kind = f?.key.split('.')[0];
-    const label = f?.suggest === 'entities' && !f.key.includes('.') && ['actor', 'tenant', 'executor'].includes(kind ?? '') ? `${kind}_name` : value;
+    // Ids with a display name: label them by name so `Yusuf` finds `impersonator:support_2`.
+    const named = (f?.suggest === 'entities' || f?.key === 'impersonator') && !f.key.includes('.');
+    const label = named && ['actor', 'impersonator', 'tenant', 'executor'].includes(kind ?? '') ? `${kind}_name` : value;
     source = `SELECT ${value} value,anyLast(${label}) label,count() count FROM ${events} WHERE (${w.sql}) ${!f ? 'AND mapContains(attributes,{key:String})' : ''} GROUP BY value`;
   } else if (f.suggest === 'entities') {
     const name = f.key.endsWith('.name'),
