@@ -44,7 +44,7 @@ See [K3s networking](https://docs.k3s.io/networking/networking-services) and the
    kubectl label node "$EDGE_NODE" logbird.io/edge=true \
      svccontroller.k3s.cattle.io/enablelb=true \
      svccontroller.k3s.cattle.io/lbpool=logbird-edge --overwrite
-   kubectl apply -f platform/traefik-config.yaml
+   kubectl -n kube-system apply -f platform/traefik-config.yaml
    kubectl -n kube-system rollout status daemonset/traefik --timeout=300s
    kubectl -n kube-system get service traefik -o jsonpath='{.spec.externalTrafficPolicy}{"\n"}'
    # Required output: Local. Confirm one ready Traefik on each published edge node.
@@ -105,11 +105,18 @@ solver. The operator allowlist below is scoped to the application Ingress.
    only Traefik to solver port 8089, then apply the example staging issuer/certificate:
 
    ```sh
-   kubectl apply -f namespace.yaml -f network-policies.yaml
-   kubectl apply -f platform/acme-network-policy.yaml -f platform/certificates.yaml
+   kubectl apply -f namespace.yaml
+   kubectl -n logbird apply -f network-policies.yaml
+   kubectl -n logbird apply -f platform/acme-network-policy.yaml -f platform/certificates.yaml
    kubectl -n logbird wait --for=condition=Ready certificate/logbird-origin --timeout=300s
    kubectl -n logbird get certificate,certificaterequest,order,challenge
    ```
+
+   Repository application objects carry `metadata.namespace: logbird`, including
+   raw NetworkPolicies; `-n logbird` is also explicit on their apply commands.
+   The sole repo-owned platform exception is Traefik's HelmChartConfig in
+   `kube-system`. The upstream cert-manager installation bundle declares its own
+   platform namespaces; do not rewrite that bundle into the application namespace.
 
    Verify staging challenge issuance, hostname and Secret references. The staging
    certificate is untrusted and cannot pass production HTTPS acceptance. In the
@@ -135,7 +142,7 @@ solver. The operator allowlist below is scoped to the application Ingress.
 ## Fence and operator acceptance window
 
 The [release sequence](cloud-operations.md#execute-the-qualified-release) deletes
-the application Ingress before stopping writers. Base `kubectl apply -k .` excludes
+the application Ingress before stopping writers. Base `kubectl -n logbird apply -k .` excludes
 the entire `edge/` directory and cannot recreate it. Inventory and fence any other
 routes to the same app/API; direct stores/writers need their own administrator fence.
 
@@ -152,7 +159,7 @@ After functional checks, replace the two reserved addresses in
 `edge/operator-window.yaml` with the operators' actual public /32 or /128 addresses:
 
 ```sh
-kubectl apply -k edge
+kubectl -n logbird apply -k edge
 kubectl -n logbird get ingress logbird -o yaml
 ```
 

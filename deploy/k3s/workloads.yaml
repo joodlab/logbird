@@ -1,6 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  namespace: logbird
   name: logbird-server
 spec:
   replicas: 2
@@ -49,6 +50,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
+  namespace: logbird
   name: logbird-server
 spec:
   selector: {app.kubernetes.io/name: logbird-server}
@@ -57,6 +59,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  namespace: logbird
   name: logbird-app
 spec:
   replicas: 2
@@ -107,6 +110,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
+  namespace: logbird
   name: logbird-app
 spec:
   selector: {app.kubernetes.io/name: logbird-app}
@@ -115,6 +119,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  namespace: logbird
   name: logbird-worker
 spec:
   replicas: 1

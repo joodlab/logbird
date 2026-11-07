@@ -1,6 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  namespace: logbird
   name: default-deny-ingress
 spec:
   podSelector: {}
@@ -9,6 +10,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  namespace: logbird
   name: ingress-to-app
 spec:
   podSelector:
@@ -25,6 +27,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  namespace: logbird
   name: app-to-server
 spec:
   podSelector:

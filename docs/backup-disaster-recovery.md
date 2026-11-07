@@ -50,8 +50,9 @@ can cover supported database engines, but Redis/Dragonfly need their engine-spec
 **Keep production recovery fenced until both independent prerequisites pass.**
 
 - **Runtime SQL packaging:** select a source revision containing the retention-SQL
-  embedding fix in [PR #51](https://github.com/joodlab/logbird/pull/51), or an equivalent
-  verified change. Inspect the actual merged portion for embedded SQL. Record its
+  embedding fix merged from [PR #51](https://github.com/joodlab/logbird/pull/51) at
+  `6be8ba00fdfeef54f24ea24cd434a8120c4310fe`, or an equivalent verified change.
+  Source embedding is present on master; qualify the selected built artifacts separately. Record its
   exact accepted commit and the built API/worker image
   digests. Real expired-row retention and failed-run repair must execute through
   those exact digests and reconcile raw/derived values before release or recovery.
@@ -64,7 +65,7 @@ can cover supported database engines, but Redis/Dragonfly need their engine-spec
   without restore was exact; this is a distinct restore gate, not proof that every
   retry doubles aggregates. [Live tracker #77](https://github.com/joodlab/logbird/issues/77)
   owns packaged restored-part guards, operator dry-run/normalization and normalized
-  retry acceptance; #51 can merge only its verified portions. Record the accepted
+  retry acceptance; #51 merged its verified portions at `6be8ba0`. Record the accepted
   fix/procedure revisions and image digests, then prove all three checkpoints below.
   **These live gates remain open.** Use #77's accepted procedure rather than inventing
   a mutation-version workaround; preserve original restored data and archives.
@@ -155,7 +156,7 @@ cannot close either gate when logical values disagree. Track them separately in
    kubectl -n logbird rollout status deployment/logbird-server --timeout=300s
    kubectl -n logbird rollout status deployment/logbird-worker --timeout=300s
    kubectl -n logbird rollout status deployment/logbird-app --timeout=300s
-   kubectl apply -k "$RELEASE_REPO/deploy/k3s/edge"
+   kubectl -n logbird apply -k "$RELEASE_REPO/deploy/k3s/edge"
    # From ONE allowlisted operator host, using the dedicated QA canary project's
    # ingest/read keys already loaded privately into this process environment:
    : "${LOGBIRD_INGEST_KEY:?Canary ingest key}" "${LOGBIRD_READ_KEY:?Same canary project}"
@@ -225,7 +226,7 @@ downloads, decryption and validation. Never rehearse by importing into productio
    compare it with the set's capture-time receipt.
 3. Configure an allowed `backups` disk on the **fresh isolated** ClickHouse server
    using the accepted release's
-   [backup-disk config in #51](https://github.com/joodlab/logbird/blob/1d10c692e421b5d33cc675da91fda8a5e55b2fe6/config/clickhouse-backups.xml).
+   [merged backup-disk config](../config/clickhouse-backups.xml).
    Pin the accepted revision and deployed engine version, bind the durable staging
    directory to that config's path, and restart only the isolated server. Inspect
    `system.disks` to verify name/path; do not copy the source server's data directories.
@@ -311,7 +312,7 @@ background merges and cannot establish correctness.
 | `events_by_minute` | `sum(events)` by the full minute/environment/action/outcome/actor/executor key matches raw events | Recompute the same map from survivors and compare every key/value | Identical logical map to B; no doubled counts |
 | `entities` | Group `(project_id,kind,entity_id)`: summed events, min first_seen, max last_seen and fixture labels agree with raw actor/tenant/executor/target expansion | Same invariants against survivors; expired-only entities gone | Same counts/extrema/fixture labels as B |
 | `attribute_keys` | Per project/key: summed count and max last_seen match raw map-key expansion; merged samples belong to the fixture's permitted values | Same invariants against survivors; expired-only keys gone | Same logical counts/extrema; merged samples remain valid |
-| Conditional `event_ids` / `event_ids_mv` (migration 006) | One logical receipt per distinct project/event ID in the capture fixture, with exact received_at/timestamp and correct MV destination | One receipt per expected surviving ID, reflecting this release's receipt-retention policy; no duplicate MV population | Same receipt map as B; repeated repair must not add receipts |
+| Conditional `event_ids` / `event_ids_mv` (006 or 007) | Select from migration inventory plus actual engine: 006 logical FINAL map; 007 distinct ID/tuple sets and oldest-tuple lookup; record physical multiplicity and MV destination | Compare the independently predicted surviving maps/tuples under this release's retention rules; explain any approved rebuild change | Same logical result as B and no unexplained per-tuple physical growth against accepted B; existing 007 backfill overlap is not corruption |
 | Views and diagnostics | Saved materialized-view definitions and `TO` destinations match this schema; record part versions and pending mutation context | Verify definitions/destinations unchanged; record completed/failed mutations and receipt alongside logical values | Repeat diagnostics; completion alone is insufficient |
 
 Checkpoint A covers the restored boundary before retention removes expired fixture
@@ -325,7 +326,8 @@ a completed no-op scheduler pass is not repeated-repair evidence.
 ### Executable comparison and fixture manifest
 
 Reference checks: [raw/minute/entities/attributes SQL](cloud-dr-checks.sql) and
-[conditional event-ID SQL](cloud-dr-event-ids.sql). **Each EXCEPT ALL in both
+[006 receipt SQL](cloud-dr-event-ids-006.sql), [007 receipt SQL](cloud-dr-event-ids-007.sql)
+and [physical growth check](cloud-dr-receipt-growth.sql). **Each EXCEPT ALL in both
 directions must return an empty result; every query must succeed.** `throwIf` guards
 reject empty project fixtures and expected/actual counts that differ from the
 independently recorded manifest. Successful guards use `FORMAT Null` so they do not
@@ -335,8 +337,8 @@ expected nonzero raw/survivor counts, query count, exit status and checkpoint.
 SimpleAggregateFunction counts use `sum`; attribute `samples` uses `groupUniqArrayMerge`.
 
 Use only the small version-pinned QA fixture on isolated targets. The existing
-[self-host harness](https://github.com/joodlab/logbird/blob/1d10c692e421b5d33cc675da91fda8a5e55b2fe6/scripts/selfhost-smoke.mjs)
-and [dated evidence](https://github.com/joodlab/logbird/blob/1d10c692e421b5d33cc675da91fda8a5e55b2fe6/docs/verification/selfhost-2026-11-07.json)
+[merged self-host harness](../scripts/selfhost-smoke.mjs)
+and [dated self-host evidence](verification/selfhost-2026-11-07.json)
 are reference inputs, not a cloud PASS. Follow #77 for the accepted built-image
 guard/repair scenario. Keep constant labels per entity and at most five distinct
 values per attribute key so the reference sample set is deterministic.
@@ -393,8 +395,7 @@ set -eu
 : "${RELEASE_REPO:?Absolute qualified release checkout}" "${EXPECTED_ROWS:?Checkpoint file path}"
 : "${QA_PROJECT:?Isolated QA project ID}" "${MANIFEST_COUNT:?Nonzero checkpoint count from trusted receipt}"
 DR_SQL="$RELEASE_REPO/docs/cloud-dr-checks.sql"
-RECEIPT_SQL="$RELEASE_REPO/docs/cloud-dr-event-ids.sql"
-sha256sum "$DR_SQL" "$RECEIPT_SQL" > /secure/receipt/verification-sql.sha256
+sha256sum "$DR_SQL" > /secure/receipt/verification-sql.sha256
 # Match these hashes to the accepted revision's independently trusted receipt.
 test "$(wc -l < "$EXPECTED_ROWS")" -eq "$MANIFEST_COUNT"
 clickhouse-client --config-file /secure/isolated-clickhouse.xml \
@@ -407,25 +408,101 @@ test ! -s /secure/receipt/checkpoint-differences.txt
 
 Use an operator-controlled path without quotes/newlines; this is a small fixture,
 not an in-memory copy of customer data. Validate file count/hash against the receipt
-before execution. For migration 006, export `project_id,event_id,received_at,timestamp`
-from source `event_ids FINAL` and filter its B/C map under the release's recorded
-receipt-retention policy. Load the corresponding private JSONEachRow file into
-`expected_receipts`, then execute its comparisons in the same session:
+before execution. Receipt selection and expected-data loading are separate below.
+
+### Receipt profile from migration inventory and engine
+
+Record the inventory and actual table engines **before exporting**, and again on
+restore. Master `6be8ba0` contains migrations 001-005 only; receipt tables are
+conditional on [#62 at 97b03c2](https://github.com/joodlab/logbird/blob/97b03c2dd710f4fa805c525c57fc7b8395e2aa94/packages/clickhouse/migrations/007_event_ids_merge_tree.sql).
+Use the authenticated source/restore client configs, never change the shared stores:
+
+```sql
+SELECT name,applied_at FROM logbird.migrations ORDER BY name;
+SELECT name,engine,create_table_query FROM system.tables
+WHERE database='logbird' AND name IN ('event_ids','event_ids_mv','event_ids_v2','event_ids_v2_mv')
+ORDER BY name;
+```
+
+| Recorded inventory and observed state | Export and verification |
+| --- | --- |
+| 001-005; no event_ids objects | Record absence; skip receipt SQL only |
+| 006 present, 007 absent; event_ids is ReplacingMergeTree; no v2 leftovers | Profile 006: export logical map with FINAL; use `cloud-dr-event-ids-006.sql` |
+| 006 and completed 007 present; event_ids is plain MergeTree; no v2 leftovers | Profile 007: no FINAL; export distinct full tuples; use `cloud-dr-event-ids-007.sql` |
+| Missing/unknown engine, inventory mismatch or interrupted v2 objects | Stop; preserve evidence and use the accepted migration recovery procedure. Do not guess a profile or rewrite inventory |
+
+Both scripts independently reject an engine/inventory mismatch. Save/review the MV
+`TO` destination with the schema receipt. On the fictional **source**, choose the
+matching export, keeping `project_id,event_id,received_at,timestamp` column order:
+
+```sql
+-- 006 / ReplacingMergeTree only:
+SELECT project_id,event_id,received_at,timestamp FROM logbird.event_ids FINAL
+WHERE project_id={fixture_project:String} ORDER BY project_id,event_id FORMAT JSONEachRow;
+-- 007 / plain MergeTree only, including legacy tuples and overlapping backfill:
+SELECT DISTINCT project_id,event_id,received_at,timestamp FROM logbird.event_ids
+WHERE project_id={fixture_project:String}
+ORDER BY project_id,event_id,received_at,timestamp FORMAT JSONEachRow;
+-- Both: physical multiplicity is recorded separately, never assumed to be one.
+SELECT project_id,event_id,received_at,timestamp,count() AS physical_rows
+FROM logbird.event_ids WHERE project_id={fixture_project:String}
+GROUP BY project_id,event_id,received_at,timestamp
+ORDER BY project_id,event_id,received_at,timestamp FORMAT JSONEachRow;
+```
+
+Save A and independently predicted B/C receipt files under the release's recorded
+retention/rebuild rules and fixture gap, including any approved reinsertions. Do not
+blindly filter a 006 FINAL map if legacy fallback/rebuild can replace a pointer.
+For 007, the tuple file is distinct: record both its tuple count and distinct
+`(project_id,event_id)` count. The canonical lookup is the oldest surviving tuple
+by `received_at,timestamp,event_id`, matching
+[existingEventIdentities](https://github.com/joodlab/logbird/blob/97b03c2dd710f4fa805c525c57fc7b8395e2aa94/packages/clickhouse/src/identity.ts#L115).
+The 007 script compares the ID set, complete distinct tuples and this lookup;
+physical duplicates from backfill do not change those logical results.
+
+At A, the physical ceiling comes from the independently recorded source. At B use
+that ceiling projected under retention plus explicitly approved rebuild changes;
+record each explanation. After B passes all logical and growth checks, retain its
+observed per-tuple multiplicity as C's ceiling. C must not grow beyond accepted B
+without a specific, reviewed explanation. Replacing merges may reduce counts.
+Save physical snapshots at all phases separately from logical difference files;
+never generate a logical expected map from the restored result.
+
+Load both expected files in one client session. `MANIFEST_RECEIPT_COUNT` is the
+006 logical-map row count or 007 distinct full-tuple count; `MANIFEST_RECEIPT_ID_COUNT`
+is 007's distinct ID count. Counts/hashes must come from the trusted receipt:
 
 ```sh
-: "${EXPECTED_RECEIPTS:?Checkpoint-specific verified file path}" "${MANIFEST_RECEIPT_COUNT:?Nonzero receipt count}"
+set -eu
+: "${RELEASE_REPO:?Absolute qualified checkout}" "${RECEIPT_PROFILE:?006 or 007 from inventory AND engine}"
+case "$RECEIPT_PROFILE" in
+  006|007) RECEIPT_SQL="$RELEASE_REPO/docs/cloud-dr-event-ids-$RECEIPT_PROFILE.sql" ;;
+  *) echo 'Stop: invalid receipt profile' >&2; exit 1 ;;
+esac
+GROWTH_SQL="$RELEASE_REPO/docs/cloud-dr-receipt-growth.sql"
+sha256sum "$RECEIPT_SQL" "$GROWTH_SQL" >> /secure/receipt/verification-sql.sha256
+: "${EXPECTED_RECEIPTS:?Verified tuple/map file}" "${MANIFEST_RECEIPT_COUNT:?Nonzero count}"
+: "${EXPECTED_MULTIPLICITY:?Verified phase ceiling file}" "${MANIFEST_MULTIPLICITY_COUNT:?Nonzero tuple count}"
+: "${QA_PROJECT:?Fixture project}" "${MANIFEST_RECEIPT_ID_COUNT:?Distinct ID count; same as row count for 006}"
 test "$(wc -l < "$EXPECTED_RECEIPTS")" -eq "$MANIFEST_RECEIPT_COUNT"
+test "$(wc -l < "$EXPECTED_MULTIPLICITY")" -eq "$MANIFEST_MULTIPLICITY_COUNT"
 clickhouse-client --config-file /secure/isolated-clickhouse.xml \
-  --param_fixture_project="$QA_PROJECT" --param_manifest_receipt_count="$MANIFEST_RECEIPT_COUNT" --multiquery --query "
+  --param_fixture_project="$QA_PROJECT" --param_manifest_receipt_count="$MANIFEST_RECEIPT_COUNT" \
+  --param_manifest_receipt_id_count="$MANIFEST_RECEIPT_ID_COUNT" \
+  --param_manifest_multiplicity_count="$MANIFEST_MULTIPLICITY_COUNT" --multiquery --query "
   CREATE TEMPORARY TABLE expected_receipts (
-    project_id String, event_id String, received_at DateTime64(3,'UTC'), timestamp DateTime64(3,'UTC'));
+    project_id String,event_id String,received_at DateTime64(3,'UTC'),timestamp DateTime64(3,'UTC'));
+  CREATE TEMPORARY TABLE expected_receipt_multiplicity (
+    project_id String,event_id String,received_at DateTime64(3,'UTC'),timestamp DateTime64(3,'UTC'),physical_rows UInt64);
   INSERT INTO expected_receipts FROM INFILE '$EXPECTED_RECEIPTS' FORMAT JSONEachRow;
-  $(cat "$RECEIPT_SQL")" > /secure/receipt/receipt-differences.txt
+  INSERT INTO expected_receipt_multiplicity FROM INFILE '$EXPECTED_MULTIPLICITY' FORMAT JSONEachRow;
+  $(cat "$RECEIPT_SQL")
+  $(cat "$GROWTH_SQL")" > /secure/receipt/receipt-differences.txt
 test ! -s /secure/receipt/receipt-differences.txt
 ```
 
-Record both physical duplicate diagnostics and logical receipt agreement; never
-unconditionally execute a query against a table absent from the migration inventory.
+Nonempty results or any failed guard keep recovery fenced. Record the selected
+profile/engine, SQL hashes, query counts and physical multiplicity before/after B/C.
 
 ### Postgres inventory queries
 

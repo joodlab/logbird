@@ -184,8 +184,9 @@ or CI workflows. No build, push or deployment is performed by Kustomize.
 
 **Artifact qualification is a release and recovery prerequisite.** The chosen source
 must contain [PR #51](https://github.com/joodlab/logbird/pull/51)'s retention-SQL
-embedding fix, or an equivalent verified change; check that the actual merged portion
-contains the embedding, not merely that the PR number is merged. Record the fix commit,
+embedding fix, now merged on master at `6be8ba0`, or an equivalent verified change.
+Confirm the selected revision contains the generated embedding; source merge does
+not qualify built artifacts. Record the fix commit,
 all four built digests and actual running image IDs. Exercise real expired-row
 retention and failed-run repair through those exact built API/worker digests, then
 compare survivor IDs and logical values in all three aggregate tables. Migration
@@ -318,7 +319,8 @@ apply only namespace/network policy; on upgrades preserve existing Secrets:
 ```sh
 set -eu
 kubectl config current-context
-kubectl apply -f namespace.yaml -f network-policies.yaml
+kubectl apply -f namespace.yaml
+kubectl -n logbird apply -f network-policies.yaml
 # Fence: base apply -k deliberately excludes edge/ and cannot recreate this Ingress.
 kubectl -n logbird delete ingress logbird --ignore-not-found --wait=true
 ```
@@ -369,8 +371,8 @@ unique Job name and exact migration digest in `migration/job.yaml`:
 ```sh
 set -eu
 : "${MIGRATION_JOB:?Set logbird-migrate-<unique-release-id>, matching job.yaml}"
-kubectl apply -f config.yaml
-kubectl apply -f migration/job.yaml
+kubectl -n logbird apply -f config.yaml
+kubectl -n logbird apply -f migration/job.yaml
 sh ../../scripts/wait-k8s-job.sh "$MIGRATION_JOB"
 ```
 
@@ -385,7 +387,7 @@ unschedulable Pods rather than waiting silently for the deadline.
 After the helper reports Complete, apply only the base and wait for all three rollouts:
 
 ```sh
-kubectl apply -k .
+kubectl -n logbird apply -k .
 kubectl -n logbird rollout status deployment/logbird-server --timeout=300s
 kubectl -n logbird rollout status deployment/logbird-app --timeout=300s
 kubectl -n logbird rollout status deployment/logbird-worker --timeout=300s
@@ -447,6 +449,23 @@ kubeconform -strict -summary -kubernetes-version 1.35.0 /tmp/logbird-k3s.yaml de
 # not by silently skipping unknown resource kinds.
 git diff --check
 ```
+
+Run local static tests with
+`node --test scripts/k3s-manifests.test.mjs scripts/wait-k8s-job.test.mjs`.
+They check the **raw objects and raw apply commands**, independently of Kustomize's
+namespace transformer. Every application object must explicitly target `logbird`;
+the Traefik platform object is explicitly in `kube-system`. No real kubectl is run
+by these tests. Any separate render must use an empty kubeconfig and credential-free
+environment, never the operator's host/cloud context.
+
+The opt-in local receipt test is
+`LOGBIRD_CLOUD_RECEIPT_TEST=1 node --env-file=.env --test scripts/cloud-dr-receipts.integration.test.mjs`.
+It requires localhost and the existing `logbird` database, creates only UUID-owned
+QA tables plus session-private Memory expectations, validates native 006/007 engines
+and exact checked-in SQL, then verifies cleanup. It creates no database/user/settings
+and changes no application table. Follow current RAM/lock rules before execution.
+The dated [Round 5 receipt](verification/cloud-operations-round5-2026-11-07.md)
+records both native engine variants, raw namespace assertions and cleanup.
 
 The baseline retains v1.34 restricted Pod Security rules and is schema-checked
 against Kubernetes 1.35 for the proposed pinned K3s release. Repeat against the

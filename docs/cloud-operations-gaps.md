@@ -44,7 +44,9 @@ The release owner assigns a person to each named role before provisioning.
   is the live acceptance tracker. Record accepted guard/procedure revisions and exact image IDs.
 - [ ] Prove logical raw/minute/entity/attribute values after restore, failed-run repair and
   repeated repair, with parts/mutations, original archives and no-restore control preserved.
-- [ ] If migration 006 exists, verify event_ids receipts/MV and the release's retention policy.
+- [ ] If 006/007 exists, select receipt checks from inventory AND actual engine; prove
+  the 006 logical FINAL map or 007 distinct sets/oldest lookup, MV destination and
+  no unexplained physical growth from B to C.
 - [ ] Execute the committed dry-run/normalization procedure only under #77's accepted
   offline prerequisites; no automatic data repair or speculative workaround.
 - [ ] Capture a matched encrypted three-store/config set, fetch it from off-host and
@@ -57,8 +59,8 @@ The release owner assigns a person to each named role before provisioning.
 
 ## OPS-04 artifacts
 
-- [ ] Inspect #51's actual merged portion for embedded retention SQL, or name an equivalent
-  verified revision. Record source SHA, architecture and all four immutable digests.
+- [ ] Master `6be8ba0` includes #51's SQL embedding. Inspect the selected release
+  revision for that embedding or an equivalent verified implementation. Record source SHA, architecture and all four immutable digests.
 - [ ] Provide reviewed manual image build/registry/publish and release-receipt tooling;
   no automatic PR Docker builds. Preserve rollback digests and private pull credentials.
 - [ ] Run real expired retention and failed-run repair through those API/worker digests,
