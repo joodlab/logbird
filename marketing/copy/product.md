@@ -16,8 +16,7 @@ path: /product
   read API (last section on this page).
   <!-- source: docs/SPEC.md intro ("not an end-customer portal") -->
 - **cta:** Self-host it → `/self-hosting` · Join the waitlist → `/contact`
-- **visual:** `marketing/captures/2026-11-06-logbird-rename/03-overview-light.png` (overview: KPI cards, events by
-  outcome, top actions).
+- **visual:** `marketing/captures/2026-11-07-site-console/overview-light.png` / `overview-dark.png` (manifest id `overview`).
 
 ## explorer
 
@@ -33,8 +32,8 @@ path: /product
   - Keyboard first: `/` focuses search, `j` and `k` move through events, `Esc` closes the panel, ⌘K opens the command
     palette.
   - Export the current results as CSV or JSONL. <!-- source: packages/contracts/src/routes.ts (export ?format=csv|jsonl) -->
-- **visual:** clip `marketing/captures/2026-11-04-ui-foundation/explorer-search-filter-zoom.webm` (search, filter by a
-  facet, zoom the chart).
+- **visual:** clip `marketing/captures/2026-11-07-site-console/investigate-explorer-operation.webm` (manifest id `investigate`: type a query, open an event,
+  follow its operation).
 
 ## search
 
@@ -57,9 +56,10 @@ path: /product
 - **bullets:**
   - Fields are suggested from what your project actually sends, with how often each one appears.
   - Errors point at the exact token and say what was expected, for example "attempt is a number".
-  - Any field you send, however deeply nested, is searchable by its dotted path.
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/qb-03-values-and-operators.png` (value suggestions with
-  counts); alternative `qb-13-inline-error.png` (inline error).
+  - Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 attributes
+    and the first 2 KiB of each value; the full event is stored as received.
+    <!-- source: docs/SPEC.md §3 (flattening); packages/clickhouse/src/normalize.ts -->
+- **visual:** `marketing/captures/2026-11-07-site-console/query-suggestions-light.png` (manifest id `query-suggestions`) under the query-language code sample.
 
 ## sql-mode
 
@@ -81,8 +81,7 @@ path: /product
   <!-- source: docs/SPEC.md §5.1.2; docs/query-language.md §Security model -->
 - **limit line (small print):** SQL mode is for the console only. The public read API accepts the query language,
   not SQL. A free-form SQL console isn't part of Logbird. <!-- source: docs/query-language.md -->
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/qb-23-sql-rejected.png` (a subquery rejected inline:
-  "Subqueries are not allowed"); alternative `qb-22-sql-results.png`.
+- **visual:** `marketing/captures/2026-11-07-site-console/sql-rejected-light.png` (manifest id `sql-rejected`: a subquery rejected before it runs).
 
 ## entity-pages
 
@@ -98,8 +97,7 @@ path: /product
   - **Tenants:** whose account. "What happened at Azure Hotels last week?" is one click.
   - **Executors:** what did the work. The API, each queue worker and cron job, with job ids and attempts.
   - **Records:** what changed. `booking:bk_1042` has a history of its own.
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/09-tenant-profile.png`; alternative
-  `08-actor-profile.png`.
+- **visual:** `marketing/captures/2026-11-07-site-console/tenant-light.png` (manifest id `tenant`).
 
 ## operations
 
@@ -110,10 +108,8 @@ path: /product
   caused which. Logbird draws the tree: each step with its outcome, executor and timing. A failed first attempt and
   the retry that worked sit side by side.
   <!-- source: docs/concepts.md §Operations; docs/SPEC.md §8 journey 6 -->
-- **visual:** clip `marketing/captures/2026-11-04-ui-foundation/entity-follow-operation-tree.webm`. The stills
-  `2026-11-05-final-walkthrough/05-operation.png` and `2026-11-04-ui-foundation/real-operation.png` show single-event
-  operations only. **Recommended:** a new capture of the cancellation-and-refund example (`docs/concepts.md`) as a
-  multi-node tree.
+- **visual:** `marketing/captures/2026-11-07-site-console/operation-light.png` (manifest id `operation`: a scheduler request, its jobs, failed attempts and
+  the retries that worked; the durations are fixture data).
 
 ## event-detail
 
@@ -121,16 +117,20 @@ path: /product
 - **eyebrow:** Event detail
 - **heading:** The full story of one event.
 - **body:** Open any event to read it as a sentence: who did what, in which account, to which records, and how it
-  ended. The actor and the executor are on separate cards. When staff acted for a customer, the impersonator gets a
-  card too.
+  ended. The actor and the executor are on separate cards. When a support agent acted for a customer, the agent
+  appears beside the customer.
 - **bullets:**
   - Before and after values for every changed field.
   - The causation breadcrumb, with a link to the whole operation.
   - Context ids (request, trace, IP), every custom attribute, and the raw JSON exactly as received.
   - Copy a link, or copy the event as a curl command.
-  <!-- source: docs/SPEC.md §8 journey 4 (event sheet) -->
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/04-event-sheet.png` and
-  `06-impersonation.png` (impersonator card).
+  - Support work stands out: rows show "via support", the Done by support filter lists them, and each support agent
+    has a page.
+  <!-- source: docs/SPEC.md §8 journey 4 (event sheet); #69 (explorer columns, facet-sidebar, support-agent-profile) -->
+- **visual:** `marketing/captures/2026-11-07-site-console/event-sheet-light.png` / `event-sheet-dark.png` (manifest id
+  `event-sheet`). The impersonation still is set aside: it shows the card as it was before #69 ("Impersonator", not
+  "Support"). Re-shoot it on master in a stack window, ideally with a "via support" row and the Done by support filter,
+  before using it again.
 
 ## live-tail
 
@@ -141,7 +141,7 @@ path: /product
   applied.
 - **limit line:** Live tail polls over HTTP. It doesn't use WebSockets, so it works behind any proxy.
   <!-- source: docs/self-hosting.md §Any reverse proxy -->
-- **visual:** clip `marketing/captures/2026-11-04-ui-foundation/explorer-detail-live-tail.webm`.
+- **visual:** none (a compact card on the page).
 
 ## saved-views
 
@@ -151,7 +151,7 @@ path: /product
 - **body:** Save a query, its time range and its columns as a view, in query or SQL mode. Views appear in the sidebar
   and in the search bar's suggestions. Anyone in the workspace can open them; members can delete their own.
   <!-- source: docs/SPEC.md §7.1, §8 journey 7 -->
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/qb-25-views-sql-badge.png`.
+- **visual:** none (a compact card on the page).
 
 ## setup
 
@@ -168,8 +168,8 @@ path: /product
     fictional events over seven days. It never counts as setup, and you can remove it.
     <!-- source: docs/SPEC.md §5 sample-data -->
   - A conformance score on every event, and a Fields page that shows every field you send and how often.
-- **visual:** clip `marketing/captures/2026-11-05-final-walkthrough/onboarding.webm` (curl → event received); stills
-  `23-first-event-received.png`, `27-setup-envelope.png`.
+- **visual:** `marketing/captures/2026-11-07-site-console/setup-light.png` (manifest id `setup`). The onboarding stills were discarded because the page's
+  snippet prints the ingest key.
 
 ## retention
 
@@ -182,20 +182,18 @@ path: /product
   <!-- source: docs/SPEC.md §1.4, §4, §5 retention preview, §6 (retentionDays=90), §7.1; packages/contracts/src/api.ts RETENTION_OPTIONS -->
 - **limit line:** Retention deletes are permanent. There's no archive and no undo. The preview count is
   approximate, because storage is at least once.
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/10-retention-preview.png` (lowering to 30 days, with
-  the preview warning and the last and next purge). The preview shows a real event count from the
-  fictional seed, which is fine.
+- **visual:** `marketing/captures/2026-11-07-site-console/retention-light.png` (manifest id `retention`: the 30-day preview; nothing was confirmed).
 
 ## workspace-activity
 
 - **id:** `workspace-activity`
 - **eyebrow:** Workspace activity
-- **heading:** Logbird keeps an audit log of itself.
-- **body:** Creating a project, creating or revoking a key, changing retention, inviting a member: Logbird records
-  each of these management actions as an event in your workspace's own activity stream. You read it with the same
-  explorer.
-  <!-- source: docs/SPEC.md §1.5, §8 journey 9 -->
-- **visual:** `marketing/captures/2026-11-04-ui-foundation/light-workspace-activity.png`.
+- **heading:** Logbird records its own management actions.
+- **body:** Logbird records management actions (projects, keys, retention, invitations) in workspace activity. You read
+  it with the same explorer.
+  <!-- source: docs/SPEC.md §1.5, §8 journey 9. Don't say "each" or imply guaranteed or atomic capture until #73
+  (atomic audit rows for management mutations) merges; strengthen in a follow-up then. -->
+- **visual:** none (a compact card on the page).
 
 ## team
 
@@ -207,7 +205,7 @@ path: /product
   role on every request, not just the UI.
   <!-- source: docs/SPEC.md §7, §7.1; SECURITY.md -->
 - **limit line:** SSO isn't available yet. It's on the roadmap.
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/47-members-after.png`.
+- **visual:** none (a compact card on the page).
 
 ## read-api
 

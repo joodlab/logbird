@@ -14,16 +14,17 @@ path: /self-hosting
 - **body:** Logbird is MIT-licensed and self-hosts with Docker Compose. Run it on one VM and your events stay on your
   own servers. It's the same codebase Logbird Cloud will run.
   <!-- source: LICENSE; docs/SPEC.md intro ("one codebase, self-host or cloud") -->
-- **cta:** Five-minute quickstart ↓ `#quickstart` · Join the Cloud waitlist → `/contact`
+- **cta:** Quickstart ↓ `#quickstart` (public repo only) · Join the Cloud waitlist → `/contact`
 - **small print:** Source on GitHub — coming soon. Self-hosting builds from source; no images are published yet.
-- **visual:** clip `marketing/captures/2026-11-05-self-hosting/selfhost-e2e.webm` (clean machine → `compose up` →
-  sign-in → first event). Check the clip for real email addresses and hostnames before use.
+  <!-- when WEB_GITHUB_PUBLIC=true: drop "Source on GitHub — coming soon." -->
+- **visual:** a diagram of the Compose stack (console, api, worker, postgres, clickhouse, redis). The 2026-11-05
+  self-hosting captures show the old name and a real key prefix, so they aren't used.
 
 ## quickstart
 
 - **id:** `quickstart`
 - **eyebrow:** Quickstart
-- **heading:** Five minutes to your first event.
+- **heading:** From clone to your first event. <!-- no time claim: source builds vary by machine -->
 - **body:** You need Docker Engine and Docker Compose 2.24.4 or newer. The first build takes longer, depending on
   your CPU and network. <!-- source: docs/self-hosting.md §Five-minute quickstart -->
 - **code sample (rendered only once `WEB_GITHUB_PUBLIC=true`; until then the section reads "The quickstart is published
@@ -34,10 +35,15 @@ path: /self-hosting
   cd logbird
   sh scripts/selfhost-init.sh   # creates .env and generates secrets
   # Set SMTP in .env, or set AUTH_LOG_SIGN_IN_CODES=true for a first test.
-  docker compose up -d
+  # Build the four roles one at a time (less peak memory), then start without rebuilding.
+  docker compose build migrate
+  docker compose build server
+  docker compose build worker
+  docker compose build app
+  docker compose up -d --no-build
   ```
+  <!-- source: docs/self-hosting.md (after #51): sequential builds, pull_policy: build, up --no-build -->
 
-  Small print: "The repository opens publicly soon. Until then, this command won't work for you."
 - **steps after the code:**
   1. Open `http://localhost:4600` and sign in with the code sent to your email.
   2. Create a workspace and a project. Copy the ingest key; it's shown once.
@@ -54,8 +60,8 @@ path: /self-hosting
 - **bullets:**
   - The init script generates the secrets it needs and never overwrites values you've set.
   - `/livez` checks the API process; `/readyz` checks Postgres, ClickHouse and Redis.
-- **visual:** `marketing/captures/2026-11-05-self-hosting/08-curl-ingest.png`, then
-  `07-first-event-received.png`. Check both for real paths or addresses before use.
+- **visual:** none. The quickstart code renders only once `WEB_GITHUB_PUBLIC=true`; until then a "published when the
+  repository opens" panel.
 
 ## requirements
 
@@ -66,9 +72,12 @@ path: /self-hosting
   - A Linux host, or any machine that runs Linux containers, with Docker Engine and Compose 2.24.4 or newer.
   - An SMTP provider for sign-in codes and invitations, for example Amazon SES, Postmark or Brevo.
   - A domain and ports 80 and 443 if you want automatic HTTPS.
-  - **Starting size:** 4 vCPU, 8 GB RAM and SSD storage. That's an initial allocation, not measured capacity. Reserve
-    disk for ClickHouse merges and backups, and measure your own growth with representative test traffic.
-  <!-- source: docs/self-hosting.md §SMTP and first login, §Caddy TLS, §Sizing -->
+  - **Starting size:** 4 vCPU, 8 GB RAM and SSD storage. That's an initial allocation, not measured capacity. Building
+    from source needs more headroom: build the roles one at a time, and leave disk for images and build cache as well
+    as your data, ClickHouse merges and backups.
+  - **Access:** sign-up is open: anyone who can reach the console can create an account and a workspace. Keep it private
+    while you evaluate, or restrict who can reach it.
+  <!-- source: docs/self-hosting.md §SMTP and first login, §Caddy TLS, §Sizing, §Five-minute quickstart (after #51) -->
 - **visual:** none
 
 ## options
@@ -77,7 +86,7 @@ path: /self-hosting
 - **eyebrow:** Ways to run it
 - **heading:** Pick the setup that fits what you already run.
 - **cards:**
-  1. **Bundled Compose.** One `docker compose up -d` starts Postgres, ClickHouse, Redis, the API, the worker and the
+  1. **Bundled Compose.** One Compose project runs Postgres, ClickHouse, Redis, the API, the worker and the
      console. Only the console port is published, on `127.0.0.1` by default. A one-off migration step runs before
      the API and worker start.
      <!-- source: docs/self-hosting.md; docs/deployment.md -->
@@ -124,8 +133,7 @@ path: /self-hosting
   provider. For a first local test you can log sign-in codes to the server log instead. Turn that off once SMTP
   works: anyone who can read the logs can sign in.
   <!-- source: docs/self-hosting.md §SMTP and first login -->
-- **visual:** `marketing/captures/2026-11-05-self-hosting/02-server-log-code.png` (code in the server log). Check for
-  real addresses before use.
+- **visual:** none.
 
 ## upgrades
 
@@ -133,9 +141,13 @@ path: /self-hosting
 - **eyebrow:** Upgrades and backups
 - **heading:** Upgrade with a pinned revision, after a backup.
 - **steps:**
-  1. Back up Postgres (`pg_dump`) and ClickHouse (`BACKUP DATABASE`, to a disk or S3).
-  2. Stop writes and pin a tested revision.
-  3. Run `docker compose up -d --build`. Migrations run first; if one fails, the new version doesn't start.
+  1. Stop writes: block ingress and stop the console, server and worker (the worker finishes its current job first).
+  2. Back up, with writers stopped: matched Postgres (`pg_dump`) and ClickHouse (`BACKUP DATABASE`) backups and a
+     SHA-256 checksum file. Keep the original `.env`; record the Git revision and image IDs.
+  3. Switch to a tested revision.
+  4. Build the four roles one at a time, then `docker compose up -d --no-build`. Migrations run first; if one fails,
+     the new version doesn't start.
+  5. Verify readiness, sign-in, your events, settings and keys, and the retention runs before reopening ingress.
 - **bullets:**
   - `docker compose down` keeps your data. `docker compose down -v` deletes it, permanently.
   - Restore into empty, separate storage first, and check counts before you switch over.
@@ -149,7 +161,8 @@ path: /self-hosting
 - **eyebrow:** Not there yet
 - **heading:** What self-hosting doesn't include today.
 - **bullets:**
-  - **Published images.** You build from source. Image tags come with the first release.
+  - **Published images.** You build from source; publishing to a registry is still being decided (#88). Smaller runtime
+    images are in progress (#67, #68).
   - **High availability.** The Compose setup is a single VM. It has no failover.
   - **Published capacity numbers.** We haven't published load-test results yet. Size from your own measurements.
   - **SSO.** Sign-in is by emailed code only. SSO is on the roadmap.

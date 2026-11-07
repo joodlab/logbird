@@ -4,6 +4,9 @@ import { llmsTxt, robotsTxt, sitemapXml } from './discovery';
 import { articleLd, breadcrumbLd, faqLd, organizationLd, pageHead, pageMeta, softwareLd, websiteLd } from './seo';
 import { publishedPages, staticPages } from './site-map';
 
+// Chosen from the manifest so these tests survive each page PR flipping `ready`.
+const unready = staticPages.find((page) => !page.ready);
+
 describe('metadata', () => {
   it('uses a canonical origin, page title and 1200×63 social card', () => {
     const head = pageHead('/product');
@@ -19,7 +22,9 @@ describe('metadata', () => {
   });
   it('keeps drafts and pages that are not ready out of search', () => {
     expect(pageHead('/blog/$slug').meta).toContainEqual({ name: 'robots', content: 'noindex' });
-    expect(pageHead('/product').meta).toContainEqual({ name: 'robots', content: 'noindex' });
+    if (unready) {
+      expect(pageHead(unready.path).meta).toContainEqual({ name: 'robots', content: 'noindex' });
+    }
     expect(pageHead('/').meta).not.toContainEqual({ name: 'robots', content: 'noindex' });
   });
   it('emits real schema types and limits the zero-price offer to self-hosting', () => {
@@ -82,6 +87,8 @@ describe('static discovery', () => {
     expect(xml).toContain('<priority>1</priority>');
     expect(robotsTxt()).toBe(`User-agent: *\nAllow: /\nSitemap: ${SITE_URL}/sitemap.xml\n`);
     expect(llmsTxt()).toContain(`(${SITE_URL}/contact)`);
-    expect(llmsTxt()).not.toContain(`(${SITE_URL}/product)`);
+    if (unready) {
+      expect(llmsTxt()).not.toContain(`(${new URL(unready.path, SITE_URL).href})`);
+    }
   });
 });

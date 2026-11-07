@@ -2,7 +2,7 @@ import { Input } from '@logbird/ui/components/ui/input';
 import { Label } from '@logbird/ui/components/ui/label';
 import { Textarea } from '@logbird/ui/components/ui/textarea';
 import { type FormEvent, type ReactNode, useState } from 'react';
-import { CONTACT_EMAIL } from '../env';
+import { CONTACT_EMAIL, GITHUB_PUBLIC } from '../env';
 
 // Copy: marketing/copy/contact.md (form, states).
 // No mailbox is named unless WEB_CONTACT_EMAIL is configured (never a guessed address).
@@ -33,7 +33,7 @@ const messageFor = (code: string | undefined) => (code ? (STATUS_MESSAGES[code] 
 
 const INTERESTS = [
   { value: 'cloud', label: 'The Logbird Cloud waitlist' },
-  { value: 'self-host', label: 'Self-hosting, when the source opens' },
+  { value: 'self-host', label: GITHUB_PUBLIC ? 'Self-hosting' : 'Self-hosting, when the source opens' },
   { value: 'updates', label: 'Product updates only' },
   { value: 'correction', label: 'A correction to one of our pages' },
   { value: 'other', label: 'A question, or support and enterprise' },

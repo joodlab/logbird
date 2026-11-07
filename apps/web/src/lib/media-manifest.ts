@@ -56,12 +56,6 @@ export const screenshots: ScreenshotEntry[] = [
     alt: 'An event in detail: the actor and executor cards, the tenant, two target records, the status change from pending to confirmed, and the causation chain.',
   },
   {
-    id: 'impersonation',
-    light: `${C}/impersonation-light.png`,
-    ...desktop,
-    alt: 'An event where a support agent acted for a customer: the customer is the actor, and the support agent appears on a separate impersonator card.',
-  },
-  {
     id: 'operation',
     light: `${C}/operation-light.png`,
     ...desktop,

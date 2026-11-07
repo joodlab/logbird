@@ -31,7 +31,8 @@ path: /developers
   npm install @logbird/sdk
   ```
 
-  Small print: "The packages publish to npm with the first release, when the repository opens."
+  Small print: "The packages publish to npm with the first release, when the repository opens." Once
+  `WEB_GITHUB_PUBLIC=true`: "The packages publish to npm with the first release."
   <!-- source: docs/roadmap.md P0-3; npm registry 404 for @logbird/sdk on 2026-11-07 -->
 - **code sample:**
 
@@ -43,7 +44,8 @@ path: /developers
     apiKey: process.env.LOGBIRD_INGEST_KEY, // lb_ingest_...
     enabled: Boolean(process.env.LOGBIRD_INGEST_KEY), // off locally when no key is set
     defaults: { environment: 'production' },
-    onError: (error) => console.error(error.message),
+    onError: (error) => console.error(error.message), // permanent rejections and background failures
+    onDrop: (event) => console.warn('audit event dropped', event.action), // each rejected or discarded event
   });
 
   client.track({
@@ -54,13 +56,18 @@ path: /developers
     changes: [{ field: 'status', before: 'confirmed', after: 'cancelled' }],
   });
 
-  await client.flush(); // send now; rejects if delivery fails
-  await client.shutdown(); // on exit: stop accepting events and drain the queue
+  // flush() rejects only when retryable delivery (network, 429, 5xx) runs out of retries; the batch stays
+  // queued for the next flush. Permanent rejections don't reject: they arrive through onError and onDrop.
+  await client.flush().catch((error) => console.error('audit delivery pending', error));
+  // On exit: stop accepting events and drain the queue. Rejects under the same condition as flush().
+  await client.shutdown().catch((error) => console.error('audit events left undelivered', error));
   ```
 
 - **bullets:**
   - `track(event)` never throws and never waits for the network.
-  - `flush()` and `shutdown()` reject if delivery fails, so handle them.
+  - `flush()` and `shutdown()` reject when retryable delivery (network, `429`, `5xx`) runs out of retries, and the batch
+    stays queued. Permanent rejections arrive through `onError` and `onDrop` instead.
+    <!-- source: packages/sdk/src/index.ts send()/flush(); packages/sdk/README.md -->
   - Call `shutdown()` from your host's own exit hook. The SDK installs no process handlers.
   - Keep ingest keys on the server. Never ship one in a browser bundle.
   <!-- source: packages/sdk/README.md; docs/integrations.md §Design -->
@@ -250,7 +257,8 @@ path: /developers
     (the default) or `'newest'` decides what goes, and `onDrop` reports each event dropped.
   - **In memory.** A crash before the server acknowledges can lose pending events. Call `shutdown()` on exit.
   - **Partial batches.** Events without an `action` are rejected one by one, and the rest are stored.
-    Permanent errors other than `429` drop the batch and report it through `onError`.
+    Permanent errors other than `429` drop the batch and report it through `onError` and `onDrop`, without rejecting
+    `flush()`.
   <!-- source: packages/sdk/README.md (defaults: 100 rows, 1000 ms, 5 retries; maxQueueSize 10,000); docs/SPEC.md §2; docs/integrations.md -->
 - **visual:** none
 
@@ -266,7 +274,7 @@ path: /developers
   | Events per request | 1 to 1000 |
   | Request size | 5 MB |
   | Event size | 256 KB |
-  | Attributes per event | 256 keys, 6 levels deep, values up to 2 KB |
+  | Attributes per event | Up to 256 indexed, 6 levels deep, the first 2 KiB of each value |
   | `occurredAt` | ISO-8601 or epoch milliseconds, from 3650 days ago to 24 hours ahead |
   | Ingest rate (default, per project) | 3000 requests a minute |
   | Read rate (default, per project) | 1200 requests a minute |
