@@ -390,7 +390,7 @@ export function EventsTable({
                   aria-label={rowLabel(e)}
                   aria-rowindex={item.index + (isMobile ? 1 : 2)}
                   className={cn(
-                    'absolute inset-x-0 cursor-pointer border-b border-border/60 px-2 text-[13px] outline-hidden transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+                    'absolute inset-x-0 cursor-pointer border-b border-border/60 px-2 text-[13px] outline-hidden transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset forced-colors:-outline-offset-2',
                     selected && 'bg-brand/[0.08] hover:bg-brand/[0.1]',
                     isCursor && !selected && 'bg-muted/60',
                     freshIds?.has(e.id) && 'tm-row-new',

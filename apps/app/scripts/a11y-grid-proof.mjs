@@ -409,10 +409,14 @@ try {
     await page.waitForTimeout(200);
     const outline = await page.evaluate(() => {
       const s = getComputedStyle(document.activeElement);
-      return { style: s.outlineStyle, width: s.outlineWidth, color: s.outlineColor };
+      return { style: s.outlineStyle, width: s.outlineWidth, offset: s.outlineOffset, color: s.outlineColor };
     });
     await page.emulateMedia({ forcedColors: 'none' });
-    check('forced colors: the focused row keeps a painted outline', outline.style !== 'none' && outline.width !== '0px', outline);
+    check(
+      'forced colors: the focused row keeps a painted outline, inset so neighbouring rows cannot cover it',
+      outline.style !== 'none' && outline.width !== '0px' && Number.parseFloat(outline.offset) < 0,
+      outline,
+    );
   }
 
   /* ---------------- round 3: empty results never drop focus to <body> ---------------- */

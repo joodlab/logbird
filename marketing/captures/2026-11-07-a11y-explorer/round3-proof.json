@@ -9,21 +9,21 @@
   "PASS explorer: ArrowDown ×50 → row 50": {
     "tag": "DIV",
     "role": "row",
-    "eventId": "01a1b665-945c-7059-8f08-5cec7ff87bb3",
+    "eventId": "01a1b66d-930b-79c0-a739-d75ab8321f70",
     "index": 50,
     "top": 856,
     "tabIndex": 0,
-    "name": "Lina Placeholder changed booking BK-base-366, success, booking.cancelled, 15:24:"
+    "name": "Vera Validator changed booking BK-base-340, success, booking.modified, 15:32:59"
   },
   "live pill": "250 new since live started",
   "PASS live tail: focus stays on the same event": {
-    "before": "01a1b665-945c-7059-8f08-5cec7ff87bb3",
-    "after": "01a1b665-945c-7059-8f08-5cec7ff87bb3",
+    "before": "01a1b66d-930b-79c0-a739-d75ab8321f70",
+    "after": "01a1b66d-930b-79c0-a739-d75ab8321f70",
     "sameNode": true
   },
   "PASS live tail: its index moved by the batch": "50 → 200",
   "PASS live tail: it is still the only tab stop": [
-    "01a1b665-945c-7059-8f08-5cec7ff87bb3"
+    "01a1b66d-930b-79c0-a739-d75ab8321f70"
   ],
   "PASS live tail: no scroll jump (row stays put on screen)": {
     "rowTop": "856 → 856",
@@ -32,21 +32,21 @@
   "PASS live tail: ArrowDown continues from that event": {
     "tag": "DIV",
     "role": "row",
-    "eventId": "01a1b665-945c-7011-b595-0f41063a6e21",
+    "eventId": "01a1b66d-930b-79a7-8615-2307746566ff",
     "index": 201,
     "top": 856,
     "tabIndex": 0,
-    "name": "Omar Fictional changed booking BK-base-397, success, booking.modified, 15:24:12"
+    "name": "Lina Placeholder changed booking BK-base-338, success, booking.modified, 15:32:5"
   },
   "PASS live tail: k moves back to it": 200,
   "PASS explorer: Escape returns focus to the opened row": {
     "tag": "DIV",
     "role": "row",
-    "eventId": "01a1b665-945c-7059-8f08-5cec7ff87bb3",
+    "eventId": "01a1b66d-930b-79c0-a739-d75ab8321f70",
     "index": 200,
     "top": 820,
     "tabIndex": 0,
-    "name": "Lina Placeholder changed booking BK-base-366, success, booking.cancelled, 15:24:"
+    "name": "Vera Validator changed booking BK-base-340, success, booking.modified, 15:32:59"
   },
   "axe": {
     "explorer desktop-light (live)": [
@@ -54,9 +54,7 @@
         "id": "aria-allowed-role",
         "impact": "minor",
         "nodes": 1,
-        "sample": [
-          "textarea"
-        ]
+        "sample": ["textarea"]
       }
     ],
     "event-sheet desktop-light": [],
@@ -67,9 +65,7 @@
         "id": "aria-allowed-role",
         "impact": "minor",
         "nodes": 1,
-        "sample": [
-          "textarea"
-        ]
+        "sample": ["textarea"]
       }
     ],
     "activity desktop-dark": [],
@@ -79,9 +75,7 @@
         "id": "aria-allowed-role",
         "impact": "minor",
         "nodes": 1,
-        "sample": [
-          "textarea"
-        ]
+        "sample": ["textarea"]
       }
     ]
   },
@@ -91,9 +85,7 @@
   "PASS activity: Tab reaches the grid": "6 presses → row 0",
   "PASS activity: ArrowDown moves the roving tab stop": {
     "index": 3,
-    "tabStops": [
-      "01a1b665-9280-7d78-be6d-ca4518b24577"
-    ]
+    "tabStops": ["01a1b66d-9125-7623-bfb3-ef4692864d99"]
   },
   "PASS activity: Shift+Tab out, Tab back → same row": {
     "out": "Workspace",
@@ -103,20 +95,20 @@
   "PASS activity: Escape returns focus to the opened row": {
     "tag": "DIV",
     "role": "row",
-    "eventId": "01a1b665-9280-7d78-be6d-ca4518b24577",
+    "eventId": "01a1b66d-9125-7623-bfb3-ef4692864d99",
     "index": 3,
     "top": 409,
     "tabIndex": 0,
-    "name": "Rowan Fixture created API key ‘QA read 6’, success, api_key.created, 15:24:32"
+    "name": "Rowan Fixture created API key ‘QA read 6’, success, api_key.created, 15:33:16"
   },
   "PASS activity: focused row survives scrolling away": {
     "tag": "DIV",
     "role": "row",
-    "eventId": "01a1b665-9280-7d78-be6d-ca4518b24577",
+    "eventId": "01a1b66d-9125-7623-bfb3-ef4692864d99",
     "index": 3,
     "top": 231,
     "tabIndex": 0,
-    "name": "Rowan Fixture created API key ‘QA read 6’, success, api_key.created, 15:24:32"
+    "name": "Rowan Fixture created API key ‘QA read 6’, success, api_key.created, 15:33:16"
   },
   "axe activity desktop-light": "0",
   "PASS query: Tab / Shift+Tab never edit the draft": [
@@ -143,17 +135,15 @@
   },
   "PASS query: accepting a suggestion is announced politely": {
     "draft": "outcome:",
-    "announced": "Inserted outcome: | 550 events · Last hour · 22 ms | "
+    "announced": "Inserted outcome: | 550 events · Last hour · 23 ms | "
   },
   "PASS scroll jump: a new query keeps the view at the top, fetches no second page, tab stop on row 0": {
     "cursorBefore": "row 90 (success)",
     "query": "outcome:failure",
     "scrollTop": "0 → 0",
     "pageRequests": 0,
-    "tabStops": [
-      "01a1b665-b8bf-72f3-bc31-a9d1602dcaba"
-    ],
-    "row0": "01a1b665-b8bf-72f3-bc31-a9d1602dcaba",
+    "tabStops": ["01a1b66d-b765-790e-80bb-d2aeea91953b"],
+    "row0": "01a1b66d-b765-790e-80bb-d2aeea91953b",
     "focus": "Query"
   },
   "PASS scroll jump: Tab into the new results lands on row 0": {
@@ -165,9 +155,10 @@
     "home": 0,
     "renderedRows": 29
   },
-  "PASS forced colors: the focused row keeps a painted outline": {
+  "PASS forced colors: the focused row keeps a painted outline, inset so neighbouring rows cannot cover it": {
     "style": "solid",
     "width": "2px",
+    "offset": "-2px",
     "color": "rgb(55, 0, 110)"
   },
   "PASS empty: a refetch emptying the list moves focus from the row to the query bar": {
