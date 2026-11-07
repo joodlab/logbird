@@ -19,10 +19,7 @@
     "signout-dark-390-menu.png",
     "signout-dark-390-done.png"
   ],
-  "videos": [
-    "light-1440-interactions.webm",
-    "light-390-interactions.webm"
-  ],
+  "videos": ["light-1440-interactions.webm", "light-390-interactions.webm"],
   "problems": [],
   "cleanup": {
     "clickhouse": {
