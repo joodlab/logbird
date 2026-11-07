@@ -4,7 +4,8 @@ Real console at `origin/master` 81b0188 on the shared local services, in a ficti
 (project "Azure Hotels", user "Maya Farouk" with an `@example.test` address). 30,000 fictional events from
 `@logbird/seed` were sent through the public ingest API with an ingest key that was revoked afterwards; the seed's
 `source` values were rewritten to neutral names (see issue #78). The explorer's query timer was removed from the page
-before each still (the site makes no performance claims). Playwright's bundled Chromium, 1440×900 and 390×844.
+before each still (the site makes no performance claims); durations that are part of the fictional data, such as an
+operation's "3.50 s" and step offsets, remain and are not measurements. Playwright's bundled Chromium, 1440×900 and 390×844.
 The project and workspace were deleted after the session.
 
 The first-event onboarding stills were discarded: the page's curl snippet prints the full (since revoked) ingest key.

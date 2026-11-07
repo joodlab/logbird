@@ -26,7 +26,7 @@ path: /legal/privacy
 - **id:** `must-cover`
 - **heading:** What the final policy must cover (for counsel; remove this section before launch)
 - **bullets:**
-  - **Who the controller is:** Joodlab's legal entity name, address and contact details (owner to provide).
+  - **Who the controller is:** the publisher's legal entity name, address and contact details (owner to provide; `WEB_ORG_NAME`).
   - **Data collected by the site:** waitlist and contact form only — email (required); name, company, topic and
     message (optional). Server logs, if the host keeps any, and for how long.
   - **Purpose and legal basis:** contacting the person about Logbird; whether consent or legitimate interest applies

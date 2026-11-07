@@ -26,10 +26,11 @@ path: /self-hosting
 - **heading:** Five minutes to your first event.
 - **body:** You need Docker Engine and Docker Compose 2.24.4 or newer. The first build takes longer, depending on
   your CPU and network. <!-- source: docs/self-hosting.md §Five-minute quickstart -->
-- **code sample (available once the repository is public):**
+- **code sample (rendered only once `WEB_GITHUB_PUBLIC=true`; until then the section reads "The quickstart is published
+  when the repository opens." with the self-host CTA — see `README.md` § Self-host CTA rule):**
 
   ```sh
-  git clone https://github.com/joodlab/logbird.git
+  git clone <WEB_GITHUB_URL>.git
   cd logbird
   sh scripts/selfhost-init.sh   # creates .env and generates secrets
   # Set SMTP in .env, or set AUTH_LOG_SIGN_IN_CODES=true for a first test.
