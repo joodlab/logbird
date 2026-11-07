@@ -57,8 +57,9 @@ export async function notifyWaitlist(record: WaitlistRecord) {
   });
   try {
     await transport.sendMail({
-      from: env.MAIL_FROM,
-      to: env.WAITLIST_NOTIFY_TO,
+      // notificationSettings() guarantees both are set before this is called.
+      from: env.MAIL_FROM as string,
+      to: env.WAITLIST_NOTIFY_TO as string,
       subject: 'Logbird waitlist submission',
       text: Object.entries(record)
         .map(([key, value]) => `${key}: ${value ?? ''}`)

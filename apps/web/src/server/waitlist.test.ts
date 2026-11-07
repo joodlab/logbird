@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { notificationSettings } from './env';
 import { clientAddress, createRateLimiter, handleWaitlist } from './waitlist';
 import { createCloudflareStore } from './waitlist-cloudflare';
 import { createNodeStore } from './waitlist-node';
@@ -108,6 +109,22 @@ describe('waitlist boundary', () => {
     });
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: { code: 'waitlist_unavailable', message: 'The waitlist is unavailable on this deployment.' } });
+  });
+});
+describe('notification settings', () => {
+  it('never guesses a mailbox: SMTP on without MAIL_FROM or WAITLIST_NOTIFY_TO disables notifications', () => {
+    expect(notificationSettings({})).toEqual({ enabled: false, reason: 'smtp_not_configured' });
+    expect(notificationSettings({ SMTP_HOST: 'smtp.example.test' })).toEqual({ enabled: false, reason: 'missing MAIL_FROM and WAITLIST_NOTIFY_TO' });
+    expect(notificationSettings({ SMTP_HOST: 'smtp.example.test', MAIL_FROM: 'Site <site@example.test>' })).toEqual({
+      enabled: false,
+      reason: 'missing WAITLIST_NOTIFY_TO',
+    });
+    expect(
+      notificationSettings({ SMTP_HOST: 'smtp.example.test', MAIL_FROM: 'Site <site@example.test>', WAITLIST_NOTIFY_TO: 'team@example.test' }),
+    ).toEqual({
+      enabled: true,
+      reason: 'ok',
+    });
   });
 });
 describe('storage adapters', () => {
