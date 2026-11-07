@@ -1,4 +1,4 @@
-﻿# Backend QA round 1
+# Backend QA round 1
 
 Verified locally on 2026-11-05 using Node 22.18.0 and pinned pnpm 10.30.3.
 Shared Postgres, ClickHouse, Dragonfly and Mailpit; fictional isolated projects only.

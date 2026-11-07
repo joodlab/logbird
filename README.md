@@ -19,7 +19,11 @@ git clone https://github.com/joodlab/logbird.git
 cd logbird
 sh scripts/selfhost-init.sh
 # Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
-docker compose up -d
+docker compose build migrate
+docker compose build server
+docker compose build worker
+docker compose build app
+docker compose up -d --no-build
 ```
 
 Open http://localhost:4600, sign in using the emailed code (or server logs when explicitly enabled), and create a workspace and project. Copy its ingest key and send:
