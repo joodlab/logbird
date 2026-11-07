@@ -341,12 +341,14 @@ try {
   // M2: the agent page opens on 7 days.
   await page.goto(`${BASE}/p/${projectId}/support/${agentId(2)}`);
   await settle(page, 1200);
-  check('agent page defaults to the last 7 days', (await page.getByText('Done as support · last 7 days').count()) === 1);
+  check('agent page defaults to the last 7 days', (await page.getByText('Done as support · Last 7 days').count()) === 1);
 
   // M2/m3: a summary query over budget → page banner + "Couldn't load" in that panel; Retry recovers everything.
   let failActions = true;
-  await page.route(/\/facets\?.*field=action/, (route) =>
-    failActions
+  let actionHits = 0;
+  await page.route(/\/facets\?.*field=action/, (route) => {
+    if (failActions) actionHits += 1;
+    return failActions
       ? route.fulfill({
           status: 503,
           contentType: 'application/json',
@@ -354,11 +356,19 @@ try {
             error: { code: 'query_unavailable', message: 'Storage query failed or exceeded its budget. Narrow the time range and retry.' },
           }),
         })
-      : route.continue(),
-  );
+      : route.continue();
+  });
+  const opened = Date.now();
   await page.goto(`${BASE}/p/${projectId}/support/${agentId(2)}?range=30d`);
-  await settle(page, 2500);
   const banner = page.getByTestId('agent-page-failure');
+  // m2: an over-budget summary is not retried: the banner shows at once and the scan ran exactly once.
+  await banner.waitFor({ timeout: 10_000 });
+  const bannerAfterMs = Date.now() - opened;
+  await settle(page, 2500);
+  check('an over-budget summary is never auto-retried: one request, banner without retry delay', actionHits === 1 && bannerAfterMs < 6000, {
+    requests: actionHits,
+    bannerAfterMs,
+  });
   // The panel around the "Top actions" title: walk up from the title until the element holds the panel body.
   const panelText = (title) =>
     page.evaluate((t) => {
@@ -373,7 +383,10 @@ try {
   const bannerText = (await banner.textContent().catch(() => '')) ?? '';
   check(
     'a summary over budget shows the range banner with shorter ranges',
-    /Too many events to summarise for last 30 days/.test(bannerText) && /Last 7 days/.test(bannerText) && /Last 24 hours/.test(bannerText),
+    /Couldn't summarise the last 30 days\. It may hold too many events\./.test(bannerText) &&
+      /Try a shorter range, or retry\./.test(bannerText) &&
+      /Last 7 days/.test(bannerText) &&
+      /Last 24 hours/.test(bannerText),
     bannerText,
   );
   check(
@@ -386,11 +399,14 @@ try {
   );
   await page.screenshot({ path: path.join(OUT, 'after-desktop-light-agent-page-budget-banner.png') });
   failActions = false;
-  await banner.getByRole('button', { name: 'Retry' }).click();
+  await banner.getByRole('button', { name: 'Retry' }).focus();
+  await page.keyboard.press('Enter');
   await settle(page, 1500);
+  const afterRetry = await page.evaluate(() => document.activeElement?.tagName ?? null);
   check(
-    'Retry refetches every failed query and clears the banner',
-    (await banner.count()) === 0 && (await page.getByText("Couldn't load").count()) === 0,
+    'Retry refetches every failed query, clears the banner, and focus moves to the heading',
+    (await banner.count()) === 0 && (await page.getByText("Couldn't load").count()) === 0 && afterRetry === 'H1',
+    { focus: afterRetry },
   );
   await page.unroute(/\/facets\?.*field=action/);
 
@@ -485,7 +501,18 @@ try {
       await p.screenshot({ path: path.join(OUT, `after-phone-${theme}-long-names-explorer.png`) });
       await p.goto(P(`/support/${agentId(0)}`));
       await settle(p, 1200);
-      check(`390px ${theme}: agent page fits`, (await p.evaluate(() => document.scrollingElement.scrollWidth)) <= 390);
+      // m1 (round 3): the app scrolls inside its own container, so check every section's box, not the document width.
+      const sections = await p.evaluate(() =>
+        [...document.querySelectorAll('section')].map((el) => ({
+          name: (el.querySelector('h2, h3, [data-slot=card-title]')?.textContent ?? el.getAttribute('aria-label') ?? '').trim().slice(0, 30),
+          right: Math.round(el.getBoundingClientRect().right),
+        })),
+      );
+      const spilling = sections.filter((x) => x.right > 390);
+      check(`390px ${theme}: agent page fits (every section inside the screen)`, sections.length > 0 && spilling.length === 0, {
+        sections: sections.length,
+        spilling,
+      });
       await p.screenshot({ path: path.join(OUT, `after-phone-${theme}-long-names-agent-page.png`) });
       await p.goto(P('/actors/usr_long'));
       await settle(p, 1200);

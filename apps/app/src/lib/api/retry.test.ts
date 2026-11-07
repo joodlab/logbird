@@ -20,6 +20,24 @@ describe('shouldRetry', () => {
     expect(shouldRetry(0, new TypeError('fetch failed'))).toBe(true);
     expect(shouldRetry(2, new TypeError('fetch failed'))).toBe(false);
   });
+
+  it('never retries a query over its storage budget (a shorter range or an explicit Retry helps, an identical scan does not)', () => {
+    expect(shouldRetry(0, new ApiRequestError(503, 'query_unavailable', 'Storage query failed or exceeded its budget.'))).toBe(false);
+    expect(
+      shouldRetry(
+        0,
+        new ApiRequestError(422, 'invalid_query', 'Query exceeded its resource budget', {
+          lang: 'query',
+          reason: 'limit',
+          start: null,
+          end: null,
+          hint: null,
+        }),
+      ),
+    ).toBe(false);
+    // Other 5xx still get two more tries.
+    expect(shouldRetry(0, new ApiRequestError(502, 'bad_gateway', 'upstream'))).toBe(true);
+  });
 });
 
 describe('retryDelay', () => {

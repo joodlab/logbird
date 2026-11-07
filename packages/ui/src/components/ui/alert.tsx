@@ -1,6 +1,7 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
+import { SUPPORT_SURFACE } from '../../lib/tones'
 import { cn } from '../../lib/utils'
 
 const alertVariants = cva(
@@ -15,7 +16,7 @@ const alertVariants = cva(
         warning: "border-warning/30 bg-warning/10 text-warning *:data-[slot=alert-description]:text-warning/90",
         success: "border-success/30 bg-success/10 text-success *:data-[slot=alert-description]:text-success/90",
         /** Support impersonation: who was really at the keyboard. Pass role="note" for static explanations. */
-        support: "border-support/25 bg-support/5 text-foreground *:[svg]:text-support",
+        support: `${SUPPORT_SURFACE} text-foreground *:[svg]:text-support`,
       },
     },
     defaultVariants: {

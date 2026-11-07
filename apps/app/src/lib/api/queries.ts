@@ -1,6 +1,7 @@
 import type { EntityKind, EntitySort, QueryLang } from '@logbird/contracts';
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from '@tanstack/react-query';
 import { authClient } from '@/lib/auth-client';
+import { isOverBudget } from '@/lib/query-budget';
 import { resolveRange } from '@/lib/range';
 import { api, langParam } from './client';
 import { ApiRequestError, isBusyError, isTimeoutError, withDeadline } from './errors';
@@ -27,12 +28,13 @@ export const BUSY_RETRIES = 12;
 export const SESSION_DEADLINE_MS = 15_000;
 
 /**
- * Shared retry policy: never retry 4xx or a request that already hit its deadline, retry busy projects patiently,
- * and give other failures (network, 5xx) two more tries.
+ * Shared retry policy: never retry 4xx, a request that already hit its deadline, or a query over its storage budget
+ * (an identical scan would fail the same way; pages offer a shorter range or an explicit Retry); retry busy projects
+ * patiently, and give other failures (network, 5xx) two more tries.
  */
 export function shouldRetry(failureCount: number, error: unknown): boolean {
   if (isBusyError(error)) return failureCount < BUSY_RETRIES;
-  if (isTimeoutError(error)) return false;
+  if (isTimeoutError(error) || isOverBudget(error)) return false;
   return !(error instanceof ApiRequestError && error.status >= 400 && error.status < 500) && failureCount < 2;
 }
 

@@ -9,6 +9,7 @@ import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { CircleAlertIcon, RotateCwIcon, Rows3Icon, UserIcon, VenetianMaskIcon } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 import { ActionName } from '@/components/action-name';
 import { OutcomeAreaChart } from '@/components/charts/outcome-area-chart';
 import { EntityProfileLink } from '@/components/entity-link';
@@ -21,7 +22,7 @@ import { distinctCount, SUPPORT_TERM, supportAgentQuery } from '@/lib/impersonat
 import { withPresence } from '@/lib/presence-filter';
 import { failureSummary } from '@/lib/query-budget';
 import { formatTerm } from '@/lib/query-language';
-import { rangeLabel } from '@/lib/range';
+import { rangeLabel, rangePhrase } from '@/lib/range';
 import { useDocumentTitle } from '@/lib/use-document-title';
 
 interface SupportAgentProfileProps {
@@ -63,6 +64,16 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
     for (const q of [...summaries, ownAccount]) if (q.isError) void q.refetch();
   };
   const retrying = summaries.some((q) => q.isError && q.isFetching);
+  // When the banner goes away (a shorter range, or Retry worked) focus would drop to <body>: hand it to the heading.
+  const heading = useRef<HTMLHeadingElement>(null);
+  const hadFailure = useRef(false);
+  useEffect(() => {
+    if (failure) hadFailure.current = true;
+    else if (hadFailure.current) {
+      hadFailure.current = false;
+      if (document.activeElement === document.body || document.activeElement === null) heading.current?.focus();
+    }
+  }, [failure]);
 
   const fresh = (q: { isPlaceholderData: boolean; data?: unknown }) => (q.isPlaceholderData ? undefined : q.data);
   const selfData = fresh(self) as typeof self.data;
@@ -70,10 +81,11 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
   const total = selfData ? (selfData.values[0]?.count ?? 0) : undefined;
   const actedAsData = fresh(actedAs) as typeof actedAs.data;
   const tenantData = fresh(tenants) as typeof tenants.data;
+  const actionData = fresh(actions) as typeof actions.data;
   const ownEvents = fresh(ownAccount) ? (ownAccount.data?.values[0]?.count ?? 0) : 0;
   // Nobody with this id did anything as support in range: one empty state, no callout or zero tiles (n3).
   const none = total === 0;
-  const range7 = rangeLabel(range).toLowerCase();
+  const phrase = rangePhrase(range);
   useSetCrumb(name);
   useDocumentTitle(`${name} · Support agent · Logbird`);
 
@@ -93,7 +105,7 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
               {self.isPending ? (
                 <Skeleton className="h-7 w-48" />
               ) : (
-                <h1 className="truncate font-semibold text-xl tracking-tight">
+                <h1 className="truncate font-semibold text-xl tracking-tight outline-none" ref={heading} tabIndex={-1}>
                   <bdi>{name}</bdi>
                 </h1>
               )}
@@ -127,9 +139,11 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
         {failure ? (
           <Alert data-testid="agent-page-failure">
             <CircleAlertIcon />
-            <AlertTitle>{failure === 'budget' ? `Too many events to summarise for ${range7}.` : "Some of this page couldn't load."}</AlertTitle>
+            <AlertTitle>
+              {failure === 'budget' ? `Couldn't summarise ${phrase}. It may hold too many events.` : "Some of this page couldn't load."}
+            </AlertTitle>
             <AlertDescription>
-              {failure === 'budget' ? 'Try a shorter range. ' : null}
+              {failure === 'budget' ? 'Try a shorter range, or retry.' : null}
               <span className="mt-2 flex flex-wrap gap-2">
                 {failure === 'budget' && range !== '7d' ? (
                   <Button onClick={() => onTimelineChange({ range: '7d', ev: undefined })} size="sm" variant="outline">
@@ -141,7 +155,8 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
                     Last 24 hours
                   </Button>
                 ) : null}
-                <Button disabled={retrying} onClick={retryFailed} size="sm" variant="ghost">
+                {/* aria-disabled, not disabled: the button keeps focus while its retry runs. */}
+                <Button aria-disabled={retrying} onClick={() => (retrying ? undefined : retryFailed())} size="sm" variant="ghost">
                   <RotateCwIcon />
                   Retry
                 </Button>
@@ -152,7 +167,7 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
 
         {none ? (
           <EmptyState
-            description={`Nobody with the id ${agentId} signed in as a customer in ${range7}. Check the id, or try a wider range.`}
+            description={`Nobody with the id ${agentId} signed in as a customer in ${phrase}. Check the id, or try a wider range.`}
             icon={VenetianMaskIcon}
             size="sm"
             title="No support activity in this range"
@@ -183,7 +198,7 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
             <StatTileGrid className="grid-cols-2 sm:grid-cols-3">
               <StatTile
                 className="col-span-2 sm:col-span-1"
-                label={`Done as support · ${range7}`}
+                label={`Done as support · ${rangeLabel(range)}`}
                 loading={total === undefined && !self.isError}
                 value={self.isError && total === undefined ? failedValue : formatNumber(total ?? 0)}
               />
@@ -199,7 +214,7 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
               />
             </StatTileGrid>
 
-            <div className="grid gap-3 lg:grid-cols-[1fr_320px]">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
               <Panel className="self-start" description="Click a band to filter the timeline below" title="Activity as support">
                 <div className="p-3 pb-2">
                   {series.data ? (
@@ -215,7 +230,7 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
                   )}
                 </div>
               </Panel>
-              <div className="flex flex-col gap-3">
+              <div className="flex min-w-0 flex-col gap-3">
                 <Panel description="Whose account they were using" title="Acted as">
                   {actedAs.isError && !actedAsData ? (
                     <CouldNotLoad />
@@ -241,11 +256,11 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
                   )}
                 </Panel>
                 <Panel title="Top actions">
-                  {actions.isError && !actions.data ? (
+                  {actions.isError && !actionData ? (
                     <CouldNotLoad />
                   ) : (
                     <RankList
-                      items={(actions.data?.values ?? []).map((a) => ({
+                      items={(actionData?.values ?? []).map((a) => ({
                         key: a.value,
                         label: <ActionName action={a.value} />,
                         count: a.count,
@@ -259,7 +274,7 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
                           </button>
                         ),
                       }))}
-                      loading={actions.isPending}
+                      loading={!actionData}
                       rows={4}
                     />
                   )}
