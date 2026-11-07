@@ -1,10 +1,7 @@
 {
   "date": "2026-11-07",
   "probe": {
-    "dockerfile": [
-      "FROM scratch",
-      "COPY . /context/"
-    ],
+    "dockerfile": ["FROM scratch", "COPY . /context/"],
     "command": "docker buildx build --no-cache --progress=plain --output=type=tar,dest=.tmp/round2-context.tar -f .tmp/round2-context.Dockerfile .",
     "buildRef": "qbztc3bm7oousfg1grfrr3al2",
     "transferredContext": "3.12MB",
@@ -41,11 +38,7 @@
     "freeDiskGiB": 110.13987731933594
   },
   "migrateInit": {
-    "entrypoint": [
-      "/usr/bin/tini",
-      "-g",
-      "--"
-    ],
+    "entrypoint": ["/usr/bin/tini", "-g", "--"],
     "finalProvisioningCommandExec": true,
     "liveCancellationCheck": "pending #77; no migrate image rebuild or service run",
     "staticStageAssertions": "PASS tini installation, exec-form group-forwarding entrypoint, USER node and final exec"
