@@ -155,7 +155,15 @@ it('keeps member evidence above the global cap, freezes first/last times, and ne
       occurredAt: now.toISOString(),
       targets: [{ id, name: email }],
       context: { requestId: 'request-0' },
-      metadata: { attempts: 1 },
+      metadata: {
+        attempts: 1,
+        reason: 'invalid_otp',
+        overflow: true,
+        firstAttemptAt: now.toISOString(),
+        lastAttemptAt: now.toISOString(),
+        distinctIps: ['203.0.113.20'],
+        ipsTruncated: false,
+      },
     });
     expect(events[1]?.payload).toMatchObject({
       occurredAt: new Date(+now + 11_000).toISOString(),
@@ -177,6 +185,16 @@ it('keeps member evidence above the global cap, freezes first/last times, and ne
       },
     });
     expect(events[1]?.payload).not.toHaveProperty('context');
+    await stageFailedSignIn(email, 'locked_out', { requestId: 'locked-overflow', ip: '203.0.113.77' }, secret, new Date(+now + 12_000));
+    const locked = await prisma.authAuditWindow.findFirstOrThrow({ where: { emailHash: hash, reason: 'locked_out' } });
+    expect(locked.id).toContain(':overflow:locked_out:');
+    await flushFailedSignIns(new Date('2044-01-01T02:00:02Z'), [locked.id]);
+    const lockout = await prisma.auditOutbox.findFirstOrThrow({
+      where: { stream: `ws:${org}`, payload: { path: ['metadata', 'reason'], equals: 'locked_out' } },
+    });
+    expect(lockout.payload).toMatchObject({ metadata: { reason: 'locked_out', overflow: true, attempts: 1 } });
+    expect((lockout.payload as { description: string }).description).toContain('locked after too many wrong codes');
+    expect((lockout.payload as { description: string }).description).toContain('counted under the global admission limit');
   } finally {
     await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${org}` } });
     await prisma.authAuditWindow.deleteMany({ where: { emailHash: hash } });
@@ -230,7 +248,7 @@ it('isolates workspace budgets by namespace and preserves the top 20 targeted me
       data: { id: budget, namespace: namespaces[1], stream: `ws:${org}`, windowEnd: end, suppressed: 325, targets },
     });
     await flushAuthAuditBudgets(new Date(+end + 1000), [budget]);
-    const summary = await prisma.auditOutbox.findUniqueOrThrow({ where: { id: `auth-suppression-${budget}` } });
+    const summary = await prisma.auditOutbox.findUniqueOrThrow({ where: { id: `auth-suppression-${budget}-1` } });
     const metadata = (summary.payload as { metadata: { targets: { userId: string; attempts: number }[]; targetsTruncated: boolean } }).metadata;
     expect(metadata.targets).toHaveLength(20);
     expect(metadata.targets[0]).toEqual({ userId: 'qa-member-24', attempts: 25 });

@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHmac, randomInt, randomUUID } from 'node:crypto';
 import { auth } from '@logbird/auth';
 import { auditNamespace, prisma } from '@logbird/database';
 import { expect, it, vi } from 'vitest';
@@ -52,13 +52,19 @@ async function fixture() {
       },
     });
   const actor = await create();
+  const peer = `192.0.2.${randomInt(1, 255)}`;
   const request = (path: string, body?: unknown, cookie = cookieFor(actor.token), origin = env.APP_URL) =>
-    app.request(path, {
-      method: 'POST',
-      headers: { cookie, Origin: origin, 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    app.request(
+      path,
+      {
+        method: 'POST',
+        headers: { cookie, Origin: origin, 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      },
+      { incoming: { socket: { remoteAddress: peer } } },
+    );
   return {
+    peer,
     userId,
     org,
     email,
@@ -109,6 +115,11 @@ it('owns all four endpoints, enforces self-only policy without an active workspa
     expect((await f.request('/api/session/sign-out')).status).toBe(401);
     const rows = await f.rows();
     expect(rows).toHaveLength(3);
+    expect(rows.map((row) => (row.payload as { action: string }).action).sort()).toEqual([
+      'auth.session.revoked',
+      'auth.session.revoked',
+      'auth.signed_out',
+    ]);
     expect(rows.map((row) => (row.payload as { targets: { id: string }[] }).targets[0]?.id).sort()).toEqual([one.id, two.id, f.actor.id].sort());
     expect(rows.every((row) => row.confirmedAt && !row.sourceSessionId)).toBe(true);
     for (const row of rows) {
@@ -211,15 +222,58 @@ it('neutralizes ambiguous old hook intents without deleting or confirming their 
 });
 
 it('preserves the shared Redis auth limit on owned session endpoints before session lookup', async () => {
+  const peer = `203.0.113.${randomInt(1, 255)}`;
   for (const path of ['/api/session/sign-out', '/api/sessions/revoke-all']) {
     for (let n = 0; n <= env.AUTH_RATE_LIMIT_PER_MINUTE; n++) {
       const response = await app.request(
         path,
         { method: 'POST', headers: { Origin: env.APP_URL } },
-        { incoming: { socket: { remoteAddress: '203.0.113.66' } } },
+        { incoming: { socket: { remoteAddress: peer } } },
       );
       expect(response.status).toBe(n < env.AUTH_RATE_LIMIT_PER_MINUTE ? 401 : 429);
       if (response.status === 429) expect(response.headers.get('Retry-After')).not.toBeNull();
     }
   }
 });
+
+it.each(['/api/session/sign-out', '/api/sessions/revoke', '/api/sessions/revoke-all', '/api/sessions/revoke-others'])(
+  '%s requires trusted Origin or Referer, preserving Fetch Metadata protection',
+  async (path) => {
+    const f = await fixture();
+    try {
+      const other = await f.create();
+      const request = (headers: Record<string, string>) =>
+        app.request(
+          path,
+          {
+            method: 'POST',
+            headers: { cookie: cookieFor(f.actor.token), 'Content-Type': 'application/json', ...headers },
+            body: path === '/api/sessions/revoke' ? JSON.stringify({ sessionId: other.id }) : undefined,
+          },
+          { incoming: { socket: { remoteAddress: f.peer } } },
+        );
+      const rejectedHeaders: Record<string, string>[] = [
+        {},
+        { Referer: 'https://foreign.example.test/' },
+        { 'Sec-Fetch-Site': 'same-site' },
+        { Origin: 'https://foreign.example.test', Referer: env.APP_URL },
+        { Origin: env.APP_URL, 'Sec-Fetch-Site': 'cross-site' },
+        { Origin: 'null', 'Sec-Fetch-Site': 'same-origin' },
+      ];
+      for (const headers of rejectedHeaders) expect((await request(headers)).status).toBe(403);
+      expect(await prisma.session.count({ where: { userId: f.userId } })).toBe(2);
+      expect(await f.rows()).toEqual([]);
+      expect((await request({ Referer: `${env.APP_URL}/account?tab=sessions` })).status).toBe(200);
+      const rows = await f.rows();
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.every((row) => (row.payload as { context: { ip: string } }).context.ip === f.peer)).toBe(true);
+      if (path === '/api/session/sign-out') {
+        const repeated = await request({ Referer: env.APP_URL });
+        expect(repeated.status).toBe(401);
+        expect(repeated.headers.getSetCookie().join('\n')).toContain('logbird.session_token=;');
+      }
+    } finally {
+      await f.cleanup();
+    }
+  },
+);

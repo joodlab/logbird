@@ -1,4 +1,4 @@
-import { auth, authAuditContext, setAuthAuditHandler } from '@logbird/auth';
+import { auth, authAuditContext, clearSessionCookies, setAuthAuditHandler } from '@logbird/auth';
 import { QueryError } from '@logbird/clickhouse';
 import { queryErrorDetailsSchema } from '@logbird/contracts';
 import { Prisma, ProjectBusyError, prisma } from '@logbird/database';
@@ -25,7 +25,7 @@ import { doc, routeDoc } from './openapi';
 import { auditDrainStatus } from './outbox-delivery';
 import { clientAddress, rateLimit } from './rate-limit';
 import { managementRoutes } from './routes';
-import { sessionRoutes } from './session-routes';
+import { sessionMutationOrigin, sessionRoutes } from './session-routes';
 import { setupRoutes } from './setup-routes';
 import type { AppEnv } from './types';
 
@@ -186,6 +186,12 @@ app.get(
     return c.json({ status: postgres && ch ? 'ok' : 'degraded', postgres, clickhouse: ch }, postgres && ch ? 200 : 503);
   },
 );
+app.use('/api/session/*', sessionMutationOrigin);
+app.use('/api/sessions/*', sessionMutationOrigin);
+app.use('/api/session/sign-out', async (c, next) => {
+  await next();
+  if (c.res.status === 401) for (const cookie of await clearSessionCookies(c.req.raw.headers)) c.header('Set-Cookie', cookie, { append: true });
+});
 app.use('/api/*', authorizeMutation);
 export const routes = app
   .route('/api', sessionRoutes)

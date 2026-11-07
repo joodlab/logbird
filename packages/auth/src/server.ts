@@ -6,7 +6,7 @@ import { sendMemberJoined, sendOrganizationInvitation, sendRoleChanged, sendSign
 import { createEnv } from '@t3-oss/env-core';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { APIError, createAuthEndpoint } from 'better-auth/api';
+import { APIError, createAuthEndpoint, originCheckMiddleware } from 'better-auth/api';
 import { deleteSessionCookie } from 'better-auth/cookies';
 import { emailOTP, organization } from 'better-auth/plugins';
 import { z } from 'zod';
@@ -81,6 +81,9 @@ export const auth = betterAuth({
   trustedOrigins: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)],
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
   advanced: {
+    // Keep cookie request validation enabled in tests as well as production.
+    disableOriginCheck: false,
+    disableCSRFCheck: false,
     cookiePrefix: 'logbird',
     useSecureCookies: new URL(env.APP_URL).protocol === 'https:',
     defaultCookieAttributes: { httpOnly: true, sameSite: 'lax' },
@@ -202,4 +205,28 @@ const expireSessionCookies = createAuthEndpoint('/internal-cookie-expiry', { met
 export async function clearSessionCookies(headers: Headers) {
   const response = await expireSessionCookies({ headers, context: await auth.$context, asResponse: true });
   return response.headers.getSetCookie();
+}
+
+const validateCookieOrigin = createAuthEndpoint('/internal-origin-check', { method: 'POST', use: [originCheckMiddleware] }, async (ctx) =>
+  ctx.json({ success: true }),
+);
+/** The same Origin/Referer matcher and cookie CSRF check as better-auth's HTTP router. */
+export async function trustedSessionMutation(request: Request) {
+  const source = request.headers.get('origin') || request.headers.get('referer');
+  if (!source || source === 'null' || request.headers.get('sec-fetch-site') === 'cross-site') return false;
+  const headers = new Headers(request.headers);
+  // These routes authenticate only with cookies; force the library's cookie branch even for an anonymous request.
+  if (!headers.has('cookie')) headers.set('cookie', '');
+  try {
+    const response = await validateCookieOrigin({
+      request: new Request(request.url, { method: 'POST', headers }),
+      headers,
+      context: await auth.$context,
+      asResponse: true,
+    });
+    return response.ok;
+  } catch (error) {
+    if (error instanceof APIError && error.status === 'FORBIDDEN') return false;
+    throw error;
+  }
 }

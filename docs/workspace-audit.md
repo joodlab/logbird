@@ -29,7 +29,9 @@ Expiry cleanup is unaudited. Revoked-device creation/expiry/address/user-agent a
 session tokens are never serialized. Sign-out and any revocation including the current session expire cookies using
 better-auth's native helper (including chunked cache cookies). Repeated signed-out requests return 401; the console
 handles an already-ended session as success. The four original better-auth HTTP endpoints return 409; API clients must
-switch to these owned routes. Cross-origin POSTs are rejected independently of CORS.
+switch to these owned routes. Cookie-authenticated mutations require a trusted Origin or, when absent, a trusted Referer, using better-auth's own
+origin middleware. Missing/bad sources, a null Origin and cross-site Fetch Metadata are rejected independently of CORS.
+Sign-out errors keep the user signed in and show a retryable error toast. An already-ended sign-out clears stale cookies.
 
 The former before/after-hook intents and reconciler are removed. The migration neutralizes up to 100 ambiguous
 unconfirmed intents in quarantine as `legacy_session_intent`; a bounded per-minute sweep handles any remainder or
@@ -37,7 +39,7 @@ late writes from an older replica. It never guesses which action committed or re
 `confirmedAt`/`sourceSessionId` columns remain for rolling schema compatibility; new owned records use the default
 confirmed state and no source intent. Delivered/confirmed historical evidence remains intact. Roll back code while
 retaining the schema and quarantined rows, and investigate legacy intents against independent request evidence.
-`auth.signed_in` uses deterministic `auth:signin:?` ids; the short creation-to-after-hook crash/storage window remains
+`auth.signed_in` uses deterministic `auth:signin:<sessionId>:<orgId>:<namespace>` ids; the short creation-to-after-hook crash/storage window remains
 tracked in [#82](https://github.com/joodlab/logbird/issues/82), along with better-auth member/invitation/organization-creation
 hooks. Those successful committed actions retain their successful response if enqueue fails, with a safe diagnostic.
 ClickHouse sample-data changes also span separate stores; they do not have a distributed transaction with Postgres.
@@ -56,9 +58,13 @@ authentication claim is made.
 
 ## Failed sign-ins and budgets
 
-Every failed OTP request stages a HMAC only, plus bounded request context, before returning. It does no membership
-lookup, AES encryption/decryption or advisory locking. Existing windows increment under their own row lock; only new windows contend
-on an atomic conditional admission-counter update. User hashes are backfilled in batches of 100 by the API and refreshed
+Failed OTP requests attempt to stage a HMAC only, plus bounded request context, before returning. An indexed lookup of the
+canonical email resolves current workspace memberships for the admission fence; the attempted email is never staged.
+Admissions take workspace hour-budget rows FOR SHARE before touching windows. Expansion takes those budget rows
+FOR UPDATE before window locks, and finalization takes FOR UPDATE before its pending-window check. Workspace ids
+are sorted consistently. A fresh uncommitted INSERT therefore cannot be invisible to a concurrent finalization.
+No AES encryption/decryption or advisory lock is used. Fresh identities also contend on the short global
+conditional admission-counter update. User hashes are backfilled in batches of 100 by the API and refreshed
 on successful sign-in. The lookup waits while initial backfill is incomplete. Legacy encrypted windows are preserved
 in quarantine (`legacy_identity_unresolved`) for explicit operator recovery, never guessed or silently dropped.
 
@@ -67,21 +73,30 @@ The attempted address, OTP and cookies are never event content. This stored-emai
 to the workspace. Unknown identities have no workspace destination.
 
 One initial failure and at most one counted summary are emitted per identity/reason/five-minute window. The first
-uses `firstAttemptAt` and its original context. The summary uses `lastAttemptAt`, **no single requestId/IP/user-agent**,
+uses `firstAttemptAt` and its original context, with both metadata times equal to that first attempt and only its IP. The summary uses `lastAttemptAt`, **no single requestId/IP/user-agent**,
 and `metadata.firstAttemptAt`, `lastAttemptAt`, `distinctIps` (up to 10) and `ipsTruncated`. `lastContext` is kept in the
-staging row for investigation, not misattributed to the whole burst. Occurrence times are frozen when stored; delayed
+staging row for investigation, not misattributed to the whole burst. The summary IP set describes the full window, including the first attempt. Occurrence times are frozen when stored; delayed
 flush does not move them to delivery time. Reasons read "wrong code", "expired code" and "locked after too many wrong codes".
 
-At most 600 fresh windows/hour receive the normal path. Above it, hash-only per-(hash,hour) overflow counters still
+At most 600 fresh windows/hour receive the normal path. Above it, hash-only per-(hash,reason,hour) overflow counters still
 resolve members to counted workspace evidence; junk identities cannot blind all workspaces. The first overflow logs
-`global_suppression_started`. Overflow counters may grow with fresh identities until the hourly retention boundary;
+`global_suppression_started`. Overflow retains the real `invalid_otp`, `expired_otp` or `locked_out` reason;
+its sentence says "counted under the global admission limit" so the audit limit is not mistaken for the sign-in cause.
+The older `global_overflow` reason is preserved only for legacy counters, where the original reason is unavailable.
+Overflow counters may grow with fresh identities until the hourly retention boundary;
 the cap bounds ordinary evidence production, not arbitrary hash cardinality. Each workspace admits 60 rows/hour plus
-one counted suppression summary with `metadata.targets` (top 20 user ids/counts, plus a truncation flag). Summary
+counted suppression summaries with `metadata.targets` (top 20 user delta counts, plus a truncation flag). Summary
 freezing waits for that hour's pending/quarantined windows to resolve, preventing late increments from being lost.
 A request delayed behind a closing summary rechecks `closedAt` under that row lock and increments the next window
 generation instead. Its first/last occurrence times are the actual late-admission time, with a new immutable event id;
 a closed summary is never reopened. Requests delayed beyond retention also enter a current generation. Normal and
 hourly overflow windows use the same policy, including the next hour's budget.
+A finalized budget can receive a late expansion (for example after replica clock skew or membership/backfill changes).
+`reportedSuppressed` and per-target watermarks advance atomically with an outbox INSERT, emitting only the new delta
+under `auth-suppression-<budgetId>-<generation>`. Existing payloads/ids never change. `metadata.attempts` is that delta;
+`totalAttempts` is the cumulative counter. Old reported counters and surviving legacy receipts initialize the watermarks.
+A previously truncated legacy target list establishes a partial watermark: unknown user deltas are omitted with
+`targetsTruncated: true`, while the overall delta count remains exact. Later watermarks use the full stored target map.
 All window/budget/suppression identities include the namespace. Legacy round-2 budgets are retained/reported separately
 in the transition hour. Authentication's separate peer/code limits are unchanged.
 
@@ -105,7 +120,7 @@ image/container execution was not part of the in-process proof.
 Each API replica runs batched sweeps (200 rows/table/minute), using short `SKIP LOCKED` deletes:
 - delivered outbox rows: after 7 days;
 - fully expanded closed windows (`flushedAttempts = attempts`): after window end + 1 hour;
-- reported budgets: after window end + 24 hours, once no unresolved window from that hour remains.
+- fully reported, non-quarantined budgets (`reportedSuppressed = suppressed`): after window end + 24 hours, once no unresolved window from that hour remains.
 
 A separate bounded compatibility pass (100 rows/tick, indexed) closes completed round-2 windows only when their
 identity was erased, `flushedAttempts = attempts > 0`, and `nextAttemptAt` is the round-2 year-9999 sentinel. It does not
@@ -126,7 +141,11 @@ identity (never mint a new id); `invalid_event` is a rejected event shape/type; 
 rejections; `audit_storage_unavailable` covers transient delivery/state failures. Delivery quarantines after 10 attempts.
 Staging backs off per window and quarantines after 5 preparation failures; `legacy_identity_unresolved` quarantines
 immediately, and `hash_backfill_pending` waits without consuming the quarantine budget. `legacy_session_intent` means
-an ambiguous pre-upgrade hook intent retained for investigation, never automatically confirmed. No error messages or credentials are persisted.
+an ambiguous pre-upgrade hook intent retained for investigation, never automatically confirmed.
+Budget reporting retries independently with exponential backoff and quarantines after 5 preparation failures.
+`audit.preparation_failed {kind: "budget", id, attempts, lastError}` uses `audit_budget_preparation_unavailable`
+or `invalid_budget_watermark`; a poison budget cannot stop healthy budgets in the page. A state-write failure logs
+`audit.preparation_state_unavailable`. No exception messages or credentials are persisted.
 
 ```sql
 SELECT namespace, count(*) AS undelivered,
@@ -137,15 +156,19 @@ SELECT id, stream, attempts, "nextAttemptAt", "lastError", "confirmedAt", "sourc
 FROM "AuditOutbox" WHERE "deliveredAt" IS NULL ORDER BY "createdAt" LIMIT 100;
 SELECT id, "emailHash", "prepareAttempts", "lastError", "quarantinedAt", "windowEnd"
 FROM "AuthAuditWindow" WHERE "closedAt" IS NULL ORDER BY "nextAttemptAt" LIMIT 100;
+SELECT id, stream, suppressed, "reportedSuppressed", generation, "prepareAttempts", "nextAttemptAt", "lastError", "quarantinedAt"
+FROM "AuthAuditBudget" WHERE NOT reported OR "quarantinedAt" IS NOT NULL ORDER BY "nextAttemptAt" LIMIT 100;
 -- After fixing the cause and checking the exact namespace/id; keep attempt fences monotonic.
 UPDATE "AuditOutbox" SET "quarantinedAt"=NULL, "nextAttemptAt"=now()
 WHERE namespace='<namespace>' AND id='<reviewed-id>' AND "deliveredAt" IS NULL AND "confirmedAt" IS NOT NULL AND "sourceSessionId" IS NULL;
 UPDATE "AuthAuditWindow" SET "quarantinedAt"=NULL, "nextAttemptAt"=now()
 WHERE namespace='<namespace>' AND id='<recovered-hash-window>' AND "emailHash" IS NOT NULL AND "closedAt" IS NULL AND "flushedAttempts"<attempts;
+UPDATE "AuthAuditBudget" SET "quarantinedAt"=NULL, "nextAttemptAt"=now()
+WHERE namespace='<namespace>' AND id='<reviewed-budget-id>' AND NOT reported;
 ```
 
 A requeue grants a new attempt; another failure at the threshold quarantines again. Do not reset attempts (the lease
-fence), edit frozen payloads, clear `closedAt`, or confirm legacy session intents from a Session existence check.
+fence), change generation/reporting watermarks without verified history, edit frozen payloads, clear `closedAt`, or confirm legacy session intents from a Session existence check.
 A pre-upgrade closed window with `flushedAttempts < attempts` is retained but cannot be requeued: its summary id is
 already frozen. Recover only the unreported delta into a **new generation/id**, verifying its hash, counts and first/last
 times against independent request logs, then mark the old source resolved in the same operator transaction. Do not
@@ -176,14 +199,14 @@ user-agent context where available. Keys and session tokens are never recorded. 
 | `member.role.changed` | member | acting user / member | role before → after |
 | `member.removed`, `member.joined_via_link` | member | acting user / member | member id/name |
 | `invite_link.created`, `invite_link.revoked` | invite_link | user / invite link | link id and role, never its secret |
-| `auth.signed_in` | auth | signed-in user / user | successful sign-in |
-| `auth.signed_out`, `auth.session.revoked` | auth | acting user / non-secret session id | owned self-only sign-out/revoke routes; replay after sign-out returns 401 |
-| `auth.sign_in.failed` | auth | anonymous / targeted member user id | hashVersion, emailHash, reason, attempts, windowEnd, auditWindowSeconds |
-| `auth.sign_in.suppressed` | auth | system / workspace stream | aggregate attempts and windowEnd |
+| `auth.signed_in` | auth | signed-in user / user | `metadata.session {createdAt, expiresAt, ipAddress, userAgent}`; deterministic sign-in id |
+| `auth.signed_out`, `auth.session.revoked` | auth | acting user / non-secret session id | `metadata.session {createdAt, expiresAt, ipAddress, userAgent}` describes the ended device; requester context is separate; explicit device/address sentence; replay after sign-out returns 401 and expires stale cookies |
+| `auth.sign_in.failed` | auth | anonymous / targeted member user id | `hashVersion`, `emailHash`, `reason` (`invalid_otp`, `expired_otp`, `locked_out`; legacy `global_overflow` means original reason unavailable), `overflow`, `attempts`, `windowEnd`, `firstAttemptAt`, `lastAttemptAt`, `distinctIps`, `ipsTruncated`; first record snapshots its first attempt, summary describes the window |
+| `auth.sign_in.suppressed` | auth | system / workspace stream | delta `attempts`, cumulative `totalAttempts`, `generation`, `windowEnd`, top-20 delta `targets [{userId, attempts}]`, `targetsTruncated`; no single requester context |
 
 Expired-session cleanup is skipped, including better-auth's `getSession` deletion of expired sessions. Direct database
-deletes outside the HTTP auth lifecycle are outside coverage. Rename serialization spans the before-read, mutation
-and durable insert only, with no nested ingestion-lock acquire. No-op/denied renames emit no success record. Recording
+deletes outside the HTTP auth lifecycle are outside coverage. Rename locks the workspace row, reads/updates it and
+inserts its frozen evidence in one Postgres transaction. No-op/denied renames emit no success record. Recording
 denied renames is deferred: authorization behavior remains unchanged and this PR does not introduce a new denied-action policy.
 
 Canonical activity chips come from `WORKSPACE_ACTIVITY_CATEGORIES` in `@logbird/contracts`; Views maps to

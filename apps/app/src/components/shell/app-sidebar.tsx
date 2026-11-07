@@ -309,10 +309,14 @@ function UserMenu() {
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={async () => {
-              await signOut();
-              await queryClient.invalidateQueries({ queryKey: meQuery().queryKey, exact: true, refetchType: 'none' });
-              await navigate({ to: '/login' });
-              queryClient.clear();
+              try {
+                await signOut();
+                await queryClient.invalidateQueries({ queryKey: meQuery().queryKey, exact: true, refetchType: 'none' });
+                await navigate({ to: '/login' });
+                queryClient.clear();
+              } catch (error) {
+                toast.error('Could not sign out', { description: error instanceof Error ? error.message : undefined });
+              }
             }}
           >
             <LogOutIcon />

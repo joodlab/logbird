@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { CheckIcon, LogOutIcon } from 'lucide-react';
 import { useEffect } from 'react';
+import { toast } from 'sonner';
 import { BrandLockup } from '@/components/brand';
 import { meQuery, workspaceSetupQuery } from '@/lib/api/queries';
 import { signOut } from '@/lib/auth-client';
@@ -56,10 +57,14 @@ function OnboardingLayout() {
           <span className="hidden sm:inline">{me.user.email}</span>
           <Button
             onClick={async () => {
-              await signOut();
-              await queryClient.invalidateQueries({ queryKey: meQuery().queryKey, exact: true, refetchType: 'none' });
-              await navigate({ to: '/login' });
-              queryClient.clear();
+              try {
+                await signOut();
+                await queryClient.invalidateQueries({ queryKey: meQuery().queryKey, exact: true, refetchType: 'none' });
+                await navigate({ to: '/login' });
+                queryClient.clear();
+              } catch (error) {
+                toast.error('Could not sign out', { description: error instanceof Error ? error.message : undefined });
+              }
             }}
             size="sm"
             variant="ghost"

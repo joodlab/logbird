@@ -122,9 +122,8 @@ it('counts suppressed attempts, targets known members, fans out atomically, and 
     const staged = await prisma.authAuditWindow.findFirstOrThrow({ where: { id: { startsWith: hash } } });
     expect(JSON.stringify(staged)).not.toContain(email);
     const workspaceBudget = `${auditNamespace()}:ws:${orgs[1]}:${Math.floor(now.getTime() / 3_600_000) * 3_600_000}`;
-    await prisma.authAuditBudget.create({
-      data: { id: workspaceBudget, namespace: auditNamespace(), stream: `ws:${orgs[1]}`, windowEnd: new Date('2041-01-01T01:00:00Z'), admitted: 59 },
-    });
+    // Admission already created this row to fence finalization before inserting its window.
+    await prisma.authAuditBudget.update({ where: { id: workspaceBudget }, data: { admitted: 59 } });
     await flushFailedSignIns(now, [staged.id]);
     await flushFailedSignIns(new Date(now.getTime() + 300_000), [staged.id]);
     {
