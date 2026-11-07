@@ -27,7 +27,7 @@ import {
   UserIcon,
   VenetianMaskIcon,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { ActionName } from '@/components/action-name';
 import { EntityLink, EntityProfileLink } from '@/components/entity-link';
 import { Timestamp } from '@/components/timestamp';
@@ -53,14 +53,30 @@ interface EventSheetProps {
   fetchDetail?: boolean;
   /** Set when a deep-linked event could not be loaded. */
   missingError?: unknown;
+  /**
+   * Where focus goes when the sheet closes. The sheet opens from state (URL `?event=`), so it has no trigger to return
+   * to by itself: pass the row that opened it.
+   */
+  finalFocus?: ComponentProps<typeof SheetContent>['finalFocus'];
 }
 
-export function EventSheet({ projectId, event, open, onOpenChange, onPrev, onNext, onFilter, fetchDetail = true, missingError }: EventSheetProps) {
+export function EventSheet({
+  projectId,
+  event,
+  open,
+  onOpenChange,
+  onPrev,
+  onNext,
+  onFilter,
+  fetchDetail = true,
+  missingError,
+  finalFocus,
+}: EventSheetProps) {
   const detail = useQuery({ ...eventQuery(projectId ?? '', event?.id ?? ''), enabled: open && fetchDetail && Boolean(projectId && event) });
   const e = detail.data?.event ?? event;
   return (
     <Sheet onOpenChange={onOpenChange} open={open}>
-      <SheetContent className="w-full gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[640px]" showCloseButton>
+      <SheetContent className="w-full gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[640px]" finalFocus={finalFocus} showCloseButton>
         {e ? (
           <EventDetailBody
             detail={detail.data}
@@ -225,10 +241,10 @@ function EventDetailBody({
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-col gap-3 border-b px-5 pt-4 pb-4">
         <div className="flex items-center gap-1 pe-10">
-          <Button aria-label="Previous event" disabled={!onPrev} onClick={onPrev} size="icon-xs" variant="ghost">
+          <Button aria-label="Previous event" className="pointer-coarse:size-11" disabled={!onPrev} onClick={onPrev} size="icon-xs" variant="ghost">
             <ChevronLeftIcon />
           </Button>
-          <Button aria-label="Next event" disabled={!onNext} onClick={onNext} size="icon-xs" variant="ghost">
+          <Button aria-label="Next event" className="pointer-coarse:size-11" disabled={!onNext} onClick={onNext} size="icon-xs" variant="ghost">
             <ChevronRightIcon />
           </Button>
           <span className="ms-1 hidden items-center gap-1 text-[11px] text-muted-foreground sm:flex">

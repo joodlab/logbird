@@ -14,7 +14,7 @@ import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { CheckCircle2Icon, KeyRoundIcon, Loader2Icon, PlusIcon, TriangleAlertIcon } from 'lucide-react';
-import { useState } from 'react';
+import { type RefObject, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { AdminNote, AdminOnly } from '@/components/admin-gate';
@@ -47,6 +47,7 @@ function KeysSettings() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const [createOpen, setCreateOpen] = useState(false);
+  const createButton = useRef<HTMLButtonElement>(null);
   const can = useCan();
   const manage = can('keys.manage');
   const revoke = useMutation({
@@ -69,7 +70,7 @@ function KeysSettings() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
           {manage ? null : <AdminNote className="flex-1">You can see this project's keys. Owners and admins create and revoke them.</AdminNote>}
           <AdminOnly allowed={manage} className="self-end sm:self-auto">
-            <Button disabled={!manage} onClick={() => setCreateOpen(true)} size="sm">
+            <Button disabled={!manage} onClick={() => setCreateOpen(true)} ref={createButton} size="sm">
               <PlusIcon />
               Create key
             </Button>
@@ -142,15 +143,27 @@ function KeysSettings() {
           </ul>
         )}
       </SettingsSection>
-      {manage ? <CreateKeyDialog onOpenChange={setCreateOpen} open={createOpen} projectId={projectId} /> : null}
+      {manage ? <CreateKeyDialog finalFocus={createButton} onOpenChange={setCreateOpen} open={createOpen} projectId={projectId} /> : null}
     </div>
   );
 }
 
 const nameSchema = z.string().trim().min(1, 'Name the key after what will use it.').max(64);
 
-function CreateKeyDialog({ open, onOpenChange, projectId }: { open: boolean; onOpenChange: (open: boolean) => void; projectId: string }) {
+function CreateKeyDialog({
+  open,
+  onOpenChange,
+  projectId,
+  finalFocus,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  projectId: string;
+  /** The "Create key" button: the dialog opens from state, so it returns focus there explicitly. */
+  finalFocus: RefObject<HTMLButtonElement | null>;
+}) {
   const queryClient = useQueryClient();
+  const nameInput = useRef<HTMLInputElement>(null);
   const [created, setCreated] = useState<{ key: ApiKey; secret: string } | null>(null);
   const create = useMutation({
     mutationFn: (value: { name: string; kind: 'ingest' | 'read' }) => api.keys.create(projectId, { name: value.name.trim(), kind: value.kind }),
@@ -178,7 +191,7 @@ function CreateKeyDialog({ open, onOpenChange, projectId }: { open: boolean; onO
 
   return (
     <Dialog onOpenChange={close} open={open}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg" finalFocus={finalFocus} initialFocus={created ? undefined : nameInput}>
         {created ? (
           <div className="flex flex-col gap-4">
             <DialogHeader>
@@ -225,10 +238,10 @@ function CreateKeyDialog({ open, onOpenChange, projectId }: { open: boolean; onO
                     <Label htmlFor="key-name">Name</Label>
                     <Input
                       aria-invalid={Boolean(message) || undefined}
-                      autoFocus
                       id="key-name"
                       onChange={(e) => field.handleChange(e.target.value)}
                       placeholder="Production API"
+                      ref={nameInput}
                       value={field.state.value}
                     />
                     {message ? <p className="text-destructive text-xs">{message}</p> : null}

@@ -19,7 +19,7 @@ import { translateQueryToSql } from '@/lib/query-translate';
 import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
 import { appendSqlPredicate } from '@/lib/sql-language';
 import { EventSheet } from './event-sheet';
-import { EventsTable } from './events-table';
+import { EventsTable, type EventsTableHandle } from './events-table';
 import { ColumnPicker, ExplorerOverflowMenu, ExportMenu, SaveViewButton } from './explorer-toolbar';
 import { FacetSidebar } from './facet-sidebar';
 
@@ -58,6 +58,12 @@ function isTyping(target: EventTarget | null): boolean {
   return Boolean(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.closest('[role=dialog]')));
 }
 
+/** `o` opens the cursor row only from the page or the grid itself, never while another control has focus. */
+function isPageOrRow(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  return !el || el === document.body || el.getAttribute('role') === 'row';
+}
+
 export function Explorer({
   projectId,
   state,
@@ -72,6 +78,7 @@ export function Explorer({
   const lang: QueryLang = allowSql && state.lang === 'sql' ? 'sql' : 'query';
   const effectiveQ = [baseQuery, q].filter(Boolean).join(' ');
   const queryBar = useRef<QueryInputHandle>(null);
+  const eventsTable = useRef<EventsTableHandle>(null);
   const [facetsOpen, setFacetsOpen] = useState(() => {
     if (embedded || typeof window === 'undefined') return false;
     try {
@@ -166,6 +173,12 @@ export function Explorer({
   const selected = selectedFromRows ?? deepLinked.data?.event ?? null;
 
   const select = useCallback((e: AuditEvent | null) => onChange({ ev: e?.id }), [onChange]);
+  // The cursor follows the open event (clicks, j/k in the sheet, deep links), so closing the sheet returns focus to it.
+  useEffect(() => {
+    if (selectedIndex >= 0) setCursor(selectedIndex);
+  }, [selectedIndex]);
+  const cursorRef = useRef(cursor);
+  cursorRef.current = cursor;
   const move = useCallback(
     (delta: number) => {
       if (rows.length === 0) return;
@@ -173,6 +186,8 @@ export function Explorer({
       const next = Math.min(rows.length - 1, Math.max(0, (from < 0 ? -1 : from) + delta));
       setCursor(next);
       if (ev) select(rows[next] ?? null);
+      // With the sheet closed, j/k move real focus through the grid (the sheet keeps focus while it is open).
+      else eventsTable.current?.focusRow(next);
     },
     [rows, ev, selectedIndex, cursor, select],
   );
@@ -192,7 +207,8 @@ export function Explorer({
       } else if (event.key === 'k') {
         event.preventDefault();
         move(-1);
-      } else if ((event.key === 'Enter' || event.key === 'o') && cursor >= 0 && !ev) {
+      } else if (event.key === 'o' && cursor >= 0 && !ev && isPageOrRow(event.target)) {
+        // Enter on a focused row is handled by the grid itself.
         event.preventDefault();
         select(rows[cursor] ?? null);
       }
@@ -402,7 +418,12 @@ export function Explorer({
               </>
             )}
           </span>
-          <button className="flex shrink-0 items-center gap-1 hover:text-foreground" onClick={() => setShowChart((s) => !s)} type="button">
+          <button
+            aria-expanded={showChart}
+            className="-my-2 flex shrink-0 items-center gap-1 py-2 hover:text-foreground pointer-coarse:-my-3.5 pointer-coarse:py-3.5"
+            onClick={() => setShowChart((s) => !s)}
+            type="button"
+          >
             <ChevronDownIcon className={cn('size-3.5 transition-transform', !showChart && '-rotate-90')} />
             {showChart ? 'Hide chart' : 'Show chart'}
           </button>
@@ -438,10 +459,12 @@ export function Explorer({
             hasMore={!problem && events.hasNextPage}
             loadMore={() => events.fetchNextPage()}
             loading={events.isPending && !problem}
+            onCursorChange={setCursor}
             onSelect={(e) => {
               setCursor(rows.indexOf(e));
               select(e);
             }}
+            ref={eventsTable}
             rows={rows}
             selectedId={ev}
             total={total}
@@ -451,6 +474,8 @@ export function Explorer({
 
       <EventSheet
         event={selected}
+        // Back to the row the sheet showed last (it may differ from the one opened, after j/k): never to <body>.
+        finalFocus={() => eventsTable.current?.rowElement(cursorRef.current) ?? true}
         onFilter={(term) => {
           addFilter(term);
         }}

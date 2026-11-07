@@ -26,7 +26,12 @@ function LoginLayout() {
       <footer className="relative flex h-14 items-center justify-center gap-3 text-muted-foreground text-xs">
         <span>Open-source audit trail · MIT</span>
         <span aria-hidden>·</span>
-        <a className="hover:text-foreground" href="https://github.com/joodlab/logbird" rel="noreferrer" target="_blank">
+        <a
+          className="-my-2 py-2 hover:text-foreground pointer-coarse:-my-3.5 pointer-coarse:py-3.5"
+          href="https://github.com/joodlab/logbird"
+          rel="noreferrer"
+          target="_blank"
+        >
           GitHub
         </a>
       </footer>

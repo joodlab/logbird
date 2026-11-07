@@ -48,7 +48,8 @@ export function CopyValue({ value, display, className }: { value: string; displa
   return (
     <button
       className={cn(
-        'group/copy inline-flex max-w-full items-center gap-1.5 rounded-sm font-mono text-[12px] text-foreground/90 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50',
+        // min-h-6: a 24px target (WCAG 2.5.8) without changing the text size; the copy icon shows on touch, which has no hover.
+        'group/copy inline-flex min-h-6 max-w-full items-center gap-1.5 rounded-sm font-mono text-[12px] text-foreground/90 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50',
         className,
       )}
       onClick={(event) => {
@@ -62,7 +63,7 @@ export function CopyValue({ value, display, className }: { value: string; displa
       {copied ? (
         <CheckIcon className="size-3 shrink-0 text-outcome-success" />
       ) : (
-        <CopyIcon className="size-3 shrink-0 opacity-0 transition-opacity group-hover/copy:opacity-60 group-focus-visible/copy:opacity-60" />
+        <CopyIcon className="size-3 shrink-0 opacity-0 transition-opacity group-hover/copy:opacity-60 group-focus-visible/copy:opacity-60 pointer-coarse:opacity-60" />
       )}
     </button>
   );

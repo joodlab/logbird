@@ -61,6 +61,12 @@
   --color-outcome-denied: var(--outcome-denied);
   --color-outcome-partial: var(--outcome-partial);
   --color-outcome-unknown: var(--outcome-unknown);
+  --color-outcome-success-foreground: var(--outcome-success-foreground);
+  --color-outcome-failure-foreground: var(--outcome-failure-foreground);
+  --color-outcome-denied-foreground: var(--outcome-denied-foreground);
+  --color-outcome-partial-foreground: var(--outcome-partial-foreground);
+  --color-severity-notice-foreground: var(--severity-notice-foreground);
+  --color-severity-warning-foreground: var(--severity-warning-foreground);
   --color-severity-info: var(--severity-info);
   --color-severity-notice: var(--severity-notice);
   --color-severity-warning: var(--severity-warning);
@@ -134,6 +140,14 @@
   --severity-notice: #2563eb;
   --severity-warning: #d97706;
   --severity-critical: #dc2626;
+  /* Text on an outcome/severity tint (badges, pills, KPI deltas). The 600-step colours above are for dots, bars and
+     icons; small text needs the 700/800 step to reach WCAG AA 4.5:1 on the /10 tint over card, background and muted. */
+  --outcome-success-foreground: #065f46;
+  --outcome-failure-foreground: #b91c1c;
+  --outcome-denied-foreground: #92400e;
+  --outcome-partial-foreground: #9a3412;
+  --severity-notice-foreground: #1d4ed8;
+  --severity-warning-foreground: #92400e;
 
   --syntax-key: #7c3aed;
   --syntax-string: #047857;
@@ -198,6 +212,13 @@
   --severity-notice: #60a5fa;
   --severity-warning: #fbbf24;
   --severity-critical: #f87171;
+  /* Dark tints already pass AA with the base colours: text keeps them. */
+  --outcome-success-foreground: #34d399;
+  --outcome-failure-foreground: #f87171;
+  --outcome-denied-foreground: #fbbf24;
+  --outcome-partial-foreground: #fb923c;
+  --severity-notice-foreground: #60a5fa;
+  --severity-warning-foreground: #fbbf24;
 
   --syntax-key: #c4b5fd;
   --syntax-string: #6ee7b7;

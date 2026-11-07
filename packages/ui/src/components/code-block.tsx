@@ -33,11 +33,11 @@ export function CodeBlock({ code, language = 'text', title, className, maxHeight
       {title ? (
         <div className="flex h-9 items-center justify-between border-b px-3">
           <span className="font-mono text-[11px] text-muted-foreground uppercase tracking-wider">{title}</span>
-          <CopyButton label={copyLabel} value={code} />
+          <CopyButton className="pointer-coarse:size-11" label={copyLabel} value={code} />
         </div>
       ) : (
         <CopyButton
-          className="absolute top-2 end-2 bg-background/80 opacity-70 backdrop-blur group-hover/code:opacity-100"
+          className="absolute top-2 end-2 bg-background/80 opacity-70 backdrop-blur group-hover/code:opacity-100 pointer-coarse:size-11"
           label={copyLabel}
           value={code}
         />
@@ -65,13 +65,13 @@ export function CodeTabs({ tabs, className, defaultTab }: { tabs: CodeTab[]; cla
   if (!current) return null;
   return (
     <div className={cn('overflow-hidden rounded-lg border bg-muted/40', className)}>
-      <div className="flex h-9 items-center justify-between border-b ps-1 pe-2">
-        <div className="flex items-center" role="tablist">
+      <div className="flex h-9 items-center justify-between border-b ps-1 pe-2 pointer-coarse:h-11">
+        <div className="flex h-full items-center" role="tablist">
           {tabs.map((tab) => (
             <button
               aria-selected={tab.id === current.id}
               className={cn(
-                'relative h-9 px-3 font-medium text-[12px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:text-foreground',
+                'relative h-full rounded-md px-3 font-medium text-[12px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
                 tab.id === current.id &&
                   'text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-brand',
               )}
@@ -84,7 +84,7 @@ export function CodeTabs({ tabs, className, defaultTab }: { tabs: CodeTab[]; cla
             </button>
           ))}
         </div>
-        <CopyButton label="Copy snippet" value={current.code} />
+        <CopyButton className="pointer-coarse:size-11" label="Copy snippet" value={current.code} />
       </div>
       <pre className="overflow-auto p-3.5 font-mono text-[12.5px] leading-relaxed">
         <code>

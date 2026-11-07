@@ -83,8 +83,9 @@ const FIRST_LINE_ICON = 'mt-[calc((var(--query-bar-height)-2px-1rem)/2)]';
  * saved views, fields, operators, values ranked by frequency), a syntax hint row, Lucene/KQL conversions, a
  * Query | SQL mode toggle and inline server errors.
  *
- * Keyboard: ↑/↓ move, Tab (or Enter after moving) accepts, Enter runs, Ctrl/⌘+Enter always runs, Esc closes,
- * Ctrl+Space reopens, Shift+Delete forgets the highlighted recent query.
+ * Keyboard (the APG combobox convention): ↑/↓ move, Enter after moving (or on a partly typed name) accepts, → at the
+ * end of the text accepts, Enter runs, Ctrl/⌘+Enter always runs, Esc closes, Ctrl+Space reopens, Shift+Delete forgets
+ * the highlighted recent query. Tab never edits the query: focus moves on and the panel closes.
  */
 export function QueryInput({
   projectId,
@@ -143,7 +144,7 @@ export function QueryInput({
     if (showList) document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
   }, [activeIndex, showList, listId]);
 
-  // Warm the value cache for the highlighted field, so Tab → `field:` shows its values without a spinner.
+  // Warm the value cache for the highlighted field, so accepting `field:` shows its values without a spinner.
   const queryClient = useQueryClient();
   const warmField = activeSuggestion ? valueSourceFor(activeSuggestion) : null;
   useEffect(() => {
@@ -260,25 +261,33 @@ export function QueryInput({
       recent.remove(activeSuggestion.recent.q, activeSuggestion.recent.lang);
       return;
     }
-    if (e.key === 'Tab' && !e.shiftKey && showPanel && (showList || draft.trim())) {
-      // While composing, Tab completes and never moves focus (to the mode toggle, where Enter would switch
-      // modes). Esc closes the panel first; then Tab leaves the bar as usual.
-      e.preventDefault();
-      if (activeSuggestion && activeSuggestion.id !== 'loading') accept(activeSuggestion);
-      return;
+    // Tab is left alone: a keyboard user leaving the bar must never rewrite the query (WCAG 3.2.2). Blur closes the panel.
+    const prefix = completions.prefix.toLowerCase();
+    const partial =
+      Boolean(prefix) &&
+      activeSuggestion !== undefined &&
+      activeSuggestion.kind !== 'recent' &&
+      activeSuggestion.kind !== 'fix' &&
+      // A fully typed name (`impersonator` for `impersonator:*`) is not partial: Enter runs.
+      activeSuggestion.label.toLowerCase().replace(/:\*?$/, '') !== prefix &&
+      activeSuggestion.insert.trim().toLowerCase().replace(/:\*?$/, '') !== prefix;
+    if (e.key === 'ArrowRight' && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && activeSuggestion && activeSuggestion.id !== 'loading') {
+      // → completes like a shell or an address bar: only from the end of the text (or right after a fix), so moving the
+      // caret through the query still works.
+      const el = e.currentTarget;
+      const at = el.selectionStart;
+      const collapsed = at === el.selectionEnd;
+      const atEnd = at === draft.length;
+      const afterFix = activeSuggestion.kind === 'fix' && at === activeSuggestion.to;
+      if (collapsed && ((atEnd && (navigated || partial || activeSuggestion.kind === 'fix')) || afterFix)) {
+        e.preventDefault();
+        accept(activeSuggestion);
+        return;
+      }
     }
     if (e.key === 'Enter') {
       if (e.shiftKey && lang === 'sql' && !(showList && navigated)) return; // newline
       e.preventDefault();
-      const prefix = completions.prefix.toLowerCase();
-      const partial =
-        Boolean(prefix) &&
-        activeSuggestion !== undefined &&
-        activeSuggestion.kind !== 'recent' &&
-        activeSuggestion.kind !== 'fix' &&
-        // A fully typed name (`impersonator` for `impersonator:*`) is not partial: Enter runs.
-        activeSuggestion.label.toLowerCase().replace(/:\*?$/, '') !== prefix &&
-        activeSuggestion.insert.trim().toLowerCase().replace(/:\*?$/, '') !== prefix;
       if (activeSuggestion && activeSuggestion.id !== 'loading' && !e.metaKey && !e.ctrlKey && (navigated || partial)) {
         accept(activeSuggestion);
         return;
@@ -366,6 +375,7 @@ export function QueryInput({
             aria-activedescendant={showList ? `${listId}-${activeIndex}` : undefined}
             aria-autocomplete="list"
             aria-controls={listId}
+            aria-describedby={showList ? `${listId}-keys` : undefined}
             aria-expanded={showList}
             aria-invalid={showProblem || undefined}
             aria-label={lang === 'sql' ? 'SQL WHERE expression' : 'Query'}
@@ -419,6 +429,11 @@ export function QueryInput({
           <Kbd className="me-1 hidden md:inline-flex">/</Kbd>
         </div>
       </div>
+      {showList ? (
+        <span className="sr-only" id={`${listId}-keys`}>
+          Up and down arrows choose a suggestion, Enter or Right arrow inserts it, Escape closes the list.
+        </span>
+      ) : null}
       {showPanel ? (
         <SuggestionPanel
           active={activeIndex}
