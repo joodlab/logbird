@@ -93,7 +93,8 @@ interface EventsTableProps {
    */
   rowLabel?: (event: AuditEvent) => string;
   /**
-   * Identifies the result set `rows` belongs to (its query, language and range). Change it only when non-placeholder
+   * Identifies the result set `rows` belongs to: every input of the query that produced them (project, range, the
+   * effective query including any base query, and its language). Change it only when non-placeholder
    * data for a new query is committed: a changed key marks `rows` as a new result set, however many rows it shares with
    * the old one. Without it, a new result set is inferred from the rows (`isReplaced`: the old first row is gone), which
    * misses a new query whose newest match is the old first row.

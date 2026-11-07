@@ -49,6 +49,14 @@ interface ExplorerProps {
 
 const FACETS_KEY = 'logbird.explorer.facets';
 
+/**
+ * The `EventsTable` result-set key: every input of the events query. That is the project, the range and the effective
+ * query, including an entity page's `baseQuery`. The language only matters when there is a query to parse.
+ */
+export function explorerResultKey(projectId: string, range: string, effectiveQ: string, lang: QueryLang): string {
+  return JSON.stringify([projectId, range, effectiveQ, effectiveQ ? lang : 'query']);
+}
+
 function newestArrival(events: AuditEvent[]): string | undefined {
   return events.reduce<string | undefined>((max, e) => (!max || e.receivedAt > max ? e.receivedAt : max), undefined);
 }
@@ -99,16 +107,23 @@ export function Explorer({
   /* ---------------- query errors ---------------- */
   // A rejected query keeps the last good results on screen (dimmed) and explains itself in the bar.
   const problem = queryProblem(events.error, lang) ?? queryProblem(histogram.error, lang);
-  const lastGood = useRef<{ pages?: SearchResponse[]; histogram?: HistogramResponse; query?: { q: string; lang: QueryLang }; range?: string }>({});
+  const lastGood = useRef<{
+    pages?: SearchResponse[];
+    histogram?: HistogramResponse;
+    query?: { q: string; lang: QueryLang };
+    range?: string;
+    resultKey?: string;
+  }>({});
   if (events.data && !events.isError) lastGood.current.pages = events.data.pages;
   if (events.isSuccess && !events.isPlaceholderData) {
     lastGood.current.query = { q, lang };
     lastGood.current.range = range;
+    lastGood.current.resultKey = explorerResultKey(projectId, range, effectiveQ, lang);
   }
-  // The result set the table shows: it changes only when non-placeholder results for a new query, language or range are
-  // committed, so the table starts that set at the top even when it shares rows with the old one.
-  const committed = lastGood.current.query;
-  const resultKey = committed ? JSON.stringify([lastGood.current.range, committed.lang, committed.q]) : undefined;
+  // The result set the table shows: it changes only when non-placeholder results for a new project, query, language or
+  // range are committed, so the table starts that set at the top even when it shares rows with the old one (e.g. moving
+  // between two entity profiles, where `q` stays empty but `baseQuery` changes).
+  const resultKey = lastGood.current.resultKey;
   if (histogram.data && !histogram.isError) lastGood.current.histogram = histogram.data;
   // Nothing valid to save or export while the query is rejected (the export would fail the same way).
   const saveBlocked = problem ? 'Fix the query first — a view must run without errors.' : null;
