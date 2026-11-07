@@ -1,10 +1,12 @@
-import { copyFile, mkdir, readFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
 import { clips, imageWidths, screenshots, type Variant } from '../src/lib/media-manifest';
 
 const root = resolve('../..');
 const output = resolve('public/media');
+// Start empty: every file is regenerated below, and a capture removed from the manifest must not ship.
+await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 async function source(path: string) {
   const file = resolve(root, path);

@@ -97,7 +97,7 @@ run it on your own servers. <!-- source: docs/brand.md §2 (cloud clause "or our
 | SQL mode runs as a separate read-only ClickHouse user with row policies bound to one project | `docs/SPEC.md` §5.1.2, `docs/query-language.md` |
 | Logbird records its own management actions in a workspace activity stream | `docs/SPEC.md` §1.5 |
 | First-party integrations: Hono, TanStack Start, Vue, Nuxt; worker helper `jobAudit` | `docs/integrations.md`, `packages/sdk/README.md` |
-| Self-host: `docker compose up -d`, Compose ≥ 2.24.4; Coolify; external Postgres/ClickHouse/Redis or Dragonfly; Caddy TLS | `docs/self-hosting.md`, `docs/coolify.md` |
+| Self-host: sequential `docker compose build`, then `docker compose up -d --no-build`, Compose ≥ 2.24.4; Coolify; external Postgres/ClickHouse/Redis or Dragonfly; Caddy TLS | `docs/self-hosting.md`, `docs/coolify.md` |
 | Suggested starting VM: 4 vCPU, 8 GB RAM, SSD — an initial allocation, not measured capacity | `docs/self-hosting.md` §Sizing |
 
 **Not used on purpose:** performance numbers of any kind (query latency, events per second, "300,000 events in
