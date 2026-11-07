@@ -6,7 +6,7 @@ import { CheckIcon, LogOutIcon } from 'lucide-react';
 import { useEffect } from 'react';
 import { BrandLockup } from '@/components/brand';
 import { workspaceSetupQuery } from '@/lib/api/queries';
-import { authClient } from '@/lib/auth-client';
+import { signOut } from '@/lib/auth-client';
 import { hasName } from '@/lib/user';
 
 export const Route = createFileRoute('/_authed/onboarding')({
@@ -56,7 +56,7 @@ function OnboardingLayout() {
           <span className="hidden sm:inline">{me.user.email}</span>
           <Button
             onClick={async () => {
-              await authClient.signOut();
+              await signOut();
               queryClient.clear();
               await navigate({ to: '/login' });
             }}

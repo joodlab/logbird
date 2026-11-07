@@ -179,10 +179,10 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
         expect(await failed.json()).not.toHaveProperty('user');
       }
       await flushTestSignIns([authEmailHash(actor.email, env.BETTER_AUTH_SECRET)]);
-      const signedOut = await request(actor.cookie, '/api/auth/sign-out', 'POST', {});
+      const signedOut = await request(actor.cookie, '/api/session/sign-out', 'POST', {});
       expect(signedOut.status).toBe(200);
       expect((await request(actor.cookie, '/api/me')).status).toBe(401);
-      expect((await request(actor.cookie, '/api/auth/sign-out', 'POST', {})).status).toBe(200);
+      expect((await request(actor.cookie, '/api/session/sign-out', 'POST', {})).status).toBe(401);
       const rows = await rawActivity();
       const logoutRows = rows.filter((r) => r.action === 'auth.signed_out' && r.actor.id === actor.id);
       expect(logoutRows).toHaveLength(1);

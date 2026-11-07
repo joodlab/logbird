@@ -1,5 +1,4 @@
 import { serve } from '@hono/node-server';
-import { reconcileSessionAudit } from '@logbird/auth';
 import { closeProjectLocks, prisma } from '@logbird/database';
 import { closeRetentionQueue } from '@logbird/worker/queue';
 import { app } from './app';
@@ -22,8 +21,7 @@ if ('keepAliveTimeout' in server) {
 }
 const auditDrainer = startAuditDrainer(ingest, async () => {
   await backfillAuthEmailHashes(env.BETTER_AUTH_SECRET);
-  const results = await Promise.allSettled([flushFailedSignIns(), reconcileSessionAudit()]);
-  if (results.some((result) => result.status === 'rejected')) throw new Error('Audit preparation unavailable');
+  await flushFailedSignIns();
 });
 let stopping = false;
 function shutdown() {
