@@ -51,7 +51,7 @@ async function deliverClaimed(row: AuditOutbox, deliverAuditEvent: DeliverAuditE
 export async function deliverOutboxEvent(id: string, deliverAuditEvent: DeliverAuditEvent, now = new Date()) {
   for (const row of await claimAuditEvents(now, id)) await deliverClaimed(row, deliverAuditEvent, now);
 }
-/** A requested export can race another replica's drainer claim; wait for its acknowledgement before sending bytes. */
+/** A requested export can race another replica's claim; await acknowledgement before sending bytes. */
 export async function waitForAuditDelivery(id: string, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   while (true) {
@@ -131,9 +131,14 @@ export async function sweepAuditRetention(now = new Date()) {
     SELECT id FROM "AuthAuditWindow" WHERE namespace=${ns} AND "closedAt" IS NOT NULL AND "quarantinedAt" IS NULL
     AND "flushedAttempts"=attempts AND "windowEnd" < ${new Date(+now - 3_600_000)} ORDER BY "windowEnd" LIMIT 200 FOR UPDATE SKIP LOCKED)`;
   const budgets = await prisma.$executeRaw`DELETE FROM "AuthAuditBudget" WHERE id IN (
-    SELECT b.id FROM "AuthAuditBudget" b WHERE b.namespace=${ns} AND b.reported=true AND b."windowEnd" < ${new Date(+now - 86_400_000)}
+    SELECT b.id FROM "AuthAuditBudget" b WHERE b.namespace=${ns} AND b.reported=true AND b."quarantinedAt" IS NULL AND b."reportedSuppressed"=b.suppressed AND b."windowEnd" < ${new Date(+now - 86_400_000)}
     AND NOT EXISTS (SELECT 1 FROM "AuthAuditWindow" w WHERE w.namespace=b.namespace AND w."closedAt" IS NULL
       AND w."windowEnd">b."windowEnd"-INTERVAL '1 hour' AND w."windowEnd"<=b."windowEnd")
     ORDER BY b."windowEnd" LIMIT 200 FOR UPDATE SKIP LOCKED)`;
-  return { delivered, windows, budgets };
+  const admissions = await prisma.$executeRaw`DELETE FROM "AuthAuditAdmission" WHERE id IN (
+    SELECT a.id FROM "AuthAuditAdmission" a WHERE a.namespace=${ns} AND a."windowEnd" < ${new Date(+now - 86_400_000)}
+    AND NOT EXISTS (SELECT 1 FROM "AuthAuditWindow" w WHERE w.namespace=a.namespace AND w."closedAt" IS NULL
+      AND w."windowEnd">a."windowEnd"-INTERVAL '1 hour' AND w."windowEnd"<=a."windowEnd")
+    ORDER BY a."windowEnd" LIMIT 200 FOR UPDATE SKIP LOCKED)`;
+  return { delivered, windows, budgets, admissions };
 }

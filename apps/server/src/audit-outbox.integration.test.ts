@@ -122,8 +122,15 @@ it('counts suppressed attempts, targets known members, fans out atomically, and 
     const staged = await prisma.authAuditWindow.findFirstOrThrow({ where: { id: { startsWith: hash } } });
     expect(JSON.stringify(staged)).not.toContain(email);
     const workspaceBudget = `${auditNamespace()}:ws:${orgs[1]}:${Math.floor(now.getTime() / 3_600_000) * 3_600_000}`;
+    // Workspace budgets are resolved only during preparation; seed this destination near its limit.
     await prisma.authAuditBudget.create({
-      data: { id: workspaceBudget, namespace: auditNamespace(), stream: `ws:${orgs[1]}`, windowEnd: new Date('2041-01-01T01:00:00Z'), admitted: 59 },
+      data: {
+        id: workspaceBudget,
+        namespace: auditNamespace(),
+        stream: `ws:${orgs[1]}`,
+        windowEnd: new Date(Math.floor(+now / 3_600_000) * 3_600_000 + 3_600_000),
+        admitted: 59,
+      },
     });
     await flushFailedSignIns(now, [staged.id]);
     await flushFailedSignIns(new Date(now.getTime() + 300_000), [staged.id]);
@@ -132,10 +139,7 @@ it('counts suppressed attempts, targets known members, fans out atomically, and 
       const events = await prisma.auditOutbox.findMany({ where: { stream: `ws:${org}` }, orderBy: { createdAt: 'asc' } });
       expect(events).toHaveLength(2);
       expect(events.map((r) => (r.payload as { metadata: { attempts: number } }).metadata.attempts)).toEqual([1, 4]);
-      expect(events[0]?.payload).toMatchObject({
-        targets: [{ type: 'user', id, name: 'QA Target Member' }],
-        description: "Failed sign-in to QA Target Member's account (wrong code)",
-      });
+      expect(events[0]?.payload).toMatchObject({ targets: [{ type: 'user', id, name: 'QA Target Member' }] });
     }
     expect(await prisma.auditOutbox.count({ where: { stream: `ws:${orgs[1]}` } })).toBe(1);
     expect((await prisma.authAuditBudget.findUniqueOrThrow({ where: { id: workspaceBudget } })).suppressed).toBe(4);

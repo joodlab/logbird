@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+﻿import { randomUUID } from 'node:crypto';
 import { Prisma, prisma } from '@logbird/database';
 import { Queue } from 'bullmq';
 import Redis from 'ioredis';
@@ -69,6 +69,7 @@ afterAll(async () => {
     await prisma.auditOutbox.deleteMany({ where: { namespace: prefix } });
     await prisma.authAuditWindow.deleteMany({ where: { namespace: prefix } });
     await prisma.authAuditBudget.deleteMany({ where: { namespace: prefix } });
+    await prisma.authAuditAdmission.deleteMany({ where: { namespace: prefix } });
   } finally {
     await queue.close();
     await connection.quit();

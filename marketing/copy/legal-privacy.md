@@ -12,13 +12,18 @@ path: /legal/privacy
 - **body (shown at the top of the page, prominent):** Placeholder — to be replaced by counsel-reviewed text before
   launch.
 - **visual:** none
+- **site:** the page renders the banner and the summary only, and stays `ready: false` (noindex, not in the footer or
+  sitemap) until counsel-reviewed text replaces it.
 
 ## summary
 
 - **id:** `summary`
 - **heading (H1):** Privacy
-- **body:** This website collects one thing: the details you type into the waitlist and contact form. We use them to
-  contact you about Logbird. The site uses no trackers, no analytics cookies and no third-party advertising scripts.
+- **body:** This website collects the details you type into the waitlist and contact form, and we use them to contact
+  you about Logbird. Like any web server, it also processes your IP address: in memory to rate-limit the form, and it
+  may appear in our host's request logs. The site uses no trackers, no analytics cookies and no third-party advertising scripts.
+  <!-- source: apps/web/server/waitlist.ts and src/server/waitlist.ts (the IP keys an in-memory limiter only; it is
+  not written to the waitlist file) -->
 - **visual:** none
 
 ## must-cover
@@ -29,6 +34,8 @@ path: /legal/privacy
   - **Who the controller is:** the publisher's legal entity name, address and contact details (owner to provide; `WEB_ORG_NAME`).
   - **Data collected by the site:** waitlist and contact form only — email (required); name, company, topic and
     message (optional). Server logs, if the host keeps any, and for how long.
+  - **IP addresses:** used in memory to rate-limit the form (never stored with the waitlist entry); the host or CDN
+    (Cloudflare) may log them with each request. The owner confirms the host's log retention.
   - **Purpose and legal basis:** contacting the person about Logbird; whether consent or legitimate interest applies
     in each jurisdiction where we sell (Saudi Arabia, the UAE and other GCC states, Egypt, Tunisia) and where
     visitors are (EU, UK, US). <!-- jurisdictions from docs/brand.md §8 -->
@@ -38,7 +45,8 @@ path: /legal/privacy
   - **Retention:** how long waitlist entries are kept, and when they're deleted.
   - **Rights:** how to see, correct or delete your data, and how to withdraw from the waitlist.
   - **International transfers**, if the storage or email provider is outside the visitor's country.
-  - **Contact:** a privacy contact address. Placeholder: `privacy@logbird.dev` (domain not bought yet).
+  - **Contact:** a privacy contact address (owner to provide; there is no default mailbox, and the domain isn't bought
+    yet).
   - **Scope:** this policy covers the website only. Self-hosted Logbird installations are run by their operators;
     Logbird Cloud will have its own terms and data processing terms before it opens.
   - **Changes:** how and when the policy is updated, with a "last updated" date.

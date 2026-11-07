@@ -1,23 +1,23 @@
-import { clearSessionCookies } from '@logbird/auth';
+import { clearSessionCookies, trustedSessionMutation } from '@logbird/auth';
 import { revokeSessionSchema, sessionActionResponseSchema } from '@logbird/contracts';
 import { Prisma, prisma, type Session } from '@logbird/database';
 import { type Context, Hono } from 'hono';
+import { createMiddleware } from 'hono/factory';
 import { validator } from 'hono-openapi';
-import { env } from './env';
 import { ApiError } from './errors';
 import { audit } from './ingest';
 import { doc } from './openapi';
 import type { AppEnv } from './types';
 
 type EndMode = 'sign-out' | 'revoke' | 'revoke-all' | 'revoke-others';
+// Run before requireSession: even the library's implicit session refresh must follow origin validation.
+export const sessionMutationOrigin = createMiddleware<AppEnv>(async (c, next) => {
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && !(await trustedSessionMutation(c.req.raw)))
+    throw new ApiError(403, 'forbidden', 'Use a trusted Logbird Origin or Referer.');
+  await next();
+});
+
 async function endSessions(c: Context<AppEnv>, mode: EndMode, sessionId?: string) {
-  // CORS alone does not stop a cross-origin POST from mutating cookie-authenticated state.
-  const origin = c.req.header('origin');
-  if (
-    (origin && ![env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)].includes(origin)) ||
-    c.req.header('sec-fetch-site') === 'cross-site'
-  )
-    throw new ApiError(403, 'forbidden', 'Use a trusted Logbird origin.');
   const actor = c.get('user');
   const currentId = c.get('session').id;
   const clearsCookie = mode === 'sign-out' || mode === 'revoke-all' || (mode === 'revoke' && sessionId === currentId);
@@ -50,6 +50,7 @@ async function endSessions(c: Context<AppEnv>, mode: EndMode, sessionId?: string
           undefined,
           {
             organizationId: member.organizationId,
+            description: `${mode === 'sign-out' ? 'Signed out on' : 'Revoked'} the session from ${session.ipAddress || 'an unknown address'} (${session.userAgent || 'unknown device'}), signed in ${session.createdAt.toISOString()}`,
             metadata: {
               session: {
                 createdAt: session.createdAt.toISOString(),
