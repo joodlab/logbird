@@ -18,6 +18,7 @@ import { formatNumber } from '@/lib/format';
 import { queryProblem, reasonTitle } from '@/lib/query-error';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
+import { andQuery } from '@/lib/query-language';
 import { appendSqlPredicate } from '@/lib/sql-language';
 import { EventSheet } from './event-sheet';
 import { EventsTable, type EventsTableHandle } from './events-table';
@@ -85,7 +86,8 @@ export function Explorer({
 }: ExplorerProps) {
   const { q, range, columns, ev, live } = state;
   const lang: QueryLang = allowSql && state.lang === 'sql' ? 'sql' : 'query';
-  const effectiveQ = [baseQuery, q].filter(Boolean).join(' ');
+  // The base filter (an entity or support agent) must constrain all of `q`, even one with a top-level OR.
+  const effectiveQ = andQuery(baseQuery ?? '', q);
   const queryBar = useRef<QueryInputHandle>(null);
   const eventsTable = useRef<EventsTableHandle>(null);
   const [facetsOpen, setFacetsOpen] = useState(() => {
@@ -245,7 +247,7 @@ export function Explorer({
   /** "Filter by this value" from the event sheet: a query term, translated to a predicate in SQL mode. */
   const addFilter = (term: string) => {
     if (lang !== 'sql') {
-      onChange({ q: `${q} ${term}`.trim(), ev: undefined });
+      onChange({ q: andQuery(q, term), ev: undefined });
       return;
     }
     const predicate = translateQueryToSql(term);

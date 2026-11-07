@@ -1,6 +1,6 @@
 import type { QueryLang } from '@logbird/contracts';
 import { coreField } from '@/lib/query-catalog';
-import { canonicalField, fieldTerms, formatTerm, removeTerm } from '@/lib/query-language';
+import { andQuery, canonicalField, fieldTerms, formatTerm, hasTopLevelOr, removeTokens, topLevelFieldTerms } from '@/lib/query-language';
 import { appendSqlPredicate, removeSqlConjuncts, sqlConjuncts, sqlString } from '@/lib/sql-language';
 
 /**
@@ -12,10 +12,15 @@ import { appendSqlPredicate, removeSqlConjuncts, sqlConjuncts, sqlString } from 
  * - excluding `*` drops every other term for the field (positive and negative), since nothing else can match;
  * - excluding one value drops `-field:*` and that value's positive term.
  *
- * So no click can leave a contradiction such as `-impersonator:* impersonator:support_1` that matches nothing.
+ * So no click from the sidebar can leave a contradiction such as `-impersonator:* impersonator:support_1`. Hand-written
+ * value groups (`impersonator:(a OR b)`, or a parenthesised `(impersonator_id = 'a')` in SQL) belong to the group too and
+ * are replaced with it; other hand-written forms (`impersonator_id IN (…)`, `impersonator:/re/`) are left as typed.
+ *
+ * Every predicate is ANDed with `andQuery` / `appendSqlPredicate`, so a query with a top-level OR is parenthesised and
+ * the presence filter constrains all of it.
  */
 export interface PresenceTerm {
-  /** `*` for "any value", else one value. */
+  /** `*` for "any value", else one value (for a value group, its raw `(…)` text). */
   value: string;
   negated: boolean;
 }
@@ -26,15 +31,16 @@ interface Adapter {
   add: (q: string, t: PresenceTerm) => string;
 }
 
+const OWN_KINDS = new Set(['plain', 'quoted', 'group']);
+
 function queryAdapter(field: string): Adapter {
   const f = canonicalField(field);
-  const own = (q: string) =>
-    fieldTerms(q).filter((t) => (t.valueKind === 'plain' || t.valueKind === 'quoted') && canonicalField(t.field ?? '') === f);
+  const isOwn = (t: { valueKind?: string; field?: string }) => OWN_KINDS.has(t.valueKind ?? '') && canonicalField(t.field ?? '') === f;
+  const term = (t: { value?: string; negated: boolean }) => ({ value: t.value ?? '', negated: Boolean(t.negated) });
   return {
-    terms: (q) => own(q).map((t) => ({ value: t.value ?? '', negated: Boolean(t.negated) })),
-    remove: (q, test) =>
-      own(q).reduce((acc, t) => (test({ value: t.value ?? '', negated: Boolean(t.negated) }) ? removeTerm(acc, field, t.value, t.negated) : acc), q),
-    add: (q, t) => `${q} ${formatTerm(field, t.value, t.negated)}`.trim(),
+    terms: (q) => fieldTerms(q).filter(isOwn).map(term),
+    remove: (q, test) => removeTokens(q, (t) => t.kind === 'field' && isOwn(t) && test(term(t))),
+    add: (q, t) => andQuery(q, formatTerm(field, t.value, t.negated)),
   };
 }
 
@@ -46,9 +52,34 @@ export function presenceSqlPredicate(column: string, t: PresenceTerm): string {
   return `${column} ${t.negated ? '!=' : '='} ${sqlString(t.value)}`;
 }
 
-/** Reads one top-level `col = '…'` / `col != '…'` conjunct back as a presence term. */
+/** `(x)` → `x` while the outer parentheses enclose the whole conjunct (quotes respected). */
+function unwrapParens(conjunct: string): string {
+  let c = conjunct.trim();
+  for (;;) {
+    if (!(c.startsWith('(') && c.endsWith(')'))) return c;
+    let depth = 0;
+    let quoted = false;
+    let whole = true;
+    for (let i = 0; i < c.length; i++) {
+      const ch = c[i];
+      if (quoted) {
+        if (ch === '\\') i += 1;
+        else if (ch === "'") quoted = false;
+      } else if (ch === "'") quoted = true;
+      else if (ch === '(') depth += 1;
+      else if (ch === ')') {
+        depth -= 1;
+        if (depth === 0 && i < c.length - 1) whole = false;
+      }
+    }
+    if (!whole) return c;
+    c = c.slice(1, -1).trim();
+  }
+}
+
+/** Reads one top-level `col = '…'` / `col != '…'` conjunct (redundant parentheses allowed) back as a presence term. */
 export function parsePresenceSql(conjunct: string, column: string): PresenceTerm | null {
-  const m = new RegExp(`^${escapeRegExp(column)}\\s*(!=|<>|=)\\s*'((?:[^'\\\\]|\\\\.)*)'$`).exec(conjunct.trim());
+  const m = new RegExp(`^${escapeRegExp(column)}\\s*(!=|<>|=)\\s*'((?:[^'\\\\]|\\\\.)*)'$`).exec(unwrapParens(conjunct));
   if (!m) return null;
   const notEqual = m[1] !== '=';
   const value = (m[2] ?? '').replace(/\\(.)/g, '$1');
@@ -101,10 +132,21 @@ export function togglePresenceTerm(q: string, field: string, value: string, mode
   );
 }
 
-/** Narrow a query to events that have the field (`field:*`), e.g. to count support without the empty bucket. */
+/**
+ * Narrow a query to events that have the field (`field:*`), e.g. to count support without the empty bucket. An
+ * existing `field:*` only counts when it constrains the whole query (outside every group, no top-level OR).
+ */
 export function withPresence(q: string, field: string, lang: QueryLang = 'query'): string {
-  const a = adapter(field, lang);
-  return a.terms(q).some((x) => same(x, { value: '*', negated: false })) ? q.trim() : a.add(q, { value: '*', negated: false });
+  const any: PresenceTerm = { value: '*', negated: false };
+  if (lang === 'sql') {
+    const a = adapter(field, lang);
+    return a.terms(q).some((x) => same(x, any)) ? q.trim() : a.add(q, any);
+  }
+  const f = canonicalField(field);
+  const constrained =
+    !hasTopLevelOr(q) &&
+    topLevelFieldTerms(q).some((t) => !t.negated && t.valueKind === 'plain' && t.value === '*' && canonicalField(t.field ?? '') === f);
+  return constrained ? q.trim() : andQuery(q, formatTerm(field, '*'));
 }
 
 /** Every simple term for the field, for whole-group rewrites ("who did it"). */

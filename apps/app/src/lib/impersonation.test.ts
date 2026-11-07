@@ -50,6 +50,12 @@ describe('who did it', () => {
     expect(withWhoFilter('-impersonator:support_2', 'self')).toBe('-impersonator:*');
   });
 
+  it('keeps a user OR whole when swapping the split (M1)', () => {
+    expect(withWhoFilter('outcome:failure OR outcome:denied', 'support')).toBe('(outcome:failure OR outcome:denied) impersonator:*');
+    expect(withWhoFilter('outcome:failure OR outcome:denied', 'self')).toBe('(outcome:failure OR outcome:denied) -impersonator:*');
+    expect(withWhoFilter('impersonator:(support_1 OR support_2)', 'self')).toBe('-impersonator:*');
+  });
+
   it('swaps the split in SQL', () => {
     expect(withWhoFilter("outcome = 'failure'", 'support', 'sql')).toBe("outcome = 'failure' AND impersonator_id != ''");
     expect(withWhoFilter("outcome = 'failure' AND impersonator_id = 'support_1'", 'self', 'sql')).toBe(

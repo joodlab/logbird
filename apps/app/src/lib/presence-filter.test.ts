@@ -135,3 +135,36 @@ describe('presence facet, SQL', () => {
     expect(withPresence('', F, 'sql')).toBe("impersonator_id != ''");
   });
 });
+
+describe('presence filter across OR and groups (round 3)', () => {
+  it('constrains a whole top-level OR when toggled from the sidebar (M1)', () => {
+    expect(q('outcome:failure OR outcome:denied', '*', 'include')).toBe('(outcome:failure OR outcome:denied) impersonator:*');
+    expect(q('outcome:failure OR outcome:denied', '*', 'exclude')).toBe('(outcome:failure OR outcome:denied) -impersonator:*');
+    expect(q('outcome:failure OR outcome:denied', 'support_1', 'include')).toBe('(outcome:failure OR outcome:denied) impersonator:support_1');
+    // Toggling back keeps the user's OR intact.
+    expect(q('(outcome:failure OR outcome:denied) impersonator:*', '*', 'include')).toBe('(outcome:failure OR outcome:denied)');
+  });
+
+  it('counts with a presence filter that constrains the whole query (M1)', () => {
+    expect(withPresence('outcome:failure OR outcome:denied', F)).toBe('(outcome:failure OR outcome:denied) impersonator:*');
+    // An existing impersonator:* under an OR does not constrain everything.
+    expect(withPresence('outcome:failure OR impersonator:*', F)).toBe('(outcome:failure OR impersonator:*) impersonator:*');
+    expect(withPresence('(a OR b) impersonator:*', F)).toBe('(a OR b) impersonator:*');
+    expect(withPresence("outcome = 'failure' OR outcome = 'denied'", F, 'sql')).toBe("(outcome = 'failure' OR outcome = 'denied') AND impersonator_id != ''");
+  });
+
+  it('replaces a hand-written value group with the presence group (m2)', () => {
+    expect(q('impersonator:(support_1 OR support_2)', '*', 'exclude')).toBe('-impersonator:*');
+    expect(q('impersonator:(support_1 OR support_2)', 'support_3', 'include')).toBe('impersonator:support_3');
+    expect(q('-impersonator:(support_1 OR support_2)', '*', 'include')).toBe('-impersonator:(support_1 OR support_2) impersonator:*');
+    // Flat ORs of agents are the same group.
+    expect(q('(impersonator:support_1 OR impersonator:support_2) action:x', '*', 'exclude')).toBe('action:x -impersonator:*');
+  });
+
+  it('reads redundant parentheses in SQL as the same predicate (m2)', () => {
+    expect(sql("(impersonator_id = 'support_1')", '*', 'exclude')).toBe("impersonator_id = ''");
+    expect(sql("((impersonator_id != ''))", '*', 'include')).toBe('');
+    expect(parsePresenceSql("(impersonator_id = 'a' OR impersonator_id = 'b')", 'impersonator_id')).toBeNull();
+    expect(parsePresenceSql("(impersonator_id = 'a)')", 'impersonator_id')).toEqual({ value: 'a)', negated: false });
+  });
+});

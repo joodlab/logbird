@@ -227,6 +227,45 @@ function join(tokens: QueryToken[]): string {
     .trim();
 }
 
+/** True when `q` has an `OR` outside every group. Adjacent terms bind tighter than `OR` (`a b OR c` = `(a b) OR c`). */
+export function hasTopLevelOr(q: string): boolean {
+  let depth = 0;
+  for (const t of tokenize(q)) {
+    if (t.kind === 'paren') depth += t.raw === ')' ? -1 : 1;
+    else if (depth === 0 && t.kind === 'operator' && t.raw === 'OR') return true;
+  }
+  return false;
+}
+
+/**
+ * `a` AND `b`, as one query. A side with a top-level `OR` is parenthesised, so the other side constrains all of it:
+ * `andQuery('impersonator:x', 'outcome:failure OR outcome:denied')` → `impersonator:x (outcome:failure OR outcome:denied)`.
+ */
+export function andQuery(a: string, b: string): string {
+  const x = a.trim();
+  const y = b.trim();
+  if (!x) return y;
+  if (!y) return x;
+  const wrap = (s: string) => (hasTopLevelOr(s) ? `(${s})` : s);
+  return `${wrap(x)} ${wrap(y)}`;
+}
+
+/** Terms outside every group (`depth 0`), i.e. the ones that constrain the whole query when it has no top-level OR. */
+export function topLevelFieldTerms(q: string): QueryToken[] {
+  let depth = 0;
+  const out: QueryToken[] = [];
+  for (const t of tokenize(q)) {
+    if (t.kind === 'paren') depth += t.raw === ')' ? -1 : 1;
+    else if (depth === 0 && t.kind === 'field') out.push(t);
+  }
+  return out;
+}
+
+/** Remove the tokens `test` accepts (by identity), tidying operators and groups they leave dangling. */
+export function removeTokens(q: string, test: (t: QueryToken) => boolean): string {
+  return join(tokenize(q).filter((t) => !test(t)));
+}
+
 /** Field terms present in the query (non-space tokens only). */
 export function fieldTerms(q: string): QueryToken[] {
   return tokenize(q).filter((t) => t.kind === 'field');
@@ -264,13 +303,13 @@ export function removeTerm(q: string, field: string, value?: string, negated?: b
  */
 export function includeTerm(q: string, field: string, value: string): string {
   const without = removeTerm(removeTerm(q, field, undefined, false), field, value, true);
-  return `${without} ${formatTerm(field, value)}`.trim();
+  return andQuery(without, formatTerm(field, value));
 }
 
 /** Exclude `field:value` (any number of exclusions can coexist). */
 export function excludeTerm(q: string, field: string, value: string): string {
   const without = removeTerm(q, field, value);
-  return `${without} ${formatTerm(field, value, true)}`.trim();
+  return andQuery(without, formatTerm(field, value, true));
 }
 
 /** Toggle helper used by facet rows: click → include / un-include; alt-click → exclude / un-exclude. */

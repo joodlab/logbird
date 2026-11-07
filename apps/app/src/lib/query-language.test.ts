@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  andQuery,
+  hasTopLevelOr,
   canonicalField,
   excludeTerm,
   formatTerm,
@@ -305,5 +307,30 @@ describe('include / exclude', () => {
     const q = excludeTerm(excludeTerm('', 'action', 'a'), 'action', 'b');
     expect(q).toBe('-action:a -action:b');
     expect(toggleTerm(q, 'action', 'a', 'exclude')).toBe('-action:b');
+  });
+});
+
+describe('andQuery (OR precedence)', () => {
+  it('detects only an OR outside every group', () => {
+    expect(hasTopLevelOr('outcome:failure OR outcome:denied')).toBe(true);
+    expect(hasTopLevelOr('(outcome:failure OR outcome:denied) action:x')).toBe(false);
+    expect(hasTopLevelOr('actor:(a OR b)')).toBe(false);
+    expect(hasTopLevelOr('-(a OR b) c')).toBe(false);
+    expect(hasTopLevelOr('ORDER:x')).toBe(false);
+  });
+
+  it('parenthesises a side with a top-level OR so the other side constrains all of it', () => {
+    // Explorer's effectiveQ on the agent page: the agent must constrain the whole user query.
+    expect(andQuery('impersonator:support_1', 'outcome:failure OR outcome:denied')).toBe('impersonator:support_1 (outcome:failure OR outcome:denied)');
+    expect(andQuery('outcome:failure OR outcome:denied', 'impersonator:*')).toBe('(outcome:failure OR outcome:denied) impersonator:*');
+    expect(andQuery('a OR b', 'c OR d')).toBe('(a OR b) (c OR d)');
+    expect(andQuery('(a OR b)', 'c')).toBe('(a OR b) c');
+    expect(andQuery('', 'a OR b')).toBe('a OR b');
+    expect(andQuery('actor:x', '')).toBe('actor:x');
+  });
+
+  it('includes and excludes facet values across an OR', () => {
+    expect(includeTerm('action:a OR action:b', 'outcome', 'failure')).toBe('(action:a OR action:b) outcome:failure');
+    expect(excludeTerm('action:a OR action:b', 'outcome', 'failure')).toBe('(action:a OR action:b) -outcome:failure');
   });
 });

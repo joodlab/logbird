@@ -17,9 +17,9 @@ it.runIf(process.env.CLICKHOUSE_URL)(
     const customer = { id: 'cust_huda', name: 'Huda Saleh (fictional)', type: 'user' };
     const fixtures = [
       { id: 'a', impersonator: { id: 'support_omar', name: 'Omar Haddad (fictional)' } },
-      { id: 'b', impersonator: { id: 'support_omar', name: 'Omar Haddad (fictional)' } },
-      { id: 'c', impersonator: { id: 'support_lina', name: 'Lina Park (fictional)' } },
-      { id: 'd' },
+      { id: 'b', outcome: 'failure', impersonator: { id: 'support_omar', name: 'Omar Haddad (fictional)' } },
+      { id: 'c', outcome: 'denied', impersonator: { id: 'support_lina', name: 'Lina Park (fictional)' } },
+      { id: 'd', outcome: 'denied' },
     ];
     try {
       const rows = fixtures.map((f, i) =>
@@ -46,6 +46,16 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       expect(asCustomer.values.filter((v) => v.value !== '').reduce((n, v) => n + v.count, 0)).toBe(3);
       expect((await searchEvents(ch, p, { from, to, q: 'actor:cust_huda -impersonator:*', limit: 10, order: 'desc' })).total).toBe(1);
       expect((await searchEvents(ch, p, { from, to, q: 'actor:cust_huda impersonator:*', limit: 10, order: 'desc' })).total).toBe(3);
+
+      // The agent page's timeline: andQuery('impersonator:support_omar', 'outcome:failure OR outcome:denied') parenthesises
+      // the user's OR, so only Omar's events come back. Unparenthesised, AND binds tighter and every denied event leaks in.
+      const agentOr = await searchEvents(ch, p, { from, to, q: 'impersonator:support_omar (outcome:failure OR outcome:denied)', limit: 10, order: 'desc' });
+      expect(agentOr.total).toBe(1);
+      expect(agentOr.data.map((e) => e.impersonator?.id)).toEqual(['support_omar']);
+      expect((await searchEvents(ch, p, { from, to, q: 'impersonator:support_omar outcome:failure OR outcome:denied', limit: 10, order: 'desc' })).total).toBe(3);
+      // The sidebar's presence count over a user OR: withPresence → '(…OR…) impersonator:*' excludes the empty bucket.
+      const anyOr = await facets(ch, p, { from, to, q: '(outcome:failure OR outcome:denied) impersonator:*', field: 'impersonator', limit: 1 });
+      expect(anyOr.values.reduce((n, v) => n + v.count, 0) + anyOr.otherCount).toBe(2);
 
       // The query bar and jump-to match a fragment of the agent's name, not only the id.
       const byName = suggestResponseSchema.parse(await suggestValues(ch, p, { field: 'impersonator', prefix: 'omar', limit: 10 }));

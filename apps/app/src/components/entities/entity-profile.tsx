@@ -24,7 +24,7 @@ import { ENTITY_SECTIONS, type EntitySection, entityQuery, splitTargetId, typeIc
 import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
-import { formatTerm } from '@/lib/query-language';
+import { andQuery, formatTerm } from '@/lib/query-language';
 import { rangeLabel } from '@/lib/range';
 import { useDocumentTitle } from '@/lib/use-document-title';
 
@@ -239,7 +239,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
               navigate({
                 to: '/p/$projectId/events',
                 params: { projectId },
-                search: (prev) => ({ range: prev.range, q: [baseQuery, timeline.q].filter(Boolean).join(' ') }),
+                search: (prev) => ({ range: prev.range, q: andQuery(baseQuery, timeline.q) }),
               })
             }
             type="button"
