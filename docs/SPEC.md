@@ -384,8 +384,7 @@ invitation acceptance remain available; organization administration uses its rol
 
 | /api operation | Owner | Admin | Member |
 |---|---|---|---|
-| PATCH /api/workspace (name / slug) | yes | yes | no |
-| better-auth organization update (other fields only) | yes | yes | no |
+| better-auth organization update | yes | yes | no |
 | better-auth organization delete | yes | no | no |
 | better-auth invite/cancel invitation, manage members | yes | yes (owner safeguards apply) | no |
 | better-auth profile/session, create workspace, accept/reject invitation, leave workspace | self-service | self-service | self-service (last-owner safeguards apply) |

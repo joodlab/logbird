@@ -260,6 +260,7 @@ export const managementRoutes = new Hono<AppEnv>()
       if (confirm !== c.get('project').slug) throw new ApiError(422, 'confirmation_required', 'Type the project slug to delete the project.');
       const projectId = c.get('project').id;
       await withProjectLock(projectId, async () => {
+        await prisma.project.update({ where: { id: projectId }, data: { exportDeleteStartedAt: new Date(), exportGeneration: { increment: 1 } } });
         await purgeProjectEvents(projectId);
         await prisma.$transaction(async (tx) => {
           const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });

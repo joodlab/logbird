@@ -2791,6 +2791,9 @@
               }
             }
           },
+          "429": {
+            "description": "Export capacity is in use. Finish or cancel an export, then retry."
+          },
           "default": {
             "content": {
               "application/json": {

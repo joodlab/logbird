@@ -88,7 +88,7 @@ it('fails closed for requested storage and preserves completed bytes through ter
   await expect(auditedExport(chunks(), false, receipt, new AbortController().signal)).rejects.toThrow('audit unavailable');
   expect(next).not.toHaveBeenCalled();
   expect(receipt.mock.calls.map(([action]) => action)).toEqual(['export.requested', 'export.failed']);
-  expect(receipt.mock.calls.at(-1)?.[1]).toEqual({ rows: 0, bytes: 0, reason: 'storage_unavailable' });
+  expect(receipt.mock.calls.at(-1)?.[1]).toEqual({ rows: 0, bytes: 0, reason: 'audit_unavailable' });
   receipt.mockResolvedValueOnce(undefined);
   const reader = (await auditedExport(chunks(), false, receipt, new AbortController().signal)).getReader();
   await reader.read();
@@ -170,5 +170,21 @@ it('audits invalid range and unavailable-client preparation inside the lifecycle
       new AbortController().signal,
     ),
   ).rejects.toThrow('safe');
-  expect(receipt.mock.calls.at(-1)).toEqual(['export.failed', { rows: 0, bytes: 0, reason: 'storage_unavailable' }]);
+  expect(receipt.mock.calls.at(-1)).toEqual(['export.failed', { rows: 0, bytes: 0, reason: 'sql_unavailable' }]);
+});
+
+it('releases admission and records a safe reason when a consumer stalls', async () => {
+  async function* chunks() {
+    while (true) yield '{}\n';
+  }
+  const receipt = vi.fn().mockResolvedValue(undefined);
+  const release = vi.fn().mockResolvedValue(undefined);
+  const reader = (
+    await auditedExport(chunks(), false, receipt, new AbortController().signal, 'qa-idle', { idleMs: 20, onSettled: release })
+  ).getReader();
+  await reader.read();
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await expect(reader.read()).rejects.toThrow('idle timeout');
+  expect(receipt.mock.calls.at(-1)?.[1].reason).toBe('idle_timeout');
+  expect(release).toHaveBeenCalledExactlyOnceWith('export.failed');
 });

@@ -57,7 +57,7 @@ it('matches search in both orders, retains legacy canonical payloads and half-op
     ];
     // Direct writes deliberately model pre-fence legacy duplicates, only in this fictional project.
     const rows = inputs.map((event, index) => {
-      const normalized = normalizeEvent(event, { projectId, receivedAt: new Date(clock + index) });
+      const normalized = normalizeEvent(event, { projectId, receivedAt: new Date(clock - 1000 + index) });
       if (!normalized.ok) throw new Error(normalized.reason);
       return normalized.row;
     });
@@ -99,6 +99,16 @@ it('matches search in both orders, retains legacy canonical payloads and half-op
     );
     const delayedRows: string[] = [];
     for (let i = 0; i < 200; i++) delayedRows.push((await delayed.next()).value as string);
+    // A received-time fence excludes late backdated rows on either side of the page cursor.
+    const late = [-5000, 5000].map((offset) => {
+      const result = normalizeEvent(
+        { id: `late-${offset}`, action: 'export.parity', occurredAt: new Date(clock - 3_600_000 + offset).toISOString() },
+        { projectId, receivedAt: new Date(clock + 5000) },
+      );
+      if (!result.ok) throw new Error(result.reason);
+      return result.row;
+    });
+    await insertEvents(ch, late);
     await new Promise((resolve) => setTimeout(resolve, 100));
     for await (const row of delayed) delayedRows.push(row);
     expect(delayedRows).toHaveLength(206);
@@ -116,7 +126,7 @@ it('matches search in both orders, retains legacy canonical payloads and half-op
     const tied = ['tie-a', 'tie-b'].map((description) => {
       const result = normalizeEvent(
         { id: 'legacy-tie', action: 'export.tie', occurredAt: new Date(clock - 1000).toISOString(), description },
-        { projectId, receivedAt: new Date(clock + 1000) },
+        { projectId, receivedAt: new Date(clock - 1) },
       );
       if (!result.ok) throw new Error(result.reason);
       return result.row;

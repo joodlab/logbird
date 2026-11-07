@@ -40,6 +40,11 @@ export const EXPORT_ID_HEADER = 'X-Logbird-Export-Id';
 export const EXPORT_SCHEMA_HEADER = 'X-Logbird-Export-Schema';
 export const exportFormatSchema = z.enum(['csv', 'jsonl', 'jsonl-evidence']);
 export type ExportFormat = z.infer<typeof exportFormatSchema>;
+export const EXPORT_FORMAT_LABELS: Record<ExportFormat, string> = {
+  'jsonl-evidence': 'Complete (original payloads)',
+  csv: 'Spreadsheet (CSV)',
+  jsonl: 'JSON Lines (all fields)',
+};
 export const exportQuerySchema = rangeQuerySchema.extend({ format: exportFormatSchema });
 export type ExportQuery = z.infer<typeof exportQuerySchema>;
 export const exportEvidenceRowSchema = z.object({ exportSchemaVersion: z.literal(EXPORT_SCHEMA_VERSION), event: eventSchema, payload: z.unknown() });

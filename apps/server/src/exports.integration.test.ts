@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { purgeProject } from '@logbird/clickhouse';
 import { createProjectResponseSchema, exportEvidenceRowSchema } from '@logbird/contracts';
 import { prisma, storeAuditEvent } from '@logbird/database';
+import { enforceProjectRetention } from '@logbird/worker/retention';
 import { expect, it, vi } from 'vitest';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
@@ -159,12 +160,15 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     }
     const resilient = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
     expect(resilient.status).toBe(200);
-    const unavailable = vi.spyOn(prisma.auditOutbox, 'create').mockRejectedValueOnce(new Error('fictional terminal storage outage'));
+    const unavailable = vi.spyOn(prisma, '$transaction').mockRejectedValueOnce(new Error('fictional terminal storage outage'));
     try {
       expect((await resilient.text()).trimEnd().split('\n')).toHaveLength(205);
     } finally {
       unavailable.mockRestore();
     }
+    const recovered = await receipts(resilient.headers.get('x-request-id') ?? '');
+    expect(recovered.map((row) => row.action).sort()).toEqual(['export.completed', 'export.requested']);
+    expect(recovered.find((row) => row.action === 'export.completed').metadata.export.rows).toBe(205);
     const aborted = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
     if (!aborted.body) throw new Error('Export body missing');
     const reader = aborted.body.getReader();
@@ -178,13 +182,16 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     expect((await receipts(invalid.headers.get('x-request-id') ?? '')).map((r) => r.action).sort()).toEqual(['export.failed', 'export.requested']);
     for (const [suffix, status, reason] of [
       ['format=jsonl&from=invalid&to=invalid', 422, 'invalid_query'],
-      ['format=jsonl&lang=sql&q=1', 503, 'storage_unavailable'],
+      ['format=jsonl&lang=sql&q=1', 503, 'sql_unavailable'],
     ] as const) {
       const early = await request(owner.cookie, `/api/projects/${projectId}/export?${suffix}`);
       expect(early.status).toBe(status);
       const records = await receipts(early.headers.get('x-request-id') ?? '');
       expect(records.map((r) => r.action).sort()).toEqual(['export.failed', 'export.requested']);
       expect(records.find((r) => r.action === 'export.failed').metadata.export.reason).toBe(reason);
+      expect(records.find((r) => r.action === 'export.failed').description).toContain(
+        reason === 'sql_unavailable' ? 'SQL mode unavailable' : 'invalid query',
+      );
     }
     const rejected = vi
       .spyOn(ingestion, 'ingest')
@@ -201,17 +208,91 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
       });
       expect(queued.map((row) => (row.payload as { action: string }).action).sort()).toEqual(['export.failed', 'export.requested']);
       expect(queued.find((row) => (row.payload as { action: string }).action === 'export.failed')?.payload).toMatchObject({
-        metadata: { export: { reason: 'storage_unavailable', rows: 0, bytes: 0 } },
+        metadata: { export: { reason: 'audit_unavailable', rows: 0, bytes: 0 } },
       });
     } finally {
       rejected.mockRestore();
     }
+    // Retention starts after the first page. Both timestamp orderings must fail closed at final validation.
+    for (const lateTimestamp of [new Date(Date.now() - 30_000), new Date(Date.now() + 30_000)]) {
+      const paused = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
+      if (!paused.body) throw new Error('Export body missing');
+      const reader = paused.body.getReader();
+      await reader.read();
+      const run = await prisma.retentionRun.create({
+        data: { projectId, retentionDays: 90, cutoff: new Date(), status: 'completed', finishedAt: new Date() },
+      });
+      // A newly ingested event is fenced out whether it sorts behind or ahead of the cursor.
+      await ingestion.ingest(projectId, { id: randomUUID(), action: 'evidence.updated', occurredAt: lateTimestamp.toISOString() });
+      let failed = false;
+      try {
+        while (!(await reader.read()).done) {
+          /* drain */
+        }
+      } catch {
+        failed = true;
+      }
+      expect(failed).toBe(true);
+      const terminal = (await receipts(paused.headers.get('x-request-id') ?? '')).find((row) => row.action === 'export.failed');
+      expect(terminal.metadata.export.reason).toBe('membership_changed');
+      await prisma.retentionRun.delete({ where: { id: run.id } });
+    }
+    await ingestion.ingest(
+      projectId,
+      Array.from({ length: 401 }, (_, i) => ({
+        id: `retained-${i}`,
+        action: 'evidence.retention',
+        occurredAt: new Date(Date.now() - 100 * 86_400_000).toISOString(),
+      })),
+    );
+    const retentionExport = await request(
+      owner.cookie,
+      `/api/projects/${projectId}/export?format=jsonl&q=action:evidence.retention&from=${new Date(Date.now() - 110 * 86_400_000).toISOString()}`,
+    );
+    if (!retentionExport.body) throw new Error('Export body missing');
+    const retentionReader = retentionExport.body.getReader();
+    await retentionReader.read();
+    await enforceProjectRetention(projectId);
+    await expect(
+      (async () => {
+        while (!(await retentionReader.read()).done) {
+          /* drain */
+        }
+      })(),
+    ).rejects.toThrow();
+    expect(
+      (await receipts(retentionExport.headers.get('x-request-id') ?? '')).find((row) => row.action === 'export.failed').metadata.export.reason,
+    ).toBe('membership_changed');
+    const afterPurge = await clickhouse.query({
+      query: "SELECT count() n FROM events WHERE project_id={p:String} AND action='evidence.retention'",
+      query_params: { p: projectId },
+      format: 'JSONEachRow',
+    });
+    expect(Number((await afterPurge.json<{ n: number }>())[0]?.n)).toBe(0);
+
+    const deletionExport = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
+    if (!deletionExport.body) throw new Error('Export body missing');
+    const deletionReader = deletionExport.body.getReader();
+    await deletionReader.read();
+    expect((await request(owner.cookie, `/api/projects/${projectId}?confirm=${project.slug}`, 'DELETE')).status).toBe(204);
+    project = undefined;
+    await expect(
+      (async () => {
+        while (!(await deletionReader.read()).done) {
+          /* drain */
+        }
+      })(),
+    ).rejects.toThrow();
+    expect(
+      (await receipts(deletionExport.headers.get('x-request-id') ?? '')).find((row) => row.action === 'export.failed').metadata.export.reason,
+    ).toBe('membership_changed');
     console.log(
       'SECURITY exports: owner/admin/member x 3 formats, 205 unique rows across pages; original payload deep equality; formula neutralization; completed, failed and canceled receipts verified against Postgres/ClickHouse/Redis/Mailpit.',
     );
   } finally {
     if (project) expect((await request(ownerCookie, `/api/projects/${project.id}?confirm=${project.slug}`, 'DELETE')).status).toBe(204);
     if (organizationId) {
+      await prisma.exportLease.deleteMany({ where: { workspaceId: organizationId } });
       await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${organizationId}` } });
       await purgeProject(clickhouse, `ws:${organizationId}`);
       await prisma.organization.delete({ where: { id: organizationId } });

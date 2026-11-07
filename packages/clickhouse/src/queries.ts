@@ -37,9 +37,9 @@ async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }, no
 }
 
 type Params = Record<string, unknown>;
-export async function read<T>(ch: ClickHouseClient, query: string, parameters: Params = {}, guard = 10): Promise<T[]> {
+export async function read<T>(ch: ClickHouseClient, query: string, parameters: Params = {}, guard = 10, exportBudget = false): Promise<T[]> {
   const query_params = { ...parameters };
-  for (const key of ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff']) {
+  for (const key of ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff', 'exportReceivedBefore']) {
     const value = query_params[key];
     if (typeof value === 'string') query_params[key] = new Date(value).toISOString().replace('T', ' ').slice(0, -1);
   }
@@ -55,6 +55,10 @@ export async function read<T>(ch: ClickHouseClient, query: string, parameters: P
         format: 'JSONEachRow',
         clickhouse_settings: {
           max_execution_time: isQueryClient(ch) ? 10 : guard,
+          // Restricted SQL's CONST profile supplies 1-GiB memory/read limits and reserves both API admission slots.
+          ...(exportBudget && !isQueryClient(ch)
+            ? { max_memory_usage: '134217728', max_bytes_to_read: '268435456', read_overflow_mode: 'throw' as const, max_threads: 2 }
+            : {}),
           ...(isQueryClient(ch) ? { SQL_logbird_project: project as string } : {}),
         },
       })
@@ -143,6 +147,7 @@ async function searchPage(
   q: SearchQuery,
   compiled?: Awaited<ReturnType<typeof filter>>,
   includePayload = false,
+  exportClock?: string,
 ): Promise<{ page: SearchResponse; payloads: string[] }> {
   const start = performance.now(),
     w = await where(ch, projectId, q, compiled),
@@ -151,6 +156,10 @@ async function searchPage(
     order = asc ? 'ASC' : 'DESC';
   let tail = '';
   const params: Params = { ...w.params, limit: q.limit + 1 };
+  if (exportClock) {
+    w.sql += ' AND received_at <= {exportReceivedBefore:DateTime64(3)}';
+    params.exportReceivedBefore = exportClock;
+  }
   if (q.cursor) {
     const [ts, id] = cursor(q.cursor);
     params.cursorTs = ts;
@@ -159,16 +168,20 @@ async function searchPage(
   }
   const rows = await read<EventRow>(
     ch,
-    `SELECT * EXCEPT(${includePayload ? 'search_text' : 'payload,search_text'}) FROM events WHERE project_id={project:String} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id`,
+    `SELECT * EXCEPT(${includePayload ? 'search_text' : 'payload,search_text'}) FROM events WHERE ${exportClock ? w.sql : 'project_id={project:String}'} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id`,
     params,
+    10,
+    Boolean(exportClock),
   );
   const hasMore = rows.length > q.limit,
     data = rows.slice(0, q.limit).map(toEvent),
     last = data.at(-1);
-  const total = Number(
-    (await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT 10001)`, w.params, 1))[0]?.n ??
-      0,
-  );
+  const total = exportClock
+    ? 0
+    : Number(
+        (await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT 10001)`, w.params, 1))[0]
+          ?.n ?? 0,
+      );
   return {
     page: { data, total, nextCursor: hasMore && last ? encode([last.timestamp, last.id]) : null, tookMs: performance.now() - start },
     payloads: includePayload ? rows.slice(0, q.limit).map((row) => row.payload) : [],
@@ -516,6 +529,7 @@ export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQu
       { ...query, cursor: nextCursor, limit: 200, order: 'asc' },
       frozen.compiled,
       q.format === 'jsonl-evidence',
+      frozen.clock,
     );
     if (first && q.format === 'csv') yield `${CSV_COLUMNS.join(',')}\n`;
     first = false;
@@ -524,6 +538,7 @@ export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQu
         // Same selected physical row, including when legacy conflicting versions share every identity timestamp.
         const payload = payloads[index];
         if (payload === undefined) throw new Error('Export payload no longer available');
+        if (/[\r\n]/u.test(payload)) throw new Error('Export payload contains a line separator');
         try {
           JSON.parse(payload);
         } catch {

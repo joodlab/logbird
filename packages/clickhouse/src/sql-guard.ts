@@ -18,7 +18,7 @@ function reject(reason: Reason, q: string, message: string, start = 0, end = q.l
 }
 /** q with the contents of single-quoted literals blanked (same length), so searches never match inside strings. */
 function code(q: string) {
-  return q.replace(/'(?:[^'\\]|\\.|'')*'?/g, (m) => `'${' '.repeat(Math.max(0, m.length - 2))}${m.length > 1 ? "'" : ''}`);
+  return q.replace(/'(?:[^'\\]|\\[\s\S]|'')*'?/g, (m) => `'${' '.repeat(Math.max(0, m.length - 2))}${m.length > 1 ? "'" : ''}`);
 }
 /** Span of the first occurrence of `pattern` outside string literals, or the whole expression. */
 function locate(q: string, pattern: RegExp): [number, number] {
@@ -199,7 +199,7 @@ export function sqlSyntaxError(error: unknown, statement: string, expression: st
 
 /** Called only after SQL validation. Resolve moving date functions once for every export page. */
 export function freezeSqlClock(expression: string, clock: number) {
-  const literal = "'(?:[^'\\\\]|\\\\.|'')*'";
+  const literal = "'(?:[^'\\\\]|\\\\[\\s\\S]|'')*'";
   const tokens = new RegExp(`${literal}|\\b(now64|now|today|yesterday)\\s*\\(`, 'gi');
   let end = 0;
   let sql = '';

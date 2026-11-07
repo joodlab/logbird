@@ -5,8 +5,19 @@
 Every matching event is exported in ascending event order. The query is compiled once with one export clock;
 its resolved range, compiled predicate/parameters and clock appear in the terminal record. Relative query bounds
 and SQL `now`, `now64`, `today`, `yesterday` calls stay fixed across pages. SQL clock functions need literal
-precision/time zones; use explicit timestamps for more complex expressions. Paging is not a database snapshot:
-concurrent ingestion, retention and deletion can still change the rows visible between pages.
+precision/time zones; use explicit timestamps for more complex expressions.
+
+Membership is the matching stored rows with `received_at <=` the frozen export start, ordered by occurrence time/id.
+Later received backdated rows are excluded on both sides of the cursor. The receive-time fence is applied to both
+the candidate lookup and the selected physical row. It uses stored receive timestamps, not a cross-replica wall-clock
+or transaction-commit ordering guarantee. Legacy duplicate arbitration remains the existing search policy.
+
+Retention/sample replacement advance a Postgres project generation **before** destructive I/O. Deletion persists
+a start marker before purging. Export preparation and the final validation take the existing short shared project
+lock and compare the generation/retention-run boundary. A changed boundary, in-progress/failed retention or deletion
+fails the stream with `membership_changed`, rather than recording completion of an incomplete file. Discard the
+partial file and retry. No lock or Postgres transaction spans the download. Direct administrative ClickHouse writes
+that bypass these application fences require stopping exports first. This is not a general database snapshot.
 
 ## Which format?
 
@@ -14,7 +25,8 @@ concurrent ingestion, retention and deletion can still change the rows visible b
   `event`, and the stored original JSON in `payload`. The latter preserves accepted nested/unknown/long values;
   it does not preserve HTTP whitespace, compression or the batch wrapper. Normalized fields and payload are selected
   from the same physical row, including legacy versions with tied timestamps. Missing or malformed stored JSON fails
-  the export. Syntax validation does not reserialize valid JSON or change large-number text.
+  the export. Literal CR/LF in externally inserted payload text also fails, protecting JSONL framing. Syntax validation
+  does not reserialize valid JSON or change large-number text.
 - **Spreadsheet (CSV)** — every normalized field; long values follow normalizer caps. UTF-8, comma delimiters,
   quoted cells, escaped double quotes, LF records, no BOM. The original five-column prefix is preserved:
   `id,timestamp,action,outcome,description`. Appended columns are
@@ -63,17 +75,41 @@ for reconciliation. A failed acknowledgement independently attempts a correlated
 Postgres is available. Invalid range, invalid query and unavailable restricted SQL-client preparation occur inside this
 lifecycle and produce correlated failure records when initial audit storage is available.
 
-Completion, failure and cancellation are inserted into the [durable audit outbox](workspace-audit.md), independently
-retried by the API drainer. A terminal audit outage cannot break an otherwise successful export. A Postgres outage at the
-terminal insert is reported as `export.audit_storage_unavailable {exportId, action}` and can leave a requested record requiring operator
-investigation; completed bytes cannot be reconstructed after process loss. Server shutdown drains tracked terminal
-writes before closing clients. Cancellation during an in-flight completion emits a later corrective `export.failed`
-record for the same export id; treat that cancellation as the final state. Reasons are `client_aborted`, `invalid_query`,
-`storage_unavailable`, `export_error`; private exception messages and event contents are excluded.
+Requested evidence and an unconfirmed `export.outcome_unknown` fallback are inserted in **one Postgres transaction**
+with the admission lease. Without that commit no event bytes leave. Completion/failure/cancel UPDATE the provisional
+terminal payload, retrying the exact event four times with backoff. Settlement atomically freezes that payload and
+releases admission. Cancellation while completion is in flight supersedes its provisional draft, so only the final
+outcome is delivered. Drafts are never ingested. If storing cancellation fails, an earlier completion draft cannot
+be confirmed by mistake. Recovery after an already-frozen unknown may add a separately identified correction.
+
+A terminal storage outage cannot break successful bytes: the pre-existing unknown fallback remains durable. On a
+producer crash or failed settlement, every API replica's sweeper confirms expired fallbacks using short row locks
+and `SKIP LOCKED`. Drafts are discarded after a crash: they are not proof of stream settlement. Unknown records have
+null rows/bytes and no digest; they never imply success. Safe diagnostics are `export.audit_storage_unavailable
+{exportId,action}` and `export.release_failed {exportId}`. The outbox independently retries delivery. Server shutdown
+drains tracked terminal writes before closing clients; a forced exit leaves the durable leased fallback.
+
+Reasons are `client_aborted` (download canceled), `invalid_query`, `audit_unavailable` (audit record not confirmed),
+`sql_unavailable` (SQL mode unavailable), `membership_changed`, `idle_timeout`, `lease_expired`, `resource_limit`,
+`export_error`, and `outcome_not_confirmed`. Sentences name the cause; private exception messages are excluded.
 
 Completion means the producer exhausted its pages and handed bytes to the stream. Counts are not client receipt
 acknowledgement. Discard partial or errored downloads. An in-flight database query may finish before iterator cleanup.
 The console buffers a Blob, so very large downloads depend on browser memory; HTTP clients can stream to disk.
-There is no whole-export row/byte budget. Deploy the server and console together after the outbox migrations.
+There is no row-total truncation. Admission is shared by replicas through expiring Postgres leases: one export per
+user, two per workspace, and two weighted slots per audit namespace (ordinary export: one; SQL: both). A 30-second idle deadline, 15-minute duration deadline and
+60-second lease (renewed every 10 seconds) bound slow/disconnected producers. Abort/settlement releases capacity;
+expired capacity is reclaimed after a crash. Admission denial is `429 export_busy`, before any file or audit request
+is started. Ordinary pages have a 10-second query deadline, 128 MiB memory, 256 MiB read-byte budget, two threads and
+throw-on-overflow. Restricted SQL retains its existing immutable profile: 10 seconds, 1 GiB memory/read bytes,
+four threads and throw-on-overflow. It reserves both admission slots so admitted export query memory is at most
+1 GiB for SQL, or 256 MiB for two ordinary queries, below the shared 1.79 GiB ClickHouse cap. Other query traffic
+still shares that server cap. Exports skip the unused per-page count scan. Deploy the server/worker/console together
+after the additive Postgres migrations; no ClickHouse migration is needed.
+
+Outbox retention keeps delivered evidence for seven days and never removes awaiting/undelivered/quarantined rows.
+Expired admission leases are bounded sweep deletions; they contain ids only, no event payloads. To investigate an
+unknown outcome, search its export id and check independent request logs. Never infer a digest or saved file from
+the provisional draft. Use the [outbox requeue procedure](workspace-audit.md) only for frozen delivery failures.
 
 Until #62 lands, this branch uses the existing duplicate-id arbitration. Complete exports pair the selected normalized row with its exact stored payload; immutable first-acceptance and ambiguous-retry guarantees belong to #62 and require combined verification.

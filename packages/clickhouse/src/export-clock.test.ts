@@ -25,6 +25,19 @@ it('validates stored JSON without reserializing large-number text', async () => 
   expect((await output.next()).value).toContain(`"payload":${payload}}`);
 });
 
+it.each(['\n', '\r'])('rejects stored line separators instead of splitting evidence framing (%j)', async (separator) => {
+  await expect(exportEvents(payloadClient(`{${separator}"valid":true}`), 'stored', { format: 'jsonl-evidence' }).next()).rejects.toThrow(
+    'line separator',
+  );
+});
+
+it.each(['\n', '\r', '\u2028', '\u2029'])('keeps backslash-escaped separators inside SQL literals (%j)', (separator) => {
+  const literal = `description = 'x\\${separator}now()'`;
+  const frozen = freezeSqlClock(`${literal} AND timestamp < now()`, 1234);
+  expect(frozen.sql).toContain(literal);
+  expect(frozen.sql.match(/fromUnixTimestamp64Milli/g)).toHaveLength(1);
+});
+
 it('reuses one compiled relative boundary after consumption delays across pages', async () => {
   const start = Date.parse('2026-11-07T12:00:00Z');
   const now = vi.spyOn(Date, 'now').mockReturnValue(start);
@@ -55,6 +68,8 @@ it('reuses one compiled relative boundary after consumption delays across pages'
     expect(params[1]?.q0).toBe(params[0]?.q0);
     expect(params[1]?.from).toBe(params[0]?.from);
     expect(params[1]?.to).toBe(params[0]?.to);
+    expect(params[1]?.exportReceivedBefore).toBe(params[0]?.exportReceivedBefore);
+    expect((ch.query as ReturnType<typeof vi.fn>).mock.calls.some(([call]) => call.query.includes('count()'))).toBe(false);
     expect(JSON.parse(output[0] ?? '{}').exportSchemaVersion).toBe(1);
   } finally {
     now.mockRestore();

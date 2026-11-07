@@ -38,6 +38,7 @@ export async function enforceProjectRetention(projectId: string) {
     const previous = await tx.retentionRun.findFirst({ where: { projectId }, orderBy: { startedAt: 'desc' } });
     const cutoff = new Date(Date.now() - project.retentionDays * 86_400_000);
     const run = await prisma.retentionRun.create({ data: { projectId, retentionDays: project.retentionDays, cutoff, status: 'running' } });
+    await prisma.project.update({ where: { id: projectId }, data: { exportGeneration: { increment: 1 } } });
     // Short Prisma statements remain independent of the session holding the project lock.
     const heartbeat = setInterval(() => {
       void prisma.retentionRun

@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import * as ch from '@logbird/clickhouse';
 import * as s from '@logbird/contracts';
-import { type AuditPayload, prisma, storeAuditEvent } from '@logbird/database';
+import { type AuditPayload, type Prisma, prisma } from '@logbird/database';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { resolver, validator } from 'hono-openapi';
 import { z } from 'zod';
 import { clickhouse, queryClickhouse } from './clickhouse';
 import { ApiError } from './errors';
+import { exportMembership, finishExport, releaseExport, renewExport, stageExport, validateExportMembership } from './export-outcomes';
 import { auditedExport } from './export-stream';
 import { ingest, readIngestBody, requireProjectReadable } from './ingest';
 import { requireApiKey, requireProjectAccess, requireSession } from './middlewares';
@@ -174,6 +175,7 @@ export const dataRoutes = new Hono<AppEnv>()
     '/projects/:projectId/export',
     routeDoc('Stream CSV or JSONL', {
       responses: {
+        429: { description: 'Export capacity is in use. Finish or cancel an export, then retry.' },
         200: {
           description:
             'Versioned CSV/JSONL or complete original-payload JSONL, linked to workspace receipts by export id and SHA-256. See docs/exports.md.',
@@ -196,29 +198,44 @@ export const dataRoutes = new Hono<AppEnv>()
       const exportId = randomUUID();
       const stream = `ws:${project.organizationId}`;
       let resolved: ch.ExportPlan | undefined;
-      const formatName = input.format === 'csv' ? 'CSV' : input.format === 'jsonl-evidence' ? 'complete JSON Lines' : 'JSON Lines';
+      let membership: string | null = null;
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
+      const expired = new AbortController();
+      const formatName = s.EXPORT_FORMAT_LABELS[input.format];
       c.header(s.EXPORT_ID_HEADER, exportId);
       c.header(s.EXPORT_SCHEMA_HEADER, `${input.format}/${s.EXPORT_SCHEMA_VERSION}`);
       const body = await auditedExport(
         async () => {
+          membership = await exportMembership(project.id);
           const client = queryClient(input);
           resolved = await ch.prepareExport(client, input, clock);
           return ch.exportEvents(client, project.id, input, resolved);
         },
         input.format === 'csv',
         async (action, counts) => {
-          const suffix = ` (export ${exportId.slice(0, 8)})`;
+          const noun = counts.rows === 1 ? 'event' : 'events';
+          const reasons = {
+            client_aborted: 'download canceled',
+            invalid_query: 'invalid query',
+            audit_unavailable: 'audit record not confirmed',
+            sql_unavailable: 'SQL mode unavailable',
+            membership_changed: 'stored events changed; retry the export',
+            idle_timeout: 'download inactive',
+            lease_expired: 'export expired',
+            resource_limit: 'query resource limit',
+            export_error: 'export error',
+          };
           const description =
             action === 'export.requested'
               ? `Started a ${formatName} export of ${project.name}`
               : action === 'export.completed'
-                ? `Exported ${counts.rows} events from ${project.name} as ${formatName}`
-                : `${formatName} export of ${project.name} stopped after ${counts.rows} events (${counts.reason === 'client_aborted' ? 'download canceled' : counts.reason === 'invalid_query' ? 'invalid query' : 'export error'})`;
+                ? `Exported ${counts.rows} ${noun} from ${project.name} as ${formatName}`
+                : `${formatName} export of ${project.name} stopped after ${counts.rows} ${noun} (${reasons[counts.reason ?? 'export_error']})`;
           const event: AuditPayload = {
             id: `${exportId}-${action.split('.')[1]}`,
             occurredAt: new Date().toISOString(),
             action,
-            description: description + suffix,
+            description: `Export ${exportId.slice(0, 8)}: ${description}`,
             outcome: action === 'export.failed' ? 'failure' : 'success',
             actor: { type: 'user', id: c.get('user').id, name: c.get('user').name || c.get('user').email },
             executor: { type: 'api', id: 'api-server' },
@@ -237,10 +254,12 @@ export const dataRoutes = new Hono<AppEnv>()
                 exportId,
                 projectId: project.id,
                 format: input.format,
+                formatLabel: formatName,
                 schemaVersion: s.EXPORT_SCHEMA_VERSION,
                 query: input.q?.trim() ?? '',
                 lang: input.lang ?? 'query',
                 clock: new Date(clock).toISOString(),
+                receivedBefore: new Date(clock).toISOString(),
                 from: resolved?.range.from ?? input.from?.slice(0, 128) ?? null,
                 to: resolved?.range.to ?? input.to?.slice(0, 128) ?? null,
                 resolvedQuery: resolved ? JSON.parse(JSON.stringify(resolved.compiled)) : null,
@@ -248,17 +267,55 @@ export const dataRoutes = new Hono<AppEnv>()
               },
             },
           };
-          if (action !== 'export.requested') return storeAuditEvent(stream, event);
+          if (action !== 'export.requested') return finishExport(exportId, stream, event);
           try {
-            const requested = await storeAuditEvent(stream, event);
+            const unknown: AuditPayload = {
+              ...event,
+              id: `${exportId}-outcome`,
+              action: 'export.outcome_unknown',
+              outcome: 'unknown',
+              description: `Export ${exportId.slice(0, 8)}: ${formatName} export of ${project.name} has no confirmed outcome (producer outcome not confirmed)`,
+              metadata: {
+                export: {
+                  ...(event.metadata as { export: Prisma.InputJsonObject }).export,
+                  rows: null,
+                  bytes: null,
+                  reason: 'outcome_not_confirmed',
+                },
+              },
+            };
+            const requested = await stageExport({
+              id: exportId,
+              userId: c.get('user').id,
+              workspaceId: project.organizationId,
+              projectId: project.id,
+              stream,
+              requested: event,
+              unknown,
+              sql: input.lang === 'sql',
+            });
+            heartbeat = setInterval(() => {
+              void renewExport(exportId).catch(() =>
+                expired.abort(new ApiError(503, 'export_lease_expired', 'The export lease could not be renewed. Retry.')),
+              );
+            }, 10_000);
+            heartbeat.unref();
             await deliverOutboxEvent(requested.id, ingest);
             if (!(await waitForAuditDelivery(requested.id))) throw new Error('Export request not acknowledged');
-          } catch {
+          } catch (error) {
+            if (error instanceof ApiError && error.code === 'export_busy') throw error;
             throw new ApiError(503, 'export_audit_unavailable', 'The export request could not be recorded. Retry the export before downloading.');
           }
         },
-        c.req.raw.signal,
+        AbortSignal.any([c.req.raw.signal, expired.signal]),
         exportId,
+        {
+          beforeComplete: () => validateExportMembership(project.id, membership),
+          onSettled: async (action) => {
+            clearInterval(heartbeat);
+            await releaseExport(exportId, action);
+          },
+        },
       );
       c.header('Content-Type', input.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/x-ndjson');
       c.header(

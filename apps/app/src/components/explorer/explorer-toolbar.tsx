@@ -1,4 +1,4 @@
-import { EXPORT_ID_HEADER, type QueryLang } from '@logbird/contracts';
+import { EXPORT_FORMAT_LABELS, EXPORT_ID_HEADER, type QueryLang } from '@logbird/contracts';
 import { Button } from '@logbird/ui/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@logbird/ui/components/ui/dialog';
 import {
@@ -67,9 +67,9 @@ export function ColumnPicker({ columns, onChange }: { columns: string[]; onChang
 
 type ExportFormat = import('@logbird/contracts').ExportFormat;
 const EXPORT_FORMATS: { format: ExportFormat; label: string; hint: string }[] = [
-  { format: 'jsonl-evidence', label: 'Complete (original payloads)', hint: 'Original stored events with provenance. Use as evidence.' },
-  { format: 'csv', label: 'Spreadsheet (CSV)', hint: 'Every normalized field; long values shortened.' },
-  { format: 'jsonl', label: 'JSON Lines (all fields)', hint: 'Every normalized field; long values shortened.' },
+  { format: 'jsonl-evidence', label: EXPORT_FORMAT_LABELS['jsonl-evidence'], hint: 'Original stored events with provenance. Use as evidence.' },
+  { format: 'csv', label: EXPORT_FORMAT_LABELS.csv, hint: 'Every normalized field; long values shortened.' },
+  { format: 'jsonl', label: EXPORT_FORMAT_LABELS.jsonl, hint: 'Every normalized field; long values shortened.' },
 ];
 
 /** Downloads every match of the range and query as CSV or JSON Lines (the toolbar menu and the mobile menu share it). */
@@ -143,6 +143,7 @@ export function ExportMenu({
             </DropdownMenuLabel>
             {EXPORT_FORMATS.map((f) => (
               <DropdownMenuItem key={f.format} onClick={() => download(f.format)}>
+                <DownloadIcon />
                 <span className="flex flex-col gap-0.5">
                   <span>{f.label}</span>
                   <span className="text-muted-foreground text-xs">{f.hint}</span>
@@ -152,7 +153,7 @@ export function ExportMenu({
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem render={<a href="https://github.com/joodlab/logbird/blob/master/docs/exports.md" rel="noreferrer" target="_blank" />}>
-            Which format?
+            Which format? (GitHub ↗)
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -225,7 +226,7 @@ export function ExplorerOverflowMenu({
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem render={<a href="https://github.com/joodlab/logbird/blob/master/docs/exports.md" rel="noreferrer" target="_blank" />}>
-            Which format?
+            Which format? (GitHub ↗)
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

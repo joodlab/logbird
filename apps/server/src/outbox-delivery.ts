@@ -1,4 +1,5 @@
 import { type AuditOutbox, type AuditPayload, auditNamespace, Prisma, prisma } from '@logbird/database';
+import { sweepExportOutcomes } from './export-outcomes';
 
 export type DeliverAuditEvent = (stream: string, event: AuditPayload) => Promise<{ accepted: number; rejected: { reason: string }[] }>;
 
@@ -76,7 +77,7 @@ export function startAuditDrainer(deliverAuditEvent: DeliverAuditEvent, prepare?
   const wake = () => {
     if (stopped || running) return;
     running = (async () => {
-      const results = await Promise.allSettled([prepare?.(), drainAuditOutbox(deliverAuditEvent)]);
+      const results = await Promise.allSettled([prepare?.(), sweepExportOutcomes(), drainAuditOutbox(deliverAuditEvent)]);
       if (results.some((result) => result.status === 'rejected'))
         console.error(JSON.stringify({ event: 'audit.drainer_failed', lastError: 'audit_storage_unavailable' }));
       if (!stopped && Date.now() - lastMaintenance >= 60_000) {
