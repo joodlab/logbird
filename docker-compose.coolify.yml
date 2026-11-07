@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17-bookworm
+    image: postgres:17-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-logbird}
       POSTGRES_PASSWORD: ${SERVICE_PASSWORD_64_POSTGRES:?}
@@ -13,13 +13,15 @@ services:
       retries: 10
     restart: unless-stopped
   clickhouse:
-    image: clickhouse/clickhouse-server:26.9
+    image: clickhouse/clickhouse-server:26.9@sha256:925b0fbc8df74de7671404e688a4d99fd202910db3de8d524867e6f881c20be7
     environment:
       CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-logbird}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-logbird}
       CLICKHOUSE_PASSWORD: ${SERVICE_PASSWORD_64_CLICKHOUSE:?}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
-    volumes: [clickhouse:/var/lib/clickhouse]
+    volumes:
+      - clickhouse:/var/lib/clickhouse
+      - ./config/clickhouse-backups.xml:/etc/clickhouse-server/config.d/backups.xml:ro
     ulimits:
       nofile: {soft: 262144, hard: 262144}
     healthcheck:
@@ -29,7 +31,7 @@ services:
       retries: 10
     restart: unless-stopped
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:c5d34a98396a4775e223c74e929162c35c5a2182901ba26b50ade939941ce14b
     command: [redis-server, --appendonly, 'yes', --maxmemory-policy, noeviction]
     volumes: [redis:/data]
     healthcheck:
@@ -39,6 +41,7 @@ services:
       retries: 10
     restart: unless-stopped
   migrate:
+    pull_policy: build
     image: ${LOGBIRD_IMAGE_REGISTRY:-logbird}/migrate:${LOGBIRD_VERSION:-local}
     build: {context: ., dockerfile: apps/server/Dockerfile, target: migrate}
     environment: &runtime
@@ -73,6 +76,7 @@ services:
       redis: {condition: service_healthy}
     restart: 'no'
   server:
+    pull_policy: build
     image: ${LOGBIRD_IMAGE_REGISTRY:-logbird}/server:${LOGBIRD_VERSION:-local}
     build: {context: ., dockerfile: apps/server/Dockerfile}
     environment:
@@ -83,6 +87,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 45s
   worker:
+    pull_policy: build
     image: ${LOGBIRD_IMAGE_REGISTRY:-logbird}/worker:${LOGBIRD_VERSION:-local}
     build: {context: ., dockerfile: apps/worker/Dockerfile}
     environment: *runtime
@@ -92,6 +97,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 5m
   app:
+    pull_policy: build
     image: ${LOGBIRD_IMAGE_REGISTRY:-logbird}/app:${LOGBIRD_VERSION:-local}
     build: {context: ., dockerfile: apps/app/Dockerfile}
     environment:

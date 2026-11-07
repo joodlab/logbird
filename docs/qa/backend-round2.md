@@ -1,4 +1,4 @@
-﻿# Backend QA round 2 verification
+# Backend QA round 2 verification
 
 2026-11-05, local shared services; base `ddb5fd4`. Node 22.22.0 and pnpm 10.30.3.
 No app/UI files, CI workflows, existing keys or QA listeners were changed. The backend listener used 4901;
