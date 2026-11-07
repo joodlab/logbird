@@ -1,4 +1,4 @@
-import { auth, authAuditContext, setAuthAuditHandler } from '@logbird/auth';
+import { auth, authAuditContext, clearSessionCookies, setAuthAuditHandler } from '@logbird/auth';
 import { QueryError } from '@logbird/clickhouse';
 import { queryErrorDetailsSchema } from '@logbird/contracts';
 import { Prisma, ProjectBusyError, prisma } from '@logbird/database';
@@ -12,17 +12,20 @@ import { requestId } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
 import { openAPIRouteHandler } from 'hono-openapi';
 import { z } from 'zod';
+import { queueAuditEvent } from './audit-outbox';
+import { recordFailedSignIn } from './auth-activity';
 import { clickhouse } from './clickhouse';
 import { dataRoutes, publicRoutes } from './data-routes';
 import { env } from './env';
 import { ApiError } from './errors';
-import { ingest } from './ingest';
 import { invitationRoutes } from './invitation-routes';
 import { inviteLinkRoutes } from './invite-link-routes';
 import { authorizeMutation } from './middlewares/require-role';
 import { doc, routeDoc } from './openapi';
+import { auditDrainStatus } from './outbox-delivery';
 import { clientAddress, rateLimit } from './rate-limit';
 import { managementRoutes } from './routes';
+import { sessionMutationOrigin, sessionRoutes } from './session-routes';
 import { setupRoutes } from './setup-routes';
 import type { AppEnv } from './types';
 
@@ -35,6 +38,8 @@ app.use(
   bodyLimit({ maxSize: 5 * 1024 * 1024, onError: (c) => c.json({ error: { code: 'payload_too_large', message: 'Request exceeds 5 MB.' } }, 413) }),
 );
 app.use('/api/auth/*', rateLimit);
+app.use('/api/session/*', rateLimit);
+app.use('/api/sessions/*', rateLimit);
 app.use(
   '*',
   cors({
@@ -85,26 +90,28 @@ app.onError((error, c) => {
 });
 app.notFound((c) => c.json({ error: { code: 'not_found', message: 'Route not found.' } }, 404));
 setAuthAuditHandler((e) =>
-  ingest(`ws:${e.organizationId}`, {
+  queueAuditEvent(`ws:${e.organizationId}`, {
     action: e.action,
     actor: { ...e.actor, type: 'user', name: e.actor.name || e.actor.email },
     executor: { type: 'api', id: 'api-server' },
     targets: [e.target],
-    changes: e.changes,
-    context: e.context,
+    changes: e.changes as import('@logbird/database').Prisma.InputJsonValue[],
+    context: e.context ? { requestId: e.context.requestId, ip: e.context.ip, userAgent: e.context.userAgent } : undefined,
     occurredAt: new Date().toISOString(),
-    description: e.action,
+    description: e.description ?? e.action,
   }),
 );
 app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
+  const authPath = c.req.path.replace(/\/+$/, '');
+  if (['sign-out', 'revoke-session', 'revoke-sessions', 'revoke-other-sessions'].some((path) => authPath === `/api/auth/${path}`))
+    return c.json({ error: { code: 'use_owned_session_endpoint', message: 'Use the self-only /api/session or /api/sessions routes.' } }, 409);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  const authBody =
-    c.req.path === '/api/auth/organization/invite-member'
-      ? await c.req.raw
-          .clone()
-          .json()
-          .catch(() => null)
-      : null;
+  const authBody = ['/api/auth/organization/invite-member', '/api/auth/sign-in/email-otp'].includes(c.req.path)
+    ? await c.req.raw
+        .clone()
+        .json()
+        .catch(() => null)
+    : null;
   const pendingResend =
     authBody?.resend === true &&
     typeof authBody.email === 'string' &&
@@ -118,24 +125,35 @@ app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
           },
         })
       : null;
-  return authAuditContext.run(
-    { actor: session?.user, requestId: c.get('requestId'), ip: clientAddress(c) ?? '', userAgent: c.req.header('user-agent') ?? '' },
-    async () => {
-      const response = await auth.handler(c.req.raw);
-      // Installed better-auth skips organization hooks on resend; audit the successful endpoint result.
-      if (response.ok && c.req.path === '/api/auth/organization/invite-member' && session && pendingResend) {
-        const invitation = await response.clone().json();
-        if (invitation.id === pendingResend.id)
-          await ingest(`ws:${invitation.organizationId}`, {
-            action: 'member.invitation.resent',
-            actor: { ...session.user, type: 'user' },
-            targets: [{ type: 'invitation', id: invitation.id, name: invitation.email }],
-            executor: { type: 'api', id: 'api-server' },
-          });
-      }
-      return response;
-    },
-  );
+  const runAuth = () =>
+    authAuditContext.run(
+      {
+        actor: session?.user,
+        requestId: c.get('requestId'),
+        ip: clientAddress(c) ?? '',
+        userAgent: c.req.header('user-agent') ?? '',
+        path: c.req.path,
+      },
+      async () => {
+        const response = await auth.handler(c.req.raw);
+        if (!response.ok && c.req.path === '/api/auth/sign-in/email-otp') {
+          await recordFailedSignIn(c, authBody?.email, response);
+        }
+        // Installed better-auth skips organization hooks on resend; audit the successful endpoint result.
+        if (response.ok && c.req.path === '/api/auth/organization/invite-member' && session && pendingResend) {
+          const invitation = await response.clone().json();
+          if (invitation.id === pendingResend.id)
+            await queueAuditEvent(`ws:${invitation.organizationId}`, {
+              action: 'member.invitation.resent',
+              actor: { ...session.user, type: 'user' },
+              targets: [{ type: 'invitation', id: invitation.id, name: invitation.email }],
+              executor: { type: 'api', id: 'api-server' },
+            });
+        }
+        return response;
+      },
+    );
+  return runAuth();
 });
 app.get('/livez', (c) => c.json({ status: 'ok' }));
 app.get('/readyz', async (c) => {
@@ -147,7 +165,8 @@ app.get('/readyz', async (c) => {
     connection.ping(),
   ]);
   const ready = checks.every((r) => r.status === 'fulfilled');
-  return c.json({ status: ready ? 'ok' : 'degraded' }, ready ? 200 : 503);
+  const audit = await auditDrainStatus().catch(() => ({ unavailable: true }));
+  return c.json({ status: ready ? 'ok' : 'degraded', audit }, ready ? 200 : 503);
 });
 app.get(
   '/health',
@@ -167,8 +186,15 @@ app.get(
     return c.json({ status: postgres && ch ? 'ok' : 'degraded', postgres, clickhouse: ch }, postgres && ch ? 200 : 503);
   },
 );
+app.use('/api/session/*', sessionMutationOrigin);
+app.use('/api/sessions/*', sessionMutationOrigin);
+app.use('/api/session/sign-out', async (c, next) => {
+  await next();
+  if (c.res.status === 401) for (const cookie of await clearSessionCookies(c.req.raw.headers)) c.header('Set-Cookie', cookie, { append: true });
+});
 app.use('/api/*', authorizeMutation);
 export const routes = app
+  .route('/api', sessionRoutes)
   .route('/api', inviteLinkRoutes)
   .route('/api', invitationRoutes)
   .route('/api', setupRoutes)

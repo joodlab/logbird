@@ -457,7 +457,7 @@ User journeys (each must work end-to-end against the real server):
    destructive confirm dialog requiring the slug, explains permanent deletion; shows last purge + oldest event),
    **API keys** (create dialog → secret shown once with copy + snippet; list with kind badges, last used,
    revoke confirm), workspace members + invite by email, **workspace activity** (Logbird's own audit stream,
-   rendered with the same explorer components), danger zone (delete project).
+   rendered with the same explorer components; see the [activity action catalogue](workspace-audit.md)), danger zone (delete project).
 10. **Setup** (`/p/$projectId/setup`, replaces Docs / Quickstart; `/docs` redirects): live checklist from
     `GET /api/projects/:projectId/setup` with one section per step (inline ingest/read keys, first event, envelope
     coverage with "find missing" explorer links, operationId, retention review, invite), followed by the envelope

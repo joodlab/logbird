@@ -6,8 +6,11 @@ import { sendMemberJoined, sendOrganizationInvitation, sendRoleChanged, sendSign
 import { createEnv } from '@t3-oss/env-core';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
+import { APIError, createAuthEndpoint, originCheckMiddleware } from 'better-auth/api';
+import { deleteSessionCookie } from 'better-auth/cookies';
 import { emailOTP, organization } from 'better-auth/plugins';
 import { z } from 'zod';
+import { recordSessionSignIn } from './sign-in-audit';
 
 type AuditUser = { id: string; name: string; email: string };
 type AuthAudit = {
@@ -16,9 +19,16 @@ type AuthAudit = {
   actor: AuditUser;
   target: { type: string; id: string; name?: string };
   changes?: unknown[];
+  description?: string;
   context?: { requestId: string; ip: string; userAgent: string };
 };
-export const authAuditContext = new AsyncLocalStorage<{ actor?: AuditUser; requestId: string; ip: string; userAgent: string }>();
+export const authAuditContext = new AsyncLocalStorage<{
+  actor?: AuditUser;
+  requestId: string;
+  ip: string;
+  userAgent: string;
+  path?: string;
+}>();
 let auditHandler: ((event: AuthAudit) => Promise<unknown>) | undefined;
 export const setAuthAuditHandler = (handler: NonNullable<typeof auditHandler>) => {
   auditHandler = handler;
@@ -29,6 +39,7 @@ function record(
   fallback: AuditUser,
   target: { type: string; id: string; name?: string },
   changes?: unknown[],
+  description?: string,
 ) {
   const context = authAuditContext.getStore();
   return auditHandler?.({
@@ -37,8 +48,9 @@ function record(
     actor: action === 'auth.signed_in' ? fallback : (context?.actor ?? fallback),
     target,
     changes,
+    description,
     context,
-  });
+  }).catch(() => console.error(JSON.stringify({ event: 'auth.audit_storage_unavailable', action })));
 }
 const env = createEnv({
   server: { APP_URL: z.url(), TRUSTED_ORIGINS: z.string().default(''), BETTER_AUTH_SECRET: z.string().min(32) },
@@ -61,12 +73,17 @@ async function notify(kind: string, send: () => Promise<unknown>) {
 }
 export const auth = betterAuth({
   baseURL: env.APP_URL,
+  // Session ends belong to Logbird's atomic deletion/outbox routes. Keep the library router closed too.
+  disabledPaths: ['/sign-out', '/revoke-session', '/revoke-sessions', '/revoke-other-sessions'],
   // The API boundary enforces shared Redis limits across replicas.
   rateLimit: { enabled: false },
   secret: env.BETTER_AUTH_SECRET,
   trustedOrigins: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)],
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
   advanced: {
+    // Keep cookie request validation enabled in tests as well as production.
+    disableOriginCheck: false,
+    disableCSRFCheck: false,
     cookiePrefix: 'logbird',
     useSecureCookies: new URL(env.APP_URL).protocol === 'https:',
     defaultCookieAttributes: { httpOnly: true, sameSite: 'lax' },
@@ -75,9 +92,11 @@ export const auth = betterAuth({
     session: {
       create: {
         after: async (session) => {
-          const user = await prisma.user.findUniqueOrThrow({ where: { id: session.userId } });
-          for (const member of await prisma.member.findMany({ where: { userId: user.id } }))
-            await record(member.organizationId, 'auth.signed_in', user, { type: 'user', id: user.id, name: user.email });
+          try {
+            await recordSessionSignIn(session, env.BETTER_AUTH_SECRET, authAuditContext.getStore());
+          } catch {
+            console.error(JSON.stringify({ event: 'auth.audit_storage_unavailable', action: 'auth.signed_in' }));
+          }
         },
       },
     },
@@ -107,6 +126,10 @@ export const auth = betterAuth({
       organizationHooks: {
         afterCreateOrganization: async ({ organization, user }) => {
           await record(organization.id, 'organization.created', user, { type: 'organization', id: organization.id, name: organization.name });
+        },
+        beforeUpdateOrganization: async ({ organization: input }) => {
+          if (input.name !== undefined || input.slug !== undefined)
+            throw new APIError('FORBIDDEN', { message: 'Use PATCH /api/workspace to change the workspace name or URL slug.' });
         },
         afterCreateInvitation: async ({ organization, inviter, invitation }) => {
           await record(organization.id, 'member.invited', inviter, { type: 'invitation', id: invitation.id, name: invitation.email });
@@ -173,3 +196,37 @@ export const auth = betterAuth({
   ],
 });
 export type AuthSession = typeof auth.$Infer.Session;
+
+// Called locally only; this endpoint is not registered on better-auth's HTTP router.
+const expireSessionCookies = createAuthEndpoint('/internal-cookie-expiry', { method: 'POST' }, async (ctx) => {
+  deleteSessionCookie(ctx);
+  return ctx.json({ success: true });
+});
+export async function clearSessionCookies(headers: Headers) {
+  const response = await expireSessionCookies({ headers, context: await auth.$context, asResponse: true });
+  return response.headers.getSetCookie();
+}
+
+const validateCookieOrigin = createAuthEndpoint('/internal-origin-check', { method: 'POST', use: [originCheckMiddleware] }, async (ctx) =>
+  ctx.json({ success: true }),
+);
+/** The same Origin/Referer matcher and cookie CSRF check as better-auth's HTTP router. */
+export async function trustedSessionMutation(request: Request) {
+  const source = request.headers.get('origin') || request.headers.get('referer');
+  if (!source || source === 'null' || request.headers.get('sec-fetch-site') === 'cross-site') return false;
+  const headers = new Headers(request.headers);
+  // These routes authenticate only with cookies; force the library's cookie branch even for an anonymous request.
+  if (!headers.has('cookie')) headers.set('cookie', '');
+  try {
+    const response = await validateCookieOrigin({
+      request: new Request(request.url, { method: 'POST', headers }),
+      headers,
+      context: await auth.$context,
+      asResponse: true,
+    });
+    return response.ok;
+  } catch (error) {
+    if (error instanceof APIError && error.status === 'FORBIDDEN') return false;
+    throw error;
+  }
+}

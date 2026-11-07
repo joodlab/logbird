@@ -1,0 +1,153 @@
+{
+  "categories": [
+    {
+      "category": "project",
+      "label": "Projects",
+      "count": 1,
+      "actions": ["project.created"]
+    },
+    {
+      "category": "api_key",
+      "label": "API keys",
+      "count": 3,
+      "actions": ["api_key.created"]
+    },
+    {
+      "category": "member",
+      "label": "Members",
+      "count": 2,
+      "actions": ["member.invited"]
+    },
+    {
+      "category": "saved_view",
+      "label": "Views",
+      "count": 1,
+      "actions": ["saved_view.created"]
+    },
+    {
+      "category": "organization",
+      "label": "Workspace",
+      "count": 5,
+      "actions": ["organization.updated", "organization.created"]
+    },
+    {
+      "category": "invite_link",
+      "label": "Invite links",
+      "count": 2,
+      "actions": ["invite_link.created"]
+    },
+    {
+      "category": "auth",
+      "label": "Sign-ins \u0026 sessions",
+      "count": 10,
+      "actions": [
+        "auth.sign_in.failed",
+        "auth.signed_in",
+        "auth.signed_out",
+        "auth.session.revoked"
+      ]
+    }
+  ],
+  "screenshots": [
+    "light-desktop-views.png",
+    "dark-desktop-workspace.png",
+    "light-mobile-sessions.png",
+    "dark-mobile-views.png"
+  ],
+  "consoleProblems": [],
+  "sourceRevision": "4f9b138fef439c7c9b5c4419ef6e554cb5973b12",
+  "browser": "Playwright Chromium; fresh isolated contexts; personal Chrome unchanged",
+  "before": {
+    "sourceRevision": "2b45622a163e2bede21a77dd95407ae1369c4809",
+    "results": [
+      {
+        "category": "view",
+        "canonical": "saved_view",
+        "oldCount": 0,
+        "canonicalCount": 1
+      },
+      {
+        "category": "workspace",
+        "canonical": "organization",
+        "oldCount": 0,
+        "canonicalCount": 1
+      }
+    ]
+  },
+  "sessionRevocation": {
+    "action": "auth.session.revoked",
+    "responseStatus": 200,
+    "replayStatus": 401,
+    "count": 1,
+    "actorMatchesOwner": true,
+    "targetIsSession": true,
+    "hasRequestAndIp": true,
+    "excludesToken": true
+  },
+  "cleanup": {
+    "at": "2026-11-07T13:01:02.227Z",
+    "projectDeletedThroughApi": true,
+    "storageCounts": {
+      "events": 0,
+      "events_by_minute": 0,
+      "entities": 0,
+      "attribute_keys": 0
+    },
+    "postgresProjectCount": 0,
+    "ownedWorkspaceDeleted": true,
+    "ownedUserDeleted": true
+  },
+  "files": [
+    {
+      "name": "before-view-light.png",
+      "bytes": 82204,
+      "sha256": "fabd785a9cdd8bcc8be1f02d04bcb0ff7ddd48a5dc34c12357cebcd699d7503a",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "name": "before-workspace-light.png",
+      "bytes": 82476,
+      "sha256": "9b3c2d838151e8a2c2981bf416057286d97d8d1d7d594e13d1e6d793fba86b96",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "name": "dark-desktop-workspace.png",
+      "bytes": 131641,
+      "sha256": "acd4def5469b71d6fc45dfb7fe6d8c7fbeb8512e398b1c909f16d9cca9fdcb35",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "name": "dark-mobile-views.png",
+      "bytes": 44174,
+      "sha256": "a2510fff00c556bf8ae23ba0311258adc4feb5a594ee1f8b99464cc997647165",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "light-desktop-views.png",
+      "bytes": 84361,
+      "sha256": "27e2ec16a1c2743e7321a69b1dfe8e117520e99c0f259f1abaca74f596472b6e",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "name": "light-mobile-sessions.png",
+      "bytes": 56984,
+      "sha256": "d4f4f056f92895f15515c4f124d6d24fb925a698fd46096e9a4358cce9b63ad2",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "video": {
+    "name": "activity-categories.webm",
+    "bytes": 1498332,
+    "width": 1440,
+    "sha256": "fe8f332c4a63f038b34d7cda810edfffd9db8a4e9f4138e344d9e6842e3e9412",
+    "codec": "VP9",
+    "durationSeconds": 6.32,
+    "height": 900
+  }
+}
