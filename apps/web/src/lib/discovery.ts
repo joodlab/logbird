@@ -1,13 +1,15 @@
-import { SITE_URL } from '../env';
+import { type SiteConfig, siteConfig } from '../env';
 import { siteIndexable } from './release';
 import { publishedPages } from './site-map';
 
+// Each function takes the resolved config so the build (vite.config.ts) can pass the same values the bundle uses.
 const escapeXml = (text: string) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
-export function sitemapXml() {
+export function sitemapXml(config: SiteConfig = siteConfig) {
   const pages = siteIndexable() ? publishedPages : [];
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${pages.map((page) => `<url><loc>${escapeXml(new URL(page.path, SITE_URL).href)}</loc><changefreq>${page.changefreq}</changefreq><priority>${page.priority}</priority></url>`).join('')}</urlset>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${pages.map((page) => `<url><loc>${escapeXml(new URL(page.path, config.SITE_URL).href)}</loc><changefreq>${page.changefreq}</changefreq><priority>${page.priority}</priority></url>`).join('')}</urlset>\n`;
 }
 /** Disallow everything while a release blocker is open (see release.ts). */
-export const robotsTxt = () => (siteIndexable() ? `User-agent: *\nAllow: /\nSitemap: ${SITE_URL}/sitemap.xml\n` : 'User-agent: *\nDisallow: /\n');
-export const llmsTxt = () =>
-  `# Logbird\n\n${(siteIndexable() ? publishedPages : []).map((page) => `- [${page.title}](${new URL(page.path, SITE_URL).href}): ${page.description}`).join('\n')}\n`;
+export const robotsTxt = (config: SiteConfig = siteConfig) =>
+  siteIndexable() ? `User-agent: *\nAllow: /\nSitemap: ${config.SITE_URL}/sitemap.xml\n` : 'User-agent: *\nDisallow: /\n';
+export const llmsTxt = (config: SiteConfig = siteConfig) =>
+  `# Logbird\n\n${(siteIndexable() ? publishedPages : []).map((page) => `- [${page.title}](${new URL(page.path, config.SITE_URL).href}): ${page.description}`).join('\n')}\n`;

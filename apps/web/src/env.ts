@@ -22,28 +22,47 @@ const source: Record<string, string | undefined> =
 
 const DOMAIN = 'logbird.dev';
 
-function url(name: string, fallback?: string): string | undefined {
-  const value = source[name]?.trim();
-  if (!value) {
-    return fallback;
-  }
-  try {
-    return new URL(value).href.replace(/\/$/, '');
-  } catch {
-    throw new Error(`${name} must be an absolute URL.`);
-  }
+export interface SiteConfig {
+  SITE_URL: string;
+  /** Undefined while Cloud is waitlist-only: the header shows no "Sign in" link. */
+  APP_URL?: string;
+  GITHUB_PUBLIC: boolean;
+  GITHUB_URL?: string;
+  /** The publisher's legal name is pending the owner; until it is set the site names no company. */
+  ORG_NAME?: string;
 }
 
-export const SITE_URL = url('WEB_SITE_URL', `https://${DOMAIN}`) as string;
-/** Undefined while Cloud is waitlist-only: the header shows no "Sign in" link. */
-export const APP_URL = url('WEB_APP_URL');
-export const GITHUB_PUBLIC = source.WEB_GITHUB_PUBLIC === 'true';
-export const GITHUB_URL = url('WEB_GITHUB_URL');
-if (GITHUB_PUBLIC && !GITHUB_URL) {
-  throw new Error('WEB_GITHUB_PUBLIC=true needs WEB_GITHUB_URL.');
+/**
+ * Builds the public configuration from WEB_* values. The bundle (via __SITE_ENV__), discovery files and OG cards all
+ * call this with the same resolved values (scripts/public-env.ts), so their origins always agree.
+ */
+export function siteConfigFrom(values: Record<string, string | undefined>): SiteConfig {
+  const url = (name: string, fallback?: string): string | undefined => {
+    const value = values[name]?.trim();
+    if (!value) {
+      return fallback;
+    }
+    try {
+      return new URL(value).href.replace(/\/$/, '');
+    } catch {
+      throw new Error(`${name} must be an absolute URL.`);
+    }
+  };
+  const config: SiteConfig = {
+    SITE_URL: url('WEB_SITE_URL', `https://${DOMAIN}`) as string,
+    APP_URL: url('WEB_APP_URL'),
+    GITHUB_PUBLIC: values.WEB_GITHUB_PUBLIC === 'true',
+    GITHUB_URL: url('WEB_GITHUB_URL'),
+    ORG_NAME: values.WEB_ORG_NAME?.trim() || undefined,
+  };
+  if (config.GITHUB_PUBLIC && !config.GITHUB_URL) {
+    throw new Error('WEB_GITHUB_PUBLIC=true needs WEB_GITHUB_URL.');
+  }
+  return config;
 }
-/** The publisher's legal name is pending the owner; until it is set the site names no company. */
-export const ORG_NAME = source.WEB_ORG_NAME?.trim() || undefined;
+
+export const siteConfig = siteConfigFrom(source);
+export const { SITE_URL, APP_URL, GITHUB_PUBLIC, GITHUB_URL, ORG_NAME } = siteConfig;
 export const COPYRIGHT_HOLDER = ORG_NAME ?? 'Logbird contributors';
 
 /** Pending-domain mailboxes. Owner question: confirm these once the domain is bought. */

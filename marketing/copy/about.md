@@ -1,6 +1,6 @@
 ---
 title: About Logbird
-description: Logbird is an open-source audit log built by Joodlab for teams who owe their customers a trail of who did what.
+description: Logbird is an open-source audit log for teams who owe their customers a trail of who did what.
 path: /about
 ---
 
@@ -11,10 +11,13 @@ path: /about
 - **id:** `intro`
 - **eyebrow:** About
 - **heading (H1):** We built the audit log we needed.
-- **body:** Logbird is built by Joodlab. It started as the audit log for a hotel-booking SaaS, where every support
-  question begins the same way: who changed this, and when? We wanted the answer to take one search, on servers we
-  run ourselves. We released it under the MIT licence so any product team can do the same.
-  <!-- source: LICENSE ("Copyright (c) 2026 Joodlab"); docs/SPEC.md intro (audience) and docs/roadmap.md intro — owner to confirm the company description and whether to name Joodlab -->
+- **body:** Logbird started as the audit log a product team needed, where every support question begins the same
+  way: who changed this, and when? We wanted the answer to take one search, on servers we run ourselves. We released
+  it under the MIT licence so any product team can do the same.
+  <!-- source: docs/SPEC.md intro (audience) and docs/roadmap.md intro -->
+  <!-- owner-gated: org-name, origin-story. Only once the owner approves WEB_ORG_NAME and the origin story:
+       "Logbird is built by {WEB_ORG_NAME}. It started as the audit log for a hotel-booking SaaS, where every support
+       question begins the same way: …" -->
 
 - **visual:** none
 

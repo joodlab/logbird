@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createRateLimiter, handleWaitlist } from './waitlist';
+import { clientAddress, createRateLimiter, handleWaitlist } from './waitlist';
 import { createCloudflareStore } from './waitlist-cloudflare';
 import { createNodeStore } from './waitlist-node';
 
@@ -82,6 +82,12 @@ describe('waitlist boundary', () => {
     expect(limiter('c', 0)).toBe(false);
     expect(limiter('c', 61_000)).toBe(true);
   });
+  it('trusts forwarding headers only for the configured number of proxies', () => {
+    expect(clientAddress('10.0.0.2', '203.0.113.9', 0)).toBe('10.0.0.2');
+    expect(clientAddress('10.0.0.2', '198.51.100.7, 203.0.113.9', 1)).toBe('203.0.113.9');
+    expect(clientAddress('10.0.0.2', 'spoofed, 198.51.100.7, 203.0.113.9', 2)).toBe('198.51.100.7');
+    expect(clientAddress('10.0.0.2', null, 1)).toBe('10.0.0.2');
+  });
   it('accepts only the listed origins', async () => {
     const response = await handleWaitlist(
       new Request(`${origin}/api/waitlist`, {
@@ -114,10 +120,30 @@ describe('storage adapters', () => {
       });
       const response = await handleWaitlist(req({ ...valid, website: '' }), { ...dependencies(), store: createNodeStore(file, notify) });
       expect(response.status).toBe(200);
-      expect(notify).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce());
       const record = JSON.parse((await readFile(file, 'utf8')).trim());
       expect(record).toEqual({ ...valid, receivedAt: '1970-01-01T00:00:01.000Z' });
       expect(record).not.toHaveProperty('website');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  it('accepts once persisted, retries a failing notification, and logs no personal data', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'logbird-web-'));
+    try {
+      const file = join(directory, 'waitlist.jsonl');
+      const notify = vi.fn(async () => {
+        throw new Error('smtp down');
+      });
+      const lines: string[] = [];
+      const store = createNodeStore(file, notify, { attempts: 3, delayMs: 1, log: (line) => lines.push(line) });
+      const response = await handleWaitlist(req({ ...valid, website: '' }), { ...dependencies(), store });
+      expect(response.status).toBe(200);
+      await vi.waitFor(() => expect(lines).toHaveLength(1));
+      expect(notify).toHaveBeenCalledTimes(3);
+      expect(lines[0]).toContain('waitlist.notify_failed');
+      expect(lines[0]).not.toContain(valid.email);
+      expect(await readFile(file, 'utf8')).toContain(valid.email);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

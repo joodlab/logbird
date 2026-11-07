@@ -8,3 +8,6 @@ export const securityHeaders = {
   'Strict-Transport-Security': 'max-age=31536000',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
 };
+
+/** Media keeps stable URLs (scripts/media.ts), so a replaced capture must be able to reach browsers: a day, never immutable. */
+export const MEDIA_CACHE = 'public, max-age=86400, stale-while-revalidate=604800';

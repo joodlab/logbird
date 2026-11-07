@@ -12,7 +12,8 @@
         "NITRO_PRESET",
         "LOGBIRD_WEB_ALLOW_INTERIM"
       ],
-      "outputs": [".output/**", "public/media/**", "public/og/**"]
+      "outputs": [".output/**", "public/media/**", "public/og/**"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/marketing/captures/**"]
     }
   }
 }

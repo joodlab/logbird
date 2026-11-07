@@ -38,6 +38,21 @@ export function createRateLimiter(maxClients = MAX_CLIENTS) {
     return bucket.count <= 5;
   };
 }
+/**
+ * The client address for rate limiting. With `trustedHops` proxies in front, each appending the address it received
+ * from, the client is the trustedHops-th X-Forwarded-For entry from the right; entries a client sends are further left
+ * and ignored. With 0 hops (the default) forwarding headers are never trusted.
+ */
+export function clientAddress(socketIp: string | undefined, forwardedFor: string | null, trustedHops: number): string {
+  if (trustedHops <= 0 || !forwardedFor) {
+    return socketIp ?? 'unknown';
+  }
+  const entries = forwardedFor
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return entries[entries.length - trustedHops] ?? entries[0] ?? socketIp ?? 'unknown';
+}
 export async function handleWaitlist(request: Request, deps: WaitlistDependencies): Promise<Response> {
   const contentType = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
   const form = contentType === 'application/x-www-form-urlencoded';

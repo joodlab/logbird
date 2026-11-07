@@ -115,15 +115,22 @@ Nobody outside the team can self-host until the repository is public (no publish
 
 ## Owner-gated copy
 
-These lines are **not** used anywhere on the site. The owner may approve them later.
+**Marker:** an owner-gated variant is written only inside an HTML comment that starts with `<!-- owner-gated: <topic>`.
+Text inside those comments is never implemented on the site until the owner approves that topic; everything outside
+them is safe to implement verbatim. Topics: `org-name` (the publisher's name, `WEB_ORG_NAME`), `origin-story`,
+`design-partner-name`, `cloud-clause`.
 
-- **Design partner, named:** "JoodCMS, a hotel-booking SaaS, is our first design partner, being integrated."
-  The approved, unnamed variant used on the site is: "Logbird is being integrated with a hotel-booking SaaS, our first
-  design partner." Never say "in production" or "customer" until the rollout says so (`docs/roadmap.md`).
-- **Cloud clause in the positioning:** "…and run it on your own servers or ours." (from `docs/brand.md`). Use it only
-  once Logbird Cloud accepts sign-ups.
-- **Repository link:** `https://github.com/joodlab/logbird`. Until the repository is public, every mention reads
+
+These variants are **not** used anywhere on the site. The owner may approve them later.
+
+- **Design partner:** the site says "Logbird is being integrated with a hotel-booking SaaS, our first design partner."
+  Never say "in production" or "customer" until the rollout says so (`docs/roadmap.md`).
+  <!-- owner-gated: design-partner-name. "JoodCMS, a hotel-booking SaaS, is our first design partner, being integrated." -->
+- **Cloud clause in the positioning:** used only once Logbird Cloud accepts sign-ups.
+  <!-- owner-gated: cloud-clause. "…and run it on your own servers or ours." (docs/brand.md) -->
+- **Repository link:** comes from `WEB_GITHUB_URL`. Until the repository is public, every mention reads
   "Source on GitHub — coming soon".
+  <!-- owner-gated: org-name. Repository: https://github.com/joodlab/logbird ; publisher: Joodlab -->
 
 ## Pending owner decisions that affect copy
 
@@ -138,21 +145,19 @@ These lines are **not** used anywhere on the site. The owner may approve them la
 - **Security contact.** `SECURITY.md` still lists `SECURITY_CONTACT_EMAIL (not configured)`. The security page needs
   that address before launch.
 
-## Captures: what to fix before using them
+## Captures
 
-All visuals named in these files are real captures from the console against real local services, with fictional seed
-data. Before publishing, check these issues:
+Pages use the console captures in `marketing/captures/2026-11-07-site-console/` (listed in
+`apps/web/src/lib/media-manifest.ts`). They were shot against the real console in a fictional workspace,
+"QA Azure Hotels", with a fictional user and seed data; see that folder's README for how.
 
-1. **Every existing capture shows the demo workspace "Jood" and project "JoodCMS"** in the sidebar and breadcrumbs
-   (including `2026-11-06-logbird-rename/`). That conflicts with the rule not to name the design partner. Re-capture
-   with a neutral fictional workspace (suggested: workspace "Azure Hotels", project "Booking API"), or crop the
-   sidebar and breadcrumb. `04-event-sheet.png` also shows a `via joodcms` source badge.
-2. **Captures dated 2026-11-04 and 2026-11-05 predate the rename.** They show the old square "T" mark and
-   `demo@trailmark.local`. Only `2026-11-06-logbird-rename/` shows the Logbird mark.
-3. **Explorer captures show a query timer** (for example "348 ms" in `2026-11-06-logbird-rename/04-explorer-light.png`).
-   It is incidental UI, but the site makes no performance claims, so crop it or re-capture.
-4. Capture command: `OUT_DIR=marketing/captures/<date>-<topic> node apps/app/scripts/walkthrough.mjs`
-   (`marketing/README.md`). 1440×900, light and dark.
+- **No query timings:** the explorer's query timer was removed before each still, because the site makes no
+  performance claims. Some shots still show durations that belong to the fictional data itself, such as an operation
+  tree's "3.50 s" and step offsets. Those are seeded event timestamps, not measurements of Logbird.
+- **Older captures:** the 2026-11-04/05/06 folders predate the rename or show the design partner's demo workspace. Don't
+  use them on the site.
+- **Replacing a capture:** keep its manifest id, or mark the entry `interim: true` while a replacement is pending. An
+  interim entry blocks indexing and the Cloudflare build (`apps/web/src/lib/release.ts`).
 
 ## Glossary
 

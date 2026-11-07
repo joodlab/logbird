@@ -27,15 +27,15 @@ path: /legal/terms
 - **id:** `must-cover`
 - **heading:** What the final terms must cover (for counsel; remove this section before launch)
 - **bullets:**
-  - **Who we are:** Joodlab's legal entity, address and contact (owner to provide).
+  - **Who we are:** the publisher's legal entity, address and contact (owner to provide; `WEB_ORG_NAME`).
   - **Scope:** website terms only. The software is under MIT. Cloud terms, an acceptable use policy and data
     processing terms come separately, before the cloud opens.
   - **The waitlist:** joining it creates no contract, no reservation and no promise of price, date or availability.
   - **No warranty for site content:** docs and comparisons are provided as is. Comparison pages state the date each
     fact was checked.
-  - **Trademarks:** Logbird, لوغبيرد and the bird mark are Joodlab's (filings pending counsel's clearance,
+  - **Trademarks:** Logbird, لوغبيرد and the bird mark are the publisher's (filings pending counsel's clearance,
     `docs/brand.md` §8). Third-party product names are used only to identify those products.
-  - **Liability limits and governing law:** for counsel to set, given where Joodlab is established.
+  - **Liability limits and governing law:** for counsel to set, given where the publisher is established.
   - **Changes to the terms**, with a "last updated" date.
   - **Contact:** placeholder `legal@logbird.dev` (domain not bought yet).
 - **visual:** none

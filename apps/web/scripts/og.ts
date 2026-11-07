@@ -4,10 +4,14 @@ import { dirname, resolve } from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
 import { createElement as h } from 'react';
 import satori from 'satori';
-import { SITE_URL } from '../src/env';
+import { siteConfigFrom } from '../src/env';
 import { siteMap } from '../src/lib/site-map';
+import { loadPublicEnv } from './public-env';
 
 const require = createRequire(import.meta.url);
+// The same resolved origin as the bundle and the discovery files (scripts/public-env.ts).
+const { SITE_URL } = siteConfigFrom(loadPublicEnv());
+console.log(`og: cards for ${new URL(SITE_URL).host}`);
 const font = (pkg: string, file: string) => readFile(resolve(dirname(require.resolve(`${pkg}/package.json`)), 'files', file));
 const [regular, semibold, mono, arabic, logo] = await Promise.all([
   font('@fontsource/geist', 'geist-latin-400-normal.woff'),
