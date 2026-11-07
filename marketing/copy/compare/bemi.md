@@ -16,7 +16,7 @@ path: /compare/bemi
   attach application context, such as the user or the endpoint, to each change. You don't instrument call sites,
   and nothing is missed because someone forgot an `audit()` call. Logbird works the other way round: your code
   reports actions, including ones that never touch your database. [B1–B4]
-- **category note (shown as a callout):** Bemi is automatic database change data capture for Postgres. Logbird is an
+- **category note (shown as a callout titled "A different category"):** Bemi is automatic database change data capture for Postgres. Logbird is an
   application audit log. Many teams could use both: Bemi as the record of every row change, and Logbird as the
   readable history of who did what.
 - **visual:** diagram: two lanes. Top lane, "Bemi": app → Postgres → WAL → Bemi → `changes` table (rows: table,
@@ -35,7 +35,7 @@ path: /compare/bemi
   | How it captures | SDK or HTTP calls you add | Postgres logical replication (WAL), through Debezium and NATS JetStream [B1, B5] |
   | Databases | Any; Logbird doesn't read your database | PostgreSQL [B4, B5] |
   | Licence | MIT | Core: SSPL-1.0; ORM packages: LGPL-3.0 [B6, B7, B8] |
-  | Self-host | Yes: Docker Compose or Coolify | Open-source version "designed for evaluation and non-critical workloads"; a licensed Self-Hosting Enterprise edition for production [B9] |
+  | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: …, built from source" once public) | Open-source version "designed for evaluation and non-critical workloads"; a licensed Self-Hosting Enterprise edition for production [B9] |
   | Hosted offering | Logbird Cloud: waitlist only | Bemi Cloud [B9] |
   | Data model | Recommended envelope: actor, executor, tenant, targets, changes, operation | `changes` table: database, schema, table, primary key, operation, before, after, context [B3] |
   | Query | Query language and guarded SQL `WHERE` mode in a console | SQL on the `changes` table, or ORM helpers (Prisma, Rails and others) [B3, B10, B11] |

@@ -27,7 +27,7 @@ path: /compare/retraced
   | | Logbird | Retraced |
   | --- | --- | --- |
   | Licence | MIT | Apache-2.0 [S5] |
-  | Self-host | Yes: Docker Compose or Coolify, built from source | Yes: Docker Compose; also documented for DigitalOcean, AWS and Skaffold; the Kubernetes docs page says "Coming soon" [S6, S7] |
+  | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: …, built from source" once public) | Yes: Docker Compose; also documented for DigitalOcean, AWS and Skaffold; the Kubernetes docs page says "Coming soon" [S6, S7] |
   | Hosted offering | Logbird Cloud: waitlist only | None found [S8] |
   | Required event fields | `action` only; any other shape accepted | `action` and `crud` in the API spec; the docs also list `actor` as mandatory [S9, S10] |
   | Tenant field | `tenant` (optional) | `group` (optional in the API spec) [S10] |
@@ -101,7 +101,7 @@ path: /compare/retraced
   - S16 — Releases: v1.13.1, published 2024-11-06. https://api.github.com/repos/retracedhq/retraced/releases
   - S17 — Commits: latest on `main` 2025-08-26; `archived: false`.
     https://api.github.com/repos/retracedhq/retraced/commits · https://api.github.com/repos/retracedhq/retraced
-- **unverified (left out of the table):** who maintains Retraced today (Ory acquired BoxyHQ in 2025; Ory hasn't said
-  anything about Retraced); whether OpenSearch or the repository's Helm files are supported; any retention or deletion
+- **unverified (left out of the table):** who maintains Retraced today (boxyhq.com now redirects to Ory, and we found
+  no statement from Ory about Retraced); whether OpenSearch or the repository's Helm files are supported; any retention or deletion
   job outside the documented configuration; CSV export details.
 - **visual:** none

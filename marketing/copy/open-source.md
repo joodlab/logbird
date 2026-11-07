@@ -1,6 +1,6 @@
 ---
 title: Open source — Logbird
-description: Logbird is MIT-licensed. API, console, worker, SDK and integrations live in one repository, which opens publicly soon.
+description: Logbird is MIT-licensed. API, console, worker, SDK and integrations live in one repository, which opens publicly soon. <!-- when WEB_GITHUB_PUBLIC=true: "…in one repository on GitHub." -->
 path: /open-source
 ---
 
@@ -10,13 +10,17 @@ path: /open-source
 
 - **id:** `hero`
 - **eyebrow:** Open source
-- **heading (H1):** MIT-licensed. All of it.
+- **heading (H1):** The product is MIT-licensed.
+  <!-- source: LICENSE. Covers the API, console, worker, SDK and integrations; experiments/forge carries its own
+  Apache-2.0 LICENSE, so never claim "all of it". -->
 - **body:** Logbird is released under the MIT licence. The API, the console, the retention worker, the SDK and the
   integrations are in one repository. You can read the code, run it, change it and ship it in your own product.
   <!-- source: LICENSE (MIT). Its copyright line names the publisher: owner-gated (WEB_ORG_NAME), not quoted on the site until approved -->
 - **cta:** Source on GitHub — coming soon (disabled button, no link) · Self-host it → `/self-hosting`
 - **small print:** The repository opens publicly soon. Until then, the code isn't public.
-- **visual:** none
+- **visual:** a LICENSE card: "MIT License", the copyright line only once the publisher name is approved (`WEB_ORG_NAME`,
+  pending the owner), the licence's first sentence (truncated),
+  and four checks: Read it · Run it · Change it · Ship it in your product.
 
 ## in-the-repo
 
@@ -53,6 +57,9 @@ path: /open-source
   focused branches, Conventional Commits, and pull requests that explain what changed, why, and how it was verified.
   UI changes include screenshots. Tests use fictional data only. Maintainers merge.
   <!-- source: CONTRIBUTING.md; AGENTS.md -->
+- **checklist (from the body):** Node 22.18+ and pnpm · Focused branches and Conventional Commits · Pull requests that
+  explain what changed, why, and how it was verified · Screenshots for UI changes · Fictional data only in tests ·
+  Maintainers merge.
 - **bullets:**
   - API changes start in `packages/contracts`. The server and console change in the same pull request.
   - There are no CI workflows yet. Checks and Docker builds run by hand before a release.
@@ -73,9 +80,11 @@ path: /open-source
 - **id:** `security`
 - **eyebrow:** Security reports
 - **heading:** Found a vulnerability? Tell us privately.
-- **body:** Don't open a public issue. Once the repository is public, use GitHub's private vulnerability reporting.
+- **body:** Don't open a public issue. Email the security contact (`WEB_SECURITY_EMAIL`; no default). While it's unset,
+  use `SECURITY.md`'s wording: ask the maintainers for a private channel through the contact form.
   Include the affected version, a reproduction with fictional data, and the impact. We coordinate the fix and the
   disclosure with you privately. We don't offer a response-time SLA yet.
+  <!-- site rule: the site names only the security email, never a GitHub reporting flow -->
   <!-- source: SECURITY.md -->
 - **cta:** Security and data handling → `/security`
 - **visual:** none
@@ -88,5 +97,7 @@ path: /open-source
 - **body:** Version 0.1 is the first supported line. The SDK and the Hono integration are at 0.2. Nothing has been
   released yet: there are no npm packages or Docker images. Both come with the first release.
   <!-- source: SECURITY.md ("Version 0.1.x is the initial supported line"); CHANGELOG.md (both "Unreleased"); packages/sdk/package.json (0.2.0) -->
-- **cta:** Changelog → `/changelog`
+- **facts panel:** Supported line — 0.1 · SDK and Hono integration — 0.2 · npm packages — Not released · Docker images —
+  Not released.
+- **cta:** Read the changelog → `/changelog`
 - **visual:** none
