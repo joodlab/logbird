@@ -168,7 +168,7 @@ The explorer's query bar suggests as you type, at any caret position; accepting 
 - **Syntax hint row:** one line under the bar says what the current token expects (`attempt · number — attempt:>2 …`, the range / regex / phrase rules, or in SQL mode the signature of the function around the caret with the current argument emphasised).
 - **Familiar spellings:** Lucene `_exists_:f` → `f:*`, KQL `f = v` / `f != v` / `f >= 10` → `f:v` / `-f:v` / `f:>=10`, `f: v` → `f:v`, `!f:v` → `-f:v`, `&&` / `||` → `AND` / `OR`. They are underlined, offered as the first suggestion, and converted when the query runs (with Undo). Lower-case `and` / `or` / `not` are only flagged, since they may be words you are searching for.
 - **SQL mode:** columns, `attributes['…']` keys (also found by the key's own name: `queue` → `attributes['metadata.queue']`), functions with signatures, comparison operators after a column, `AND` / `OR` after an operand, values after `=`, `IN (`, `has(col,` (quoted for you), and relative times after `timestamp >`.
-- **Keyboard:** ↑/↓ move, Tab completes (and never moves focus while you compose), Enter runs (or picks a row you moved to), Ctrl/⌘+Enter always runs, Esc closes the panel, Ctrl+Space opens it, `/` focuses the bar.
+- **Keyboard:** ↑/↓ move, → at the end of the query completes, Enter runs (or picks a row you moved to, or completes a partly typed field name), Ctrl/⌘+Enter always runs, Esc closes the panel, Ctrl+Space opens it, `/` focuses the bar. Tab never changes the query: it moves focus to the next control.
 
 ## Local verification
 
