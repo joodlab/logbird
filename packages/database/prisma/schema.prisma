@@ -209,3 +209,45 @@ model InviteLink {
 
   @@index([organizationId])
 }
+
+// No cascading FK: evidence and pending deliveries survive removal of source records.
+model AuditOutbox {
+  namespace String @default("{logbird}")
+  id String @id
+  stream String
+  payload Json
+  createdAt DateTime @default(now())
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  deliveredAt DateTime?
+  lastError String?
+
+  @@index([deliveredAt, nextAttemptAt])
+}
+
+// Membership-independent failed-auth staging. The lookup identity is encrypted, never event content.
+model AuthAuditWindow {
+  namespace String @default("{logbird}")
+  id String @id
+  identity String
+  reason String
+  context Json
+  attempts Int @default(1)
+  flushedAttempts Int @default(0)
+  windowEnd DateTime
+  nextAttemptAt DateTime @default(now())
+
+  @@index([nextAttemptAt])
+}
+
+model AuthAuditBudget {
+  namespace String @default("{logbird}")
+  id String @id
+  stream String?
+  windowEnd DateTime
+  admitted Int @default(0)
+  suppressed Int @default(0)
+  reported Boolean @default(false)
+
+  @@index([reported, windowEnd])
+}

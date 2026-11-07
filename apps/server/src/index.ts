@@ -2,8 +2,11 @@ import { serve } from '@hono/node-server';
 import { closeProjectLocks, prisma } from '@logbird/database';
 import { closeRetentionQueue } from '@logbird/worker/queue';
 import { app } from './app';
+import { flushFailedSignIns } from './auth-failures';
 import { clickhouse, queryClickhouse } from './clickhouse';
 import { env } from './env';
+import { ingest } from './ingest';
+import { startAuditDrainer } from './outbox-delivery';
 import { rateLimitStore } from './rate-limit';
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, () =>
@@ -16,16 +19,19 @@ if ('keepAliveTimeout' in server) {
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 66_000;
 }
+const auditDrainer = startAuditDrainer(ingest, () => flushFailedSignIns(env.BETTER_AUTH_SECRET));
 let stopping = false;
 function shutdown() {
   if (stopping) return;
   stopping = true;
+  const drained = auditDrainer.stop();
   const deadline = setTimeout(() => {
     if ('closeAllConnections' in server) server.closeAllConnections();
     process.exit(1);
   }, 30_000);
   deadline.unref();
   server.close(async () => {
+    await drained;
     const results = await Promise.allSettled([
       closeRetentionQueue(),
       closeProjectLocks(),

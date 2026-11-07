@@ -4,6 +4,7 @@ import { prisma } from '@logbird/database';
 import { expect, it } from 'vitest';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
+import { drainTestAudit } from './test-audit';
 
 it('R2-3/9: accepted, rejected, canceled and resent invitations audit exactly once with actor/target', async () => {
   const users: string[] = [];
@@ -62,6 +63,7 @@ it('R2-3/9: accepted, rejected, canceled and resent invitations audit exactly on
     expect((await request(rejected.cookie, '/api/auth/organization/reject-invitation', 'POST', { invitationId: r.id })).status).toBe(200);
     await invite((await prisma.invitation.findUniqueOrThrow({ where: { id: c.id } })).email, true);
     expect((await request(owner.cookie, '/api/auth/organization/cancel-invitation', 'POST', { invitationId: c.id })).status).toBe(200);
+    await drainTestAudit(organizationId);
     const rows = await (
       await clickhouse.query({
         query: 'SELECT action,actor_id,target_ids,target_names FROM events WHERE project_id={p:String}',
@@ -94,6 +96,7 @@ it('R2-3/9: accepted, rejected, canceled and resent invitations audit exactly on
     const created = await createdKey.json();
     expect(created.key.createdBy.name).toBe(owner.email);
     expect(created.key.createdBy.email).toBe(owner.email);
+    await drainTestAudit(organizationId);
     const activity = await (await request(owner.cookie, '/api/workspace/activity')).json();
     expect(activity.data.find((e: { action: string }) => e.action === 'saved_view.deleted').targets[0].name).toBe('Named view');
     expect(
@@ -107,6 +110,7 @@ it('R2-3/9: accepted, rejected, canceled and resent invitations audit exactly on
     );
   } finally {
     if (organizationId) {
+      await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${organizationId}` } });
       await purgeProject(clickhouse, `ws:${organizationId}`);
       await prisma.organization.delete({ where: { id: organizationId } });
     }

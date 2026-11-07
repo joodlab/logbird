@@ -1,3 +1,5 @@
+export const API_KEY_SCOPES = { read: 'events:read', ingest: 'events:ingest' } as const;
+
 import { z } from 'zod';
 import { eventSchema } from './events';
 import { queryLangSchema } from './query';

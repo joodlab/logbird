@@ -1,4 +1,4 @@
-import type { AuditEvent } from '@logbird/contracts';
+import { type AuditEvent, WORKSPACE_ACTIVITY_CATEGORIES } from '@logbird/contracts';
 import { FilterChip } from '@logbird/ui/components/filter-chip';
 import { EmptyState, ErrorState } from '@logbird/ui/components/states';
 import { Input } from '@logbird/ui/components/ui/input';
@@ -24,13 +24,6 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/
 });
 
 const COLUMNS = ['time', 'outcome', 'action', 'description', 'actor'];
-const CATEGORIES = [
-  ['project', 'Projects'],
-  ['api_key', 'API keys'],
-  ['member', 'Members'],
-  ['view', 'Views'],
-  ['workspace', 'Workspace'],
-] as const;
 
 function WorkspaceActivity() {
   const search = Route.useSearch();
@@ -57,8 +50,8 @@ function WorkspaceActivity() {
     <div className="flex min-h-[28rem] flex-1 flex-col">
       <div className="flex flex-col gap-3 border-b px-4 py-4 sm:px-6">
         <p className="max-w-3xl text-muted-foreground text-sm">
-          Logbird records its own management actions — projects, keys, retention, members, views — into this stream. It is the same event model you
-          send, shown with the same components.
+          Logbird records its own management actions — projects, keys, retention, members, views, invite links, sign-ins and sessions, invite links,
+          sign-ins and sessions — into this stream. It is the same event model you send, shown with the same components.
         </p>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="relative w-full sm:max-w-xs">
@@ -74,7 +67,7 @@ function WorkspaceActivity() {
           </div>
           <fieldset className="flex flex-wrap gap-1.5">
             <legend className="sr-only">Filter by area</legend>
-            {CATEGORIES.map(([value, label]) => (
+            {WORKSPACE_ACTIVITY_CATEGORIES.map(([value, label]) => (
               <FilterChip
                 active={category === value}
                 key={value}

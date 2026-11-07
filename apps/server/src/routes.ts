@@ -1,6 +1,7 @@
 ﻿import { randomUUID } from 'node:crypto';
 import { compileQuery, projectStats, retentionStats, validateSql } from '@logbird/clickhouse';
 import {
+  API_KEY_SCOPES,
   apiKeySchema,
   createApiKeyResponseSchema,
   createApiKeySchema,
@@ -38,6 +39,31 @@ async function activeOrganization(c: import('hono').Context<AppEnv>) {
     throw new ApiError(403, 'organization_required', 'Select an organization you belong to.');
   return id;
 }
+function auditApiKey(
+  c: import('hono').Context<AppEnv>,
+  action: 'api_key.created' | 'api_key.revoked',
+  key: { id: string; name: string; kind: string; prefix: string },
+  project: { id: string; name: string; organizationId: string },
+  reason?: 'project_deleted',
+) {
+  return audit(c, action, { type: 'api_key', id: key.id, name: key.name }, undefined, {
+    organizationId: project.organizationId,
+    targets: [
+      { type: 'api_key', id: key.id, name: key.name },
+      { type: 'project', id: project.id, name: project.name },
+    ],
+    metadata: {
+      apiKey: {
+        kind: key.kind,
+        scope: API_KEY_SCOPES[key.kind as keyof typeof API_KEY_SCOPES],
+        prefix: key.prefix,
+        state: action === 'api_key.created' ? 'active' : 'revoked',
+        ...(reason ? { reason } : {}),
+      },
+    },
+  });
+}
+
 export const managementRoutes = new Hono<AppEnv>()
   .use('*', requireSession)
   .get('/me', doc('Current user and workspaces', meResponseSchema), async (c) => {
@@ -89,7 +115,7 @@ export const managementRoutes = new Hono<AppEnv>()
         return { project: serializeProject(project), ingestKey: { key: serializeKey(key), secret: material.secret } };
       });
       await audit(c, 'project.created', { type: 'project', id: result.project.id, name: result.project.name });
-      await audit(c, 'api_key.created', { type: 'api_key', id: result.ingestKey.key.id, name: result.ingestKey.key.name });
+      await auditApiKey(c, 'api_key.created', result.ingestKey.key, { ...result.project, organizationId });
       return c.json(createProjectResponseSchema.parse(result), 201);
     },
   )
@@ -163,7 +189,7 @@ export const managementRoutes = new Hono<AppEnv>()
         await audit(c, 'project.setup.dismissed', { type: 'project', id: project.id, name: project.name }, [
           { field: 'setupDismissed', after: setupDismissed },
         ]);
-      const changes = (['name', 'description', 'retentionDays'] as const)
+      const changes = (['name', 'description'] as const)
         .filter((field) => before[field] !== project[field])
         .map((field) => ({ field, before: before[field], after: project[field] }));
       if (changes.length) await audit(c, 'project.updated', { type: 'project', id: project.id, name: project.name }, changes);
@@ -183,7 +209,8 @@ export const managementRoutes = new Hono<AppEnv>()
       if (confirm !== c.get('project').slug) throw new ApiError(422, 'confirmation_required', 'Type the project slug to delete the project.');
       const projectId = c.get('project').id;
       await withProjectLock(projectId, async (tx) => {
-        await tx.apiKey.updateMany({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
+        const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
+        for (const key of revoked) await auditApiKey(c, 'api_key.revoked', key, c.get('project'), 'project_deleted');
         await purgeProjectEvents(projectId);
         await tx.project.delete({ where: { id: projectId } });
       });
@@ -212,19 +239,19 @@ export const managementRoutes = new Hono<AppEnv>()
         include: creatorSelect,
       });
       invalidateSetup(c.get('project').id);
-      await audit(c, 'api_key.created', { type: 'api_key', id: key.id, name: key.name });
+      await auditApiKey(c, 'api_key.created', key, c.get('project'));
       return c.json({ key: serializeKey(key), secret: material.secret }, 201);
     },
   )
   .delete('/projects/:projectId/keys/:keyId', routeDoc('Revoke API key', { responses: { 204: { description: 'Revoked' } } }), async (c) => {
     const key = await prisma.apiKey.findFirst({ where: { id: c.req.param('keyId'), projectId: c.get('project').id } });
+    if (!key) throw new ApiError(404, 'not_found', 'API key not found.');
     const result = await prisma.apiKey.updateMany({
-      where: { id: c.req.param('keyId'), projectId: c.get('project').id },
+      where: { id: key.id, projectId: c.get('project').id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
-    if (!result.count) throw new ApiError(404, 'not_found', 'API key not found.');
     invalidateSetup(c.get('project').id);
-    await audit(c, 'api_key.revoked', { type: 'api_key', id: c.req.param('keyId'), name: key?.name });
+    if (result.count) await auditApiKey(c, 'api_key.revoked', key, c.get('project'));
     return c.body(null, 204);
   })
   .get('/projects/:projectId/views', doc('List saved views', z.object({ data: z.array(savedViewSchema) })), async (c) =>
