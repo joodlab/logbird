@@ -21,7 +21,7 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
   );
   const values = [...unique.entries()]
     .filter(([id]) => !cached.has(id))
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([id, row]) => {
       const legacy = stored.get(id);
       return Prisma.sql`(${projectId}, ${id}, ${organizationId}, ${legacy?.fingerprint ?? eventFingerprint(row)}, ${legacy?.receivedAt ?? new Date(row.received_at)}, ${legacy?.eventAt ?? new Date(row.timestamp)}, ${legacy ? new Date() : null})`;
@@ -32,6 +32,7 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
     VALUES ${Prisma.join(values)} ON CONFLICT ("projectId", "eventId") DO NOTHING RETURNING "eventId"`)
     : [];
   const ownedIds = owned.map((r) => r.eventId);
+  const ownedSet = new Set(ownedIds);
   let attempted = false;
   try {
     // Recheck after ownership: a process may have paused between the first lookup and claiming,
@@ -57,7 +58,7 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
         rejected.push({ index: candidate.index, reason: 'duplicate_id_conflict' });
         continue;
       }
-      if (!receipt.confirmedAt && !ownedIds.includes(id)) {
+      if (!receipt.confirmedAt && !ownedSet.has(id)) {
         // Includes recovery after INSERT succeeded but confirmation/HTTP delivery failed.
         const existing = stored.get(id) ?? (await existingEventIdentities(clickhouse, projectId, [id])).get(id);
         if (!existing || existing.fingerprint !== receipt.fingerprint)
@@ -69,7 +70,12 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
     attempted = true; // A transport error can mean ClickHouse accepted the INSERT. Preserve claims.
     try {
       await insertEvents(clickhouse, [...rows.values()]);
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && ['6', '27', '38', '41', '53', '69', '72'].includes(String(error.code))) {
+        // ClickHouse rejected parsing/types before storage. These claims are safe to release.
+        attempted = false;
+        throw new ApiError(422, 'invalid_event', 'Storage could not parse this batch. Check event field types and timestamps.');
+      }
       throw new ApiError(503, 'ingest_pending', 'Storage acknowledgement is unresolved; retry this batch.');
     }
     await prisma.ingestReceipt.updateMany({ where: { projectId, eventId: { in: ownedIds }, confirmedAt: null }, data: { confirmedAt: new Date() } });

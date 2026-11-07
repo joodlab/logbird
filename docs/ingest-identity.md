@@ -40,6 +40,10 @@ in the PR; they do not establish a production 10M/day capacity result.
 
 ## Failed or uncertain writes
 
+Deterministic ClickHouse parse/type errors (codes 6, 27, 38, 41, 53, 69, 72) retain
+the existing `422 invalid_event` behavior and release only this attempt's pending
+claims. They are permanent SDK errors, not an unresolved write requiring retries.
+
 The receipt is pending before ClickHouse I/O and confirmed only after ClickHouse's
 `wait_for_async_insert=1` acknowledgement. A storage acknowledgement failure, or an
 exact retry while the earlier row is absent, returns `503 ingest_pending` with
@@ -122,3 +126,6 @@ New fenced writes have one row per id and agree across search/detail/export/roll
 Legacy conflicts should be audited and reconciled explicitly, preserving all surviving
 evidence. Direct ClickHouse writers and old binaries must be denied or upgraded;
 the database engine itself is not an authorization boundary.
+An action filter can still surface a legacy non-canonical version that matches that
+filter, while detail selects the oldest surviving version. This is historical data
+ambiguity; the filtered row's own fields always satisfy its filter.

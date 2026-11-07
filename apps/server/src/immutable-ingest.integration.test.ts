@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { eventFingerprint, exportEvents, getEvent, insertEvents, normalizeEvent, read, searchEvents } from '@logbird/clickhouse';
 import { prisma, pruneIngestReceipts, purgeIngestReceipts, withProjectLock } from '@logbird/database';
+import { enforceProjectRetention } from '@logbird/worker/retention';
 import { expect, it } from 'vitest';
 import { clickhouse, purgeProjectEvents } from './clickhouse';
 import { ingest } from './ingest';
@@ -118,6 +119,15 @@ it('immutable ids, retries, concurrent claims, rollups, legacy rows, pending rec
     await withProjectLock(project, () => purgeIngestReceipts(project, new Date(now.getTime() - 1)));
     expect(await prisma.ingestReceipt.count({ where: { projectId: project, eventId: 'pending' } })).toBe(1);
     await ingest(`ws:${org}`, { action: 'workspace.audit' });
+    await ingest(project, {
+      id: 'retention-expired',
+      action: 'retention.original',
+      occurredAt: new Date(now.getTime() - 100 * 86_400_000).toISOString(),
+    });
+    expect(await prisma.ingestReceipt.count({ where: { projectId: project, eventId: 'retention-expired' } })).toBe(1);
+    await enforceProjectRetention(project);
+    expect(await prisma.ingestReceipt.count({ where: { projectId: project, eventId: 'retention-expired' } })).toBe(0);
+    expect(await getEvent(clickhouse, project, 'retention-expired')).toBeNull();
   } finally {
     await withProjectLock(project, () => purgeProjectEvents(project));
     await withProjectLock(`ws:${org}`, () => purgeProjectEvents(`ws:${org}`));

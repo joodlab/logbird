@@ -1,17 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import { insertEvents, normalizeEvent } from '@logbird/clickhouse';
+import { insertEvents, normalizeEvent, read, searchEvents, toEvent, where } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma, withProjectLock } from '@logbird/database';
 import { clickhouse, purgeProjectEvents } from '../apps/server/src/clickhouse';
 import { type IngestCandidate, insertImmutableEvents } from '../apps/server/src/immutable-ingest';
 
 // Opt-in benchmark. Hold the shared heavy slot and check RAM before running.
-// 1M receipts in an owned table, then paired 1000-event ClickHouse INSERTs (20 samples).
+// 1M receipts, paired 1000-event INSERTs and explorer queries over 10M owned history rows.
+// Supply the cloud load owner's approved fictional source project. It is read, never modified.
+const historySource = process.argv[2];
+if (!historySource) throw new Error('Usage: node --env-file=.env --import tsx scripts/benchmark-ingest-identity.ts APPROVED_10M_SOURCE_PROJECT');
 const org = randomUUID();
 const table = `qa_receipts_${org.replaceAll('-', '')}`;
 const project = `qa-identity-${org}`;
 const baseline = `${project}-baseline`;
 const batchSize = 1000;
 const p95 = (samples: number[]) => [...samples].sort((a, b) => a - b)[Math.ceil(samples.length * 0.95) - 1];
+const p50 = (samples: number[]) => [...samples].sort((a, b) => a - b)[Math.ceil(samples.length * 0.5) - 1];
 const timed = async (work: () => Promise<unknown>) => {
   const start = performance.now();
   await work();
@@ -43,6 +47,17 @@ try {
   const size = await prisma.$queryRawUnsafe(`SELECT pg_relation_size('${table}')::float8 heap_bytes,
     pg_table_size('${table}')::float8 table_bytes,pg_indexes_size('${table}')::float8 index_bytes,
     pg_total_relation_size('${table}')::float8 total_bytes`);
+  await prisma.$executeRawUnsafe(`DROP TABLE ${table}`);
+  const sourceRows = await read<{ n: number }>(clickhouse, 'SELECT count() n FROM events WHERE project_id={p:String}', { p: historySource });
+  if (Number(sourceRows[0]?.n) < 10_000_000) throw new Error('Approved source must have at least 10M rows');
+  await clickhouse.command({
+    query:
+      'INSERT INTO events SELECT {project:String},* EXCEPT(project_id,category,search_text) FROM events WHERE project_id={source:String} LIMIT 10000000',
+    query_params: { project, source: historySource },
+    clickhouse_settings: { max_execution_time: 300 },
+  });
+  const historyRows = (await read<{ n: number }>(clickhouse, 'SELECT count() n FROM events WHERE project_id={p:String}', { p: project }))[0]?.n;
+  if (Number(historyRows) < 10_000_000) throw new Error('Owned benchmark history must have at least 10M rows');
   const rawMs: number[] = [],
     fencedMs: number[] = [],
     addedMs: number[] = [];
@@ -74,18 +89,86 @@ try {
   console.log(
     JSON.stringify({
       receiptRows: 1_000_000,
+      historyRows,
       batchSize,
       receiptBulkClaimP95Ms: p95(claims),
       size,
       samples: rawMs.length,
       rawP95Ms: p95(rawMs),
+      rawP50Ms: p50(rawMs),
       fencedP95Ms: p95(fencedMs),
+      fencedP50Ms: p50(fencedMs),
       pairedAddedP95Ms: p95(addedMs),
+      pairedAddedP50Ms: p50(addedMs),
       rawMs,
       fencedMs,
       addedMs,
     }),
   );
+  const bounds = (
+    await read<{ first: string; last: string }>(
+      clickhouse,
+      'SELECT min(timestamp) first,max(timestamp) last FROM events WHERE project_id={p:String}',
+      { p: project },
+    )
+  )[0];
+  if (!bounds) throw new Error('Missing benchmark bounds');
+  const iso = (value: string) => new Date(value.endsWith('Z') ? value : `${value.replace(' ', 'T')}Z`);
+  const last = iso(bounds.last).getTime();
+  for (const range of ['day', 'full'] as const)
+    for (const order of ['asc', 'desc'] as const) {
+      const q = {
+        from: range === 'day' ? new Date(last - 86_400_000).toISOString() : iso(bounds.first).toISOString(),
+        to: new Date(last + 1000).toISOString(),
+        limit: 200,
+        order,
+      };
+      const filter = await where(clickhouse, project, q);
+      const direction = order.toUpperCase();
+      const before: number[] = [],
+        after: number[] = [];
+      const legacy = async () => {
+        const rows = await read<Parameters<typeof toEvent>[0]>(
+          clickhouse,
+          `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={project:String} AND (timestamp,event_id) IN
+        (SELECT timestamp,event_id FROM events WHERE ${filter.sql} ORDER BY timestamp ${direction},event_id ${direction} LIMIT 1 BY timestamp,event_id LIMIT {limit:UInt32})
+        ORDER BY timestamp ${direction},event_id ${direction} LIMIT 1 BY timestamp,event_id`,
+          { ...filter.params, limit: 201 },
+        );
+        rows.slice(0, 200).map(toEvent);
+        await read(clickhouse, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${filter.sql} LIMIT 10001)`, filter.params, 1);
+      };
+      for (let sample = 0; sample < 21; sample++) {
+        let oldMs: number, newMs: number;
+        if (sample % 2 === 0) {
+          oldMs = await timed(legacy);
+          newMs = await timed(() => searchEvents(clickhouse, project, q));
+        } else {
+          newMs = await timed(() => searchEvents(clickhouse, project, q));
+          oldMs = await timed(legacy);
+        }
+        if (sample) {
+          before.push(oldMs);
+          after.push(newMs);
+        }
+      }
+      console.log(
+        JSON.stringify({
+          explorer: {
+            range,
+            order,
+            historyRows,
+            samples: before.length,
+            beforeP50Ms: p50(before),
+            beforeP95Ms: p95(before),
+            afterP50Ms: p50(after),
+            afterP95Ms: p95(after),
+            before,
+            after,
+          },
+        }),
+      );
+    }
 } finally {
   await withProjectLock(project, () => purgeProjectEvents(project));
   await withProjectLock(baseline, () => purgeProjectEvents(baseline));
