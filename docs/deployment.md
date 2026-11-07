@@ -1,5 +1,11 @@
 # First production test
 
+For the hosted-cloud architecture decision, Kubernetes manifests and release gates, see
+[cloud operations](cloud-operations.md). Recovery procedures live in
+[backup and disaster recovery](backup-disaster-recovery.md); operational monitoring and sender setup
+are in [alerts and status](alerts-status.md) and [transactional email](transactional-email.md).
+These are preparation artifacts; they do not establish a deployed or accepted cloud service.
+
 Target: one Linux VM with Compose, private database network, SSD storage and a TLS reverse proxy. No cloud deployment or public signup is assumed. Follow [self-hosting](self-hosting.md) for builds, migrations and backups. Do not put real customer events into this first acceptance run.
 
 ## Owner decisions

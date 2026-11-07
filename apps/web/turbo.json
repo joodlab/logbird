@@ -1,0 +1,26 @@
+{
+  "$schema": "https://turborepo.org/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "env": [
+        "WEB_SITE_URL",
+        "WEB_APP_URL",
+        "WEB_GITHUB_URL",
+        "WEB_GITHUB_PUBLIC",
+        "WEB_ORG_NAME",
+        "WEB_SECURITY_EMAIL",
+        "WEB_CONTACT_EMAIL",
+        "NITRO_PRESET",
+        "LOGBIRD_WEB_ALLOW_INTERIM"
+      ],
+      "outputs": [".output/**", "public/media/**", "public/og/**"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*",
+        "$TURBO_ROOT$/.env*",
+        "$TURBO_ROOT$/marketing/captures/**"
+      ]
+    }
+  }
+}

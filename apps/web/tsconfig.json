@@ -1,0 +1,10 @@
+{
+  "extends": "@logbird/tsconfig/react.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "scripts", "vite.config.ts", "vitest.config.ts", "server"],
+  "exclude": ["node_modules", "dist", ".output", ".nitro"]
+}
