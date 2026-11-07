@@ -1,8 +1,8 @@
 import { useCopy } from '@logbird/ui/hooks/use-copy';
 import { type CodeLanguage, highlight, TOKEN_CLASS } from '@logbird/ui/lib/highlight';
-import { cn } from '@logbird/ui/lib/utils';
 import { CheckIcon, CopyIcon } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
+import { cx as cn } from '../../lib/cx';
 
 /**
  * The console's highlighter and syntax tokens, in a lighter shell than `@logbird/ui`'s CodeBlock: the site's copy

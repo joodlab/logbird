@@ -1,4 +1,4 @@
-import { cn } from '@logbird/ui/lib/utils';
+import { cx as cn } from '../../lib/cx';
 
 /**
  * The brand illustration from the mark and the social card: a stack of log entries where the newest one is indigo.

@@ -1,4 +1,4 @@
-import { cn } from '@logbird/ui/lib/utils';
+import { cx as cn } from '../../lib/cx';
 import { Clip } from '../clip';
 import { Screenshot } from '../screenshot';
 

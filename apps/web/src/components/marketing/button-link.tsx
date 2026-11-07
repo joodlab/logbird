@@ -1,17 +1,37 @@
-import { type Button, buttonVariants } from '@logbird/ui/components/ui/button';
-import { cn } from '@logbird/ui/lib/utils';
 import { Link } from '@tanstack/react-router';
-import type { ComponentProps, MouseEventHandler, ReactNode } from 'react';
+import type { MouseEventHandler, ReactNode } from 'react';
+import { cx } from '../../lib/cx';
 
-type ButtonLinkProps = Pick<ComponentProps<typeof Button>, 'variant' | 'size'> & {
+/*
+ * The console's button look (packages/ui/src/components/ui/button.tsx) for links. Mirrored as plain class strings so
+ * marketing pages don't ship @base-ui's Button and tailwind-merge just to style anchors. Keep in sync with the
+ * console's variants when they change.
+ */
+const base =
+  'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent bg-clip-padding text-center font-medium text-sm no-underline outline-none transition-all select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:translate-y-px [&_svg]:pointer-events-none [&_svg]:shrink-0';
+const variants = {
+  default: 'bg-primary text-primary-foreground hover:bg-primary/80',
+  outline: 'border-border bg-background shadow-xs hover:bg-muted hover:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50',
+  ghost: 'hover:bg-muted hover:text-foreground dark:hover:bg-muted/50',
+  link: 'text-brand underline-offset-4 hover:underline',
+} as const;
+const sizes = {
+  default: 'h-(--control-size-default) px-3',
+  sm: 'h-(--control-size-compact) px-2.5',
+  lg: 'h-(--control-size-large) px-4 text-[15px]',
+} as const;
+
+type ButtonLinkProps = {
+  variant?: keyof typeof variants;
+  size?: keyof typeof sizes;
   children: ReactNode;
   className?: string;
   onClick?: MouseEventHandler<HTMLAnchorElement>;
 } & ({ to: string; href?: never } | { href: string; to?: never });
 
 /** A link styled as a button. `to` is an internal route (client navigation); `href` is anything else. */
-export function ButtonLink({ to, href, variant, size, className, children, onClick }: ButtonLinkProps) {
-  const classes = cn(buttonVariants({ variant, size }), 'no-underline', className);
+export function ButtonLink({ to, href, variant = 'default', size = 'default', className, children, onClick }: ButtonLinkProps) {
+  const classes = cx(base, variants[variant], variant === 'link' ? 'h-auto px-0' : sizes[size], className);
   if (to !== undefined) {
     return (
       <Link className={classes} onClick={onClick} to={to}>

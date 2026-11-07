@@ -1,3 +1,4 @@
+import geistLatin from '@fontsource-variable/geist/files/geist-latin-wght-normal.woff2?url';
 import { getThemeScript, ThemeProvider } from '@logbird/ui/theme';
 import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
@@ -14,6 +15,8 @@ export const Route = createRootRoute({
       { name: 'theme-color', content: '#0b0b0c', media: '(prefers-color-scheme: dark)' },
     ],
     links: [
+      // Preload the Latin UI font so first paint already uses Geist (no swap repaint of the headline).
+      { rel: 'preload', href: geistLatin, as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' },
       { rel: 'stylesheet', href: appCss },
       { rel: 'icon', type: 'image/svg+xml', href: '/brand/logbird-favicon.svg' },
       { rel: 'apple-touch-icon', href: '/brand/logbird-apple-touch-icon.png' },

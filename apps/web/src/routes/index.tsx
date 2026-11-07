@@ -252,7 +252,7 @@ function HomePage() {
         </div>
         <div className="mt-10 flex items-center gap-3">
           <ShieldCheckIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-          <ButtonLink className="px-0" to="/security" variant="link">
+          <ButtonLink to="/security" variant="link">
             Read how Logbird handles data
           </ButtonLink>
         </div>
@@ -267,7 +267,7 @@ function Hero() {
   return (
     <section aria-labelledby="hero-title" className="relative overflow-hidden">
       <div aria-hidden="true" className="ledger-bg pointer-events-none absolute inset-0" />
-      <div className="container-site relative grid gap-12 pt-14 pb-16 md:pt-24 md:pb-20 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-center">
+      <div className="container-site relative grid gap-12 pt-14 pb-16 md:pt-24 md:pb-20 lg:min-h-[max(40rem,calc(100svh-var(--header-h)))] lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-center lg:py-16">
         <div className="flex min-w-0 flex-col gap-6">
           <Eyebrow>Open-source audit logs · MIT</Eyebrow>
           <h1 className="display" id="hero-title">

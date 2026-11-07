@@ -1,5 +1,5 @@
-import { cn } from '@logbird/ui/lib/utils';
 import type { ReactNode } from 'react';
+import { cx as cn } from '../../lib/cx';
 
 export function Eyebrow({ children, className }: { children: ReactNode; className?: string }) {
   return <p className={cn('eyebrow', className)}>{children}</p>;
