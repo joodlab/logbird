@@ -16,7 +16,9 @@ const immutableWriter = existsSync(new URL('../apps/server/src/immutable-ingest.
 if ((variant === 'immutable') !== immutableWriter) throw new Error('Variant does not match the checked-out writer');
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 if (!historySource || !expectedHead)
-  throw new Error('Usage: node --env-file=.env --import tsx scripts/benchmark-ingest-identity.ts APPROVED_10M_SOURCE_PROJECT EXPECTED_HEAD [baseline|immutable]');
+  throw new Error(
+    'Usage: node --env-file=.env --import tsx scripts/benchmark-ingest-identity.ts APPROVED_10M_SOURCE_PROJECT EXPECTED_HEAD [baseline|immutable]',
+  );
 if (head !== expectedHead || execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' }).trim())
   throw new Error('Benchmark requires a clean checkout at EXPECTED_HEAD');
 console.log(JSON.stringify({ head, variant, historySource, startedAt: new Date().toISOString() }));
@@ -79,14 +81,25 @@ try {
   });
   const historyRows = (await read<{ n: number }>(clickhouse, 'SELECT count() n FROM events WHERE project_id={p:String}', { p: project }))[0]?.n;
   if (Number(historyRows) < 10_000_000) throw new Error('Owned benchmark history must have at least 10M rows');
-  for (const { batchSize, payloadBytes } of [{ batchSize: 1, payloadBytes: 0 }, { batchSize: 100, payloadBytes: 0 }, { batchSize: 1000, payloadBytes: 0 }, { batchSize: 1000, payloadBytes: 4096 }]) {
+  for (const { batchSize, payloadBytes } of [
+    { batchSize: 1, payloadBytes: 0 },
+    { batchSize: 100, payloadBytes: 0 },
+    { batchSize: 1000, payloadBytes: 0 },
+    { batchSize: 1000, payloadBytes: 4096 },
+  ]) {
     const rawMs: number[] = [],
       fencedMs: number[] = [],
       addedMs: number[] = [];
     for (let batch = 0; batch < 21; batch++) {
       const now = new Date();
       const candidates = Array.from({ length: batchSize }, () => {
-        const input = { id: randomUUID(), action: 'benchmark.immutable', occurredAt: now.toISOString(), actor: { id: 'fictional' }, ...(payloadBytes ? { metadata: { content: 'x'.repeat(payloadBytes) } } : {}) };
+        const input = {
+          id: randomUUID(),
+          action: 'benchmark.immutable',
+          occurredAt: now.toISOString(),
+          actor: { id: 'fictional' },
+          ...(payloadBytes ? { metadata: { content: 'x'.repeat(payloadBytes) } } : {}),
+        };
         const normalized = normalizeEvent(input, { projectId: project, receivedAt: now });
         if (!normalized.ok) throw new Error('Invalid fixture');
         return { input, row: normalized.row };
@@ -102,7 +115,10 @@ try {
       };
       const fenced = async () => {
         queryLabel = `ingest-${batchSize}-${payloadBytes}-${batch}-${variant}`;
-        await ingest(project, candidates.map((c) => c.input));
+        await ingest(
+          project,
+          candidates.map((c) => c.input),
+        );
       };
       let rawTime: number, fencedTime: number;
       if (batch % 2 === 0) {
@@ -218,10 +234,16 @@ try {
 } finally {
   // Master's purge may predate event_ids even when the shared DB already has the additive index.
   const indexExists = Number((await read<{ result: number }>(clickhouse, 'EXISTS TABLE event_ids'))[0]?.result ?? 0) === 1;
-  for (const owned of [project]) await withProjectLock(owned, async () => {
-    await purgeProjectEvents(owned);
-    if (indexExists) await clickhouse.command({ query: 'DELETE FROM event_ids WHERE project_id={p:String}', query_params: { p: owned }, clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' } });
-  });
+  for (const owned of [project])
+    await withProjectLock(owned, async () => {
+      await purgeProjectEvents(owned);
+      if (indexExists)
+        await clickhouse.command({
+          query: 'DELETE FROM event_ids WHERE project_id={p:String}',
+          query_params: { p: owned },
+          clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
+        });
+    });
   await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS ${table}`);
   await prisma.organization.deleteMany({ where: { id: org } });
   await rateLimitStore.quit();
