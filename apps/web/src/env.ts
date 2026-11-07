@@ -11,9 +11,10 @@
  *   WEB_GITHUB_PUBLIC  "true" once the repository is public        default false
  *   WEB_GITHUB_URL     repository URL; required when public        default unset
  *   WEB_ORG_NAME       legal name for © and JSON-LD (pending owner) default unset → "Logbird contributors", no Organization
+ *   WEB_SECURITY_EMAIL vulnerability-report mailbox; NO default     unset → SECURITY.md's "request a private channel" wording
  */
 /** The only variables the build passes to the site (vite.config.ts) and that Turbo hashes (turbo.json). */
-export const PUBLIC_ENV_KEYS = ['WEB_SITE_URL', 'WEB_APP_URL', 'WEB_GITHUB_URL', 'WEB_GITHUB_PUBLIC', 'WEB_ORG_NAME'] as const;
+export const PUBLIC_ENV_KEYS = ['WEB_SITE_URL', 'WEB_APP_URL', 'WEB_GITHUB_URL', 'WEB_GITHUB_PUBLIC', 'WEB_ORG_NAME', 'WEB_SECURITY_EMAIL'] as const;
 
 declare const __SITE_ENV__: Record<string, string | undefined> | undefined;
 
@@ -30,6 +31,13 @@ export interface SiteConfig {
   GITHUB_URL?: string;
   /** The publisher's legal name is pending the owner; until it is set the site names no company. */
   ORG_NAME?: string;
+  /**
+   * Where researchers report vulnerabilities. No default: a guessed mailbox on a domain we don't control would send
+   * reports nowhere, or to a stranger. Unset renders SECURITY.md's wording and is a release blocker (release.ts).
+   */
+  SECURITY_EMAIL?: string;
+  /** False while WEB_SITE_URL is unset, i.e. the canonical origin is the provisional domain (a release blocker). */
+  SITE_URL_CONFIGURED: boolean;
 }
 
 /**
@@ -54,7 +62,12 @@ export function siteConfigFrom(values: Record<string, string | undefined>): Site
     GITHUB_PUBLIC: values.WEB_GITHUB_PUBLIC === 'true',
     GITHUB_URL: url('WEB_GITHUB_URL'),
     ORG_NAME: values.WEB_ORG_NAME?.trim() || undefined,
+    SECURITY_EMAIL: values.WEB_SECURITY_EMAIL?.trim() || undefined,
+    SITE_URL_CONFIGURED: Boolean(values.WEB_SITE_URL?.trim()),
   };
+  if (config.SECURITY_EMAIL && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.SECURITY_EMAIL)) {
+    throw new Error('WEB_SECURITY_EMAIL must be an email address.');
+  }
   if (config.GITHUB_PUBLIC && !config.GITHUB_URL) {
     throw new Error('WEB_GITHUB_PUBLIC=true needs WEB_GITHUB_URL.');
   }
@@ -62,12 +75,11 @@ export function siteConfigFrom(values: Record<string, string | undefined>): Site
 }
 
 export const siteConfig = siteConfigFrom(source);
-export const { SITE_URL, APP_URL, GITHUB_PUBLIC, GITHUB_URL, ORG_NAME } = siteConfig;
+export const { SITE_URL, APP_URL, GITHUB_PUBLIC, GITHUB_URL, ORG_NAME, SECURITY_EMAIL } = siteConfig;
 export const COPYRIGHT_HOLDER = ORG_NAME ?? 'Logbird contributors';
 
 /** Pending-domain mailboxes. Owner question: confirm these once the domain is bought. */
 export const CONTACT_EMAIL = `hello@${DOMAIN}`;
-export const SECURITY_EMAIL = `security@${DOMAIN}`;
 export const PRIVACY_EMAIL = `privacy@${DOMAIN}`;
 
 const LOCAL = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0)$/i;
