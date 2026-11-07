@@ -244,7 +244,13 @@ function FacetGroup({
               <span className="min-w-0 shrink-[3] truncate font-mono text-[10.5px] text-muted-foreground">{v.value}</span>
             ) : null}
           </span>
-          <span className="relative shrink-0 text-[11px] text-muted-foreground tabular-nums group-hover/facet:opacity-0">
+          <span
+            className={cn(
+              'relative shrink-0 text-[11px] tabular-nums group-hover/facet:opacity-0',
+              // On the brand tint of a selected row the muted grey falls under 4.5:1.
+              included ? 'text-foreground' : 'text-muted-foreground',
+            )}
+          >
             {formatCompact(v.count)}
           </span>
         </button>

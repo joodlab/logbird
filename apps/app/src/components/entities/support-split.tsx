@@ -101,7 +101,6 @@ export function SupportSplitPanel({
               {counts.agents.slice(0, 6).map((a) => (
                 <li key={a.id}>
                   <SupportAgentLink
-                    aria-label={`${a.name}, support agent: ${formatNumber(a.count)} events. Open their support activity`}
                     agentId={a.id}
                     className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-[13px] outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
                     projectId={projectId}
@@ -111,6 +110,7 @@ export function SupportSplitPanel({
                       {a.name}
                     </span>
                     <span className="text-muted-foreground text-xs tabular-nums">{formatNumber(a.count)}</span>
+                    <span className="sr-only"> events as a support agent. Opens their support activity</span>
                   </SupportAgentLink>
                 </li>
               ))}

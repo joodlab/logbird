@@ -182,11 +182,12 @@ try {
   }
   const from = new Date(Date.now() - 3_600_000).toISOString();
   let total = 0;
-  for (let i = 0; i < 90 && total < all.length; i++) {
+  for (let i = 0; i < 90 && total < Math.min(all.length, 10_001); i++) {
     total = (await json(await api.get(`${BASE}/api/projects/${projectId}/events?from=${from}&limit=1`, { headers: H }))).total ?? 0;
-    if (total < all.length) await page.waitForTimeout(1000);
+    if (total < Math.min(all.length, 10_001)) await page.waitForTimeout(1000);
   }
-  check('fixture ingested (10k+ rows)', total >= all.length, total);
+  // The search total is capped at 10,001 ("10,000+").
+  check('fixture ingested (10k+ rows)', total >= Math.min(all.length, 10_001), total);
   const P = (p, q) => `${BASE}/p/${projectId}${p}?range=1h${q ? `&q=${encodeURIComponent(q)}` : ''}`;
 
   /* ---------------- counts (API, as the UI asks) ---------------- */

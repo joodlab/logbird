@@ -77,7 +77,7 @@ export function SupportMarker({
     <>
       <VenetianMaskIcon aria-hidden className="size-3 shrink-0 text-support" />
       <span className="truncate" dir="auto">
-        <span className="text-muted-foreground">via support:</span> <span className="font-medium text-foreground">{name}</span>
+        <span className="text-support-foreground">via support:</span> <span className="font-medium text-foreground">{name}</span>
       </span>
     </>
   );
@@ -94,8 +94,8 @@ export function SupportMarker({
     );
   if (linked && projectId) {
     return (
+      // The name starts with the visible "via support: X" (WCAG 2.5.3), then says as whom and where the link goes.
       <SupportAgentLink
-        aria-label={`${description}. Open ${name}'s support activity`}
         agentId={event.impersonator.id}
         className={cn(
           'inline-flex min-w-0 max-w-full rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
@@ -106,6 +106,7 @@ export function SupportMarker({
         title={description}
       >
         {body}
+        <span className="sr-only">, acting as {personLabel(event.actor) || 'an unknown customer'}. Opens their support activity</span>
       </SupportAgentLink>
     );
   }
