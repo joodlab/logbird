@@ -24,7 +24,14 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
     return { from: new Date(r.fromMs), to: new Date(r.toMs) };
   }, [range]);
 
-  const sections = matches.filter((m) => m.staticData?.crumb).map((m) => ({ id: m.id, label: m.staticData.crumb as string, path: m.pathname }));
+  const sections = matches
+    .filter((m) => m.staticData?.crumb)
+    .map((m) => ({
+      id: m.id,
+      label: m.staticData.crumb as string,
+      path: m.pathname,
+      to: m.staticData.crumbTo && params.projectId ? m.staticData.crumbTo.replace('$projectId', params.projectId) : undefined,
+    }));
   const showRange = matches.some((m) => m.staticData?.range);
   const isMac = useIsMac();
 
@@ -58,7 +65,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
               ) : (
                 <Link
                   className="truncate text-muted-foreground hover:text-foreground"
-                  to={dynamicCrumb && i === sections.length - 1 ? s.path.replace(/\/[^/]+\/?$/, '') : s.path}
+                  to={s.to ?? (dynamicCrumb && i === sections.length - 1 ? s.path.replace(/\/[^/]+\/?$/, '') : s.path)}
                 >
                   {s.label}
                 </Link>

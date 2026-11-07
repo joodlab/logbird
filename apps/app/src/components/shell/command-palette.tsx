@@ -27,6 +27,7 @@ import {
   SunIcon,
   TimerResetIcon,
   UsersIcon,
+  VenetianMaskIcon,
 } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '@/lib/api/client';
@@ -54,6 +55,17 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
       );
       return results.flatMap((r) => r.data);
     },
+    staleTime: 30_000,
+  });
+  // Support agents only appear as `impersonator`, never in the actor directory: look them up by name or id.
+  const agents = useQuery({
+    queryKey: ['palette-support-agents', projectId, debounced],
+    enabled: open && Boolean(projectId) && debounced.length >= 2,
+    queryFn: ({ signal }) =>
+      api
+        .suggest(projectId ?? '', { field: 'impersonator', prefix: debounced, limit: 4 }, signal)
+        .then((r) => r.values)
+        .catch(() => []),
     staleTime: 30_000,
   });
 
@@ -110,6 +122,25 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
               <SearchIcon />
               Search events for <span className="font-mono text-xs">{trimmed}</span>
             </CommandItem>
+          </CommandGroup>
+        ) : null}
+        {projectId && agents.data && agents.data.length > 0 ? (
+          <CommandGroup heading="Support agents">
+            {agents.data.map((a) => (
+              <CommandItem
+                key={a.value}
+                onSelect={() => go(() => navigate({ to: '/p/$projectId/support/$agentId', params: { projectId, agentId: a.value } }))}
+                value={`support ${a.value} ${a.label} ${debounced}`}
+              >
+                <EntityAvatar id={a.value} name={a.label || a.value} size="sm" />
+                <span className="truncate">{a.label || a.value}</span>
+                <span className="truncate font-mono text-muted-foreground text-xs">{a.value}</span>
+                <CommandShortcut className="flex items-center gap-1">
+                  <VenetianMaskIcon className="size-3" />
+                  Support
+                </CommandShortcut>
+              </CommandItem>
+            ))}
           </CommandGroup>
         ) : null}
         {entities.data && entities.data.length > 0 ? (

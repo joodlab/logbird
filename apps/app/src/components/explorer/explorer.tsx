@@ -431,6 +431,7 @@ export function Explorer({
           ) : null}
           <EventsTable
             columns={columns}
+            projectId={projectId}
             cursorIndex={ev ? selectedIndex : cursor}
             empty={empty}
             fetchingMore={events.isFetchingNextPage}

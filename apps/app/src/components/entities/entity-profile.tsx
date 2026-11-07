@@ -8,10 +8,11 @@ import { Button } from '@logbird/ui/components/ui/button';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { ArrowLeftIcon, Rows3Icon, SearchXIcon } from 'lucide-react';
+import { ArrowLeftIcon, Rows3Icon, SearchXIcon, VenetianMaskIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ActionName } from '@/components/action-name';
 import { OutcomeAreaChart } from '@/components/charts/outcome-area-chart';
+import { SupportSplitPanel, useSupportCounts, WhoSegmentedControl } from '@/components/entities/support-split';
 import { EntityProfileLink } from '@/components/entity-link';
 import { Explorer, type ExplorerState } from '@/components/explorer/explorer';
 import { RankList } from '@/components/rank-list';
@@ -22,6 +23,7 @@ import { useSetCrumb } from '@/lib/crumbs';
 import { ENTITY_SECTIONS, type EntitySection, entityQuery, splitTargetId, typeIcon } from '@/lib/entities';
 import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
+import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
 import { formatTerm } from '@/lib/query-language';
 import { rangeLabel } from '@/lib/range';
 import { useDocumentTitle } from '@/lib/use-document-title';
@@ -46,6 +48,9 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   useSetCrumb(p?.entity.name || displayId);
   useDocumentTitle(`${p?.entity.name || displayId} · ${meta.singular} · Logbird`);
   const baseQuery = entityQuery(kind, entityId);
+  const support = useSupportCounts(projectId, kind, entityId, baseQuery, timeline.range);
+  const who = whoFilter(timeline.q);
+  const onWho = (next: WhoFilter) => onTimelineChange({ q: withWhoFilter(timeline.q, next), ev: undefined });
 
   if (profile.isError && !p) {
     const notFound = profile.error instanceof ApiRequestError && profile.error.status === 404;
@@ -66,6 +71,17 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
               <ArrowLeftIcon />
               All {meta.label.toLowerCase()}
             </Button>
+            {kind === 'actor' ? (
+              <Button
+                nativeButton={false}
+                render={<Link params={{ projectId, agentId: entityId }} to="/p/$projectId/support/$agentId" />}
+                size="sm"
+                variant="outline"
+              >
+                <VenetianMaskIcon />
+                Look for {displayId} as a support agent
+              </Button>
+            ) : null}
           </EmptyState>
         ) : (
           <ErrorState error={profile.error} onRetry={() => profile.refetch()} />
@@ -129,6 +145,17 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
           <Stat label="First seen" loading={!p} value={p ? <Timestamp format="date" iso={p.entity.firstSeen} /> : ''} />
           <Stat label="Last seen" loading={!p} value={p ? <Timestamp format="relative" iso={p.entity.lastSeen} /> : ''} />
         </dl>
+
+        <SupportSplitPanel
+          counts={support}
+          entityId={entityId}
+          kind={kind}
+          name={p?.entity.name || displayId}
+          onWho={onWho}
+          projectId={projectId}
+          total={p ? outcomeTotal : undefined}
+          who={who}
+        />
 
         <div className="grid gap-3 lg:grid-cols-[1fr_320px]">
           <Panel description="Click a band to filter the timeline below" title="Activity">
@@ -204,8 +231,9 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
       </div>
 
       <section aria-label="Timeline" className="flex flex-col border-t">
-        <div className="flex items-center justify-between px-4 pt-4 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-6">
           <h2 className="font-medium text-sm">Timeline</h2>
+          {(support?.support ?? 0) > 0 || who !== 'all' ? <WhoSegmentedControl kind={kind} onWho={onWho} who={who} /> : null}
           <button
             className="text-muted-foreground text-xs hover:text-foreground"
             onClick={() =>

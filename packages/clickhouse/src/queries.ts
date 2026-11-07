@@ -246,7 +246,7 @@ export async function facets(ch: ClickHouseClient, p: string, q: z.infer<typeof 
   } else if (['target_types', 'target_names', 'changes_fields'].includes(expr)) {
     expr = `arrayJoin(${expr})`;
     label = expr;
-  } else if (['actor', 'tenant', 'executor'].includes(q.field)) label = `${q.field}_name`;
+  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(q.field)) label = `${q.field}_name`;
   if (QUERY_FIELDS.some((f) => f.column === col && ['number', 'date'].includes(f.type))) {
     expr = `toString(${expr})`;
     label = expr;

@@ -27,6 +27,8 @@ declare module '@tanstack/react-router' {
   interface StaticDataRouteOption {
     /** Section label for the top-bar breadcrumb. */
     crumb?: string;
+    /** Where the section crumb links (a route path with `$projectId`), when it is not the parent URL segment. */
+    crumbTo?: string;
     /** Show the shared time-range control in the top bar. */
     range?: boolean;
     /** Range used when the URL has none (sparse pages want a wider window). */

@@ -1,10 +1,9 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { OutcomeDot, SeverityBadge, TypePill } from '@logbird/ui/components/badges';
 import { EntityChip } from '@logbird/ui/components/entity-chip';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
-import { VenetianMaskIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ActionName } from '@/components/action-name';
+import { JobHint, SupportMarker } from '@/components/impersonation';
 import { Timestamp } from '@/components/timestamp';
 import { typeIcon } from '@/lib/entities';
 import { eventSentence } from '@/lib/events';
@@ -49,21 +48,15 @@ export const EVENT_COLUMNS: EventColumn[] = [
     required: true,
     defaultVisible: true,
     render: (e) => (
-      <span className="flex min-w-0 items-center gap-1.5">
-        {e.impersonator ? (
-          <Tooltip>
-            <TooltipTrigger render={<span className="shrink-0 text-outcome-denied" />}>
-              <VenetianMaskIcon className="size-3.5" />
-            </TooltipTrigger>
-            <TooltipContent>Performed while {e.impersonator.name || e.impersonator.id} was impersonating</TooltipContent>
-          </Tooltip>
-        ) : null}
+      <span className="flex min-w-0 flex-1 items-center gap-1.5">
+        <SupportMarker event={e} />
         {e.severity === 'critical' || e.severity === 'warning' ? (
           <SeverityBadge className="h-4 shrink-0 px-1.5 text-[10px]" severity={e.severity} />
         ) : null}
         <span className="truncate" dir="auto">
           {eventSentence(e)}
         </span>
+        <JobHint className="ms-auto hidden max-w-[14rem] ps-2 lg:inline-flex" event={e} />
       </span>
     ),
   },
@@ -84,6 +77,13 @@ export const EVENT_COLUMNS: EventColumn[] = [
       ),
   },
   {
+    id: 'impersonator',
+    label: 'Support agent',
+    width: 164,
+    defaultVisible: false,
+    render: (e) => (e.impersonator ? <SupportMarker className="max-w-full" event={e} /> : <span className="text-muted-foreground text-xs">—</span>),
+  },
+  {
     id: 'tenant',
     label: 'Tenant',
     width: 150,
@@ -101,6 +101,23 @@ export const EVENT_COLUMNS: EventColumn[] = [
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate font-mono text-[12px]">{e.executor.id}</span>
           {e.executor.attempt > 1 ? <TypePill tone="warning">#{e.executor.attempt}</TypePill> : null}
+        </span>
+      ) : (
+        <span className="text-muted-foreground text-xs">—</span>
+      ),
+  },
+  {
+    id: 'job',
+    label: 'Job · try',
+    width: 150,
+    defaultVisible: false,
+    render: (e) =>
+      e.executor?.jobId || (e.executor?.attempt ?? 0) > 0 ? (
+        <span className="flex min-w-0 items-center gap-1.5" title={e.executor?.jobId || undefined}>
+          <span className="truncate font-mono text-[12px]">{e.executor?.jobId || '—'}</span>
+          {(e.executor?.attempt ?? 0) > 0 ? (
+            <TypePill tone={(e.executor?.attempt ?? 0) > 1 ? 'warning' : 'neutral'}>try {e.executor?.attempt}</TypePill>
+          ) : null}
         </span>
       ) : (
         <span className="text-muted-foreground text-xs">—</span>

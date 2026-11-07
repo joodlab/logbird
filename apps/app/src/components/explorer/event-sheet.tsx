@@ -1,7 +1,7 @@
 import type { AuditEvent, EventDetail } from '@logbird/contracts';
 import { OutcomeBadge, OutcomeDot, SeverityBadge, TypePill } from '@logbird/ui/components/badges';
 import { CopyButton, CopyValue } from '@logbird/ui/components/copy-button';
-import { EntityAvatar } from '@logbird/ui/components/entity-chip';
+import { EntityAvatar, EntityChip } from '@logbird/ui/components/entity-chip';
 import { JsonViewer } from '@logbird/ui/components/json-viewer';
 import { ErrorState } from '@logbird/ui/components/states';
 import { Button } from '@logbird/ui/components/ui/button';
@@ -30,6 +30,7 @@ import {
 import type { ReactNode } from 'react';
 import { ActionName } from '@/components/action-name';
 import { EntityLink, EntityProfileLink } from '@/components/entity-link';
+import { SupportAgentLink } from '@/components/impersonation';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery } from '@/lib/api/queries';
@@ -337,11 +338,26 @@ function EventDetailBody({
               <PartyCard hint="at the keyboard" icon={<VenetianMaskIcon className="size-3" />} label="Impersonator" tone="warning">
                 <div className="flex min-w-0 flex-col gap-1">
                   {projectId ? (
-                    <EntityLink id={e.impersonator.id} kind="actor" name={e.impersonator.name} projectId={projectId} type="user" />
+                    <SupportAgentLink
+                      agentId={e.impersonator.id}
+                      className="min-w-0 rounded-sm outline-none hover:underline hover:decoration-muted-foreground/40 hover:underline-offset-2 focus-visible:ring-2 focus-visible:ring-ring/50"
+                      projectId={projectId}
+                    >
+                      <EntityChip id={e.impersonator.id} name={e.impersonator.name || e.impersonator.id} />
+                    </SupportAgentLink>
                   ) : (
-                    <span className="truncate text-sm">{e.impersonator.name}</span>
+                    <span className="truncate text-sm">{e.impersonator.name || e.impersonator.id}</span>
                   )}
                   <span className="truncate font-mono text-muted-foreground text-xs">{e.impersonator.id}</span>
+                  {projectId ? (
+                    <SupportAgentLink
+                      agentId={e.impersonator.id}
+                      className="text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
+                      projectId={projectId}
+                    >
+                      Everything they did as support →
+                    </SupportAgentLink>
+                  ) : null}
                 </div>
               </PartyCard>
             ) : null}

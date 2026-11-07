@@ -26,7 +26,9 @@ export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<
     const events = `(SELECT * FROM (${sample}) LIMIT 50000)`;
     const value = !f ? 'attributes[{key:String}]' : f.type === 'array' ? `arrayJoin(${f.column})` : f.column;
     const kind = f?.key.split('.')[0];
-    const label = f?.suggest === 'entities' && !f.key.includes('.') && ['actor', 'tenant', 'executor'].includes(kind ?? '') ? `${kind}_name` : value;
+    // Ids with a display name: label them by name so `Yusuf` finds `impersonator:support_2`.
+    const named = (f?.suggest === 'entities' || f?.key === 'impersonator') && !f.key.includes('.');
+    const label = named && ['actor', 'impersonator', 'tenant', 'executor'].includes(kind ?? '') ? `${kind}_name` : value;
     source = `SELECT ${value} value,anyLast(${label}) label,count() count FROM ${events} WHERE (${w.sql}) ${!f ? 'AND mapContains(attributes,{key:String})' : ''} GROUP BY value`;
   } else if (f.suggest === 'entities') {
     const name = f.key.endsWith('.name'),
