@@ -65,8 +65,7 @@ it('recovers a session deletion crash, retains aborted intents, and freezes revo
 
 it('a poison window and a preparation failure cannot stop healthy queued delivery', async () => {
   const id = randomUUID(),
-    stream = `ws:qa-poison-${id}`,
-    secret = 'qa-secret-for-recovery-only-not-production';
+    stream = `ws:qa-poison-${id}`;
   let drainer: ReturnType<typeof startAuditDrainer> | undefined;
   try {
     await prisma.authAuditWindow.create({
