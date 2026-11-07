@@ -117,7 +117,7 @@ const beforeSend = event => event.action === 'health.checked' ? null : hide(even
 ## Requests and workers
 
 `createAudit(options, hostContext, request)` from `@logbird/sdk/integration` captures
-stable header/UUID correlation fallbacks once. actor/tenant/executor/ip/requestId/operationId
+stable header/UUID correlation fallbacks once. actor/impersonator/tenant/executor/ip/requestId/operationId
 resolvers run at each audit call, including after route authentication. Explicit partial
 fields skip their resolver, even when undefined. Resolver failures report onError and omit
 only that field. audit(action, partial?) synchronously returns the stamped event id and
@@ -137,8 +137,8 @@ await workerAudit.pending();
 await client.shutdown();
 ```
 
-AuditCarrier carries operationId, requestId, traceId, parentEventId, actor and tenant.
+AuditCarrier carries operationId, requestId, traceId, parentEventId, actor, impersonator and tenant.
 Treat carriers as trusted internal data, not authentication. Worker executor uses queue/name,
-string jobId and attemptsMade + 1. Explicit actor/tenant override the carrier; absent actor
+string jobId and attemptsMade + 1. Explicit actor/impersonator/tenant override the carrier; absent actor
 uses system/scheduler. No BullMQ dependency is required. Use integration `shutdown(options)`
 when pending captures may still exist rather than calling client.shutdown directly.
