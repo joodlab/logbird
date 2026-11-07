@@ -51,7 +51,7 @@ path: /contact
   - **Error (network or server):** We couldn't send that. Check your connection and try again.
   - **Too many attempts:** Too many attempts. Wait a minute, then try again.
   - **Unavailable (form disabled, for example before the backend exists):** The form isn't available right now.
-    Email us at `hello@logbird.dev` instead.
+    Email us at `{WEB_CONTACT_EMAIL}` (only when set; no default) instead.
     <!-- domain pending owner: logbird.dev isn't bought yet; see README.md § Pending owner decisions -->
 - **visual:** none
 
