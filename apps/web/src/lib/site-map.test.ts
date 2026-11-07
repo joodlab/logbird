@@ -51,8 +51,8 @@ it('names no company or design partner anywhere in the site source (pending the 
   const pattern = new RegExp(['jo', 'od'].join(''), 'i');
   expect(files.filter((file) => pattern.test(readFileSync(file, 'utf8')))).toEqual([]);
 });
-it('hashes every public variable and the package env files in Turbo', () => {
+it('hashes every public variable and every env file the loader reads in Turbo', () => {
   const build = JSON.parse(readFileSync('turbo.json', 'utf8')).tasks.build;
   expect(build.env).toEqual(expect.arrayContaining([...PUBLIC_ENV_KEYS]));
-  expect(build.inputs).toEqual(expect.arrayContaining(['.env*', '$TURBO_ROOT$/marketing/captures/**']));
+  expect(build.inputs).toEqual(expect.arrayContaining(['.env*', '$TURBO_ROOT$/.env*', '$TURBO_ROOT$/marketing/captures/**']));
 });
