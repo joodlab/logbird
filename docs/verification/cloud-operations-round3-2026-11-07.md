@@ -45,6 +45,15 @@ read with the host kubeconfig; expired authentication prevented cluster access.
 The corrected test uses an empty isolated kubeconfig and a verified stub path.
 No cluster resource was read successfully or changed; no credentials were refreshed.
 
+Follow-up: the committed [wait-helper harness](../../scripts/wait-k8s-job.test.mjs)
+replaces the ad-hoc check. Before every subprocess it supplies an empty temporary
+kubeconfig, isolated HOME/config directories, an allowlisted environment (no cloud
+credentials or startup hooks), and a PATH containing only its stub directory. A
+deliberately missing stub must exit 127; no real kubectl fallback is possible.
+`node --test scripts/wait-k8s-job.test.mjs`: **5/5 pass**, including child-side
+environment assertions and the missing-stub case. Master `2a9d378` is merged in
+`ff9f18c`; the original source/build counts above remain the dated Round 3 baseline.
+
 Cleanup/resources: all seven SQL-test temporary tables dropped; no persisted SQL
 fixtures or schema changes from those checks. All own test/build processes ended;
 `build-a` released. No stack, browser, Docker image or infrastructure was started.
