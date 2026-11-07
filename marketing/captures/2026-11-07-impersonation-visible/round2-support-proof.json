@@ -7,12 +7,8 @@
     "blank": false
   },
   "PASS agent page: support events with no actor/tenant are not a customer/tenant": {
-    "customers": [
-      "usr_long"
-    ],
-    "tenants": [
-      "tn_qa_0"
-    ]
+    "customers": ["usr_long"],
+    "tenants": ["tn_qa_0"]
   },
   "PASS − on \"Any support agent\" says what it will do when active": "",
   "PASS hidden support + click an agent → only that agent": "impersonator:qa_support_02",
@@ -42,16 +38,12 @@
       {
         "id": "aria-allowed-role",
         "nodes": 1,
-        "sample": [
-          "textarea"
-        ]
+        "sample": ["textarea"]
       },
       {
         "id": "label-content-name-mismatch",
         "nodes": 1,
-        "sample": [
-          ".w-\\(--control-size-compact\\)"
-        ]
+        "sample": [".w-\\(--control-size-compact\\)"]
       }
     ],
     "event-sheet support desktop-light": [],
@@ -59,48 +51,36 @@
       {
         "id": "aria-allowed-role",
         "nodes": 1,
-        "sample": [
-          "textarea"
-        ]
+        "sample": ["textarea"]
       },
       {
         "id": "label-content-name-mismatch",
         "nodes": 1,
-        "sample": [
-          ".w-\\(--control-size-compact\\)"
-        ]
+        "sample": [".w-\\(--control-size-compact\\)"]
       }
     ],
     "actor split desktop-light": [
       {
         "id": "aria-allowed-role",
         "nodes": 1,
-        "sample": [
-          "textarea"
-        ]
+        "sample": ["textarea"]
       },
       {
         "id": "label-content-name-mismatch",
         "nodes": 1,
-        "sample": [
-          ".w-\\(--control-size-compact\\)"
-        ]
+        "sample": [".w-\\(--control-size-compact\\)"]
       }
     ],
     "explorer support desktop-dark": [
       {
         "id": "aria-allowed-role",
         "nodes": 1,
-        "sample": [
-          "textarea"
-        ]
+        "sample": ["textarea"]
       },
       {
         "id": "label-content-name-mismatch",
         "nodes": 1,
-        "sample": [
-          ".w-\\(--control-size-compact\\)"
-        ]
+        "sample": [".w-\\(--control-size-compact\\)"]
       }
     ],
     "event-sheet support desktop-dark": [],
@@ -108,41 +88,31 @@
       {
         "id": "aria-allowed-role",
         "nodes": 1,
-        "sample": [
-          "textarea"
-        ]
+        "sample": ["textarea"]
       },
       {
         "id": "label-content-name-mismatch",
         "nodes": 1,
-        "sample": [
-          ".w-\\(--control-size-compact\\)"
-        ]
+        "sample": [".w-\\(--control-size-compact\\)"]
       }
     ],
     "actor split desktop-dark": [
       {
         "id": "aria-allowed-role",
         "nodes": 1,
-        "sample": [
-          "textarea"
-        ]
+        "sample": ["textarea"]
       },
       {
         "id": "label-content-name-mismatch",
         "nodes": 1,
-        "sample": [
-          ".w-\\(--control-size-compact\\)"
-        ]
+        "sample": [".w-\\(--control-size-compact\\)"]
       }
     ],
     "explorer support phone-light": [
       {
         "id": "aria-allowed-role",
         "nodes": 1,
-        "sample": [
-          "textarea"
-        ]
+        "sample": ["textarea"]
       }
     ]
   },
@@ -164,11 +134,7 @@
   "PASS 390px light: \"Who did it\" control is not cut short": {
     "width": 305,
     "truncated": false,
-    "labels": [
-      "Everything",
-      "Themselves",
-      "By support"
-    ]
+    "labels": ["Everything", "Themselves", "By support"]
   },
   "axe explorer support phone-light": "aria-allowed-role(1) textarea",
   "console problems (phone light)": [],
@@ -181,11 +147,7 @@
   "PASS 390px dark: \"Who did it\" control is not cut short": {
     "width": 305,
     "truncated": false,
-    "labels": [
-      "Everything",
-      "Themselves",
-      "By support"
-    ]
+    "labels": ["Everything", "Themselves", "By support"]
   },
   "console problems (phone dark)": [],
   "cleanup: QA project deleted": 204
