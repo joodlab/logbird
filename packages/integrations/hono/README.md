@@ -12,7 +12,7 @@ app.post('/records', c => { c.var.audit('record.created', { targets: [{ type: 'r
 // In the host's shutdown handler, await capture.shutdown().
 ```
 
-Options: `client`, optional `actor(c)` and `tenant(c)` resolvers (sync/async), optional `executor(c)`, `ip(c)`, `requestId(c)`, `operationId(c)`,
+Options: `client`, optional `actor(c)`, `impersonator(c)` and `tenant(c)` resolvers (sync/async), optional `executor(c)`, `ip(c)`, `requestId(c)`, `operationId(c)`,
 `onError(error)`, `autoTrack: { methods?: string[], skip?: (c) => boolean }`. Defaults track POST/PUT/PATCH/DELETE.
 Use authenticated context for resolvers. Headers only supply correlation, never authorization.
 Workers executionCtx.waitUntil flushes queued events after responses; Node/Bun own their shutdown lifecycle.

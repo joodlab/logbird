@@ -5,6 +5,7 @@ export interface AuditCarrier {
   traceId?: string;
   parentEventId?: string;
   actor?: EventInput['actor'];
+  impersonator?: EventInput['impersonator'];
   tenant?: EventInput['tenant'];
 }
 export interface Audit {
@@ -16,6 +17,7 @@ type Resolver<C, T> = (context: C) => T | Promise<T>;
 export interface CaptureOptions<C> {
   client: Logbird;
   actor?: Resolver<C, EventInput['actor']>;
+  impersonator?: Resolver<C, EventInput['impersonator']>;
   tenant?: Resolver<C, EventInput['tenant']>;
   executor?: Resolver<C, EventInput['executor']>;
   ip?: Resolver<C, string | undefined>;
@@ -72,8 +74,8 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
   async function resolve(event: Partial<EventInput>, carrierOnly = false): Promise<EventInput> {
     const merged: EventInput = { ...envelope, ...event, action: event.action ?? '', context: { ...envelope.context, ...event.context } };
     const fields = carrierOnly
-      ? (['actor', 'tenant', 'requestId', 'operationId'] as const)
-      : (['actor', 'tenant', 'executor', 'ip', 'requestId', 'operationId'] as const);
+      ? (['actor', 'impersonator', 'tenant', 'requestId', 'operationId'] as const)
+      : (['actor', 'impersonator', 'tenant', 'executor', 'ip', 'requestId', 'operationId'] as const);
     await Promise.all(
       fields.map(async (field) => {
         const inContext = field === 'ip' || field === 'requestId' || field === 'operationId';
@@ -114,9 +116,17 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
     while (local.size) await Promise.allSettled([...local]);
   };
   audit.carrier = (partial = {}) => {
-    const { actor, tenant, ...correlation } = partial;
+    const { actor, impersonator, tenant, ...correlation } = partial;
     return register(
-      resolve({ ...('actor' in partial ? { actor } : {}), ...('tenant' in partial ? { tenant } : {}), context: correlation }, true).then(
+      resolve(
+        {
+          ...('actor' in partial ? { actor } : {}),
+          ...('impersonator' in partial ? { impersonator } : {}),
+          ...('tenant' in partial ? { tenant } : {}),
+          context: correlation,
+        },
+        true,
+      ).then(
         (event) =>
           JSON.parse(
             JSON.stringify({
@@ -125,6 +135,7 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
               traceId: event.context?.traceId,
               parentEventId: event.context?.parentEventId,
               actor: event.actor,
+              impersonator: event.impersonator,
               tenant: event.tenant,
             }),
           ) as AuditCarrier,
@@ -139,6 +150,7 @@ export interface JobAuditOptions {
   carrier?: AuditCarrier;
   executor?: { id?: string; name?: string };
   actor?: EventInput['actor'];
+  impersonator?: EventInput['impersonator'];
   tenant?: EventInput['tenant'];
   onError?: (error: Error) => void;
 }
@@ -147,6 +159,7 @@ export function jobAudit(options: JobAuditOptions): Audit {
   return capture({ client: options.client, onError: options.onError }, undefined, {
     action: '',
     actor: options.actor ?? carrier?.actor ?? { type: 'system', id: 'scheduler' },
+    impersonator: options.impersonator ?? carrier?.impersonator,
     tenant: options.tenant ?? carrier?.tenant,
     executor: {
       type: 'worker',
