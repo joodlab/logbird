@@ -20,6 +20,17 @@ The sequential builds above reduce concurrent compiler/package-install memory.
 Runtime sizing below does not include peak source-build memory or build-cache
 storage.
 
+The four buildable roles use `pull_policy: build`, so source installs build their
+own images rather than automatically falling back to the default Hub namespace.
+Bare `up` can rebuild them even when images exist. Build sequentially, then use
+`up --no-build` with the local images you just built. On a replacement host those
+images must be built first. This policy changes the earlier tested command path;
+its upgrade/restore runtime matrix remains pending in [#77](https://github.com/joodlab/logbird/issues/77)
+and the [registry-owner decision #88](https://github.com/joodlab/logbird/issues/88).
+The manual release flow retains its explicit
+`--pull always`. See [Compose pull policy](https://docs.docker.com/reference/compose-file/services/#pull_policy)
+and [`up --no-build`](https://docs.docker.com/reference/cli/docker/compose/up/).
+
 Image build stages default to one pnpm build/postinstall at a time and four
 concurrent downloads (`BUILD_CONCURRENCY=1`, `DOWNLOAD_CONCURRENCY=4`). For an
 additional per-Node-process heap cap, use
@@ -80,7 +91,7 @@ URL-encode special characters in manual connection URLs. Generated hex values ne
 
 Configure SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASSWORD and MAIL_FROM using provider settings. Examples: Amazon SES regional SMTP endpoint and SMTP credentials; Postmark smtp.postmarkapp.com:587 and server token credentials; Brevo smtp-relay.brevo.com:587 and SMTP credentials. Verify sender/domain and SPF/DKIM/DMARC with the provider.
 
-Without SMTP explicitly enable AUTH_LOG_SIGN_IN_CODES=true. Each auth.sign_in_code JSON line contains recipient/code: log readers can sign in. Only sign-in bypasses SMTP, never invitations or other OTP purposes. With SMTP configured it logs and sends. After SMTP works, disable the flag and run `docker compose up -d server worker`; handle existing log retention appropriately. Missing SMTP with the flag off fails delivery. Invitations/courtesy emails need SMTP.
+Without SMTP explicitly enable AUTH_LOG_SIGN_IN_CODES=true. Each auth.sign_in_code JSON line contains recipient/code: log readers can sign in. Only sign-in bypasses SMTP, never invitations or other OTP purposes. With SMTP configured it logs and sends. After SMTP works, disable the flag and run `docker compose up -d --no-build server worker` using the images already built; handle existing log retention appropriately. Missing SMTP with the flag off fails delivery. Invitations/courtesy emails need SMTP.
 
 For a Docker Desktop evaluation using an existing host Mailpit, set
 `SMTP_HOST=host.docker.internal`, `SMTP_PORT=1025`, `SMTP_SECURE=false`, and leave
@@ -231,6 +242,10 @@ archives, checksum file and original env securely off-host. Run
 deleting any copy. Host archives stay under `.tmp/backups/`, excluded
 from Git/Docker; legacy `/backups/` and dump/zip files are also excluded.
 
+Use the [logical-totals query](#recovery-gate-with-ingress-blocked) to record the
+backup totals, using the current installation's env/project flags with its copy
+and client commands. Save the result beside the matched backup receipt.
+
 After verifying the off-host copy, remove only this archive from the data volume:
 
 ```sh
@@ -247,7 +262,25 @@ as recovery. Copy its configuration privately to `.env.restore`; retain all
 secrets, set `LOGBIRD_BIND=127.0.0.1`, and choose an unused `LOGBIRD_HTTP_PORT` with
 matching temporary `APP_URL`. Keep ingress blocked and app/Caddy stopped. Select
 the saved BACKUP_ID; do not generate a new timestamp. Verify the saved hashes.
-Start only data services; do not run migrations yet:
+Start only data services; do not run migrations yet.
+
+On a replacement host, first make an authorized checkout at the recorded Git
+revision. Place the preserved private configuration in `.env.restore` there and
+build all four roles before the gate's `up --no-build`. Do not run the quickstart's
+startup command against the empty target:
+
+```sh
+git clone https://github.com/joodlab/logbird.git
+cd logbird
+git switch --detach <recorded-git-sha>
+# Place the preserved .env.restore here, then:
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml build migrate
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml build server
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml build worker
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml build app
+```
+
+Then restore the matched data into the empty services:
 
 ```sh
 BACKUP_ID=logbird-20261107T120000Z # replace with the saved backup ID
@@ -303,6 +336,10 @@ docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh 
 docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --multiquery --queries-file /tmp/restore-dry-run.sql'
 ```
 
+The repeat dry run lists the `events_restore_staging` table created by this
+normalization; that is expected. The first dry run must not contain a leftover
+stage from an earlier attempt.
+
 Require successful full-row equality and aggregate checks. Before starting the
 policy worker, compare `raw_rows`, `payload_checksum` and `received_at_checksum`
 with the first dry run: all must match. Staging/replay preserves `received_at` and
@@ -325,6 +362,10 @@ and dry run, remains pending in #77.
 
 ### Recovery gate with ingress blocked
 
+Here and during cutover, **ingress blocked means application traffic is restricted
+to the operator's allowlisted address**, not that every inbound port is closed.
+Keep other browser/SDK traffic blocked until acceptance passes.
+
 Keep browser/SDK ingress blocked and app/Caddy stopped. Start migrate, server and
 worker only. Record the gate time, then enqueue one normal retention sweep through
 the configured queue, or wait for its hourly cycle:
@@ -334,7 +375,7 @@ GATE_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml up -d --no-build server worker
 docker compose --env-file .env.restore -p logbird-restore exec -T worker node -e '
 const { Queue } = require("bullmq");
-const Redis = require("ioredis");
+const { Redis } = require("ioredis");
 (async () => {
   const connection = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1 });
   const queue = new Queue("retention", { connection, prefix: process.env.BULLMQ_PREFIX });
@@ -369,7 +410,11 @@ zero. A running receipt needs more time; a failure or guard log blocks cutover.
 Inspect `retention.completed` too; a queue job completion alone does not establish
 every project receipt. Repeat the receipt query until the cycle ends.
 
-Copy this SQL into a file and run it through the same ClickHouse queries-file pattern:
+The grep checks pass with **no output**; grep exits 1 for no match. If using
+`set -e`, run them in an `if` condition or handle that expected exit explicitly.
+Matching failure/guard lines block cutover; a log-read error is not a clean pass.
+
+Save this SQL as `.tmp/backups/logical-totals.sql`:
 
 ```sql
 SELECT count() AS raw_rows,
@@ -379,6 +424,11 @@ SELECT count() AS raw_rows,
        sum(length(mapKeys(attributes))) AS expected_attributes,
        (SELECT sum(count) FROM logbird.attribute_keys) AS actual_attributes
 FROM logbird.events;
+```
+
+```sh
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml cp .tmp/backups/logical-totals.sql clickhouse:/tmp/logical-totals.sql
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --queries-file /tmp/logical-totals.sql'
 ```
 
 Require raw_rows=minute_events, expected_entities=actual_entities and
@@ -399,11 +449,17 @@ restored data remains pending in #77.
    ```
 
    Substitute the recorded original identity; omit Caddy/profile when unused.
-2. In `.env.restore`, restore public APP_URL, LOGBIRD_HTTP_PORT, LOGBIRD_DOMAIN,
+2. In `.env.restore`, restore public APP_URL, LOGBIRD_BIND, LOGBIRD_HTTP_PORT, LOGBIRD_DOMAIN,
    ACME_EMAIL and TLS ports. Preserve all credentials; set TRUST_PROXY for the
    actual proxy chain. Replace the temporary verification origin/port.
 3. Recreate server/worker/app for that public origin. With Caddy, first ensure the
-   original Caddy is stopped:
+   original Caddy is stopped. A fresh project has no inherited certificates:
+   allow inbound TCP :80 for ACME HTTP-01 while :443 remains operator-allowlisted.
+   With the supplied Caddyfile, :80 serves challenges and HTTPS redirects.
+   Preserve the application allowlist while verifying through the public HTTPS
+   origin. Production certificate issuance counts against ACME rate limits;
+   use the local-CA drill above or an ACME staging issuer for repeated drills.
+   See [Caddy's challenge requirements](https://caddyserver.com/docs/automatic-https#acme-challenges).
 
    ```sh
    docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml --profile tls up -d --no-build --no-deps --force-recreate server worker app caddy
@@ -412,7 +468,7 @@ restored data remains pending in #77.
    Without Caddy omit `--profile tls` and `caddy`, and point the existing proxy at
    the restored app port. Keep ingress blocked while checking readiness, SMTP
    login, original user/session, events/settings/read keys and worker receipts.
-   Then switch proxy/DNS target if needed and open ingress.
+   Switch proxy/DNS target if needed while retaining the operator allowlist.
 4. Every later upgrade, backup, log and uninstall command must retain
    `--env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml`
    and `--profile tls` when used. Record this as the active installation identity;
@@ -426,10 +482,24 @@ restored data remains pending in #77.
    restored_compose ps
    ```
 
-5. After public acceptance and a new matched off-host backup, the original may be
-   removed with `down` using its own env/project flags. Keep original volumes for
-   the rollback window; use `down -v` only after retiring that recovery copy.
-   Remove staging from the restored DB only after the gate/application checks pass.
+5. After the recovery gate and operator application checks pass, **drop staging
+   before taking the new off-host backup**. It retains a full raw copy without
+   project retention, enlarges later backups, and makes the next normalization
+   refuse its existing staging table. Use the restored identity:
+
+   ```sh
+   cat > .tmp/backups/drop-restore-staging.sql <<'SQL'
+   DROP TABLE logbird.events_restore_staging SYNC;
+   SQL
+   docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml cp .tmp/backups/drop-restore-staging.sql clickhouse:/tmp/drop-restore-staging.sql
+   docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --queries-file /tmp/drop-restore-staging.sql'
+   ```
+
+6. Take and verify a new matched off-host backup using the restored identity and
+   stopped-writer procedure, then resume/check its services. Open general ingress
+   after these checks. After public acceptance, the original may be removed with
+   `down` using its own env/project flags. Keep original volumes for the rollback
+   window; use `down -v` only after retiring that recovery copy.
 
    ```sh
    docker compose --env-file .env -p logbird -f docker-compose.yml -f docker-compose.backup.yml --profile tls down
@@ -448,8 +518,11 @@ and preserves its data. Include the active `-p`, `--env-file`, `-f` and
 the sample project with the recorded active installation:
 
 ```sh
-docker volume ls --filter label=com.docker.compose.project=logbird-restore
+docker volume ls --filter label=com.docker.compose.project=logbird
 ```
+
+`logbird` is the default directory-name project. After recovery use
+`logbird-restore`, or whichever active project name was recorded.
 
 **`down -v` permanently deletes the selected project's data/certificate volumes.**
 For permanent deletion only after exporting and verifying backups,

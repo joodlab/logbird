@@ -116,8 +116,8 @@ still pending in [#77](https://github.com/joodlab/logbird/issues/77).
 
 Test only in a fresh disposable stack, with no shared or customer database:
 
-1. Build the new migrate image. Start only its disposable data services, using
-   the resource/lock rules for the machine. Keep app/server/worker stopped.
+1. With enough free RAM/disk, build the new migrate image and start only its
+   disposable data services. Keep app/server/worker stopped.
 2. Create `.tmp/migration-cancel/migration.sql` containing only
    `SELECT pg_sleep(60);`. In a temporary Compose override, mount that directory
    read-only into the migrate service at

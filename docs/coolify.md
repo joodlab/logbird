@@ -18,6 +18,16 @@ Compose stack. Keep both files aligned when updating those pins. Use the native
 with the same stopped-writer boundary. This file mounts `config/clickhouse-backups.xml`
 into ClickHouse, enabling the named `backups` disk without a second Compose file.
 
+On the destination host, find the resource's generated project with
+`docker compose ls`, then translate native commands to
+`docker compose -p <uuid> -f <generated-compose-file>` with its actual environment,
+or use `docker exec` / `docker cp` on the recorded container names. Skip the native
+`-f docker-compose.backup.yml up -d clickhouse` step: this file already mounts the
+backup disk. Command translation and recovery remain unverified in #77.
+
+All four buildable roles use `pull_policy: build`; deployment builds from source.
+The changed policy's Coolify behavior remains a live acceptance gate in #77.
+
 This guide does **not support a data-only restore through the Coolify UI**. A normal
 deployment includes migrate; do not deploy an empty recovery target and then copy
 database archives into it. Use the standalone, empty Compose recovery project in
