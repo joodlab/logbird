@@ -1,14 +1,16 @@
 import type { AuditEvent } from '@logbird/contracts';
+import { TypePill } from '@logbird/ui/components/badges';
 import { cn } from '@logbird/ui/lib/utils';
 import { Link } from '@tanstack/react-router';
 import { CogIcon, VenetianMaskIcon } from 'lucide-react';
 import { createContext, type ReactNode, useContext } from 'react';
 import { personLabel } from '@/lib/events';
-import { jobHint, supportAgentName } from '@/lib/impersonation';
+import { jobHint, supportAgentName, supportPhrase } from '@/lib/impersonation';
 
 /**
  * What row cells need to know about their list without threading props through column defs: the project (to link)
- * and which columns are showing (so the support marker appears once, in the best place).
+ * and which columns are showing (so the support marker appears once, in the best place). The explorer provides it
+ * around its table, so the table itself stays unaware of support.
  */
 export const EventListContext = createContext<{ projectId?: string; columns?: readonly string[] }>({});
 
@@ -22,18 +24,26 @@ export function supportMarkerPlacement(columns: readonly string[] | undefined): 
   return 'description';
 }
 
-/** Link to a support agent's page: everything they did while acting as customers. */
+/**
+ * Link to a support agent's page: everything they did while signed in as customers. Clicks and keys stay on the link,
+ * so Enter on it never also opens the row's event sheet.
+ */
 export function SupportAgentLink({
   projectId,
   agentId,
   className,
   children,
+  tabIndex,
+  title,
   'aria-label': ariaLabel,
 }: {
   projectId: string;
   agentId: string;
   className?: string;
   children: ReactNode;
+  /** -1 inside list rows: the row is the tab stop; the agent page is one step away via the event sheet. */
+  tabIndex?: number;
+  title?: string;
   'aria-label'?: string;
 }) {
   return (
@@ -41,7 +51,10 @@ export function SupportAgentLink({
       aria-label={ariaLabel}
       className={className}
       onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
       params={{ projectId, agentId }}
+      tabIndex={tabIndex}
+      title={title}
       to="/p/$projectId/support/$agentId"
     >
       {children}
@@ -67,43 +80,49 @@ export function SupportMarker({
 }) {
   const { projectId } = useContext(EventListContext);
   const name = supportAgentName(event);
-  if (!event.impersonator || !name) return null;
-  const actingAs = personLabel(event.actor) || 'the customer';
-  const description = `Done by support agent ${name} while acting as ${actingAs}`;
-  const pill = cn(
-    variant === 'inline'
-      ? 'inline-flex h-3.5 min-w-0 max-w-full items-center gap-1 rounded-sm text-[10.5px] text-foreground leading-none'
-      : 'inline-flex h-5 max-w-[13rem] shrink-0 items-center gap-1 rounded-md bg-outcome-denied/10 px-1.5 text-[11px] text-foreground ring-1 ring-outcome-denied/30 ring-inset',
-    className,
-  );
+  const phrase = supportPhrase(event);
+  if (!event.impersonator || !name || !phrase) return null;
+  const description = phrase.charAt(0).toUpperCase() + phrase.slice(1);
   const content = (
     <>
-      <VenetianMaskIcon aria-hidden className="size-3 shrink-0 text-outcome-denied" />
+      <VenetianMaskIcon aria-hidden className="size-3 shrink-0 text-support" />
       <span className="truncate" dir="auto">
-        <span className="text-muted-foreground">via support:</span> <span className="font-medium">{name}</span>
+        <span className="text-muted-foreground">via support:</span> <span className="font-medium text-foreground">{name}</span>
       </span>
     </>
   );
+  // The pill is the shared support-toned TypePill (sans, not mono: it carries a person's name).
+  const body =
+    variant === 'inline' ? (
+      <span className={cn('inline-flex h-3.5 min-w-0 max-w-full items-center gap-1 rounded-sm text-[10.5px] leading-none', className)}>
+        {content}
+      </span>
+    ) : (
+      <TypePill className={cn('min-w-0 max-w-[13rem] shrink-0 font-sans', className)} tone="support">
+        {content}
+      </TypePill>
+    );
   if (linked && projectId) {
     return (
       <SupportAgentLink
         aria-label={`${description}. Open ${name}'s support activity`}
         agentId={event.impersonator.id}
         className={cn(
-          pill,
-          'outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-          variant === 'inline' ? 'hover:underline hover:underline-offset-2' : 'hover:bg-outcome-denied/15',
+          'inline-flex min-w-0 max-w-full rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+          variant === 'inline' ? 'hover:underline hover:underline-offset-2' : 'hover:brightness-95 dark:hover:brightness-125',
         )}
         projectId={projectId}
+        tabIndex={-1}
+        title={description}
       >
-        {content}
+        {body}
       </SupportAgentLink>
     );
   }
   return (
-    <span className={pill} title={description}>
-      {content}
-      <span className="sr-only">, acting as {actingAs}</span>
+    <span className="inline-flex min-w-0 max-w-full" title={description}>
+      {body}
+      <span className="sr-only">, acting as {personLabel(event.actor) || 'an unknown customer'}</span>
     </span>
   );
 }

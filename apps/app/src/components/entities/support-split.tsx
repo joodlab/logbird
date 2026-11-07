@@ -1,15 +1,15 @@
 import type { EntityKind } from '@logbird/contracts';
 import { EntityAvatar } from '@logbird/ui/components/entity-chip';
 import { Panel } from '@logbird/ui/components/page-header';
+import { StatTile, StatTileGrid } from '@logbird/ui/components/stat-card';
 import { SegmentedControl, SegmentedControlItem } from '@logbird/ui/components/ui/segmented-control';
-import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRightIcon, UserIcon, VenetianMaskIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
 import { SupportAgentLink } from '@/components/impersonation';
 import { facetQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
 import { supportAgentQuery, type WhoFilter } from '@/lib/impersonation';
+import { withPresence } from '@/lib/presence-filter';
 
 export interface SupportCounts {
   /** Events in range that support did (as this actor / in this tenant / on this record). */
@@ -19,9 +19,12 @@ export interface SupportCounts {
   asAgent: number;
 }
 
-/** Support activity around one entity: who from support was involved, and what this actor did as support. */
+/**
+ * Support activity around one entity: who from support was involved, and what this actor did as support. Counted
+ * with `impersonator:*` so the empty bucket (events nobody impersonated) never lands in the overflow total.
+ */
 export function useSupportCounts(projectId: string, kind: EntityKind, entityId: string, baseQuery: string, range: string): SupportCounts | undefined {
-  const agents = useQuery(facetQuery(projectId, 'impersonator', range, baseQuery, 20));
+  const agents = useQuery(facetQuery(projectId, 'impersonator', range, withPresence(baseQuery, 'impersonator'), 20));
   const asAgent = useQuery({ ...facetQuery(projectId, 'impersonator', range, supportAgentQuery(entityId), 1), enabled: kind === 'actor' });
   if (!agents.data || agents.isPlaceholderData) return undefined;
   const present = agents.data.values.filter((v) => v.value !== '');
@@ -33,17 +36,25 @@ export function useSupportCounts(projectId: string, kind: EntityKind, entityId: 
 }
 
 const SPLIT_COPY = {
-  actor: { self: 'Acted themselves', support: 'Support acting as them' },
-  other: { self: 'Not by support', support: 'Done by support' },
+  actor: { self: 'Acted themselves', support: 'Support acting as them', selfShort: 'Themselves', supportShort: 'By support' },
+  other: { self: 'Not by support', support: 'Done by support', selfShort: 'Not support', supportShort: 'By support' },
 } as const;
 
 export function splitCopy(kind: EntityKind) {
   return kind === 'actor' ? SPLIT_COPY.actor : SPLIT_COPY.other;
 }
 
+/** The panel's one-line summary, true whether support acted as this entity, this actor is an agent, or both (m2). */
+export function splitDescription(kind: EntityKind, name: string, counts: Pick<SupportCounts, 'support' | 'asAgent'>): string {
+  if (counts.support === 0) return `Support never signed in as ${name} in this range. ${name} is a support agent; that work is kept apart.`;
+  return kind === 'actor'
+    ? `Some of these events were done by a support agent signed in as ${name}.`
+    : 'Some of these events were done by a support agent signed in as a customer.';
+}
+
 /**
  * "Acted themselves 120 · Support acting as them 11", the support agents involved, and (for an actor who is also a
- * support agent) a way to their impersonation activity. Clicking a number filters the timeline.
+ * support agent) a way to their support activity. The timeline's {@link WhoSegmentedControl} is the one filter.
  */
 export function SupportSplitPanel({
   projectId,
@@ -52,8 +63,6 @@ export function SupportSplitPanel({
   name,
   total,
   counts,
-  who,
-  onWho,
 }: {
   projectId: string;
   kind: EntityKind;
@@ -62,8 +71,6 @@ export function SupportSplitPanel({
   /** Every event in range for this entity. */
   total: number | undefined;
   counts: SupportCounts | undefined;
-  who: WhoFilter;
-  onWho: (who: WhoFilter) => void;
 }) {
   // Nothing while loading: most entities never involve support, so no placeholder that then vanishes.
   if (!counts || total === undefined) return null;
@@ -71,32 +78,29 @@ export function SupportSplitPanel({
   const copy = splitCopy(kind);
   const self = Math.max(total - counts.support, 0);
   return (
-    <Panel
-      description={
-        kind === 'actor'
-          ? `Some of these events were done by a support agent signed in as ${name}.`
-          : 'Some of these events were done by a support agent acting as a customer.'
-      }
-      title="Who did it"
-    >
+    <Panel description={splitDescription(kind, name, counts)} title="Who did it">
       <div className="flex flex-col gap-3 p-3">
         {counts.support > 0 ? (
-          <div className="grid grid-cols-2 gap-2">
-            <SplitButton
-              active={who === 'self'}
-              count={self}
-              icon={<UserIcon className="size-3.5" />}
-              label={copy.self}
-              onClick={() => onWho(who === 'self' ? 'all' : 'self')}
+          <StatTileGrid className="grid-cols-2">
+            <StatTile
+              label={
+                <span className="flex items-center gap-1.5">
+                  <UserIcon aria-hidden className="size-3.5 shrink-0" />
+                  {copy.self}
+                </span>
+              }
+              value={formatNumber(self)}
             />
-            <SplitButton
-              active={who === 'support'}
-              count={counts.support}
-              icon={<VenetianMaskIcon className="size-3.5 text-outcome-denied" />}
-              label={copy.support}
-              onClick={() => onWho(who === 'support' ? 'all' : 'support')}
+            <StatTile
+              label={
+                <span className="flex items-center gap-1.5">
+                  <VenetianMaskIcon aria-hidden className="size-3.5 shrink-0 text-support" />
+                  {copy.support}
+                </span>
+              }
+              value={formatNumber(counts.support)}
             />
-          </div>
+          </StatTileGrid>
         ) : null}
         {counts.agents.length > 0 ? (
           <div className="flex flex-col gap-1">
@@ -124,13 +128,13 @@ export function SupportSplitPanel({
         {counts.asAgent > 0 ? (
           <SupportAgentLink
             agentId={entityId}
-            className="flex items-center gap-2 rounded-md border border-outcome-denied/25 bg-outcome-denied/5 px-3 py-2 text-[13px] outline-none hover:bg-outcome-denied/10 focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="flex items-center gap-2 rounded-md border border-support/25 bg-support/5 px-3 py-2 text-[13px] outline-none hover:bg-support/10 focus-visible:ring-2 focus-visible:ring-ring/50"
             projectId={projectId}
           >
-            <VenetianMaskIcon aria-hidden className="size-4 shrink-0 text-outcome-denied" />
+            <VenetianMaskIcon aria-hidden className="size-4 shrink-0 text-support" />
             <span className="min-w-0 flex-1">
               {name} is also a support agent: <span className="font-medium">{formatNumber(counts.asAgent)}</span> action
-              {counts.asAgent === 1 ? '' : 's'} while acting as other people. These are not counted here.
+              {counts.asAgent === 1 ? '' : 's'} while signed in as customers. These are not counted here.
             </span>
             <ArrowRightIcon aria-hidden className="size-4 shrink-0" />
           </SupportAgentLink>
@@ -140,39 +144,7 @@ export function SupportSplitPanel({
   );
 }
 
-function SplitButton({
-  label,
-  count,
-  icon,
-  active,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  icon: ReactNode;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      aria-pressed={active}
-      className={cn(
-        'flex min-w-0 flex-col gap-0.5 rounded-lg border px-3 py-2 text-start outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/50',
-        active && 'border-brand/40 bg-brand/[0.06]',
-      )}
-      onClick={onClick}
-      type="button"
-    >
-      <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
-        {icon}
-        <span className="truncate">{label}</span>
-      </span>
-      <span className="font-semibold text-lg tabular-nums tracking-tight">{formatNumber(count)}</span>
-    </button>
-  );
-}
-
-/** Timeline control: Everything · Acted themselves · Support acting as them. */
+/** Timeline control: Everything · Acted themselves · Support acting as them (shorter labels on phones). */
 export function WhoSegmentedControl({
   kind,
   who,
@@ -186,16 +158,18 @@ export function WhoSegmentedControl({
 }) {
   const copy = splitCopy(kind);
   return (
-    <SegmentedControl aria-label="Who did it" className={className} size="sm">
+    <SegmentedControl aria-label="Who did it" className={className} role="group" size="sm">
       <SegmentedControlItem active={who === 'all'} onClick={() => onWho('all')}>
         Everything
       </SegmentedControlItem>
       <SegmentedControlItem active={who === 'self'} onClick={() => onWho('self')}>
-        {copy.self}
+        <span className="sm:hidden">{copy.selfShort}</span>
+        <span className="hidden sm:inline">{copy.self}</span>
       </SegmentedControlItem>
       <SegmentedControlItem active={who === 'support'} onClick={() => onWho('support')}>
-        <VenetianMaskIcon aria-hidden className="text-outcome-denied" />
-        {copy.support}
+        <VenetianMaskIcon aria-hidden className="text-support" />
+        <span className="sm:hidden">{copy.supportShort}</span>
+        <span className="hidden sm:inline">{copy.support}</span>
       </SegmentedControlItem>
     </SegmentedControl>
   );

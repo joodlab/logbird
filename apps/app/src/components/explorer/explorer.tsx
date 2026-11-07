@@ -10,6 +10,7 @@ import { ArrowUpIcon, ChevronDownIcon, CircleAlertIcon, FilterIcon, PanelLeftClo
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EventHistogram } from '@/components/charts/event-histogram';
+import { EventListContext } from '@/components/impersonation';
 import { QueryInput, type QueryInputHandle } from '@/components/query-input/query-input';
 import { api, langParam } from '@/lib/api/client';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
@@ -166,6 +167,8 @@ export function Explorer({
   const selected = selectedFromRows ?? deepLinked.data?.event ?? null;
 
   const select = useCallback((e: AuditEvent | null) => onChange({ ev: e?.id }), [onChange]);
+  // Row cells link support markers to the agent page and place them by the visible columns.
+  const listContext = useMemo(() => ({ projectId, columns }), [projectId, columns]);
   const move = useCallback(
     (delta: number) => {
       if (rows.length === 0) return;
@@ -429,24 +432,25 @@ export function Explorer({
               </span>
             </div>
           ) : null}
-          <EventsTable
-            columns={columns}
-            projectId={projectId}
-            cursorIndex={ev ? selectedIndex : cursor}
-            empty={empty}
-            fetchingMore={events.isFetchingNextPage}
-            freshIds={fresh}
-            hasMore={!problem && events.hasNextPage}
-            loadMore={() => events.fetchNextPage()}
-            loading={events.isPending && !problem}
-            onSelect={(e) => {
-              setCursor(rows.indexOf(e));
-              select(e);
-            }}
-            rows={rows}
-            selectedId={ev}
-            total={total}
-          />
+          <EventListContext value={listContext}>
+            <EventsTable
+              columns={columns}
+              cursorIndex={ev ? selectedIndex : cursor}
+              empty={empty}
+              fetchingMore={events.isFetchingNextPage}
+              freshIds={fresh}
+              hasMore={!problem && events.hasNextPage}
+              loadMore={() => events.fetchNextPage()}
+              loading={events.isPending && !problem}
+              onSelect={(e) => {
+                setCursor(rows.indexOf(e));
+                select(e);
+              }}
+              rows={rows}
+              selectedId={ev}
+              total={total}
+            />
+          </EventListContext>
         </div>
       </div>
 

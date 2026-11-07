@@ -6,12 +6,13 @@ import { DEFAULT_COLUMNS } from '@/components/explorer/columns';
 import type { ExplorerState } from '@/components/explorer/explorer';
 import { useRange } from '@/lib/use-range';
 
-/** A support agent's page: everything they did while impersonating customers (`impersonator:<id>`). */
+/** A support agent's page: everything they did while signed in as customers (`impersonator:<id>`). */
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/support/$agentId')({
   head: () => ({ meta: [{ title: 'Support agent · Logbird' }] }),
   validateSearch: z.object({ q: z.string().optional(), ev: z.string().optional(), live: z.boolean().optional() }),
   // Support sessions are rare: open on a range that usually has some.
-  staticData: { crumb: 'Actors', crumbTo: '/p/$projectId/actors', range: true, defaultRange: '30d' },
+  // The section crumb opens everything support did; agents are not in the actor directory.
+  staticData: { crumb: 'Support', crumbTo: '/p/$projectId/events', crumbSearch: { q: 'impersonator:*' }, range: true, defaultRange: '30d' },
   component: SupportAgentPage,
 });
 

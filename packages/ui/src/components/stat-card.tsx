@@ -80,3 +80,21 @@ export function StatCard({ label, value, delta, goodWhen = 'up', deltaKind, hint
     </Comp>
   );
 }
+
+/**
+ * Compact stat for a profile header row: label over value, in a `dl` grid of tiles (`StatTileGrid`). Lighter than
+ * {@link StatCard}: no border or delta, so several sit edge to edge.
+ */
+export function StatTile({ label, value, loading, className }: { label: ReactNode; value: ReactNode; loading?: boolean; className?: string }) {
+  return (
+    <div className={cn('flex min-w-0 flex-col gap-1 bg-card px-4 py-3', className)}>
+      <dt className="truncate text-muted-foreground text-xs">{label}</dt>
+      <dd className="font-semibold text-lg tabular-nums tracking-tight">{loading ? <Skeleton className="h-6 w-16" /> : value}</dd>
+    </div>
+  );
+}
+
+/** Tiles joined by 1px hairlines (the gap shows the border colour). */
+export function StatTileGrid({ className, children }: { className?: string; children: ReactNode }) {
+  return <dl className={cn('grid gap-px overflow-hidden rounded-xl border bg-border', className)}>{children}</dl>;
+}

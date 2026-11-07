@@ -1,5 +1,7 @@
-import type { AuditEvent } from '@logbird/contracts';
-import { formatTerm, hasTerm, includeTerm, removeTerm } from '@/lib/query-language';
+import type { AuditEvent, QueryLang } from '@logbird/contracts';
+import { personLabel } from '@/lib/events';
+import { presenceTerms, setPresence } from '@/lib/presence-filter';
+import { formatTerm } from '@/lib/query-language';
 
 /**
  * Support impersonation, in plain words. When `impersonator` is set, the actor is the customer it was done *as*
@@ -21,18 +23,33 @@ export type WhoFilter = 'all' | 'support' | 'self';
 
 export const SUPPORT_TERM = 'impersonator:*';
 
-export function whoFilter(q: string): WhoFilter {
-  if (hasTerm(q, 'impersonator', '*', false)) return 'support';
-  if (hasTerm(q, 'impersonator', '*', true)) return 'self';
+/**
+ * Which split a query is in. Any positive support filter (`impersonator:*` or one agent) is "support", `-impersonator:*`
+ * is "self"; works in both query languages.
+ */
+export function whoFilter(q: string, lang: QueryLang = 'query'): WhoFilter {
+  const terms = presenceTerms(q, 'impersonator', lang);
+  if (terms.some((t) => !t.negated)) return 'support';
+  if (terms.some((t) => t.negated && t.value === '*')) return 'self';
   return 'all';
 }
 
-/** Swap the who-split in a query, keeping every other term. */
-export function withWhoFilter(q: string, who: WhoFilter): string {
-  const without = removeTerm(removeTerm(q, 'impersonator', '*', false), 'impersonator', '*', true);
-  if (who === 'support') return includeTerm(without, 'impersonator', '*');
-  if (who === 'self') return `${without} -${SUPPORT_TERM}`.trim();
-  return without;
+/**
+ * Swap the who-split in a query, keeping every other term. Specific agents go with it, so the result never
+ * contradicts itself: "self" and "everything" drop every `impersonator:` term; "support" keeps only agent exclusions
+ * (`impersonator:* -impersonator:support_2` is still meaningful).
+ */
+export function withWhoFilter(q: string, who: WhoFilter, lang: QueryLang = 'query'): string {
+  if (who === 'support') return setPresence(q, 'impersonator', { value: '*', negated: false }, lang, (t) => t.negated && t.value !== '*');
+  if (who === 'self') return setPresence(q, 'impersonator', { value: '*', negated: true }, lang);
+  return setPresence(q, 'impersonator', null, lang);
+}
+
+/** "done by support agent Leena Ashford while acting as Rohan Mehta": the one phrase rows, labels and tooltips use. */
+export function supportPhrase(e: Pick<AuditEvent, 'impersonator' | 'actor'>): string | null {
+  const name = supportAgentName(e);
+  if (!name) return null;
+  return `done by support agent ${name} while acting as ${personLabel(e.actor) || 'an unknown customer'}`;
 }
 
 /**

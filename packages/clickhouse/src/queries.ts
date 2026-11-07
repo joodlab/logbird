@@ -251,16 +251,15 @@ export async function facets(ch: ClickHouseClient, p: string, q: z.infer<typeof 
     expr = `toString(${expr})`;
     label = expr;
   }
-  const rows = await read<{ value: string; label: string; count: number }>(
+  // Only the top `limit` groups leave ClickHouse; the window sum (computed before LIMIT) keeps otherCount exact.
+  const rows = await read<{ value: string; label: string; count: number; total: number }>(
     ch,
-    `SELECT ${expr} value,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),value) label,count() count FROM events ${join} WHERE ${w.sql} GROUP BY value ORDER BY count DESC,value`,
-    { ...w.params, attr: q.field.replace(/^(attr|attributes)\./, '') },
+    `SELECT ${expr} value,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),value) label,count() count,sum(count()) OVER () total FROM events ${join} WHERE ${w.sql} GROUP BY value ORDER BY count DESC,value LIMIT {facetLimit:UInt32}`,
+    { ...w.params, attr: q.field.replace(/^(attr|attributes)\./, ''), facetLimit: q.limit },
   );
-  return {
-    field: q.field,
-    values: rows.slice(0, q.limit).map((r) => ({ ...r, count: Number(r.count) })),
-    otherCount: rows.slice(q.limit).reduce((n, r) => n + Number(r.count), 0),
-  };
+  const values = rows.map((r) => ({ value: r.value, label: r.label, count: Number(r.count) }));
+  const total = Number(rows[0]?.total ?? 0);
+  return { field: q.field, values, otherCount: Math.max(total - values.reduce((n, v) => n + v.count, 0), 0) };
 }
 async function metrics(ch: ClickHouseClient, p: string, q: RangeQuery) {
   const w = await where(ch, p, q);

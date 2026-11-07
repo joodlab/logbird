@@ -175,13 +175,13 @@ function PartyCard({
   hint: string;
   icon: ReactNode;
   children: ReactNode;
-  tone?: 'default' | 'warning';
+  tone?: 'default' | 'support';
 }) {
   return (
     <div
       className={cn(
         'flex min-w-0 flex-col gap-2 overflow-hidden rounded-lg border p-3',
-        tone === 'warning' ? 'border-outcome-denied/30 bg-outcome-denied/5' : 'bg-muted/25',
+        tone === 'support' ? 'border-support/30 bg-support/5' : 'bg-muted/25',
       )}
     >
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -280,12 +280,12 @@ function EventDetailBody({
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Section title="Who">
           {e.impersonator ? (
-            <p className="flex items-start gap-2 rounded-md border border-outcome-denied/25 bg-outcome-denied/5 px-3 py-2 text-[13px]">
-              <VenetianMaskIcon className="mt-0.5 size-4 shrink-0 text-outcome-denied" />
+            <p className="flex items-start gap-2 rounded-md border border-support/25 bg-support/5 px-3 py-2 text-[13px]">
+              <VenetianMaskIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-support" />
               <span>
-                <span className="font-medium">{e.impersonator.name || e.impersonator.id}</span> did this while impersonating{' '}
-                <span className="font-medium">{personLabel(e.actor)}</span>. The actor is who it was done as; the impersonator is who was at the
-                keyboard.
+                Support agent <span className="font-medium">{e.impersonator.name || e.impersonator.id}</span> did this while signed in as{' '}
+                <span className="font-medium">{personLabel(e.actor) || 'an unknown customer'}</span>. The actor is whose account it was; the support
+                agent was at the keyboard.
               </span>
             </p>
           ) : null}
@@ -335,7 +335,7 @@ function EventDetailBody({
               )}
             </PartyCard>
             {e.impersonator ? (
-              <PartyCard hint="at the keyboard" icon={<VenetianMaskIcon className="size-3" />} label="Impersonator" tone="warning">
+              <PartyCard hint="at the keyboard" icon={<VenetianMaskIcon className="size-3 text-support" />} label="Support agent" tone="support">
                 <div className="flex min-w-0 flex-col gap-1">
                   {projectId ? (
                     <SupportAgentLink
@@ -352,10 +352,11 @@ function EventDetailBody({
                   {projectId ? (
                     <SupportAgentLink
                       agentId={e.impersonator.id}
-                      className="text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
+                      className="inline-flex items-center gap-1 self-start whitespace-nowrap text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
                       projectId={projectId}
                     >
-                      Everything they did as support →
+                      Everything they did as support
+                      <ArrowRightIcon aria-hidden className="size-3 shrink-0" />
                     </SupportAgentLink>
                   ) : null}
                 </div>

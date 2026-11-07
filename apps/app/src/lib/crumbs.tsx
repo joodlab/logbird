@@ -29,6 +29,8 @@ declare module '@tanstack/react-router' {
     crumb?: string;
     /** Where the section crumb links (a route path with `$projectId`), when it is not the parent URL segment. */
     crumbTo?: string;
+    /** Search params for the section crumb's link (kept with the current range). */
+    crumbSearch?: Record<string, string>;
     /** Show the shared time-range control in the top bar. */
     range?: boolean;
     /** Range used when the URL has none (sparse pages want a wider window). */

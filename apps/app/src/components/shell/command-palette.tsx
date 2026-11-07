@@ -29,7 +29,7 @@ import {
   UsersIcon,
   VenetianMaskIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '@/lib/api/client';
 import { projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { ENTITY_SECTIONS, sectionForKind } from '@/lib/entities';
@@ -69,6 +69,15 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
     staleTime: 30_000,
   });
 
+  // The highlighted item. When a support agent matches what was typed, highlight them once their lookup lands, so
+  // Enter opens the agent's page rather than a free-text search that cannot find what they did as a customer.
+  const [highlighted, setHighlighted] = useState('');
+  const firstAgent = agents.data?.[0];
+  const firstAgentValue = firstAgent ? `support ${firstAgent.value} ${firstAgent.label}` : '';
+  useEffect(() => {
+    if (firstAgentValue) setHighlighted(firstAgentValue);
+  }, [firstAgentValue]);
+
   const go = (fn: () => void) => {
     onOpenChange(false);
     setSearch('');
@@ -82,6 +91,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   return (
     <CommandDialog
       className="sm:max-w-xl"
+      commandProps={{ value: highlighted, onValueChange: setHighlighted }}
       description="Navigate, jump to an entity, event or operation, switch project or theme."
       onOpenChange={(next) => {
         onOpenChange(next);
@@ -93,6 +103,25 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
       <CommandInput onValueChange={setSearch} placeholder="Search pages, actors, tenants, records, or paste an event id…" value={search} />
       <CommandList className="max-h-[min(60vh,28rem)]">
         <CommandEmpty>No matches. Try an id like usr_42 or op_…</CommandEmpty>
+        {projectId && agents.data && agents.data.length > 0 ? (
+          <CommandGroup heading="Support agents">
+            {agents.data.map((a) => (
+              <CommandItem
+                key={a.value}
+                onSelect={() => go(() => navigate({ to: '/p/$projectId/support/$agentId', params: { projectId, agentId: a.value } }))}
+                value={`support ${a.value} ${a.label}`}
+              >
+                <EntityAvatar id={a.value} name={a.label || a.value} size="sm" />
+                <span className="truncate">{a.label || a.value}</span>
+                <span className="truncate font-mono text-muted-foreground text-xs">{a.value}</span>
+                <CommandShortcut className="flex items-center gap-1">
+                  <VenetianMaskIcon className="size-3" />
+                  Support
+                </CommandShortcut>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ) : null}
         {projectId && trimmed ? (
           <CommandGroup heading="Jump to">
             {looksLikeEvent ? (
@@ -122,25 +151,6 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
               <SearchIcon />
               Search events for <span className="font-mono text-xs">{trimmed}</span>
             </CommandItem>
-          </CommandGroup>
-        ) : null}
-        {projectId && agents.data && agents.data.length > 0 ? (
-          <CommandGroup heading="Support agents">
-            {agents.data.map((a) => (
-              <CommandItem
-                key={a.value}
-                onSelect={() => go(() => navigate({ to: '/p/$projectId/support/$agentId', params: { projectId, agentId: a.value } }))}
-                value={`support ${a.value} ${a.label} ${debounced}`}
-              >
-                <EntityAvatar id={a.value} name={a.label || a.value} size="sm" />
-                <span className="truncate">{a.label || a.value}</span>
-                <span className="truncate font-mono text-muted-foreground text-xs">{a.value}</span>
-                <CommandShortcut className="flex items-center gap-1">
-                  <VenetianMaskIcon className="size-3" />
-                  Support
-                </CommandShortcut>
-              </CommandItem>
-            ))}
           </CommandGroup>
         ) : null}
         {entities.data && entities.data.length > 0 ? (

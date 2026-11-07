@@ -11,6 +11,7 @@ import { facetQuery } from '@/lib/api/queries';
 import { formatCompact } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { altClickLabel, useIsMac } from '@/lib/platform';
+import { hasPresenceTerm, togglePresenceTerm, withPresence } from '@/lib/presence-filter';
 import { coreField } from '@/lib/query-catalog';
 import { fieldTerms, hasTerm, queryFieldForFacet, removeTerm, toggleTerm } from '@/lib/query-language';
 import { hasSqlPredicate, isColumnPredicate, removeSqlConjuncts, sqlConjuncts, sqlString, toggleSqlPredicate } from '@/lib/sql-language';
@@ -22,22 +23,31 @@ interface FacetSpec {
   defaultOpen?: boolean;
   /** Values are ids with display names as labels: show the name, keep the id secondary. */
   named?: boolean;
-  /** A leading "any value" row (`field:*`, ⌥/Alt-click or − for `-field:*`), and copy for when nothing has the field. */
-  presence?: { label: string; hide: string; empty: string };
+  /**
+   * A leading "any value" row (`field:*`, ⌥/Alt-click or − for `-field:*`), and copy for when nothing has the field.
+   * `*` and the values are one group (see lib/presence-filter), and counts only cover events that have the field.
+   */
+  presence?: { label: string; hide: string; show: string; empty: string };
 }
 
 const FACETS: FacetSpec[] = [
   { field: 'outcome', label: 'Outcome', defaultOpen: true },
-  { field: 'severity', label: 'Severity', defaultOpen: true },
-  { field: 'action', label: 'Action', mono: true, defaultOpen: true },
-  { field: 'actor', label: 'Actor', defaultOpen: true, named: true },
+  // Right after Outcome so it is above the fold at 1440×900: "was this support?" is the first question in a review.
   {
     field: 'impersonator',
     label: 'Done by support',
     defaultOpen: true,
     named: true,
-    presence: { label: 'Any support agent', hide: 'Hide what support did', empty: 'Nothing was done by support in this range.' },
+    presence: {
+      label: 'Any support agent',
+      hide: 'Hide what support did',
+      show: 'Show what support did again',
+      empty: 'Nothing was done by support in this range.',
+    },
   },
+  { field: 'severity', label: 'Severity', defaultOpen: true },
+  { field: 'action', label: 'Action', mono: true, defaultOpen: true },
+  { field: 'actor', label: 'Actor', defaultOpen: true, named: true },
   { field: 'tenant', label: 'Tenant', named: true },
   { field: 'executor', label: 'Executor', named: true },
   { field: 'target', label: 'Record', named: true },
@@ -87,17 +97,25 @@ function sqlOps(field: string): FacetOps {
   const info = coreField(field);
   const column = info?.column ?? field;
   const array = info?.type === 'array';
-  // `*` is the presence row: any non-empty value.
-  const include = (v: string) =>
-    v === '*' ? (array ? `notEmpty(${column})` : `${column} != ''`) : array ? `has(${column}, ${sqlString(v)})` : `${column} = ${sqlString(v)}`;
-  const exclude = (v: string) =>
-    v === '*' ? (array ? `empty(${column})` : `${column} = ''`) : array ? `NOT has(${column}, ${sqlString(v)})` : `${column} != ${sqlString(v)}`;
+  const include = (v: string) => (array ? `has(${column}, ${sqlString(v)})` : `${column} = ${sqlString(v)}`);
+  const exclude = (v: string) => (array ? `NOT has(${column}, ${sqlString(v)})` : `${column} != ${sqlString(v)}`);
   return {
     activeCount: (q) => sqlConjuncts(q).filter((c) => isColumnPredicate(c, column)).length,
     without: (q) => removeSqlConjuncts(q, (c) => isColumnPredicate(c, column)),
     included: (q, v) => hasSqlPredicate(q, include(v)),
     excluded: (q, v) => hasSqlPredicate(q, exclude(v)),
     toggle: (q, v, mode) => toggleSqlPredicate(q, mode === 'include' ? include(v) : exclude(v), column, mode),
+  };
+}
+
+/** A presence facet: `*` and its values form one exclusive group in either language (no contradictory queries). */
+function presenceOps(field: string, lang: QueryLang): FacetOps {
+  const base = lang === 'sql' ? sqlOps(field) : queryOps(field);
+  return {
+    ...base,
+    included: (q, v) => hasPresenceTerm(q, field, { value: v, negated: false }, lang),
+    excluded: (q, v) => hasPresenceTerm(q, field, { value: v, negated: true }, lang),
+    toggle: (q, v, mode) => togglePresenceTerm(q, field, v, mode, lang),
   };
 }
 
@@ -162,15 +180,18 @@ function FacetGroup({
   onChange: (q: string) => void;
 }) {
   const queryField = queryFieldForFacet(spec.field);
-  const ops = lang === 'sql' ? sqlOps(queryField) : queryOps(queryField);
+  const opsFor = (l: QueryLang) => (spec.presence ? presenceOps(queryField, l) : l === 'sql' ? sqlOps(queryField) : queryOps(queryField));
+  const ops = opsFor(lang);
   const activeCount = ops.activeCount(q);
   const [open, setOpen] = useState(Boolean(spec.defaultOpen) || activeCount > 0);
   const [limit, setLimit] = useState(6);
   // Counts ignore this field's own terms so sibling values stay visible while one is selected.
   const base = counts ?? { q, lang };
-  const scopedQ = (base.lang === 'sql' ? sqlOps(queryField) : queryOps(queryField)).without(base.q);
+  const without = opsFor(base.lang).without(base.q);
+  // A presence facet counts only events that have the field (`field:*`), so the empty bucket never hides in
+  // otherCount: its "any value" row is then exactly the listed values plus the overflow.
+  const scopedQ = spec.presence ? withPresence(without, queryField, base.lang) : without;
   const facet = useQuery({ ...facetQuery(projectId, spec.field, range, scopedQ, 20, base.lang), enabled: open });
-  // A presence facet lists only events that have the field; its "any value" row stands for all of them.
   const allValues = facet.data?.values ?? [];
   const values = spec.presence ? allValues.filter((v) => v.value !== '') : allValues;
   const presentCount = spec.presence ? values.reduce((n, v) => n + v.count, 0) + (facet.data?.otherCount ?? 0) : 0;
@@ -206,7 +227,7 @@ function FacetGroup({
             style={{ width: `${(v.count / max) * 100}%` }}
           />
           {spec.field === 'outcome' ? <OutcomeDot className="relative" outcome={v.value} /> : null}
-          {presenceRow ? <VenetianMaskIcon aria-hidden className="relative size-3.5 shrink-0 text-outcome-denied" /> : null}
+          {presenceRow ? <VenetianMaskIcon aria-hidden className="relative size-3.5 shrink-0 text-support" /> : null}
           <span className="relative flex min-w-0 flex-1 items-baseline gap-1.5">
             <span
               className={cn(
@@ -231,7 +252,16 @@ function FacetGroup({
           <TooltipTrigger
             render={
               <Button
-                aria-label={presenceRow ? (spec.presence?.hide ?? `Hide: ${spec.label}`) : `Exclude ${v.label}`}
+                aria-label={
+                  presenceRow
+                    ? excluded
+                      ? (spec.presence?.show ?? `Show: ${spec.label}`)
+                      : (spec.presence?.hide ?? `Hide: ${spec.label}`)
+                    : excluded
+                      ? `Stop excluding ${v.label || '(none)'}`
+                      : `Exclude ${v.label || '(none)'}`
+                }
+                aria-pressed={excluded}
                 className={cn(
                   'absolute end-1 text-muted-foreground opacity-0 hover:bg-background hover:text-outcome-failure focus-visible:opacity-100 group-hover/facet:opacity-100 dark:hover:bg-background',
                   excluded && 'text-outcome-failure opacity-100',
@@ -245,7 +275,7 @@ function FacetGroup({
             <MinusIcon className="size-3" />
           </TooltipTrigger>
           <TooltipContent side="right">
-            {excluded ? 'Remove exclusion' : presenceRow ? (spec.presence?.hide ?? 'Hide these') : 'Exclude'}
+            {presenceRow ? (excluded ? spec.presence?.show : spec.presence?.hide) : excluded ? 'Remove exclusion' : 'Exclude'}
           </TooltipContent>
         </Tooltip>
       </div>

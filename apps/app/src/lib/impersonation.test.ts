@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { jobHint, supportAgentName, supportAgentQuery, whoFilter, withWhoFilter } from './impersonation';
+import { jobHint, supportAgentName, supportAgentQuery, supportPhrase, whoFilter, withWhoFilter } from './impersonation';
 
 const executor = (over: Partial<{ type: string; id: string; name: string; jobId: string; attempt: number }> = {}) => ({
   executor: { type: 'worker', id: 'billing-worker', name: '', jobId: '', attempt: 0, ...over },
@@ -23,8 +23,29 @@ describe('who did it', () => {
     expect(whoFilter('')).toBe('all');
     expect(whoFilter('outcome:failure impersonator:*')).toBe('support');
     expect(whoFilter('-impersonator:* action:booking.modified')).toBe('self');
-    // A specific agent is not the "support" split.
-    expect(whoFilter('impersonator:support_2')).toBe('all');
+    // One agent is a subset of support; agent exclusions alone are still "everything".
+    expect(whoFilter('impersonator:support_2')).toBe('support');
+    expect(whoFilter('-impersonator:support_2')).toBe('all');
+    expect(whoFilter("impersonator_id != ''", 'sql')).toBe('support');
+    expect(whoFilter("outcome = 'failure' AND impersonator_id = ''", 'sql')).toBe('self');
+    expect(whoFilter("impersonator_id = 'support_2'", 'sql')).toBe('support');
+    expect(whoFilter("outcome = 'failure'", 'sql')).toBe('all');
+  });
+
+  it('drops specific agents with the split, so the timeline never contradicts itself (M1)', () => {
+    expect(withWhoFilter('actor:cust_1 impersonator:support_1', 'self')).toBe('actor:cust_1 -impersonator:*');
+    expect(withWhoFilter('impersonator:support_1', 'support')).toBe('impersonator:*');
+    expect(withWhoFilter('impersonator:support_1 -impersonator:support_2', 'support')).toBe('-impersonator:support_2 impersonator:*');
+    expect(withWhoFilter('impersonator:support_1 -impersonator:support_2', 'all')).toBe('');
+    expect(withWhoFilter('-impersonator:support_2', 'self')).toBe('-impersonator:*');
+  });
+
+  it('swaps the split in SQL', () => {
+    expect(withWhoFilter("outcome = 'failure'", 'support', 'sql')).toBe("outcome = 'failure' AND impersonator_id != ''");
+    expect(withWhoFilter("outcome = 'failure' AND impersonator_id = 'support_1'", 'self', 'sql')).toBe(
+      "outcome = 'failure' AND impersonator_id = ''",
+    );
+    expect(withWhoFilter("impersonator_id = '' AND outcome = 'failure'", 'all', 'sql')).toBe("outcome = 'failure'");
   });
 
   it('swaps the split and keeps every other term', () => {
@@ -33,6 +54,18 @@ describe('who did it', () => {
     expect(withWhoFilter('-impersonator:* outcome:failure', 'all')).toBe('outcome:failure');
     expect(withWhoFilter('', 'self')).toBe('-impersonator:*');
     expect(whoFilter(withWhoFilter('action:x', 'support'))).toBe('support');
+  });
+});
+
+describe('supportPhrase', () => {
+  it('says who was at the keyboard and whose account it was', () => {
+    expect(
+      supportPhrase({ impersonator: { id: 'support_1', name: 'Leena Ashford' }, actor: { type: 'user', id: 'u1', name: 'Rohan Mehta', email: '' } }),
+    ).toBe('done by support agent Leena Ashford while acting as Rohan Mehta');
+    expect(supportPhrase({ impersonator: { id: 'support_1', name: '' }, actor: null })).toBe(
+      'done by support agent support_1 while acting as an unknown customer',
+    );
+    expect(supportPhrase({ impersonator: null, actor: null })).toBeNull();
   });
 });
 

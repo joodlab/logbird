@@ -73,6 +73,8 @@
   --color-syntax-punct: var(--syntax-punct);
   --color-diff-add: var(--diff-add);
   --color-diff-remove: var(--diff-remove);
+  --color-support: var(--support);
+  --color-support-foreground: var(--support-foreground);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -143,6 +145,10 @@
   --syntax-punct: #737373;
   --diff-add: #047857;
   --diff-remove: #b91c1c;
+  /* Support impersonation: its own hue, so a support row never reads as a denied (amber) one. Base for icons and
+     tints, foreground for small text on the /10 tint (WCAG AA). */
+  --support: #c026d3;
+  --support-foreground: #a21caf;
 
   --chart-1: #4f46e5;
   --chart-2: #0891b2;
@@ -207,6 +213,8 @@
   --syntax-punct: #8a8a8a;
   --diff-add: #6ee7b7;
   --diff-remove: #fca5a5;
+  --support: #e879f9;
+  --support-foreground: #f0abfc;
 
   --chart-1: #818cf8;
   --chart-2: #22d3ee;

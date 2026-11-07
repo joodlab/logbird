@@ -1,14 +1,13 @@
 import { CopyValue } from '@logbird/ui/components/copy-button';
 import { EntityAvatar } from '@logbird/ui/components/entity-chip';
 import { Panel } from '@logbird/ui/components/page-header';
-import { EmptyState } from '@logbird/ui/components/states';
+import { StatTile, StatTileGrid } from '@logbird/ui/components/stat-card';
+import { EmptyState, ErrorState } from '@logbird/ui/components/states';
 import { Button } from '@logbird/ui/components/ui/button';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
-import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Rows3Icon, UserIcon, VenetianMaskIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
 import { ActionName } from '@/components/action-name';
 import { OutcomeAreaChart } from '@/components/charts/outcome-area-chart';
 import { EntityProfileLink } from '@/components/entity-link';
@@ -17,7 +16,8 @@ import { RankList } from '@/components/rank-list';
 import { facetQuery, histogramQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
 import { formatNumber } from '@/lib/format';
-import { supportAgentQuery } from '@/lib/impersonation';
+import { SUPPORT_TERM, supportAgentQuery } from '@/lib/impersonation';
+import { withPresence } from '@/lib/presence-filter';
 import { formatTerm } from '@/lib/query-language';
 import { rangeLabel } from '@/lib/range';
 import { useDocumentTitle } from '@/lib/use-document-title';
@@ -29,22 +29,25 @@ interface SupportAgentProfileProps {
   onTimelineChange: (patch: Partial<ExplorerState>) => void;
 }
 
-/** Distinct values in a facet, "100+" when the server cut the list. */
-function distinct(data: { values: unknown[]; otherCount: number } | undefined): string {
+/**
+ * Distinct values in a facet, "100+" when the server cut the list. Facets are requested with `field:*`, so events
+ * with no actor or tenant never count as one more customer; the filter is a second guard.
+ */
+export function distinctCount(data: { values: { value: string }[]; otherCount: number } | undefined): string {
   if (!data) return '';
-  return `${formatNumber(data.values.length)}${data.otherCount > 0 ? '+' : ''}`;
+  return `${formatNumber(data.values.filter((v) => v.value !== '').length)}${data.otherCount > 0 ? '+' : ''}`;
 }
 
 /**
- * Everything one support agent did while impersonating customers. The agent may never act under their own account,
+ * Everything one support agent did while signed in as customers. The agent may never act under their own account,
  * so this page is built from `impersonator:<id>` rather than the actor directory.
  */
 export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineChange }: SupportAgentProfileProps) {
   const baseQuery = supportAgentQuery(agentId);
   const { range } = timeline;
   const self = useQuery(facetQuery(projectId, 'impersonator', range, baseQuery, 1));
-  const actedAs = useQuery(facetQuery(projectId, 'actor', range, baseQuery, 100));
-  const tenants = useQuery(facetQuery(projectId, 'tenant', range, baseQuery, 100));
+  const actedAs = useQuery(facetQuery(projectId, 'actor', range, withPresence(baseQuery, 'actor'), 100));
+  const tenants = useQuery(facetQuery(projectId, 'tenant', range, withPresence(baseQuery, 'tenant'), 100));
   const actions = useQuery(facetQuery(projectId, 'action', range, baseQuery, 5));
   const series = useQuery(histogramQuery(projectId, range, baseQuery));
   // Their own account, if they also act as themselves: link it, never mix the two.
@@ -57,7 +60,7 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
   const actedAsData = fresh(actedAs) as typeof actedAs.data;
   const tenantData = fresh(tenants) as typeof tenants.data;
   const ownEvents = fresh(ownAccount) ? (ownAccount.data?.values[0]?.count ?? 0) : 0;
-  useSetCrumb(`${name} · support`);
+  useSetCrumb(name);
   useDocumentTitle(`${name} · Support agent · Logbird`);
 
   return (
@@ -68,12 +71,16 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
             <EntityAvatar id={agentId} name={name} size="lg" />
             <div className="flex min-w-0 flex-col gap-1">
               <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
-                <VenetianMaskIcon aria-hidden className="size-3.5 text-outcome-denied" />
+                <VenetianMaskIcon aria-hidden className="size-3.5 text-support" />
                 <span>Support agent</span>
               </div>
-              <h1 className="truncate font-semibold text-xl tracking-tight" dir="auto">
-                {self.isPending ? <Skeleton className="h-6 w-48" /> : name}
-              </h1>
+              {self.isPending ? (
+                <Skeleton className="h-7 w-48" />
+              ) : (
+                <h1 className="truncate font-semibold text-xl tracking-tight" dir="auto">
+                  {name}
+                </h1>
+              )}
               <CopyValue className="text-muted-foreground" value={agentId} />
             </div>
           </div>
@@ -101,33 +108,51 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
           </div>
         </div>
 
-        <p className="flex items-start gap-2 rounded-md border border-outcome-denied/25 bg-outcome-denied/5 px-3 py-2 text-[13px]">
-          <VenetianMaskIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-outcome-denied" />
+        <p className="flex items-start gap-2 rounded-md border border-support/25 bg-support/5 px-3 py-2 text-[13px]">
+          <VenetianMaskIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-support" />
           <span>
-            These are the actions <span className="font-medium">{name}</span> took while impersonating customers. Each one is recorded under the
+            These are the actions <span className="font-medium">{name}</span> did while signed in as customers. Each one is recorded under the
             customer's name; {name} was at the keyboard.
             {ownEvents > 0 ? ` What ${name} did under their own account is on their actor page.` : null}
           </span>
         </p>
 
-        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-3">
-          <Stat
-            className="col-span-2 sm:col-span-1"
-            label={`Done as support · ${rangeLabel(range).toLowerCase()}`}
-            loading={total === undefined}
-            value={formatNumber(total ?? 0)}
-          />
-          <Stat label="Customers acted as" loading={!actedAsData} value={distinct(actedAsData)} />
-          <Stat label="Tenants" loading={!tenantData} value={distinct(tenantData)} />
-        </dl>
+        {self.isError && !selfData ? (
+          <ErrorState error={self.error} onRetry={() => self.refetch()} size="sm" title="Could not load this support agent" />
+        ) : (
+          <StatTileGrid className="grid-cols-2 sm:grid-cols-3">
+            <StatTile
+              className="col-span-2 sm:col-span-1"
+              label={`Done as support · ${rangeLabel(range).toLowerCase()}`}
+              loading={total === undefined}
+              value={formatNumber(total ?? 0)}
+            />
+            <StatTile
+              label="Customers acted as"
+              loading={!actedAsData && !actedAs.isError}
+              value={actedAs.isError ? '—' : distinctCount(actedAsData)}
+            />
+            <StatTile label="Tenants" loading={!tenantData && !tenants.isError} value={tenants.isError ? '—' : distinctCount(tenantData)} />
+          </StatTileGrid>
+        )}
 
-        {total === 0 ? (
+        {self.isError && !selfData ? null : total === 0 ? (
           <EmptyState
-            description={`No events in ${rangeLabel(range).toLowerCase()} name ${name} as the impersonator. Try a wider range.`}
+            description={`Nobody with the id ${agentId} signed in as a customer in ${rangeLabel(range).toLowerCase()}. Check the id, or try a wider range.`}
             icon={VenetianMaskIcon}
             size="sm"
-            title="Nothing done as support in this range"
-          />
+            title="No support activity in this range"
+          >
+            <Button
+              nativeButton={false}
+              render={<Link params={{ projectId }} search={(prev) => ({ range: prev.range, q: SUPPORT_TERM })} to="/p/$projectId/events" />}
+              size="sm"
+              variant="outline"
+            >
+              <VenetianMaskIcon />
+              Everything support did
+            </Button>
+          </EmptyState>
         ) : (
           <div className="grid gap-3 lg:grid-cols-[1fr_320px]">
             <Panel description="Click a band to filter the timeline below" title="Activity as support">
@@ -189,30 +214,23 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
         )}
       </div>
 
-      <section aria-label="Timeline" className="flex flex-col border-t">
-        <div className="flex items-center justify-between px-4 pt-4 sm:px-6">
-          <h2 className="font-medium text-sm">What they did as support</h2>
-        </div>
-        <div className="flex h-[640px] min-h-0 flex-col">
-          <Explorer
-            baseLabel={`support: ${name}`}
-            baseQuery={baseQuery}
-            embedded
-            onChange={onTimelineChange}
-            projectId={projectId}
-            state={timeline}
-          />
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function Stat({ label, value, loading, className }: { label: string; value: ReactNode; loading: boolean; className?: string }) {
-  return (
-    <div className={cn('flex flex-col gap-1 bg-card px-4 py-3', className)}>
-      <dt className="truncate text-muted-foreground text-xs">{label}</dt>
-      <dd className="font-semibold text-lg tabular-nums tracking-tight">{loading ? <Skeleton className="h-6 w-16" /> : value}</dd>
+      {total === 0 || (self.isError && !selfData) ? null : (
+        <section aria-label="Timeline" className="flex flex-col border-t">
+          <div className="flex items-center justify-between px-4 pt-4 sm:px-6">
+            <h2 className="font-medium text-sm">What they did as support</h2>
+          </div>
+          <div className="flex h-[640px] min-h-0 flex-col">
+            <Explorer
+              baseLabel={`support: ${name}`}
+              baseQuery={baseQuery}
+              embedded
+              onChange={onTimelineChange}
+              projectId={projectId}
+              state={timeline}
+            />
+          </div>
+        </section>
+      )}
     </div>
   );
 }
