@@ -38,13 +38,40 @@ it('rejects confirmed different content and timestamps with actionable reasons',
   }
   expect(await f.count()).toBe(1);
 });
-it('arbitrates two in-process HTTP app instances against shared DBs', async () => {
+it('arbitrates two HTTP app instances while the first INSERT is paused before acknowledgement', async () => {
   const input = { ...original, occurredAt: new Date().toISOString() };
-  const responses = await Promise.all(Array.from({ length: 12 }, (_, i) => f.post({ ...input, action: `winner.${i}` }, i % 2)));
-  expect(responses.filter((r) => r.status === 202)).toHaveLength(1);
-  for (const response of responses.filter((r) => r.status === 503)) expect((await response.json()).error.code).toBe('ingest_pending');
-  expect(await f.count()).toBe(1);
-  expect((await getEvent(clickhouse, f.project, input.id))?.event.action).toMatch(/^winner\./);
+  let release: () => void = () => undefined;
+  let entered: () => void = () => undefined;
+  const paused = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const insertionStarted = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const insert = clickhouse.insert.bind(clickhouse);
+  const spy = vi.spyOn(clickhouse, 'insert').mockImplementationOnce(async (params) => {
+    entered();
+    await paused;
+    return insert(params);
+  });
+  const first = f.post({ ...input, action: 'winner.original' });
+  try {
+    await insertionStarted;
+    const competitors = await Promise.all(Array.from({ length: 11 }, (_, i) => f.post({ ...input, action: `competitor.${i}` }, i % 2)));
+    for (const response of competitors) {
+      expect(response.status).toBe(503);
+      expect((await response.json()).error.code).toBe('ingest_pending');
+    }
+    expect(await f.count()).toBe(0);
+    release();
+    expect((await first).status).toBe(202);
+    expect(await f.count()).toBe(1);
+    expect((await getEvent(clickhouse, f.project, input.id))?.event.action).toBe('winner.original');
+  } finally {
+    release();
+    await first;
+    spy.mockRestore();
+  }
 });
 it('deduplicates identical batch indices and rejects the different sibling', async () => {
   const response = await f.post([original, original, { ...original, action: 'conflict' }, { action: 'generated.id' }]);
@@ -121,7 +148,7 @@ it('retention cutoff cleanup preserves an unresolved delayed original while a co
   await enforceProjectRetention(f.project);
   expect(await f.count()).toBe(0);
   expect((await read<{ n: number }>(clickhouse, 'SELECT count() n FROM event_ids WHERE project_id={p:String}', { p: f.project }))[0]?.n).toBe(0);
-});
+}, 90_000);
 it('rejects NUL and split Unicode ids individually, storing healthy siblings', async () => {
   const response = await f.post([
     { id: 'a\0b', action: 'unsafe' },

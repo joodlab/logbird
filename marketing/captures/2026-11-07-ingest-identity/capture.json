@@ -1,0 +1,71 @@
+{
+  "sourceHead": "eea756ebdb508533f067a27466e830576c82d3e9",
+  "beforeSource": "3a1541f",
+  "evidence": [
+    {
+      "stage": "before",
+      "device": "desktop",
+      "theme": "light",
+      "width": 1440,
+      "height": 900,
+      "file": "marketing/captures/2026-11-07-ingest-identity/before-desktop-light.png"
+    },
+    {
+      "stage": "before",
+      "device": "desktop",
+      "theme": "dark",
+      "width": 1440,
+      "height": 900,
+      "file": "marketing/captures/2026-11-07-ingest-identity/before-desktop-dark.png"
+    },
+    {
+      "stage": "before",
+      "device": "phone",
+      "theme": "light",
+      "width": 390,
+      "height": 844,
+      "file": "marketing/captures/2026-11-07-ingest-identity/before-phone-light.png"
+    },
+    {
+      "stage": "before",
+      "device": "phone",
+      "theme": "dark",
+      "width": 390,
+      "height": 844,
+      "file": "marketing/captures/2026-11-07-ingest-identity/before-phone-dark.png"
+    },
+    {
+      "stage": "after",
+      "device": "desktop",
+      "theme": "light",
+      "width": 1440,
+      "height": 900,
+      "file": "marketing/captures/2026-11-07-ingest-identity/after-desktop-light.png"
+    },
+    {
+      "stage": "after",
+      "device": "desktop",
+      "theme": "dark",
+      "width": 1440,
+      "height": 900,
+      "file": "marketing/captures/2026-11-07-ingest-identity/after-desktop-dark.png"
+    },
+    {
+      "stage": "after",
+      "device": "phone",
+      "theme": "light",
+      "width": 390,
+      "height": 844,
+      "file": "marketing/captures/2026-11-07-ingest-identity/after-phone-light.png"
+    },
+    {
+      "stage": "after",
+      "device": "phone",
+      "theme": "dark",
+      "width": 390,
+      "height": 844,
+      "file": "marketing/captures/2026-11-07-ingest-identity/after-phone-dark.png"
+    }
+  ],
+  "pageErrors": []
+}

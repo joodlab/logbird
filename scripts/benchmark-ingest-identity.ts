@@ -90,12 +90,16 @@ try {
       };
       const fenced = async () => {
         queryLabel = `ingest-${batchSize}-${batch}-fenced`;
-        await recoverProjectIngest(
+        const store = async () => {
+          await insertImmutableEvents(project, org, candidates);
+        };
+        const replayed = await recoverProjectIngest(
           clickhouse,
           project,
           candidates.map((c) => c.row.event_id),
+          store,
         );
-        return withProjectLock(project, () => insertImmutableEvents(project, org, candidates), { mode: 'shared' });
+        if (!replayed) await withProjectLock(project, store, { mode: 'shared' });
       };
       let rawTime: number, fencedTime: number;
       if (batch % 2 === 0) {

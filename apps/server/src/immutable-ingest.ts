@@ -195,7 +195,7 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
   }
 }
 
-/** Caller holds the shared project lock. Unique receipts fence every API process. */
+/** Caller holds a project lock: exclusive during recovery, shared otherwise. Receipts fence every API process. */
 export async function insertImmutableEvents(projectId: string, organizationId: string, candidates: IngestCandidate[]) {
   if (!candidates.length) return { ids: [] as string[], rejected: [] as { index: number; reason: string }[] };
   const { owned, receipts, stored } = await claimEvents(projectId, organizationId, candidates);

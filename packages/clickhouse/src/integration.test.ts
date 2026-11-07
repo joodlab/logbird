@@ -126,7 +126,8 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       await ch.close();
     }
   },
-  60_000,
+  // Includes cutoff repair, five-table project purges, and final fixture cleanup on real services.
+  120_000,
 );
 
 it.runIf(process.env.CLICKHOUSE_URL)(
