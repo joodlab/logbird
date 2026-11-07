@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: logbird
+  name: logbird
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # Default to an operator-only acceptance window. Unfence explicitly after approval.
+    traefik.ingress.kubernetes.io/router.middlewares: logbird-operator-window@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [audit.example.test]
+      secretName: logbird-origin-tls
+  rules:
+    - host: audit.example.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: logbird-app
+                port: {name: http}

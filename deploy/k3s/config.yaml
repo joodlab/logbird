@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logbird-config
+  namespace: logbird
+data:
+  NODE_ENV: production
+  APP_URL: https://audit.example.test
+  CLICKHOUSE_DATABASE: logbird
+  CLICKHOUSE_QUERY_USER: logbird_query
+  BULLMQ_PREFIX: '{logbird}'
+  # Direct client -> Local Traefik -> app proxy -> API. No HTTP LB/CDN in this path.
+  TRUST_PROXY: '2'
+  AUTH_LOG_SIGN_IN_CODES: 'false'
+  # Hetzner blocks 25/465 until approved; launch requires unblock or verified 587 requireTLS.
+  SMTP_PORT: '465'
+  SMTP_SECURE: 'true'
+  MAIL_FROM: Logbird <hello@example.test>
