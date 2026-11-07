@@ -1,6 +1,6 @@
 ---
 title: Logbird Cloud and pricing
-description: Logbird Cloud runs the same open-source codebase for you. It isn't open yet. Join the waitlist. Pricing isn't set yet.
+description: Logbird Cloud will run the same open-source codebase for you. It isn't open yet. Join the waitlist. Pricing isn't set yet.
 path: /cloud
 ---
 
@@ -16,7 +16,9 @@ path: /cloud
   <!-- source: docs/SPEC.md intro ("one codebase, self-host or cloud"); docs/deployment.md ("No cloud deployment or public signup is assumed") -->
 - **cta (primary):** Join the waitlist → `/contact`
 - **cta (secondary):** Self-host it today → `/self-hosting`
-- **visual:** none, or the social card `apps/app/public/brand/logbird-og.png`
+- **visual:** a "Where things stand" panel (no prices, no dates):
+  Logbird Cloud — Not open yet · Waitlist; Pricing — Isn't set yet · Published before launch; Self-host — Available
+  today · Free, MIT.
 
 ## pricing
 
@@ -32,6 +34,7 @@ path: /cloud
   3. **Support and enterprise.** For teams that want help running Logbird, or terms we haven't covered here.
      CTA: Contact us → `/contact`
 - **small print:** "Plans, prices and limits will be announced before launch. Nothing on this page is an offer."
+- **card status labels (not prices):** Self-host — "Free, MIT"; Cloud — "Waitlist"; Support and enterprise — "Talk to us".
 - **visual:** none. Three equal cards with no prices or "per month" text.
 
 ## faq

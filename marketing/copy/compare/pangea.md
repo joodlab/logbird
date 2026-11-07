@@ -16,7 +16,7 @@ path: /compare/pangea
   come with a proof that it hasn't been altered. Events can also be signed. Logs move through hot, warm and cold
   storage, and an embeddable React viewer lets your customers search and verify their logs. If you need to *prove*
   that logs weren't changed, that's what it was built for, and Logbird doesn't do it. [P1–P4]
-- **status note (shown as a callout):** CrowdStrike acquired Pangea in September 2025. Pangea's product and signup
+- **status note (shown as a callout titled "Ownership, as of 7 November 2026"):** CrowdStrike completed its acquisition of Pangea on 26 September 2025. Pangea's product and signup
   pages now redirect to CrowdStrike, while the Secure Audit Log documentation and API are still published. Check
   current availability with CrowdStrike. [P5–P7]
 - **visual:** none

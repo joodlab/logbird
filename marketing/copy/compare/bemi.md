@@ -16,7 +16,7 @@ path: /compare/bemi
   attach application context, such as the user or the endpoint, to each change. You don't instrument call sites,
   and nothing is missed because someone forgot an `audit()` call. Logbird works the other way round: your code
   reports actions, including ones that never touch your database. [B1–B4]
-- **category note (shown as a callout):** Bemi is automatic database change data capture for Postgres. Logbird is an
+- **category note (shown as a callout titled "A different category"):** Bemi is automatic database change data capture for Postgres. Logbird is an
   application audit log. Many teams could use both: Bemi as the record of every row change, and Logbird as the
   readable history of who did what.
 - **visual:** diagram: two lanes. Top lane, "Bemi": app → Postgres → WAL → Bemi → `changes` table (rows: table,

@@ -408,3 +408,25 @@ a {
 .dark .site-code .text-syntax-comment {
   color: #9a9a9a;
 }
+
+/* ---------- trust pages (cloud, open source, security, compare) ----------
+   .panel is unlayered, so Tailwind border/background utilities can't override it; these modifiers can. */
+.panel-accent {
+  border-color: color-mix(in oklab, var(--brand) 50%, var(--border));
+}
+.panel-sunken {
+  background: var(--surface-sunken);
+}
+.panel-link {
+  transition: border-color 0.15s;
+}
+.panel-link:hover,
+.panel-link:focus-within {
+  border-color: color-mix(in oklab, var(--foreground) 35%, var(--border));
+}
+.callout {
+  border-inline-start: 3px solid var(--brand);
+}
+.table-panel tbody tr:last-child > * {
+  border-bottom: 0;
+}

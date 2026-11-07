@@ -1,7 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { PlaceholderPage } from '../components/placeholder-page';
+import { ComparisonPage } from '../components/marketing/comparison-page';
+import { getComparison } from '../lib/comparisons';
 import { pageHead } from '../lib/seo';
-export const Route = createFileRoute('/compare/pangea')({
-  head: () => pageHead('/compare/pangea'),
-  component: () => <PlaceholderPage path="/compare/pangea" />,
-});
+
+// Copy: marketing/copy/compare/pangea.md. Facts: src/lib/comparisons.ts.
+export const Route = createFileRoute('/compare/pangea')({ head: () => pageHead('/compare/pangea'), component: ComparePangeaPage });
+
+function ComparePangeaPage() {
+  return <ComparisonPage comparison={getComparison('pangea')} />;
+}

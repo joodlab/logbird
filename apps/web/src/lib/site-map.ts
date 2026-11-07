@@ -61,7 +61,7 @@ export const siteMap: SitePage[] = [
   {
     path: '/cloud',
     title: 'Cloud',
-    description: 'Cloud page content is being prepared.',
+    description: "Logbird Cloud will run the same open-source codebase for you. It isn't open yet. Join the waitlist. Pricing isn't set yet.",
     section: 'product',
     priority: 0.9,
     changefreq: 'weekly',
@@ -72,7 +72,7 @@ export const siteMap: SitePage[] = [
   {
     path: '/open-source',
     title: 'Open source',
-    description: 'Open source page content is being prepared.',
+    description: 'Logbird is MIT-licensed. API, console, worker, SDK and integrations live in one repository, which opens publicly soon.',
     section: 'developers',
     priority: 0.8,
     changefreq: 'monthly',
@@ -83,7 +83,7 @@ export const siteMap: SitePage[] = [
   {
     path: '/security',
     title: 'Security',
-    description: 'Security page content is being prepared.',
+    description: "How Logbird isolates projects, stores keys, guards SQL, deletes expired data and audits itself, and what we don't claim yet.",
     section: 'company',
     priority: 0.7,
     changefreq: 'monthly',
@@ -94,7 +94,8 @@ export const siteMap: SitePage[] = [
   {
     path: '/compare',
     title: 'Compare',
-    description: 'Compare page content is being prepared.',
+    description:
+      'Fair, sourced comparisons of Logbird with Retraced, WorkOS Audit Logs, Pangea Secure Audit Log and Bemi, including when to choose them.',
     section: 'compare',
     priority: 0.8,
     changefreq: 'monthly',
@@ -106,7 +107,7 @@ export const siteMap: SitePage[] = [
   {
     path: '/compare/retraced',
     title: 'Retraced',
-    description: 'Retraced page content is being prepared.',
+    description: 'Retraced is an Apache-2.0 audit log service with an embeddable React viewer. How it compares with Logbird, sourced and dated.',
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',
@@ -117,7 +118,8 @@ export const siteMap: SitePage[] = [
   {
     path: '/compare/workos-audit-logs',
     title: 'WorkOS Audit Logs',
-    description: 'WorkOS Audit Logs page content is being prepared.',
+    description:
+      'WorkOS Audit Logs is a hosted audit log API with an Admin Portal viewer and SIEM log streams. How it compares with Logbird, sourced.',
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',
@@ -128,7 +130,8 @@ export const siteMap: SitePage[] = [
   {
     path: '/compare/pangea',
     title: 'Pangea',
-    description: 'Pangea page content is being prepared.',
+    description:
+      'Pangea Secure Audit Log is a hosted, tamperproof audit log with Merkle-tree proofs. How it compares with Logbird, sourced and dated.',
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',
@@ -139,7 +142,8 @@ export const siteMap: SitePage[] = [
   {
     path: '/compare/bemi',
     title: 'Bemi',
-    description: 'Bemi page content is being prepared.',
+    description:
+      'Bemi captures every Postgres row change automatically. Logbird records the actions your app reports. Different tools, sometimes used together.',
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',

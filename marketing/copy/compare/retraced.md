@@ -101,7 +101,7 @@ path: /compare/retraced
   - S16 — Releases: v1.13.1, published 2024-11-06. https://api.github.com/repos/retracedhq/retraced/releases
   - S17 — Commits: latest on `main` 2025-08-26; `archived: false`.
     https://api.github.com/repos/retracedhq/retraced/commits · https://api.github.com/repos/retracedhq/retraced
-- **unverified (left out of the table):** who maintains Retraced today (Ory acquired BoxyHQ in 2025; Ory hasn't said
-  anything about Retraced); whether OpenSearch or the repository's Helm files are supported; any retention or deletion
+- **unverified (left out of the table):** who maintains Retraced today (boxyhq.com now redirects to Ory, and we found
+  no statement from Ory about Retraced); whether OpenSearch or the repository's Helm files are supported; any retention or deletion
   job outside the documented configuration; CSV export details.
 - **visual:** none
