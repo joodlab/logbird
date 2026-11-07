@@ -14,6 +14,7 @@ export async function enforceProjectRetention(projectId: string) {
       async (tx) => {
         const latest = await tx.project.findUnique({ where: { id: projectId } });
         if (!latest) return true;
+        // Any unfinished maintenance defeats the no-op; a completed repair rebuilt every rollup.
         const previous = await tx.retentionRun.findFirst({ where: { projectId }, orderBy: { startedAt: 'desc' } });
         if (latest.retentionDays !== current.retentionDays || (previous && previous.status !== 'completed')) return false;
         await tx.retentionRun.create({
@@ -37,6 +38,7 @@ export async function enforceProjectRetention(projectId: string) {
     if (await tx.retentionRun.findFirst({ where: { projectId, status: 'running' } })) return;
     const project = await tx.project.findUnique({ where: { id: projectId } });
     if (!project) return;
+    // A later successful ingest repair subsumes an earlier failed retention's rollup state.
     const previous = await tx.retentionRun.findFirst({ where: { projectId }, orderBy: { startedAt: 'desc' } });
     const cutoff = new Date(Date.now() - project.retentionDays * 86_400_000);
     const run = await prisma.$transaction(async (db) => {

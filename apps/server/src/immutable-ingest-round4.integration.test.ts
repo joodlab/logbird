@@ -2,8 +2,8 @@ import { fork } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { read } from '@logbird/clickhouse';
-import { prisma } from '@logbird/database';
-import { probeIngestRecovery, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
+import { ProjectBusyError, prisma } from '@logbird/database';
+import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
@@ -116,9 +116,19 @@ it('keeps failed repairs read-fenced while healthy siblings commit, then retenti
   expect(await f.count()).toBe(2);
   await unavailable();
   expect(logs.mock.calls.some(([line]) => String(line).includes('ingest.recovery_failed') && String(line).includes('241'))).toBe(true);
+  // Once the first repair fails, requests defer to retention even after the flush throttle expires.
+  for (const id of ['healthy-2', 'healthy-3']) {
+    vi.setSystemTime(Date.now() + 61_000);
+    const retry = await f.post([pending, { id, action: 'healthy.event' }]);
+    expect(retry.status).toBe(503);
+    expect(retry.headers.get('Retry-After')).toBe('60');
+    expect((await retry.json()).error.details).toMatchObject({ accepted: 1, ids: [id], indices: [0], eventIds: ['abandoned'] });
+  }
+  expect(spy.mock.calls.filter(([p]) => /^DELETE FROM (events_by_minute|entities|attribute_keys)\b/.test(p.query))).toHaveLength(3);
+  expect(await prisma.retentionRun.count({ where: { projectId: f.project, kind: 'ingest_repair', status: 'failed' } })).toBe(1);
   spy.mockRestore();
   await enforceProjectRetention(f.project);
-  await consistent(2);
+  await consistent(4);
   expect(await prisma.retentionRun.count({ where: { projectId: f.project, kind: 'ingest_repair', status: { in: ['running', 'failed'] } } })).toBe(0);
 });
 it('repairs a process killed after destructive deletes without exposing an empty model after lease expiry', async () => {
@@ -256,4 +266,10 @@ it('probes the flush grant at startup and emits actionable recovery diagnostics'
   expect(await probeIngestRecovery(clickhouse)).toBe(false);
   expect(logs.mock.calls.some(([line]) => String(line).includes('ingest.recovery_failed') && String(line).includes('497'))).toBe(true);
   expect(logs.mock.calls.some(([line]) => String(line).includes('SYSTEM FLUSH ASYNC INSERT QUEUE'))).toBe(true);
+});
+
+it('does not log ordinary project-lock contention as an ingest recovery failure', () => {
+  const logs = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  logIngestRecoveryFailure(new ProjectBusyError(), f.project);
+  expect(logs).not.toHaveBeenCalled();
 });

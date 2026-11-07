@@ -234,7 +234,8 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
       const pending = candidates.filter((c) => pendingIds.has(c.row.event_id));
       const ids = result.ids.filter((id) => !pendingIds.has(id));
       const unsettled = new Set(pending.map((c) => c.index));
-      throw pendingError(
+      throw await pendingError(
+        projectId,
         error.message,
         ids,
         result.rejected.filter((r) => !unsettled.has(r.index)),
@@ -246,7 +247,8 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
   }
   // Healthy siblings are already durable; an identical batch retry will not insert them again.
   if (result.pending.length)
-    throw pendingError(
+    throw await pendingError(
+      projectId,
       'Some event ids have unresolved writes. Retry this batch; listed indices are unresolved.',
       result.ids,
       result.rejected,
@@ -256,7 +258,8 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
   return { ids: result.ids, rejected: result.rejected };
 }
 
-function pendingError(
+async function pendingError(
+  projectId: string,
   message: string,
   ids: string[],
   rejected: { index: number; reason: string; code: string }[],
@@ -274,7 +277,7 @@ function pendingError(
   const now = Date.now();
   const retryAfter = Math.max(
     1,
-    pending.some((p) => receipts.get(p.eventId)?.claimedAt) ? ingestRecoveryRetryAfter() : 0,
+    pending.some((p) => receipts.get(p.eventId)?.claimedAt) ? await ingestRecoveryRetryAfter(projectId) : 0,
     ...pending.map((p) => {
       const receipt = receipts.get(p.eventId);
       if (!receipt) return 1;

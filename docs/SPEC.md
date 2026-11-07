@@ -231,9 +231,10 @@ Runs heartbeat every 30 seconds with a ten-minute lease (legacy null heartbeats 
 Recovery under the project ingestion lock marks expired running runs failed with error `abandoned`.
 Requests recover lazily and enqueue a retry; worker startup revisits running projects and the hourly
 sweep retries all projects, continuing past individual failures. Live running runs return 503 retention_unavailable with Retry-After: 1 for project data reads
-and project setup; retention status remains readable. Readiness checks are short non-transactional
+and project setup, including retention status while its project read fence is active. Readiness checks are short non-transactional
 statements, and no read holds a project lock or a Postgres connection during ClickHouse I/O.
-An already-started read/export is not a snapshot and may overlap a purge.
+Raw-event reads and exports are not snapshots and may overlap a purge. Rollup-backed reads compare
+maintenance generation and fence before/after querying; an overlapping rebuild returns 503 even if completed.
 Writers use session advisory locks held on a separate pool (16 connections per process), never a transaction:
 ingest (including Logbird's own audit writes) takes a **shared** data lock, so concurrent ingests for one project
 coexist; maintenance (retention, sample replacement/removal, deletion, policy changes) takes it **exclusive**. A
@@ -244,10 +245,12 @@ Retry-After: 1 (the SDK retries), and no Prisma connection ever waits behind a p
 The lock statements also have a one-second lock timeout and two-second statement/connection budgets.
 No Postgres transaction spans ClickHouse work. Prisma uses its own independent pool; connection_limit
 in DATABASE_URL sets that pool size (default 10). Callbacks are exclusive sections, not transactions.
-Sample/deletion reads may see transient aggregates during maintenance; once rebuilt, rollups reflect
-surviving rows exactly because concurrent writers never enter the exclusive section.
-Failed runs allow reads and ingestion: surviving raw events remain accessible, but aggregates may be
-incomplete until a successful retry rebuilds them. The retention status endpoint exposes the failure.
+Sample removal persists the same ingest-repair fence and generation before rebuilding rollups.
+Once rebuilt, rollups reflect surviving rows exactly because concurrent writers never enter the exclusive section.
+Failed ordinary retention runs allow reads and ingestion; aggregates may be incomplete until a successful retry.
+Failed ingest-repair runs keep project reads fenced while healthy ingestion can continue. The queued retention
+job owns their retry; matching ingest requests do not repeat the failed rebuild and poll with Retry-After: 60.
+The retention status endpoint exposes ordinary retention failures once the project read fence allows access.
 Recovery never restores expired events. Workspace setup reports `retentionBusy: true` per affected
 project instead of failing the workspace; its progress is a placeholder (0, nextStep null,
 firstEventAt null), not measured emptiness.
@@ -285,7 +288,7 @@ The **route table and every request/response schema live in `packages/contracts`
 
 `GET /api/projects/:projectId/retention?preview=30` returns retentionDays,
 oldestEventAt (null for an empty project), nextPurgeAt (next registered scheduler
-occurrence, null when unregistered), and lastRun (startedAt, finishedAt, status,
+occurrence, null when unregistered), and lastRun for kind=retention only (startedAt, finishedAt, status,
 cutoff, deletedEvents, error). Status uses the worker values running/completed/failed.
 previewDeletedEvents counts stored rows older than the candidate cutoff, or is null
 when preview is omitted. This is an approximate logical event count because storage
@@ -399,10 +402,10 @@ server configuration. See the query-language security model for the verification
 
 better-auth tables (user, session, account, verification) + organization plugin (organization, member,
 invitation) + app tables:
-- `Project { id, organizationId, name, slug (unique per org), description?, retentionDays=90, createdAt, updatedAt }`
+- `Project { id, organizationId, name, slug (unique per org), description?, retentionDays=90, maintenanceGeneration BigInt=0, createdAt, updatedAt }`
 - `ApiKey { id, projectId, name, kind (ingest|read), prefix, hash (unique), createdById?, createdAt, lastUsedAt?, revokedAt? }`
 - `SavedView { id, projectId, name, description?, state Json, createdById?, createdAt }`
-- `RetentionRun { id, projectId, retentionDays, cutoff, startedAt, finishedAt?, status, error? }`
+- `RetentionRun { id, projectId, kind=retention (retention|ingest_repair), retentionDays, cutoff, startedAt, heartbeatAt?, finishedAt?, status, deletedEvents?, error? }`
 
 ## 7. Auth
 

@@ -6,7 +6,7 @@ import {
   repairEventIndex,
   retryFingerprint,
 } from '@logbird/clickhouse';
-import { confirmIngestReceipts, INGEST_RECEIPT_WINDOW_MS, prisma, withProjectLock } from '@logbird/database';
+import { confirmIngestReceipts, INGEST_RECEIPT_WINDOW_MS, ProjectBusyError, prisma, withProjectLock } from '@logbird/database';
 import { rebuildProjectReadModel } from './project-repair';
 
 const FLUSH_INTERVAL_MS = 60_000;
@@ -31,11 +31,17 @@ async function flushAfter(ch: ClickHouseClient, proofAfter: number) {
   return true;
 }
 
-export function ingestRecoveryRetryAfter() {
+async function hasFailedRepair(projectId: string) {
+  return !!(await prisma.retentionRun.findFirst({ where: { projectId, kind: 'ingest_repair', status: 'failed' }, select: { id: true } }));
+}
+export async function ingestRecoveryRetryAfter(projectId: string) {
+  // Retention owns failed repairs. Poll its durable result once a minute; requests never rebuild it again.
+  if (await hasFailedRepair(projectId)) return 60;
   return Math.max(0, Math.ceil((flushAttemptedAt + FLUSH_INTERVAL_MS - Date.now()) / 1000));
 }
 export function logIngestRecoveryFailure(error: unknown, projectId?: string) {
   const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
+  if (error instanceof ProjectBusyError || code === 'project_busy') return;
   console.error(
     JSON.stringify({
       level: 'error',
@@ -89,7 +95,7 @@ export async function recoverProjectIngest(ch: ClickHouseClient, projectId: stri
           (c) => c.eventId === r.eventId && retryFingerprint(c.input, projectId, r.receivedAt, r.eventId, r.fingerprint, r.eventAt) === r.fingerprint,
         ),
     );
-  if (!actionable) return false;
+  if (!actionable || (await hasFailedRepair(projectId))) return false;
   const proofAfter = Math.max(
     0,
     ...preview.filter((r) => r.claimedAt).map((r) => (r.claimedAt?.getTime() ?? 0) + INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS),
@@ -97,6 +103,8 @@ export async function recoverProjectIngest(ch: ClickHouseClient, projectId: stri
   // Avoid taking the project lock for a flush that the process-wide throttle will refuse.
   if (proofAfter > flushedAt && !flushing && now - flushAttemptedAt < FLUSH_INTERVAL_MS) return false;
   return withProjectLock(projectId, async () => {
+    // A repair can fail while this request is acquiring the lock. Its queued retention job owns recovery.
+    if (await hasFailedRepair(projectId)) return false;
     const newestClaim = await prisma.ingestReceipt.findFirst({
       where: { ...eligible, claimedAt: { lt: expiredAt } },
       orderBy: { claimedAt: 'desc' },

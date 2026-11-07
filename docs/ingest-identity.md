@@ -228,3 +228,11 @@ If a repair overlaps either query, even if it completes before the second check,
 the response is discarded with 503. No read holds a project lock or a PG connection
 during ClickHouse I/O. Raw events remain non-snapshot reads; they are not emptied
 by a rollup rebuild. Deploy the additive column before new server/worker binaries.
+
+After a failed ingest repair, its queued retention job (or the hourly sweep) owns
+the retry. Matching HTTP retries check the durable failed record before the lock
+and again after acquiring it; they preserve pending ids and store healthy siblings
+without repeating the history rebuild. Retry-After is 60 seconds while that worker
+repair remains outstanding. This is a polling interval, not a settlement deadline;
+reads stay fenced until the worker succeeds. Ordinary lock contention is not logged
+as ingest.recovery_failed.

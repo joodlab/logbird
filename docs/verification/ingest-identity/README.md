@@ -1,5 +1,22 @@
 # Immutable ingest verification, 2026-11-07
 
+## Round 5
+
+[Results and resources](round5-results.json) record Claude's three final minor fixes:
+failed repairs are retried by retention, with a durable pre-lock/under-lock guard
+and 60-second request polling; self-host upgrade instructions are in the correct
+section; SPEC matches the fence, purpose and generation fields. Nine focused
+claims pass, including two retries that issue no additional rollup deletes.
+Normal project contention is not logged as recovery failure. The optional code
+column wrapping nit is deferred; the current captured reference UI is unchanged.
+
+The complete earlier 661e71d server run finished with 139 passes, one 5-second
+timeout and 51 skips across all 33 files. It is an early signal, not a pass. The
+unchanged native retention test also exceeds 5 seconds on clean master. Only that
+test receives a 60-second budget for queued verified lightweight deletes; measured
+master/branch durations and exact two-fixture cleanup are retained above. The new
+full per-file verdict at the final Round 5 head is posted as a PR follow-up.
+
 ## Final review delta
 
 Sol's final admitted-reader race is addressed with a monotonic maintenance generation.
