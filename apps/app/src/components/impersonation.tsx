@@ -5,7 +5,7 @@ import { Link } from '@tanstack/react-router';
 import { CogIcon, VenetianMaskIcon } from 'lucide-react';
 import { createContext, type ReactNode, useContext } from 'react';
 import { personLabel } from '@/lib/events';
-import { jobHint, supportAgentName, supportPhrase } from '@/lib/impersonation';
+import { jobHint, supportAgentName, supportMarkerPlacement, supportPhrase } from '@/lib/impersonation';
 
 /**
  * What row cells need to know about their list without threading props through column defs: the project (to link)
@@ -13,16 +13,6 @@ import { jobHint, supportAgentName, supportPhrase } from '@/lib/impersonation';
  * around its table, so the table itself stays unaware of support.
  */
 export const EventListContext = createContext<{ projectId?: string; columns?: readonly string[] }>({});
-
-/**
- * Where a list row shows its support marker: under the actor's name (desktop), in a dedicated Support agent column
- * if one is showing, else beside the event sentence.
- */
-export function supportMarkerPlacement(columns: readonly string[] | undefined): 'actor' | 'column' | 'description' {
-  if (columns?.includes('impersonator')) return 'column';
-  if (columns?.includes('actor')) return 'actor';
-  return 'description';
-}
 
 /**
  * Link to a support agent's page: everything they did while signed in as customers. Clicks and keys stay on the link,

@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { jobHint, supportAgentName, supportAgentQuery, supportPhrase, whoFilter, withWhoFilter } from './impersonation';
+import {
+  distinctCount,
+  jobHint,
+  splitDescription,
+  supportAgentName,
+  supportAgentQuery,
+  supportMarkerPlacement,
+  supportPhrase,
+  whoFilter,
+  withWhoFilter,
+} from './impersonation';
 
 const executor = (over: Partial<{ type: string; id: string; name: string; jobId: string; attempt: number }> = {}) => ({
   executor: { type: 'worker', id: 'billing-worker', name: '', jobId: '', attempt: 0, ...over },
@@ -66,6 +76,35 @@ describe('supportPhrase', () => {
       'done by support agent support_1 while acting as an unknown customer',
     );
     expect(supportPhrase({ impersonator: null, actor: null })).toBeNull();
+  });
+});
+
+describe('supportMarkerPlacement', () => {
+  it('puts the marker in one place per row', () => {
+    expect(supportMarkerPlacement(['timestamp', 'description', 'actor'])).toBe('actor');
+    expect(supportMarkerPlacement(['timestamp', 'description', 'actor', 'impersonator'])).toBe('column');
+    expect(supportMarkerPlacement(['timestamp', 'description'])).toBe('description');
+    expect(supportMarkerPlacement(undefined)).toBe('description');
+  });
+});
+
+describe('support counts', () => {
+  it('never counts the empty bucket as a customer or tenant (m1)', () => {
+    expect(distinctCount({ values: [{ value: 'usr_1' }, { value: '' }], otherCount: 0 })).toBe('1');
+    expect(distinctCount({ values: [{ value: 'usr_1' }, { value: 'usr_2' }], otherCount: 7 })).toBe('2+');
+    expect(distinctCount(undefined)).toBe('');
+  });
+
+  it('describes the split truthfully when the actor is only a support agent (m2)', () => {
+    expect(splitDescription('actor', 'Leena', { support: 0, asAgent: 12 })).toBe(
+      'Support never signed in as Leena in this range. Leena is a support agent; that work is kept apart.',
+    );
+    expect(splitDescription('actor', 'Noura', { support: 3, asAgent: 0 })).toBe(
+      'Some of these events were done by a support agent signed in as Noura.',
+    );
+    expect(splitDescription('tenant', 'North', { support: 3, asAgent: 0 })).toBe(
+      'Some of these events were done by a support agent signed in as a customer.',
+    );
   });
 });
 

@@ -16,7 +16,7 @@ import { RankList } from '@/components/rank-list';
 import { facetQuery, histogramQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
 import { formatNumber } from '@/lib/format';
-import { SUPPORT_TERM, supportAgentQuery } from '@/lib/impersonation';
+import { distinctCount, SUPPORT_TERM, supportAgentQuery } from '@/lib/impersonation';
 import { withPresence } from '@/lib/presence-filter';
 import { formatTerm } from '@/lib/query-language';
 import { rangeLabel } from '@/lib/range';
@@ -27,15 +27,6 @@ interface SupportAgentProfileProps {
   agentId: string;
   timeline: ExplorerState;
   onTimelineChange: (patch: Partial<ExplorerState>) => void;
-}
-
-/**
- * Distinct values in a facet, "100+" when the server cut the list. Facets are requested with `field:*`, so events
- * with no actor or tenant never count as one more customer; the filter is a second guard.
- */
-export function distinctCount(data: { values: { value: string }[]; otherCount: number } | undefined): string {
-  if (!data) return '';
-  return `${formatNumber(data.values.filter((v) => v.value !== '').length)}${data.otherCount > 0 ? '+' : ''}`;
 }
 
 /**
@@ -130,9 +121,13 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
             <StatTile
               label="Customers acted as"
               loading={!actedAsData && !actedAs.isError}
-              value={actedAs.isError ? '—' : distinctCount(actedAsData)}
+              value={actedAs.isError ? '—' : distinctCount(actedAsData, formatNumber)}
             />
-            <StatTile label="Tenants" loading={!tenantData && !tenants.isError} value={tenants.isError ? '—' : distinctCount(tenantData)} />
+            <StatTile
+              label="Tenants"
+              loading={!tenantData && !tenants.isError}
+              value={tenants.isError ? '—' : distinctCount(tenantData, formatNumber)}
+            />
           </StatTileGrid>
         )}
 

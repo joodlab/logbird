@@ -66,3 +66,30 @@ export function jobHint(e: Pick<AuditEvent, 'executor'>): { executor: string; at
     .join(', ');
   return { executor, attempt, jobId: x.jobId, label };
 }
+
+/**
+ * Where a list row shows its support marker: under the actor's name (desktop), in a dedicated Support agent column
+ * if one is showing, else beside the event sentence.
+ */
+export function supportMarkerPlacement(columns: readonly string[] | undefined): 'actor' | 'column' | 'description' {
+  if (columns?.includes('impersonator')) return 'column';
+  if (columns?.includes('actor')) return 'actor';
+  return 'description';
+}
+
+/**
+ * Distinct values in a facet, "100+" when the server cut the list. Facets are requested with `field:*`, so events
+ * with no actor or tenant never count as one more customer; the filter is a second guard.
+ */
+export function distinctCount(data: { values: { value: string }[]; otherCount: number } | undefined, format: (n: number) => string = String): string {
+  if (!data) return '';
+  return `${format(data.values.filter((v) => v.value !== '').length)}${data.otherCount > 0 ? '+' : ''}`;
+}
+
+/** The "Who did it" panel's one-line summary, true whether support acted as this entity, this actor is an agent, or both. */
+export function splitDescription(kind: string, name: string, counts: { support: number; asAgent: number }): string {
+  if (counts.support === 0) return `Support never signed in as ${name} in this range. ${name} is a support agent; that work is kept apart.`;
+  return kind === 'actor'
+    ? `Some of these events were done by a support agent signed in as ${name}.`
+    : 'Some of these events were done by a support agent signed in as a customer.';
+}

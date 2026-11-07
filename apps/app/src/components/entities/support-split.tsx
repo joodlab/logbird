@@ -8,7 +8,7 @@ import { ArrowRightIcon, UserIcon, VenetianMaskIcon } from 'lucide-react';
 import { SupportAgentLink } from '@/components/impersonation';
 import { facetQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
-import { supportAgentQuery, type WhoFilter } from '@/lib/impersonation';
+import { splitDescription, supportAgentQuery, type WhoFilter } from '@/lib/impersonation';
 import { withPresence } from '@/lib/presence-filter';
 
 export interface SupportCounts {
@@ -42,14 +42,6 @@ const SPLIT_COPY = {
 
 export function splitCopy(kind: EntityKind) {
   return kind === 'actor' ? SPLIT_COPY.actor : SPLIT_COPY.other;
-}
-
-/** The panel's one-line summary, true whether support acted as this entity, this actor is an agent, or both (m2). */
-export function splitDescription(kind: EntityKind, name: string, counts: Pick<SupportCounts, 'support' | 'asAgent'>): string {
-  if (counts.support === 0) return `Support never signed in as ${name} in this range. ${name} is a support agent; that work is kept apart.`;
-  return kind === 'actor'
-    ? `Some of these events were done by a support agent signed in as ${name}.`
-    : 'Some of these events were done by a support agent signed in as a customer.';
 }
 
 /**
