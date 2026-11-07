@@ -145,7 +145,7 @@ const outlines = (page) =>
     return {
       focused: s ? { el: describe(active), style: s.outlineStyle, width: s.outlineWidth, offset: s.outlineOffset, color: s.outlineColor } : null,
       unfocusedOutlined: others.length,
-      sample: others.slice(0, 6).map(describe),
+      sample: others.slice(0, 12).map(describe),
     };
   });
 
@@ -444,7 +444,7 @@ try {
     check('forced colors (explorer): no unfocused element (rows, sidebar, toolbar) is outlined', fc.unfocusedOutlined === 0, fc);
     await page.screenshot({ path: path.join(OUT, 'after-forced-colors-row-focus-desktop.png') });
     // Before: the same screen with round 2's classes (328c227) put back, and the same row focused. The PR's controls had
-    // `outline-none`; the shadcn sidebar had its unconditional `outline-hidden`.
+    // `outline-none`; the shadcn sidebar and chart had their unconditional `outline-hidden`.
     const restored = await page.evaluate(() => {
       const els = [...document.querySelectorAll('[class*="focus-visible:outline-hidden"]')];
       for (const el of els) {
@@ -454,6 +454,11 @@ try {
           el.classList.add('outline-hidden');
         }
       }
+      // The shadcn chart's round-2 `[&_.recharts-*]:outline-hidden` (no longer in the compiled CSS): the same rule.
+      const style = document.createElement('style');
+      style.textContent =
+        '.recharts-layer,.recharts-surface,.recharts-sector{outline-style:none}@media (forced-colors: active){.recharts-layer,.recharts-surface,.recharts-sector{outline:2px solid transparent;outline-offset:2px}}';
+      document.head.append(style);
       return els.length;
     });
     await page.waitForTimeout(150);
@@ -539,6 +544,8 @@ try {
         newTotal: total,
       },
     );
+    // Release the hold: it would also delay the filtered list's next pages below.
+    hold = null;
     await page.keyboard.press('ArrowDown');
     check('filter by (race): ArrowDown continues from row 0', (await focused(page)).index === 1, (await focused(page)).index);
 

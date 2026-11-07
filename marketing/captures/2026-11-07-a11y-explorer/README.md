@@ -108,3 +108,56 @@ were too high; the minima were right and every value passes AA.
 
 Shots (docs page code block, demo workspace, read-only): `before-/after-syntax-comment-code-desktop-{light,dark}.png`. The "before"
 renders the old token values in the same running app through an injected style; the computed comment colour was checked in each.
+
+## Rounds 3 and 4 — rerunnable proof
+
+The same script, extended each round. Round 3 (`round3-proof.*`, head `d25291a`, fixture "QA Fix a11y r3") ran 29/29 checks.
+Round 4 (`round4-proof.txt` / `round4-proof.json`, fixture `qa-fix-a11y-r4-*@example.test`, workspace "QA Fix a11y r4",
+project deleted at the end, no console problems) ran **36/36**: round 3's 29 plus these 7.
+
+- **Forced colors, focus-only outlines.** Tailwind's `outline-hidden` sets `outline: 2px solid transparent` under
+  `forced-colors: active`. Round 3 applied it unconditionally, so in High Contrast every row, Settings tab, range preset,
+  snippet tab and `CopyValue` was boxed. Round 4 uses `outline-none focus-visible:outline-hidden`, with the inset as
+  `focus-visible:forced-colors:-outline-offset-2`. The bare `forced-colors:` form loses to the focus-visible 2px offset on
+  specificity. The shadcn sidebar items and chart layers got the same one-class fix.
+  - The focused row is `solid 2px` at offset `-2px`, and an unfocused row computes `outline-style: none`.
+  - A sweep of every rendered element under forced colors finds **0** outlined elements apart from the focused one, on
+    the explorer, the event sheet (its `CopyValue`s) and Settings at 390 px. In Settings, the focused tab is outlined and
+    inset.
+- **"Filter by…" race.** The filtered response is held back 2 s, so the sheet closes and focus returns to the old row 299
+  first. When the results arrive (275 events, neither the old first row nor event 299 among them), focus is on row 0,
+  `scrollTop` is 0, no `cursor=` page request is made, row 0 is the only tab stop, and ↓ goes to row 1. A second case
+  uses "Filter by operation" from row 199, so the new results still hold the event. Focus stays on that event, now row 0,
+  and its row is in view, again with no page request.
+
+### Forced-colors shots
+
+`before-` / `after-forced-colors-row-focus-desktop.png` were retaken in round 4, with the same row focused under
+`forcedColors: 'active'`. **After** is the shipped round-4 build: only the focused row is outlined. **Before** is round 2's
+shipped state (`328c227`), recreated on the same page. The proof strips the focus-only classes, leaving `outline-none`
+(round 2's classes) on the PR's controls. It puts the unconditional `outline-hidden` back on the shadcn sidebar and the
+equivalent rule on the chart layers. The focused row then has no visible indicator, and every sidebar item is boxed.
+Round 3's shots, which showed every row boxed, are in git history at `d25291a`.
+
+### Current axe state (round 4)
+
+Each row was rescanned in round 4 at head `bcc6ed4` + the chart fix, with axe-core 4.10.3, light and dark, desktop and
+390 px. The fixture is a new project rather than the demo workspace, so Overview and Settings → Keys show setup-state
+content. Event sheets and dialogs are scoped to the dialog. `region` is omitted, as above.
+
+| Screen | Desktop light | Desktop dark | Phone light | Phone dark |
+|---|---|---|---|---|
+| explorer | aria-allowed-role(1) | aria-allowed-role(1) | aria-allowed-role(1) | aria-allowed-role(1) |
+| event sheet | 0 | 0 | 0 | 0 |
+| Workspace Activity | 0 | 0 | — | — |
+| Activity event sheet | 0 | — | — | — |
+| overview | 0 | 0 | — | — |
+| Settings → Keys | 0 | 0 | 0 | — |
+| Settings (General) | — | — | 0 | — |
+
+`aria-allowed-role` is the pre-existing `textarea[role=combobox]` in the query bar (see the PR's "Not fixed here"). Not
+rescanned since round 1: the create-key dialog (0 / 0 / 0 / 0 then), the revoke confirm, overview at 390 px and Settings → Keys
+at 390 px dark. Rounds 2–4 changed only focus classes there.
+
+Round 4 also shortened the query bar's static hint to "Arrows choose a suggestion, Enter or Right arrow inserts it,
+Escape closes. Enter runs the query."
