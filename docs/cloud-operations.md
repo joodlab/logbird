@@ -48,6 +48,39 @@ data services, exporters or filesystem cache. Limits and replicas are trial allo
 evidence for 10M events/day. Reserve room for a replacement Pod and ClickHouse merge/backup
 headroom; derive disk forecasts from observed compressed growth, retention and recovery duration.
 
+### ClickHouse background maintenance
+
+Use a dedicated cloud ClickHouse maintenance budget. The shared development server's
+two-thread pool is a constrained test environment, not a cloud sizing result. For an
+initial dedicated 8-vCPU/16-GiB-or-larger trial, propose `background_pool_size=8`,
+`background_merges_mutations_concurrency_ratio=2`, and
+`number_of_free_entries_in_pool_to_execute_mutation=2`. These are unmeasured starting
+values; retain one Logbird retention consumer and serialize its project purges.
+Check CPU, disk latency, free space, part growth and request tails during mixed
+ingest/search/export/retention traffic before increasing maintenance concurrency.
+Do not apply these values to the owner's shared server as part of a benchmark.
+
+The pool controls merge/mutation threads; a larger pool consumes more CPU/I/O, and
+reducing it requires restart. See [server pool settings](https://clickhouse.com/docs/reference/settings/server-settings/settings/background#background_pool_size).
+The ratio allows more scheduled operations than physical threads; it is not extra
+CPU capacity. Prefer starvation-free `round_robin` scheduling for a bounded purge
+deadline; `shortest_task_first` can starve large tasks under sustained inserts.
+See [merge/mutation scheduling](https://clickhouse.com/docs/reference/settings/server-settings/settings/background-merges).
+
+Reserve merge capacity: the mutation free-entry threshold must not exceed
+`background_pool_size * background_merges_mutations_concurrency_ratio`. Review
+actual per-table overrides as well as global defaults. See the
+[MergeTree mutation threshold](https://clickhouse.com/docs/reference/settings/merge-tree-settings/number-of#number_of_free_entries_in_pool_to_execute_mutation).
+
+Before and after every measured purge/delete, capture pending `system.mutations`
+counts (owned fixture versus others), age/parts remaining, pool size/tasks, and
+effective server settings. Keep foreign predicates/content out of reports. Record
+shared-pool contention beside duration; queued background work can delay synchronous
+deletion independently of Logbird's locking. The [mutation status table](https://clickhouse.com/docs/reference/system-tables/mutations)
+uses `is_done=0` for unfinished work. Repeat in an otherwise idle window for a
+baseline; never kill another project's mutation, disable merges, or force `FINAL`
+to manufacture a faster result. Alert on queue age and failed progress, not only count.
+
 Keep database listeners private and allow only the application/data administration paths.
 [Hetzner private Networks do not automatically encrypt traffic](https://docs.hetzner.com/networking/networks/faq/).
 Use verified database TLS or a tested encrypted transport, and confirm client certificate/CA
