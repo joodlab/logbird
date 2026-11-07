@@ -33,6 +33,8 @@ function valueSourceFor(s: Suggestion): string | null {
 
 export interface QueryInputHandle {
   focus: () => void;
+  /** The text field, for callers that hand focus back to the bar (a dialog's final focus, an emptied grid). */
+  element: () => HTMLElement | null;
 }
 
 export interface QueryInputProps {
@@ -83,8 +85,12 @@ const FIRST_LINE_ICON = 'mt-[calc((var(--query-bar-height)-2px-1rem)/2)]';
  * saved views, fields, operators, values ranked by frequency), a syntax hint row, Lucene/KQL conversions, a
  * Query | SQL mode toggle and inline server errors.
  *
- * Keyboard: ↑/↓ move, Tab (or Enter after moving) accepts, Enter runs, Ctrl/⌘+Enter always runs, Esc closes,
- * Ctrl+Space reopens, Shift+Delete forgets the highlighted recent query.
+ * Keyboard: ↑/↓ move through the suggestions and Enter after moving (or on a partly typed name) accepts, as in the APG
+ * combobox pattern; Enter otherwise runs, Ctrl/⌘+Enter always runs, Esc closes, Ctrl+Space reopens, Shift+Delete forgets
+ * the highlighted recent query. → at the end of the text also accepts: that is the shell / address-bar inline-completion
+ * convention, not APG (where → only moves the caret), so it never fires mid-text or with a selection. Tab never edits
+ * the query: focus moves on and the panel closes. The keys are described to screen readers on focus (a static
+ * `aria-describedby`), and each accepted suggestion is announced politely.
  */
 export function QueryInput({
   projectId,
@@ -109,8 +115,10 @@ export function QueryInput({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
   const listId = `qi-list-${lang}`;
+  // Polite announcement of the last accepted suggestion (a zero-width toggle repeats identical ones).
+  const [announcement, setAnnouncement] = useState('');
 
-  useImperativeHandle(ref, () => ({ focus: () => inputRef.current?.focus() }), []);
+  useImperativeHandle(ref, () => ({ focus: () => inputRef.current?.focus(), element: () => inputRef.current }), []);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-sync the draft when the submitted query or its language changes
   useEffect(() => setDraft(value), [value, lang]);
 
@@ -143,7 +151,7 @@ export function QueryInput({
     if (showList) document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
   }, [activeIndex, showList, listId]);
 
-  // Warm the value cache for the highlighted field, so Tab → `field:` shows its values without a spinner.
+  // Warm the value cache for the highlighted field, so accepting `field:` shows its values without a spinner.
   const queryClient = useQueryClient();
   const warmField = activeSuggestion ? valueSourceFor(activeSuggestion) : null;
   useEffect(() => {
@@ -212,6 +220,7 @@ export function QueryInput({
     }
     const text = draft.slice(0, s.from) + s.insert + draft.slice(s.to);
     setText(text, s.caret);
+    setAnnouncement((prev) => `Inserted ${s.insert.trim() || s.label}${prev.endsWith('​') ? '' : '​'}`);
     if (s.run) {
       submit(text);
       return;
@@ -260,25 +269,33 @@ export function QueryInput({
       recent.remove(activeSuggestion.recent.q, activeSuggestion.recent.lang);
       return;
     }
-    if (e.key === 'Tab' && !e.shiftKey && showPanel && (showList || draft.trim())) {
-      // While composing, Tab completes and never moves focus (to the mode toggle, where Enter would switch
-      // modes). Esc closes the panel first; then Tab leaves the bar as usual.
-      e.preventDefault();
-      if (activeSuggestion && activeSuggestion.id !== 'loading') accept(activeSuggestion);
-      return;
+    // Tab is left alone: a keyboard user leaving the bar must never rewrite the query (WCAG 3.2.2). Blur closes the panel.
+    const prefix = completions.prefix.toLowerCase();
+    const partial =
+      Boolean(prefix) &&
+      activeSuggestion !== undefined &&
+      activeSuggestion.kind !== 'recent' &&
+      activeSuggestion.kind !== 'fix' &&
+      // A fully typed name (`impersonator` for `impersonator:*`) is not partial: Enter runs.
+      activeSuggestion.label.toLowerCase().replace(/:\*?$/, '') !== prefix &&
+      activeSuggestion.insert.trim().toLowerCase().replace(/:\*?$/, '') !== prefix;
+    if (e.key === 'ArrowRight' && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey && activeSuggestion && activeSuggestion.id !== 'loading') {
+      // → completes like a shell or an address bar: only from the end of the text (or right after a fix), so moving the
+      // caret through the query still works.
+      const el = e.currentTarget;
+      const at = el.selectionStart;
+      const collapsed = at === el.selectionEnd;
+      const atEnd = at === draft.length;
+      const afterFix = activeSuggestion.kind === 'fix' && at === activeSuggestion.to;
+      if (collapsed && ((atEnd && (navigated || partial || activeSuggestion.kind === 'fix')) || afterFix)) {
+        e.preventDefault();
+        accept(activeSuggestion);
+        return;
+      }
     }
     if (e.key === 'Enter') {
       if (e.shiftKey && lang === 'sql' && !(showList && navigated)) return; // newline
       e.preventDefault();
-      const prefix = completions.prefix.toLowerCase();
-      const partial =
-        Boolean(prefix) &&
-        activeSuggestion !== undefined &&
-        activeSuggestion.kind !== 'recent' &&
-        activeSuggestion.kind !== 'fix' &&
-        // A fully typed name (`impersonator` for `impersonator:*`) is not partial: Enter runs.
-        activeSuggestion.label.toLowerCase().replace(/:\*?$/, '') !== prefix &&
-        activeSuggestion.insert.trim().toLowerCase().replace(/:\*?$/, '') !== prefix;
       if (activeSuggestion && activeSuggestion.id !== 'loading' && !e.metaKey && !e.ctrlKey && (navigated || partial)) {
         accept(activeSuggestion);
         return;
@@ -349,7 +366,8 @@ export function QueryInput({
             WHERE
           </span>
         ) : null}
-        <div className="relative grid max-h-[9.75rem] min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-y-auto overflow-x-hidden">
+        {/* The query syntax is left-to-right in every locale: → at the end accepts, and the mirror lines up with the text. */}
+        <div className="relative grid max-h-[9.75rem] min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-y-auto overflow-x-hidden" dir="ltr">
           <div aria-hidden className={cn(TEXT, 'pointer-events-none [grid-area:1/1]')}>
             {draft ? (
               <>
@@ -366,6 +384,7 @@ export function QueryInput({
             aria-activedescendant={showList ? `${listId}-${activeIndex}` : undefined}
             aria-autocomplete="list"
             aria-controls={listId}
+            aria-describedby={`${listId}-keys`}
             aria-expanded={showList}
             aria-invalid={showProblem || undefined}
             aria-label={lang === 'sql' ? 'SQL WHERE expression' : 'Query'}
@@ -377,6 +396,7 @@ export function QueryInput({
               'h-full w-full resize-none overflow-hidden bg-transparent text-transparent caret-foreground outline-none [grid-area:1/1] selection:bg-brand/25 selection:text-transparent',
             )}
             data-lang={lang}
+            dir="ltr"
             onBlur={() => setTimeout(() => setOpen(false), 120)}
             onChange={(e) => {
               setDraft(e.target.value);
@@ -419,6 +439,12 @@ export function QueryInput({
           <Kbd className="me-1 hidden md:inline-flex">/</Kbd>
         </div>
       </div>
+      <span className="sr-only" id={`${listId}-keys`}>
+        Arrows choose a suggestion, Enter or Right arrow inserts it, Escape closes. Enter runs the query.
+      </span>
+      <span aria-live="polite" className="sr-only">
+        {announcement}
+      </span>
       {showPanel ? (
         <SuggestionPanel
           active={activeIndex}
