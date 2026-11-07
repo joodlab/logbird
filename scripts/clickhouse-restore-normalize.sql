@@ -1,4 +1,4 @@
-﻿-- OFFLINE OPERATOR STEP: preserve the backup, stop ALL writers, inspect the dry run.
+-- OFFLINE OPERATOR STEP: preserve the backup, stop ALL writers, inspect the dry run.
 -- Requires disk for another full raw table. Never run against a live instance.
 -- An existing staging table deliberately stops this script: inspect/recover it first.
 SELECT throwIf(count()!=0,'Wait for existing mutations to finish before normalization') FROM system.mutations WHERE database='logbird' AND NOT is_done;

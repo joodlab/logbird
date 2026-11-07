@@ -4,6 +4,7 @@
 
 - Rename the current product to Logbird; include an explicit namespace migration for existing installations.
 - Pin self-host base images by multi-platform digest; document native backup/restore, uninstall and manual release acceptance.
+- Fix packaged retention's missing rollup SQL by embedding it at build time. Verify deletes before rebuilding, fail with `LOGBIRD_DELETE_INCOMPLETE` if restored rows remain, and log safe `retention.run_failed` error codes. After upgrading, inspect failed retention receipts and worker logs: the first successful run after a failed receipt rebuilds that project's rollups and can be expensive.
 
 ## SDK and Hono 0.2.0 - Unreleased
 

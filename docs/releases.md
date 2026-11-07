@@ -13,11 +13,20 @@ documented configuration/API contract. Use `v0.1.0-rc.1`-style candidates when a
 release still needs acceptance. SDK packages have independent versions and
 changelog sections; they do not select container versions.
 
+Git tags include `v`, for example `v0.1.0-rc.1`. Image `$VERSION` and
+`LOGBIRD_VERSION` omit it: `0.1.0-rc.1`. The same prefix-free value is the OCI
+version label; `sha-<full-sha>` remains a separate immutable image tag.
+
 Before a maintainer creates a tag, update `CHANGELOG.md` with a dated product
 version, highlights, configuration/migration actions, recovery instructions and
 known limits. Keep an Unreleased section for later work. Record the exact Git SHA,
 toolchain versions, base-image digests, test commands/results, image IDs/sizes,
-platforms tested and backup/restore receipt. Run from a clean checkout:
+platforms tested and backup/restore receipt. Prepare a clean source checkout with
+an ignored `.env` containing valid local test configuration (including APP_URL,
+auth/query credentials and service URLs); `openapi:export` explicitly loads that
+file. Running Postgres, ClickHouse and Redis with the current additive schema and
+restricted query user are prerequisites for complete tests. Use isolated fictional
+fixtures and private queue prefixes; never reset shared data. Then run:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -74,7 +83,7 @@ with exact version and `sha-<full-git-sha>` tags, revision/version OCI labels,
 provenance and SBOM. For example (this command publishes):
 
 ```sh
-docker buildx build --platform linux/amd64,linux/arm64 \
+docker buildx build --platform linux/amd64 \
   --label org.opencontainers.image.revision="$REVISION" \
   --label org.opencontainers.image.version="$VERSION" \
   --tag "ghcr.io/joodlab/logbird/server:$VERSION" \
@@ -83,6 +92,9 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ```
 
 Use the corresponding Dockerfile for app/worker and `--target migrate` for migrate.
+Add `linux/arm64` to a publication only after that architecture's complete build
+and application acceptance passes. The example publishes amd64 only because
+arm64 is currently unverified.
 Never overwrite a published version or use `latest` as an upgrade selector. Inspect
 the resulting manifest/index digests, pull those images into an empty host and
 rerun acceptance. Record all four registry digests in the release notes before
@@ -95,3 +107,57 @@ Publication, tag creation, package visibility and public ACME/SMTP are separate
 actions from local validation. This document authorizes none of them and adds no
 CI workflows. [Docker's multi-platform guide](https://docs.docker.com/build/building/multi-platform/)
 describes native/emulated builders and image-store requirements.
+
+### Migration cancellation check
+
+The migrate image uses `tini -g` as PID 1 to forward termination to the active
+shell, pnpm and migration process group. Live cancellation/retry verification is
+still pending in [#77](https://github.com/joodlab/logbird/issues/77).
+
+Test only in a fresh disposable stack, with no shared or customer database:
+
+1. Build the new migrate image. Start only its disposable data services, using
+   the resource/lock rules for the machine. Keep app/server/worker stopped.
+2. Create `.tmp/migration-cancel/migration.sql` containing only
+   `SELECT pg_sleep(60);`. In a temporary Compose override, mount that directory
+   read-only into the migrate service at
+   `/workspace/packages/database/prisma/migrations/20991231000000_qa_cancel`.
+   This supplies a deliberately slow, schema-free QA migration without changing
+   the image or committing a test migration. Save the override as
+   `.tmp/compose.migration-cancel.yml`:
+
+   ```yaml
+   services:
+     migrate:
+       volumes:
+         - ./.tmp/migration-cancel:/workspace/packages/database/prisma/migrations/20991231000000_qa_cancel:ro
+   ```
+
+3. With that override, run the real migration command in the background:
+   `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run -d --no-deps --name logbird-migration-cancel-probe migrate`.
+   Confirm the sleep query is active in `pg_stat_activity` before cancelling;
+   an already completed migration does not test signal forwarding.
+
+   ```sql
+   SELECT pid, state, query FROM pg_stat_activity
+   WHERE datname = current_database() AND pid <> pg_backend_pid()
+     AND state = 'active' AND query LIKE '%pg_sleep(60)%';
+   ```
+
+4. Run `docker top logbird-migration-cancel-probe` to record the child processes,
+   then `docker stop --time 20 logbird-migration-cancel-probe`. Record elapsed
+   time, `docker inspect --format '{{json .State}}' logbird-migration-cancel-probe`
+   and migration logs. Require exit before forced SIGKILL, exit code other than
+   137, no OOM, no surviving migration children and no active QA sleep query.
+   Do not count a completed command or a forced kill as a passing cancellation.
+5. Inspect `_prisma_migrations` and database state. If the QA migration is marked
+   failed, verify its sole sleep statement made no schema/data changes, then
+   use a one-shot migrate container with the same override:
+   `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run --rm --no-deps migrate pnpm --filter @logbird/database exec prisma migrate resolve --rolled-back 20991231000000_qa_cancel`.
+   This resolution is only for the schema-free QA fixture. Real failed migrations
+   require inspection and an appropriate recovery decision before retry.
+6. Run the default migrate command again with the override and let it finish.
+   Require PostgreSQL/ClickHouse migration and query-user provisioning success;
+   run it once more to verify no pending migrations. Remove the stopped probe
+   container, stop/remove the disposable stack and volumes, and remove only the
+   temporary fixture/override. Preserve the logs and exit-state evidence.

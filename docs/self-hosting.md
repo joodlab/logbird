@@ -1,18 +1,18 @@
-﻿# Self-hosting
+# Self-hosting
 
 ## Five-minute quickstart
 
 Install Docker Engine and Compose >=2.24.4 (Linux containers). First builds can take longer depending on CPU/network. No images are published yet.
 
 ```sh
-git clone https://github.com/joodlab/logbird.git
+git clone https://github.com/joodlab/logbird.git # private repository: use authorized GitHub access
 cd logbird
 sh scripts/selfhost-init.sh
 # Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
 docker compose up -d
 ```
 
-On a memory-constrained build host, build roles sequentially before `up -d` to
+Build roles sequentially by default before `up -d --no-build` to
 reduce concurrent compiler/package-install memory: `docker compose build migrate`,
 then `docker compose build server`, `docker compose build worker`, and
 `docker compose build app`. Runtime sizing below does not include peak source-build
@@ -26,7 +26,7 @@ and repeat for each role. These are build arguments, not runtime environment
 settings or a hard limit on the whole Docker/WSL VM. Measure host memory before
 and after each target; source builds still need headroom beyond runtime sizing.
 
-Open http://localhost:4600. Enter your email; read the code in your inbox, or privately run `docker compose logs server` when the log fallback is enabled. Create a workspace and project, copy its ingest key (shown once), then send:
+Open http://localhost:4600. Enter your email; read the code in your inbox, or privately run `docker compose logs server` when the log fallback is enabled. Create a workspace and project, copy its ingest key (shown once).
 
 There is no separate instance-admin bootstrap account. A verified first login creates
 a user, and creating a workspace makes that user its owner. Email sign-up is open:
@@ -96,7 +96,7 @@ Set TRUST_PROXY explicitly: profiles cannot change another service's environment
 For a local-only test without DNS changes, set `APP_URL=https://audit.logbird.test:4743`,
 `LOGBIRD_DOMAIN=audit.logbird.test`, `LOGBIRD_TLS_HTTP_PORT=4780`,
 `LOGBIRD_TLS_HTTPS_PORT=4743`, and `TRUST_PROXY=2` in the private env file. Create
-`Caddyfile.local`:
+`.tmp/Caddyfile.local` (create `.tmp/` first):
 
 ```caddyfile
 audit.logbird.test {
@@ -105,17 +105,17 @@ audit.logbird.test {
 }
 ```
 
-Create `compose.tls-local.yml` (keep both local files out of commits):
+Create `.tmp/compose.tls-local.yml` (both files are ignored):
 
 ```yaml
 services:
   caddy:
     volumes:
-      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - ./.tmp/Caddyfile.local:/etc/caddy/Caddyfile:ro
 ```
 
 ```sh
-docker compose -f docker-compose.yml -f compose.tls-local.yml --profile tls up -d
+docker compose -f docker-compose.yml -f .tmp/compose.tls-local.yml --profile tls up -d
 curl --insecure --resolve audit.logbird.test:4743:127.0.0.1 https://audit.logbird.test:4743/readyz
 ```
 
@@ -168,202 +168,277 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
 
 ## Upgrades and backups
 
-Back up first, stop writes and pin a tested Git revision (image tags/digests when
-published). Record the old revision and image IDs. Block ingress, drain jobs, then
-`docker compose stop app worker server`. Build the new images before restarting:
-`docker compose build`, followed by `docker compose up -d`. One-shot migrate gates
-new server/worker startup; failure blocks startup. Prisma/ClickHouse apply only
-unapplied migrations; query credentials stay unchanged. Initialization variables
-do not rotate stored database passwords. Preserve the original env securely with
-backups. Follow the separate namespace migration below when upgrading Trailmark.
+1. Block browser/SDK ingress and run `docker compose stop app server worker`.
+   The worker has a five-minute grace period to finish its current job; wait for
+   stop to complete and inspect logs if it needed a forced kill.
+2. Take the matched stopped-writer backups below; preserve the original env.
+3. Record `git rev-parse HEAD` and `docker compose images` with the backup receipt.
+4. Fetch/select the tested revision: `git fetch origin`, then
+   `git switch --detach <tested-sha>`. Preserve local changes first.
+5. Build migrate/server/worker/app sequentially, then run `docker compose up -d --no-build`.
+   One-shot migrate gates new API/worker startup; failure blocks startup.
+6. Verify readiness, SMTP login, retained events/settings/keys and retention
+   receipts before reopening ingress. After a failed receipt the next successful
+   run rebuilds that project's rollups and can be expensive. Inspect failed
+   receipts and `retention.run_failed` logs after upgrading.
 
-### Migration cancellation check
+Use the active installation's env/project/override/TLS flags on every command;
+a restored project keeps the identity recorded in Cut over below. Query
+credentials and database passwords are preserved. Follow the namespace migration
+below for older Trailmark installations.
 
-The migrate image uses `tini -g` as PID 1 to forward termination to the active
-shell, pnpm and migration process group. Live cancellation/retry verification is
-still pending in [#77](https://github.com/joodlab/logbird/issues/77).
-
-Test only in a fresh disposable stack, with no shared or customer database:
-
-1. Build the new migrate image. Start only its disposable data services, using
-   the resource/lock rules for the machine. Keep app/server/worker stopped.
-2. Create `.tmp/migration-cancel/migration.sql` containing only
-   `SELECT pg_sleep(60);`. In a temporary Compose override, mount that directory
-   read-only into the migrate service at
-   `/workspace/packages/database/prisma/migrations/20991231000000_qa_cancel`.
-   This supplies a deliberately slow, schema-free QA migration without changing
-   the image or committing a test migration. Save the override as
-   `.tmp/compose.migration-cancel.yml`:
-
-   ```yaml
-   services:
-     migrate:
-       volumes:
-         - ./.tmp/migration-cancel:/workspace/packages/database/prisma/migrations/20991231000000_qa_cancel:ro
-   ```
-
-3. With that override, run the real migration command in the background:
-   `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run -d --no-deps --name logbird-migration-cancel-probe migrate`.
-   Confirm the sleep query is active in `pg_stat_activity` before cancelling;
-   an already completed migration does not test signal forwarding.
-
-   ```sql
-   SELECT pid, state, query FROM pg_stat_activity
-   WHERE datname = current_database() AND pid <> pg_backend_pid()
-     AND state = 'active' AND query LIKE '%pg_sleep(60)%';
-   ```
-
-4. Run `docker top logbird-migration-cancel-probe` to record the child processes,
-   then `docker stop --time 20 logbird-migration-cancel-probe`. Record elapsed
-   time, `docker inspect --format '{{json .State}}' logbird-migration-cancel-probe`
-   and migration logs. Require exit before forced SIGKILL, exit code other than
-   137, no OOM, no surviving migration children and no active QA sleep query.
-   Do not count a completed command or a forced kill as a passing cancellation.
-5. Inspect `_prisma_migrations` and database state. If the QA migration is marked
-   failed, verify its sole sleep statement made no schema/data changes, then
-   use a one-shot migrate container with the same override:
-   `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run --rm --no-deps migrate pnpm --filter @logbird/database exec prisma migrate resolve --rolled-back 20991231000000_qa_cancel`.
-   This resolution is only for the schema-free QA fixture. Real failed migrations
-   require inspection and an appropriate recovery decision before retry.
-6. Run the default migrate command again with the override and let it finish.
-   Require PostgreSQL/ClickHouse migration and query-user provisioning success;
-   run it once more to verify no pending migrations. Remove the stopped probe
-   container, stop/remove the disposable stack and volumes, and remove only the
-   temporary fixture/override. Preserve the logs and exit-state evidence.
+See the [maintainer migration-cancellation check](releases.md#migration-cancellation-check)
+for signal handling; its live acceptance is pending in #77.
 
 ### Native backup and fresh-storage restore
 
-Use the same stopped-writer boundary for both stores. The optional override enables
-ClickHouse's local backup disk inside its existing data volume. Recreating just
-ClickHouse loads the configuration; keep API/worker/app stopped:
+These shell blocks use POSIX sh (Linux/macOS or Git Bash on Windows). Use
+`docker compose cp` for binary archives; PowerShell 5 binary redirection can
+corrupt them. These commands assume bundled data services; external database
+operators should use their provider's matched backup/restore procedure.
+
+Block browser/SDK ingress, then stop and drain writers before either backup:
 
 ```sh
+docker compose stop app server worker
 docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d clickhouse
 mkdir -p .tmp/backups
+BACKUP_ID="logbird-$(date -u +%Y%m%dT%H%M%SZ)"
 docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f /tmp/logbird.pg.dump'
-docker compose cp postgres:/tmp/logbird.pg.dump .tmp/backups/logbird.pg.dump
-```
-
-Create `.tmp/backups/backup.sql` containing the following SQL. Use a unique archive name
-for every backup; ClickHouse refuses to overwrite an existing backup.
-
-```sql
-BACKUP DATABASE logbird TO Disk('backups', 'logbird.zip');
-```
-
-```sh
+docker compose cp postgres:/tmp/logbird.pg.dump ".tmp/backups/$BACKUP_ID.pg.dump"
+cat > .tmp/backups/backup.sql <<SQL
+BACKUP DATABASE logbird TO Disk('backups', '$BACKUP_ID.zip');
+SQL
 docker compose cp .tmp/backups/backup.sql clickhouse:/tmp/logbird-backup.sql
 docker compose exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --queries-file /tmp/logbird-backup.sql'
-docker compose cp clickhouse:/var/lib/clickhouse/backups/logbird.zip .tmp/backups/logbird.zip
 ```
 
-Check that the synchronous command returns `BACKUP_CREATED`, record checksums, Git
-revision, database versions and logical totals: `count()` for `events`, `sum(events)`
-for `events_by_minute` and `entities`, and `sum(count)` for `attribute_keys`.
-Physical rollup row counts can change during background merges. Copy the archives and original `.env` to secure
-off-host storage. Host archives stay under `.tmp/backups/`, excluded from Git and
-Docker build contexts; legacy `/backups/` and dump/zip files are also excluded.
-Archives inside a data volume alone are not a recoverable backup.
-`docker compose cp` avoids binary redirection corruption in Windows PowerShell 5.
-The `mkdir -p` example uses POSIX sh; on PowerShell use `New-Item -ItemType Directory
--Force .tmp/backups`. Never print the env file or authentication material.
-
-Restore into a **different, empty Compose project**, keeping the original stopped
-as recovery. Copy the original configuration privately to `.env.restore`; retain
-all secrets and set an unused `LOGBIRD_HTTP_PORT` and matching `APP_URL`. Do not run
-migrations before restoring. Start only the three fresh data services:
+Require `BACKUP_CREATED` from the synchronous ClickHouse command, then export it:
 
 ```sh
+docker compose cp "clickhouse:/var/lib/clickhouse/backups/$BACKUP_ID.zip" ".tmp/backups/$BACKUP_ID.zip"
+sha256sum ".tmp/backups/$BACKUP_ID.pg.dump" ".tmp/backups/$BACKUP_ID.zip" > ".tmp/backups/$BACKUP_ID.sha256"
+```
+
+Use a new BACKUP_ID each time; ClickHouse refuses to overwrite an archive. Record
+checksums, Git revision, database versions and logical totals: `count()` for
+`events`, `sum(events)` for `events_by_minute` and `entities`, and `sum(count)` for
+`attribute_keys`. Physical rollup counts change during merges. Copy the matched
+archives, checksum file and original env securely off-host and verify the hashes
+there before deleting any copy. Host archives stay under `.tmp/backups/`, excluded
+from Git/Docker; legacy `/backups/` and dump/zip files are also excluded.
+
+After verifying the off-host copy, remove only this archive from the data volume:
+
+```sh
+docker compose exec -T -e BACKUP_ID="$BACKUP_ID" clickhouse sh -c 'rm -- "/var/lib/clickhouse/backups/$BACKUP_ID.zip"'
+docker compose exec -T postgres rm -- /tmp/logbird.pg.dump
+```
+
+For backup only, resume with `docker compose up -d server worker app`, verify
+readiness/login/readback/retention, then reopen ingress. Include usual TLS and
+override flags. For an upgrade, keep writers stopped and continue its ordered steps.
+
+Restore into a **different, empty Compose project**, retaining the stopped original
+as recovery. Copy its configuration privately to `.env.restore`; retain all
+secrets, set `LOGBIRD_BIND=127.0.0.1`, and choose an unused `LOGBIRD_HTTP_PORT` with
+matching temporary `APP_URL`. Keep ingress blocked and app/Caddy stopped. Select
+the saved BACKUP_ID; do not generate a new timestamp. Verify the saved hashes.
+Start only data services; do not run migrations yet:
+
+```sh
+BACKUP_ID=logbird-20261107T120000Z # replace with the saved backup ID
+sha256sum -c ".tmp/backups/$BACKUP_ID.sha256"
 docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml up -d --wait postgres clickhouse redis
-docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/logbird.pg.dump postgres:/tmp/logbird.pg.dump
+docker compose --env-file .env.restore -p logbird-restore cp ".tmp/backups/$BACKUP_ID.pg.dump" postgres:/tmp/logbird.pg.dump
 docker compose --env-file .env.restore -p logbird-restore exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error /tmp/logbird.pg.dump'
-docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/logbird.zip clickhouse:/var/lib/clickhouse/backups/logbird.zip
-```
-
-Create `.tmp/backups/restore.sql`:
-
-```sql
-RESTORE DATABASE logbird FROM Disk('backups', 'logbird.zip');
-```
-
-```sh
+docker compose --env-file .env.restore -p logbird-restore cp ".tmp/backups/$BACKUP_ID.zip" "clickhouse:/var/lib/clickhouse/backups/$BACKUP_ID.zip"
+cat > .tmp/backups/restore.sql <<SQL
+RESTORE DATABASE logbird FROM Disk('backups', '$BACKUP_ID.zip');
+SQL
 docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/restore.sql clickhouse:/tmp/logbird-restore.sql
 docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --queries-file /tmp/logbird-restore.sql'
 ```
 
-**Keep the full stack stopped until completing this recovery gate.** On the
-pinned ClickHouse 26.9.27.3, restored parts can retain
-mutation versions higher than the new database's delete mutations. A mutation
-can report success while leaving rows visible. Logbird verifies deletion and
-fails with `LOGBIRD_DELETE_INCOMPLETE` before inserting duplicate rollups. See
-[issue #75](https://github.com/joodlab/logbird/issues/75).
+Require exit success and `RESTORED` **now, before migration/worker startup**. Check
+saved raw/logical totals and matched users/settings/keys. On failure keep writers
+stopped; never force a restore into populated storage. Preserved env credentials
+configure the bundled administrator; migrate later reprovisions the restricted
+query account without rotation. Custom access settings need a separate backup.
+See the [ClickHouse backup reference](https://clickhouse.com/docs/concepts/features/backup-restore/overview).
 
-Normalization is an explicit offline operator step. Stop server, worker and all
-ingesters, preserve the matched backup, and reserve disk for another full raw
-table plus merge headroom. These SQL examples and scripts target the default
-`logbird` database; adapt both scripts and verification queries before using a
-custom database name. Copy `scripts/clickhouse-restore-dry-run.sql` into the
-container and execute it with `--multiquery --queries-file`, using the same
-`docker compose cp` and authenticated client pattern above. This read-only dry
-run shows the table/view inventory, active parts, mutations and raw checksums:
+### Normalize restored ClickHouse parts
+
+**Normalize after every native ClickHouse restore before starting writers.** The
+pinned ClickHouse 26.9.27.3 can restore parts with mutation versions higher than
+new delete mutations. A mutation may report success while rows remain. The source
+guard checks deletion and raises `LOGBIRD_DELETE_INCOMPLETE` before reinsertion.
+**Live verification of the packaged guard and retry after normalization is pending
+in [#77](https://github.com/joodlab/logbird/issues/77); full DR readiness is not
+claimed.** See [#75](https://github.com/joodlab/logbird/issues/75).
+
+This is an explicit offline step. Keep the matched off-host backup and reserve
+another full raw table plus merge headroom. These scripts target default database
+`logbird`; adapt both files and verification queries for a custom database name.
+Run the committed, BOM-free files directly:
 
 ```sh
 docker compose --env-file .env.restore -p logbird-restore cp scripts/clickhouse-restore-dry-run.sql clickhouse:/tmp/restore-dry-run.sql
 docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --multiquery --queries-file /tmp/restore-dry-run.sql'
 ```
 
-Review custom materialized views and clear all their destinations before replay.
-The bundled normalization handles migration 006 / PR #62's `event_ids` destination
-when present, preventing `event_ids_mv` from populating it twice. After that
-migration lands, also verify one receipt per distinct `(project_id,event_id)`.
-Do not proceed if `events_restore_staging` exists: it may be the only complete
-recovery copy from an interrupted attempt.
-
-After reviewing the dry run, explicitly copy and execute
-`scripts/clickhouse-restore-normalize.sql` with `--multiquery --queries-file`.
+Save the dry-run output. Require no unfinished mutations and no existing
+`events_restore_staging`. A leftover staging table may be the only complete copy
+from an interrupted attempt: inspect it first. Review every MV/destination and
+clear custom destinations before replay. The script clears all three rollups and
+optional `event_ids` (006 / PR #62), preventing its MV from being populated twice.
 
 ```sh
 docker compose --env-file .env.restore -p logbird-restore cp scripts/clickhouse-restore-normalize.sql clickhouse:/tmp/restore-normalize.sql
 docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --multiquery --queries-file /tmp/restore-normalize.sql'
+# Repeat the exact dry run and save its output:
+docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --multiquery --queries-file /tmp/restore-dry-run.sql'
 ```
 
-It stages visible raw rows in a new on-disk table, verifies full-row equality in
-both directions with `EXCEPT ALL`, truncates raw and rollup tables, then inserts
-raw rows through the existing views once. `received_at` and `payload` are copied
-unchanged. Full-row equality and independent minute/entity/attribute totals must
-pass after replay. Nothing runs automatically during restore.
+Require successful full-row equality and aggregate checks. Before starting the
+policy worker, compare `raw_rows`, `payload_checksum` and `received_at_checksum`
+with the first dry run: all must match. Staging/replay preserves `received_at` and
+`payload`. If inventory includes `event_ids`, run these queries with the same
+authenticated client and require all three counts to match immediately after replay:
 
-On any error, keep writers stopped and retain staging and backup; do not blindly
-rerun. Staging deliberately remains for recovery. Test a failed-retention retry
-and recheck logical totals before switching traffic. Only after successful
-verification may the operator drop `logbird.events_restore_staging` and start
-the full stack. Keep the backup until the complete recovery acceptance passes.
+```sql
+SELECT count() AS logical_receipts,
+       uniqExact(tuple(project_id,event_id)) AS distinct_receipts
+FROM logbird.event_ids FINAL;
+SELECT uniqExact(tuple(project_id,event_id)) AS distinct_raw_ids FROM logbird.events;
+```
+
+`FINAL` checks logical receipts; physical counts change during merges. On error
+retain staging/backups, keep writers stopped and investigate; do not blindly
+rerun normalization. Staging stays until the gate passes. Nothing runs on restore
+automatically. Executing both committed files, including the final precondition
+and dry run, remains pending in #77.
+
+### Recovery gate with ingress blocked
+
+Keep browser/SDK ingress blocked and app/Caddy stopped. Start migrate, server and
+worker only. Record the gate time, then enqueue one normal retention sweep through
+the configured queue, or wait for its hourly cycle:
 
 ```sh
-docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml up -d
+GATE_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml up -d --no-build server worker
+docker compose --env-file .env.restore -p logbird-restore exec -T worker node -e '
+const { Queue } = require("bullmq");
+const Redis = require("ioredis");
+(async () => {
+  const connection = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1 });
+  const queue = new Queue("retention", { connection, prefix: process.env.BULLMQ_PREFIX });
+  try { const job = await queue.add("retention.enforce", {}); console.log("Queued recovery sweep " + job.id); }
+  finally { await queue.close(); await connection.quit(); }
+})().catch(() => { console.error("Recovery enqueue failed"); process.exitCode = 1; });'
+cat > .tmp/backups/recovery-gate.sql <<SQL
+SET TIME ZONE 'UTC';
+WITH latest AS (
+  SELECT DISTINCT ON ("projectId") "projectId", status, "startedAt", "finishedAt", error
+  FROM "RetentionRun" ORDER BY "projectId", "startedAt" DESC
+)
+SELECT p.id AS project_id, r.status, r."startedAt", r."finishedAt", r.error
+FROM "Project" p LEFT JOIN latest r ON r."projectId"=p.id ORDER BY p.id;
+WITH latest AS (
+  SELECT DISTINCT ON ("projectId") "projectId", status, "startedAt"
+  FROM "RetentionRun" ORDER BY "projectId", "startedAt" DESC
+)
+SELECT count(*) AS projects_without_completed_gate_run
+FROM "Project" p LEFT JOIN latest r ON r."projectId"=p.id
+WHERE r.status IS DISTINCT FROM 'completed' OR r."startedAt" < '$GATE_STARTED'::timestamptz;
+SQL
+docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/recovery-gate.sql postgres:/tmp/recovery-gate.sql
+docker compose --env-file .env.restore -p logbird-restore exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /tmp/recovery-gate.sql'
+docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep 'retention.run_failed'
+docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep '"errorCode":"LOGBIRD_DELETE_INCOMPLETE"'
 ```
 
-Require `RESTORED`, successful migrate/query-user provisioning, `/readyz`, SMTP
-login, unchanged users/projects/settings/API keys, event readback and matching raw
-and aggregate totals before switching traffic. A database backup does not
-include server-configured users; bundled administrator credentials come from the
-preserved env, and migrate reprovisions the restricted account without rotating
-its password. Custom access configuration must be backed up separately. See the
-[ClickHouse backup reference](https://clickhouse.com/docs/concepts/features/backup-restore/overview).
+The receipt table is Prisma's `"RetentionRun"`. Wait until each restored project's
+latest run is `completed`, started after GATE_STARTED, and the missing count is
+zero. A running receipt needs more time; a failure or guard log blocks cutover.
+Inspect `retention.completed` too; a queue job completion alone does not establish
+every project receipt. Repeat the receipt query until the cycle ends.
 
-Redis uses AOF. With drained jobs, a fresh Redis starts retention scheduling when
-the worker starts; verify a real retention run. If pending jobs must survive, back
-up and restore its stopped volume at the same boundary using your volume backup
-tool. Do not combine stores from different write boundaries. Stop on restore
-errors; never force a restore into populated storage. Rollback after incompatible
-migrations means restoring the matched backup into fresh storage with the old
-revision, rather than running old binaries against a newer schema.
+Copy this SQL into a file and run it through the same ClickHouse queries-file pattern:
+
+```sql
+SELECT count() AS raw_rows,
+       (SELECT sum(events) FROM logbird.events_by_minute) AS minute_events,
+       sum((actor_id!='')+(tenant_id!='')+(executor_id!='')+length(target_ids)) AS expected_entities,
+       (SELECT sum(events) FROM logbird.entities) AS actual_entities,
+       sum(length(mapKeys(attributes))) AS expected_attributes,
+       (SELECT sum(count) FROM logbird.attribute_keys) AS actual_attributes
+FROM logbird.events;
+```
+
+Require raw_rows=minute_events, expected_entities=actual_entities and
+expected_attributes=actual_attributes. Retention may remove expired events during
+the cycle; verify surviving events/settings/keys as well. No projects means no
+per-project retention evidence. Keep staging and the original project until gate
+and application acceptance pass. This documented gate's execution on packaged
+restored data remains pending in #77.
+
+### Cut over
+
+1. Keep public ingress blocked. Stop the original project's app/server/worker and,
+   when used, Caddy, freeing its original HTTP/80/443 bindings. Use its recorded
+   env/project name, for example `--env-file .env -p logbird`, not `.env.restore`.
+2. In `.env.restore`, restore public APP_URL, LOGBIRD_HTTP_PORT, LOGBIRD_DOMAIN,
+   ACME_EMAIL and TLS ports. Preserve all credentials; set TRUST_PROXY for the
+   actual proxy chain. Replace the temporary verification origin/port.
+3. Recreate server/worker/app for that public origin. With Caddy, first ensure the
+   original Caddy is stopped:
+
+   ```sh
+   docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml --profile tls up -d --no-build --no-deps --force-recreate server worker app caddy
+   ```
+
+   Without Caddy omit `--profile tls` and `caddy`, and point the existing proxy at
+   the restored app port. Keep ingress blocked while checking readiness, SMTP
+   login, original user/session, events/settings/read keys and worker receipts.
+   Then switch proxy/DNS target if needed and open ingress.
+4. Every later upgrade, backup, log and uninstall command must retain
+   `--env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml`
+   and `--profile tls` when used. Record this as the active installation identity;
+   bare `docker compose` would select the old project. POSIX operators may keep
+   these flags in a local wrapper:
+
+   ```sh
+   restored_compose() {
+     docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml --profile tls "$@"
+   }
+   restored_compose ps
+   ```
+
+5. After public acceptance and a new matched off-host backup, the original may be
+   removed with `down` using its own env/project flags. Keep original volumes for
+   the rollback window; use `down -v` only after retiring that recovery copy.
+   Remove staging from the restored DB only after the gate/application checks pass.
+
+Redis uses AOF. If pending jobs must survive, back up its stopped volume at the
+same boundary; do not mix stores from different points in time. Incompatible
+migrations require matched fresh-storage restore with the old revision, rather
+than starting old binaries against a newer schema.
 
 ### Uninstall
 
 `docker compose down --remove-orphans` removes this project's containers and network
-and preserves its data. Include the same `-p`, `--env-file` and `-f` options used to
-install. For permanent deletion only after exporting and verifying backups,
+and preserves its data. Include the active `-p`, `--env-file`, `-f` and
+`--profile tls` options when used. Preview that project's volumes first; replace
+the sample project with the recorded active installation:
+
+```sh
+docker volume ls --filter label=com.docker.compose.project=logbird-restore
+```
+
+**`down -v` permanently deletes the selected project's data/certificate volumes.**
+For permanent deletion only after exporting and verifying backups,
 `docker compose down -v --remove-orphans` also deletes its named database, queue and
 Caddy certificate volumes. It does not remove `.env`, host backup copies or images.
 Keep the env with the backups or delete it privately according to your retention
@@ -373,6 +448,13 @@ on a shared host. The restore project's storage is separate and needs its own
 explicit teardown.
 
 ## Sizing
+
+The bounded 2026-11-07 evaluation observed about 14.7 GB for images plus private
+build cache and a 1.79 GB migrate image (historical images at 1a62ff4). This is an
+observation, not a disk requirement or capacity guarantee. Reserve additional
+space for raw data, backup archives, merge headroom and a full restore staging
+table. Build roles sequentially by default; an 8 GB runtime allocation does not
+establish that concurrent source builds will fit.
 
 Start a bounded evaluation with 4 vCPU, 8 GB RAM and SSD. This is an initial allocation, not measured capacity. Reserve RAM/disk for ClickHouse merges/backups and measure compressed growth with fictional representative traffic. Monitor disk, readiness, 5xx/429, queue age, retention failures and backup age. One VM has no HA. See [deployment](deployment.md) and [Coolify](coolify.md).
 

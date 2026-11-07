@@ -35,6 +35,7 @@ Thumbs.db
 .docker-data
 
 # Private database backups (also excluded from Docker build contexts)
+# Intentional archive assets need an explicit reviewed negation here and in .dockerignore.
 /backups/
 *.dump
 *.zip

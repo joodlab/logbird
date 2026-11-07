@@ -8,6 +8,7 @@ AGENTS.local.md
 CLAUDE.local.md
 .tmp
 # Local database archives must never reach build layers or remote builders.
+# Intentional archive assets need an explicit reviewed negation here and in .gitignore.
 /backups/
 **/*.dump
 **/*.zip

@@ -1,4 +1,4 @@
-﻿-- Read-only dry run. Stop server/worker/ingesters before executing normalization.
+-- Read-only dry run. Stop server/worker/ingesters before executing normalization.
 SELECT version();
 SELECT table,name,rows,data_version FROM system.parts WHERE active AND database='logbird' ORDER BY table,name;
 SELECT table,mutation_id,is_done,latest_fail_reason FROM system.mutations WHERE database='logbird' ORDER BY table,mutation_id;
