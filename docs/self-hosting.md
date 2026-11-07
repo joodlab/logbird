@@ -9,14 +9,16 @@ git clone https://github.com/joodlab/logbird.git # private repository: use autho
 cd logbird
 sh scripts/selfhost-init.sh
 # Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
-docker compose up -d
+docker compose build migrate
+docker compose build server
+docker compose build worker
+docker compose build app
+docker compose up -d --no-build
 ```
 
-Build roles sequentially by default before `up -d --no-build` to
-reduce concurrent compiler/package-install memory: `docker compose build migrate`,
-then `docker compose build server`, `docker compose build worker`, and
-`docker compose build app`. Runtime sizing below does not include peak source-build
-memory or build-cache storage.
+The sequential builds above reduce concurrent compiler/package-install memory.
+Runtime sizing below does not include peak source-build memory or build-cache
+storage.
 
 Image build stages default to one pnpm build/postinstall at a time and four
 concurrent downloads (`BUILD_CONCURRENCY=1`, `DOWNLOAD_CONCURRENCY=4`). For an
