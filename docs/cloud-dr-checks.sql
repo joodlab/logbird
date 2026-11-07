@@ -1,8 +1,14 @@
 -- Read-only checks after loading checkpoint-specific expected_events in THIS client session.
 -- Each result set must be empty. Use a small isolated QA fixture, not customer data.
--- Parameters: fixture_project (String). No FINAL: duplicate physical raw rows must fail.
+-- Parameters: fixture_project (String), manifest_count (UInt64, independently recorded).
+-- FORMAT Null keeps successful guards out of the differences output.
+SELECT throwIf(count() = 0, 'no fixture rows'),
+       throwIf(count() != {manifest_count:UInt64}, 'expected raw manifest count mismatch')
+FROM expected_events WHERE project_id = {fixture_project:String} FORMAT Null;
+SELECT throwIf(count() != {manifest_count:UInt64}, 'actual raw manifest count mismatch')
+FROM logbird.events WHERE project_id = {fixture_project:String} FORMAT Null;
 
--- 1. Raw bytes and multiplicity: includes received_at, payload and all exported columns.
+-- 1. No FINAL: raw bytes and multiplicity include received_at, payload and exported columns.
 WITH
     expected AS (SELECT * FROM expected_events WHERE project_id = {fixture_project:String}),
     actual AS (SELECT * FROM logbird.events WHERE project_id = {fixture_project:String})

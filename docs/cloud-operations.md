@@ -11,10 +11,16 @@ by these files. No production, failover, restore or capacity acceptance is claim
   Coolify is simpler to set up, but its Compose deployment path has an interruption
   window and does not remove the database/recovery work.
 - **Budget:** roughly **EUR 230–300/month for phase 1**, excluding VAT, labor,
-  transactional mail, domain and independent monitoring; see the dated bill below.
+  transactional mail, domain, private registry, transfer overage and independent
+  monitoring; see the dated bill below.
 - **Effort estimate:** 3–5 engineer-days for platform setup and rehearsals, plus
-  4–8 hours/month for patching, backup/restore drills and alert checks, with a named
-  primary/backup on call. These are planning estimates; unresolved launch gates add work.
+  4–8 hours/month for patching, restore drills and alert checks **only after OPS-03's
+  nightly fence/capture/verify/reopen automation is implemented and rehearsed**.
+  That automation is launch-blocking; its implementation is additional setup work.
+  Without it, an illustrative 0.5–0.75 attended hours/night × 30 adds **15–22.5 hours
+  of night work/month**, or 19–30.5 hours including routine work, plus an explicit
+  primary/backup night rota. Measure the actual run duration; these are estimates,
+  not measured staffing costs. Do not approve the smaller effort figure for manual nights.
 - **Data ownership is an open owner decision:** this budget assumes self-run
   Postgres, ClickHouse and Redis/Dragonfly on three separate data VMs. Approve that
   operational responsibility or obtain managed-service quotes before provisioning.
@@ -30,8 +36,9 @@ by these files. No production, failover, restore or capacity acceptance is claim
 - **Nightly ingest outage:** the current matched backup stops API/worker writes.
   Its duration is unmeasured. Time dumps, queue capture and readiness at representative
   size, then extrapolate by bytes/throughput and add drain/verification time before
-  offering a maintenance window. OPS-03 tracks an online cross-store boundary
-  (potentially Postgres WAL/PITR plus ClickHouse incremental backups) as an alternative.
+  offering a maintenance window. OPS-03's longer-term **online backups (Postgres
+  PITR + ClickHouse incremental, no nightly fence)** require a verified cross-store
+  boundary; that is the alternative that removes the nightly outage.
 
 ### Dated cost worksheet
 
@@ -322,6 +329,11 @@ acknowledged inserts to drain; then stop API and worker writers. First install s
 the scale step because no old Deployments exist:
 
 ```sh
+curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' "https://$PUBLIC_HOST/readyz"
+# Non-allowlisted source: 404 while fenced, 403 in the operator window; never 200.
+```
+
+```sh
 # Upgrade only, after the external fence and drain have been observed:
 kubectl -n logbird scale deployment/logbird-server deployment/logbird-worker --replicas=0
 kubectl -n logbird wait --for=delete pod -l app.kubernetes.io/name=logbird-server --timeout=300s
@@ -366,6 +378,9 @@ If the Job fails or times out, stop: preserve its status/logs, investigate appli
 use the recovery decision below. Do not automatically rerun, delete evidence or unblock traffic.
 The Job has no automatic retries and a 20-minute deadline. It uses the image CMD to deploy
 Postgres migrations, ClickHouse migrations and query-user grants in that order.
+If nothing starts within about one minute, inspect
+`kubectl -n logbird get pods -l job-name="$MIGRATION_JOB"` for ImagePullBackOff or
+unschedulable Pods rather than waiting silently for the deadline.
 
 After the helper reports Complete, apply only the base and wait for all three rollouts:
 
@@ -452,6 +467,7 @@ privileges, probes against running images, backups or real traffic. The release 
 - [ ] Scoped Secrets, readonly runtimes, migration exception audit, image pull and
   failed-Job handling pass against qualified images.
 - [ ] Matched off-host recovery, deletion reconciliation, measured outage/RPO/RTO,
-  alert delivery/runbooks and independent status access pass.
+  automated nightly fence/capture/verify/reopen, alert delivery/runbooks and
+  independent status access pass.
 - [ ] Functional tunnel and operator-only edge acceptance pass; release owner signs
   the receipt before unfencing. Remaining gates are listed in [operations gaps](cloud-operations-gaps.md).

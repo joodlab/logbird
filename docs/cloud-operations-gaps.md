@@ -35,6 +35,11 @@ The release owner assigns a person to each named role before provisioning.
 
 ## OPS-03 recovery
 
+- [ ] **Launch-blocking nightly automation:** implement/rehearse fence, drain,
+  three-store capture, encryption/upload/readback verification, writer restart,
+  one-host operator-window readiness/canary and unfence. On failure leave traffic
+  fenced, page the night rota and withhold success heartbeat; test each interrupted phase.
+  The 4–8-hour monthly routine estimate assumes this exists, not manual night work.
 - [ ] #75 is the restore-specific mutation-version defect; [#77](https://github.com/joodlab/logbird/issues/77)
   is the live acceptance tracker. Record accepted guard/procedure revisions and exact image IDs.
 - [ ] Prove logical raw/minute/entity/attribute values after restore, failed-run repair and
@@ -45,8 +50,9 @@ The release owner assigns a person to each named role before provisioning.
 - [ ] Capture a matched encrypted three-store/config set, fetch it from off-host and
   verify checksums/decryption; prove deletion reconciliation and measured RPO/RTO.
 - [ ] Measure nightly ingest downtime at representative size and get owner acceptance.
-  If rejected, design/rehearse an online cross-store boundary (WAL/PITR plus ClickHouse
-  incremental is a candidate, not an implemented alternative).
+  Longer-term alternative: **online backups (Postgres PITR + ClickHouse incremental,
+  no nightly fence)** with a proved cross-store boundary. This removes the nightly
+  outage; scheduling the fenced procedure merely removes attended work.
 - [ ] Prove missing-artifact/decrypt/overdue alerts and independent recovery credentials.
 
 ## OPS-04 artifacts

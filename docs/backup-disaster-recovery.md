@@ -80,6 +80,9 @@ cannot close either gate when logical values disagree. Track them separately in
 
 1. Acquire the release/backup lock. Verify target identities, destination access, free disk,
    last successful restore and previous recovery set. Abort on ambiguity; never reset a service.
+   Set `RELEASE_REPO` to the absolute, qualified release checkout/operations bundle
+   (including `deploy/k3s`, smoke tooling and the SQL files). Record its source SHA;
+   do not depend on the backup host's current directory.
 2. Use only the [Ingress fence and drain commands](cloud-operations.md#fence-and-drain)
    for k3s (stop before its migration steps); prove external rejection before the boundary. Fence all direct writers,
    wait for acknowledged ingestion and active
@@ -141,9 +144,40 @@ cannot close either gate when logical values disagree. Track them separately in
    Add the encrypted configuration/secret references and platform backup to the set. Hash and
    upload all artifacts; verify every object is readable from the recovery host, then record
    a complete-set receipt outside the affected host. A local success or upload attempt alone
-   is insufficient. Restart the recorded qualified API/worker digests, prove readiness
-   and [operator-only acceptance](cloud-ingress.md#fence-and-operator-acceptance-window),
-   then [unfence explicitly](cloud-ingress.md#unfence-and-refence).
+   is insufficient. For an **unchanged nightly capture**, restore the recorded
+   baseline replica counts (API 2, worker 1), without changing images/configuration:
+
+   ```sh
+   set -eu
+   : "${RELEASE_REPO:?Absolute qualified release checkout}" "${PUBLIC_HOST:?Approved HTTPS hostname}"
+   kubectl -n logbird scale deployment/logbird-server --replicas=2
+   kubectl -n logbird scale deployment/logbird-worker --replicas=1
+   kubectl -n logbird rollout status deployment/logbird-server --timeout=300s
+   kubectl -n logbird rollout status deployment/logbird-worker --timeout=300s
+   kubectl -n logbird rollout status deployment/logbird-app --timeout=300s
+   kubectl apply -k "$RELEASE_REPO/deploy/k3s/edge"
+   # From ONE allowlisted operator host, using the dedicated QA canary project's
+   # ingest/read keys already loaded privately into this process environment:
+   : "${LOGBIRD_INGEST_KEY:?Canary ingest key}" "${LOGBIRD_READ_KEY:?Same canary project}"
+   curl --fail --silent --show-error "https://$PUBLIC_HOST/readyz" --output /dev/null
+   (cd "$RELEASE_REPO" && BASE_URL="https://$PUBLIC_HOST" \
+     SMOKE_EMAIL= SMOKE_OTP= SMOKE_COOKIE= SMOKE_PROJECT_ID= \
+     pnpm smoke:prod > /secure/receipt/nightly-smoke.txt)
+   grep --fixed-strings --quiet 'PASS ingest + read (fictional smoke event retained)' /secure/receipt/nightly-smoke.txt
+   kubectl -n logbird annotate ingress logbird \
+     traefik.ingress.kubernetes.io/router.middlewares-
+   ```
+
+   This **reduced nightly reopen check** is readiness plus canary ingest/readback
+   through the operator window, with mail/console options disabled. The script's
+   normal optional SKIPs do not excuse a missing ingest/read PASS. Use the captured
+   counts if the qualified release differs from 2/1; verify imageIDs/config stayed
+   unchanged. Reserve the two-host bucket/spoof test for releases and edge/config
+   changes, which require [full acceptance](cloud-ingress.md#two-ip-rate-limit-acceptance).
+   Preserve any additional middleware when removing only the operator allowlist.
+   On any failed step, delete the Ingress again, keep the fence and page the rota;
+   no success heartbeat or automatic blind retry. OPS-03 must automate and rehearse
+   the entire nightly sequence before launch.
 7. Send a success heartbeat **after** off-host verification, and alert on failure, missed schedule
    and overdue restore drill. Do not report a complete set when one store or credential is missing.
 
@@ -210,7 +244,10 @@ downloads, decryption and validation. Never rehearse by importing into productio
    Keep database name and materialized-view destinations consistent. Restore/reprovision access
    policies using the **preserved** query password and that release's provisioning command.
    Before any worker starts, perform checkpoint A below: raw event IDs/payloads,
-   logical aggregates, view destinations and row-policy isolation. Keep public access fenced.
+   logical aggregates and view destinations. For row-policy isolation, execute the
+   [Query/SQL denial and cross-project acceptance](deployment.md#acceptance) using
+   the restricted query user and a second fictional project; main-user admin reads
+   are not isolation proof. Keep public access fenced.
 4. Restore the queue persistence with its version-matched engine and original `{logbird}` prefix.
    For the selected Redis 7 path, stop only the isolated Redis service and inspect
    the trusted archive listing for traversal/absolute paths before extraction. The
@@ -289,7 +326,10 @@ a completed no-op scheduler pass is not repeated-repair evidence.
 
 Reference checks: [raw/minute/entities/attributes SQL](cloud-dr-checks.sql) and
 [conditional event-ID SQL](cloud-dr-event-ids.sql). **Each EXCEPT ALL in both
-directions must return an empty result; every query must succeed.** Query errors,
+directions must return an empty result; every query must succeed.** `throwIf` guards
+reject empty project fixtures and expected/actual counts that differ from the
+independently recorded manifest. Successful guards use `FORMAT Null` so they do not
+pollute the differences output. Query errors,
 missing expected files or zero fixtures are failures. The receipt also records
 expected nonzero raw/survivor counts, query count, exit status and checkpoint.
 SimpleAggregateFunction counts use `sum`; attribute `samples` uses `groupUniqArrayMerge`.
@@ -305,13 +345,41 @@ Before capturing the fictional source, export the normalized fixture rows using
 the private client config; retain the API input manifest, exact cutoff and ID list
 independently of the restored target. Store these **encrypted in the recovery set**:
 
+**Fixture gap rule:** record capture time, retentionDays, maximum supported set age
+and maximum drill duration, all in UTC. At capture, expired events must be older
+than retentionDays **plus maximum set age** (add a safety margin); survivors must
+remain newer than the wall-clock retention cutoff through the latest permitted
+drill finish. For example, for 90-day retention, a 35-day maximum set age and a
+one-day drill budget, use expired events 200 days old and survivors one day old.
+Keep the frozen manifest split strictly between the two groups. If the set exceeds
+that age or the drill overruns the gap, stop and replace the fixture/set; do not
+change expected survivors from the restored result or confuse fixture expiry with #75.
+
+At B **and C**, bind the exact completed repair receipt ID and assert its real
+`RetentionRun.cutoff` lies in `(max expired timestamp, min survivor timestamp]`.
+Use the protected isolated Postgres connection and `psql -X -v ON_ERROR_STOP=1`
+with `-v QA_RUN=... -v QA_PROJECT=... -v MAX_EXPIRED=... -v MIN_SURVIVOR=...`:
+
+```sql
+SELECT 1 / CASE WHEN count(*) = 1 AND bool_and(
+  status = 'completed' AND "projectId" = :'QA_PROJECT'
+  AND cutoff > (:'MAX_EXPIRED'::timestamptz AT TIME ZONE 'UTC')
+  AND cutoff <= (:'MIN_SURVIVOR'::timestamptz AT TIME ZONE 'UTC')
+) THEN 1 ELSE 0 END AS fixture_cutoff_verified
+FROM "RetentionRun" WHERE id = :'QA_RUN';
+```
+
+Run the SQL via psql stdin/file so psql variables expand. A missing/wrong receipt,
+project, status or out-of-gap cutoff errors instead of passing. Retain the receipt
+ID/cutoff and timestamp bounds; only then compare against the precomputed B/C file.
+
 ```sh
 clickhouse-client --config-file /secure/source-clickhouse.xml --param_fixture_project="$QA_PROJECT" \
   --query 'SELECT * FROM logbird.events WHERE project_id={fixture_project:String} ORDER BY event_id FORMAT JSONEachRow' \
   > "$RECOVERY_SET/fixture-A.jsonl"
 clickhouse-client --config-file /secure/source-clickhouse.xml --param_fixture_project="$QA_PROJECT" \
   --param_cutoff="$FIXTURE_CUTOFF" --query \
-  'SELECT * FROM logbird.events WHERE project_id={fixture_project:String} AND timestamp >= {cutoff:DateTime64(3)} ORDER BY event_id FORMAT JSONEachRow' \
+  "SELECT * FROM logbird.events WHERE project_id={fixture_project:String} AND timestamp >= {cutoff:DateTime64(3,'UTC')} ORDER BY event_id FORMAT JSONEachRow" \
   > "$RECOVERY_SET/fixture-BC.jsonl"
 # Save counts, cutoff, SHA256, input event IDs, expected receipt map and schema/column order.
 ```
@@ -322,12 +390,18 @@ the client-side file, then execute all four comparisons:
 
 ```sh
 set -eu
-: "${EXPECTED_ROWS:?Checkpoint file path}" "${QA_PROJECT:?Isolated QA project ID}"
+: "${RELEASE_REPO:?Absolute qualified release checkout}" "${EXPECTED_ROWS:?Checkpoint file path}"
+: "${QA_PROJECT:?Isolated QA project ID}" "${MANIFEST_COUNT:?Nonzero checkpoint count from trusted receipt}"
+DR_SQL="$RELEASE_REPO/docs/cloud-dr-checks.sql"
+RECEIPT_SQL="$RELEASE_REPO/docs/cloud-dr-event-ids.sql"
+sha256sum "$DR_SQL" "$RECEIPT_SQL" > /secure/receipt/verification-sql.sha256
+# Match these hashes to the accepted revision's independently trusted receipt.
+test "$(wc -l < "$EXPECTED_ROWS")" -eq "$MANIFEST_COUNT"
 clickhouse-client --config-file /secure/isolated-clickhouse.xml \
-  --param_fixture_project="$QA_PROJECT" --multiquery --query "
+  --param_fixture_project="$QA_PROJECT" --param_manifest_count="$MANIFEST_COUNT" --multiquery --query "
   CREATE TEMPORARY TABLE expected_events ENGINE=Memory AS SELECT * FROM logbird.events WHERE 0;
   INSERT INTO expected_events FROM INFILE '$EXPECTED_ROWS' FORMAT JSONEachRow;
-  $(cat docs/cloud-dr-checks.sql)" > /secure/receipt/checkpoint-differences.txt
+  $(cat "$DR_SQL")" > /secure/receipt/checkpoint-differences.txt
 test ! -s /secure/receipt/checkpoint-differences.txt
 ```
 
@@ -339,13 +413,14 @@ receipt-retention policy. Load the corresponding private JSONEachRow file into
 `expected_receipts`, then execute its comparisons in the same session:
 
 ```sh
-: "${EXPECTED_RECEIPTS:?Checkpoint-specific verified file path}"
+: "${EXPECTED_RECEIPTS:?Checkpoint-specific verified file path}" "${MANIFEST_RECEIPT_COUNT:?Nonzero receipt count}"
+test "$(wc -l < "$EXPECTED_RECEIPTS")" -eq "$MANIFEST_RECEIPT_COUNT"
 clickhouse-client --config-file /secure/isolated-clickhouse.xml \
-  --param_fixture_project="$QA_PROJECT" --multiquery --query "
+  --param_fixture_project="$QA_PROJECT" --param_manifest_receipt_count="$MANIFEST_RECEIPT_COUNT" --multiquery --query "
   CREATE TEMPORARY TABLE expected_receipts (
     project_id String, event_id String, received_at DateTime64(3,'UTC'), timestamp DateTime64(3,'UTC'));
   INSERT INTO expected_receipts FROM INFILE '$EXPECTED_RECEIPTS' FORMAT JSONEachRow;
-  $(cat docs/cloud-dr-event-ids.sql)" > /secure/receipt/receipt-differences.txt
+  $(cat "$RECEIPT_SQL")" > /secure/receipt/receipt-differences.txt
 test ! -s /secure/receipt/receipt-differences.txt
 ```
 

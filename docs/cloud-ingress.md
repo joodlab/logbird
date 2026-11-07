@@ -157,6 +157,9 @@ kubectl -n logbird get ingress logbird -o yaml
 ```
 
 This opens only those two sources; a third, non-allowlisted source must receive 403.
+From that third source, record
+`curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' "https://$PUBLIC_HOST/readyz"`:
+expect 404 while fenced and 403 in this window, never 200.
 Test real TLS/SNI without `-k`, Secure/HttpOnly/SameSite cookies, hostile forwarded
 headers, HTTPS origin/CORS and the following rate-limit separation. No fixture keys
 or codes belong in logs/receipts.
@@ -164,27 +167,31 @@ or codes belong in logs/receipts.
 ### Two-IP rate-limit acceptance
 
 Use two independently routed operator hosts (not two interfaces behind one NAT),
-only fictional QA identities, the same state-changing auth route/method and one
-fixed-minute window. Do not lower limits on a live service. From source A make
-`AUTH_RATE_LIMIT_PER_MINUTE + 1` calls to the chosen route (for example
-`POST /api/auth/email-otp/send-verification-otp` with a QA address and `type=sign-in`).
-Confirm A reaches Logbird's 429/Retry-After. Immediately make one valid call from
-source B: it must reach the auth handler rather than A's limiter. Distinguish
-better-auth's own throttles by recording response codes/bodies privately.
+the same non-mailing auth POST and one fixed-minute window. This test is required
+for releases and edge/proxy/rate-limit changes, not each unchanged nightly backup.
+Do not lower live limits. Use **POST `/api/auth/sign-out` with no session/cookie**
+and the valid Origin header: it exercises the shared auth limiter without sending
+mail or changing a real session. From A make `AUTH_RATE_LIMIT_PER_MINUTE + 1` calls
+and confirm Logbird's 429/Retry-After. Immediately call from B: it must reach the
+sign-out handler rather than A's limiter. Keep provider SMTP entirely out of this test.
 
 With the Redis administrator, verify exactly two SHA256 source-address suffixes
-for that route/window's `{logbird}:rate:auth:<method>:<route>:<digest>:<window>` keys,
+for that window's `{logbird}:rate:auth:POST:/api/auth/*:<digest>:<window>` keys,
 without printing IPs, addresses or credentials. Repeat through each published node;
 forged X-Forwarded-For from A must not evade A's bucket. Record the IP-to-digest
 mapping privately. If all calls collapse to one bucket, keep the Ingress closed,
 check Local/local endpoints and TRUST_PROXY; never raise the global limit to hide it.
-The proposed application warning is tracked in OPS-09; low traffic alone cannot
+All auth POSTs from one source share the `/api/auth/*` route bucket, independent of
+the concrete auth endpoint. The proposed warning is tracked in OPS-09; low traffic alone cannot
 diagnose a broken proxy.
 
 ## Unfence and refence
 
-Only after all release gates and both acceptance routes pass, and the release owner
-authorizes reopening, remove the one known acceptance middleware annotation:
+For releases, require all release gates and both acceptance routes before the
+release owner authorizes reopening. Unchanged nightly captures use the reduced
+[readiness/canary reopen procedure](backup-disaster-recovery.md#capture-procedure)
+instead; they do not repeat the two-host commissioning test. Remove the one known
+acceptance middleware annotation only after the applicable checks pass:
 
 ```sh
 kubectl -n logbird annotate ingress logbird \

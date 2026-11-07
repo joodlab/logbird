@@ -54,6 +54,19 @@ deliberately missing stub must exit 127; no real kubectl fallback is possible.
 environment assertions and the missing-stub case. Master `2a9d378` is merged in
 `ff9f18c`; the original source/build counts above remain the dated Round 3 baseline.
 
+Round 4 follow-up checks: current frozen install, typecheck **17/17**, source build
+**11/11** (9 cache hits), app tests **171/171**, hermetic harness **5/5**, and lint
+**420 files / 0 errors / 76 existing warnings** pass after that merge. Real ClickHouse checks pass for
+non-empty fixtures, expected/actual raw and receipt manifest counts, and wrong
+project/count rejection; the previous comparison/corruption checks still pass.
+The UTC-typed export parameter reports UTC. The new Postgres cutoff assertion
+passes two boundary cases and rejects six missing/wrong/out-of-gap cases using
+synthetic CTEs in read-only transactions. All seven temporary ClickHouse tables
+were dropped. All **29 shell blocks** parse in a credential-free environment with
+an empty kubeconfig; none of those commands executed. **58 links/anchors** pass.
+Nightly automation, actual reopen and live release/IP/restore proof remain open
+OPS-03/#77 launch gates; these checks do not certify the proposed procedures.
+
 Cleanup/resources: all seven SQL-test temporary tables dropped; no persisted SQL
 fixtures or schema changes from those checks. All own test/build processes ended;
 `build-a` released. No stack, browser, Docker image or infrastructure was started.

@@ -2,6 +2,12 @@
 -- This release's retention also purges expired receipts: load checkpoint A's
 -- original IDs, then the independently filtered survivor IDs for B and C.
 -- Load expected_receipts as documented; both result sets must be empty.
+SELECT throwIf(count() = 0, 'no fixture receipts'),
+       throwIf(count() != {manifest_receipt_count:UInt64}, 'expected receipt manifest count mismatch')
+FROM expected_receipts WHERE project_id = {fixture_project:String} FORMAT Null;
+SELECT throwIf(count() != {manifest_receipt_count:UInt64}, 'actual receipt manifest count mismatch')
+FROM logbird.event_ids FINAL WHERE project_id = {fixture_project:String} FORMAT Null;
+
 WITH
     expected AS (SELECT * FROM expected_receipts WHERE project_id = {fixture_project:String}),
     actual AS (
