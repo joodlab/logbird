@@ -149,7 +149,9 @@ export async function searchEvents(ch: ClickHouseClient, projectId: string, q: S
   }
   const rows = await read<EventRow>(
     ch,
-    `SELECT * EXCEPT(payload,search_text) FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
+    // Sort/dedupe only narrow identity pointers; fetch wide columns for this bounded page afterward.
+    // received_at keeps the outer fetch on the exact matching version before replacement merges.
+    `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={project:String} AND (timestamp,event_id,received_at) IN (SELECT timestamp,event_id,received_at FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
     params,
   );
   const hasMore = rows.length > q.limit,

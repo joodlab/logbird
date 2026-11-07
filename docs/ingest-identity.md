@@ -206,7 +206,13 @@ The shipped reconciliation command accepts one project id only.
 Search/export return the row that passed the filter; detail chooses the oldest
 surviving receipt. Historical non-canonical rows can still match filters. This
 change cannot restore overwritten originals or globally canonicalize historical
-cursor pages. The >=10M retained-history benchmark and 1M receipt bytes remain a
+cursor pages. Search selects a bounded page of narrow (timestamp,event_id,received_at)
+pointers, then fetches only those exact wide rows. ASC/DESC event-time ordering
+comes first; the earliest receipt breaks ties at a timestamp. Filters and cursor
+boundaries apply before page-local id deduplication. A legacy id at another
+timestamp can therefore recur on a later page; new immutable writes cannot create
+that case. Detail independently chooses the oldest surviving receipt across timestamps.
+The >=10M retained-history benchmark and 1M receipt bytes remain a
 separately scheduled acceptance gate. The script shipped separately in PR #79;
 run it at the final clean PR head under heavy and logbird-stack with the approved
 cloud fixture and fourth argument `immutable`. Small real-service proofs are not

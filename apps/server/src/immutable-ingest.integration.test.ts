@@ -178,16 +178,21 @@ it('rejects NUL and split Unicode ids individually, storing healthy siblings', a
 });
 it('search, detail, export and cursor pages agree for newly immutable writes', async () => {
   for (let i = 0; i < 3; i++) expect((await f.post({ ...original, id: `page-${i}`, action: `action.${i}` })).status).toBe(202);
-  const q = { from: new Date(Date.now() - 60_000).toISOString(), to: new Date(Date.now() + 60_000).toISOString(), limit: 1, order: 'asc' as const };
-  const ids: string[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await searchEvents(clickhouse, f.project, { ...q, cursor });
-    expect(page.total).toBe(3);
-    ids.push(...page.data.map((e) => e.id));
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor);
-  expect(new Set(ids).size).toBe(3);
+  const q = { from: new Date(Date.now() - 60_000).toISOString(), to: new Date(Date.now() + 60_000).toISOString(), limit: 1 };
+  for (const order of ['asc', 'desc'] as const) {
+    const ids: string[] = [];
+    let cursor: string | undefined;
+    for (let pageIndex = 0; pageIndex < 3; pageIndex++) {
+      const page = await searchEvents(clickhouse, f.project, { ...q, order, cursor });
+      expect(page.total).toBe(3);
+      expect(page.data).toHaveLength(1);
+      ids.push(...page.data.map((e) => e.id));
+      expect(!!page.nextCursor).toBe(pageIndex < 2);
+      cursor = page.nextCursor ?? undefined;
+    }
+    expect(ids).toEqual(order === 'asc' ? ['page-0', 'page-1', 'page-2'] : ['page-2', 'page-1', 'page-0']);
+    expect(new Set(ids).size).toBe(3);
+  }
   const lines: string[] = [];
   for await (const line of exportEvents(clickhouse, f.project, { ...q, q: 'action:action.1', format: 'jsonl' })) lines.push(JSON.parse(line).action);
   expect(lines).toEqual(['action.1']);

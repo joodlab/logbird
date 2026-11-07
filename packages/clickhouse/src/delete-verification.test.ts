@@ -42,3 +42,17 @@ it('refuses further writes when the identity-index delete leaves visible rows', 
   expect(command).toHaveBeenCalledTimes(2);
   expect(command.mock.calls.every(([args]) => args.query.startsWith('DELETE FROM'))).toBe(true);
 });
+
+it('cutoff repair reads identity pointers and affected aggregate keys instead of wide event payloads', async () => {
+  const command = vi.fn().mockResolvedValue({});
+  const query = vi
+    .fn()
+    .mockImplementation(async ({ query: sql }: { query: string }) => ({ json: async () => (sql.startsWith('SELECT DISTINCT') ? [] : [{ n: 0 }]) }));
+  await purgeProject({ query, command } as unknown as ClickHouseClient, 'qa-narrow-retention', new Date('2026-11-07T00:00:00.000Z'));
+  const indexRepair = command.mock.calls.find(([p]) => p.query.startsWith('INSERT INTO event_ids'))?.[0].query as string;
+  expect(indexRepair).toMatch(/^INSERT INTO event_ids SELECT DISTINCT project_id,event_id,received_at,timestamp FROM events WHERE project_id=/);
+  expect(indexRepair).not.toMatch(/payload|search_text|SELECT \*/);
+  const affected = query.mock.calls.find(([p]) => p.query.startsWith('SELECT DISTINCT'))?.[0].query as string;
+  expect(affected).toContain('SELECT DISTINCT kind,id');
+  expect(affected).not.toMatch(/payload|search_text|SELECT \*/);
+});
