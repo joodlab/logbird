@@ -1,0 +1,33 @@
+PASS fixture ingested (10k+ rows): 10001
+PASS presence row = every support event, with 22 agents > 20 listed: {"listed":20,"otherCount":4,"anyTotal":47,"blank":false}
+PASS agent page: support events with no actor/tenant are not a customer/tenant: {"customers":["usr_long"],"tenants":["tn_qa_0"]}
+PASS − on "Any support agent" says what it will do when active: 
+PASS hidden support + click an agent → only that agent: impersonator:qa_support_02
+PASS an agent + Alt-click "Any support agent" → support hidden, agent dropped: -impersonator:*
+PASS support links in rows are not tab stops: {"inRows":29,"tabbable":0}
+PASS row name says who was at the keyboard: Booking BK-S-0-0 changed, done by support agent Maximilian Bartholomew Featherstonehaugh-Montgomery (fictional QA support) while acting as Anastasia Konstantino
+PASS Tab from a row leaves the grid (no stop on the in-row links): {"tag":"BODY","role":null,"inGrid":false,"index":null,"label":""}
+PASS Shift+Tab returns to the row: 11
+PASS Enter on a row opens the event sheet: 
+PASS Escape returns focus to the row: 
+PASS Enter on a support link opens only the agent page: {"historyEntries":1,"backEv":null}
+PASS Ctrl+End over 10k rows lands on the last loaded row: 99
+axe explorer support desktop-light: aria-allowed-role(1) textarea, label-content-name-mismatch(1) .w-\(--control-size-compact\)
+axe event-sheet support desktop-light: 0
+axe support-agent page desktop-light: aria-allowed-role(1) textarea, label-content-name-mismatch(1) .w-\(--control-size-compact\)
+axe actor split desktop-light: aria-allowed-role(1) textarea, label-content-name-mismatch(1) .w-\(--control-size-compact\)
+axe explorer support desktop-dark: aria-allowed-role(1) textarea, label-content-name-mismatch(1) .w-\(--control-size-compact\)
+axe event-sheet support desktop-dark: 0
+axe support-agent page desktop-dark: aria-allowed-role(1) textarea, label-content-name-mismatch(1) .w-\(--control-size-compact\)
+axe actor split desktop-dark: aria-allowed-role(1) textarea, label-content-name-mismatch(1) .w-\(--control-size-compact\)
+console problems (desktop): []
+PASS 390px light: long names fit (no page scroll, markers inside rows): {"pageWidth":390,"rows":21,"markersSpilling":0}
+PASS 390px light: agent page fits: 
+PASS 390px light: "Who did it" control is not cut short: {"width":305,"truncated":false,"labels":["Everything","Themselves","By support"]}
+axe explorer support phone-light: aria-allowed-role(1) textarea
+console problems (phone light): []
+PASS 390px dark: long names fit (no page scroll, markers inside rows): {"pageWidth":390,"rows":21,"markersSpilling":0}
+PASS 390px dark: agent page fits: 
+PASS 390px dark: "Who did it" control is not cut short: {"width":305,"truncated":false,"labels":["Everything","Themselves","By support"]}
+console problems (phone dark): []
+cleanup: QA project deleted: 204

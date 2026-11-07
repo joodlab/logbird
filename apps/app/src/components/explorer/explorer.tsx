@@ -10,11 +10,13 @@ import { ArrowUpIcon, ChevronDownIcon, CircleAlertIcon, FilterIcon, PanelLeftClo
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EventHistogram } from '@/components/charts/event-histogram';
+import { EventListContext } from '@/components/impersonation';
 import { QueryInput, type QueryInputHandle } from '@/components/query-input/query-input';
 import { api, langParam } from '@/lib/api/client';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, reasonTitle } from '@/lib/query-error';
+import { andQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
 import { appendSqlPredicate } from '@/lib/sql-language';
@@ -84,7 +86,8 @@ export function Explorer({
 }: ExplorerProps) {
   const { q, range, columns, ev, live } = state;
   const lang: QueryLang = allowSql && state.lang === 'sql' ? 'sql' : 'query';
-  const effectiveQ = [baseQuery, q].filter(Boolean).join(' ');
+  // The base filter (an entity or support agent) must constrain all of `q`, even one with a top-level OR.
+  const effectiveQ = andQuery(baseQuery ?? '', q);
   const queryBar = useRef<QueryInputHandle>(null);
   const eventsTable = useRef<EventsTableHandle>(null);
   const [facetsOpen, setFacetsOpen] = useState(() => {
@@ -196,6 +199,8 @@ export function Explorer({
   const selected = selectedFromRows ?? deepLinked.data?.event ?? null;
 
   const select = useCallback((e: AuditEvent | null) => onChange({ ev: e?.id }), [onChange]);
+  // Row cells link support markers to the agent page and place them by the visible columns.
+  const listContext = useMemo(() => ({ projectId, columns }), [projectId, columns]);
   // The table moves the cursor onto the open event itself (clicks, j/k in the sheet, deep links), so closing the sheet
   // returns focus to it.
   const cursorIndex = cursorId ? rows.findIndex((e) => e.id === cursorId) : -1;
@@ -242,7 +247,7 @@ export function Explorer({
   /** "Filter by this value" from the event sheet: a query term, translated to a predicate in SQL mode. */
   const addFilter = (term: string) => {
     if (lang !== 'sql') {
-      onChange({ q: `${q} ${term}`.trim(), ev: undefined });
+      onChange({ q: andQuery(q, term), ev: undefined });
       return;
     }
     const predicate = translateQueryToSql(term);
@@ -488,28 +493,30 @@ export function Explorer({
               </span>
             </div>
           ) : null}
-          <EventsTable
-            columns={columns}
-            cursorId={cursorId}
-            empty={empty}
-            fetchingMore={events.isFetchingNextPage}
-            // A refetch emptied the list while a row had focus: back to the query, the way to widen it.
-            focusFallback={() => queryBar.current?.element()}
-            freshIds={fresh}
-            hasMore={!problem && events.hasNextPage}
-            loadMore={() => events.fetchNextPage()}
-            loading={events.isPending && !problem}
-            onCursorChange={setCursorId}
-            resultKey={resultKey}
-            onSelect={(e) => {
-              setCursorId(e.id);
-              select(e);
-            }}
-            ref={eventsTable}
-            rows={rows}
-            selectedId={ev}
-            total={total}
-          />
+          <EventListContext value={listContext}>
+            <EventsTable
+              columns={columns}
+              cursorId={cursorId}
+              empty={empty}
+              fetchingMore={events.isFetchingNextPage}
+              // A refetch emptied the list while a row had focus: back to the query, the way to widen it.
+              focusFallback={() => queryBar.current?.element()}
+              freshIds={fresh}
+              hasMore={!problem && events.hasNextPage}
+              loadMore={() => events.fetchNextPage()}
+              loading={events.isPending && !problem}
+              onCursorChange={setCursorId}
+              resultKey={resultKey}
+              onSelect={(e) => {
+                setCursorId(e.id);
+                select(e);
+              }}
+              ref={eventsTable}
+              rows={rows}
+              selectedId={ev}
+              total={total}
+            />
+          </EventListContext>
         </div>
       </div>
 

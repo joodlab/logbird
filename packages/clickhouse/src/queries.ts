@@ -22,6 +22,7 @@ import type { ClickHouseClient } from './client';
 import { isQueryClient } from './client';
 import type { EventRow } from './normalize';
 import { columns, compileQuery, QueryError } from './query';
+import { rollupSql } from './rollup-sql';
 import { sqlSyntaxError, validateSql } from './sql-guard';
 
 const sqlExpression = Symbol('sqlExpression');
@@ -246,21 +247,20 @@ export async function facets(ch: ClickHouseClient, p: string, q: z.infer<typeof 
   } else if (['target_types', 'target_names', 'changes_fields'].includes(expr)) {
     expr = `arrayJoin(${expr})`;
     label = expr;
-  } else if (['actor', 'tenant', 'executor'].includes(q.field)) label = `${q.field}_name`;
+  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(q.field)) label = `${q.field}_name`;
   if (QUERY_FIELDS.some((f) => f.column === col && ['number', 'date'].includes(f.type))) {
     expr = `toString(${expr})`;
     label = expr;
   }
-  const rows = await read<{ value: string; label: string; count: number }>(
+  // Only the top `limit` groups leave ClickHouse; the window sum (computed before LIMIT) keeps otherCount exact.
+  const rows = await read<{ value: string; label: string; count: number; total: number }>(
     ch,
-    `SELECT ${expr} value,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),value) label,count() count FROM events ${join} WHERE ${w.sql} GROUP BY value ORDER BY count DESC,value`,
-    { ...w.params, attr: q.field.replace(/^(attr|attributes)\./, '') },
+    `SELECT ${expr} value,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),value) label,count() count,sum(count()) OVER () total FROM events ${join} WHERE ${w.sql} GROUP BY value ORDER BY count DESC,value LIMIT {facetLimit:UInt32}`,
+    { ...w.params, attr: q.field.replace(/^(attr|attributes)\./, ''), facetLimit: q.limit },
   );
-  return {
-    field: q.field,
-    values: rows.slice(0, q.limit).map((r) => ({ ...r, count: Number(r.count) })),
-    otherCount: rows.slice(q.limit).reduce((n, r) => n + Number(r.count), 0),
-  };
+  const values = rows.map((r) => ({ value: r.value, label: r.label, count: Number(r.count) }));
+  const total = Number(rows[0]?.total ?? 0);
+  return { field: q.field, values, otherCount: Math.max(total - values.reduce((n, v) => n + v.count, 0), 0) };
 }
 async function metrics(ch: ClickHouseClient, p: string, q: RangeQuery) {
   const w = await where(ch, p, q);
@@ -517,6 +517,22 @@ export async function hasExpiredEvents(ch: ClickHouseClient, p: string, before: 
   return Number(rows[0]?.n ?? 0) > 0;
 }
 
+async function deleteAndVerify(ch: ClickHouseClient, table: string, predicate: string, params: Params) {
+  await ch.command({
+    query: `DELETE FROM ${table} WHERE ${predicate}`,
+    query_params: params,
+    clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
+  });
+  // Native-restored parts can outrank the new database's mutation sequence.
+  // A completed mutation alone does not prove that the rows disappeared.
+  const rows = await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`, params);
+  if (Number(rows[0]?.n ?? 0) !== 0) {
+    throw Object.assign(new Error(`Delete left visible rows in ${table}; stop writers and follow the ClickHouse restore normalization procedure.`), {
+      code: 'LOGBIRD_DELETE_INCOMPLETE',
+    });
+  }
+}
+
 export async function purgeProject(ch: ClickHouseClient, p: string, before?: Date) {
   // Caller serializes ingestion. Capture only aggregate keys touched by expired rows.
   const params = {
@@ -536,11 +552,7 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
         params,
       )
     : [];
-  await ch.command({
-    query: `DELETE FROM events WHERE project_id={p:String}${before ? ' AND timestamp < {before:DateTime64(3)}' : ''}`,
-    query_params: params,
-    clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-  });
+  await deleteAndVerify(ch, 'events', `project_id={p:String}${before ? ' AND timestamp < {before:DateTime64(3)}' : ''}`, params);
   if (!before) return rebuildProjectRollups(ch, p, false);
   const filters = {
     events_by_minute: 'bucket <= {bucket:DateTime64(3)}',
@@ -553,16 +565,9 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
     entityIds: affected.filter((r) => r.kind !== 'attribute').map((r) => r.id),
     keys: affected.filter((r) => r.kind === 'attribute').map((r) => r.id),
   };
-  for (const [table, filter] of Object.entries(filters))
-    await ch.command({
-      query: `DELETE FROM ${table} WHERE project_id={p:String} AND ${filter}`,
-      query_params: scoped,
-      clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-    });
+  for (const [table, filter] of Object.entries(filters)) await deleteAndVerify(ch, table, `project_id={p:String} AND ${filter}`, scoped);
   // Recompute the boundary minute and affected entity/key histories exactly; newer buckets stay intact.
-  const { readFile } = await import('node:fs/promises');
-  const sql = await readFile(new URL('../migrations/002_rollups.sql', import.meta.url), 'utf8');
-  for (const statement of sql.split(';')) {
+  for (const statement of rollupSql.split(';')) {
     const m = statement.match(/CREATE MATERIALIZED VIEW IF NOT EXISTS \w+ TO (\w+) AS (SELECT[\s\S]+)/);
     if (!m) continue;
     const table = m[1] as keyof typeof filters;
@@ -575,16 +580,9 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
 
 /** Caller holds the project ingestion lock. Rebuild from surviving raw rows. */
 export async function rebuildProjectRollups(ch: ClickHouseClient, p: string, rebuild = true) {
-  for (const table of ['events_by_minute', 'entities', 'attribute_keys'])
-    await ch.command({
-      query: `DELETE FROM ${table} WHERE project_id={p:String}`,
-      query_params: { p },
-      clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-    });
+  for (const table of ['events_by_minute', 'entities', 'attribute_keys']) await deleteAndVerify(ch, table, 'project_id={p:String}', { p });
   if (rebuild) {
-    const { readFile } = await import('node:fs/promises');
-    const sql = await readFile(new URL('../migrations/002_rollups.sql', import.meta.url), 'utf8');
-    for (const statement of sql.split(';')) {
+    for (const statement of rollupSql.split(';')) {
       const m = statement.match(/CREATE MATERIALIZED VIEW IF NOT EXISTS \w+ TO (\w+) AS (SELECT[\s\S]+)/);
       if (!m) continue;
       const select = m[2]?.replace(
