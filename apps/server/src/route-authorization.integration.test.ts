@@ -111,7 +111,7 @@ it('denies anonymous and foreign-project requests through every concrete route; 
     await prisma.session.updateMany({ where: { userId: actor.id }, data: { activeOrganizationId: allowedOrganization } });
     await prisma.member.update({ where: { id: membership.id }, data: { role: 'member' } });
     for (const [method, pattern] of consoleMatrix.filter(([, , policy]) => policy === 'admin')) {
-      const response = await request(pathFor(pattern, allowed), method, actor.cookie, method === 'DELETE' ? undefined : {});
+      const response = await request(pathFor(pattern, allowed), method, actor.cookie, method === 'GET' || method === 'DELETE' ? undefined : {});
       expect(response.status, `member ${method} ${pattern}`).toBe(403);
       await response.text();
     }
@@ -152,6 +152,14 @@ it('denies anonymous and foreign-project requests through every concrete route; 
       expect(sql.status).toBe(422);
       await sql.text();
     }
+    const foreignRows = await (
+      await clickhouse.query({
+        query: 'SELECT action FROM events WHERE project_id={p:String}',
+        query_params: { p: foreign },
+        format: 'JSONEachRow',
+      })
+    ).json<{ action: string }>();
+    expect(foreignRows).toEqual([{ action: marker }]);
     console.log(
       `Cloud matrix: ${consoleMatrix.length} concrete routes; anonymous, cross-project, membership, role and key-scope assertions completed against real services.`,
     );
@@ -162,5 +170,15 @@ it('denies anonymous and foreign-project requests through every concrete route; 
       await prisma.organization.deleteMany({ where: { id: organization } });
     }
     await prisma.user.deleteMany({ where: { id: { in: users } } });
+    for (const table of ['events', 'events_by_minute', 'entities', 'attribute_keys']) {
+      const remaining = await (
+        await clickhouse.query({
+          query: `SELECT count() AS n FROM ${table} WHERE project_id IN {projects:Array(String)}`,
+          query_params: { projects: [...projects, ...organizations.map((id) => `ws:${id}`)] },
+          format: 'JSONEachRow',
+        })
+      ).json<{ n: number }>();
+      expect(Number(remaining[0]?.n), `fixture cleanup ${table}`).toBe(0);
+    }
   }
 }, 180_000);
