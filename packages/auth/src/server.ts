@@ -100,7 +100,7 @@ export const auth = betterAuth({
         before: (session) => stageSessionEnd(session, authAuditContext.getStore()),
         after: async (session) => {
           try {
-            await confirmSessionEnd(session);
+            await confirmSessionEnd(session, authAuditContext.getStore());
           } catch {
             console.error(JSON.stringify({ event: 'auth.audit_storage_unavailable', action: 'auth.session.end.confirm' }));
           }

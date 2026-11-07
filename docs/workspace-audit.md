@@ -24,6 +24,11 @@ with `confirmedAt = null`. Before-hook failure prevents deletion. The after-hook
 the payload or failing an already successful action. The API reconciles intents older than 60 seconds: a missing
 Session confirms deletion; a still-present Session is retained in quarantine as `not_committed`. Expiry cleanup is
 excluded. Non-secret revoked-session creation time, address and user-agent are separate from requester context.
+A later explicit retry may refresh a proved-aborted, never-claimed intent with the new action/request before deletion.
+Pending concurrent attempts return a retryable error; a stale after-hook cannot confirm another request's intent.
+Confirmed payloads and all delivery retries remain frozen.
+If an unconfirmed session has disappeared after its original expiry, reconciliation quarantines it as
+`expired_session_intent`: implicit expiry cleanup is ambiguous and must never become an attributed user revocation.
 `auth.signed_in` uses deterministic `auth:signin:?` ids; the short creation-to-after-hook crash/storage window remains
 tracked in [#82](https://github.com/joodlab/logbird/issues/82), along with better-auth member/invitation/organization-creation
 hooks. Those successful committed actions retain their successful response if enqueue fails, with a safe diagnostic.

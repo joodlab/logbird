@@ -35,11 +35,17 @@ it('recovers a session deletion crash, retains aborted intents, and freezes revo
     });
     const deleted = await makeSession(),
       aborted = await makeSession();
+    const expiredIntent = await makeSession();
+    expiredIntent.expiresAt = new Date(Date.now() + 10_000);
+    await prisma.session.update({ where: { id: expiredIntent.id }, data: { expiresAt: expiredIntent.expiresAt } });
     const context = { path: '/api/auth/revoke-other-sessions', requestId: token, ip: '203.0.113.11', userAgent: 'QA requester' };
     await stageSessionEnd(deleted, context);
     await stageSessionEnd(aborted, context);
+    await stageSessionEnd(expiredIntent, context);
     expect(await claimAuditEvents()).toHaveLength(0);
     await prisma.session.delete({ where: { id: deleted.id } }); // Simulated process loss: no after-hook.
+    await prisma.session.delete({ where: { id: expiredIntent.id } }); // Lost intent could later disappear through expiry cleanup.
+    await confirmSessionEnd(expiredIntent); // Implicit cleanup has no explicit request context.
     await reconcileSessionAudit(new Date(Date.now() + 61_000));
     const rows = await prisma.auditOutbox.findMany({ where: { stream: `ws:${org}` } });
     const recovered = rows.find((row) => row.sourceSessionId === deleted.id);
@@ -53,9 +59,26 @@ it('recovers a session deletion crash, retains aborted intents, and freezes revo
     if (!notCommitted) throw new Error('Aborted intent missing');
     expect(notCommitted).toMatchObject({ confirmedAt: null, lastError: 'not_committed' });
     expect(notCommitted.quarantinedAt).not.toBeNull();
+    expect(rows.find((row) => row.sourceSessionId === expiredIntent.id)).toMatchObject({ confirmedAt: null, lastError: 'expired_session_intent' });
+    const retry = { ...context, path: '/api/auth/sign-out', requestId: randomUUID(), ip: '203.0.113.12' };
+    await stageSessionEnd(aborted, retry);
+    await expect(stageSessionEnd(aborted, { ...retry, requestId: randomUUID() })).rejects.toMatchObject({ status: 'SERVICE_UNAVAILABLE' });
+    // A late after-hook from the aborted request must not confirm the new attempt.
+    await confirmSessionEnd(aborted, context);
+    expect((await prisma.auditOutbox.findUniqueOrThrow({ where: { id: notCommitted.id } })).confirmedAt).toBeNull();
+    await prisma.session.delete({ where: { id: aborted.id } });
+    await confirmSessionEnd(aborted, retry);
+    expect(await prisma.auditOutbox.findUniqueOrThrow({ where: { id: notCommitted.id } })).toMatchObject({
+      quarantinedAt: null,
+      lastError: null,
+      payload: { action: 'auth.signed_out', context: { requestId: retry.requestId, ip: retry.ip } },
+    });
     await deliverOutboxEvent(recovered.id, async () => ({ accepted: 1, rejected: [] }));
     await confirmSessionEnd(deleted); // Idempotent confirmation cannot rewrite frozen evidence.
     expect((await prisma.auditOutbox.findUniqueOrThrow({ where: { id: recovered.id } })).deliveredAt).not.toBeNull();
+    const frozen = (await prisma.auditOutbox.findUniqueOrThrow({ where: { id: notCommitted.id } })).payload;
+    await stageSessionEnd(aborted, { ...retry, requestId: randomUUID() }); // Source is gone; no rewrite.
+    expect((await prisma.auditOutbox.findUniqueOrThrow({ where: { id: notCommitted.id } })).payload).toEqual(frozen);
   } finally {
     await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${org}` } });
     await prisma.organization.deleteMany({ where: { id: org } });
