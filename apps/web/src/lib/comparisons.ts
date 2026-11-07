@@ -6,6 +6,8 @@
  * Inline marks: `code` and **bold** (rendered by components/marketing/rich.tsx).
  */
 
+import { GITHUB_PUBLIC } from '../env';
+
 export const ACCESSED = '2026-11-07';
 
 export const TRADEMARK_LINE =
@@ -59,6 +61,10 @@ const src = (id: string, title: string, url: string, also?: string[]): Compariso
 
 const range = (prefix: string, from: number, to: number) => Array.from({ length: to - from + 1 }, (_, index) => `${prefix}${from + index}`);
 
+// Nobody can self-host before the source opens, so the cell says so until WEB_GITHUB_PUBLIC=true.
+const LOGBIRD_SELF_HOST = GITHUB_PUBLIC
+  ? 'Yes: Docker Compose or Coolify, built from source'
+  : 'Planned: Docker Compose or Coolify, when the source opens';
 const LOGBIRD_PRICING = 'Self-host free (MIT); Cloud pricing not set';
 const LOGBIRD_VIEWER = 'None yet; read API plus headless Vue helpers';
 const LOGBIRD_READ = '`GET /v1/events` with a project read key';
@@ -78,7 +84,7 @@ const retraced: Comparison = {
     { label: 'Licence', logbird: 'MIT', them: 'Apache-2.0', sourceIds: ['S5'] },
     {
       label: 'Self-host',
-      logbird: 'Yes: Docker Compose or Coolify, built from source (repository opens soon)',
+      logbird: LOGBIRD_SELF_HOST,
       them: 'Yes: Docker Compose; also documented for DigitalOcean, AWS and Skaffold; the Kubernetes docs page says "Coming soon"',
       sourceIds: ['S6', 'S7'],
     },
@@ -206,7 +212,7 @@ const workos: Comparison = {
     { label: 'Licence and source', logbird: 'MIT; source opens publicly soon', them: 'No source code or licence published', sourceIds: ['W1', 'W2'] },
     {
       label: 'Self-host',
-      logbird: 'Yes: Docker Compose or Coolify (repository opens soon)',
+      logbird: LOGBIRD_SELF_HOST,
       them: "No self-host option documented. The on-prem guide covers your app calling WorkOS's cloud.",
       sourceIds: ['W6'],
     },
@@ -232,7 +238,7 @@ const workos: Comparison = {
     {
       label: 'Export',
       logbird: 'CSV or JSONL from the explorer',
-      them: 'CSV export via API, one organization and date range at a time, covering the past three months',
+      them: 'CSV export through the Dashboard and the API, one organization and date range at a time, covering the past three months',
       sourceIds: ['W10'],
     },
     { label: 'Streaming to SIEM', logbird: 'On the roadmap', them: 'Log Streams to seven destination types', sourceIds: ['W5'] },
@@ -249,11 +255,11 @@ const workos: Comparison = {
       them: "Export API; Widgets GraphQL API to search one organization's events",
       sourceIds: ['W10', 'W12'],
     },
-    { label: 'Storage engine', logbird: LOGBIRD_STORAGE, them: 'Not disclosed', sourceIds: [] },
+    { label: 'Storage engine', logbird: LOGBIRD_STORAGE, them: 'Not stated in public docs', sourceIds: [] },
     {
       label: 'Pricing',
       logbird: LOGBIRD_PRICING,
-      them: '$0/month base; $125/month per SIEM connection; $99/month per million events stored (as of 2026-11-07)',
+      them: '$0/month listed on the product page; $125/month per SIEM connection; $99/month per million events stored (as of 2026-11-07)',
       sourceIds: ['W1', 'W13'],
     },
   ],
@@ -316,7 +322,7 @@ const pangea: Comparison = {
     body: "As of 7 November 2026: CrowdStrike completed its acquisition of Pangea on 26 September 2025, and Pangea's product and signup pages redirect to CrowdStrike, while the Secure Audit Log documentation and API are still published. Check current availability with CrowdStrike.",
     sourceIds: ['P5', 'P6', 'P7'],
   },
-  card: 'A hosted, tamperproof audit log with cryptographic proofs. Pangea is now part of CrowdStrike.',
+  card: 'A hosted, tamperproof audit log with cryptographic proofs. Part of CrowdStrike since September 2025.',
   fit: "You need cryptographic proof that audit events haven't been changed.",
   rows: [
     {
@@ -327,7 +333,7 @@ const pangea: Comparison = {
     },
     {
       label: 'Self-host',
-      logbird: 'Yes: Docker Compose or Coolify (repository opens soon)',
+      logbird: LOGBIRD_SELF_HOST,
       them: "No self-host option documented; Pangea's Edge and Private Cloud models don't list the audit service",
       sourceIds: ['P10', 'P11'],
     },
@@ -362,12 +368,12 @@ const pangea: Comparison = {
       them: 'Embeddable React component, `@pangeacyber/react-mui-audit-log-viewer`, wired to your backend',
       sourceIds: ['P9'],
     },
-    { label: 'Storage engine', logbird: LOGBIRD_STORAGE, them: 'Not disclosed', sourceIds: [] },
+    { label: 'Storage engine', logbird: LOGBIRD_STORAGE, them: 'Not stated in public docs', sourceIds: [] },
     {
       label: 'Pricing',
       logbird: LOGBIRD_PRICING,
-      them: 'Credit-based pay-as-you-go, with a $5 monthly credit per organization',
-      sourceIds: ['P16'],
+      them: 'No public price list; signup redirects to CrowdStrike',
+      sourceIds: ['P7', 'P16'],
     },
   ],
   chooseThem: [
@@ -380,7 +386,9 @@ const pangea: Comparison = {
     'Your events must **stay on your own servers**, under an MIT licence.',
     'You want to **send any shape** without designing a fixed schema first.',
     'Your team investigates with an **operator console**: entity pages, operation trees, workers and retries, and SQL.',
-    'You want **SQL-level questions** answered against your own ClickHouse, under limits you can read in the code.',
+    GITHUB_PUBLIC
+      ? 'You want **SQL-level questions** answered against your own ClickHouse, under limits you can read in the code.'
+      : 'You want **SQL-level questions** answered against your own ClickHouse, under documented limits.',
   ],
   sources: [
     src(
@@ -422,12 +430,12 @@ const pangea: Comparison = {
     src('P15', 'Retention tiers (same page as P4); cold export', 'https://pangea.cloud/docs/audit/using-secure-audit-log/cold-export'),
     src(
       'P16',
-      'Billing: credit-based, pay-as-you-go, $5 complimentary monthly balance',
+      'Billing page: renders no price list ("Loading billing information…")',
       'https://pangea.cloud/docs/admin-guide/organizations/billing/',
     ),
   ],
   unverified:
-    "Whether CrowdStrike still sells Secure Audit Log to new customers; per-unit prices (the public billing page doesn't render them; figures exist only in the page's script source); the signing and hash algorithms; the storage engine; whether `message` is required in the default template.",
+    "Whether CrowdStrike still sells Secure Audit Log to new customers; the pricing model (the public billing page describes credit-based pay-as-you-go with a monthly credit, but doesn't render the figures, which exist only in the page's script source, and signup now redirects to CrowdStrike); the signing and hash algorithms; the storage engine; whether `message` is required in the default template.",
 };
 
 const bemi: Comparison = {
@@ -463,7 +471,7 @@ const bemi: Comparison = {
     { label: 'Licence', logbird: 'MIT', them: 'Core: SSPL-1.0; ORM packages: LGPL-3.0', sourceIds: ['B6', 'B7', 'B8'] },
     {
       label: 'Self-host',
-      logbird: 'Yes: Docker Compose or Coolify (repository opens soon)',
+      logbird: LOGBIRD_SELF_HOST,
       them: 'Open-source version "designed for evaluation and non-critical workloads"; a licensed Self-Hosting Enterprise edition for production',
       sourceIds: ['B9'],
     },

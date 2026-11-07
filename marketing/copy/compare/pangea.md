@@ -30,15 +30,15 @@ path: /compare/pangea
   | | Logbird | Pangea Secure Audit Log |
   | --- | --- | --- |
   | Licence and source | MIT | Hosted service, no source published; SDKs and the viewer component are MIT [P8, P9] |
-  | Self-host | Yes: Docker Compose or Coolify | No self-host option documented; Pangea's Edge and Private Cloud models don't list the audit service [P10, P11] |
+  | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: …, built from source" once public) | No self-host option documented; Pangea's Edge and Private Cloud models don't list the audit service [P10, P11] |
   | Hosting model | Self-hosted, MIT (source opens soon); Logbird Cloud waitlist | Hosted by Pangea [P12] |
   | Schema | Any JSON with an `action`; recommended envelope | Templates (for example Timestamp, Actor, Action, Status, Target, Source, Tenant ID, Old, New, Message) or a custom schema per configuration; the schema can't change after creation [P13] |
   | Tamper evidence | None | Merkle-tree tamperproofing, roots published to Arweave, optional event signing [P2] |
   | Search | Query language and guarded SQL `WHERE` mode | `field:value` with `AND`, `OR`, parentheses and quotes; up to 10,000 results per search [P14, P12] |
   | Retention | Per project, 7 days to 10 years; hourly permanent deletion | Hot up to 14 days, warm up to 10 years, cold up to 10 years (cold retrievable on request) [P15] |
   | Customer-facing viewer | None yet; read API plus headless Vue helpers | Embeddable React component, `@pangeacyber/react-mui-audit-log-viewer`, wired to your backend [P9] |
-  | Storage engine | ClickHouse for events, Postgres for metadata | Not disclosed |
-  | Pricing | Self-host free (MIT); Cloud pricing not set | Credit-based pay-as-you-go, with a $5 monthly credit per organization [P16] |
+  | Storage engine | ClickHouse for events, Postgres for metadata | Not stated in public docs |
+  | Pricing | Self-host free (MIT); Cloud pricing not set | No public price list; signup redirects to CrowdStrike [P7, P16] |
 
 - **visual:** none
 
@@ -61,7 +61,7 @@ path: /compare/pangea
   - Your events must **stay on your own servers**, under an MIT licence.
   - You want to **send any shape** without designing a fixed schema first.
   - Your team investigates with an **operator console**: entity pages, operation trees, workers and retries, and SQL.
-  - You want **SQL-level questions** answered against your own ClickHouse, under limits you can read in the code.
+  - You want **SQL-level questions** answered against your own ClickHouse, under documented limits ("limits you can read in the code" once the source is public).
 - **cta:** Self-host Logbird → `/self-hosting` · Join the waitlist → `/contact`
 - **visual:** none
 
@@ -92,9 +92,11 @@ path: /compare/pangea
   - P14 — Searching the logs. https://pangea.cloud/docs/audit/using-secure-audit-log/searching-the-logs
   - P15 — Retention tiers (same page as P4); cold export.
     https://pangea.cloud/docs/audit/using-secure-audit-log/cold-export
-  - P16 — Billing: credit-based, pay-as-you-go, $5 complimentary monthly balance.
+  - P16 — Billing page: renders no price list ("Loading billing information…"); the credit model is listed under
+    unverified.
     https://pangea.cloud/docs/admin-guide/organizations/billing/
-- **unverified (left out of the table):** whether CrowdStrike still sells Secure Audit Log to new customers; per-unit
+- **unverified (left out of the table):** whether CrowdStrike still sells Secure Audit Log to new customers; the pricing model (credit-based pay-as-you-go
+  with a monthly credit appears only in the billing page's script source, and signup redirects to CrowdStrike); per-unit
   prices (the public billing page doesn't render them; figures exist only in the page's script source); the signing
   and hash algorithms; the storage engine; whether `message` is required in the default template.
 - **visual:** none

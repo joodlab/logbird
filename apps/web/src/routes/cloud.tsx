@@ -9,8 +9,11 @@ import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { GITHUB_PUBLIC } from '../env';
 import { cx } from '../lib/cx';
 import { faqLd, pageHead } from '../lib/seo';
+import { getPage } from '../lib/site-map';
 
 // Copy: marketing/copy/cloud.md. Change wording there first. No prices, limits, SLAs or dates on this page.
+const privacyReady = getPage('/legal/privacy').ready;
+
 const faq: FaqItem[] = [
   { q: 'When does Logbird Cloud open?', a: "We haven't set a date. People on the waitlist hear first." },
   {
@@ -35,8 +38,11 @@ const faq: FaqItem[] = [
   { q: 'Will there be an SLA?', a: "We'll publish service levels and limits together with the cloud's launch terms." },
   {
     q: 'What do you do with my waitlist email?',
-    a: 'We store it to contact you about Logbird. No trackers. See the privacy notice.',
-    body: (
+    // The privacy notice is referenced only once /legal/privacy is ready (site-map), here and in the FAQ JSON-LD.
+    a: privacyReady
+      ? 'We store it to contact you about Logbird. No trackers. See the privacy notice.'
+      : 'We store it to contact you about Logbird. No trackers.',
+    body: privacyReady ? (
       <>
         We store it to contact you about Logbird. No trackers. See the{' '}
         <Link className="text-link" to="/legal/privacy">
@@ -44,7 +50,7 @@ const faq: FaqItem[] = [
         </Link>
         .
       </>
-    ),
+    ) : undefined,
   },
 ];
 
@@ -135,7 +141,7 @@ function CloudPage() {
         }
         aside={<StatusPanel />}
         eyebrow="Logbird Cloud"
-        lead="Logbird Cloud will run the same open-source codebase you can self-host. We run the servers, the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is."
+        lead="Logbird Cloud will run the same open-source codebase you can self-host. We'll run the servers, the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is."
         title="The same Logbird, run by us."
       />
 

@@ -24,6 +24,7 @@ const INTERESTS = [
   { value: 'cloud', label: 'The Logbird Cloud waitlist' },
   { value: 'self-host', label: 'Self-hosting, when the source opens' },
   { value: 'updates', label: 'Product updates only' },
+  { value: 'correction', label: 'A correction to one of our pages' },
   { value: 'other', label: 'A question, or support and enterprise' },
 ] as const;
 

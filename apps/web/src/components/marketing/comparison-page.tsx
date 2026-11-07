@@ -169,7 +169,7 @@ export function ComparisonPage({ comparison, figure }: { comparison: Comparison;
               title="Sources"
             />
             <div className="flex flex-wrap gap-3">
-              <ButtonLink to="/contact" variant="outline">
+              <ButtonLink search={{ interest: 'correction' }} to="/contact" variant="outline">
                 Report an outdated fact
               </ButtonLink>
               <ButtonLink to="/compare" variant="ghost">

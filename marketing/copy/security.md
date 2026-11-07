@@ -12,7 +12,8 @@ path: /security
 - **eyebrow:** Security
 - **heading (H1):** How Logbird handles your data.
 - **body:** An audit log holds sensitive history, so this page says what Logbird does with it and where each
-  protection stops. The repository's `SECURITY.md` and `docs/SPEC.md` have the details.
+  protection stops. The repository's `SECURITY.md` and `docs/SPEC.md` have the details. <!-- this sentence only once
+  WEB_GITHUB_PUBLIC=true: readers can't open the repository before then -->
 - **visual:** an "On this page" list linking to each section below.
 
 ## self-host
@@ -21,7 +22,7 @@ path: /security
 - **eyebrow:** Where data lives
 - **heading:** Self-hosted, your events stay on your servers.
 - **body:** When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your
-  own Postgres. The self-hosted software doesn't send usage data back to us. The one outside service it needs is the SMTP provider
+  own Postgres. The self-hosted software doesn't send usage data back to us. The server's only outbound connection is to the SMTP provider
   you choose, which delivers sign-in codes and invitations.
   <!-- source: docs/self-hosting.md; README.md §Architecture; no analytics/telemetry code found in apps/ or packages/ (grep, 2026-11-07) — owner to confirm -->
 - **visual:** diagram: one box labelled "Your server" holding console, API, worker, Postgres, ClickHouse and Redis.
@@ -149,8 +150,9 @@ path: /security
   you. We don't offer a response-time SLA yet.
   <!-- site rule: the site names only the security email, never a GitHub reporting flow -->
   <!-- source: SECURITY.md -->
-- **contact:** `security@logbird.dev` — **placeholder**. The domain isn't bought yet, and `SECURITY.md` has no
-  contact address configured. The owner must set a real address before launch.
+- **contact:** `WEB_SECURITY_EMAIL`, with **no default**. Until the owner sets it, say what `SECURITY.md` says: ask the
+  maintainers for a private channel (through the contact form), and don't include details. A missing mailbox or the
+  provisional domain is a release blocker (`apps/web/src/lib/release.ts`).
 - **visual:** none
 
 ## dont-claim

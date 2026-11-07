@@ -82,7 +82,7 @@ export const siteMap: SitePage[] = [
   {
     path: '/open-source',
     title: 'Open source',
-    description: 'Logbird is MIT-licensed. API, console, worker, SDK and integrations live in one repository, which opens publicly soon.',
+    description: 'The Logbird product is MIT-licensed: API, console, worker, SDK and integrations, in one repository that opens publicly soon.',
     section: 'developers',
     priority: 0.8,
     changefreq: 'monthly',
@@ -146,7 +146,7 @@ export const siteMap: SitePage[] = [
     path: '/compare/pangea',
     title: 'Pangea',
     description:
-      'Pangea Secure Audit Log is a hosted, tamperproof audit log with Merkle-tree proofs. How it compares with Logbird, sourced and dated.',
+      'Pangea Secure Audit Log, now part of CrowdStrike, is a hosted, tamperproof audit log. How it compares with Logbird, sourced and dated.',
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',

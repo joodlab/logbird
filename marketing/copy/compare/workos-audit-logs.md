@@ -27,18 +27,18 @@ path: /compare/workos-audit-logs
   | | Logbird | WorkOS Audit Logs |
   | --- | --- | --- |
   | Licence and source | MIT; source opens publicly soon | No source code or licence published [W1, W2] |
-  | Self-host | Yes: Docker Compose or Coolify | No self-host option documented. The on-prem guide covers your app calling WorkOS's cloud. [W6] |
+  | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: …, built from source" once public) | No self-host option documented. The on-prem guide covers your app calling WorkOS's cloud. [W6] |
   | Hosting model | Self-hosted, MIT (source opens soon); Logbird Cloud waitlist | Hosted by WorkOS [W2] |
   | Schema | Any JSON with an `action`; nothing to register | Event schemas must be configured per action before you emit; metadata JSON Schema validation is optional [W2, W7, W8] |
   | Required event fields | `action` | `organization_id`, `action`, `occurred_at`, `actor`, `targets`, `context` [W9] |
   | Search | Query language and guarded SQL `WHERE` mode in the console | Filter by actors, events, targets and dates in the Dashboard and Admin Portal [W1, W2] |
-  | Export | CSV or JSONL from the explorer | CSV export via API, one organization and date range at a time, covering the past three months [W10] |
+  | Export | CSV or JSONL from the explorer | CSV export through the Dashboard and the API, one organization and date range at a time, covering the past three months [W10] |
   | Streaming to SIEM | On the roadmap | Log Streams to seven destination types [W5] |
   | Retention | Per project, 7 days to 10 years; can be lowered, with a preview and permanent deletion | Per organization; 30 days by default; can be raised up to 10 years; lowering isn't supported [W2, W11] |
   | Customer-facing viewer | None yet; read API plus headless Vue helpers | Admin Portal: view and export events [W3] |
   | Programmatic read | `GET /v1/events` with a project read key | Export API; Widgets GraphQL API to search one organization's events [W10, W12] |
-  | Storage engine | ClickHouse for events, Postgres for metadata | Not disclosed |
-  | Pricing | Self-host free (MIT); Cloud pricing not set | $0/month base; $125/month per SIEM connection; $99/month per million events stored (as of 2026-11-07) [W1, W13] |
+  | Storage engine | ClickHouse for events, Postgres for metadata | Not stated in public docs |
+  | Pricing | Self-host free (MIT); Cloud pricing not set | $0/month listed on the product page; $125/month per SIEM connection; $99/month per million events stored (as of 2026-11-07) [W1, W13] |
 
 - **visual:** none
 

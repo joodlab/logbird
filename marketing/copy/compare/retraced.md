@@ -27,7 +27,7 @@ path: /compare/retraced
   | | Logbird | Retraced |
   | --- | --- | --- |
   | Licence | MIT | Apache-2.0 [S5] |
-  | Self-host | Yes: Docker Compose or Coolify, built from source | Yes: Docker Compose; also documented for DigitalOcean, AWS and Skaffold; the Kubernetes docs page says "Coming soon" [S6, S7] |
+  | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: …, built from source" once public) | Yes: Docker Compose; also documented for DigitalOcean, AWS and Skaffold; the Kubernetes docs page says "Coming soon" [S6, S7] |
   | Hosted offering | Logbird Cloud: waitlist only | None found [S8] |
   | Required event fields | `action` only; any other shape accepted | `action` and `crud` in the API spec; the docs also list `actor` as mandatory [S9, S10] |
   | Tenant field | `tenant` (optional) | `group` (optional in the API spec) [S10] |

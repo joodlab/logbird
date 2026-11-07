@@ -35,7 +35,7 @@ path: /compare/bemi
   | How it captures | SDK or HTTP calls you add | Postgres logical replication (WAL), through Debezium and NATS JetStream [B1, B5] |
   | Databases | Any; Logbird doesn't read your database | PostgreSQL [B4, B5] |
   | Licence | MIT | Core: SSPL-1.0; ORM packages: LGPL-3.0 [B6, B7, B8] |
-  | Self-host | Yes: Docker Compose or Coolify | Open-source version "designed for evaluation and non-critical workloads"; a licensed Self-Hosting Enterprise edition for production [B9] |
+  | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: …, built from source" once public) | Open-source version "designed for evaluation and non-critical workloads"; a licensed Self-Hosting Enterprise edition for production [B9] |
   | Hosted offering | Logbird Cloud: waitlist only | Bemi Cloud [B9] |
   | Data model | Recommended envelope: actor, executor, tenant, targets, changes, operation | `changes` table: database, schema, table, primary key, operation, before, after, context [B3] |
   | Query | Query language and guarded SQL `WHERE` mode in a console | SQL on the `changes` table, or ORM helpers (Prisma, Rails and others) [B3, B10, B11] |

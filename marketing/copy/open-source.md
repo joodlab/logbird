@@ -10,7 +10,9 @@ path: /open-source
 
 - **id:** `hero`
 - **eyebrow:** Open source
-- **heading (H1):** MIT-licensed. All of it.
+- **heading (H1):** The product is MIT-licensed.
+  <!-- source: LICENSE. Covers the API, console, worker, SDK and integrations; experiments/forge carries its own
+  Apache-2.0 LICENSE, so never claim "all of it". -->
 - **body:** Logbird is released under the MIT licence. The API, the console, the retention worker, the SDK and the
   integrations are in one repository. You can read the code, run it, change it and ship it in your own product.
   <!-- source: LICENSE (MIT). Its copyright line names the publisher: owner-gated (WEB_ORG_NAME), not quoted on the site until approved -->
@@ -78,7 +80,8 @@ path: /open-source
 - **id:** `security`
 - **eyebrow:** Security reports
 - **heading:** Found a vulnerability? Tell us privately.
-- **body:** Don't open a public issue. Email the security contact (`SECURITY_EMAIL` in `apps/web/src/env.ts`).
+- **body:** Don't open a public issue. Email the security contact (`WEB_SECURITY_EMAIL`; no default). While it's unset,
+  use `SECURITY.md`'s wording: ask the maintainers for a private channel through the contact form.
   Include the affected version, a reproduction with fictional data, and the impact. We coordinate the fix and the
   disclosure with you privately. We don't offer a response-time SLA yet.
   <!-- site rule: the site names only the security email, never a GitHub reporting flow -->
