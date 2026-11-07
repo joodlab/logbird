@@ -1,4 +1,4 @@
-# Self-hosting
+﻿# Self-hosting
 
 ## Five-minute quickstart
 
@@ -233,6 +233,55 @@ RESTORE DATABASE logbird FROM Disk('backups', 'logbird.zip');
 ```sh
 docker compose --env-file .env.restore -p logbird-restore cp backups/restore.sql clickhouse:/tmp/logbird-restore.sql
 docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --queries-file /tmp/logbird-restore.sql'
+```
+
+**Keep the full stack stopped until completing this recovery gate.** On the
+pinned ClickHouse 26.9.27.3, restored parts can retain
+mutation versions higher than the new database's delete mutations. A mutation
+can report success while leaving rows visible. Logbird verifies deletion and
+fails with `LOGBIRD_DELETE_INCOMPLETE` before inserting duplicate rollups. See
+[issue #75](https://github.com/joodlab/logbird/issues/75).
+
+Normalization is an explicit offline operator step. Stop server, worker and all
+ingesters, preserve the matched backup, and reserve disk for another full raw
+table plus merge headroom. Copy `scripts/clickhouse-restore-dry-run.sql` into the
+container and execute it with `--multiquery --queries-file`, using the same
+`docker compose cp` and authenticated client pattern above. This read-only dry
+run shows the table/view inventory, active parts, mutations and raw checksums:
+
+```sh
+docker compose --env-file .env.restore -p logbird-restore cp scripts/clickhouse-restore-dry-run.sql clickhouse:/tmp/restore-dry-run.sql
+docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --multiquery --queries-file /tmp/restore-dry-run.sql'
+```
+
+Review custom materialized views and clear all their destinations before replay.
+The bundled normalization handles migration 006 / PR #62's `event_ids` destination
+when present, preventing `event_ids_mv` from populating it twice. After that
+migration lands, also verify one receipt per distinct `(project_id,event_id)`.
+Do not proceed if `events_restore_staging` exists: it may be the only complete
+recovery copy from an interrupted attempt.
+
+After reviewing the dry run, explicitly copy and execute
+`scripts/clickhouse-restore-normalize.sql` with `--multiquery --queries-file`.
+
+```sh
+docker compose --env-file .env.restore -p logbird-restore cp scripts/clickhouse-restore-normalize.sql clickhouse:/tmp/restore-normalize.sql
+docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --multiquery --queries-file /tmp/restore-normalize.sql'
+```
+
+It stages visible raw rows in a new on-disk table, verifies full-row equality in
+both directions with `EXCEPT ALL`, truncates raw and rollup tables, then inserts
+raw rows through the existing views once. `received_at` and `payload` are copied
+unchanged. Full-row equality and independent minute/entity/attribute totals must
+pass after replay. Nothing runs automatically during restore.
+
+On any error, keep writers stopped and retain staging and backup; do not blindly
+rerun. Staging deliberately remains for recovery. Test a failed-retention retry
+and recheck logical totals before switching traffic. Only after successful
+verification may the operator drop `logbird.events_restore_staging` and start
+the full stack. Keep the backup until the complete recovery acceptance passes.
+
+```sh
 docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml up -d
 ```
 
