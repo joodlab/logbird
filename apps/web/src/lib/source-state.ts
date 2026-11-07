@@ -14,3 +14,18 @@ export const SOURCE_STATE_PHRASES = [
   "isn't public",
   "you'll be able to self-host",
 ] as const;
+
+/**
+ * Phrases that say the source is already open. The mirror of the list above: scripts/check-source-state.ts fails a
+ * private build (WEB_GITHUB_PUBLIC unset) that renders any of them.
+ */
+export const SOURCE_OPEN_PHRASES = [
+  'released it under',
+  'Self-host Logbird today',
+  'Self-host it',
+  'today, self-host Logbird',
+  'codebase you can self-host',
+  'source on GitHub',
+  'repository on GitHub',
+  'Source on GitHub, under',
+] as const;
