@@ -1,2 +1,2 @@
 import { defineConfig } from 'vitest/config';
-export default defineConfig({ resolve: { tsconfigPaths: true }, test: { include: ['src/**/*.test.ts'] } });
+export default defineConfig({ resolve: { tsconfigPaths: true, dedupe: ['react', 'react-dom'] }, test: { include: ['src/**/*.test.ts'] } });

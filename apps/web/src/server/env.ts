@@ -14,6 +14,10 @@ export const serverEnv = createEnv({
     SMTP_PASSWORD: z.string().optional(),
     MAIL_FROM: z.string().default(`Logbird <${CONTACT_EMAIL}>`),
     WAITLIST_NOTIFY_TO: z.email().default(CONTACT_EMAIL),
+    /** Where the Node adapter appends submissions (PII). Default: apps/web/.data/waitlist.jsonl (gitignored). */
+    WAITLIST_FILE: z.string().optional(),
+    /** Extra origins allowed to post the form, comma-separated (e.g. a staging host). */
+    WEB_ALLOWED_ORIGINS: z.string().optional(),
   },
   isServer: true,
   runtimeEnv: process.env,

@@ -3,16 +3,25 @@ import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
 import { defineConfig, loadEnv } from 'vite';
+import { localPublicUrls, PUBLIC_ENV_KEYS } from './src/env';
 import { llmsTxt, robotsTxt, sitemapXml } from './src/lib/discovery';
 import { securityHeaders } from './src/lib/security-headers';
 import { prerenderPaths } from './src/lib/site-map';
 
 export default defineConfig(({ mode }) => {
   const loaded = { ...loadEnv(mode, '../..', ''), ...loadEnv(mode, process.cwd(), ''), ...process.env };
-  const publicEnv = Object.fromEntries(['SITE_URL', 'APP_URL', 'GITHUB_URL', 'GITHUB_PUBLIC'].map((key) => [key, loaded[key]]));
+  // Only WEB_* variables reach the site, so the console's APP_URL (localhost in the shared .env) never leaks in.
+  const publicEnv = Object.fromEntries(PUBLIC_ENV_KEYS.map((key) => [key, loaded[key]]));
   const preset = process.env.NITRO_PRESET ?? 'node-server';
+  if (preset === 'cloudflare-module') {
+    const local = localPublicUrls(publicEnv);
+    if (local.length) {
+      throw new Error(`A public (Cloudflare) build can't point at a developer machine: ${local.join(', ')}.`);
+    }
+  }
   return {
-    resolve: { tsconfigPaths: true },
+    // One React for the site and @logbird/ui (which resolves React from the workspace root).
+    resolve: { tsconfigPaths: true, dedupe: ['react', 'react-dom'] },
     define: { __SITE_ENV__: JSON.stringify(publicEnv), 'import.meta.env.NITRO_PRESET': JSON.stringify(preset) },
     server: { port: 4620, strictPort: true },
     preview: { port: 4620, strictPort: true },

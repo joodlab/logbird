@@ -1,4 +1,5 @@
-import { GITHUB_PUBLIC, GITHUB_URL, SITE_URL } from '../env';
+import { GITHUB_PUBLIC, GITHUB_URL, ORG_NAME, SITE_URL } from '../env';
+import { pageIndexable } from './release';
 import { getPage } from './site-map';
 export const canonicalHref = (path: string) => new URL(path, `${SITE_URL}/`).href;
 export function pageMeta({
@@ -39,18 +40,27 @@ export function pageMeta({
 function ld(data: Record<string, unknown>) {
   return { type: 'application/ld+json', children: JSON.stringify({ '@context': 'https://schema.org', ...data }).replaceAll('<', '\\u003c') };
 }
+/** Only when the publisher's legal name is set (WEB_ORG_NAME, pending the owner); otherwise no company is named. */
 export const organizationLd = () =>
-  ld({
-    '@type': 'Organization',
-    '@id': `${SITE_URL}/#organization`,
-    name: 'Joodlab',
-    alternateName: 'Logbird',
-    url: SITE_URL,
-    logo: canonicalHref('/brand/logbird-wordmark-light.svg'),
-    ...(GITHUB_PUBLIC ? { sameAs: [GITHUB_URL] } : {}),
-  });
+  ORG_NAME
+    ? ld({
+        '@type': 'Organization',
+        '@id': `${SITE_URL}/#organization`,
+        name: ORG_NAME,
+        alternateName: 'Logbird',
+        url: SITE_URL,
+        logo: canonicalHref('/brand/logbird-wordmark-light.svg'),
+        ...(GITHUB_PUBLIC && GITHUB_URL ? { sameAs: [GITHUB_URL] } : {}),
+      })
+    : null;
 export const websiteLd = () =>
-  ld({ '@type': 'WebSite', name: 'Logbird', url: SITE_URL, inLanguage: 'en', publisher: { '@id': `${SITE_URL}/#organization` } });
+  ld({
+    '@type': 'WebSite',
+    name: 'Logbird',
+    url: SITE_URL,
+    inLanguage: 'en',
+    ...(ORG_NAME ? { publisher: { '@id': `${SITE_URL}/#organization` } } : {}),
+  });
 export const softwareLd = () =>
   ld({
     '@type': 'SoftwareApplication',
@@ -83,7 +93,7 @@ export const articleLd = (article: {
     datePublished: article.published,
     dateModified: article.modified ?? article.published,
     author: { '@type': 'Person', name: article.author },
-    publisher: { '@id': `${SITE_URL}/#organization` },
+    ...(ORG_NAME ? { publisher: { '@id': `${SITE_URL}/#organization` } } : {}),
     image: canonicalHref(`/og/${article.ogSlug}.png`),
   });
 export const faqLd = (items: { q: string; a: string }[]) =>
@@ -96,11 +106,12 @@ export function pageHead(path: string) {
   const draft = path.includes('$');
   const canonicalPath = draft ? '/blog/draft' : path;
   return {
-    meta: [...pageMeta({ ...page, path: canonicalPath }), ...(draft ? [{ name: 'robots', content: 'noindex' }] : [])],
+    // Not-ready pages, drafts, and every page while a release blocker is open are noindex (release.ts).
+    meta: [...pageMeta({ ...page, path: canonicalPath }), ...(pageIndexable(page) && !draft ? [] : [{ name: 'robots', content: 'noindex' }])],
     links: [{ rel: 'canonical', href: canonicalHref(canonicalPath) }],
     scripts:
       path === '/'
-        ? [organizationLd(), websiteLd(), softwareLd()]
+        ? [organizationLd(), websiteLd(), softwareLd()].filter((script) => script !== null)
         : [
             breadcrumbLd([
               { name: 'Home', path: '/' },
