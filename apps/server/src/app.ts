@@ -12,12 +12,12 @@ import { requestId } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
 import { openAPIRouteHandler } from 'hono-openapi';
 import { z } from 'zod';
+import { queueAuditEvent } from './audit-outbox';
 import { recordFailedSignIn } from './auth-activity';
 import { clickhouse } from './clickhouse';
 import { dataRoutes, publicRoutes } from './data-routes';
 import { env } from './env';
 import { ApiError } from './errors';
-import { ingest } from './ingest';
 import { invitationRoutes } from './invitation-routes';
 import { inviteLinkRoutes } from './invite-link-routes';
 import { authorizeMutation } from './middlewares/require-role';
@@ -86,15 +86,15 @@ app.onError((error, c) => {
 });
 app.notFound((c) => c.json({ error: { code: 'not_found', message: 'Route not found.' } }, 404));
 setAuthAuditHandler((e) =>
-  ingest(`ws:${e.organizationId}`, {
+  queueAuditEvent(`ws:${e.organizationId}`, {
     action: e.action,
     actor: { ...e.actor, type: 'user', name: e.actor.name || e.actor.email },
     executor: { type: 'api', id: 'api-server' },
     targets: [e.target],
-    changes: e.changes,
-    context: e.context,
+    changes: e.changes as import('@logbird/database').Prisma.InputJsonValue[],
+    context: e.context ? { requestId: e.context.requestId, ip: e.context.ip, userAgent: e.context.userAgent } : undefined,
     occurredAt: new Date().toISOString(),
-    description: e.action,
+    description: e.description ?? e.action,
   }),
 );
 app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
@@ -130,20 +130,13 @@ app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
       async () => {
         const response = await auth.handler(c.req.raw);
         if (!response.ok && c.req.path === '/api/auth/sign-in/email-otp') {
-          const email = authBody?.email;
-          const auditResponse = response.clone();
-          // Workspace lookup/storage latency must not become an account-enumeration signal in the auth response.
-          setImmediate(() => {
-            void recordFailedSignIn(c, email, auditResponse).catch(() => {
-              console.error(JSON.stringify({ event: 'auth.audit_failed', requestId: c.get('requestId') }));
-            });
-          });
+          await recordFailedSignIn(c, authBody?.email, response);
         }
         // Installed better-auth skips organization hooks on resend; audit the successful endpoint result.
         if (response.ok && c.req.path === '/api/auth/organization/invite-member' && session && pendingResend) {
           const invitation = await response.clone().json();
           if (invitation.id === pendingResend.id)
-            await ingest(`ws:${invitation.organizationId}`, {
+            await queueAuditEvent(`ws:${invitation.organizationId}`, {
               action: 'member.invitation.resent',
               actor: { ...session.user, type: 'user' },
               targets: [{ type: 'invitation', id: invitation.id, name: invitation.email }],
@@ -153,10 +146,13 @@ app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
         return response;
       },
     );
-  // Separate from the workspace stream's ingestion lock: hooks can append receipts while this lock is held.
+  // Rename serialization ends after durable enqueue. Delivery never reacquires this pool inside the hook.
   const organizationId = (typeof authBody?.organizationId === 'string' && authBody.organizationId) || session?.session.activeOrganizationId;
   return c.req.path === '/api/auth/organization/update' && organizationId
-    ? withProjectLock(`organization-update:${organizationId}`, runAuth)
+    ? withProjectLock(`organization-update:${organizationId}`, runAuth).catch((error) => {
+        if (error instanceof ProjectBusyError) throw new ApiError(503, 'workspace_busy', 'Another workspace update is in progress. Retry shortly.');
+        throw error;
+      })
     : runAuth();
 });
 app.get('/livez', (c) => c.json({ status: 'ok' }));

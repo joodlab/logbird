@@ -113,3 +113,5 @@ executor changes.
 
 Useful Explorer queries for this example: `actor:usr_42`, `tenant:biz_7`, `executor:refunds-worker`,
 `target:bk_1042 target.type:booking`, `operation:op_cancel_bk_1042`, `job:job_981`.
+
+Logbird records its own management and authentication activity in a workspace stream. See the [activity action catalogue](workspace-audit.md) for actor, target, metadata and delivery semantics.

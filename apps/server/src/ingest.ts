@@ -5,6 +5,7 @@ import { ingestResponseSchema } from '@logbird/contracts';
 import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { enqueueProjectRetention } from '@logbird/worker/queue';
 import type { Context } from 'hono';
+import { queueAuditEvent } from './audit-outbox';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { clientAddress } from './rate-limit';
@@ -72,15 +73,27 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
   );
   return ingestResponseSchema.parse({ accepted: ids.length, ids, rejected, warnings });
 }
-export function audit(c: Context<AppEnv>, action: string, target: { type: string; id: string; name?: string }, changes?: unknown[]) {
-  return ingest(`ws:${c.get('activeOrganizationId')}`, {
+export function audit(
+  c: Context<AppEnv>,
+  action: string,
+  target: { type: string; id: string; name?: string },
+  changes?: unknown[],
+  extra?: {
+    targets?: { type: string; id: string; name?: string }[];
+    metadata?: import('@logbird/database').Prisma.InputJsonObject;
+    description?: string;
+    organizationId?: string;
+  },
+) {
+  return queueAuditEvent(`ws:${extra?.organizationId ?? c.get('activeOrganizationId')}`, {
     action,
     occurredAt: new Date().toISOString(),
-    actor: { type: 'user', ...c.get('user'), name: c.get('user').name || c.get('user').email },
+    actor: { type: 'user', id: c.get('user').id, name: c.get('user').name || c.get('user').email },
     executor: { type: 'api', id: 'api-server' },
-    targets: [target],
-    changes,
-    description: action,
+    targets: extra?.targets ?? [target],
+    changes: changes as import('@logbird/database').Prisma.InputJsonValue[],
+    metadata: extra?.metadata,
+    description: extra?.description ?? action,
     context: { requestId: c.get('requestId'), ip: clientAddress(c) ?? '', userAgent: c.req.header('user-agent') ?? '' },
   });
 }

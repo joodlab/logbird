@@ -2,9 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { purgeProject } from '@logbird/clickhouse';
 import { createProjectResponseSchema, WORKSPACE_ACTIVITY_CATEGORIES } from '@logbird/contracts';
 import { prisma } from '@logbird/database';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { app } from './app';
+import { authEmailHash } from './auth-failures';
 import { clickhouse } from './clickhouse';
+import { env } from './env';
+import { drainTestAudit, flushTestSignIns } from './test-audit';
 
 it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chip evidence', async () => {
   const users: string[] = [];
@@ -54,8 +57,9 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
     cookiePeers.set(cookie, ip);
     return { id: user.id as string, email, cookie, ip };
   }
-  const rawActivity = async () =>
-    (
+  const rawActivity = async () => {
+    await drainTestAudit(organizationId);
+    return (
       await clickhouse.query({
         query: 'SELECT payload FROM events WHERE project_id={p:String} ORDER BY timestamp,event_id',
         query_params: { p: `ws:${organizationId}` },
@@ -64,6 +68,7 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
     )
       .json<{ payload: string }>()
       .then((rows) => rows.map((r) => JSON.parse(r.payload)));
+  };
   try {
     const owner = await login();
     ownerCookie = owner.cookie;
@@ -146,6 +151,21 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
       (await request(owner.cookie, '/api/auth/organization/update', 'POST', { organizationId, data: { name: 'QA Fix own audit' } })).status,
     ).toBe(200);
 
+    // An audit-storage outage after the rename must not turn the committed mutation into an auth error.
+    const enqueue = vi.spyOn(prisma.auditOutbox, 'create').mockRejectedValueOnce(new Error('fictional storage outage'));
+    try {
+      expect(
+        (await request(owner.cookie, '/api/auth/organization/update', 'POST', { organizationId, data: { name: 'QA Fix audit storage outage' } }))
+          .status,
+      ).toBe(200);
+      expect((await prisma.organization.findUniqueOrThrow({ where: { id: organizationId } })).name).toBe('QA Fix audit storage outage');
+    } finally {
+      enqueue.mockRestore();
+    }
+    expect(
+      (await request(owner.cookie, '/api/auth/organization/update', 'POST', { organizationId, data: { name: 'QA Fix own audit' } })).status,
+    ).toBe(200);
+
     const raised = await request(owner.cookie, path, 'PATCH', { retentionDays: 90 });
     expect(raised.status).toBe(200);
     const raisedRows = (await rawActivity()).filter((r) => r.context?.requestId === raised.headers.get('x-request-id'));
@@ -177,6 +197,7 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
         expect([400, 403]).toContain(failed.status);
         expect(await failed.json()).not.toHaveProperty('user');
       }
+      await flushTestSignIns([authEmailHash(actor.email, env.BETTER_AUTH_SECRET)]);
       const signedOut = await request(actor.cookie, '/api/auth/sign-out', 'POST', {});
       expect(signedOut.status).toBe(200);
       expect((await request(actor.cookie, '/api/me')).status).toBe(401);
@@ -195,7 +216,16 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
       await request(actor.cookie, '/api/auth/organization/set-active', 'POST', { organizationId });
       expect((await rawActivity()).filter((r) => r.action === 'auth.signed_in' && r.actor.id === actor.id)).toHaveLength(1);
     }
+    const expired = await prisma.session.create({
+      data: { id: randomUUID(), userId: owner.id, token: randomUUID(), expiresAt: new Date(Date.now() - 1000) },
+    });
+    // better-auth's getSession expiry cleanup must never be attributed as an explicit user revocation.
+    const { createHmac } = await import('node:crypto');
+    const signature = createHmac('sha256', env.BETTER_AUTH_SECRET).update(expired.token).digest('base64');
+    await request(`logbird.session_token=${encodeURIComponent(`${expired.token}.${signature}`)}`, '/api/me');
+    expect(await prisma.session.findUnique({ where: { id: expired.id } })).toBeNull();
     const rows = await rawActivity();
+    expect(rows.some((r) => r.action === 'auth.session.revoked' && r.targets?.[0]?.id === expired.id)).toBe(false);
     const failures = rows.filter((r) => r.action === 'auth.sign_in.failed');
     expect(failures).toHaveLength(6); // one invalid-code and one lockout record per account, despite seven attempts
     expect(failures.filter((r) => r.metadata.reason === 'locked_out')).toHaveLength(3);
@@ -212,7 +242,7 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
     const afterDeletion = await rawActivity();
     for (const key of keys) {
       const lifecycle = afterDeletion.filter((r) => r.targets?.[0]?.id === key.id && r.action.startsWith('api_key.'));
-      expect(lifecycle).toHaveLength(key.id === initial.ingestKey.key.id ? 1 : 2);
+      expect(lifecycle).toHaveLength(2);
       for (const row of lifecycle) {
         expect(row.targets[1]).toMatchObject({ type: 'project', id: initial.project.id });
         expect(row.metadata.apiKey).toMatchObject({
@@ -239,9 +269,15 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
   } finally {
     if (project) await request(ownerCookie, `/api/projects/${project.id}?confirm=${project.slug}`, 'DELETE');
     if (organizationId) {
+      await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${organizationId}` } });
       await purgeProject(clickhouse, `ws:${organizationId}`);
       await prisma.organization.delete({ where: { id: organizationId } });
     }
+    const hashes = await prisma.user.findMany({ where: { id: { in: users } }, select: { email: true } });
+    await prisma.authAuditWindow.deleteMany({
+      where: { OR: hashes.map((u) => ({ id: { startsWith: authEmailHash(u.email, env.BETTER_AUTH_SECRET) } })) },
+    });
+    await prisma.authAuditBudget.deleteMany({ where: { stream: `ws:${organizationId}` } });
     await prisma.user.deleteMany({ where: { id: { in: users } } });
   }
-}, 120_000);
+}, 360_000);

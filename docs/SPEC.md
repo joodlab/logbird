@@ -482,3 +482,5 @@ website/member/role/integration/media/export/auth.*/crm.sync.*/catalog.sync.*); 
 job → child record changes), retries (attempt 2/3), failures/denied/unknown outcomes at realistic low rates,
 some events deliberately off-standard (missing actor, custom top-level keys) to exercise conformance. Seed also
 creates a dev login user `demo@logbird.local` as owner of "Jood" (OTP arrives in Mailpit).
+
+Workspace activity actions, targets, delivery guarantees and operator procedures are listed in the [activity action catalogue](workspace-audit.md).

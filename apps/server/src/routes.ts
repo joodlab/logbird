@@ -1,6 +1,7 @@
 ﻿import { randomUUID } from 'node:crypto';
 import { compileQuery, projectStats, retentionStats, validateSql } from '@logbird/clickhouse';
 import {
+  API_KEY_SCOPES,
   apiKeySchema,
   createApiKeyResponseSchema,
   createApiKeySchema,
@@ -23,12 +24,11 @@ import { validator } from 'hono-openapi';
 import { z } from 'zod';
 import { clickhouse, purgeProjectEvents, queryClickhouse } from './clickhouse';
 import { ApiError } from './errors';
-import { audit, ingest } from './ingest';
+import { audit } from './ingest';
 import { generateApiKey } from './keys';
 import { requireProjectAccess, requireSession } from './middlewares';
 import { hasAdminRole } from './middlewares/require-role';
 import { doc, routeDoc } from './openapi';
-import { clientAddress } from './rate-limit';
 import { creatorSelect, serializeKey, serializeProject, serializeView } from './serialize';
 import { invalidateSetup } from './setup-cache';
 import type { AppEnv } from './types';
@@ -44,22 +44,21 @@ function auditApiKey(
   action: 'api_key.created' | 'api_key.revoked',
   key: { id: string; name: string; kind: string; prefix: string },
   project: { id: string; name: string; organizationId: string },
+  reason?: 'project_deleted',
 ) {
-  return ingest(`ws:${project.organizationId}`, {
-    action,
-    actor: { ...c.get('user'), type: 'user' },
-    executor: { type: 'api', id: 'api-server' },
+  return audit(c, action, { type: 'api_key', id: key.id, name: key.name }, undefined, {
+    organizationId: project.organizationId,
     targets: [
       { type: 'api_key', id: key.id, name: key.name },
       { type: 'project', id: project.id, name: project.name },
     ],
-    context: { requestId: c.get('requestId'), ip: clientAddress(c) ?? '', userAgent: c.req.header('user-agent') ?? '' },
     metadata: {
       apiKey: {
         kind: key.kind,
-        scope: key.kind === 'read' ? 'events:read' : 'events:ingest',
+        scope: API_KEY_SCOPES[key.kind as keyof typeof API_KEY_SCOPES],
         prefix: key.prefix,
         state: action === 'api_key.created' ? 'active' : 'revoked',
+        ...(reason ? { reason } : {}),
       },
     },
   });
@@ -210,7 +209,8 @@ export const managementRoutes = new Hono<AppEnv>()
       if (confirm !== c.get('project').slug) throw new ApiError(422, 'confirmation_required', 'Type the project slug to delete the project.');
       const projectId = c.get('project').id;
       await withProjectLock(projectId, async (tx) => {
-        await tx.apiKey.updateMany({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
+        const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
+        for (const key of revoked) await auditApiKey(c, 'api_key.revoked', key, c.get('project'), 'project_deleted');
         await purgeProjectEvents(projectId);
         await tx.project.delete({ where: { id: projectId } });
       });
