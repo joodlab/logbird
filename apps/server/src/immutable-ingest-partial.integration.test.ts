@@ -33,9 +33,9 @@ async function assertOne() {
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, confirmedAt: { not: null } } })).toBe(1);
 }
 it.runIf(qa)('retains a real async-wait timeout while its insertion remains queued', async () => {
-  const insert = clickhouse.insert.bind(clickhouse);
+  const insert = clickhouse.exec.bind(clickhouse);
   let serverCode = '';
-  vi.spyOn(clickhouse, 'insert').mockImplementationOnce(async (params) => {
+  vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
     try {
       return await insert({
         ...params,
@@ -96,9 +96,9 @@ it.runIf(qa).each(['event_ids', 'events_by_minute'] as const)(
       await clickhouse.command({ query: `ALTER TABLE ${target} DROP CONSTRAINT IF EXISTS ${constraint}` });
     }
     vi.setSystemTime(Date.now() + 80_000);
-    const writes = vi.spyOn(clickhouse, 'insert');
+    const writes = vi.spyOn(clickhouse, 'exec');
     expect((await f.post(input)).status).toBe(202);
-    expect(writes.mock.calls.some(([p]) => p.table === 'events')).toBe(false);
+    expect(writes.mock.calls.some(([p]) => p.query.startsWith('INSERT INTO events '))).toBe(false);
     await assertOne();
   },
 );

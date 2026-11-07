@@ -9,6 +9,8 @@ export function createClickHouseClient(env = process.env): ClickHouseClient {
     database: env.CLICKHOUSE_DATABASE,
     username: env.CLICKHOUSE_USER,
     password: env.CLICKHOUSE_PASSWORD,
+    // Do not abandon a valid 40-second async acknowledgement at the client's 30-second default.
+    request_timeout: INGEST_CLAIM_LEASE_MS,
     clickhouse_settings: { date_time_input_format: 'best_effort', output_format_json_quote_64bit_integers: 0 },
   });
 }
@@ -27,24 +29,27 @@ export class AmbiguousInsertError extends Error {
 export async function insertEvents(ch: ClickHouseClient, rows: EventRow[], leaseExpiresAt = Date.now() + INGEST_CLAIM_LEASE_MS) {
   if (!rows.length) return;
   let bodySent = false;
-  const values = Readable.from(
-    (function* () {
-      // Check again when the HTTP client consumes the stream: a paused process must never send an expired lease.
-      if (Date.now() + INSERT_MAX_EXECUTION_SECONDS * 1000 + ASYNC_INSERT_FLUSH_BOUND_MS > leaseExpiresAt)
-        throw new Error('Insert lease lacks time to finish before expiry');
-      for (const row of rows) {
-        if (Date.now() >= leaseExpiresAt) throw new Error('Insert timeout: lease expired while sending');
+  // A single byte body avoids the client's per-row object transform/backpressure pipeline.
+  // Keep serialization and the lease check lazy: socket acquisition can be delayed.
+  const values = new Readable({
+    read() {
+      try {
+        const body = `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`;
+        if (Date.now() + INSERT_MAX_EXECUTION_SECONDS * 1000 + ASYNC_INSERT_FLUSH_BOUND_MS > leaseExpiresAt)
+          throw new Error('Insert lease lacks time to finish before expiry');
         bodySent = true;
-        yield row;
+        this.push(body);
+        this.push(null);
+      } catch (error) {
+        this.destroy(error instanceof Error ? error : new Error(String(error)));
       }
-    })(),
-  );
+    },
+  });
   try {
     if (Date.now() >= leaseExpiresAt) throw new Error('Insert lease expired before sending');
-    await ch.insert({
-      table: 'events',
+    const result = await ch.exec({
+      query: 'INSERT INTO events FORMAT JSONEachRow',
       values,
-      format: 'JSONEachRow',
       abort_signal: AbortSignal.timeout(Math.max(1, leaseExpiresAt - Date.now())),
       clickhouse_settings: {
         async_insert: 1,
@@ -54,6 +59,10 @@ export async function insertEvents(ch: ClickHouseClient, rows: EventRow[], lease
         wait_for_async_insert_timeout: 40,
       },
     });
+    // exec owns a response stream; acknowledgement is complete only after consuming it.
+    for await (const _chunk of result.stream) {
+      /* INSERT has no result rows. */
+    }
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
     // The same parse code can originate inside a failing MV after the source row was written.

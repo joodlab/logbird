@@ -69,7 +69,7 @@ async function takeOverReadyClaims(projectId: string, prior: IngestReceipt[], ca
 
 async function recheckAfterPause(projectId: string, owned: Map<string, IngestReceipt>, stored: Awaited<ReturnType<typeof lookup>>, lookupAt: number) {
   // A fast claim cannot outlive another writer's confirmed receipt window. Use the clock after claiming.
-  if (Date.now() - lookupAt < INGEST_RECEIPT_WINDOW_MS / 2) return;
+  if (Date.now() - lookupAt < INGEST_RECEIPT_WINDOW_MS / 2) return false;
   const rechecked = await lookup(
     projectId,
     [...owned.keys()].filter((id) => !stored.has(id)),
@@ -78,6 +78,7 @@ async function recheckAfterPause(projectId: string, owned: Map<string, IngestRec
     projectId,
     [...rechecked].map(([eventId, identity]) => ({ eventId, ...identity })),
   );
+  return true;
 }
 
 /** Claim/recheck owns release until it hands the claims to the insert phase. */
@@ -115,8 +116,14 @@ async function claimEvents(projectId: string, organizationId: string, candidates
     const inserted = values.length ? await prisma.ingestReceipt.createManyAndReturn({ data: values, skipDuplicates: true }) : [];
     for (const receipt of inserted) owned.set(receipt.eventId, receipt);
     await takeOverReadyClaims(projectId, prior, candidates, owned);
-    await recheckAfterPause(projectId, owned, stored, lookupAt);
-    const receipts = new Map((await prisma.ingestReceipt.findMany({ where: { projectId, eventId: { in: eventIds } } })).map((r) => [r.eventId, r]));
+    const rechecked = await recheckAfterPause(projectId, owned, stored, lookupAt);
+    // RETURNING already supplies this attempt's receipts. Only competitors (or a paused recheck)
+    // can have changed the remaining identities while the shared project lock is held.
+    const receipts = new Map(owned);
+    const reloadIds = rechecked ? eventIds : eventIds.filter((id) => !owned.has(id));
+    if (reloadIds.length)
+      for (const receipt of await prisma.ingestReceipt.findMany({ where: { projectId, eventId: { in: reloadIds } } }))
+        receipts.set(receipt.eventId, receipt);
     return { owned, receipts };
   } catch (error) {
     await releaseClaims(projectId, owned);

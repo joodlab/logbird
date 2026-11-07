@@ -26,7 +26,11 @@ stored evidence or reinsertion upgrades them. Frozen 3a1541f fixtures and litera
 legacy/v1 digest vectors protect this rollout path.
 
 Confirmed receipts are a ten-minute cache. Hot-path pruning runs at most once per
-minute per project/process; each DELETE removes at most 5000 receipts. Ordinary
+minute per project/process; each DELETE removes at most 5000 receipts. Fresh claims
+reuse their RETURNING receipts; bulk confirmation uses four typed arrays instead
+of four bind parameters per event. UTC strings keep session timezone independent.
+Only competing identities and pause rechecks need a subsequent receipt read.
+Fresh claims retain the same CAS/skipDuplicates arbitration. Ordinary
 pruning and retention never remove unresolved receipts. Only exclusive recovery
 can settle or remove an unresolved receipt.
 
@@ -71,11 +75,63 @@ the four existing tables. Retention retries clean index rows even when a prior
 attempt already removed the raw rows, rebuild surviving pointers and verify the
 cutoff invariant before completion.
 
+Migration 008 replaces the derived index online with smaller granules, using
+`event_ids_v3` and its temporary MV. It repeats the same seven phases, detecting
+the completed exchange by the persisted `index_granularity` setting because both
+sides are MergeTree. Schema, stable names, oldest-receipt lookup and hard TTL stay
+the same, so master and 007-only binaries remain compatible during rollout. The
+backfill bounds block size and memory; the final late-writer coverage pass runs
+adaptively sized id-hash buckets with matching predicates on raw/index tuples
+and a 256 MiB per-query ceiling. Counts and estimated key bytes from both raw
+and index tables choose a power of two: no more than 500,000 rows or 128 MiB
+of estimated set storage per bucket (twice the serialized key bytes plus
+128 bytes/row for hash-table/allocator overhead). Long
+ids and overlapping physical index rows increase the bucket count. The measured
+10M fixture uses 32 buckets; 100M ordinary-width rows require 256, rather than
+reusing a fixed count. The same bounded final pass applies to 007 on fresh upgrades. Retrying any interrupted pass is safe. Runtime cutoff purges
+use the same bounded repair, including when an earlier attempt already deleted
+the expired raw/index rows. Each bucket still scans narrow history columns;
+this trades cold reconciliation time for bounded set memory.
+
+### Granularity experiment (10M derived pointers)
+
+On the shared local ClickHouse, 20 measured batches plus three warmups per case,
+with 1,000 ids per batch and a 50/50 UUIDv4/UUIDv7 history. Every miss sample uses
+fresh ids, avoiding condition-cache reuse. These are native lookup timings, not
+HTTP ingestion timings. Each table was merged to one part before lookups.
+
+| Granularity | UUIDv4 miss rows | Read MiB | Median / p95 ms | UUIDv7 miss ms | Peak lookup MiB |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 8192 | 3,995,264 | 148.60 | 250 / 302 | 7 | 6.17 |
+| 512 | 485,888 | 18.07 | 99 / 109 | 6 | 6.17 |
+| 256 | 249,344 | 9.27 | 95 / 109 | 6 | 6.17 |
+| 128 | 126,464 | 4.70 | 87 / 95 | 7 | 6.17 |
+| 64 | 63,552 | 2.36 | 85 / 89 | 6 | 6.17 |
+
+| Granularity | 10M table MiB | Build incl. initial merge s | 1k pointer INSERT median / p95 ms | Final merge after 20k inserts s |
+| ---: | ---: | ---: | ---: | ---: |
+| 8192 | 135.46 | 6.44 | 13.50 / 27.50 | 3.72 |
+| 512 | 132.51 | 6.43 | 13.45 / 21.20 | 4.16 |
+| 256 | 132.95 | 6.58 | 13.48 / 20.48 | 4.25 |
+| 128 | 133.59 | 7.50 | 13.72 / 13.93 | 4.65 |
+| 64 | 135.01 | 9.68 | 13.43 / 14.17 | 5.44 |
+
+256 is selected: about 16 times fewer rows read for random misses, near-flat
+storage, and modest merge cost. SDK/server ids use UUIDv7 and are the fast path.
+Caller-chosen random ids amortize to about 0.1 ms/id in this 1,000-id lookup;
+this is a batch cost, not single-id latency or a linear scaling guarantee.
+Matched HTTP re-runs must record the load runner's id shape. Pointer INSERT
+cost above excludes the raw event and other materialized-view destinations.
+
 ## Bounded ambiguous writes
 
 INSERT uses max_execution_time=30 seconds, async_insert_busy_timeout_max_ms=1000,
 wait_for_async_insert=1 and a 60-second claim lease/client deadline. The body checks
 the lease when consumed, before transport handoff; an expired lease is not sent.
+One lazily serialized JSONEachRow byte body avoids a row-by-row object transform
+in the HTTP pipeline. The client socket budget is 60 seconds; the response stream
+is consumed before confirmation. Server socket timeout 209 remains ambiguous
+after handoff, even if that exception reports no written rows.
 Failures proven to precede any write release this attempt's claims. This includes
 before-body transport errors and an explicit server-code allowlist: parse codes
 6,27,38,41,53,69,72 (422 invalid_event), and unknown table/database, syntax,
@@ -169,18 +225,20 @@ old binaries and direct ClickHouse inserts bypass the Postgres fences.
 Rollback requires stopping new writers and preserving unresolved receipt state.
 Leaving the additive schema in place is safest. To remove the identity additions
 only, use the following against the verified databases. Replace `logbird` with your
-`CLICKHOUSE_DATABASE`. Both MV names are included
-so this also handles an interrupted 007. Raw events and original rollups survive.
+`CLICKHOUSE_DATABASE`. Temporary MV names are included
+so this also handles interrupted 007/008 upgrades. Raw events and original rollups survive.
 Do not remove the receipt table or its migration while pending writes exist.
 
 ```sql
 -- ClickHouse: after stopping writers and the migration runner.
+DROP VIEW IF EXISTS logbird.event_ids_v3_mv SYNC;
 DROP VIEW IF EXISTS logbird.event_ids_v2_mv SYNC;
 DROP VIEW IF EXISTS logbird.event_ids_mv SYNC;
+DROP TABLE IF EXISTS logbird.event_ids_v3 SYNC;
 DROP TABLE IF EXISTS logbird.event_ids_v2 SYNC;
 DROP TABLE IF EXISTS logbird.event_ids SYNC;
 ALTER TABLE logbird.migrations DELETE WHERE name IN
-  ('006_event_ids.sql','007_event_ids_merge_tree.sql') SETTINGS mutations_sync=2;
+  ('006_event_ids.sql','007_event_ids_merge_tree.sql','008_event_ids_granularity.sql') SETTINGS mutations_sync=2;
 
 -- Postgres: retain IngestReceipt and its original migration.
 BEGIN;
@@ -196,6 +254,13 @@ DELETE FROM "_prisma_migrations" WHERE migration_name IN
   ('20261107140000_ingest_claim_lease','20261107160000_ingest_utc_lease');
 COMMIT;
 ```
+
+To roll back only 008, keep its schema in place: 007-only binaries read the same
+columns and stable names. Smaller granules require no binary rollback. If reverting
+the physical layout is necessary, run the same dual-MV/backfill/exchange/retire
+procedure with a fresh temporary table at the prior granularity; changing a setting
+alone does not rewrite existing parts. Never replay EXCHANGE blindly or remove
+008 from the ledger while its smaller-granule table is still installed.
 
 The UTC correction alone may safely remain deployed; do not restore shifted
 leases. Recheck origin/master's migration filenames immediately before merging

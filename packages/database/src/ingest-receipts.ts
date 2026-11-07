@@ -6,12 +6,12 @@ export async function confirmIngestReceipts(
   identities: { eventId: string; fingerprint: string; receivedAt: Date; eventAt: Date }[],
 ) {
   if (!identities.length) return;
-  const values = identities.map(
-    (r) => Prisma.sql`(${r.eventId}, ${r.fingerprint}, ${r.receivedAt.toISOString()}::timestamp, ${r.eventAt.toISOString()}::timestamp)`,
-  );
+  // Four array parameters avoid parsing/encoding four bind parameters per event.
   await prisma.$executeRaw(Prisma.sql`UPDATE "IngestReceipt" AS r
     SET "fingerprint"=v.fingerprint, "receivedAt"=v.received, "eventAt"=v.event, "confirmedAt"=${new Date().toISOString()}::timestamp
-    FROM (VALUES ${Prisma.join(values)}) AS v(id,fingerprint,received,event)
+    FROM unnest(${identities.map((r) => r.eventId)}::text[], ${identities.map((r) => r.fingerprint)}::text[],
+      ${identities.map((r) => r.receivedAt.toISOString())}::timestamp[], ${identities.map((r) => r.eventAt.toISOString())}::timestamp[])
+      AS v(id,fingerprint,received,event)
     WHERE r."projectId"=${projectId} AND r."eventId"=v.id`);
 }
 

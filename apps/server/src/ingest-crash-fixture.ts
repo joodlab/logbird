@@ -4,7 +4,7 @@ import { ingest } from './ingest';
 
 process.once('message', async (message) => {
   const { projectId, input, phase } = message as { projectId: string; input: unknown; phase: 'before-send' | 'after-ack' | 'rebuild-deleted' };
-  const insert = clickhouse.insert.bind(clickhouse);
+  const insert = clickhouse.exec.bind(clickhouse);
   if (phase === 'rebuild-deleted') {
     const command = clickhouse.command.bind(clickhouse);
     clickhouse.command = async (params) => {
@@ -16,13 +16,13 @@ process.once('message', async (message) => {
       return result;
     };
   }
-  clickhouse.insert = async (params) => {
-    if (params.table === 'events' && phase === 'before-send') {
+  clickhouse.exec = async (params) => {
+    if (params.query.startsWith('INSERT INTO events ') && phase === 'before-send') {
       process.send?.({ stage: 'claimed' });
       await new Promise(() => undefined);
     }
     const result = await insert(params);
-    if (params.table === 'events' && phase === 'after-ack') {
+    if (params.query.startsWith('INSERT INTO events ') && phase === 'after-ack') {
       process.send?.({ stage: 'acknowledged' });
       await new Promise(() => undefined);
     }

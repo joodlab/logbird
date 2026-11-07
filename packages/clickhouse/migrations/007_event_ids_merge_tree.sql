@@ -21,5 +21,6 @@ DROP TABLE IF EXISTS event_ids_v2 SYNC;
 -- The retired-table SYNC precedes this idempotent missing-tuple coverage pass for those late writers.
 INSERT INTO event_ids
 SELECT DISTINCT project_id,event_id,received_at,timestamp FROM events
-WHERE (project_id,event_id,received_at,timestamp) NOT IN
-(SELECT project_id,event_id,received_at,timestamp FROM event_ids);
+WHERE cityHash64(project_id,event_id)%{identityBuckets:UInt64}={identityBucket:UInt64}
+AND (project_id,event_id,received_at,timestamp) NOT IN
+(SELECT project_id,event_id,received_at,timestamp FROM event_ids WHERE cityHash64(project_id,event_id)%{identityBuckets:UInt64}={identityBucket:UInt64});

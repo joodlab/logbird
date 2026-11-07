@@ -1,3 +1,5 @@
+// Database schema is a prerequisite. Tests never migrate implicitly: opt in with
+// CLICKHOUSE_TEST_MIGRATE=1, or deploy schema in a separately coordinated command.
 import { randomUUID } from 'node:crypto';
 import {
   entityListResponseSchema,
@@ -53,7 +55,7 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       context: { operationId: 'op' },
     };
     try {
-      await migrate(ch);
+      if (process.env.CLICKHOUSE_TEST_MIGRATE === '1') await migrate(ch);
       for (const projectId of [p, other]) {
         const rows = [
           { ...input, id: 'root', occurredAt: new Date(now.getTime() - 20_000).toISOString() },

@@ -51,10 +51,10 @@ it('prechecks five different-content retries without a flush and releases a read
 it('keeps the exclusive lock through a worker-readied replay', async () => {
   await f.pending(input, { expired: true });
   await recoverProjectIngest(clickhouse, f.project);
-  const insert = clickhouse.insert.bind(clickhouse);
+  const insert = clickhouse.exec.bind(clickhouse);
   let checked = false;
-  vi.spyOn(clickhouse, 'insert').mockImplementation(async (params) => {
-    if (params.table === 'events') {
+  vi.spyOn(clickhouse, 'exec').mockImplementation(async (params) => {
+    if (params.query.startsWith('INSERT INTO events ')) {
       checked = true;
       await expect(withProjectLock(f.project, async () => undefined, { mode: 'shared', waitMs: 0 })).rejects.toMatchObject({
         name: 'ProjectBusyError',

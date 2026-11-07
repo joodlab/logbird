@@ -9,9 +9,9 @@ it('search and export return the version that actually passed the filter, before
   const admin = createClickHouseClient();
   const ch = createClickHouseClient();
   const query = ch.query.bind(ch),
-    insert = ch.insert.bind(ch);
+    insert = ch.exec.bind(ch);
   ch.query = (params) => query({ ...params, query: params.query.replaceAll(/\bFROM events\b/g, `FROM ${table}`) });
-  ch.insert = (params) => insert({ ...params, table: params.table === 'events' ? table : params.table });
+  ch.exec = (params) => insert({ ...params, query: params.query.replace(/\bINTO events\b/g, `INTO ${table}`) });
   const now = new Date();
   try {
     // A disposable MergeTree clone keeps both versions visible, reproducing the pre-merge state deterministically.
@@ -53,9 +53,9 @@ it.each(['asc', 'desc'] as const)(
     const admin = createClickHouseClient(),
       ch = createClickHouseClient();
     const query = ch.query.bind(ch),
-      insert = ch.insert.bind(ch);
+      insert = ch.exec.bind(ch);
     ch.query = (params) => query({ ...params, query: params.query.replaceAll(/\bFROM events\b/g, `FROM ${table}`) });
-    ch.insert = (params) => insert({ ...params, table: params.table === 'events' ? table : params.table });
+    ch.exec = (params) => insert({ ...params, query: params.query.replace(/\bINTO events\b/g, `INTO ${table}`) });
     const now = new Date();
     const at = (ms: number) => new Date(now.getTime() + ms).toISOString();
     const make = (id: string, eventMs: number, receiptMs: number, action: string) => {

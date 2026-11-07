@@ -55,8 +55,8 @@ it('arbitrates two HTTP app instances while the first INSERT is paused before ac
   const insertionStarted = new Promise<void>((resolve) => {
     entered = resolve;
   });
-  const insert = clickhouse.insert.bind(clickhouse);
-  const spy = vi.spyOn(clickhouse, 'insert').mockImplementationOnce(async (params) => {
+  const insert = clickhouse.exec.bind(clickhouse);
+  const spy = vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
     entered();
     await paused;
     return insert(params);
@@ -270,8 +270,8 @@ it('upgrades a missing legacy receipt on reinsertion and rejects lossy same-batc
 
 it('keeps the exclusive project lock through an expired-claim reinsert', async () => {
   await f.pending(original, { expired: true });
-  const insert = clickhouse.insert.bind(clickhouse);
-  const spy = vi.spyOn(clickhouse, 'insert').mockImplementationOnce(async (params) => {
+  const insert = clickhouse.exec.bind(clickhouse);
+  const spy = vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
     await expect(withProjectLock(f.project, async () => undefined, { mode: 'shared', waitMs: 0 })).rejects.toMatchObject({
       name: 'ProjectBusyError',
     });

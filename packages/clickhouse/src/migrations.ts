@@ -16,6 +16,7 @@ export async function migrate(ch: ClickHouseClient) {
       .map((s) => s.trim())
       .filter(Boolean);
     if (name === '007_event_ids_merge_tree.sql') await migrateEventIdIndex(ch, statements);
+    else if (name === '008_event_ids_granularity.sql') await migrateEventIdIndex(ch, statements, { temporary: 'event_ids_v3', granularity: 256 });
     else for (const query of statements) await ch.command({ query });
     await ch.insert({ table: 'migrations', values: [{ name }], format: 'JSONEachRow' });
   }

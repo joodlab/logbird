@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { insertEvents } from '@logbird/clickhouse';
 import { type Prisma, prisma } from '@logbird/database';
 import { Logbird } from '@logbird/sdk';
@@ -30,8 +31,8 @@ const input = { id: 'same', action: 'error.original', occurredAt: new Date().toI
 it.each(['6', '27', '38', '41', '53', '69', '72', '60', '62', '81', '164', '497', '516', '241', '159', '252'])(
   'classifies server code %s after consuming the body',
   async (code) => {
-    vi.spyOn(clickhouse, 'insert').mockImplementationOnce(async (params) => {
-      for await (const _row of params.values as AsyncIterable<unknown>) {
+    vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
+      for await (const _row of ('values' in params ? params.values : []) as AsyncIterable<unknown>) {
         /* body consumed */
       }
       throw Object.assign(new Error('fictional server exception'), { code });
@@ -49,26 +50,27 @@ it.each(['6', '27', '38', '41', '53', '69', '72', '60', '62', '81', '164', '497'
   },
 );
 it('releases claims on connection refusal before body transmission', async () => {
-  vi.spyOn(clickhouse, 'insert').mockRejectedValueOnce(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }));
+  vi.spyOn(clickhouse, 'exec').mockRejectedValueOnce(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }));
   const response = await f.post(input);
   expect(response.status).toBe(503);
   expect((await response.json()).error.code).toBe('ingest_unavailable');
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(0);
 });
 it('releases claims after a real UInt16 ClickHouse parse failure', async () => {
-  const insert = clickhouse.insert.bind(clickhouse);
-  vi.spyOn(clickhouse, 'insert').mockImplementationOnce(async (params) => {
+  const insert = clickhouse.exec.bind(clickhouse);
+  vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
     const rows: unknown[] = [];
-    for await (const row of params.values as AsyncIterable<Record<string, unknown>>) rows.push({ ...row, job_attempt: 'not-an-integer' });
-    return insert({ ...params, values: rows });
+    for await (const chunk of ('values' in params ? params.values : []) as AsyncIterable<Buffer>)
+      for (const line of chunk.toString().trimEnd().split('\n')) rows.push({ ...JSON.parse(line), job_attempt: 'not-an-integer' });
+    return insert({ ...params, values: Readable.from(rows.map((row) => `${JSON.stringify(row)}\n`)) });
   });
   expect((await f.post(input)).status).toBe(422);
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(0);
   expect(await f.count()).toBe(0);
 });
 it('retains only an ambiguity after the body was consumed, then recovers an absent row', async () => {
-  vi.spyOn(clickhouse, 'insert').mockImplementationOnce(async (params) => {
-    for await (const _row of params.values as AsyncIterable<unknown>) {
+  vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
+    for await (const _row of ('values' in params ? params.values : []) as AsyncIterable<unknown>) {
       /* body handed to HTTP transport */
     }
     throw new Error('connection reset after body sent');
@@ -91,7 +93,7 @@ it('refuses an insert if its claim lease expires while the process is paused', a
       }),
     ),
   );
-  const spy = vi.spyOn(clickhouse, 'insert');
+  const spy = vi.spyOn(clickhouse, 'exec');
   expect((await f.post(input)).status).toBe(503);
   expect(spy).not.toHaveBeenCalled();
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(0);
@@ -105,8 +107,8 @@ it('pending competing conflicts wait for the actual parse-failure release path',
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  vi.spyOn(clickhouse, 'insert').mockImplementationOnce(async (params) => {
-    for await (const _row of params.values as AsyncIterable<unknown>) {
+  vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
+    for await (const _row of ('values' in params ? params.values : []) as AsyncIterable<unknown>) {
       /* request body consumed */
     }
     entered();
@@ -205,7 +207,13 @@ it('rejects corrupt stored evidence per id while storing healthy siblings', asyn
 });
 it('fast fresh batches issue one narrow identity lookup, with no payload scan or recheck', async () => {
   const spy = vi.spyOn(clickhouse, 'query');
-  expect((await f.post(input)).status).toBe(202);
+  const receipts = vi.spyOn(prisma.ingestReceipt, 'findMany');
+  expect((await f.post(Array.from({ length: 1000 }, (_, i) => ({ ...input, id: `fresh-${i}` })))).status).toBe(202);
+  // Recovery preview and prior cache only: the bulk claim already returns all owned receipts.
+  expect(receipts).toHaveBeenCalledTimes(2);
+  expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, confirmedAt: { not: null }, eventAt: new Date(input.occurredAt) } })).toBe(
+    1000,
+  );
   const statements = spy.mock.calls.map(([params]) => params.query);
   expect(statements.filter((sql) => sql.includes('FROM event_ids'))).toHaveLength(1);
   expect(statements.some((sql) => sql.includes('payload') && sql.includes('FROM events'))).toBe(false);
@@ -213,8 +221,8 @@ it('fast fresh batches issue one narrow identity lookup, with no payload scan or
 
 it('releases a recovered claim on a definite server rejection', async () => {
   await f.pending(input, { expired: true });
-  vi.spyOn(clickhouse, 'insert').mockImplementationOnce(async (params) => {
-    for await (const _row of params.values as AsyncIterable<unknown>) {
+  vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
+    for await (const _row of ('values' in params ? params.values : []) as AsyncIterable<unknown>) {
       // Exercise a server error after the original transport body was consumed.
     }
     throw Object.assign(new Error('ACCESS_DENIED'), { code: '497' });
@@ -226,7 +234,7 @@ it('releases a recovered claim on a definite server rejection', async () => {
 });
 it('rechecks retained evidence after a long lookup-to-claim pause without double inserting', async () => {
   const claim = prisma.ingestReceipt.createManyAndReturn.bind(prisma.ingestReceipt);
-  const insert = vi.spyOn(clickhouse, 'insert');
+  const insert = vi.spyOn(clickhouse, 'exec');
   vi.spyOn(prisma.ingestReceipt, 'createManyAndReturn').mockImplementationOnce((args) =>
     prismaResult(
       claim(args).then(async (receipts) => {

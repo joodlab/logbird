@@ -20,6 +20,7 @@ import { pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import { isQueryClient } from './client';
+import { backfillEventIdPointers } from './index-repair';
 import type { EventRow } from './normalize';
 import { columns, compileQuery, QueryError } from './query';
 import { rollupSql } from './rollup-sql';
@@ -563,11 +564,11 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
   if (before) {
     // A merged legacy pointer may have expired while another raw timestamp survives.
     // Keep this cold repair server-side; do not materialize an unbounded list of ids in the worker.
-    await ch.command({
-      query:
-        'INSERT INTO event_ids SELECT DISTINCT project_id,event_id,received_at,timestamp FROM events WHERE project_id={p:String} AND event_id NOT IN (SELECT event_id FROM event_ids WHERE project_id={p:String})',
-      query_params: { p },
-    });
+    await backfillEventIdPointers(
+      ch,
+      'INSERT INTO event_ids SELECT DISTINCT project_id,event_id,received_at,timestamp FROM events WHERE project_id={p:String} AND cityHash64(project_id,event_id)%{identityBuckets:UInt64}={identityBucket:UInt64} AND (project_id,event_id,received_at,timestamp) NOT IN (SELECT project_id,event_id,received_at,timestamp FROM event_ids WHERE project_id={p:String} AND cityHash64(project_id,event_id)%{identityBuckets:UInt64}={identityBucket:UInt64})',
+      { p },
+    );
   }
 
   if (!before) return rebuildProjectRollups(ch, p, false);

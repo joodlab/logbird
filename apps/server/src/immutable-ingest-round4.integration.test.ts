@@ -56,7 +56,7 @@ it('fences readers after all rollup DELETEs, excludes repair from settings, and 
   await populated();
   await f.pending(pending, { expired: true });
   const command = clickhouse.command.bind(clickhouse),
-    insert = clickhouse.insert.bind(clickhouse);
+    insert = clickhouse.exec.bind(clickhouse);
   let release: () => void = () => undefined,
     entered: () => void = () => undefined;
   const gate = new Promise<void>((r) => {
@@ -73,8 +73,8 @@ it('fences readers after all rollup DELETEs, excludes repair from settings, and 
     }
     return result;
   });
-  vi.spyOn(clickhouse, 'insert').mockImplementation(async (params) => {
-    if (params.table === 'events')
+  vi.spyOn(clickhouse, 'exec').mockImplementation(async (params) => {
+    if (params.query.startsWith('INSERT INTO events '))
       expect(await prisma.retentionRun.count({ where: { projectId: f.project, kind: 'ingest_repair', status: { in: ['running', 'failed'] } } })).toBe(
         0,
       );
