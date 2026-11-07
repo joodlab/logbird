@@ -1,17 +1,17 @@
-import type { AuditEvent } from '@logbird/contracts';
+import { type AuditEvent, EXPORT_SCHEMA_VERSION } from '@logbird/contracts';
 
 // Stable order. Structured cells are JSON; every normalized event field is represented.
 export const CSV_COLUMNS = [
   'id',
-  'project_id',
   'timestamp',
+  'action',
+  'outcome',
+  'description',
+  'project_id',
   'received_at',
   'environment',
-  'action',
   'category',
-  'outcome',
   'severity',
-  'description',
   'actor_type',
   'actor_id',
   'actor_name',
@@ -33,27 +33,29 @@ export const CSV_COLUMNS = [
   'conformance',
   'schema_version',
   'sdk',
+  'schemaVersion',
 ] as const;
 
 /** Quoting protects CSV syntax; the apostrophe separately prevents spreadsheet formula evaluation. */
 export function csvCell(value: string | number) {
   const text = String(value);
-  const safe = /^[=+\-@\t\r\n]/.test(text) ? `'${text}` : text;
+  const dangerous = /^[\s\p{Cc}\p{Cf}]*[=+\-@＝＋－＠]/u.test(text) || /^[\s\p{Cc}\p{Cf}]*[\t\r\n]/u.test(text);
+  const safe = dangerous ? `'${text}` : text;
   return `"${safe.replaceAll('"', '""')}"`;
 }
 
 export function csvEvent(e: AuditEvent) {
   return `${[
     e.id,
-    e.projectId,
     e.timestamp,
+    e.action,
+    e.outcome,
+    e.description,
+    e.projectId,
     e.receivedAt,
     e.environment,
-    e.action,
     e.category,
-    e.outcome,
     e.severity,
-    e.description,
     e.actor?.type ?? '',
     e.actor?.id ?? '',
     e.actor?.name ?? '',
@@ -75,6 +77,7 @@ export function csvEvent(e: AuditEvent) {
     e.conformance,
     e.schemaVersion,
     e.sdk,
+    EXPORT_SCHEMA_VERSION,
   ]
     .map(csvCell)
     .join(',')}\n`;

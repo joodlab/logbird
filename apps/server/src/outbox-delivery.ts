@@ -39,6 +39,16 @@ async function deliverClaimed(row: AuditOutbox, deliverAuditEvent: DeliverAuditE
 export async function deliverOutboxEvent(id: string, deliverAuditEvent: DeliverAuditEvent, now = new Date()) {
   for (const row of await claimAuditEvents(now, id)) await deliverClaimed(row, deliverAuditEvent, now);
 }
+/** A requested export can race another replica's drainer claim; wait for its acknowledgement before sending bytes. */
+export async function waitForAuditDelivery(id: string, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const row = await prisma.auditOutbox.findUnique({ where: { id } });
+    if (row?.deliveredAt) return true;
+    if (!row || row.lastError || Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
 export async function drainAuditOutbox(deliverAuditEvent: DeliverAuditEvent, now = new Date()) {
   const rows = await claimAuditEvents(now);
   const results = await Promise.allSettled(rows.map((row) => deliverClaimed(row, deliverAuditEvent, now)));

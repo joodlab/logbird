@@ -5,6 +5,7 @@ import { app } from './app';
 import { flushFailedSignIns } from './auth-failures';
 import { clickhouse, queryClickhouse } from './clickhouse';
 import { env } from './env';
+import { drainExportAudits } from './export-stream';
 import { ingest } from './ingest';
 import { startAuditDrainer } from './outbox-delivery';
 import { rateLimitStore } from './rate-limit';
@@ -32,6 +33,7 @@ function shutdown() {
   deadline.unref();
   server.close(async () => {
     await drained;
+    await drainExportAudits();
     const results = await Promise.allSettled([
       closeRetentionQueue(),
       closeProjectLocks(),

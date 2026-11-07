@@ -196,3 +196,37 @@ export function sqlSyntaxError(error: unknown, statement: string, expression: st
     hint: 'Check the SQL expression syntax',
   });
 }
+
+/** Called only after SQL validation. Resolve moving date functions once for every export page. */
+export function freezeSqlClock(expression: string, clock: number) {
+  const literal = "'(?:[^'\\\\]|\\\\.|'')*'";
+  const tokens = new RegExp(`${literal}|\\b(now64|now|today|yesterday)\\s*\\(`, 'gi');
+  let end = 0;
+  let sql = '';
+  for (const token of expression.matchAll(tokens)) {
+    if (!token[1] || token.index < end) continue;
+    const args = new RegExp(`^\\s*(?:(\\d+)\\s*(?:,\\s*(${literal}))?|(${literal}))?\\s*\\)`).exec(expression.slice(token.index + token[0].length));
+    if (!args || (args[1] !== undefined && token[1].toLowerCase() !== 'now64'))
+      throw new QueryError('Use a literal time zone and precision for export clock functions', {
+        lang: 'sql',
+        reason: 'not_allowed',
+        start: token.index,
+        end: token.index + token[0].length,
+        hint: 'Use now(), now64(3), or an explicit timestamp literal.',
+      });
+    const timezone = args[2] ?? args[3];
+    const base = `fromUnixTimestamp64Milli({exportClockMillis:Int64}${timezone ? `,${timezone}` : ''})`;
+    const fn = token[1].toLowerCase();
+    const replacement =
+      fn === 'now64'
+        ? `toDateTime64(${base},${args[1] ?? 3}${timezone ? `,${timezone}` : ''})`
+        : fn === 'now'
+          ? `toDateTime(${base}${timezone ? `,${timezone}` : ''})`
+          : fn === 'today'
+            ? `toDate(${base})`
+            : `subtractDays(toDate(${base}),1)`;
+    sql += expression.slice(end, token.index) + replacement;
+    end = token.index + token[0].length + args[0].length;
+  }
+  return { sql: sql + expression.slice(end), params: { exportClockMillis: clock } };
+}

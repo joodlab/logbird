@@ -1,10 +1,14 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { purgeProject } from '@logbird/clickhouse';
 import { createProjectResponseSchema, exportEvidenceRowSchema } from '@logbird/contracts';
-import { prisma } from '@logbird/database';
-import { expect, it } from 'vitest';
+import { prisma, storeAuditEvent } from '@logbird/database';
+import { expect, it, vi } from 'vitest';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
+import * as ingestion from './ingest';
+import { drainTestAudit } from './test-audit';
+
+vi.mock('./clickhouse', async (original) => ({ ...(await original<typeof import('./clickhouse')>()), queryClickhouse: null }));
 
 it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/failed/aborted receipts', async () => {
   const users: string[] = [];
@@ -41,6 +45,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     };
   }
   async function receipts(requestId: string) {
+    await drainTestAudit(organizationId);
     return (
       await clickhouse.query({
         query: 'SELECT payload FROM events WHERE project_id={p:String} AND request_id={id:String} ORDER BY timestamp,event_id',
@@ -87,7 +92,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
       changes: [{ field: 'status', before: { state: 'old' }, after: ['new', null] }],
       targets: [{ type: 'record', id: 'record-1' }],
       context: { requestId: 'event-request', ip: '203.0.113.9' },
-      description: '=1+1',
+      description: ['=1+1', '＝1+1', '＋1', '－1', '＠SUM(1)', ' =1+1', ' \t=1+1'][i % 7] ?? '=1+1',
       metadata: { longEvidence: 'Z'.repeat(3000), nested: { array: [null, 1, 'é'] } },
       unknown: { preserved: true },
     }));
@@ -105,6 +110,10 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
       for (const format of ['jsonl', 'csv', 'jsonl-evidence']) {
         const response = await request(actor.cookie, `/api/projects/${projectId}/export?${query}&format=${format}`);
         expect(response.status).toBe(200);
+        const exportId = response.headers.get('X-Logbird-Export-Id');
+        expect(exportId).toMatch(/^[a-f0-9-]{36}$/);
+        expect(response.headers.get('Content-Disposition')).toContain(exportId);
+        expect(response.headers.get('X-Logbird-Export-Schema')).toBe(`${format}/1`);
         const text = await response.text();
         const rows = await receipts(response.headers.get('x-request-id') ?? '');
         expect(rows.map((r) => r.action).sort()).toEqual(['export.completed', 'export.requested']);
@@ -114,17 +123,26 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
           expect(row.targets[0].id).toBe(projectId);
           expect(row.context.ip).toBe('203.0.113.73');
           expect(row.context.operationId).toBe(row.metadata.export.exportId);
-          expect(row.metadata.export.exportId).toMatch(/^[a-f0-9-]{36}$/);
+          expect(row.metadata.export.exportId).toBe(exportId);
+          expect(row.description).toContain(exportId?.slice(0, 8));
           expect(row.metadata.export).toMatchObject({ format, query: 'action:evidence.updated', projectId });
           expect(row.metadata.export.from).toMatch(/Z$/);
           expect(row).not.toHaveProperty('changes');
           expect(JSON.stringify(row)).not.toContain('longEvidence');
         }
-        expect(rows.find((r) => r.action === 'export.completed').metadata.export).toMatchObject({ rows: 205, bytes: Buffer.byteLength(text) });
+        expect(rows.find((r) => r.action === 'export.completed').metadata.export).toMatchObject({
+          rows: 205,
+          bytes: Buffer.byteLength(text),
+          sha256: createHash('sha256').update(text).digest('hex'),
+          schemaVersion: 1,
+        });
         const lines = text.trimEnd().split('\n');
         if (format === 'csv') {
           expect(lines).toHaveLength(206);
+          expect(lines[0]).toMatch(/^id,timestamp,action,outcome,description,/);
+          expect(lines[0]).toContain('schemaVersion');
           expect(lines[0]).toContain('impersonator_id');
+          for (const prefix of ['＝1+1', '＋1', '－1', '＠SUM(1)']) expect(text).toContain(`"'${prefix}"`);
           expect(lines[1]).toContain('"\'=1+1"');
           expect(lines[1]).toContain('"support"');
         } else {
@@ -139,6 +157,14 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
         }
       }
     }
+    const resilient = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
+    expect(resilient.status).toBe(200);
+    const unavailable = vi.spyOn(prisma.auditOutbox, 'create').mockRejectedValueOnce(new Error('fictional terminal storage outage'));
+    try {
+      expect((await resilient.text()).trimEnd().split('\n')).toHaveLength(205);
+    } finally {
+      unavailable.mockRestore();
+    }
     const aborted = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
     if (!aborted.body) throw new Error('Export body missing');
     const reader = aborted.body.getReader();
@@ -150,15 +176,70 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     const invalid = await request(owner.cookie, `/api/projects/${projectId}/export?format=jsonl&q=%28`);
     expect(invalid.status).toBe(422);
     expect((await receipts(invalid.headers.get('x-request-id') ?? '')).map((r) => r.action).sort()).toEqual(['export.failed', 'export.requested']);
+    for (const [suffix, status, reason] of [
+      ['format=jsonl&from=invalid&to=invalid', 422, 'invalid_query'],
+      ['format=jsonl&lang=sql&q=1', 503, 'storage_unavailable'],
+    ] as const) {
+      const early = await request(owner.cookie, `/api/projects/${projectId}/export?${suffix}`);
+      expect(early.status).toBe(status);
+      const records = await receipts(early.headers.get('x-request-id') ?? '');
+      expect(records.map((r) => r.action).sort()).toEqual(['export.failed', 'export.requested']);
+      expect(records.find((r) => r.action === 'export.failed').metadata.export.reason).toBe(reason);
+    }
+    const rejected = vi
+      .spyOn(ingestion, 'ingest')
+      .mockResolvedValueOnce({ accepted: 0, ids: [], rejected: [{ index: 0, reason: 'duplicate_id_conflict: fixture' }], warnings: [] });
+    try {
+      const blocked = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
+      expect(blocked.status).toBe(503);
+      expect((await blocked.json()).error.code).toBe('export_audit_unavailable');
+    } finally {
+      rejected.mockRestore();
+    }
     console.log(
       'SECURITY exports: owner/admin/member x 3 formats, 205 unique rows across pages; original payload deep equality; formula neutralization; completed, failed and canceled receipts verified against Postgres/ClickHouse/Redis/Mailpit.',
     );
   } finally {
     if (project) expect((await request(ownerCookie, `/api/projects/${project.id}?confirm=${project.slug}`, 'DELETE')).status).toBe(204);
     if (organizationId) {
+      await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${organizationId}` } });
       await purgeProject(clickhouse, `ws:${organizationId}`);
       await prisma.organization.delete({ where: { id: organizationId } });
     }
     await prisma.user.deleteMany({ where: { id: { in: users } } });
   }
-}, 120_000);
+}, 360_000);
+
+it('waits for a requested receipt already claimed by another replica', async () => {
+  const { deliverOutboxEvent, waitForAuditDelivery } = await import('./outbox-delivery');
+  const id = randomUUID();
+  let started!: () => void, release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    await storeAuditEvent('ws:qa-export-claim-race', { id, action: 'export.requested' });
+    const delivery = deliverOutboxEvent(id, async () => {
+      started();
+      await blocked;
+      return { accepted: 1, rejected: [] };
+    });
+    await entered;
+    let confirmed = false;
+    const waiting = waitForAuditDelivery(id).then((ok) => {
+      confirmed = ok;
+      return ok;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(confirmed).toBe(false);
+    release();
+    await delivery;
+    expect(await waiting).toBe(true);
+  } finally {
+    release();
+    await prisma.auditOutbox.deleteMany({ where: { id } });
+  }
+});

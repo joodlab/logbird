@@ -3,12 +3,18 @@ import { CSV_COLUMNS, csvCell, csvEvent } from './export';
 import { normalizeEvent } from './normalize';
 import { toEvent } from './queries';
 
-it.each(['=1+1', '+1', '-1', '@SUM(1)', '\t=1', '\r=1', '\n=1'])('neutralizes formula-leading cell %j', (value) =>
-  expect(csvCell(value)).toBe(`"'${value}"`),
+it.each(['=1+1', '+1', '-1', '@SUM(1)', '\t=1', '\r=1', '\n=1', '＝1+1', '＋1', '－1', '＠SUM(1)', ' =1', ' \t=1', '\u0001 @SUM(1)'])(
+  'neutralizes formula-leading cell %j',
+  (value) => expect(csvCell(value)).toBe(`"'${value}"`),
 );
 it('escapes delimiters, double quotes and embedded newlines without changing ordinary values', () => {
   expect(csvCell('plain,"quoted"\nnext')).toBe('"plain,""quoted""\nnext"');
   expect(csvCell('')).toBe('""');
+});
+it('preserves the original positional prefix and versions the schema', () => {
+  expect(CSV_COLUMNS.slice(0, 5)).toEqual(['id', 'timestamp', 'action', 'outcome', 'description']);
+  expect(CSV_COLUMNS.at(-1)).toBe('schemaVersion');
+  expect(csvCell(-1)).toBe('"\'-1"');
 });
 it('keeps attribution, before/after values and context in a stable flat CSV schema', () => {
   const r = normalizeEvent(

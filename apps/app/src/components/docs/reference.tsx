@@ -87,6 +87,10 @@ export function QueryCheatsheet({ projectId }: { projectId: string }) {
           workspace activity action catalogue
         </a>{' '}
         for Logbird's own security and management records.
+        <a className="underline" href="https://github.com/joodlab/logbird/blob/master/docs/exports.md" rel="noreferrer" target="_blank">
+          Export formats and verification
+        </a>
+        : complete original payloads, spreadsheet CSV and all-field JSON Lines, with linked activity records.
       </p>
       <table className="w-full text-sm max-sm:block">
         <tbody className="divide-y max-sm:block">

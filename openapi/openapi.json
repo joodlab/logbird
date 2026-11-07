@@ -2774,7 +2774,22 @@
                 }
               }
             },
-            "description": "Normalized CSV/JSONL or original-payload evidence JSONL. See docs/exports.md for schemas and audit semantics."
+            "description": "Versioned CSV/JSONL or complete original-payload JSONL, linked to workspace receipts by export id and SHA-256. See docs/exports.md.",
+            "headers": {
+              "X-Logbird-Export-Id": {
+                "description": "Stable export id in filename and workspace records.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              },
+              "X-Logbird-Export-Schema": {
+                "description": "Export format and schema version.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "default": {
             "content": {

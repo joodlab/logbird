@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { expect, it, vi } from 'vitest';
 import { auditedExport } from './export-stream';
 
@@ -11,7 +12,7 @@ it('counts UTF-8 bytes and rows separately from the CSV header', async () => {
   const text = await new Response(stream).text();
   expect(receipt.mock.calls).toEqual([
     ['export.requested', { rows: 0, bytes: 0 }],
-    ['export.completed', { rows: 1, bytes: Buffer.byteLength(text) }],
+    ['export.completed', { rows: 1, bytes: Buffer.byteLength(text), sha256: createHash('sha256').update(text).digest('hex') }],
   ]);
 });
 
@@ -77,7 +78,7 @@ it('records request-signal aborts and pre-stream query failures', async () => {
   ]);
 });
 
-it('fails closed when the requested or terminal audit cannot be stored', async () => {
+it('fails closed for requested storage and preserves completed bytes through terminal storage failure', async () => {
   const next = vi.fn();
   async function* chunks() {
     next();
@@ -89,5 +90,59 @@ it('fails closed when the requested or terminal audit cannot be stored', async (
   receipt.mockResolvedValueOnce(undefined);
   const reader = (await auditedExport(chunks(), false, receipt, new AbortController().signal)).getReader();
   await reader.read();
-  await expect(reader.read()).rejects.toThrow('audit unavailable');
+  expect(await reader.read()).toMatchObject({ done: true });
+});
+
+it('records cancellation after a completion receipt that is still in flight', async () => {
+  let started!: () => void, release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const receipt = vi.fn(async (action: string) => {
+    if (action === 'export.completed') {
+      started();
+      await blocked;
+    }
+  });
+  async function* chunks() {
+    yield '{}\n';
+  }
+  const abort = new AbortController();
+  const reader = (await auditedExport(chunks(), false, receipt, abort.signal)).getReader();
+  await reader.read();
+  const end = reader.read();
+  await entered;
+  abort.abort();
+  await expect(end).rejects.toThrow('Export aborted');
+  release();
+  await vi.waitFor(() => expect(receipt.mock.calls.map(([action]) => action)).toEqual(['export.requested', 'export.completed', 'export.failed']));
+});
+it('audits invalid range and unavailable-client preparation inside the lifecycle', async () => {
+  const receipt = vi.fn().mockResolvedValue(undefined);
+  await expect(
+    auditedExport(
+      async () => {
+        throw new Error('Invalid time range');
+      },
+      false,
+      receipt,
+      new AbortController().signal,
+    ),
+  ).rejects.toThrow('Invalid time range');
+  expect(receipt.mock.calls.at(-1)).toEqual(['export.failed', { rows: 0, bytes: 0, reason: 'invalid_query' }]);
+  receipt.mockClear();
+  await expect(
+    auditedExport(
+      async () => {
+        throw Object.assign(new Error('safe'), { code: 'sql_mode_unavailable' });
+      },
+      false,
+      receipt,
+      new AbortController().signal,
+    ),
+  ).rejects.toThrow('safe');
+  expect(receipt.mock.calls.at(-1)).toEqual(['export.failed', { rows: 0, bytes: 0, reason: 'storage_unavailable' }]);
 });

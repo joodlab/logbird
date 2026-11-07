@@ -192,3 +192,11 @@ describe('humanizeNoun', () => {
     expect(humanizeNoun('retentionDays')).toBe('retention days');
   });
 });
+
+it.each([
+  ['export.requested', 'Started a CSV export of QA Store (export 12345678)'],
+  ['export.completed', 'Exported 205 events from QA Store as CSV (export 12345678)'],
+  ['export.failed', 'CSV export of QA Store stopped after 20 events (download canceled) (export 12345678)'],
+])('renders the explicit %s export sentence', (action, description) => {
+  expect(eventSentence(event({ action, description, actor: vera, targets: [{ type: 'project', id: 'p', name: 'QA Store' }] }))).toBe(description);
+});

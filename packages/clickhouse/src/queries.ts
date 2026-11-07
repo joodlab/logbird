@@ -17,20 +17,22 @@ import type {
   SearchQuery,
   SearchResponse,
 } from '@logbird/contracts';
-import { pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
+import { EXPORT_SCHEMA_VERSION, pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import { isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
 import type { EventRow } from './normalize';
 import { columns, compileQuery, QueryError } from './query';
-import { sqlSyntaxError, validateSql } from './sql-guard';
+import { freezeSqlClock, sqlSyntaxError, validateSql } from './sql-guard';
 
 const sqlExpression = Symbol('sqlExpression');
-async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }) {
-  if (q.lang !== 'sql') return compileQuery(q.q);
+async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }, now?: number) {
+  if (q.lang !== 'sql') return compileQuery(q.q, now);
   if (!isQueryClient(ch)) throw new Error('SQL mode requires the restricted query client');
-  return { sql: await validateSql(ch, q.q), params: { [sqlExpression]: q.q ?? '' } };
+  const sql = await validateSql(ch, q.q);
+  const frozen = now === undefined ? { sql, params: {} } : freezeSqlClock(sql, now);
+  return { sql: frozen.sql, params: { ...frozen.params, [sqlExpression]: q.q ?? '' } };
 }
 
 type Params = Record<string, unknown>;
@@ -74,14 +76,14 @@ export async function read<T>(ch: ClickHouseClient, query: string, parameters: P
     throw error;
   }
 }
-export function timeRange(q: RangeQuery) {
-  const to = new Date(q.to ?? Date.now()),
+export function timeRange(q: RangeQuery, now = Date.now()) {
+  const to = new Date(q.to ?? now),
     from = new Date(q.from ?? to.getTime() - 86_400_000);
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
   return { from: from.toISOString(), to: to.toISOString() };
 }
-export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery) {
-  const c = await filter(ch, q);
+export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery, compiled?: Awaited<ReturnType<typeof filter>>) {
+  const c = compiled ?? (await filter(ch, q));
   return {
     sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${c.sql})`,
     params: { project: projectId, ...timeRange(q), ...c.params },
@@ -134,9 +136,14 @@ function cursor(s: string): [string, string] {
   }
   throw new Error('Invalid cursor');
 }
-export async function searchEvents(ch: ClickHouseClient, projectId: string, q: SearchQuery): Promise<SearchResponse> {
+export async function searchEvents(
+  ch: ClickHouseClient,
+  projectId: string,
+  q: SearchQuery,
+  compiled?: Awaited<ReturnType<typeof filter>>,
+): Promise<SearchResponse> {
   const start = performance.now(),
-    w = await where(ch, projectId, q),
+    w = await where(ch, projectId, q, compiled),
     asc = q.order === 'asc',
     op = asc ? '>' : '<',
     order = asc ? 'ASC' : 'DESC';
@@ -478,11 +485,20 @@ export async function operationEvents(ch: ClickHouseClient, p: string, operation
     )
   ).map(toEvent);
 }
-export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQuery) {
+/** Capture one query clock and compiled predicate; callers persist these resolved boundaries in export receipts. */
+export async function prepareExport(ch: ClickHouseClient, q: ExportQuery, clock = Date.now()) {
+  const range = timeRange(q, clock);
+  const compiled = await filter(ch, q, clock);
+  return { range, compiled, clock: new Date(clock).toISOString() };
+}
+export type ExportPlan = Awaited<ReturnType<typeof prepareExport>>;
+export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQuery, plan?: ExportPlan) {
+  const frozen = plan ?? (await prepareExport(ch, q));
+  const query = { ...q, ...frozen.range };
   let nextCursor: string | undefined;
   let first = true;
   do {
-    const page = await searchEvents(ch, p, { ...q, cursor: nextCursor, limit: 200, order: 'asc' });
+    const page = await searchEvents(ch, p, { ...query, cursor: nextCursor, limit: 200, order: 'asc' }, frozen.compiled);
     if (first && q.format === 'csv') yield `${CSV_COLUMNS.join(',')}\n`;
     first = false;
     const payloads = new Map<string, string>();
@@ -504,8 +520,8 @@ export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQu
         const payload = payloads.get(JSON.stringify([e.id, e.timestamp, e.receivedAt]));
         if (payload === undefined) throw new Error('Export payload no longer available');
         // Embed stored JSON verbatim: no normalized-field caps or JSON parse/stringify round trip.
-        yield `{"exportSchemaVersion":1,"event":${JSON.stringify(e)},"payload":${payload}}\n`;
-      } else yield q.format === 'jsonl' ? `${JSON.stringify(e)}\n` : csvEvent(e);
+        yield `{"exportSchemaVersion":${EXPORT_SCHEMA_VERSION},"event":${JSON.stringify(e)},"payload":${payload}}\n`;
+      } else yield q.format === 'jsonl' ? `${JSON.stringify({ ...e, exportSchemaVersion: EXPORT_SCHEMA_VERSION })}\n` : csvEvent(e);
     }
     nextCursor = page.nextCursor ?? undefined;
   } while (nextCursor);

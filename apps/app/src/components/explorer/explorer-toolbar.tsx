@@ -1,4 +1,4 @@
-import type { QueryLang } from '@logbird/contracts';
+import { EXPORT_ID_HEADER, type QueryLang } from '@logbird/contracts';
 import { Button } from '@logbird/ui/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@logbird/ui/components/ui/dialog';
 import {
@@ -66,10 +66,10 @@ export function ColumnPicker({ columns, onChange }: { columns: string[]; onChang
 }
 
 type ExportFormat = import('@logbird/contracts').ExportFormat;
-const EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
-  { format: 'csv', label: 'CSV (normalized, spreadsheet-safe)' },
-  { format: 'jsonl', label: 'JSON Lines (normalized)' },
-  { format: 'jsonl-evidence', label: 'JSON Lines (original evidence)' },
+const EXPORT_FORMATS: { format: ExportFormat; label: string; hint: string }[] = [
+  { format: 'jsonl-evidence', label: 'Complete (original payloads)', hint: 'Original stored events with provenance. Use as evidence.' },
+  { format: 'csv', label: 'Spreadsheet (CSV)', hint: 'Every normalized field; long values shortened.' },
+  { format: 'jsonl', label: 'JSON Lines (all fields)', hint: 'Every normalized field; long values shortened.' },
 ];
 
 /** Downloads every match of the range and query as CSV or JSON Lines (the toolbar menu and the mobile menu share it). */
@@ -83,14 +83,18 @@ function useExport({ projectId, range, q, lang = 'query' }: { projectId: string;
         api.events.exportUrl(projectId, { from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, format }),
       );
       if (!response.ok) throw await toApiError(response);
+      const exportId = response.headers.get(EXPORT_ID_HEADER);
+      if (!exportId || !/^[a-f0-9-]{36}$/.test(exportId)) throw new Error('Export response is missing its record identifier.');
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `logbird-events-${new Date().toISOString().slice(0, 19).replaceAll(':', '')}${format === 'jsonl-evidence' ? '-evidence' : ''}.${format === 'csv' ? 'csv' : 'jsonl'}`;
+      a.download = `logbird-events-${exportId}${format === 'jsonl-evidence' ? '-evidence' : ''}.${format === 'csv' ? 'csv' : 'jsonl'}`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success('Export ready', { description: `${rangeLabel(range)}${q ? ` · ${q}` : ''}` });
+      toast.success(`${EXPORT_FORMATS.find((f) => f.format === format)?.label ?? format} ready`, {
+        description: `${rangeLabel(range)}${q ? ` · ${q}` : ''}`,
+      });
     } catch (error) {
       toast.error('Export failed', { description: errorMessage(error) });
     } finally {
@@ -139,10 +143,17 @@ export function ExportMenu({
             </DropdownMenuLabel>
             {EXPORT_FORMATS.map((f) => (
               <DropdownMenuItem key={f.format} onClick={() => download(f.format)}>
-                {f.label}
+                <span className="flex flex-col gap-0.5">
+                  <span>{f.label}</span>
+                  <span className="text-muted-foreground text-xs">{f.hint}</span>
+                </span>
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem render={<a href="https://github.com/joodlab/logbird/blob/master/docs/exports.md" rel="noreferrer" target="_blank" />}>
+            Which format?
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </DisabledReason>
@@ -205,10 +216,17 @@ export function ExplorerOverflowMenu({
             {EXPORT_FORMATS.map((f) => (
               <DropdownMenuItem disabled={busy || Boolean(disabledReason)} key={f.format} onClick={() => download(f.format)}>
                 <DownloadIcon />
-                {f.label}
+                <span className="flex flex-col gap-0.5">
+                  <span>{f.label}</span>
+                  <span className="text-muted-foreground text-xs">{f.hint}</span>
+                </span>
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem render={<a href="https://github.com/joodlab/logbird/blob/master/docs/exports.md" rel="noreferrer" target="_blank" />}>
+            Which format?
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <SaveViewDialog

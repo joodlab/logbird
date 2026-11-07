@@ -115,3 +115,4 @@ Useful Explorer queries for this example: `actor:usr_42`, `tenant:biz_7`, `execu
 `target:bk_1042 target.type:booking`, `operation:op_cancel_bk_1042`, `job:job_981`.
 
 Logbird records its own management and authentication activity in a workspace stream. See the [activity action catalogue](workspace-audit.md) for actor, target, metadata and delivery semantics.
+See [event exports](exports.md) for complete original payloads, normalized CSV/JSONL, versioned schemas, fixed query clocks and file-to-record verification.

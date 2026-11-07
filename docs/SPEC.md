@@ -484,3 +484,4 @@ some events deliberately off-standard (missing actor, custom top-level keys) to 
 creates a dev login user `demo@logbird.local` as owner of "Jood" (OTP arrives in Mailpit).
 
 Workspace activity actions, targets, delivery guarantees and operator procedures are listed in the [activity action catalogue](workspace-audit.md).
+See [event exports](exports.md) for complete original payloads, normalized CSV/JSONL, versioned schemas, fixed query clocks and file-to-record verification.

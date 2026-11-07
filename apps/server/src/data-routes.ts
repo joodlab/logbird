@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as ch from '@logbird/clickhouse';
 import * as s from '@logbird/contracts';
-import { prisma } from '@logbird/database';
+import { type AuditPayload, prisma, storeAuditEvent } from '@logbird/database';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { resolver, validator } from 'hono-openapi';
@@ -12,6 +12,7 @@ import { auditedExport } from './export-stream';
 import { ingest, readIngestBody, requireProjectReadable } from './ingest';
 import { requireApiKey, requireProjectAccess, requireSession } from './middlewares';
 import { doc as responseDoc, routeDoc } from './openapi';
+import { deliverOutboxEvent, waitForAuditDelivery } from './outbox-delivery';
 import { clientAddress, publicRateLimits } from './rate-limit';
 import type { AppEnv } from './types';
 
@@ -174,7 +175,15 @@ export const dataRoutes = new Hono<AppEnv>()
     routeDoc('Stream CSV or JSONL', {
       responses: {
         200: {
-          description: 'Normalized CSV/JSONL or original-payload evidence JSONL. See docs/exports.md for schemas and audit semantics.',
+          description:
+            'Versioned CSV/JSONL or complete original-payload JSONL, linked to workspace receipts by export id and SHA-256. See docs/exports.md.',
+          headers: {
+            [s.EXPORT_ID_HEADER]: { description: 'Stable export id in filename and workspace records.', schema: { type: 'string', format: 'uuid' } },
+            [s.EXPORT_SCHEMA_HEADER]: {
+              description: 'Export format and schema version.',
+              schema: { type: 'string' },
+            },
+          },
           content: { 'text/csv': { schema: { type: 'string' } }, 'application/x-ndjson': { schema: { type: 'string' } } },
         },
       },
@@ -182,34 +191,78 @@ export const dataRoutes = new Hono<AppEnv>()
     query(s.exportQuerySchema),
     async (c) => {
       const input = c.req.valid('query');
-      const q = { ...input, ...ch.timeRange(input), q: input.q?.trim() ?? '', lang: input.lang ?? ('query' as const) };
-      const client = queryClient(q);
+      const clock = Date.now();
       const project = c.get('project');
       const exportId = randomUUID();
+      const stream = `ws:${project.organizationId}`;
+      let resolved: ch.ExportPlan | undefined;
+      const formatName = input.format === 'csv' ? 'CSV' : input.format === 'jsonl-evidence' ? 'complete JSON Lines' : 'JSON Lines';
+      c.header(s.EXPORT_ID_HEADER, exportId);
+      c.header(s.EXPORT_SCHEMA_HEADER, `${input.format}/${s.EXPORT_SCHEMA_VERSION}`);
       const body = await auditedExport(
-        ch.exportEvents(client, project.id, q),
-        q.format === 'csv',
-        (action, counts) =>
-          ingest(`ws:${project.organizationId}`, {
+        async () => {
+          const client = queryClient(input);
+          resolved = await ch.prepareExport(client, input, clock);
+          return ch.exportEvents(client, project.id, input, resolved);
+        },
+        input.format === 'csv',
+        async (action, counts) => {
+          const suffix = ` (export ${exportId.slice(0, 8)})`;
+          const description =
+            action === 'export.requested'
+              ? `Started a ${formatName} export of ${project.name}`
+              : action === 'export.completed'
+                ? `Exported ${counts.rows} events from ${project.name} as ${formatName}`
+                : `${formatName} export of ${project.name} stopped after ${counts.rows} events (${counts.reason === 'client_aborted' ? 'download canceled' : counts.reason === 'invalid_query' ? 'invalid query' : 'export error'})`;
+          const event: AuditPayload = {
+            id: `${exportId}-${action.split('.')[1]}`,
+            occurredAt: new Date().toISOString(),
             action,
+            description: description + suffix,
             outcome: action === 'export.failed' ? 'failure' : 'success',
-            actor: { type: 'user', ...c.get('user') },
+            actor: { type: 'user', id: c.get('user').id, name: c.get('user').name || c.get('user').email },
             executor: { type: 'api', id: 'api-server' },
-            targets: [{ type: 'project', id: project.id, name: project.name }],
+            targets: [
+              { type: 'project', id: project.id, name: project.name },
+              { type: 'export', id: exportId },
+            ],
             context: {
               operationId: exportId,
               requestId: c.get('requestId'),
               ip: clientAddress(c) ?? '',
               userAgent: c.req.header('user-agent') ?? '',
             },
-            metadata: { export: { exportId, projectId: project.id, format: q.format, query: q.q, lang: q.lang, from: q.from, to: q.to, ...counts } },
-          }),
+            metadata: {
+              export: {
+                exportId,
+                projectId: project.id,
+                format: input.format,
+                schemaVersion: s.EXPORT_SCHEMA_VERSION,
+                query: input.q?.trim() ?? '',
+                lang: input.lang ?? 'query',
+                clock: new Date(clock).toISOString(),
+                from: resolved?.range.from ?? input.from?.slice(0, 128) ?? null,
+                to: resolved?.range.to ?? input.to?.slice(0, 128) ?? null,
+                resolvedQuery: resolved ? JSON.parse(JSON.stringify(resolved.compiled)) : null,
+                ...counts,
+              },
+            },
+          };
+          if (action !== 'export.requested') return storeAuditEvent(stream, event);
+          try {
+            const requested = await storeAuditEvent(stream, event);
+            await deliverOutboxEvent(requested.id, ingest);
+            if (!(await waitForAuditDelivery(requested.id))) throw new Error('Export request not acknowledged');
+          } catch {
+            throw new ApiError(503, 'export_audit_unavailable', 'The export request could not be recorded. Retry the export before downloading.');
+          }
+        },
         c.req.raw.signal,
       );
-      c.header('Content-Type', q.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/x-ndjson');
+      c.header('Content-Type', input.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/x-ndjson');
       c.header(
         'Content-Disposition',
-        `attachment; filename="events${q.format === 'jsonl-evidence' ? '-evidence' : ''}.${q.format === 'csv' ? 'csv' : 'jsonl'}"`,
+        `attachment; filename="events-${exportId}${input.format === 'jsonl-evidence' ? '-evidence' : ''}.${input.format === 'csv' ? 'csv' : 'jsonl'}"`,
       );
       return c.body(body);
     },

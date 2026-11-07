@@ -23,11 +23,16 @@ export const rangeQuerySchema = z.object({
 });
 export type RangeQuery = z.infer<typeof rangeQuerySchema>;
 
+export const EXPORT_SCHEMA_VERSION = 1 as const;
+export const EXPORT_ID_HEADER = 'X-Logbird-Export-Id';
+export const EXPORT_SCHEMA_HEADER = 'X-Logbird-Export-Schema';
 export const exportFormatSchema = z.enum(['csv', 'jsonl', 'jsonl-evidence']);
 export type ExportFormat = z.infer<typeof exportFormatSchema>;
 export const exportQuerySchema = rangeQuerySchema.extend({ format: exportFormatSchema });
 export type ExportQuery = z.infer<typeof exportQuerySchema>;
-export const exportEvidenceRowSchema = z.object({ exportSchemaVersion: z.literal(1), event: eventSchema, payload: z.unknown() });
+export const exportEvidenceRowSchema = z.object({ exportSchemaVersion: z.literal(EXPORT_SCHEMA_VERSION), event: eventSchema, payload: z.unknown() });
+export const exportNormalizedRowSchema = eventSchema.extend({ exportSchemaVersion: z.literal(EXPORT_SCHEMA_VERSION) });
+export type ExportNormalizedRow = z.infer<typeof exportNormalizedRowSchema>;
 export type ExportEvidenceRow = z.infer<typeof exportEvidenceRowSchema>;
 
 export const searchQuerySchema = rangeQuerySchema.extend({

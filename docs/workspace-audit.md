@@ -74,6 +74,7 @@ user-agent context where available. Keys and session tokens are never recorded. 
 | `auth.signed_in` | auth | signed-in user / user | successful sign-in |
 | `auth.signed_out`, `auth.session.revoked` | auth | acting user / non-secret session id | explicit sign-out/revoke routes only; repeated sign-out is a no-op |
 | `auth.sign_in.failed` | auth | anonymous / targeted member user id | hashVersion, emailHash, reason, attempts, windowEnd, auditWindowSeconds |
+| `export.requested`, `export.completed`, `export.failed` | export | user / project and export | linked export id, format/version, resolved query clock/range, rows/bytes; completion SHA-256; safe failure reason; see [exports](exports.md) |
 | `auth.sign_in.suppressed` | auth | system / workspace stream | aggregate attempts and windowEnd |
 
 Expired-session cleanup is skipped, including better-auth's `getSession` deletion of expired sessions. Direct database
