@@ -4,6 +4,27 @@ import { normalizeEvent } from './normalize';
 import { exportEvents } from './queries';
 import { freezeSqlClock } from './sql-guard';
 
+function payloadClient(payload: string) {
+  const normalized = normalizeEvent({ id: 'stored', action: 'stored.test' }, { projectId: 'stored', receivedAt: new Date() });
+  if (!normalized.ok) throw new Error(normalized.reason);
+  return {
+    query: async ({ query }: { query: string }) => ({
+      json: async () => (query.includes('count()') ? [{ n: 1 }] : [{ ...normalized.row, payload }]),
+    }),
+  } as unknown as ClickHouseClient;
+}
+
+it.each(['', '{"broken":'])('rejects invalid stored JSON instead of producing malformed evidence (%j)', async (payload) => {
+  const output = exportEvents(payloadClient(payload), 'stored', { format: 'jsonl-evidence' });
+  await expect(output.next()).rejects.toThrow('Export payload is not valid stored JSON');
+});
+
+it('validates stored JSON without reserializing large-number text', async () => {
+  const payload = '{"precise":9007199254740993}';
+  const output = exportEvents(payloadClient(payload), 'stored', { format: 'jsonl-evidence' });
+  expect((await output.next()).value).toContain(`"payload":${payload}}`);
+});
+
 it('reuses one compiled relative boundary after consumption delays across pages', async () => {
   const start = Date.parse('2026-11-07T12:00:00Z');
   const now = vi.spyOn(Date, 'now').mockReturnValue(start);

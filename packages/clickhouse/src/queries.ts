@@ -524,7 +524,12 @@ export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQu
         // Same selected physical row, including when legacy conflicting versions share every identity timestamp.
         const payload = payloads[index];
         if (payload === undefined) throw new Error('Export payload no longer available');
-        // Embed stored JSON verbatim: no normalized-field caps or JSON parse/stringify round trip.
+        try {
+          JSON.parse(payload);
+        } catch {
+          throw new Error('Export payload is not valid stored JSON');
+        }
+        // Validate syntax only; emit stored text unchanged, including numbers beyond JS's exact integer range.
         yield `{"exportSchemaVersion":${EXPORT_SCHEMA_VERSION},"event":${JSON.stringify(e)},"payload":${payload}}\n`;
       } else yield q.format === 'jsonl' ? `${JSON.stringify({ ...e, exportSchemaVersion: EXPORT_SCHEMA_VERSION })}\n` : csvEvent(e);
     }
