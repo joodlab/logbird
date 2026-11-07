@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { appendFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import nodemailer from 'nodemailer';
 import type { WaitlistRecord } from '../lib/waitlist-schema';
 import { serverEnv as env } from './env';
@@ -33,5 +34,21 @@ export async function notifyWaitlist(record: WaitlistRecord) {
     });
   } finally {
     transport.close();
+  }
+}
+
+/**
+ * The submissions file. An explicit WAITLIST_FILE wins; otherwise apps/web/.data/waitlist.jsonl, but only when the
+ * process runs from apps/web (pnpm scripts do), so PII never lands in a directory that isn't gitignored.
+ */
+export function waitlistFile(configured?: string): string | undefined {
+  if (configured) {
+    return resolve(configured);
+  }
+  try {
+    const manifest = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { name?: string };
+    return manifest.name === '@logbird/web' ? resolve('.data/waitlist.jsonl') : undefined;
+  } catch {
+    return undefined;
   }
 }

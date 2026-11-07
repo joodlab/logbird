@@ -10,6 +10,8 @@ it('renders a native form and static no-JS feedback targets', () => {
   expect(html).toContain('<noscript>');
   expect(html).toContain('id="waitlist-ok"');
   expect(html).toContain('id="waitlist-error"');
+  expect(html).toContain('id="waitlist-validation_error"');
+  expect(html).toContain('id="waitlist-waitlist_unavailable"');
   expect(html).toContain('name="email"');
   expect(html).toContain('name="website"');
   expect(html).toContain('aria-live="polite"');
