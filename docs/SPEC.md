@@ -400,10 +400,9 @@ invitation acceptance remain available; organization administration uses its rol
 | POST workspace invite-links / DELETE workspace invite-link | yes | yes | no |
 | POST invite-links/:token/accept | valid invitation | valid invitation | valid invitation |
 | GET export, workspace activity and other workspace/project reads | yes | yes | yes |
+| GET workspace invite-links | yes | yes | no (contains bearer invitations) |
 
 See [event exports](exports.md) for complete original payloads, CSV/JSONL schemas, fixed query clocks and file-to-record verification.
-
-| GET workspace invite-links | yes | yes | no (contains bearer invitations) |
 
 Link acceptance requires a session and valid token, domain, expiry and remaining
 uses, independent of an existing workspace role. Public invitation previews remain
