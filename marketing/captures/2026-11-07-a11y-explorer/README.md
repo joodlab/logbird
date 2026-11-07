@@ -1,0 +1,69 @@
+# a11y proof — explorer, event sheet, Settings, keys dialog (2026-11-07)
+
+axe-core 4.10.3 injected into Playwright Chromium (tags wcag2a/aa, wcag21a/aa, wcag22aa, best-practice) against the real local
+stack (app :4600, server :4601, worker). Explorer, event sheet and overview use the read-only demo workspace; Settings and the keys dialog use a
+fictional fixture (`qa-fix-a11y-1@example.test`, workspace "QA Fix a11y", project deleted afterwards). "Before" is origin/master's code
+for the same files on the same stack. Event sheet and dialog scans are scoped to the dialog. The `region` best-practice rule
+(content outside landmarks: 15 nodes on desktop, the same before and after) is omitted from the table because it is out of scope here.
+
+Before, the keyboard could not reach a row (`tabStopsFromQueryToRow: not reached in 40`), so the "before" sheet was opened with a mouse
+click. A clicked row takes focus by itself, which is why `afterSheetEscape` already looks right in that column. The keyboard path
+(j + Enter) left focus on BODY in the auditor's run.
+
+Full JSON: `axe-report-before.json`, `axe-report-after.json`. Video narration: `keyboard-video-log.txt`.
+
+| Screen | Before (axe violations, nodes) | After |
+|---|---|---|
+| explorer desktop-light | aria-allowed-role(1), aria-required-children(1), color-contrast(3), page-has-heading-one(1) | aria-allowed-role(1), page-has-heading-one(1) |
+| event-sheet desktop-light | color-contrast(1), definition-list(2), target-size(4) | 0 |
+| settings-keys desktop-light | color-contrast(5) | 0 |
+| create-key-dialog desktop-light | 0 | 0 |
+| overview desktop-light | color-contrast(3) | 0 |
+| explorer desktop-dark | aria-allowed-role(1), aria-required-children(1), color-contrast(3), page-has-heading-one(1) | aria-allowed-role(1), page-has-heading-one(1) |
+| event-sheet desktop-dark | definition-list(2), target-size(4) | 0 |
+| settings-keys desktop-dark | color-contrast(3) | 0 |
+| create-key-dialog desktop-dark | 0 | 0 |
+| overview desktop-dark | color-contrast(3) | 0 |
+| explorer phone-light | aria-allowed-role(1), aria-required-children(22), page-has-heading-one(1) | aria-allowed-role(1), page-has-heading-one(1) |
+| event-sheet phone-light | color-contrast(1), definition-list(2) | 0 |
+| settings-keys phone-light | color-contrast(2) | 0 |
+| create-key-dialog phone-light | 0 | 0 |
+| overview phone-light | 0 | 0 |
+| explorer phone-dark | aria-allowed-role(1), aria-required-children(22), page-has-heading-one(1) | aria-allowed-role(1), page-has-heading-one(1) |
+| event-sheet phone-dark | definition-list(2) | 0 |
+| settings-keys phone-dark | 0 | 0 |
+| create-key-dialog phone-dark | 0 | 0 |
+| overview phone-dark | 0 | 0 |
+
+
+| Check | Before | After |
+|---|---|---|
+| afterSheetEscape desktop-light | div[role=row][data-index=2] "Nov 4, 22:35 success booking.modified Hourly CRM b" | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hotels's crm:sync:bookings job pro |
+| keyDialogInitialFocus desktop-light | input "" | input "" |
+| afterKeyDialogEscape desktop-light | BODY | button "Create key" |
+| confirmInitialFocus desktop-light | button "Revoke key" | button "Cancel" |
+| afterConfirmEscape desktop-light | BODY | button "Revoke" |
+| settingsActiveTabVisible desktop-light | fully visible (tab 265–338 in nav 265–1407) | fully visible (tab 752–859 in nav 265–1407) |
+| tabStopsFromQueryToRow | not reached in 40 | 9 |
+| afterSheetEscape desktop-dark | div[role=row][data-index=2] "Nov 4, 22:35 success booking.modified Hourly CRM b" | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hotels's crm:sync:bookings job pro |
+| keyDialogInitialFocus desktop-dark | input "" | input "" |
+| afterKeyDialogEscape desktop-dark | BODY | button "Create key" |
+| confirmInitialFocus desktop-dark | button "Revoke key" | button "Cancel" |
+| afterConfirmEscape desktop-dark | BODY | button "Revoke" |
+| settingsActiveTabVisible desktop-dark | fully visible (tab 265–338 in nav 265–1407) | fully visible (tab 752–859 in nav 265–1407) |
+| afterSheetEscape phone-light | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hot" | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hotels's crm:sync:bookings job pro |
+| keyDialogInitialFocus phone-light | input "" | input "" |
+| afterKeyDialogEscape phone-light | BODY | button "Create key" |
+| confirmInitialFocus phone-light | button "Revoke key" | button "Cancel" |
+| afterConfirmEscape phone-light | BODY | button "Revoke" |
+| settingsActiveTabVisible phone-light | fully visible (tab 16–89 in nav 16–374) | fully visible (tab 267–374 in nav 16–374) |
+| afterSheetEscape phone-dark | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hot" | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hotels's crm:sync:bookings job pro |
+| keyDialogInitialFocus phone-dark | input "" | input "" |
+| afterKeyDialogEscape phone-dark | BODY | button "Create key" |
+| confirmInitialFocus phone-dark | button "Revoke key" | button "Cancel" |
+| afterConfirmEscape phone-dark | BODY | button "Revoke" |
+| settingsActiveTabVisible phone-dark | fully visible (tab 16–89 in nav 16–374) | fully visible (tab 267–374 in nav 16–374) |
+| queryTab | Tab 1: query="outcome:failure OR " focus=textarea[role=combobox] "Query"<br>Tab 2: query="outcome:failure OR action:" focus=textarea[role=combobox] "Query"<br>Tab 3: query="outcome:failure OR action:guest.updated " focus=textarea[role=combobox] "Query" | Tab 1: query="outcome:failure " focus=button "Clear query"<br>Tab 2: query="outcome:failure " focus=button "Query syntax help"<br>Tab 3: query="outcome:failure " focus=span[role=switch] "" |
+| queryArrowRightAccepts | outcome:failure OR action:guest.updated act | outcome:failure action: |
+| rangePresetFocusRing | Last hour outline=none box-shadow=none | Last hour outline=none box-shadow=rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0,  |
+

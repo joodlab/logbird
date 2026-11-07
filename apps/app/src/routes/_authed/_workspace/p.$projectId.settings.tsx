@@ -79,6 +79,8 @@ function SettingsLayout() {
             const active = 'exact' in tab ? pathname === href : pathname === href;
             return (
               <Link
+                // Exact: otherwise the router marks General (a prefix of every section) aria-current too.
+                activeOptions={{ exact: true }}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
                   'relative shrink-0 whitespace-nowrap rounded-t-md px-3 pt-1 pb-2.5 text-sm outline-none transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset pointer-coarse:pt-2.5 pointer-coarse:pb-3.5',

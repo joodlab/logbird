@@ -440,7 +440,21 @@ export function Explorer({
       </div>
 
       <div className="flex min-h-0 flex-1">
-        {facetsOpen ? <div className="hidden w-60 shrink-0 border-e xl:flex xl:flex-col">{facetsPanel}</div> : null}
+        {facetsOpen ? (
+          <div className="relative hidden w-60 shrink-0 border-e xl:flex xl:flex-col">
+            {/* The facet list is dozens of Tab stops: let keyboard users jump past it to the events (shown on focus). */}
+            {rows.length ? (
+              <button
+                className="sr-only rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md outline-none focus-visible:not-sr-only focus-visible:absolute focus-visible:start-2 focus-visible:top-2 focus-visible:z-30 focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => eventsTable.current?.focusRow(Math.max(cursor, 0))}
+                type="button"
+              >
+                Skip filters to events
+              </button>
+            ) : null}
+            {facetsPanel}
+          </div>
+        ) : null}
         <div className={cn('relative flex min-h-0 min-w-0 flex-1 flex-col transition-opacity', problem && rows.length > 0 && 'opacity-45')}>
           {liveActive && liveRows.length > 0 ? (
             <div className="pointer-events-none absolute inset-x-0 top-10 z-20 flex justify-center">

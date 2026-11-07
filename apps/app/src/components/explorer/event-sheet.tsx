@@ -167,14 +167,18 @@ function KV({
   return (
     <div className="group/kv grid min-h-7 grid-cols-[120px_1fr_auto] items-center gap-3 text-[13px]">
       <dt className="truncate text-muted-foreground">{label}</dt>
-      <dd className="min-w-0">
-        {copy ? (
-          <CopyValue className={mono ? undefined : 'font-sans text-[13px]'} value={value} />
-        ) : (
-          <span className={cn('break-all', mono && 'font-mono text-[12px]')}>{value}</span>
-        )}
+      {/* The filter action belongs to the value: inside the dd (a <dl> group may only hold dt/dd), laid out as the third
+          grid column through display: contents. */}
+      <dd className="contents">
+        <span className="min-w-0">
+          {copy ? (
+            <CopyValue className={mono ? undefined : 'font-sans text-[13px]'} value={value} />
+          ) : (
+            <span className={cn('break-all', mono && 'font-mono text-[12px]')}>{value}</span>
+          )}
+        </span>
+        <span className="flex items-center">{term ? <FilterButton onFilter={onFilter} term={term} /> : null}</span>
       </dd>
-      <div className="flex items-center">{term ? <FilterButton onFilter={onFilter} term={term} /> : null}</div>
     </div>
   );
 }
@@ -462,13 +466,13 @@ function EventDetailBody({
             {detailLoading ? (
               <Skeleton className="h-8 w-full" />
             ) : (
-              <ol aria-label="Causation chain" className="flex flex-col gap-1">
+              <ol aria-label="Causation chain" className="flex flex-col">
                 {(detail?.parents ?? []).map((p, i) => (
                   <li className="flex items-center gap-2 text-[13px]" key={p.id} style={{ paddingInlineStart: i * 14 }}>
                     <OutcomeDot outcome={p.outcome} />
                     {projectId ? (
                       <Link
-                        className="min-w-0 truncate hover:underline"
+                        className="min-w-0 truncate py-[3px] hover:underline"
                         params={{ projectId }}
                         search={(prev) => ({ ...prev, ev: p.id })}
                         to="/p/$projectId/events"

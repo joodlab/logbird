@@ -1,0 +1,491 @@
+{
+  "phase": "before",
+  "at": "2026-11-07T12:29:21.482Z",
+  "axe": [
+    {
+      "label": "explorer desktop-light",
+      "count": 21,
+      "rules": [
+        {
+          "id": "aria-allowed-role",
+          "impact": "minor",
+          "nodes": 1,
+          "help": "ARIA role should be appropriate for the element",
+          "sample": [
+            "textarea :: ARIA role combobox is not allowed for given element"
+          ]
+        },
+        {
+          "id": "aria-required-children",
+          "impact": "critical",
+          "nodes": 1,
+          "help": "Certain ARIA roles must contain particular children",
+          "sample": [
+            "div[aria-label=\"Events\"] :: Element has children which are not allowed: button[tabindex]"
+          ]
+        },
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "nodes": 3,
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "sample": [
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(2) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Element has insufficient color contrast of 3",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(3) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Element has insufficient color contrast of 3",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(4) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Element has insufficient color contrast of 3"
+          ]
+        },
+        {
+          "id": "page-has-heading-one",
+          "impact": "moderate",
+          "nodes": 1,
+          "help": "Page should contain a level-one heading",
+          "sample": [
+            "html :: Page must have a level-one heading"
+          ]
+        },
+        {
+          "id": "region",
+          "impact": "moderate",
+          "nodes": 15,
+          "help": "All page content should be contained by landmarks",
+          "sample": [
+            "#base-ui-_r_8_ > span :: Some page content is not contained by landmarks",
+            "#base-ui-_r_a_ > span :: Some page content is not contained by landmarks",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(2) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Some page content is not contained by landma"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "event-sheet desktop-light",
+      "count": 7,
+      "rules": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "nodes": 1,
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "sample": [
+            ".text-outcome-success :: Element has insufficient color contrast of 3.35 (foreground color: #059669, background color: #e6f5f0, font size: 8.3pt (11px), font weight: normal). Expected contrast ratio of 4.5:1"
+          ]
+        },
+        {
+          "id": "definition-list",
+          "impact": "serious",
+          "nodes": 2,
+          "help": "<dl> elements must only directly contain properly-ordered <dt> and <dd> groups, <script>, <template> or <div> elements",
+          "sample": [
+            ".gap-2\\.5.last\\:border-b-0.py-4:nth-child(5) > dl :: dl element has direct children that are not allowed: div > div",
+            ".gap-2\\.5.last\\:border-b-0.py-4:nth-child(6) > dl :: dl element has direct children that are not allowed: div > div"
+          ]
+        },
+        {
+          "id": "target-size",
+          "impact": "serious",
+          "nodes": 4,
+          "help": "All touch targets must be 24px large, or leave sufficient space",
+          "sample": [
+            "li:nth-child(1) > .hover\\:underline :: Target has insufficient size (495.8px by 18.6px, should be at least 24px by 24px)",
+            "li:nth-child(2) > .hover\\:underline :: Target has insufficient size (481.8px by 18.6px, should be at least 24px by 24px)",
+            "li:nth-child(3) > .hover\\:underline :: Target has insufficient size (467.8px by 18.6px, should be at least 24px by 24px)"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "settings-keys desktop-light",
+      "count": 20,
+      "rules": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "nodes": 5,
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "sample": [
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(2) > .px-2.text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\] :: Element has insufficient color contrast of 3.52 (foreground color: #848383, bac",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(3) > .px-2.text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\] :: Element has insufficient color contrast of 3.52 (foreground color: #848383, bac",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(4) > .px-2.text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\] :: Element has insufficient color contrast of 3.52 (foreground color: #848383, bac"
+          ]
+        },
+        {
+          "id": "region",
+          "impact": "moderate",
+          "nodes": 15,
+          "help": "All page content should be contained by landmarks",
+          "sample": [
+            "#base-ui-_r_8_ > span :: Some page content is not contained by landmarks",
+            "#base-ui-_r_a_ > span :: Some page content is not contained by landmarks",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(2) > .px-2.text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\] :: Some page content is not contained by landmarks"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "create-key-dialog desktop-light",
+      "count": 0,
+      "rules": []
+    },
+    {
+      "label": "overview desktop-light",
+      "count": 18,
+      "rules": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "nodes": 3,
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "sample": [
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(2) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Element has insufficient color contrast of 3",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(3) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Element has insufficient color contrast of 3",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(4) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Element has insufficient color contrast of 3"
+          ]
+        },
+        {
+          "id": "region",
+          "impact": "moderate",
+          "nodes": 15,
+          "help": "All page content should be contained by landmarks",
+          "sample": [
+            "#base-ui-_r_8_ > span :: Some page content is not contained by landmarks",
+            "#base-ui-_r_a_ > span :: Some page content is not contained by landmarks",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(2) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Some page content is not contained by landma"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "explorer desktop-dark",
+      "count": 21,
+      "rules": [
+        {
+          "id": "aria-allowed-role",
+          "impact": "minor",
+          "nodes": 1,
+          "help": "ARIA role should be appropriate for the element",
+          "sample": [
+            "textarea :: ARIA role combobox is not allowed for given element"
+          ]
+        },
+        {
+          "id": "aria-required-children",
+          "impact": "critical",
+          "nodes": 1,
+          "help": "Certain ARIA roles must contain particular children",
+          "sample": [
+            "div[aria-label=\"Events\"] :: Element has children which are not allowed: button[tabindex]"
+          ]
+        },
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "nodes": 3,
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "sample": [
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(2) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Element has insufficient color contrast of 4",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(3) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Element has insufficient color contrast of 4",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(4) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Element has insufficient color contrast of 4"
+          ]
+        },
+        {
+          "id": "page-has-heading-one",
+          "impact": "moderate",
+          "nodes": 1,
+          "help": "Page should contain a level-one heading",
+          "sample": [
+            "html :: Page must have a level-one heading"
+          ]
+        },
+        {
+          "id": "region",
+          "impact": "moderate",
+          "nodes": 15,
+          "help": "All page content should be contained by landmarks",
+          "sample": [
+            "#base-ui-_r_8_ > span :: Some page content is not contained by landmarks",
+            "#base-ui-_r_a_ > span :: Some page content is not contained by landmarks",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(2) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Some page content is not contained by landma"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "event-sheet desktop-dark",
+      "count": 6,
+      "rules": [
+        {
+          "id": "definition-list",
+          "impact": "serious",
+          "nodes": 2,
+          "help": "<dl> elements must only directly contain properly-ordered <dt> and <dd> groups, <script>, <template> or <div> elements",
+          "sample": [
+            ".gap-2\\.5.last\\:border-b-0.py-4:nth-child(5) > dl :: dl element has direct children that are not allowed: div > div",
+            ".gap-2\\.5.last\\:border-b-0.py-4:nth-child(6) > dl :: dl element has direct children that are not allowed: div > div"
+          ]
+        },
+        {
+          "id": "target-size",
+          "impact": "serious",
+          "nodes": 4,
+          "help": "All touch targets must be 24px large, or leave sufficient space",
+          "sample": [
+            "li:nth-child(1) > .hover\\:underline :: Target has insufficient size (495.8px by 18.6px, should be at least 24px by 24px)",
+            "li:nth-child(2) > .hover\\:underline :: Target has insufficient size (481.8px by 18.6px, should be at least 24px by 24px)",
+            "li:nth-child(3) > .hover\\:underline :: Target has insufficient size (467.8px by 18.6px, should be at least 24px by 24px)"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "settings-keys desktop-dark",
+      "count": 18,
+      "rules": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "nodes": 3,
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "sample": [
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(2) > .px-2.text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\] :: Element has insufficient color contrast of 4.12 (foreground color: #747474, bac",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(3) > .px-2.text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\] :: Element has insufficient color contrast of 4.12 (foreground color: #747474, bac",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(4) > .px-2.text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\] :: Element has insufficient color contrast of 4.12 (foreground color: #747474, bac"
+          ]
+        },
+        {
+          "id": "region",
+          "impact": "moderate",
+          "nodes": 15,
+          "help": "All page content should be contained by landmarks",
+          "sample": [
+            "#base-ui-_r_8_ > span :: Some page content is not contained by landmarks",
+            "#base-ui-_r_a_ > span :: Some page content is not contained by landmarks",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(2) > .px-2.text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\] :: Some page content is not contained by landmarks"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "create-key-dialog desktop-dark",
+      "count": 0,
+      "rules": []
+    },
+    {
+      "label": "overview desktop-dark",
+      "count": 18,
+      "rules": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "nodes": 3,
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "sample": [
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(2) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Element has insufficient color contrast of 4",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(3) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Element has insufficient color contrast of 4",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(4) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Element has insufficient color contrast of 4"
+          ]
+        },
+        {
+          "id": "region",
+          "impact": "moderate",
+          "nodes": 15,
+          "help": "All page content should be contained by landmarks",
+          "sample": [
+            "#base-ui-_r_8_ > span :: Some page content is not contained by landmarks",
+            "#base-ui-_r_a_ > span :: Some page content is not contained by landmarks",
+            ".py-1\\.5[data-slot=\"sidebar-group\"][data-sidebar=\"group\"]:nth-child(2) > .text-sidebar-foreground\\/70.transition-\\[margin\\,opacity\\].group-data-\\[collapsible\\=icon\\]\\:-mt-8 :: Some page content is not contained by landma"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "explorer phone-light",
+      "count": 24,
+      "rules": [
+        {
+          "id": "aria-allowed-role",
+          "impact": "minor",
+          "nodes": 1,
+          "help": "ARIA role should be appropriate for the element",
+          "sample": [
+            "textarea :: ARIA role combobox is not allowed for given element"
+          ]
+        },
+        {
+          "id": "aria-required-children",
+          "impact": "critical",
+          "nodes": 22,
+          "help": "Certain ARIA roles must contain particular children",
+          "sample": [
+            ".overflow-auto :: Element has children which are not allowed: button[tabindex]",
+            "div[data-index=\"0\"] :: Required ARIA children role not present: cell, columnheader, gridcell, rowheader",
+            "div[data-index=\"1\"] :: Required ARIA children role not present: cell, columnheader, gridcell, rowheader"
+          ]
+        },
+        {
+          "id": "page-has-heading-one",
+          "impact": "moderate",
+          "nodes": 1,
+          "help": "Page should contain a level-one heading",
+          "sample": [
+            "html :: Page must have a level-one heading"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "event-sheet phone-light",
+      "count": 3,
+      "rules": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "nodes": 1,
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "sample": [
+            ".text-outcome-success :: Element has insufficient color contrast of 3.35 (foreground color: #059669, background color: #e6f5f0, font size: 8.3pt (11px), font weight: normal). Expected contrast ratio of 4.5:1"
+          ]
+        },
+        {
+          "id": "definition-list",
+          "impact": "serious",
+          "nodes": 2,
+          "help": "<dl> elements must only directly contain properly-ordered <dt> and <dd> groups, <script>, <template> or <div> elements",
+          "sample": [
+            ".gap-2\\.5.last\\:border-b-0.py-4:nth-child(5) > dl :: dl element has direct children that are not allowed: div > div",
+            ".gap-2\\.5.last\\:border-b-0.py-4:nth-child(6) > dl :: dl element has direct children that are not allowed: div > div"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "settings-keys phone-light",
+      "count": 2,
+      "rules": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "nodes": 2,
+          "help": "Elements must meet minimum color contrast ratio thresholds",
+          "sample": [
+            ".bg-outcome-denied\\/10 :: Element has insufficient color contrast of 2.8 (foreground color: #d97706, background color: #f9efe3, font size: 8.3pt (11px), font weight: normal). Expected contrast ratio of 4.5:1",
+            "#base-ui-_r_15_ :: Element has insufficient color contrast of 2.8 (foreground color: #d97706, background color: #f9efe3, font size: 8.3pt (11px), font weight: normal). Expected contrast ratio of 4.5:1"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "create-key-dialog phone-light",
+      "count": 0,
+      "rules": []
+    },
+    {
+      "label": "overview phone-light",
+      "count": 0,
+      "rules": []
+    },
+    {
+      "label": "explorer phone-dark",
+      "count": 24,
+      "rules": [
+        {
+          "id": "aria-allowed-role",
+          "impact": "minor",
+          "nodes": 1,
+          "help": "ARIA role should be appropriate for the element",
+          "sample": [
+            "textarea :: ARIA role combobox is not allowed for given element"
+          ]
+        },
+        {
+          "id": "aria-required-children",
+          "impact": "critical",
+          "nodes": 22,
+          "help": "Certain ARIA roles must contain particular children",
+          "sample": [
+            ".overflow-auto :: Element has children which are not allowed: button[tabindex]",
+            "div[data-index=\"0\"] :: Required ARIA children role not present: cell, columnheader, gridcell, rowheader",
+            "div[data-index=\"1\"] :: Required ARIA children role not present: cell, columnheader, gridcell, rowheader"
+          ]
+        },
+        {
+          "id": "page-has-heading-one",
+          "impact": "moderate",
+          "nodes": 1,
+          "help": "Page should contain a level-one heading",
+          "sample": [
+            "html :: Page must have a level-one heading"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "event-sheet phone-dark",
+      "count": 2,
+      "rules": [
+        {
+          "id": "definition-list",
+          "impact": "serious",
+          "nodes": 2,
+          "help": "<dl> elements must only directly contain properly-ordered <dt> and <dd> groups, <script>, <template> or <div> elements",
+          "sample": [
+            ".gap-2\\.5.last\\:border-b-0.py-4:nth-child(5) > dl :: dl element has direct children that are not allowed: div > div",
+            ".gap-2\\.5.last\\:border-b-0.py-4:nth-child(6) > dl :: dl element has direct children that are not allowed: div > div"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "settings-keys phone-dark",
+      "count": 0,
+      "rules": []
+    },
+    {
+      "label": "create-key-dialog phone-dark",
+      "count": 0,
+      "rules": []
+    },
+    {
+      "label": "overview phone-dark",
+      "count": 0,
+      "rules": []
+    }
+  ],
+  "checks": {
+    "queryAfterTabbing desktop-light": "",
+    "afterSheetEscape desktop-light": "div[role=row][data-index=2] \"Nov 4, 22:35\nsuccess\nbooking.modified\nHourly CRM b\"",
+    "keyDialogInitialFocus desktop-light": "input \"\"",
+    "afterKeyDialogEscape desktop-light": "BODY",
+    "confirmInitialFocus desktop-light": "button \"Revoke key\"",
+    "afterConfirmEscape desktop-light": "BODY",
+    "settingsActiveTabVisible desktop-light": "fully visible (tab 265–338 in nav 265–1407)",
+    "tabStopsFromQueryToRow": "not reached in 40",
+    "queryAfterTabbing desktop-dark": "",
+    "afterSheetEscape desktop-dark": "div[role=row][data-index=2] \"Nov 4, 22:35\nsuccess\nbooking.modified\nHourly CRM b\"",
+    "keyDialogInitialFocus desktop-dark": "input \"\"",
+    "afterKeyDialogEscape desktop-dark": "BODY",
+    "confirmInitialFocus desktop-dark": "button \"Revoke key\"",
+    "afterConfirmEscape desktop-dark": "BODY",
+    "settingsActiveTabVisible desktop-dark": "fully visible (tab 265–338 in nav 265–1407)",
+    "queryAfterTabbing phone-light": "action:",
+    "afterSheetEscape phone-light": "div[role=row][data-index=2] \"Hourly CRM bookings scheduler - Rimal Crescent Hot\"",
+    "keyDialogInitialFocus phone-light": "input \"\"",
+    "afterKeyDialogEscape phone-light": "BODY",
+    "confirmInitialFocus phone-light": "button \"Revoke key\"",
+    "afterConfirmEscape phone-light": "BODY",
+    "settingsActiveTabVisible phone-light": "fully visible (tab 16–89 in nav 16–374)",
+    "queryAfterTabbing phone-dark": "action:",
+    "afterSheetEscape phone-dark": "div[role=row][data-index=2] \"Hourly CRM bookings scheduler - Rimal Crescent Hot\"",
+    "keyDialogInitialFocus phone-dark": "input \"\"",
+    "afterKeyDialogEscape phone-dark": "BODY",
+    "confirmInitialFocus phone-dark": "button \"Revoke key\"",
+    "afterConfirmEscape phone-dark": "BODY",
+    "settingsActiveTabVisible phone-dark": "fully visible (tab 16–89 in nav 16–374)",
+    "queryTab": [
+      "Tab 1: query=\"outcome:failure OR \" focus=textarea[role=combobox] \"Query\"",
+      "Tab 2: query=\"outcome:failure OR action:\" focus=textarea[role=combobox] \"Query\"",
+      "Tab 3: query=\"outcome:failure OR action:guest.updated \" focus=textarea[role=combobox] \"Query\""
+    ],
+    "queryArrowRightAccepts": "outcome:failure OR action:guest.updated act",
+    "rangePresetFocusRing": "Last hour outline=none box-shadow=none"
+  }
+}
