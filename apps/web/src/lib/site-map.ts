@@ -8,6 +8,8 @@ export interface SitePage {
   ogSlug: string;
   inNav?: boolean;
   inFooter?: boolean;
+  /** Shorter label for the footer, when the title is long. */
+  footerTitle?: string;
 }
 export const siteMap: SitePage[] = [
   {
@@ -31,6 +33,7 @@ export const siteMap: SitePage[] = [
     ogSlug: 'product',
     inNav: true,
     inFooter: true,
+    footerTitle: 'Product tour',
   },
   {
     path: '/developers',
@@ -42,6 +45,7 @@ export const siteMap: SitePage[] = [
     ogSlug: 'developers',
     inNav: true,
     inFooter: true,
+    footerTitle: 'Developer guide',
   },
   {
     path: '/self-hosting',
@@ -97,6 +101,7 @@ export const siteMap: SitePage[] = [
     ogSlug: 'compare',
     inNav: true,
     inFooter: true,
+    footerTitle: 'All comparisons',
   },
   {
     path: '/compare/retraced',

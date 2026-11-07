@@ -33,6 +33,8 @@ export default defineConfig(({ mode }) => {
           '/assets/**': { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
           '/media/**': { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
         },
+        // Pre-compressed .br/.gz copies, served by the Node preview; Cloudflare compresses on its own.
+        compressPublicAssets: { gzip: true, brotli: true },
         cloudflare: { deployConfig: false },
       }),
       tanstackStart({

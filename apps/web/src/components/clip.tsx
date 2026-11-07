@@ -1,4 +1,4 @@
-import { Button } from '@logbird/ui/components/ui/button';
+import { PauseIcon, PlayIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { clips } from '../lib/media-manifest';
 export function Clip({ id }: { id: string }) {
@@ -39,7 +39,7 @@ export function Clip({ id }: { id: string }) {
     throw new Error(`Unknown clip: ${id}`);
   }
   return (
-    <figure className="clip">
+    <div className="clip relative">
       <video
         ref={ref}
         src={`/media/${entry.id}.webm`}
@@ -49,15 +49,13 @@ export function Clip({ id }: { id: string }) {
         loop
         preload="none"
         aria-label={entry.alt}
-        aria-describedby={`${id}-caption`}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
       />
-      <figcaption id={`${id}-caption`}>{entry.alt}</figcaption>
-      <Button
-        variant="outline"
+      <button
+        className="absolute end-3 bottom-3 inline-flex size-11 items-center justify-center rounded-full border bg-background/90 text-foreground shadow-sm backdrop-blur hover:bg-background"
         type="button"
-        aria-label={`${playing ? 'Pause' : 'Play'} ${id} video`}
+        aria-label={playing ? 'Pause video' : 'Play video'}
         onClick={() => {
           const video = ref.current;
           if (!video) {
@@ -71,8 +69,8 @@ export function Clip({ id }: { id: string }) {
           }
         }}
       >
-        {playing ? 'Pause' : 'Play'}
-      </Button>
-    </figure>
+        {playing ? <PauseIcon aria-hidden="true" className="size-4" /> : <PlayIcon aria-hidden="true" className="size-4" />}
+      </button>
+    </div>
   );
 }

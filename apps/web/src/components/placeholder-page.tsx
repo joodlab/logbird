@@ -1,10 +1,20 @@
 import { getPage } from '../lib/site-map';
+import { ButtonLink } from './marketing/button-link';
+import { PageHero } from './marketing/section';
+
+/** Interim body for pages whose design lands in a follow-up PR. Copy lives in marketing/copy/. */
 export function PlaceholderPage({ path }: { path: string }) {
   const page = getPage(path);
   return (
-    <>
-      <h1>{page.title === 'Home' ? 'Logbird' : page.title}</h1>
-      <p>{page.description}</p>
-    </>
+    <PageHero
+      actions={
+        <ButtonLink to="/" variant="outline">
+          Back to the overview
+        </ButtonLink>
+      }
+      eyebrow="Coming together"
+      lead={page.description}
+      title={page.title}
+    />
   );
 }
