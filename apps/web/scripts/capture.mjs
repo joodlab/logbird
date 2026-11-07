@@ -17,6 +17,8 @@ try {
         const context = await browser.newContext({
           viewport,
           colorScheme: theme,
+          // Stills show the settled page: full-page capture restarts CSS entrance animations.
+          reducedMotion: process.env.VIDEO === '1' ? 'no-preference' : 'reduce',
           ...(process.env.VIDEO === '1' ? { recordVideo: { dir: output, size: viewport } } : {}),
         });
         const page = await context.newPage();
@@ -36,6 +38,22 @@ try {
         const video = page.video();
         try {
           await page.goto(new URL(path, base).href, { waitUntil: 'networkidle' });
+          // Load lazy images and let entrance animations finish before a full-page still.
+          await page.evaluate(async () => {
+            for (const image of document.images) {
+              image.loading = 'eager';
+            }
+            for (let y = 0; y < document.documentElement.scrollHeight; y += innerHeight / 2) {
+              scrollTo(0, y);
+              await new Promise((done) => setTimeout(done, 60));
+            }
+            scrollTo(0, 0);
+            // Hidden theme variants never load; wait only for visible images, and never longer than 5 s.
+            const visible = [...document.images].filter((image) => image.offsetParent !== null && !image.complete);
+            const loaded = Promise.all(visible.map((image) => new Promise((done) => image.addEventListener('load', done, { once: true }))));
+            await Promise.race([loaded, new Promise((done) => setTimeout(done, 5000))]);
+          });
+          await page.waitForTimeout(2000);
           await page.screenshot({ path: resolve(output, `${slug}-${device}-${theme}.png`), fullPage: true });
           if (process.env.VIDEO === '1') {
             await page.evaluate(async () => {

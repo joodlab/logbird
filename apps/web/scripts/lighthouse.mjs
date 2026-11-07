@@ -6,11 +6,12 @@ import { prerenderPaths } from '../src/lib/site-map.ts';
 
 const base = process.env.BASE_URL ?? 'http://127.0.0.1:4620';
 const output = resolve(process.env.OUT_DIR ?? '.tmp/lighthouse');
+const paths = process.env.PATHS ? process.env.PATHS.split(',').map((path) => path.trim()) : prerenderPaths;
 await mkdir(output, { recursive: true });
 const chrome = await launch({ chromeFlags: ['--headless=new', '--disable-gpu'], port: 0 });
 const rows = [];
 try {
-  for (const path of prerenderPaths) {
+  for (const path of paths) {
     for (const formFactor of ['mobile', 'desktop']) {
       const result = await lighthouse(
         new URL(path, base).href,
