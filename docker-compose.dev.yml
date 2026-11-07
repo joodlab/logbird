@@ -9,7 +9,7 @@ services:
     extends: {file: docker-compose.yml, service: redis}
     ports: ['127.0.0.1:6379:6379']
   mailpit:
-    image: axllent/mailpit:v1.27
+    image: axllent/mailpit:v1.27@sha256:e22dce5b36f93c77082e204a3942fb6b283b7896e057458400a4c88344c3df68
     ports: ['127.0.0.1:1025:1025', '127.0.0.1:8025:8025']
 volumes:
   postgres:
