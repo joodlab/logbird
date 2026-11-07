@@ -42,8 +42,8 @@ export function DeltaBadge({
       className={cn(
         'inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 font-medium text-xs tabular-nums',
         good === null && 'text-muted-foreground',
-        good === true && 'bg-outcome-success/10 text-outcome-success',
-        good === false && 'bg-outcome-failure/10 text-outcome-failure',
+        good === true && 'bg-outcome-success/10 text-outcome-success-foreground',
+        good === false && 'bg-outcome-failure/10 text-outcome-failure-foreground',
       )}
       title={
         kind === 'points'

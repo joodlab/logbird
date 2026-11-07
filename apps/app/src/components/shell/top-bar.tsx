@@ -43,7 +43,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1 text-sm">
         {params.projectId ? (
           <Link
-            className="hidden max-w-40 truncate text-muted-foreground hover:text-foreground sm:block"
+            className="-my-3 hidden max-w-40 truncate py-3 text-muted-foreground hover:text-foreground sm:block"
             params={{ projectId: params.projectId }}
             to="/p/$projectId"
           >
@@ -65,7 +65,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
                 </span>
               ) : (
                 <Link
-                  className="truncate text-muted-foreground hover:text-foreground"
+                  className="-my-3 truncate py-3 text-muted-foreground hover:text-foreground"
                   to={s.to ?? (dynamicCrumb && i === sections.length - 1 ? s.path.replace(/\/[^/]+\/?$/, '') : s.path)}
                   search={s.search ? (prev: { range?: string }) => ({ range: prev.range, ...s.search }) : undefined}
                 >

@@ -61,6 +61,12 @@
   --color-outcome-denied: var(--outcome-denied);
   --color-outcome-partial: var(--outcome-partial);
   --color-outcome-unknown: var(--outcome-unknown);
+  --color-outcome-success-foreground: var(--outcome-success-foreground);
+  --color-outcome-failure-foreground: var(--outcome-failure-foreground);
+  --color-outcome-denied-foreground: var(--outcome-denied-foreground);
+  --color-outcome-partial-foreground: var(--outcome-partial-foreground);
+  --color-severity-notice-foreground: var(--severity-notice-foreground);
+  --color-severity-warning-foreground: var(--severity-warning-foreground);
   --color-severity-info: var(--severity-info);
   --color-severity-notice: var(--severity-notice);
   --color-severity-warning: var(--severity-warning);
@@ -136,13 +142,23 @@
   --severity-notice: #2563eb;
   --severity-warning: #d97706;
   --severity-critical: #dc2626;
+  /* Text on an outcome/severity tint (badges, pills, KPI deltas). The 600-step colours above are for dots, bars and
+     icons; small text needs the 700/800 step to reach WCAG AA 4.5:1 on the /10 tint over card, background and muted. */
+  --outcome-success-foreground: #065f46;
+  --outcome-failure-foreground: #b91c1c;
+  --outcome-denied-foreground: #92400e;
+  --outcome-partial-foreground: #9a3412;
+  --severity-notice-foreground: #1d4ed8;
+  --severity-warning-foreground: #92400e;
 
   --syntax-key: #7c3aed;
   --syntax-string: #047857;
   --syntax-number: #c2410c;
   --syntax-keyword: #4f46e5;
-  --syntax-comment: #8a8a8a;
-  --syntax-punct: #737373;
+  /* Comments and punctuation stay quieter than tokens but reach AA 4.5:1 on every code surface (muted, muted/40 over
+     card/background/popover): #8a8a8a/#737373 measured 3.1–3.5 and 4.3–4.7. */
+  --syntax-comment: #6b6b6b;
+  --syntax-punct: #666666;
   --diff-add: #047857;
   --diff-remove: #b91c1c;
   /* Support impersonation: its own hue, so a support row never reads as a denied (amber) one. Base for icons and
@@ -204,12 +220,20 @@
   --severity-notice: #60a5fa;
   --severity-warning: #fbbf24;
   --severity-critical: #f87171;
+  /* Dark tints already pass AA with the base colours: text keeps them. */
+  --outcome-success-foreground: #34d399;
+  --outcome-failure-foreground: #f87171;
+  --outcome-denied-foreground: #fbbf24;
+  --outcome-partial-foreground: #fb923c;
+  --severity-notice-foreground: #60a5fa;
+  --severity-warning-foreground: #fbbf24;
 
   --syntax-key: #c4b5fd;
   --syntax-string: #6ee7b7;
   --syntax-number: #fdba74;
   --syntax-keyword: #a5b4fc;
-  --syntax-comment: #6b6b6b;
+  /* AA on muted and muted/40 over card/background/popover (#6b6b6b measured 3.2–3.7). */
+  --syntax-comment: #8f8f8f;
   --syntax-punct: #8a8a8a;
   --diff-add: #6ee7b7;
   --diff-remove: #fca5a5;

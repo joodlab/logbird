@@ -1,10 +1,10 @@
 import { cn } from '../lib/utils';
 
 const OUTCOME_TONE: Record<string, { dot: string; badge: string }> = {
-  success: { dot: 'bg-outcome-success', badge: 'text-outcome-success bg-outcome-success/10 ring-outcome-success/20' },
-  failure: { dot: 'bg-outcome-failure', badge: 'text-outcome-failure bg-outcome-failure/10 ring-outcome-failure/25' },
-  denied: { dot: 'bg-outcome-denied', badge: 'text-outcome-denied bg-outcome-denied/10 ring-outcome-denied/25' },
-  partial: { dot: 'bg-outcome-partial', badge: 'text-outcome-partial bg-outcome-partial/10 ring-outcome-partial/25' },
+  success: { dot: 'bg-outcome-success', badge: 'text-outcome-success-foreground bg-outcome-success/10 ring-outcome-success/20' },
+  failure: { dot: 'bg-outcome-failure', badge: 'text-outcome-failure-foreground bg-outcome-failure/10 ring-outcome-failure/25' },
+  denied: { dot: 'bg-outcome-denied', badge: 'text-outcome-denied-foreground bg-outcome-denied/10 ring-outcome-denied/25' },
+  partial: { dot: 'bg-outcome-partial', badge: 'text-outcome-partial-foreground bg-outcome-partial/10 ring-outcome-partial/25' },
   unknown: { dot: 'bg-outcome-unknown', badge: 'text-muted-foreground bg-muted ring-border' },
 };
 const NEUTRAL = { dot: 'bg-outcome-unknown', badge: 'text-muted-foreground bg-muted ring-border' };
@@ -31,8 +31,8 @@ export function OutcomeBadge({ outcome, className }: { outcome: string; classNam
 
 const SEVERITY_TONE: Record<string, string> = {
   info: 'text-muted-foreground bg-muted ring-border',
-  notice: 'text-severity-notice bg-severity-notice/10 ring-severity-notice/20',
-  warning: 'text-severity-warning bg-severity-warning/10 ring-severity-warning/25',
+  notice: 'text-severity-notice-foreground bg-severity-notice/10 ring-severity-notice/20',
+  warning: 'text-severity-warning-foreground bg-severity-warning/10 ring-severity-warning/25',
   critical: 'text-white bg-severity-critical ring-severity-critical dark:text-black',
 };
 
@@ -68,7 +68,7 @@ export function TypePill({
         'inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-md px-1.5 font-mono text-[11px] ring-1 ring-inset',
         tone === 'neutral' && 'bg-muted text-muted-foreground ring-border',
         tone === 'brand' && 'bg-brand/10 text-brand ring-brand/20',
-        tone === 'warning' && 'bg-outcome-denied/10 text-outcome-denied ring-outcome-denied/25',
+        tone === 'warning' && 'bg-outcome-denied/10 text-outcome-denied-foreground ring-outcome-denied/25',
         tone === 'support' && 'bg-support/10 text-support-foreground ring-support/30',
         className,
       )}
