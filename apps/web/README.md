@@ -25,13 +25,16 @@ Stop the server's whole process tree when done. Never start the console or its s
 
 - `ready: false` pages render a placeholder, are `noindex`, and stay out of the nav, footer, sitemap and `llms.txt`.
   Internal `ButtonLink`s to them render nothing. Each page PR flips its own flag.
-- `src/lib/release.ts` closes the whole site while any media entry is `interim`: every page is `noindex`, `robots.txt`
+- `src/lib/release.ts` closes the whole site while any media entry is `interim`, `WEB_SITE_URL` is unset (provisional
+  domain), or `WEB_SECURITY_EMAIL` or `WEB_CONTACT_EMAIL` is unset (no mailbox is ever derived from the provisional domain): every page is `noindex`, `robots.txt`
   is `Disallow: /`, and `build:cloudflare` fails unless `LOGBIRD_WEB_ALLOW_INTERIM=1` (local previews only).
 
 ## Configuration
 
-Only `WEB_*` variables reach the site (`src/env.ts` lists them; Turbo hashes them in `apps/web/turbo.json`), so the
-console's `APP_URL` in the root `.env` can't leak in. `src/env.ts` is the only file allowed to contain the provisional
+Only `WEB_*` variables reach the site (`src/env.ts` lists them; Turbo hashes them and `apps/web/.env*` in `apps/web/turbo.json`, and a test keeps the list complete), so the
+console's `APP_URL` in the root `.env` can't leak in. `scripts/public-env.ts` resolves them once per build (root `.env*`,
+then `apps/web/.env*`, then the process environment) and the bundle, sitemap, robots, `llms.txt` and OG cards all use
+that one result, so their origins always agree. `src/env.ts` is the only file allowed to contain the provisional
 domain, and no site source may contain the company or design-partner names (tests enforce both).
 
 | Variable | Meaning | Default |
@@ -40,8 +43,11 @@ domain, and no site source may contain the company or design-partner names (test
 | `WEB_APP_URL` | Console sign-in; unset hides "Sign in" | unset (Cloud is waitlist-only) |
 | `WEB_GITHUB_PUBLIC`, `WEB_GITHUB_URL` | Repository link and self-host quickstarts | false / unset |
 | `WEB_ORG_NAME` | © holder and JSON-LD Organization (pending owner) | unset → "Logbird contributors", no Organization |
-| `SMTP_*`, `MAIL_FROM`, `WAITLIST_NOTIFY_TO` | Server-only waitlist notification (Mailpit locally) | — |
+| `WEB_SECURITY_EMAIL` | Vulnerability-report mailbox. **No default**: unset renders `SECURITY.md`'s "ask the maintainers for a private channel" wording | unset (release blocker) |
+| `WEB_CONTACT_EMAIL` | General contact mailbox. **No default**: unset, the form's messages name no address | unset (release blocker) |
+| `SMTP_*`, `MAIL_FROM`, `WAITLIST_NOTIFY_TO` | Server-only waitlist notification (Mailpit locally). `MAIL_FROM` and `WAITLIST_NOTIFY_TO` have **no defaults**: with SMTP on and either missing, notifications are off (one `waitlist.notify_disabled` warning, no personal data) and submissions are still stored | — |
 | `WAITLIST_FILE` | Node adapter's JSONL file | `apps/web/.data/waitlist.jsonl` when run from `apps/web` |
+| `WEB_TRUST_PROXY` | Reverse proxies in front of the Node server that append to `X-Forwarded-For`; the client is that many entries from the right. 0 (default) ignores forwarding headers, so behind an untrusted or unset proxy every visitor shares one limiter bucket: set this, or enforce the per-client limit at the proxy | 0 |
 | `WEB_ALLOWED_ORIGINS` | Extra origins allowed to post the form (set `http://127.0.0.1:4620` for a local `pnpm start`, which runs as production) | — |
 
 A `cloudflare-module` build fails if any public URL is localhost.
@@ -53,7 +59,10 @@ A `cloudflare-module` build fails if any public URL is localhost.
 minute (per process / per isolate, with a bounded client table). Native form posts redirect to
 `/contact?status=<code>#waitlist-<code>`, and a `:target` message for that exact code shows without JavaScript.
 
-- Node: appends to the JSONL file (gitignored, mode 600) and emails `WAITLIST_NOTIFY_TO` when `SMTP_HOST` is set.
+- Node: appends to the JSONL file (gitignored, created with mode 600) and answers success as soon as it's written. When
+  `SMTP_HOST` is set it then emails `WAITLIST_NOTIFY_TO` in the background, retrying with backoff; a final failure logs
+  `waitlist.notify_failed` with no personal data (the record stays in the file). The root `.dockerignore` keeps
+  `**/.data` and `waitlist*.jsonl` out of every Docker build context.
 - Cloudflare: `503 waitlist_unavailable` (the form shows a mailto) until a `WAITLIST_KV` binding exists. Add a
   Cloudflare Rate Limiting rule before enabling it.
 
@@ -63,7 +72,9 @@ minute (per process / per isolate, with a bounded client table). Native form pos
 "QA Azure Hotels" workspace). `scripts/media.ts` encodes AVIF/WebP (640/1024/1600 px, and phone variants at 390 px)
 into `public/media` (ignored). `<Screenshot>` renders one lazy `<picture>` per theme; the pre-paint theme class hides the
 other, so only one image downloads and nothing swaps after hydration. Below 640 px an entry's phone capture replaces the
-shrunken desktop one. Run `git lfs pull` if a source is a pointer.
+shrunken desktop one. Run `git lfs pull` if a source is a pointer. Turbo hashes `marketing/captures/**` for this
+package's build, so replacing a capture rebuilds the media. Media URLs are stable (not content-hashed), so `/media/*`
+is cached for a day with stale-while-revalidate, never `immutable`.
 
 OG cards (`scripts/og.ts`, Satori + Resvg, local fonts) render one 1200×630 PNG per manifest slug into `public/og`.
 
@@ -83,4 +94,5 @@ cd apps/web && npx wrangler deploy --config wrangler.jsonc
 
 The wrapper prerenders with the Node preset, checks every hashed asset the HTML references, then packages the Worker.
 `_headers` sets the CSP, nosniff, referrer policy, HSTS (no `includeSubDomains` until the domain is decided) and a
-restrictive permissions policy; hashed assets and `/media/*` are immutable for a year.
+restrictive permissions policy. Hashed `/assets/*` are immutable for a year; `/media/*` for a day. Replacing
+`script-src 'unsafe-inline'` with per-page hashes is tracked in #84.

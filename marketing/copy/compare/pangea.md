@@ -31,7 +31,7 @@ path: /compare/pangea
   | --- | --- | --- |
   | Licence and source | MIT | Hosted service, no source published; SDKs and the viewer component are MIT [P8, P9] |
   | Self-host | Yes: Docker Compose or Coolify | No self-host option documented; Pangea's Edge and Private Cloud models don't list the audit service [P10, P11] |
-  | Hosting model | Self-host today; Logbird Cloud waitlist | Hosted by Pangea [P12] |
+  | Hosting model | Self-hosted, MIT (source opens soon); Logbird Cloud waitlist | Hosted by Pangea [P12] |
   | Schema | Any JSON with an `action`; recommended envelope | Templates (for example Timestamp, Actor, Action, Status, Target, Source, Tenant ID, Old, New, Message) or a custom schema per configuration; the schema can't change after creation [P13] |
   | Tamper evidence | None | Merkle-tree tamperproofing, roots published to Arweave, optional event signing [P2] |
   | Search | Query language and guarded SQL `WHERE` mode | `field:value` with `AND`, `OR`, parentheses and quotes; up to 10,000 results per search [P14, P12] |

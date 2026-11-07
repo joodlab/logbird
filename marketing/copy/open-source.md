@@ -13,7 +13,7 @@ path: /open-source
 - **heading (H1):** MIT-licensed. All of it.
 - **body:** Logbird is released under the MIT licence. The API, the console, the retention worker, the SDK and the
   integrations are in one repository. You can read the code, run it, change it and ship it in your own product.
-  <!-- source: LICENSE ("MIT License, Copyright (c) 2026 Joodlab") -->
+  <!-- source: LICENSE (MIT). Its copyright line names the publisher: owner-gated (WEB_ORG_NAME), not quoted on the site until approved -->
 - **cta:** Source on GitHub — coming soon (disabled button, no link) · Self-host it → `/self-hosting`
 - **small print:** The repository opens publicly soon. Until then, the code isn't public.
 - **visual:** none

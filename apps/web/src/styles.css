@@ -415,12 +415,3 @@ a {
     box-shadow: 0 0 0 0 transparent;
   }
 }
-
-/* Unlayered on purpose: it must beat the .text-syntax-comment utility. */
-/* The console's comment token is below 4.5:1 on the site's code surfaces; lift it here only. */
-.site-code .text-syntax-comment {
-  color: #636363;
-}
-.dark .site-code .text-syntax-comment {
-  color: #9a9a9a;
-}

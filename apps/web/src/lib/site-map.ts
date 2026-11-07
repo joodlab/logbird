@@ -266,6 +266,8 @@ export const staticPages = siteMap.filter((page) => !page.path.includes('$') && 
 export const publishedPages = staticPages.filter((page) => page.ready);
 /** The draft route is exercised in static output but deliberately never indexed. */
 export const prerenderPaths = [...staticPages.map((page) => page.path), '/blog/draft'];
+/** True for designed pages; use it to skip wrappers whose only content is a link to an unready page. */
+export const isReady = (path: string) => siteMap.some((page) => page.path === path && page.ready);
 export function getPage(path: string): SitePage {
   const page = siteMap.find((entry) => entry.path === path);
   if (!page) {

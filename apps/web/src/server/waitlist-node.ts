@@ -4,12 +4,44 @@ import { dirname, resolve } from 'node:path';
 import nodemailer from 'nodemailer';
 import type { WaitlistRecord } from '../lib/waitlist-schema';
 import { serverEnv as env } from './env';
-export function createNodeStore(file: string, notify?: (record: WaitlistRecord) => Promise<void>) {
+/**
+ * Persistence decides the response: once the JSONL line is written the submission is accepted, so a visitor is never
+ * told to retry (which would duplicate their record). The email notification runs after the response, is retried with
+ * backoff, and on final failure logs one line with no personal data (the record stays in the file).
+ */
+export function createNodeStore(
+  file: string,
+  notify?: (record: WaitlistRecord) => Promise<void>,
+  options: { attempts?: number; delayMs?: number; log?: (line: string) => void } = {},
+) {
+  const attempts = options.attempts ?? 4;
+  const delayMs = options.delayMs ?? 2000;
+  const log = options.log ?? ((line: string) => console.error(line));
+  const deliver = async (record: WaitlistRecord) => {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        await notify?.(record);
+        return;
+      } catch (error) {
+        if (attempt === attempts) {
+          // No email, name or message: only what an operator needs to look into SMTP.
+          log(JSON.stringify({ level: 'error', event: 'waitlist.notify_failed', attempts, reason: error instanceof Error ? error.name : 'unknown' }));
+          return;
+        }
+        await new Promise((done) => setTimeout(done, delayMs * 2 ** (attempt - 1)));
+      }
+    }
+  };
   return async (record: WaitlistRecord) => {
     await mkdir(dirname(file), { recursive: true });
-    await appendFile(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+    await appendFile(
+      file,
+      `${JSON.stringify(record)}
+`,
+      { mode: 0o600 },
+    );
     if (notify) {
-      await notify(record);
+      void deliver(record);
     }
   };
 }
@@ -25,8 +57,9 @@ export async function notifyWaitlist(record: WaitlistRecord) {
   });
   try {
     await transport.sendMail({
-      from: env.MAIL_FROM,
-      to: env.WAITLIST_NOTIFY_TO,
+      // notificationSettings() guarantees both are set before this is called.
+      from: env.MAIL_FROM as string,
+      to: env.WAITLIST_NOTIFY_TO as string,
       subject: 'Logbird waitlist submission',
       text: Object.entries(record)
         .map(([key, value]) => `${key}: ${value ?? ''}`)

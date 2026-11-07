@@ -2,16 +2,18 @@ import tailwindcss from '@tailwindcss/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
-import { defineConfig, loadEnv } from 'vite';
-import { localPublicUrls, PUBLIC_ENV_KEYS } from './src/env';
+import { defineConfig } from 'vite';
+import { loadPublicEnv } from './scripts/public-env';
+import { localPublicUrls, siteConfigFrom } from './src/env';
 import { llmsTxt, robotsTxt, sitemapXml } from './src/lib/discovery';
-import { securityHeaders } from './src/lib/security-headers';
+import { MEDIA_CACHE, securityHeaders } from './src/lib/security-headers';
 import { prerenderPaths } from './src/lib/site-map';
 
 export default defineConfig(({ mode }) => {
-  const loaded = { ...loadEnv(mode, '../..', ''), ...loadEnv(mode, process.cwd(), ''), ...process.env };
   // Only WEB_* variables reach the site, so the console's APP_URL (localhost in the shared .env) never leaks in.
-  const publicEnv = Object.fromEntries(PUBLIC_ENV_KEYS.map((key) => [key, loaded[key]]));
+  // Resolved once and passed to the bundle and the discovery files alike.
+  const publicEnv = loadPublicEnv(mode);
+  const config = siteConfigFrom(publicEnv);
   const preset = process.env.NITRO_PRESET ?? 'node-server';
   if (preset === 'cloudflare-module') {
     const local = localPublicUrls(publicEnv);
@@ -34,7 +36,8 @@ export default defineConfig(({ mode }) => {
         routeRules: {
           '/**': { headers: securityHeaders },
           '/assets/**': { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
-          '/media/**': { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
+          // Media keeps stable names (a replaced capture reuses its URL), so it is never immutable.
+          '/media/**': { headers: { 'Cache-Control': MEDIA_CACHE } },
         },
         // Pre-compressed .br/.gz copies, served by the Node preview; Cloudflare compresses on its own.
         compressPublicAssets: { gzip: true, brotli: true },
@@ -66,7 +69,11 @@ export default defineConfig(({ mode }) => {
           if (this.environment.name !== 'client') {
             return;
           }
-          for (const [fileName, source] of Object.entries({ 'sitemap.xml': sitemapXml(), 'robots.txt': robotsTxt(), 'llms.txt': llmsTxt() })) {
+          for (const [fileName, source] of Object.entries({
+            'sitemap.xml': sitemapXml(config),
+            'robots.txt': robotsTxt(config),
+            'llms.txt': llmsTxt(config),
+          })) {
             this.emitFile({ type: 'asset', fileName, source });
           }
           this.emitFile({
@@ -74,9 +81,7 @@ export default defineConfig(({ mode }) => {
             fileName: '_headers',
             source: `/*\n${Object.entries(securityHeaders)
               .map(([key, value]) => `  ${key}: ${value}`)
-              .join(
-                '\n',
-              )}\n/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n/media/*\n  Cache-Control: public, max-age=31536000, immutable\n`,
+              .join('\n')}\n/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n/media/*\n  Cache-Control: ${MEDIA_CACHE}\n`,
           });
         },
       },

@@ -15,7 +15,8 @@ path: /cloud
   upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.
   <!-- source: docs/SPEC.md intro ("one codebase, self-host or cloud"); docs/deployment.md ("No cloud deployment or public signup is assumed") -->
 - **cta (primary):** Join the waitlist → `/contact`
-- **cta (secondary):** Self-host it today → `/self-hosting`
+- **cta (secondary):** while the repository is private: "Self-host when the source opens" → `/contact?interest=self-host`;
+  once `WEB_GITHUB_PUBLIC=true`: "Self-host it today" → `/self-hosting` (see `README.md` § Self-host CTA rule)
 - **visual:** none, or the social card `apps/app/public/brand/logbird-og.png`
 
 ## pricing

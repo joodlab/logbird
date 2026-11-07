@@ -1,9 +1,10 @@
 import { defineEventHandler } from 'nitro/h3';
 import { SITE_URL } from '../src/env';
-import { createRateLimiter, handleWaitlist } from '../src/server/waitlist';
+import { clientAddress, createRateLimiter, handleWaitlist } from '../src/server/waitlist';
 import { createCloudflareStore, type WaitlistBindings } from '../src/server/waitlist-cloudflare';
 
 const limiter = createRateLimiter();
+let warned = false;
 export default defineEventHandler(async (event) => {
   const request = event.req;
   if (request.method !== 'POST') {
@@ -15,7 +16,7 @@ export default defineEventHandler(async (event) => {
     store = createCloudflareStore(cloudflare?.env ?? {});
   } else {
     const { createNodeStore, notifyWaitlist, waitlistFile } = await import('../src/server/waitlist-node');
-    const { serverEnv: env } = await import('../src/server/env');
+    const { notificationSettings, serverEnv: env } = await import('../src/server/env');
     const file = waitlistFile(env.WAITLIST_FILE);
     if (!file) {
       return Response.json(
@@ -23,7 +24,13 @@ export default defineEventHandler(async (event) => {
         { status: 503 },
       );
     }
-    store = createNodeStore(file, env.SMTP_HOST ? notifyWaitlist : undefined);
+    const notifications = notificationSettings(env);
+    if (env.SMTP_HOST && !notifications.enabled && !warned) {
+      warned = true;
+      // Configuration only, never personal data.
+      console.error(JSON.stringify({ level: 'warn', event: 'waitlist.notify_disabled', reason: notifications.reason }));
+    }
+    store = createNodeStore(file, notifications.enabled ? notifyWaitlist : undefined);
   }
   const extra = cloudflare
     ? []
@@ -40,7 +47,9 @@ export default defineEventHandler(async (event) => {
   return handleWaitlist(request, {
     store,
     limiter,
-    ip: cloudflare ? (request.headers.get('cf-connecting-ip') ?? 'unknown') : (event.req.ip ?? 'unknown'),
+    ip: cloudflare
+      ? (request.headers.get('cf-connecting-ip') ?? 'unknown')
+      : clientAddress(event.req.ip, request.headers.get('x-forwarded-for'), (await import('../src/server/env')).serverEnv.WEB_TRUST_PROXY),
     allowedOrigins,
   });
 });

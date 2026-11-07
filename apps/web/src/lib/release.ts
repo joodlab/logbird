@@ -1,11 +1,26 @@
+import { type SiteConfig, siteConfig } from '../env';
 import { interimMedia } from './media-manifest';
 import type { SitePage } from './site-map';
 
 /**
- * Release gate. While any console capture is still interim (it may show a real workspace, a person or a timing), the
- * whole site is noindex and robots.txt disallows everything, and `build:cloudflare` refuses to package unless
- * LOGBIRD_WEB_ALLOW_INTERIM=1 is set for a local preview (scripts/build-cloudflare.ts).
+ * Release gate. While any blocker is open the whole site is noindex, robots.txt disallows everything, and
+ * `build:cloudflare` refuses to package unless LOGBIRD_WEB_ALLOW_INTERIM=1 (local previews only).
+ *
+ * - interim media: a console capture may still show a real workspace, a person or a timing;
+ * - provisional domain: WEB_SITE_URL is unset, so canonicals point at a domain that isn't ours yet;
+ * - security contact: WEB_SECURITY_EMAIL is unset, so the site can't name a vulnerability-report mailbox;
+ * - contact mailbox: WEB_CONTACT_EMAIL is unset, so the site can't name a general address.
+ *
+ * No mailbox is ever derived from the provisional domain.
  */
-export const releaseBlockers = (): string[] => interimMedia().map((id) => `interim media: ${id}`);
-export const siteIndexable = () => releaseBlockers().length === 0;
-export const pageIndexable = (page: Pick<SitePage, 'ready' | 'path'>) => siteIndexable() && page.ready && !page.path.includes('$');
+export function releaseBlockers(config: SiteConfig = siteConfig): string[] {
+  return [
+    ...interimMedia().map((id) => `interim media: ${id}`),
+    ...(config.SITE_URL_CONFIGURED ? [] : ['provisional domain: set WEB_SITE_URL']),
+    ...(config.SECURITY_EMAIL ? [] : ['security contact: set WEB_SECURITY_EMAIL']),
+    ...(config.CONTACT_EMAIL ? [] : ['contact mailbox: set WEB_CONTACT_EMAIL']),
+  ];
+}
+export const siteIndexable = (config: SiteConfig = siteConfig) => releaseBlockers(config).length === 0;
+export const pageIndexable = (page: Pick<SitePage, 'ready' | 'path'>, config: SiteConfig = siteConfig) =>
+  siteIndexable(config) && page.ready && !page.path.includes('$');

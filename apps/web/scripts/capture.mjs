@@ -50,9 +50,24 @@ try {
             }
             scrollTo(0, 0);
             // Hidden theme variants never load; wait only for visible images, and never longer than 5 s.
-            const visible = [...document.images].filter((image) => image.offsetParent !== null && !image.complete);
-            const loaded = Promise.all(visible.map((image) => new Promise((done) => image.addEventListener('load', done, { once: true }))));
-            await Promise.race([loaded, new Promise((done) => setTimeout(done, 5000))]);
+            const visible = [...document.images].filter((image) => image.offsetParent !== null);
+            const decoded = visible.map((image) =>
+              image.complete && image.naturalWidth > 0
+                ? image.decode().catch(() => undefined)
+                : new Promise((done) => {
+                    image.addEventListener(
+                      'load',
+                      () =>
+                        image
+                          .decode()
+                          .catch(() => undefined)
+                          .then(done),
+                      { once: true },
+                    );
+                    image.addEventListener('error', done, { once: true });
+                  }),
+            );
+            await Promise.race([Promise.all(decoded), new Promise((done) => setTimeout(done, 10_000))]);
           });
           await page.waitForTimeout(2000);
           await page.screenshot({ path: resolve(output, `${slug}-${device}-${theme}.png`), fullPage: true });
