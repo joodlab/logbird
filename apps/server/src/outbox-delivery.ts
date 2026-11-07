@@ -118,7 +118,7 @@ export async function sweepAuditRetention(now = new Date()) {
   const budgets = await prisma.$executeRaw`DELETE FROM "AuthAuditBudget" WHERE id IN (
     SELECT b.id FROM "AuthAuditBudget" b WHERE b.namespace=${ns} AND b.reported=true AND b."windowEnd" < ${new Date(+now - 86_400_000)}
     AND NOT EXISTS (SELECT 1 FROM "AuthAuditWindow" w WHERE w.namespace=b.namespace AND w."closedAt" IS NULL
-      AND w."firstAttemptAt">=b."windowEnd"-INTERVAL '1 hour' AND w."firstAttemptAt"<b."windowEnd")
+      AND w."windowEnd">b."windowEnd"-INTERVAL '1 hour' AND w."windowEnd"<=b."windowEnd")
     ORDER BY b."windowEnd" LIMIT 200 FOR UPDATE SKIP LOCKED)`;
   return { delivered, windows, budgets };
 }

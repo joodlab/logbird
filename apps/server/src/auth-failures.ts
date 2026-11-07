@@ -211,7 +211,7 @@ export async function flushAuthAuditBudgets(now = new Date(), ids?: string[]) {
           where: {
             namespace: auditNamespace(),
             closedAt: null,
-            firstAttemptAt: { gte: new Date(+current.windowEnd - HOUR_MS), lt: current.windowEnd },
+            windowEnd: { gt: new Date(+current.windowEnd - HOUR_MS), lte: current.windowEnd },
           },
           select: { id: true },
         })

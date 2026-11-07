@@ -155,14 +155,16 @@ it('retains pending, quarantined and late-increment evidence while pruning only 
       });
     await prisma.authAuditBudget.createMany({
       data: [
-        { id: `${prefix}-reported`, namespace: ns, windowEnd: old, reported: true },
+        { id: `${prefix}-reported`, namespace: ns, windowEnd: new Date(+old - 3_600_000), reported: true },
+        { id: `${prefix}-unresolved`, namespace: ns, windowEnd: old, reported: true },
         { id: `${prefix}-unreported`, namespace: ns, windowEnd: old },
       ],
     });
     await sweepAuditRetention(now);
     expect(await prisma.auditOutbox.count({ where: { stream: `ws:${prefix}` } })).toBe(2);
     expect(await prisma.authAuditWindow.count({ where: { id: { startsWith: prefix } } })).toBe(3);
-    expect(await prisma.authAuditBudget.count({ where: { id: { startsWith: prefix } } })).toBe(1);
+    expect(await prisma.authAuditBudget.count({ where: { id: { startsWith: prefix } } })).toBe(2);
+    expect(await prisma.authAuditBudget.findUnique({ where: { id: `${prefix}-reported` } })).toBeNull();
   } finally {
     await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${prefix}` } });
     await prisma.authAuditWindow.deleteMany({ where: { id: { startsWith: prefix } } });

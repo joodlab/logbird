@@ -124,7 +124,9 @@ WHERE namespace='<namespace>' AND id='<recovered-hash-window>' AND "emailHash" I
 
 A requeue grants a new attempt; another failure at the threshold quarantines again. Do not reset attempts (the lease
 fence), edit frozen payloads, or blindly confirm `not_committed` intents. Recover legacy identities securely with the old
-deployment secret/tooling, verify the canonical hash, then set only `emailHash` and requeue the retained window.
+deployment secret/tooling, verify the canonical hash and original occurrence times against independent request logs,
+then restore the hash/times and requeue the retained window. Migration defaults cannot establish historical attempt
+times. If those times cannot be verified, leave the legacy window in quarantine; do not invent historical evidence.
 
 ## Activity action catalogue
 
