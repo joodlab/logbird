@@ -57,8 +57,8 @@ function OnboardingLayout() {
           <Button
             onClick={async () => {
               await signOut();
-              queryClient.clear();
               await navigate({ to: '/login' });
+              queryClient.clear();
             }}
             size="sm"
             variant="ghost"

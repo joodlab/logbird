@@ -310,8 +310,8 @@ function UserMenu() {
           <DropdownMenuItem
             onClick={async () => {
               await signOut();
-              queryClient.clear();
               await navigate({ to: '/login' });
+              queryClient.clear();
             }}
           >
             <LogOutIcon />
