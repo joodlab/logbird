@@ -77,6 +77,52 @@ it('omits jobId instead of sending "undefined" for jobs without an id', async ()
   expect(track.mock.calls[0]?.[0].executor).toEqual({ type: 'worker', id: 'health', name: 'sweep', jobId: undefined, attempt: 1 });
   expect(track.mock.calls[0]?.[0].actor).toEqual({ type: 'system', id: 'scheduler' });
 });
+it('preserves impersonation attribution through serialized carriers, retries and nested jobs', async () => {
+  const { client, track } = fixture();
+  const host: { supportId?: string } = {};
+  const audit = await createAudit(
+    {
+      client,
+      actor: () => ({ type: 'user', id: 'customer-user' }),
+      impersonator: () => (host.supportId ? { id: host.supportId, name: 'QA Support' } : undefined),
+      tenant: () => ({ id: 'qa-business', name: 'QA Hotels' }),
+      operationId: () => 'support-operation',
+    },
+    host,
+    new Request('http://host'),
+  );
+  host.supportId = 'support-user';
+  const parentEventId = audit('export.requested');
+  const carrier = JSON.parse(JSON.stringify(await audit.carrier({ parentEventId })));
+  const job = jobAudit({ client, carrier, job: { id: 'export-42', queueName: 'crm', attemptsMade: 1 } });
+  const childId = job('export.generated');
+  await Promise.all([audit.pending(), job.pending()]);
+  const attribution = {
+    actor: { type: 'user', id: 'customer-user' },
+    impersonator: { id: 'support-user', name: 'QA Support' },
+    tenant: { id: 'qa-business', name: 'QA Hotels' },
+    context: { operationId: 'support-operation' },
+  };
+  expect(track.mock.calls[0]?.[0]).toMatchObject(attribution);
+  expect(track.mock.calls[1]?.[0]).toMatchObject({
+    ...attribution,
+    executor: { type: 'worker', id: 'crm', jobId: 'export-42', attempt: 2 },
+    context: { operationId: 'support-operation', parentEventId },
+  });
+  expect(await job.carrier({ parentEventId: childId })).toMatchObject({
+    actor: attribution.actor,
+    impersonator: attribution.impersonator,
+    tenant: attribution.tenant,
+    operationId: 'support-operation',
+    parentEventId: childId,
+  });
+});
+it('allows an explicit carrier impersonator override or omission', async () => {
+  const { client } = fixture();
+  const audit = await createAudit({ client, impersonator: () => ({ id: 'support' }) }, {}, new Request('http://host'));
+  expect(await audit.carrier({ impersonator: { id: 'other-support' } })).toMatchObject({ impersonator: { id: 'other-support' } });
+  expect(await audit.carrier({ impersonator: undefined })).not.toHaveProperty('impersonator');
+});
 it('shutdown waits for pending resolutions before closing the client', async () => {
   const { client, track } = fixture();
   let finish!: (actor: { id: string }) => void;

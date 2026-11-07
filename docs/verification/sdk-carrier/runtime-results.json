@@ -1,0 +1,66 @@
+{
+  "status": "passed",
+  "verifiedAt": "2026-11-07T11:38:21.939Z",
+  "scope": "SDK request/carrier/jobAudit real HTTP ingest and readback; job attempts are SDK fixtures, not a BullMQ retry",
+  "projectId": "cmw6bxxzb0000acyosopalx0b",
+  "operationId": "01a1b5cd-6e96-7344-8222-35f5d8ca574b",
+  "ingestStatuses": [
+    202
+  ],
+  "readStatus": 200,
+  "eventCount": 4,
+  "events": [
+    {
+      "id": "01a1b5cd-6e97-705e-ba50-edb445fc6cdb",
+      "action": "qa.job.completed",
+      "actorId": "qa-customer",
+      "impersonatorId": "qa-support",
+      "tenantId": "qa-business",
+      "executorType": "worker",
+      "jobId": "qa-job-01a1b5cd-6e96-7344-8222-35f5d8ca574b",
+      "attempt": 2,
+      "parentEventId": "01a1b5cd-6e97-75f4-8460-6972dd15baa1",
+      "conformance": 100
+    },
+    {
+      "id": "01a1b5cd-6e97-74be-8e47-9d0ff22d6b8b",
+      "action": "qa.job.failed",
+      "actorId": "qa-customer",
+      "impersonatorId": "qa-support",
+      "tenantId": "qa-business",
+      "executorType": "worker",
+      "jobId": "qa-job-01a1b5cd-6e96-7344-8222-35f5d8ca574b",
+      "attempt": 1,
+      "parentEventId": "01a1b5cd-6e97-75f4-8460-6972dd15baa1",
+      "conformance": 100
+    },
+    {
+      "id": "01a1b5cd-6e97-74e6-9ea0-8220159f4f0b",
+      "action": "qa.child.completed",
+      "actorId": "qa-customer",
+      "impersonatorId": "qa-support",
+      "tenantId": "qa-business",
+      "executorType": "worker",
+      "jobId": "qa-child-01a1b5cd-6e96-7344-8222-35f5d8ca574b",
+      "attempt": 1,
+      "parentEventId": "01a1b5cd-6e97-705e-ba50-edb445fc6cdb",
+      "conformance": 100
+    },
+    {
+      "id": "01a1b5cd-6e97-75f4-8460-6972dd15baa1",
+      "action": "qa.audit.requested",
+      "actorId": "qa-customer",
+      "impersonatorId": "qa-support",
+      "tenantId": "qa-business",
+      "executorType": "api",
+      "jobId": "",
+      "attempt": 0,
+      "parentEventId": "",
+      "conformance": 100
+    }
+  ],
+  "ancestorIds": [
+    "01a1b5cd-6e97-75f4-8460-6972dd15baa1",
+    "01a1b5cd-6e97-705e-ba50-edb445fc6cdb"
+  ]
+}
