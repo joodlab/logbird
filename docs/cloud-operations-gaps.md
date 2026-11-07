@@ -1,22 +1,121 @@
 # Cloud operations launch gaps
 
-Issue-ready acceptance criteria, based on source inspection on 2026-11-07. These are not claims
-that GitHub issues already exist, that implementations have landed, or that provider resources
-have been tested. Coordinate with the parent-owned readiness checklist/account design; app
-routes/auth/benchmarks and quotas/metering remain outside this operations change.
+Status: launch checklist, 2026-11-07. Checkboxes require dated source/image and
+executed evidence; a written procedure or closed PR alone does not close a gate.
+The release owner assigns a person to each named role before provisioning.
 
-| ID / proposed issue | Evidence and current gap | Acceptance criteria / required proof |
-| --- | --- | --- |
-| OPS-01: implement bounded operational telemetry | `apps/server/src/app.ts` has HTTP logs and health routes; no metrics endpoint in this baseline. Parent owns the minimal implementation. `alerts-status.md` metric names are proposed. | Parent records the landed names/units/labels and route access policy; test normalized low-cardinality labels, duration conversion and secret exclusion; prove collection and outage/absent-scrape alert delivery against real services before enabling rules. |
-| OPS-02: prove worker progress and retention deadline alerts | `apps/worker/src/health.ts` runs dependency pings independently; `index.ts` logs startup/completed/failed but has no continuous consumer heartbeat. Healthy dependencies can coexist with a stuck consumer. | Add/reuse a periodic heartbeat tied to the active worker, oldest waiting-job age and completed-sweep freshness; fail the canary when the consumer stops while stores remain reachable; demonstrate retention lease recovery and drain longer than the configured 300-second Pod grace or adjust the contract. |
-| OPS-03: automate and rehearse matched recovery sets | No cloud scheduler/off-host verifier or restore receipt is supplied. [#75](https://github.com/joodlab/logbird/issues/75) is the restore-specific mutation-version mismatch: native restore is correct before repair, then repair can double rollups; ordinary no-restore retry is exact. | Keep production recovery fenced until the accepted #75 fix PR/full revision is linked and its exact built API/worker digests pass logical raw/minute/entity/attribute comparisons immediately after restore, after failed/abandoned-run repair, and after repeated repair. Include expired/surviving fixtures, view definitions/destinations, part versions, mutation context and a no-restore control. Preserve original targets/evidence on mismatch; no speculative workaround. Also prove matched off-host recovery, deletion reconciliation, RPO/RTO and backup alerts. |
-| OPS-04: prove artifact identity and safe transition | Placeholder images have no deployment acceptance. Runtime retention SQL packaging is broken without [#51](https://github.com/joodlab/logbird/pull/51)'s embedding fix or an equivalent verified revision; this is independent of #75's restore defect. | Record the accepted packaging-fix commit and all four immutable digests. Run real expired-row retention and failed-run repair through the exact built API/worker digests and compare raw/derived logical values before release or recovery. Separately satisfy #75's fix/checkpoints. Validate readonly runtime roots and bounded scratch; audit the migrate Job's time-boxed writable-root exception against its exact image. Verify worker's five-key Secret allowlist, running imageIDs, migration failure/rollback and measured transition traffic. No healthy-Pod or migration-Job shortcut. |
-| OPS-05: provision and verify infrastructure isolation/TLS | No cluster/data services/certificates exist as a result of these artifacts; baseline ingress assumes Traefik labels, and egress remains unrestricted. | Separately authorize region/budget/topology; verify CNI ingress isolation, private data firewall paths, reviewed DNS/data/SMTP egress, verified encrypted data connections, certificate renewal/expiry alerts, true client-IP handling, node distribution and node-loss capacity. Save evidence without secret values. |
-| OPS-06: validate transactional delivery and transport | `packages/email/src/send.ts` has SMTP delivery and optional code logging, no provider event pipeline or mandatory STARTTLS setting. No real DNS/SMTP receipt was tested here. | Configure verified aligned SPF/DKIM/DMARC; keep code logging off; prove OTP/invitation/notification receipt and errors, TLS mode, provider quota/bounce/suppression operation and independent incident access. If port 587 must require TLS, implement/test fail-closed STARTTLS before using it. |
-| OPS-07: reconcile workspace deletion and restored removals | Parent reports source-confirmed ClickHouse orphan gap after workspace deletion; queued purge design and real-service evidence are pending. This ops change does not alter lifecycle code. | Parent defines durable scoped cleanup/retry state, denies access immediately, proves only the deleted workspace's raw/derived ClickHouse rows are purged while other tenants remain intact, and tests interruption/retry/restore reconciliation using isolated fictional data. Keep launch blocked until the lifecycle proof is accepted. |
+| ID / tracker | Owner role | Priority | Blocks launch? | Depends on |
+| --- | --- | --- | --- | --- |
+| [OPS-01 telemetry / #54](https://github.com/joodlab/logbird/issues/54) | Backend maintainer + SRE | P1 | Yes | Collection access policy and alert receiver |
+| [OPS-02 worker progress / #55](https://github.com/joodlab/logbird/issues/55) | Worker maintainer + SRE | P1 | Yes | OPS-01, qualified worker image |
+| [OPS-03 recovery / #56](https://github.com/joodlab/logbird/issues/56) | Data operator + release owner | P0 | Yes, including provider switching | #75/#77, OPS-08, deletion inventory |
+| [OPS-04 artifacts / #57](https://github.com/joodlab/logbird/issues/57) | Release engineer | P0 | Yes | #51 embedding, registry, OPS-03 |
+| [OPS-05 platform / #58](https://github.com/joodlab/logbird/issues/58) | Platform operator | P0 | Yes | OPS-08, region/DNS approval |
+| [OPS-06 email / #59](https://github.com/joodlab/logbird/issues/59) | Email/backend maintainer | P0 | Yes | SMTP unblock or shipped mandatory TLS on 587 |
+| [OPS-07 deletion / #60](https://github.com/joodlab/logbird/issues/60) | Cloud/backend maintainer | P0 | Yes | Queued workspace purge, OPS-03 |
+| [OPS-08 data hosting / #87](https://github.com/joodlab/logbird/issues/87) | Product owner + data operator | P0 | Yes; owner decision open | Budget, residency, on-call, measured sizing |
+| [OPS-09 client-IP guard / #86](https://github.com/joodlab/logbird/issues/86) | Backend/security maintainer | P1 | Two-IP proof blocks launch; warning is follow-up defense | OPS-05, bounded sampling design |
 
-Close each issue only with the applicable source revision plus dated executed evidence. Static
-schema validation, a backup process exit code, health HTTP 200 and provider job completion each
-prove their limited scope; none closes all launch gaps. Use [cloud operations](cloud-operations.md),
-[recovery](backup-disaster-recovery.md), [alerts/status](alerts-status.md) and
-[email](transactional-email.md) as the operator procedures for those acceptance runs.
+## OPS-01 telemetry
+
+- [ ] Define actual metrics/log names, units, bounded route labels and access policy;
+  proposed names in [alerts](alerts-status.md) are not implemented collectors.
+- [ ] Test secret exclusion, normalized route labels and milliseconds-to-seconds conversion.
+- [ ] Prove external collection, absent-scrape/outage alerts and primary/backup delivery.
+- [ ] Commission the independent status page and test access during a cluster/mail outage.
+
+## OPS-02 worker progress
+
+- [ ] Heartbeat must reflect the active consumer; collect oldest job age and sweep freshness.
+- [ ] Stopping consumption with healthy stores must fire the canary and alert.
+- [ ] Prove lease recovery and drain within the 300-second Pod grace, or change the contract.
+- [ ] Measure combined worker + exec-readiness Node process memory during retention;
+  qualify headroom below the 1 GiB cgroup limit or redesign the probe.
+- [ ] Write and rehearse the **worker-stuck runbook (TBD)** before activating that alert.
+
+## OPS-03 recovery
+
+- [ ] #75 is the restore-specific mutation-version defect; [#77](https://github.com/joodlab/logbird/issues/77)
+  is the live acceptance tracker. Record accepted guard/procedure revisions and exact image IDs.
+- [ ] Prove logical raw/minute/entity/attribute values after restore, failed-run repair and
+  repeated repair, with parts/mutations, original archives and no-restore control preserved.
+- [ ] If migration 006 exists, verify event_ids receipts/MV and the release's retention policy.
+- [ ] Execute the committed dry-run/normalization procedure only under #77's accepted
+  offline prerequisites; no automatic data repair or speculative workaround.
+- [ ] Capture a matched encrypted three-store/config set, fetch it from off-host and
+  verify checksums/decryption; prove deletion reconciliation and measured RPO/RTO.
+- [ ] Measure nightly ingest downtime at representative size and get owner acceptance.
+  If rejected, design/rehearse an online cross-store boundary (WAL/PITR plus ClickHouse
+  incremental is a candidate, not an implemented alternative).
+- [ ] Prove missing-artifact/decrypt/overdue alerts and independent recovery credentials.
+
+## OPS-04 artifacts
+
+- [ ] Inspect #51's actual merged portion for embedded retention SQL, or name an equivalent
+  verified revision. Record source SHA, architecture and all four immutable digests.
+- [ ] Provide reviewed manual image build/registry/publish and release-receipt tooling;
+  no automatic PR Docker builds. Preserve rollback digests and private pull credentials.
+- [ ] Run real expired retention and failed-run repair through those API/worker digests,
+  comparing survivor IDs and logical aggregate values; migration success is insufficient.
+- [ ] Validate read-only runtime roots/bounded scratch and the exact migration image's
+  writable-root exception audit. Verify worker's five-key Secret allowlist.
+- [ ] Prove failed/cancelled migration handling, running imageIDs and compatible rollback.
+- [ ] Measure traffic during replacement before claiming zero downtime; OPS-03/#77
+  remains an independent recovery gate.
+
+## OPS-05 platform
+
+- [ ] Provision the approved pinned K3s/OS/private network and data services from OPS-08;
+  record topology, firewall paths, DNS A/AAAA and supported version inventory.
+- [ ] Execute [Local ingress/DNS/cert-manager procedure](cloud-ingress.md), prove real
+  certificate issuance/renewal, SNI/chain, HTTP rejection and expiry alert delivery.
+- [ ] Two source IPs must produce two auth buckets; reject forged forwarding headers.
+- [ ] Prove CNI ingress isolation, reviewed DNS/data/SMTP egress, verified encrypted
+  database transport and no public database/API/dashboard bypass route.
+- [ ] Prove fence, tunnel, operator-only window, unfence/refence and failed-release behavior.
+- [ ] Test phase-1 node outage and document accepted impact; phase-2 HA/node-loss capacity
+  needs separate measured proof, placement and disruption policy.
+- [ ] Write/rehearse **disk-pressure and OOM runbooks (TBD)** before those alerts activate.
+
+## OPS-06 email
+
+- [ ] Hetzner blocks outbound 25/465 by default. Retain unblock request/approval and
+  actual 465 connectivity proof, or ship/test fail-closed `requireTLS` for 587.
+  A reachable port or optional STARTTLS does not meet the gate.
+- [ ] Verify SPF/DKIM/DMARC alignment and real OTP/invitation/notification receipt.
+- [ ] Keep code logging off; exercise TLS/downgrade, timeout, provider quota, bounce
+  and suppression failures without leaking codes or addresses.
+- [ ] Prove SMTP-connect-timeout alerting and independent incident access; follow the
+  [sender runbook](transactional-email.md#delivery-acceptance-and-failure-handling).
+
+## OPS-07 deletion
+
+- [ ] Implement durable scoped queued workspace purge/retry state and deny access immediately.
+- [ ] Prove deleted workspace raw/derived rows reach zero while another QA tenant is unchanged.
+- [ ] Exercise interruption/retry and restored-deletion reconciliation before launch.
+
+## OPS-08 data hosting decision
+
+- [ ] Owner chooses **self-run data VMs or managed services**, region, residency and
+  provider/access/backup contracts. [Cost worksheet](cloud-operations.md#dated-cost-worksheet)
+  currently assumes one VM per Postgres/ClickHouse/queue, without data HA.
+- [ ] Obtain current quotes for selected SKUs, GB, transfer, backups, registry, mail
+  and monitoring; approve budget plus setup/on-call responsibility by name.
+- [ ] Provision/configure each store privately with version-pinned persistence,
+  encrypted transport, tested grants and no shared/local development substitutions.
+- [ ] Use measured ingest/storage/search/purge data to approve disk/memory/headroom,
+  maintenance capacity and backup outage; choose data replication/HA if the SLO needs it.
+
+## OPS-09 client-IP guard
+
+- [ ] Implement the bounded startup/observed-traffic warning from [#86](https://github.com/joodlab/logbird/issues/86).
+  Startup cannot infer collapse without samples; one user/NAT alone is not a fault.
+- [ ] Prove no raw IP/identity secrets, unbounded maps or per-address metric labels;
+  document any operator-readiness contract/access change.
+- [ ] Retain the real two-source and forwarding-spoof acceptance receipt from OPS-05.
+
+Close gates with the applicable commit/image IDs, commands, output, UTC date and
+cleanup receipt. Static schema validation, a backup exit code and HTTP 200 prove
+only their named scope. Procedures: [cloud](cloud-operations.md),
+[ingress](cloud-ingress.md), [recovery](backup-disaster-recovery.md),
+[alerts/status](alerts-status.md), [email](transactional-email.md).

@@ -14,7 +14,7 @@ successful ingest/readback, restricted query grants or worker consumption.
 durationMs; `rate-limit.ts` emits `rate_limit.storage_error`. Worker startup emits `worker.ready`,
 and its consumer emits `retention.completed`, `retention.failed`, `worker.error`.
 `apps/worker/src/health.ts` is a separate dependency-check process, not a worker heartbeat.
-The baseline has no Prometheus endpoint; the parent owns its later implementation. All
+The baseline has no Prometheus endpoint; the backend/SRE owner tracks it in OPS-01. All
 `logbird_*` names below are **proposed contracts**, not scrapeable metrics or ready alert rules.
 
 Operate external HTTPS probes from outside the application host/failure domain. Run a small
@@ -32,21 +32,23 @@ and escalates if its stated deadline is missed. These response times are propose
 Deduplicate by service/environment/alert; group dependency failures so a database outage does
 not create one page per Pod. Probe absence, failed scrapes and missed heartbeats must alert.
 
-| Condition and initial threshold | Priority | Signal / first response |
-| --- | --- | --- |
-| Public `/readyz` fails 3 consecutive 30-second probes, or all API replicas unready for 2 minutes | P1 | External HTTPS + Kubernetes state; check all stores and current release, fence changes |
-| Synthetic event accepted but ID cannot be read within 30 seconds, 2 consecutive runs | P1 | External canary receipt; stop rollout and trace request/storage correlation; never report a successful canary on a skipped read |
-| HTTP 5xx > 1% for 5 minutes with >=100 requests; low traffic uses synthetic failures | P1 | Existing structured logs initially; proposed `logbird_http_requests_total{route,method,status}`; inspect release and dependencies |
-| Read/ingest p95 > 2 seconds for 10 minutes with sufficient samples | P2 | Logs initially; proposed `logbird_http_request_duration_seconds` histogram; compare baseline and query/merge pressure |
-| `rate_limit.storage_error` persists for 1 minute or auth 503 increases | P1 | Log alert; Redis failure closes auth/invites but public API limits fail open; restore queue/rate-limit availability |
-| 429 > 5% for 10 minutes | P2 | HTTP logs/counter; distinguish intended quotas, abuse, shared-NAT/proxy mistakes and capacity before changing limits |
-| Worker heartbeat absent > 2 minutes or oldest waiting job > 10 minutes | P1 | **Missing collector**: proposed `logbird_worker_heartbeat_timestamp_seconds`, `logbird_queue_oldest_waiting_age_seconds`; verify consumer/scheduler, do not infer from dependency health |
-| Any retention failure; no successful hourly sweep for > 2 hours | P2 (P1 if deletion deadline threatened) | Existing failure logs/RetentionRun rows; proposed `logbird_retention_runs_total{status}` and `logbird_retention_last_success_timestamp_seconds`; reconcile raw/derived state and retry through supported recovery |
-| Data filesystem free < 25% for 15 minutes; < 15% or forecast exhaustion < 24 hours | P2 / P1 | Node/database exporter; inspect ClickHouse merges/mutations/backup staging; add reviewed capacity, never delete live event files |
-| Memory pressure/OOM or repeated restarts (> 3 in 15 minutes) | P1 | Kubernetes/node state; record limits and query pressure before restarting or raising limits |
-| Complete off-host recovery set age > 26 hours, any artifact missing, or restore drill overdue > 35 days | P1 for missing backup / P2 for drill | **Missing external heartbeat**: proposed `logbird_backup_last_verified_timestamp_seconds`, `logbird_restore_last_success_timestamp_seconds`; verify object/decrypt access and run the recovery procedure |
-| TLS certificate expires in < 21 days / < 7 days | P2 / P1 | External certificate probe and origin cert separately; inspect issuer/renewal path |
-| Two consecutive synthetic OTP failures or provider rejects/suppresses transactional mail | P1 | Mail sink/provider events; use [sender runbook](transactional-email.md), no codes in alert messages |
+| Condition and initial threshold | Priority | Signal / first response | Runbook |
+| --- | --- | --- | --- |
+| Public `/readyz` fails 3 consecutive 30-second probes, or all API replicas unready for 2 minutes | P1 | External HTTPS + Kubernetes state; check all stores and current release, fence changes | [Release acceptance/rollback](cloud-operations.md#acceptance-and-rollback) |
+| Synthetic event accepted but ID cannot be read within 30 seconds, 2 consecutive runs | P1 | External canary receipt; stop rollout and trace request/storage correlation; never report a successful canary on a skipped read | [Release acceptance/rollback](cloud-operations.md#acceptance-and-rollback) |
+| HTTP 5xx > 1% for 5 minutes with >=100 requests; low traffic uses synthetic failures | P1 | Existing structured logs initially; proposed `logbird_http_requests_total{route,method,status}`; inspect release and dependencies | [Release acceptance/rollback](cloud-operations.md#acceptance-and-rollback) |
+| Read/ingest p95 > 2 seconds for 10 minutes with sufficient samples | P2 | Logs initially; proposed `logbird_http_request_duration_seconds` histogram; compare baseline and query/merge pressure | [Maintenance pressure](cloud-operations.md#clickhouse-background-maintenance) |
+| `rate_limit.storage_error` persists for 1 minute or auth 503 increases | P1 | Log alert; Redis failure closes auth/invites but public API limits fail open; restore queue/rate-limit availability | [Worker/queue: runbook TBD, OPS-02](cloud-operations-gaps.md#ops-02-worker-progress) |
+| 429 > 5% for 10 minutes | P2 | HTTP logs/counter; distinguish intended quotas, abuse, shared-NAT/proxy mistakes and capacity before changing limits | [Two-IP/proxy test](cloud-ingress.md#two-ip-rate-limit-acceptance) |
+| Worker heartbeat absent > 2 minutes or oldest waiting job > 10 minutes | P1 | **Missing collector**: proposed `logbird_worker_heartbeat_timestamp_seconds`, `logbird_queue_oldest_waiting_age_seconds`; verify consumer/scheduler, do not infer from dependency health | [Worker stuck: runbook TBD, OPS-02](cloud-operations-gaps.md#ops-02-worker-progress) |
+| Any retention failure; no successful hourly sweep for > 2 hours | P2 (P1 if deletion deadline threatened) | Existing failure logs/RetentionRun rows; proposed `logbird_retention_runs_total{status}` and `logbird_retention_last_success_timestamp_seconds`; reconcile raw/derived state and retry through supported recovery | [Recovery gates](backup-disaster-recovery.md#mandatory-artifact-and-restore-correctness-gates) |
+| Data filesystem free < 25% for 15 minutes; < 15% or forecast exhaustion < 24 hours | P2 / P1 | Node/database exporter; inspect ClickHouse merges/mutations/backup staging; add reviewed capacity, never delete live event files | [Disk pressure: runbook TBD, OPS-05](cloud-operations-gaps.md#ops-05-platform) |
+| Memory pressure/OOM or repeated restarts (> 3 in 15 minutes) | P1 | Kubernetes/node state; record limits and query pressure before restarting or raising limits | [OOM: runbook TBD, OPS-05](cloud-operations-gaps.md#ops-05-platform) |
+| Complete off-host recovery set age > 26 hours, any artifact missing, or restore drill overdue > 35 days | P1 for missing backup / P2 for drill | **Missing external heartbeat**: proposed `logbird_backup_last_verified_timestamp_seconds`, `logbird_restore_last_success_timestamp_seconds`; verify object/decrypt access and run the recovery procedure | [Capture](backup-disaster-recovery.md#capture-procedure) / [recovery decision](backup-disaster-recovery.md#incident-and-rollback-decision) |
+| TLS certificate expires in < 21 days / < 7 days | P2 / P1 | External certificate probe and origin cert separately; inspect issuer/renewal path | [Certificate lifecycle](cloud-ingress.md#dns-and-certificate-lifecycle) |
+| Two consecutive synthetic OTP failures or provider rejects/suppresses transactional mail | P1 | Mail sink/provider events; use [sender runbook](transactional-email.md), no codes in alert messages | [Email failure handling](transactional-email.md#delivery-acceptance-and-failure-handling) |
+| SMTP connect timeout or repeated TLS failure from the cloud network | P1 if OTP impacted | Hetzner blocks 25/465 by default; inspect unblock approval, firewall and provider before changing transport; do not log codes | [Hetzner mail gate](transactional-email.md#hetzner-launch-prerequisite) |
+| Observed auth client-IP collapse warning | P2; P1 if sign-in is throttled globally | Proposed #86 diagnostic; verify two independently routed sources and spoof resistance; legitimate NAT alone is not a fault | [Two-IP acceptance](cloud-ingress.md#two-ip-rate-limit-acceptance) / [OPS-09](cloud-operations-gaps.md#ops-09-client-ip-guard) |
 
 Metric labels must have bounded cardinality: normalized route template, method, status/class and
 environment only. Never label by tenant/project/user/key/request ID, email, raw path or query.

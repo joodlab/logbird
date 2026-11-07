@@ -4,21 +4,96 @@ Status: proposed operating design, reviewed against source and primary documenta
 2026-11-07. No infrastructure, DNS, certificates, mail account or monitoring service is provisioned
 by these files. No production, failover, restore or capacity acceptance is claimed.
 
+## Decision summary
+
+- **Recommend k3s on Hetzner:** reuse the team's JoodCMS Kubernetes practice, keep
+  migrations separate from running apps, and replace each role independently.
+  Coolify is simpler to set up, but its Compose deployment path has an interruption
+  window and does not remove the database/recovery work.
+- **Budget:** roughly **EUR 230–300/month for phase 1**, excluding VAT, labor,
+  transactional mail, domain and independent monitoring; see the dated bill below.
+- **Effort estimate:** 3–5 engineer-days for platform setup and rehearsals, plus
+  4–8 hours/month for patching, backup/restore drills and alert checks, with a named
+  primary/backup on call. These are planning estimates; unresolved launch gates add work.
+- **Data ownership is an open owner decision:** this budget assumes self-run
+  Postgres, ClickHouse and Redis/Dragonfly on three separate data VMs. Approve that
+  operational responsibility or obtain managed-service quotes before provisioning.
+- **Stages:** phase 1 is one k3s server plus the data VMs; two app replicas on that
+  server do not survive its loss. Phase 2 adds two k3s servers for a three-member
+  HA control plane and tests node placement/capacity; data HA is a separate decision.
+- **Top three risks:** unproven restored-data recovery (#75/#77); single-node/data-VM
+  outages and nightly backup downtime; login failure from SMTP blocks or collapsed
+  client-IP limits. Each is a launch gate below, not an accepted customer risk.
+- **Reconsider** if nobody can own data/on-call, the owner rejects maintenance
+  outages, managed-service quotes are cheaper than staff time, CX capacity is
+  unavailable, or the measured workload/SLO requires dedicated compute or data HA.
+- **Nightly ingest outage:** the current matched backup stops API/worker writes.
+  Its duration is unmeasured. Time dumps, queue capture and readiness at representative
+  size, then extrapolate by bytes/throughput and add drain/verification time before
+  offering a maintenance window. OPS-03 tracks an online cross-store boundary
+  (potentially Postgres WAL/PITR plus ClickHouse incremental backups) as an alternative.
+
+### Dated cost worksheet
+
+Planning date **2026-11-07**, Nuremberg/Helsinki, EUR excluding VAT. VM figures use
+Hetzner's [public website price data](https://www.hetzner.com/_resources/app/data/bench/cloud_data.json),
+fetched on that date; the [small source-hashed receipt](verification/cloud-prices-2026-11-07.json)
+records each SKU/region. Confirm the Console quote and capacity before approval.
+The website currently flags cost-optimized capacity as unavailable, so this worksheet
+uses regular-performance CPX plans rather than assuming the cheaper CX tier is orderable.
+
+| Phase-1 item | Monthly basis | EUR/month |
+| --- | --- | --- |
+| k3s server, CPX32 | 1 × 35.49 | 35.49 |
+| Postgres VM, CPX32 | 1 × 35.49 | 35.49 |
+| ClickHouse VM, CPX42 | 1 × 69.49 | 69.49 |
+| Queue VM, CPX22 | 1 × 19.49 | 19.49 |
+| Public IPv4 for four VMs (data ports firewalled) | 4 × 0.50 | 2.00 |
+| Optional server backups on all four VMs | 20% × 159.96 | 31.99 |
+| Extra volumes + encrypted off-host object storage | Planning allowance; quote the required GB, retention and transfer separately | 30–50 |
+| Hetzner LB / extra k3s workers | None in phase 1's direct-node path | 0 |
+| **Subtotal / contingency budget** | **224–244 before contingency** | **230–300** |
+
+[IPv4 pricing](https://docs.hetzner.com/cloud/servers/primary-ips/overview/#pricing)
+and [server backup billing](https://docs.hetzner.com/cloud/billing/faq/) support those
+add-ons. The storage row is an explicit estimate, not an asserted list price: quote
+[Volumes](https://www.hetzner.com/cloud/block-storage/) and
+[Object Storage](https://www.hetzner.com/storage/object-storage/) after measuring
+compressed growth and backup size. Server snapshots exclude attached Volumes and
+never replace matched application backups. Reserve staging space and deletion-protected
+off-host copies. Included local disks are not evidence that the data fits.
+
+Phase 2's two additional CPX32 servers, IPv4 and optional backups add about EUR 86;
+budget roughly EUR 320–420 total with contingency, **before data replicas**. Any
+extra workload nodes add their quoted VM/storage costs. An optional later Hetzner
+LB needs a fresh quote and the client-IP design in [ingress](cloud-ingress.md);
+it is not included or required by the direct-node plan. Dedicated CPU, managed
+databases, extra transfer and separate-provider recovery copies can change this bill
+substantially. Obtain those quotes if the load test or recovery objectives require them.
+
+### Switching later
+
+The OCI images and Kubernetes resources can move, but data cannot move merely by
+redeploying them. Change providers or orchestration only by restoring a complete
+matched recovery set into new targets, preserving credentials and reconciling
+deletions, then passing acceptance before DNS cutover. **That migration path remains
+fenced by [#75](https://github.com/joodlab/logbird/issues/75) and live tracker
+[#77](https://github.com/joodlab/logbird/issues/77)**, including packaged restored-part
+guards, normalized retry and conditional event-ID receipt checks. There is no
+accepted switching guarantee until those gates and a timed restore drill pass.
+
 ## Hosting decision
 
-Recommend **k3s on Hetzner for the hosted cloud**, with Postgres, ClickHouse and Redis/Dragonfly
-operated independently of the stateless release. This is an engineering recommendation based
-on the existing Kubernetes operating model and Logbird's durable-event contract, not a measured
-cost or availability comparison. Keep [Coolify](coolify.md) for a bounded private evaluation
-whose maintenance interruptions are acceptable. Both require the same data recovery gates.
+Keep [Coolify](coolify.md) for a bounded private evaluation whose maintenance
+interruptions are acceptable. Data operations and recovery gates apply to both choices.
 
 | Consideration | k3s on Hetzner | Coolify |
 | --- | --- | --- |
-| Existing fit | JoodCMS has Kubernetes workloads, separate migration Jobs and infrastructure state procedures | Logbird already has a Git-build Compose definition; Nibleaf documents its operational limits |
-| Releases | Separate Job completion gate; independent app/API/worker replacement | Compose reconciles services and has an interruption window; eligible Docker Image apps can overlap containers |
-| State | External data services need their own storage, backup and failover design | Platform backups and application database backups have different scopes; queue persistence needs separate coverage |
-| Operator burden | Cluster, ingress, certificates, upgrades and data operations | Platform/host upgrades, data operations and application compatibility |
-| Availability | Multiple stateless Pods are only one part of availability | Health checks alone do not establish continuous availability |
+| Existing fit | Reuses JoodCMS Kubernetes and migration-Job operating practice | Uses the supplied Compose path, adding a separate control panel to operate |
+| Releases | Gate one migration Job, then replace app/API/worker independently | Compose replacement has an interruption window; separate Docker Image apps would be another design |
+| State | Separate data VMs or approved managed stores; matched backups and restore ownership stay with the team | Same data responsibility; the panel's own backup/encryption key is additional state |
+| Operator burden | Team owns K3s/CNI/ingress/cert-manager upgrades plus the data services | Team owns host/panel upgrades plus the same data services |
+| Growth path | One server first; three-member control plane/placement when justified | Keep one-host Compose evaluation until a separately qualified deployment model is selected |
 
 [Coolify's rolling-update documentation](https://coolify.io/docs/applications/deployments/rolling-updates)
 excludes Docker Compose applications and describes the health, shutdown and compatibility
@@ -29,13 +104,14 @@ Read-only source comparisons used here: JoodCMS `k8s/README.md`,
 `k8s/templates/api/{deployment,migration-job}.yaml` and `infra/terraform/README.md` separate
 workloads, migrations and state ownership; Nibleaf `operations/deployment-reliability.md` and
 `docs/self-hosting/backups-upgrades.mdx` require exact artifacts and isolated restore evidence.
-Those sources describe practices; their current deployed behavior was not inspected. No
-credentials, addresses, state, chart values or deployment scripts were copied from either project.
+No credentials, addresses, state or deployment scripts were copied from either project.
 
 ## Topology and capacity gates
 
-For an availability target, plan three control-plane nodes with fast durable disks and a private
-registration address, plus capacity for stateless workloads on distinct failure domains. K3s's
+Phase 1 intentionally accepts one k3s failure domain while launch gates are proved;
+owner approval of that maintenance/outage model is required. Phase 2 uses three
+control-plane nodes with fast durable disks, a private registration address and
+workload placement across nodes. K3s's
 [embedded-etcd HA design](https://docs.k3s.io/datastore/ha-embedded) needs at least three server
 nodes and an odd quorum. It does not replicate application databases. A single-node evaluation
 remains a single failure domain even with two app Pods.
@@ -101,7 +177,8 @@ or CI workflows. No build, push or deployment is performed by Kustomize.
 
 **Artifact qualification is a release and recovery prerequisite.** The chosen source
 must contain [PR #51](https://github.com/joodlab/logbird/pull/51)'s retention-SQL
-embedding fix, or an equivalent verified change. Record the accepted fix commit,
+embedding fix, or an equivalent verified change; check that the actual merged portion
+contains the embedding, not merely that the PR number is merged. Record the fix commit,
 all four built digests and actual running image IDs. Exercise real expired-row
 retention and failed-run repair through those exact built API/worker digests, then
 compare survivor IDs and logical values in all three aggregate tables. Migration
@@ -109,18 +186,41 @@ success or SQL present in the migration image does not qualify runtime packaging
 The separate native-restore mutation-version defect [#75](https://github.com/joodlab/logbird/issues/75)
 also blocks production recovery until its accepted fix link/revision and the
 [restore/repair/repeated-repair checkpoints](backup-disaster-recovery.md#logical-aggregate-checkpoints-a-b-c)
-pass with the exact images. No accepted #75 fix revision is identified in this
-baseline; record it before clearing that gate. Keep these two prerequisites separate.
+pass with the exact images. [#77](https://github.com/joodlab/logbird/issues/77) tracks
+the remaining packaged guard/normalization and retry gates; record their accepted
+revisions and receipts before clearing recovery. Keep packaging and restore gates separate.
 
-Before applying, make a private release copy of this directory outside Git and:
+Before applying, make a private release copy preserving `deploy/k3s` and
+`scripts/wait-k8s-job.sh` at their repo-relative paths. Run the following from
+that copy's `deploy/k3s` directory:
 
-1. Replace all four image references with verified `repository@sha256:...` values. Record image
-   digests, source SHA, architecture, build commands and rollback digests in the release receipt.
-   Configure an image-pull Secret on each Pod if the registry is private.
-2. Replace both `audit.example.test` occurrences and `MAIL_FROM`; supply a valid
-   `logbird-origin-tls` Secret in namespace `logbird` through the cluster's certificate lifecycle.
-   The Ingress assumes the `traefik` class. It does not install HTTPS redirection or renew a cert.
-   Configure HTTPS redirection at the controller and test renewal/expiry alarms separately.
+1. Use Kustomize image digests and record source SHA, architecture, build commands,
+   running imageIDs and rollback digests. From the private `deploy/k3s` copy:
+
+   ```sh
+   : "${SERVER_DIGEST:?}" "${APP_DIGEST:?}" "${WORKER_DIGEST:?}"
+   kustomize edit set image "registry.invalid/logbird/server=registry.example.test/logbird/server@$SERVER_DIGEST"
+   kustomize edit set image "registry.invalid/logbird/app=registry.example.test/logbird/app@$APP_DIGEST"
+   kustomize edit set image "registry.invalid/logbird/worker=registry.example.test/logbird/worker@$WORKER_DIGEST"
+   # Each digest must be sha256:<64 hex>; use the approved real registry hostname.
+   # Edit migration/job.yaml separately to its qualified migrate@sha256:... image.
+   ```
+
+   For a private registry, create `logbird-registry` from a protected existing
+   Docker config and patch the dedicated namespace's default ServiceAccount:
+
+   ```sh
+   kubectl -n logbird create secret generic logbird-registry \
+     --type=kubernetes.io/dockerconfigjson --from-file=.dockerconfigjson=/secure/registry-config.json
+   kubectl -n logbird patch serviceaccount default --type=merge \
+     -p '{"imagePullSecrets":[{"name":"logbird-registry"}]}'
+   ```
+
+   This is a first-install hook; preserve existing credentials/entries on upgrades.
+   Record the inherited imagePullSecrets on new runtime and migration Pods. No token
+   mount is needed for pulling images.
+2. Complete [cluster bootstrap, DNS, Local ingress and cert-manager issuance](cloud-ingress.md).
+   Base Kustomize excludes public `edge/`; apply it only for the operator window.
 3. Create the external databases and verify readiness using a separate authorized infrastructure
    procedure. Match versions in [self-hosting](self-hosting.md): Postgres 17, ClickHouse 26.9,
    Redis 7, or tested Dragonfly with `--cluster_mode=emulated --lock_on_hashtags=true` and
@@ -139,8 +239,12 @@ Before applying, make a private release copy of this directory outside Git and:
    Back up the three object names, key inventories and encrypted recovery references
    with the matched set. Restore/recreate each scoped Secret with its preserved values;
    do not replace the worker Secret with the API file. ConfigMap defaults supply the
-   non-secret settings, including implicit SMTP TLS on port 465 for the API; verify
-   that mode with the selected provider. Keep `CLICKHOUSE_QUERY_USER=logbird_query`
+   non-secret settings. **Hetzner blocks outbound 25/465 by default**; request
+   unblocking after account eligibility (one month and first invoice paid), and retain
+   approval plus actual connection/OTP proof. Port 587 is reachable, but requires
+   OPS-06's fail-closed `requireTLS` implementation and downgrade test before launch.
+   Do not simply flip the baseline's 465/TLS settings. See [mail prerequisites](transactional-email.md#hetzner-launch-prerequisite).
+   Keep `CLICKHOUSE_QUERY_USER=logbird_query`
    consistent for API/migration. Review overrides against [.env.example](../.env.example).
 5. Give the migration identity Postgres DDL and the ClickHouse schema/access-management grants
    listed in self-hosting. Give runtime only its required data rights. Current retention and
@@ -178,8 +282,8 @@ unverified. It has no listener, one non-root container, no automatic retry, a
 `/tmp` volume is limited to 256 MiB, with `TMPDIR` and `XDG_CACHE_HOME` directed there;
 ephemeral-storage request/limit is 256/512 MiB. This exception does not extend to any
 Deployment. Current query-user tooling receives the preserved password from env and
-does not need to append an env file in that mode. Cache/tool writes elsewhere have
-not been measured, and are not claimed necessary.
+does not need to append an env file in that mode. Audit remaining cache/tool writes
+before accepting the exception.
 
 Before production, audit the full migration command against the exact #51-or-equivalent
 image in isolated targets, recording paths, ownership, peak scratch/layer usage and
@@ -190,29 +294,72 @@ justify this exact image's one-shot exception and cleanup; do not silently widen
 
 ### Execute the qualified release
 
-Serialize releases using the operator's release lock and record its owner. First take and verify
-a matched [recovery set](backup-disaster-recovery.md). Review every migration for compatibility.
+Serialize releases using the operator's release lock and record its owner. Review
+every migration for compatibility. Fence/drain below, then capture a matched
+[recovery set](backup-disaster-recovery.md#capture-procedure) before migrations.
 Until a rolling transition is rehearsed, schedule maintenance, block public writes, drain
 in-flight ingestion/exports and stop old workers and API processes before migrations. The query
 user provisioning step checks unchanged main-user counts; concurrent ingestion can invalidate it.
 Freeze all other clients as well as these Deployments. Preserve the old images and configuration.
 
-The following is an operator procedure for the prepared private release directory, **not a command
-to run against an arbitrary current context**. Confirm the cluster/context and external database
-identities privately first. On upgrades, scale old `logbird-server` and `logbird-worker` to zero
-only after ingress is fenced and requests/jobs have drained; verify termination before proceeding.
-On first install no old writers exist. Do not apply `workloads.yaml` before the Job succeeds.
+#### Fence and drain
+
+Run from the private `deploy/k3s` release copy after confirming the kubeconfig/context,
+external data identities and rollback receipt. Use `set -eu` in each shell. First
+apply only namespace/network policy; on upgrades preserve existing Secrets:
 
 ```sh
-kubectl apply -f namespace.yaml -f config.yaml
+set -eu
+kubectl config current-context
+kubectl apply -f namespace.yaml -f network-policies.yaml
+# Fence: base apply -k deliberately excludes edge/ and cannot recreate this Ingress.
+kubectl -n logbird delete ingress logbird --ignore-not-found --wait=true
+```
+
+From an external non-allowlisted source verify the app/auth/ingest routes are rejected,
+including any alternate hostname/Ingress. Wait for existing requests/exports and
+acknowledged inserts to drain; then stop API and worker writers. First install skips
+the scale step because no old Deployments exist:
+
+```sh
+# Upgrade only, after the external fence and drain have been observed:
+kubectl -n logbird scale deployment/logbird-server deployment/logbird-worker --replicas=0
+kubectl -n logbird wait --for=delete pod -l app.kubernetes.io/name=logbird-server --timeout=300s
+kubectl -n logbird wait --for=delete pod -l app.kubernetes.io/name=logbird-worker --timeout=330s
+```
+
+Fence all direct/administrative writers too, take the matched recovery set, and
+record the stopped-Pod inventory. A drain timeout keeps the release stopped;
+never force-kill a purge to meet a maintenance estimate.
+
+**First install only:** create the three scoped Secrets, then the registry hook
+above if needed. Never print files or use a wholesale developer `.env`.
+
+```sh
+set -eu
 kubectl -n logbird create secret generic logbird-runtime --from-env-file=/secure/logbird-runtime.env
 kubectl -n logbird create secret generic logbird-worker --from-env-file=/secure/logbird-worker.env
 kubectl -n logbird create secret generic logbird-migration --from-env-file=/secure/logbird-migration.env
-# On an existing install preserve these Secrets; do not recreate or rotate them.
-kubectl apply -f network-policies.yaml -n logbird
-# Edit job.yaml: unique name logbird-migrate-<release-id> and exact migration digest.
+```
+
+**Upgrade only:** verify names and key inventories privately; preserve existing
+Secret values, auth keys and registry entries. Add a missing scoped worker Secret
+from the existing authorized values once; do not recreate all Secrets or rotate them.
+
+```sh
+set -eu
+kubectl -n logbird get secret logbird-runtime logbird-worker logbird-migration -o name
+```
+
+**Both paths:** apply configuration only after the old writers are stopped. Use a
+unique Job name and exact migration digest in `migration/job.yaml`:
+
+```sh
+set -eu
+: "${MIGRATION_JOB:?Set logbird-migrate-<unique-release-id>, matching job.yaml}"
+kubectl apply -f config.yaml
 kubectl apply -f migration/job.yaml
-kubectl -n logbird wait --for=condition=complete job/logbird-migrate-<release-id> --timeout=1250s
+sh ../../scripts/wait-k8s-job.sh "$MIGRATION_JOB"
 ```
 
 If the Job fails or times out, stop: preserve its status/logs, investigate applied migrations and
@@ -220,10 +367,18 @@ use the recovery decision below. Do not automatically rerun, delete evidence or 
 The Job has no automatic retries and a 20-minute deadline. It uses the image CMD to deploy
 Postgres migrations, ClickHouse migrations and query-user grants in that order.
 
-After a successful Job, apply `kubectl apply -k .`, then wait for each Deployment rollout
-(`kubectl -n logbird rollout status deployment/logbird-server --timeout=300s`, and likewise
-`logbird-app`, `logbird-worker`). Applying the baseline is a manual step, not an enforced
-dependency on the Job; a single `apply -k` is not a safe release procedure. Readiness does not
+After the helper reports Complete, apply only the base and wait for all three rollouts:
+
+```sh
+kubectl apply -k .
+kubectl -n logbird rollout status deployment/logbird-server --timeout=300s
+kubectl -n logbird rollout status deployment/logbird-app --timeout=300s
+kubectl -n logbird rollout status deployment/logbird-worker --timeout=300s
+kubectl -n logbird get ingress logbird --ignore-not-found
+# Required: no application Ingress. edge/ has not been applied.
+```
+
+Applying the base is a manual gate on the Job. Readiness does not
 certify the schema migration inventory. Preserve the failed Job until its incident evidence is
 archived; prune only release-owned completed Jobs under a separate retention policy.
 
@@ -231,27 +386,33 @@ The API uses `/livez` for startup/liveness and `/readyz` for routing. App readin
 `/readyz`; TCP liveness avoids restarting it just because storage is unavailable. The worker's
 `node dist/health.mjs` checks dependency connectivity in a separate process; it does **not**
 prove that the existing consumer is polling. It has no dependency-triggered liveness restart.
+The extra Node readiness process shares the worker's 1 GiB memory limit: measure
+combined peak RSS/cgroup usage with concurrent retention and a probe, and leave
+headroom or change the probe design before qualifying that image (OPS-02).
 Verify `worker.ready`, its scheduler and a real completed retention job. The 300-second worker
 grace period needs long-running retention/drain evidence before relying on it.
 
 ## Acceptance and rollback
 
-Keep traffic fenced while running the [production smoke procedure](deployment.md#acceptance)
-against isolated fictional fixtures. Capture OTP delivery, login, tenant isolation, ingest 202
+Use the [local port-forward, then operator-IP-only HTTPS window](cloud-ingress.md#fence-and-operator-acceptance-window)
+for the [smoke procedure](deployment.md#acceptance) against isolated fictional fixtures.
+Capture OTP delivery, login, tenant isolation, ingest 202
 and readback of the same ID, Query/SQL denial, retention completion and HTTPS/header/client-IP
 checks. Record skipped smoke inputs as gaps. Inspect each Pod's `imageID` alongside the registry
-digest, migration inventory and source SHA; a registry tag or healthy Pod is not revision proof.
+digest, migration inventory and source SHA. A third source must remain denied during
+the edge window; prove the two-source rate-limit separation and spoofing check.
+Only then use the explicit [unfence command](cloud-ingress.md#unfence-and-refence).
 
 Require the artifact qualification above before selecting release or rollback images.
-Record retention/failed-repair evidence for the exact API/worker digests, plus #75's
+Record retention/failed-repair evidence for the exact API/worker digests, plus #75/#77's
 restore/repair/repeated-repair checkpoints before recovery. Keep production recovery
 fenced when either prerequisite or any logical comparison is missing or mismatched.
 
 Test node/process restarts, a failed migration, dependency outages, recovery and a rejected
 unhealthy rollout before launch. Measure any request interruption continuously; RollingUpdate
 settings do not establish zero downtime. Proposed telemetry is in [alerts and status](alerts-status.md).
-Parent-owned cloud readiness/account design governs product signup, quotas, workspace lifecycle
-and launch approval; this operating baseline does not supersede those gates.
+The cloud/backend owner owns signup, quotas and workspace lifecycle; the release
+owner approves launch after the linked issues have executed acceptance evidence.
 
 If no incompatible migration ran, restore the previous image digests and configuration under
 the release lock, then repeat acceptance before reopening traffic. For an incompatible schema
@@ -265,13 +426,32 @@ From the repository root, render without a cluster connection and validate the s
 
 ```sh
 kubectl kustomize deploy/k3s > /tmp/logbird-k3s.yaml
-kubeconform -strict -summary -kubernetes-version 1.34.0 /tmp/logbird-k3s.yaml deploy/k3s/migration/job.yaml
+kubectl kustomize deploy/k3s/edge > /tmp/logbird-edge.yaml
+kubeconform -strict -summary -kubernetes-version 1.35.0 /tmp/logbird-k3s.yaml deploy/k3s/migration/job.yaml deploy/k3s/platform/acme-network-policy.yaml
+# Validate edge/platform CRDs against the pinned Traefik/cert-manager/K3s schemas,
+# not by silently skipping unknown resource kinds.
 git diff --check
 ```
 
-The baseline uses Kubernetes 1.34 schemas and a v1.34 restricted Pod Security policy; these are
-validation targets, not a claim that this is the newest Kubernetes release. Choose a supported,
-pinned k3s release and repeat validation against its Kubernetes version before installation.
+The baseline retains v1.34 restricted Pod Security rules and is schema-checked
+against Kubernetes 1.35 for the proposed pinned K3s release. Repeat against the
+actual chosen controller/chart/engine versions before installation.
 Schema checks cannot verify image availability, Secret values, CNI behavior, SMTP, migration
-privileges, probes against running images, backups or real traffic. The parent must complete the
+privileges, probes against running images, backups or real traffic. The release owner must complete the
 [issue-ready launch gates](cloud-operations-gaps.md) under an authorized test environment.
+
+## Launch checklist
+
+- [ ] Owner approves region, spend, self-run versus managed data services, on-call and
+  phase-1 single-node/nightly-outage model; representative load/sizing receipt exists.
+- [ ] #51 embedding is present in the accepted SHA; exact image retention/repair passes.
+- [ ] #75/#77 packaged restore/guard/normalization/retry and conditional event_ids checks pass.
+- [ ] Bootstrap, DNS, renewed production TLS, CNI/data isolation and both-IP buckets pass.
+- [ ] Hetzner 25/465 unblock request is approved **and tested**, or port 587 has
+  shipped fail-closed `requireTLS` with downgrade rejection and real OTP proof.
+- [ ] Scoped Secrets, readonly runtimes, migration exception audit, image pull and
+  failed-Job handling pass against qualified images.
+- [ ] Matched off-host recovery, deletion reconciliation, measured outage/RPO/RTO,
+  alert delivery/runbooks and independent status access pass.
+- [ ] Functional tunnel and operator-only edge acceptance pass; release owner signs
+  the receipt before unfencing. Remaining gates are listed in [operations gaps](cloud-operations-gaps.md).

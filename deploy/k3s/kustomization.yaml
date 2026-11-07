@@ -6,5 +6,4 @@ resources:
   - config.yaml
   - workloads.yaml
   - network-policies.yaml
-  - ingress.yaml
-# The migration Job is deliberately excluded: run and verify it before workloads.
+# Migration and public edge are separate applies; this render cannot reopen traffic.

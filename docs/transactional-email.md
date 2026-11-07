@@ -15,11 +15,33 @@ and DKIM settings. Logbird sends OTP, invitations and membership/role notificati
 Store `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` privately, with minimum send-only scope.
 For a provider supporting implicit TLS, set `SMTP_PORT=465`, `SMTP_SECURE=true`; validate the
 certificate/hostname and provider requirements in staging. Port 587 with `SMTP_SECURE=false`
-permits Nodemailer's STARTTLS negotiation but the current transport does not set `requireTLS`.
-If mandatory STARTTLS is required, track the transport contract as an application gap rather
-than claiming the existing setting enforces it. Do not disable certificate verification.
+permits STARTTLS negotiation but the current transport does not set `requireTLS`.
+Do not disable certificate verification or deploy 587 as a mandatory-TLS path until
+the launch prerequisite below is shipped and verified.
 Keep `AUTH_LOG_SIGN_IN_CODES=false` in cloud; log readers must never receive usable login codes.
 Preserve existing SMTP credentials unless the owner explicitly authorizes rotation.
+
+## Hetzner launch prerequisite
+
+[Hetzner's Cloud FAQ](https://docs.hetzner.com/cloud/servers/faq/#why-can-i-not-send-any-mails-from-my-server)
+states that outbound **25 and 465 are blocked by default**, per account. After one
+month and payment of the first invoice, request unblocking in Console Limits with
+the transactional use case; approval is case-by-case, not guaranteed. Record the
+ticket/approval and test connectivity from the actual data-center/account before
+choosing 465. The example cloud ConfigMap requires that approval.
+
+Port **587 is not blocked**, but launch on that path requires [OPS-06 / #59](https://github.com/joodlab/logbird/issues/59):
+implement configurable fail-closed Nodemailer `requireTLS`, verify certificate/host,
+reject a server that does not offer STARTTLS, and prove actual OTP receipt through
+the exact runtime image. Until then, simply setting `SMTP_SECURE=false` is insufficient.
+An HTTPS mail-provider API would require a separately implemented/tested transport;
+there is no such adapter to configure in the current source.
+
+Retain 465 unblock + TLS/receipt proof **or** shipped 587 requireTLS + downgrade/receipt
+proof in the [launch checklist](cloud-operations.md#launch-checklist). SMTP connect
+timeouts are an expected first symptom of the Hetzner block: alert before users
+repeatedly retry OTP. Never enable sign-in-code logging as a workaround. Recheck
+the new account's port policy when moving a server between owners.
 
 ## DNS checklist
 
