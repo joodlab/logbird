@@ -204,8 +204,9 @@ docker compose cp clickhouse:/var/lib/clickhouse/backups/logbird.zip backups/log
 ```
 
 Check that the synchronous command returns `BACKUP_CREATED`, record checksums, Git
-revision, database versions and four table counts (`events`, `events_by_minute`,
-`entities`, `attribute_keys`). Copy the archives and original `.env` to secure
+revision, database versions and logical totals: `count()` for `events`, `sum(events)`
+for `events_by_minute` and `entities`, and `sum(count)` for `attribute_keys`.
+Physical rollup row counts can change during background merges. Copy the archives and original `.env` to secure
 off-host storage. Archives inside a data volume alone are not a recoverable backup.
 `docker compose cp` avoids binary redirection corruption in Windows PowerShell 5.
 The `mkdir -p` example uses POSIX sh; on PowerShell use `New-Item -ItemType Directory
@@ -237,7 +238,7 @@ docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml 
 
 Require `RESTORED`, successful migrate/query-user provisioning, `/readyz`, SMTP
 login, unchanged users/projects/settings/API keys, event readback and matching raw
-and aggregate table counts before switching traffic. A database backup does not
+and aggregate totals before switching traffic. A database backup does not
 include server-configured users; bundled administrator credentials come from the
 preserved env, and migrate reprovisions the restricted account without rotating
 its password. Custom access configuration must be backed up separately. See the
