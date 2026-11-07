@@ -1,0 +1,107 @@
+{
+  "beforeAuthCaptureRevision": "4f9b138",
+  "revision": "e8fa76e5d6b210b5b8869fb9c9fdc9c5d4b075f3",
+  "screenshots": [
+    "after-light-1440-workspace.png",
+    "after-light-1440-sessions.png",
+    "signout-light-1440-menu.png",
+    "signout-light-1440-retry-error.png",
+    "signout-light-1440-done.png",
+    "after-dark-1440-workspace.png",
+    "after-dark-1440-sessions.png",
+    "signout-dark-1440-menu.png",
+    "signout-dark-1440-retry-error.png",
+    "signout-dark-1440-done.png",
+    "after-light-390-workspace.png",
+    "after-light-390-sessions.png",
+    "signout-light-390-menu.png",
+    "signout-light-390-retry-error.png",
+    "signout-light-390-done.png",
+    "after-dark-390-workspace.png",
+    "after-dark-390-sessions.png",
+    "signout-dark-390-menu.png",
+    "signout-dark-390-retry-error.png",
+    "signout-dark-390-done.png",
+    "onboarding-signout-retry-error.png",
+    "onboarding-signout-retry-done.png"
+  ],
+  "videos": [
+    "light-1440-interactions.webm",
+    "light-390-interactions.webm"
+  ],
+  "problems": [],
+  "expectedFailures": [
+    {
+      "scenario": "light-1440",
+      "problem": "[http 503] POST /api/session/sign-out"
+    },
+    {
+      "scenario": "light-1440",
+      "problem": "[error] http://localhost:4600/p/cmw6tusve00007gyodvyx550h/settings/activity?range=90d&q=category%3Aauth Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "scenario": "dark-1440",
+      "problem": "[http 503] POST /api/session/sign-out"
+    },
+    {
+      "scenario": "dark-1440",
+      "problem": "[error] http://localhost:4600/p/cmw6tusve00007gyodvyx550h/settings/activity?range=90d&q=category%3Aauth Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "scenario": "light-390",
+      "problem": "[http 503] POST /api/session/sign-out"
+    },
+    {
+      "scenario": "light-390",
+      "problem": "[error] http://localhost:4600/p/cmw6tusve00007gyodvyx550h/settings/activity?range=90d&q=category%3Aauth Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "scenario": "dark-390",
+      "problem": "[http 503] POST /api/session/sign-out"
+    },
+    {
+      "scenario": "dark-390",
+      "problem": "[error] http://localhost:4600/p/cmw6tusve00007gyodvyx550h/settings/activity?range=90d&q=category%3Aauth Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "scenario": "onboarding",
+      "problem": "[http 503] POST /api/session/sign-out"
+    },
+    {
+      "scenario": "onboarding",
+      "problem": "[error] http://localhost:4600/onboarding/profile Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    }
+  ],
+  "cleanup": {
+    "clickhouse": {
+      "events": 0,
+      "events_by_minute": 0,
+      "entities": 0,
+      "attribute_keys": 0,
+      "event_ids": 0
+    },
+    "postgresProjects": 0,
+    "postgres": {
+      "onboardingUsers": 0,
+      "users": 0,
+      "organizations": 0,
+      "projects": 0,
+      "members": 0,
+      "outbox": 0,
+      "windows": 0,
+      "budgets": 0,
+      "receipts": 0
+    }
+  },
+  "signoutEvents": [
+    {
+      "n": 4
+    }
+  ],
+  "fixture": {
+    "userId": "Mw3JoOtkJPkT5s4PB0oRLhCoDkRjjA1O",
+    "orgId": "vvUnYuH2IV2t6WScYLDFPOsudEqZ1OcE",
+    "onboardingUserId": "a4QiPnY1IsWhzaGdKY4wWi516GjTluPp",
+    "projectId": "cmw6tusve00007gyodvyx550h"
+  }
+}

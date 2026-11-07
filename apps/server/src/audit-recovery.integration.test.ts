@@ -258,6 +258,7 @@ it('isolates workspace budgets by namespace and preserves the top 20 targeted me
     await prisma.auditOutbox.deleteMany({ where: { namespace: { in: namespaces } } });
     await prisma.authAuditWindow.deleteMany({ where: { namespace: { in: namespaces } } });
     await prisma.authAuditBudget.deleteMany({ where: { namespace: { in: namespaces } } });
+    await prisma.authAuditAdmission.deleteMany({ where: { namespace: { in: namespaces } } });
     await prisma.organization.deleteMany({ where: { id: org } });
     await prisma.user.deleteMany({ where: { id } });
   }
