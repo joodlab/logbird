@@ -1,4 +1,5 @@
 import { GITHUB_PUBLIC } from '../env';
+import { buildLog, postPath, posts, releases } from './publications';
 
 export interface SitePage {
   path: string;
@@ -176,11 +177,12 @@ export const siteMap: SitePage[] = [
   {
     path: '/changelog',
     title: 'Changelog',
-    description: 'Changelog page content is being prepared.',
+    description: 'What changed in Logbird, release by release, plus the build log of what we shipped each day, with real captures.',
     section: 'resources',
     priority: 0.6,
     changefreq: 'weekly',
-    ready: false,
+    // Ready with the first release or the first approved build-log entry (publications.ts).
+    ready: releases.length > 0 || buildLog.length > 0,
     ogSlug: 'changelog',
     inNav: false,
     inFooter: true,
@@ -188,19 +190,20 @@ export const siteMap: SitePage[] = [
   {
     path: '/blog',
     title: 'Blog',
-    description: 'Blog page content is being prepared.',
+    description: 'Notes on building an open-source audit log: design decisions, guarantees and limits, written by the people building Logbird.',
     section: 'resources',
     priority: 0.6,
     changefreq: 'weekly',
-    ready: false,
+    // Ready with the first published post (publications.ts).
+    ready: posts.length > 0,
     ogSlug: 'blog',
     inNav: false,
     inFooter: true,
   },
   {
     path: '/blog/$slug',
-    title: 'Draft article',
-    description: 'Draft article page content is being prepared.',
+    title: 'Blog post',
+    description: 'A post from the Logbird blog.',
     section: 'resources',
     priority: 0.3,
     changefreq: 'monthly',
@@ -212,11 +215,11 @@ export const siteMap: SitePage[] = [
   {
     path: '/about',
     title: 'About',
-    description: 'About page content is being prepared.',
+    description: 'Logbird is an open-source audit log for teams who owe their customers a trail of who did what.',
     section: 'company',
     priority: 0.6,
     changefreq: 'monthly',
-    ready: false,
+    ready: true,
     ogSlug: 'about',
     inNav: false,
     inFooter: true,
@@ -236,10 +239,11 @@ export const siteMap: SitePage[] = [
   {
     path: '/legal/privacy',
     title: 'Privacy',
-    description: 'Privacy page content is being prepared.',
+    description: 'How the Logbird website handles your data. Placeholder until counsel-reviewed text replaces it before launch.',
     section: 'legal',
     priority: 0.3,
     changefreq: 'yearly',
+    // Placeholder copy: ready only once counsel-reviewed text replaces it.
     ready: false,
     ogSlug: 'privacy',
     inNav: false,
@@ -248,10 +252,11 @@ export const siteMap: SitePage[] = [
   {
     path: '/legal/terms',
     title: 'Terms',
-    description: 'Terms page content is being prepared.',
+    description: 'Terms of use for the Logbird website. Placeholder until counsel-reviewed text replaces it before launch.',
     section: 'legal',
     priority: 0.3,
     changefreq: 'yearly',
+    // Placeholder copy: ready only once counsel-reviewed text replaces it.
     ready: false,
     ogSlug: 'terms',
     inNav: false,
@@ -271,8 +276,8 @@ export const siteMap: SitePage[] = [
 export const staticPages = siteMap.filter((page) => !page.path.includes('$') && page.path !== '/404');
 /** Pages that are linked from the nav/footer and listed in the sitemap and llms.txt. */
 export const publishedPages = staticPages.filter((page) => page.ready);
-/** The draft route is exercised in static output but deliberately never indexed. */
-export const prerenderPaths = [...staticPages.map((page) => page.path), '/blog/draft'];
+/** Every static page plus each published post. */
+export const prerenderPaths = [...staticPages.map((page) => page.path), ...posts.map(postPath)];
 /** True for designed pages; use it to skip wrappers whose only content is a link to an unready page. */
 export const isReady = (path: string) => siteMap.some((page) => page.path === path && page.ready);
 export function getPage(path: string): SitePage {
