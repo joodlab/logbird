@@ -161,3 +161,27 @@ at 390 px dark. Rounds 2–4 changed only focus classes there.
 
 Round 4 also shortened the query bar's static hint to "Arrows choose a suggestion, Enter or Right arrow inserts it,
 Escape closes. Enter runs the query."
+
+## Round 5 — rerunnable proof
+
+Round 5 (`round5-proof.txt` / `round5-proof.json`, fixture `qa-fix-a11y-r5-*@example.test`, workspace "QA Fix a11y r5",
+project deleted at the end, no console problems) ran **39/39**: round 4's 36 plus these 3. The 17 axe scans match the
+table above row for row. No visuals changed in round 5, so the shots above still apply (the forced-colors pair was not
+retaken).
+
+- **"Filter by" a common value (race).** The filter value is the tenant of the newest event (row 0), which half the
+  events share. Opened from row 298 under the same 2 s hold, so focus is back on row 298 when the results arrive. The
+  old first row is row 0 of the new results too, and event 298 is not on their first page. Before round 5, the table
+  read this as "the same list lost rows" and moved to row 99, loading page 2. Now the explorer's `resultKey` changes, and
+  focus lands on row 0 (the old first row), `scrollTop` is 0, there is no `cursor=` page request, and row 0 is the only
+  tab stop.
+- **New query with focus elsewhere, cursor event surviving.** Row 8 of `outcome:failure` is opened and closed. Then the
+  query bar is cleared and run. The event is now row 56 of the broader results, but the view stays at the top
+  (`scrollTop` 0 → 0), no page request is made, the event is still the only tab stop, and focus stays in the query bar.
+  Tabbing back in (via the skip link) lands on that event, scrolled into view.
+
+The happy-dom tests also cover what the browser proof can't easily stage: a key change that keeps the old first row, the
+same key with the first row gone (still the same list), focus elsewhere when a new set holds the cursor 280 rows up, and
+a capped live tail. Once the tail is capped at 2000, a batch of N also drops its N oldest live rows, so the paged rows
+below don't move. The view now anchors on the focused row, or on the top row in view, instead of adding N rows on every
+poll.

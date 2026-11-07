@@ -1,9 +1,9 @@
 /**
- * Keyboard + axe proof for the event grid (PR #70, rounds 2 to 4), against a REAL local stack (app :4600, server :4601, worker).
+ * Keyboard + axe proof for the event grid (PR #70, rounds 2 to 5), against a REAL local stack (app :4600, server :4601, worker).
  *
  *   AXE=/path/to/axe.min.js OUT=../../marketing/captures/2026-11-07-a11y-explorer node scripts/a11y-grid-proof.mjs
  *
- * Creates a fictional user/workspace/project (qa-fix-a11y-r4-*@example.test, "QA Fix a11y r4"), ingests events, and checks:
+ * Creates a fictional user/workspace/project (qa-fix-a11y-r5-*@example.test, "QA Fix a11y r5"), ingests events, and checks:
  *  - Explorer: keyboard into the grid, ArrowDown to row 50, a 150-event live-tail batch arrives → focus stays on the same
  *    event (same node, new index), the view does not jump, ArrowDown continues from that event, Enter/Escape round trip.
  *  - Workspace Activity: ArrowDown moves the roving tab stop; Shift+Tab out and Tab back returns to that row; the event
@@ -25,6 +25,11 @@
  *  - "Filter by…" from the sheet, with the filtered response held back so focus returns to the old row first (the
  *    race): focus lands on row 0 of the new results, the view at the top, and no second page is fetched. When the new
  *    results still hold the open event, focus stays on it at its new index, scrolled into view.
+ * Round 5:
+ *  - "Filter by" a common value (the newest event's tenant) from row ≈ 299, under the same race: the old first row is
+ *    row 0 of the new results too, and focus still lands there, the view at the top, with no second page.
+ *  - A new query while focus is in the query bar, with the cursor's event surviving further down: the view stays at the
+ *    top, no second page; Tab back in lands on that event, in view.
  * The QA project is deleted at the end. One browser, closed in `finally`.
  */
 import { readFile, writeFile } from 'node:fs/promises';
@@ -36,7 +41,7 @@ const BASE = process.env.BASE_URL ?? 'http://localhost:4600';
 const SERVER = process.env.SERVER_URL ?? 'http://127.0.0.1:4601';
 const OUT = path.resolve(process.env.OUT ?? '.');
 const AXE = await readFile(process.env.AXE ?? 'axe.min.js', 'utf8');
-const EMAIL = `qa-fix-a11y-r4-${Date.now().toString(36)}@example.test`;
+const EMAIL = `qa-fix-a11y-r5-${Date.now().toString(36)}@example.test`;
 const ROW = 36;
 /** Better Auth (and the API's CSRF guard) want the console's origin on mutating requests. */
 const H = { Origin: BASE };
@@ -177,11 +182,11 @@ try {
   const org = await json(
     await api.post(`${BASE}/api/auth/organization/create`, {
       headers: H,
-      data: { name: 'QA Fix a11y r4', slug: `qa-fix-a11y-r4-${Date.now().toString(36)}` },
+      data: { name: 'QA Fix a11y r5', slug: `qa-fix-a11y-r5-${Date.now().toString(36)}` },
     }),
   );
   await json(await api.post(`${BASE}/api/auth/organization/set-active`, { headers: H, data: { organizationId: org.id } }));
-  const created = await json(await api.post(`${BASE}/api/projects`, { headers: H, data: { name: 'QA a11y r4 grid' } }));
+  const created = await json(await api.post(`${BASE}/api/projects`, { headers: H, data: { name: 'QA a11y r5 grid' } }));
   projectId = created.project.id;
   projectSlug = created.project.slug;
   await json(await api.patch(`${BASE}/api/projects/${projectId}`, { headers: H, data: { retentionReviewed: true } }));
@@ -209,7 +214,7 @@ try {
     }
     throw new Error(`events never reached ${n}`);
   };
-  note('fixture', { email: EMAIL.replace(/-[a-z0-9]+@/, '-*@'), workspace: 'QA Fix a11y r4', events: await waitFor(400) });
+  note('fixture', { email: EMAIL.replace(/-[a-z0-9]+@/, '-*@'), workspace: 'QA Fix a11y r5', events: await waitFor(400) });
 
   /* ---------------- Explorer: live tail keeps focus on its event ---------------- */
   await page.goto(`${BASE}/p/${projectId}/events?range=1h&live=true`);
@@ -599,6 +604,178 @@ try {
     await page.unroute(EVENTS);
   }
 
+  /* ---------------- round 5: "Filter by" a common value, and a surviving cursor with focus elsewhere ---------------- */
+  {
+    const EVENTS = /\/api\/projects\/[^/]+\/events\?/;
+    let hold = null;
+    await page.route(EVENTS, async (route) => {
+      const q = new URL(route.request().url()).searchParams.get('q') ?? '';
+      if (hold && q.includes(hold)) await new Promise((r) => setTimeout(r, 2000));
+      return route.continue();
+    });
+    const pageRequests = [];
+    const onRequest = (req) => {
+      if (EVENTS.test(req.url()) && /[?&]cursor=/.test(req.url())) pageRequests.push(req.url());
+    };
+    const qIs = (t) => page.waitForFunction((x) => (new URL(location.href).searchParams.get('q') ?? '') === x, t, { timeout: 10_000 });
+    /** Open the focused row's sheet and read its "Filter by tenant:" term; the sheet stays open. */
+    const openTenant = async () => {
+      await page.keyboard.press('Enter');
+      await page.waitForSelector('[role="dialog"]');
+      await page.waitForTimeout(300);
+      const label = (await page.getByRole('button', { name: /^Filter by tenant:/ }).getAttribute('aria-label')) ?? '';
+      return label.replace(/^Filter by /, '');
+    };
+    const closeSheet = async () => {
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('[role="dialog"]', { state: 'detached' });
+      await page.waitForTimeout(300);
+    };
+
+    // A common value: the tenant of the newest event (row 0), which half the events share.
+    await page.goto(`${BASE}/p/${projectId}/events?range=1h`);
+    await settle(page);
+    await page.getByRole('combobox', { name: 'Query' }).focus();
+    await enterGrid(page);
+    const row0 = await focused(page);
+    const common = await openTenant();
+    await closeSheet();
+    // End, let the next page load, End again …: row 299; then up to the nearest row with that tenant.
+    for (let i = 0; i < 3; i++) {
+      await page.keyboard.press('End');
+      await page.waitForTimeout(1500);
+    }
+    let term = await openTenant();
+    for (let i = 0; i < 12 && term !== common; i++) {
+      await closeSheet();
+      await page.keyboard.press('ArrowUp');
+      await page.waitForTimeout(150);
+      term = await openTenant();
+    }
+    // The sheet has focus: the opened row is the grid's tab stop.
+    const openedId = (await tabStops(page))[0];
+    const opened = {
+      eventId: openedId,
+      index: await page.$eval(`[role="row"][data-event-id="${openedId}"]`, (r) => Number(r.getAttribute('data-index'))),
+    };
+    hold = term;
+    page.on('request', onRequest);
+    const tenantButton = page.getByRole('button', { name: /^Filter by tenant:/ });
+    await tenantButton.focus();
+    await page.keyboard.press('Enter');
+    // The filtered results are held back for 2 s: the sheet closes and returns focus to the old row first.
+    await page.waitForTimeout(800);
+    const whileLoading = await focused(page);
+    await page.waitForFunction((x) => (new URL(location.href).searchParams.get('q') ?? '').includes(x), term, { timeout: 10_000 });
+    await page.waitForTimeout(2000);
+    await settle(page, 1500);
+    page.off('request', onRequest);
+    hold = null;
+    const landed = await focused(page);
+    const top = await scrollTop(page);
+    const stops = await tabStops(page);
+    const openedLoaded = await page.$(`[role="row"][data-event-id="${opened.eventId}"]`).then(Boolean);
+    check(
+      'filter by a common value (race): the old first row is row 0 again; focus lands on it, view at the top, no second page',
+      term === common &&
+        opened.index > 200 &&
+        whileLoading.eventId === opened.eventId &&
+        !openedLoaded &&
+        landed.index === 0 &&
+        landed.eventId === row0.eventId &&
+        top === 0 &&
+        pageRequests.length === 0 &&
+        stops.length === 1 &&
+        stops[0] === landed.eventId,
+      {
+        row0: row0.eventId,
+        term,
+        opened: `row ${opened.index}`,
+        focusWhileLoading: `row ${whileLoading.index} (${whileLoading.eventId === opened.eventId ? 'the old row' : 'elsewhere'})`,
+        openedEventOnPage1: openedLoaded,
+        landed: `row ${landed.index} (${landed.eventId === row0.eventId ? 'the old first row' : landed.eventId})`,
+        scrollTop: top,
+        pageRequests: pageRequests.length,
+        tabStops: stops,
+      },
+    );
+
+    // Focus elsewhere, the cursor's event survives at another index: the view stays at the top.
+    await page.goto(`${BASE}/p/${projectId}/events?range=1h&q=${encodeURIComponent('outcome:failure')}`);
+    await settle(page);
+    await page.getByRole('combobox', { name: 'Query' }).focus();
+    await enterGrid(page);
+    for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(300);
+    const cursor = await focused(page);
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('[role="dialog"]');
+    await closeSheet();
+    const bar = page.getByRole('combobox', { name: 'Query' });
+    await bar.click();
+    const topBefore = await scrollTop(page);
+    pageRequests.length = 0;
+    page.on('request', onRequest);
+    await bar.fill('');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Enter');
+    await qIs('');
+    await settle(page, 1500);
+    page.off('request', onRequest);
+    const topAfter = await scrollTop(page);
+    const stops2 = await tabStops(page);
+    const survived = await page.$eval(`[role="row"][data-event-id="${cursor.eventId}"]`, (r) => Number(r.getAttribute('data-index'))).catch(() => -1);
+    const active = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+    check(
+      'new query, focus elsewhere: the cursor event survives further down, the view stays at the top, no second page',
+      cursor.index === 8 &&
+        survived >= 25 &&
+        topBefore === 0 &&
+        topAfter === 0 &&
+        pageRequests.length === 0 &&
+        stops2.length === 1 &&
+        stops2[0] === cursor.eventId &&
+        active === 'Query',
+      {
+        cursor: `row ${cursor.index} of outcome:failure`,
+        nowAt: `row ${survived}`,
+        scrollTop: `${topBefore} → ${topAfter}`,
+        pageRequests: pageRequests.length,
+        tabStops: stops2,
+        focus: active,
+      },
+    );
+    // Tab back in brings the cursor row into view.
+    const presses = await enterGrid(page);
+    const via = await page.evaluate(() => document.activeElement?.getAttribute('role'));
+    const view = () =>
+      page.evaluate(() => {
+        const row = document.activeElement?.closest('[role="row"]');
+        const scroller = document.querySelector('[role="grid"]')?.parentElement;
+        const box = scroller?.getBoundingClientRect();
+        const r = row?.getBoundingClientRect();
+        return {
+          // 1 px of slack: align 'auto' puts a row scrolled up from below on the bottom edge (subpixel rounding).
+          inView: Boolean(r && box && r.top >= box.top && r.bottom <= box.bottom + 1),
+          scrollTop: scroller?.scrollTop ?? null,
+          row: r ? `${Math.round(r.top)}–${Math.round(r.bottom)}` : null,
+          box: box ? `${Math.round(box.top)}–${Math.round(box.bottom)}` : null,
+        };
+      });
+    const now = await view();
+    await page.waitForTimeout(500);
+    const later = await view();
+    const back = await focused(page);
+    check('new query, focus elsewhere: Tab back in lands on that event, in view', back.eventId === cursor.eventId && later.inView, {
+      index: back.index,
+      presses,
+      via,
+      immediately: now,
+      after500ms: later,
+    });
+    await page.unroute(EVENTS);
+  }
+
   /* ---------------- round 3: empty results never drop focus to <body> ---------------- */
   {
     const invalidate = () =>
@@ -790,7 +967,7 @@ try {
     note('cleanup: QA project deleted', res.status());
   }
   await browser.close();
-  await writeFile(path.join(OUT, 'round4-proof.txt'), `${log.join('\n')}\n`);
-  await writeFile(path.join(OUT, 'round4-proof.json'), `${JSON.stringify(results, null, 2)}\n`);
+  await writeFile(path.join(OUT, 'round5-proof.txt'), `${log.join('\n')}\n`);
+  await writeFile(path.join(OUT, 'round5-proof.json'), `${JSON.stringify(results, null, 2)}\n`);
 }
 process.exit(results.failed ? 1 : 0);
