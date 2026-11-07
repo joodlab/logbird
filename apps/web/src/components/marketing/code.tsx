@@ -44,16 +44,19 @@ const shell = 'site-code overflow-hidden rounded-xl border bg-[var(--surface)]';
 const bar = 'flex h-10 items-center justify-between gap-2 border-b bg-[var(--surface-sunken)] ps-3 pe-1';
 const pre = 'overflow-x-auto p-4 font-mono text-[13px] leading-[1.7]';
 
+/** `wrap` soft-wraps long lines instead of scrolling (short commands shown on phones). */
 export function SiteCode({
   code,
   language = 'text',
   title,
   className,
+  wrap = false,
 }: {
   code: string;
   language?: CodeLanguage;
   title?: string;
   className?: string;
+  wrap?: boolean;
 }) {
   return (
     <div className={cn(shell, className)}>
@@ -61,7 +64,7 @@ export function SiteCode({
         <span className="truncate font-mono text-[11px] text-muted-foreground uppercase tracking-wider">{title ?? language}</span>
         <CopyCode label="Copy code" value={code} />
       </div>
-      <pre className={pre}>
+      <pre className={cn(pre, wrap && 'whitespace-pre-wrap break-all')}>
         <code>
           <Highlighted code={code} language={language} />
         </code>

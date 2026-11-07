@@ -1,17 +1,10 @@
 import type { ReactNode } from 'react';
 import { ButtonLink } from './button-link';
 import { LogStack } from './log-stack';
+import { CTA_BODY, SelfHostCta } from './self-host-cta';
 
 /** The closing call to action used at the bottom of most pages. */
-export function CtaBand({
-  title = 'Start with one event.',
-  body = 'Self-host Logbird today, or join the waitlist for Logbird Cloud.',
-  note,
-}: {
-  title?: string;
-  body?: ReactNode;
-  note?: ReactNode;
-}) {
+export function CtaBand({ title = 'Start with one event.', body = CTA_BODY, note }: { title?: string; body?: ReactNode; note?: ReactNode }) {
   return (
     <section aria-labelledby="cta-title" className="py-20 md:py-24">
       <div className="container-site">
@@ -26,9 +19,7 @@ export function CtaBand({
               <ButtonLink size="lg" to="/contact">
                 Join the waitlist
               </ButtonLink>
-              <ButtonLink size="lg" to="/self-hosting" variant="outline">
-                Self-host it
-              </ButtonLink>
+              <SelfHostCta />
             </div>
             {note ? <p className="text-muted-foreground text-sm">{note}</p> : null}
           </div>

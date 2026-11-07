@@ -38,3 +38,15 @@ it('defines the provisional domain only in env.ts', () => {
   const occurrences = files.filter((file) => readFileSync(file, 'utf8').includes(literal));
   expect(occurrences).toEqual([resolve('src/env.ts')]);
 });
+it('names no company or design partner anywhere in the site source (pending the owner)', () => {
+  const files = [
+    ...readdirSync('src', { recursive: true }).map((name) => resolve('src', String(name))),
+    ...readdirSync('scripts', { recursive: true }).map((name) => resolve('scripts', String(name))),
+    resolve('vite.config.ts'),
+    resolve('server/waitlist.ts'),
+  ]
+    .filter((name) => /\.(ts|tsx|mjs)$/.test(name))
+    .filter((name) => !name.endsWith('site-map.test.ts'));
+  const pattern = new RegExp(['jo', 'od'].join(''), 'i');
+  expect(files.filter((file) => pattern.test(readFileSync(file, 'utf8')))).toEqual([]);
+});

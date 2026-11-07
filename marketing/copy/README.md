@@ -104,6 +104,15 @@ run it on your own servers. <!-- source: docs/brand.md §2 (cloud clause "or our
 ~60 ms", "1.8 s to first event"). None of them has a measurement report yet. A load-test report is planned; numbers
 can be added when it lands, each with its source.
 
+## Self-host CTA rule
+
+Nobody outside the team can self-host until the repository is public (no published images, no npm packages). While
+`WEB_GITHUB_PUBLIC` is false the site must not offer a clone/compose quickstart or say "Self-host … today":
+
+- Secondary CTA: **"Self-host when the source opens"** → `/contact?interest=self-host` (the waitlist, self-host preselected).
+- Quickstart blocks become "Available when the repository opens." with the same link.
+- "Self-host it" → `/self-hosting` and "Self-host today" return automatically once `WEB_GITHUB_PUBLIC=true`.
+
 ## Owner-gated copy
 
 These lines are **not** used anywhere on the site. The owner may approve them later.

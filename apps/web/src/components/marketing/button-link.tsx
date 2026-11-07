@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router';
 import type { MouseEventHandler, ReactNode } from 'react';
 import { cx } from '../../lib/cx';
+import { siteMap } from '../../lib/site-map';
 
 /*
  * The console's button look (packages/ui/src/components/ui/button.tsx) for links. Mirrored as plain class strings so
@@ -27,14 +28,21 @@ type ButtonLinkProps = {
   children: ReactNode;
   className?: string;
   onClick?: MouseEventHandler<HTMLAnchorElement>;
+  search?: Record<string, string>;
 } & ({ to: string; href?: never } | { href: string; to?: never });
 
+/** Internal links to pages that aren't designed yet (site-map `ready: false`) render nothing until those pages ship. */
+const unreadyPaths = new Set(siteMap.filter((page) => !page.ready).map((page) => page.path));
+
 /** A link styled as a button. `to` is an internal route (client navigation); `href` is anything else. */
-export function ButtonLink({ to, href, variant = 'default', size = 'default', className, children, onClick }: ButtonLinkProps) {
+export function ButtonLink({ to, href, variant = 'default', size = 'default', className, children, onClick, search }: ButtonLinkProps) {
+  if (to !== undefined && unreadyPaths.has(to)) {
+    return null;
+  }
   const classes = cx(base, variants[variant], variant === 'link' ? 'h-auto px-0' : sizes[size], className);
   if (to !== undefined) {
     return (
-      <Link className={classes} onClick={onClick} to={to}>
+      <Link className={classes} onClick={onClick} search={search} to={to}>
         {children}
       </Link>
     );
