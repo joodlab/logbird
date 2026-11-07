@@ -25,10 +25,7 @@
     "onboarding-signout-retry-error.png",
     "onboarding-signout-retry-done.png"
   ],
-  "videos": [
-    "light-1440-interactions.webm",
-    "light-390-interactions.webm"
-  ],
+  "videos": ["light-1440-interactions.webm", "light-390-interactions.webm"],
   "problems": [],
   "expectedFailures": [
     {
