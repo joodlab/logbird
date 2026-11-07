@@ -25,7 +25,8 @@ Stop the server's whole process tree when done. Never start the console or its s
 
 - `ready: false` pages render a placeholder, are `noindex`, and stay out of the nav, footer, sitemap and `llms.txt`.
   Internal `ButtonLink`s to them render nothing. Each page PR flips its own flag.
-- `src/lib/release.ts` closes the whole site while any media entry is `interim`: every page is `noindex`, `robots.txt`
+- `src/lib/release.ts` closes the whole site while any media entry is `interim`, `WEB_SITE_URL` is unset (provisional
+  domain) or `WEB_SECURITY_EMAIL` is unset: every page is `noindex`, `robots.txt`
   is `Disallow: /`, and `build:cloudflare` fails unless `LOGBIRD_WEB_ALLOW_INTERIM=1` (local previews only).
 
 ## Configuration
@@ -42,6 +43,7 @@ domain, and no site source may contain the company or design-partner names (test
 | `WEB_APP_URL` | Console sign-in; unset hides "Sign in" | unset (Cloud is waitlist-only) |
 | `WEB_GITHUB_PUBLIC`, `WEB_GITHUB_URL` | Repository link and self-host quickstarts | false / unset |
 | `WEB_ORG_NAME` | © holder and JSON-LD Organization (pending owner) | unset → "Logbird contributors", no Organization |
+| `WEB_SECURITY_EMAIL` | Vulnerability-report mailbox. **No default**: unset renders `SECURITY.md`'s "ask the maintainers for a private channel" wording | unset (release blocker) |
 | `SMTP_*`, `MAIL_FROM`, `WAITLIST_NOTIFY_TO` | Server-only waitlist notification (Mailpit locally) | — |
 | `WAITLIST_FILE` | Node adapter's JSONL file | `apps/web/.data/waitlist.jsonl` when run from `apps/web` |
 | `WEB_TRUST_PROXY` | Reverse proxies in front of the Node server that append to `X-Forwarded-For`; the client is that many entries from the right. 0 (default) ignores forwarding headers, so behind an untrusted or unset proxy every visitor shares one limiter bucket: set this, or enforce the per-client limit at the proxy | 0 |
