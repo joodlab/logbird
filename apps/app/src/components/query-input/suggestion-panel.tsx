@@ -172,7 +172,7 @@ export function SuggestionPanel({
             <Kbd>↑↓</Kbd> move
           </span>
           <span className="flex items-center gap-1">
-            <Kbd>Tab</Kbd> complete
+            <Kbd>→</Kbd> complete
           </span>
           <span className="flex items-center gap-1">
             <Kbd>

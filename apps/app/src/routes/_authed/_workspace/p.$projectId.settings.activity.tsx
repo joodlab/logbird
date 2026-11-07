@@ -6,10 +6,10 @@ import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { ActivityIcon, SearchIcon } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { EventSheet } from '@/components/explorer/event-sheet';
-import { EventsTable } from '@/components/explorer/events-table';
+import { EventsTable, type EventsTableHandle } from '@/components/explorer/events-table';
 import { workspaceActivityQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
 import { includeTerm, removeTerm } from '@/lib/query-language';
@@ -43,8 +43,16 @@ function WorkspaceActivity() {
 
   const activity = useInfiniteQuery(workspaceActivityQuery(range, q));
   const rows = useMemo(() => activity.data?.pages.flatMap((p) => p.data) ?? [], [activity.data]);
+  // The result set the table shows, as of the last non-placeholder results (the query keeps the previous rows while a
+  // new search or chip loads): the table starts a new set at the top even when it shares rows with the old one.
+  const resultKey = useRef<string | undefined>(undefined);
+  if (activity.isSuccess && !activity.isPlaceholderData) resultKey.current = `${range}|${q}|${category ?? ''}`;
   const selectedIndex = search.ev ? rows.findIndex((e) => e.id === search.ev) : -1;
   const select = (e: AuditEvent | null | undefined) => navigate({ search: (prev) => ({ ...prev, ev: e?.id }), replace: true });
+  // The table tracks its own keyboard cursor (by event id, following the open event); closing the sheet returns to it.
+  const table = useRef<EventsTableHandle>(null);
+  // Where focus goes when no row is left to take it (an emptied list, the sheet closing over one).
+  const searchInput = useRef<HTMLInputElement>(null);
 
   return (
     <div className="flex min-h-[28rem] flex-1 flex-col">
@@ -69,6 +77,7 @@ function WorkspaceActivity() {
               className="ps-9"
               onChange={(e) => setDraft(e.target.value)}
               placeholder="Search activity…"
+              ref={searchInput}
               size="sm"
               value={draft}
             />
@@ -104,7 +113,6 @@ function WorkspaceActivity() {
         ) : (
           <EventsTable
             columns={COLUMNS}
-            cursorIndex={selectedIndex}
             empty={
               <EmptyState
                 description="Management actions in this workspace show up here as they happen."
@@ -113,10 +121,13 @@ function WorkspaceActivity() {
               />
             }
             fetchingMore={activity.isFetchingNextPage}
+            focusFallback={() => searchInput.current}
             hasMore={activity.hasNextPage}
             loadMore={() => activity.fetchNextPage()}
             loading={activity.isPending}
             onSelect={select}
+            ref={table}
+            resultKey={resultKey.current}
             rows={rows}
             selectedId={search.ev}
           />
@@ -125,6 +136,9 @@ function WorkspaceActivity() {
       <EventSheet
         event={selectedIndex >= 0 ? (rows[selectedIndex] ?? null) : null}
         fetchDetail={false}
+        // Back to the row the sheet showed last (it may differ from the one opened, after prev/next): never to <body>.
+        // With no rows left (a refetch emptied the list meanwhile), to the search field.
+        finalFocus={() => table.current?.cursorElement() ?? searchInput.current ?? true}
         onNext={selectedIndex >= 0 && selectedIndex < rows.length - 1 ? () => select(rows[selectedIndex + 1]) : undefined}
         onOpenChange={(open) => {
           if (!open) select(null);

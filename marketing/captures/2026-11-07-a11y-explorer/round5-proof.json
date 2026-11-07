@@ -1,0 +1,362 @@
+{
+  "fixture": {
+    "email": "qa-fix-a11y-r5-*@example.test",
+    "workspace": "QA Fix a11y r5",
+    "events": 400
+  },
+  "explorer / focuses": "Query",
+  "PASS explorer: keyboard reaches the grid": "10 presses → row 0",
+  "PASS explorer: ArrowDown ×50 → row 50": {
+    "tag": "DIV",
+    "role": "row",
+    "eventId": "01a1b6b8-be27-7413-9411-37c1ea4e37ed",
+    "index": 50,
+    "top": 856,
+    "tabIndex": 0,
+    "name": "Omar Fictional changed booking BK-base-389, success, booking.modified, 16:55:03"
+  },
+  "live pill": "250 new since live started",
+  "PASS live tail: focus stays on the same event": {
+    "before": "01a1b6b8-be27-7413-9411-37c1ea4e37ed",
+    "after": "01a1b6b8-be27-7413-9411-37c1ea4e37ed",
+    "sameNode": true
+  },
+  "PASS live tail: its index moved by the batch": "50 → 200",
+  "PASS live tail: it is still the only tab stop": [
+    "01a1b6b8-be27-7413-9411-37c1ea4e37ed"
+  ],
+  "PASS live tail: no scroll jump (row stays put on screen)": {
+    "rowTop": "856 → 856",
+    "scrollTop": "1231 → 6631 (Δ 5400 = 150 rows)"
+  },
+  "PASS live tail: ArrowDown continues from that event": {
+    "tag": "DIV",
+    "role": "row",
+    "eventId": "01a1b6b8-be27-73bf-a156-817652130270",
+    "index": 201,
+    "top": 856,
+    "tabIndex": 0,
+    "name": "Lina Placeholder changed booking BK-base-346, success, booking.modified, 16:55:0"
+  },
+  "PASS live tail: k moves back to it": 200,
+  "PASS explorer: Escape returns focus to the opened row": {
+    "tag": "DIV",
+    "role": "row",
+    "eventId": "01a1b6b8-be27-7413-9411-37c1ea4e37ed",
+    "index": 200,
+    "top": 820,
+    "tabIndex": 0,
+    "name": "Omar Fictional changed booking BK-base-389, success, booking.modified, 16:55:03"
+  },
+  "axe": {
+    "explorer desktop-light (live)": [
+      {
+        "id": "aria-allowed-role",
+        "impact": "minor",
+        "nodes": 1,
+        "sample": ["textarea"]
+      }
+    ],
+    "event-sheet desktop-light": [],
+    "activity event-sheet desktop-light": [],
+    "activity desktop-light": [],
+    "overview desktop-light": [],
+    "settings-keys desktop-light": [],
+    "explorer desktop-dark": [
+      {
+        "id": "aria-allowed-role",
+        "impact": "minor",
+        "nodes": 1,
+        "sample": ["textarea"]
+      }
+    ],
+    "event-sheet desktop-dark": [],
+    "activity desktop-dark": [],
+    "overview desktop-dark": [],
+    "settings-keys desktop-dark": [],
+    "settings phone-light": [],
+    "explorer phone-light": [
+      {
+        "id": "aria-allowed-role",
+        "impact": "minor",
+        "nodes": 1,
+        "sample": ["textarea"]
+      }
+    ],
+    "event-sheet phone-light": [],
+    "settings-keys phone-light": [],
+    "explorer phone-dark": [
+      {
+        "id": "aria-allowed-role",
+        "impact": "minor",
+        "nodes": 1,
+        "sample": ["textarea"]
+      }
+    ],
+    "event-sheet phone-dark": []
+  },
+  "axe explorer desktop-light (live)": "aria-allowed-role(1)",
+  "axe event-sheet desktop-light": "0",
+  "activity rows rendered": 20,
+  "PASS activity: Tab reaches the grid": "6 presses → row 0",
+  "PASS activity: ArrowDown moves the roving tab stop": {
+    "index": 3,
+    "tabStops": ["01a1b6b8-bc62-71ee-8650-0d18a7d47d58"]
+  },
+  "PASS activity: Shift+Tab out, Tab back → same row": {
+    "out": "Workspace",
+    "back": 3
+  },
+  "axe activity event-sheet desktop-light": "0",
+  "PASS activity: Escape returns focus to the opened row": {
+    "tag": "DIV",
+    "role": "row",
+    "eventId": "01a1b6b8-bc62-71ee-8650-0d18a7d47d58",
+    "index": 3,
+    "top": 409,
+    "tabIndex": 0,
+    "name": "Rowan Fixture created API key ‘QA read 6’, success, api_key.created, 16:55:22"
+  },
+  "PASS activity: focused row survives scrolling away": {
+    "tag": "DIV",
+    "role": "row",
+    "eventId": "01a1b6b8-bc62-71ee-8650-0d18a7d47d58",
+    "index": 3,
+    "top": 231,
+    "tabIndex": 0,
+    "name": "Rowan Fixture created API key ‘QA read 6’, success, api_key.created, 16:55:22"
+  },
+  "axe activity desktop-light": "0",
+  "PASS query: Tab / Shift+Tab never edit the draft": [
+    {
+      "key": "Tab",
+      "draft": "outcome:failure OR ",
+      "focus": "Clear query"
+    },
+    {
+      "key": "Shift+Tab",
+      "draft": "outcome:failure OR ",
+      "focus": "Query"
+    },
+    {
+      "key": "Shift+Tab",
+      "draft": "outcome:failure OR ",
+      "focus": "SQL"
+    }
+  ],
+  "PASS query: a static key hint is described on focus, dir=ltr": {
+    "describedby": "qi-list-query-keys",
+    "hint": "Arrows choose a suggestion, Enter or Right arrow inserts it, Escape closes. Enter runs the query.",
+    "dir": "ltr"
+  },
+  "PASS query: accepting a suggestion is announced politely": {
+    "draft": "outcome:",
+    "announced": "Inserted outcome: | 550 events · Last hour · 19 ms | "
+  },
+  "PASS scroll jump: a new query keeps the view at the top, fetches no second page, tab stop on row 0": {
+    "cursorBefore": "row 90 (success)",
+    "query": "outcome:failure",
+    "scrollTop": "0 → 0",
+    "pageRequests": 0,
+    "tabStops": ["01a1b6b8-e0bb-7105-8015-3a62346d5c16"],
+    "row0": "01a1b6b8-e0bb-7105-8015-3a62346d5c16",
+    "focus": "Query"
+  },
+  "PASS scroll jump: Tab into the new results lands on row 0": {
+    "presses": 10,
+    "index": 0
+  },
+  "PASS grid: Ctrl+End → last loaded row, Ctrl+Home → row 0": {
+    "end": 79,
+    "home": 0,
+    "renderedRows": 29
+  },
+  "PASS forced colors: the focused row keeps a painted outline, inset so neighbouring rows cannot cover it": {
+    "el": "div[role=row] Vera Validator changed booking",
+    "style": "solid",
+    "width": "2px",
+    "offset": "-2px",
+    "color": "rgb(55, 0, 110)"
+  },
+  "PASS forced colors: an unfocused row computes outline-style none": {
+    "row1": "none"
+  },
+  "PASS forced colors (explorer): no unfocused element (rows, sidebar, toolbar) is outlined": {
+    "focused": {
+      "el": "div[role=row] Vera Validator changed booking",
+      "style": "solid",
+      "width": "2px",
+      "offset": "-2px",
+      "color": "rgb(55, 0, 110)"
+    },
+    "unfocusedOutlined": 0,
+    "sample": []
+  },
+  "forced colors: round-2 classes put back for the before shot on": "46 elements",
+  "PASS forced colors (event sheet): no unfocused CopyValue or control is outlined": {
+    "focused": {
+      "el": "button Next event",
+      "style": "none",
+      "width": "1px",
+      "offset": "0px",
+      "color": "rgb(55, 0, 110)"
+    },
+    "unfocusedOutlined": 0,
+    "sample": []
+  },
+  "PASS filter by (race): focus lands on row 0 of the new results, view at the top, no second page": {
+    "opened": "row 299",
+    "term": "tenant:tn_qa_1",
+    "focusWhileLoading": "row 299 (the old row)",
+    "landed": "row 0",
+    "scrollTop": 0,
+    "pageRequests": 0,
+    "tabStops": ["01a1b6b8-e0bb-7fb6-b682-cee2912c3032"],
+    "newTotal": 275
+  },
+  "PASS filter by (race): ArrowDown continues from row 0": 1,
+  "PASS filter by (event still in the results): focus stays on it at its new index, scrolled into view": {
+    "opened": "row 199",
+    "term": "operation:base-op-249",
+    "focusWhileLoading": "row 199",
+    "now": "row 0",
+    "sameEvent": true,
+    "inView": true,
+    "pageRequests": 0
+  },
+  "PASS filter by a common value (race): the old first row is row 0 again; focus lands on it, view at the top, no second page": {
+    "row0": "01a1b6b8-e0bb-7105-8015-3a62346d5c16",
+    "term": "tenant:tn_qa_0",
+    "opened": "row 298",
+    "focusWhileLoading": "row 298 (the old row)",
+    "openedEventOnPage1": false,
+    "landed": "row 0 (the old first row)",
+    "scrollTop": 0,
+    "pageRequests": 0,
+    "tabStops": ["01a1b6b8-e0bb-7105-8015-3a62346d5c16"]
+  },
+  "PASS new query, focus elsewhere: the cursor event survives further down, the view stays at the top, no second page": {
+    "cursor": "row 8 of outcome:failure",
+    "nowAt": "row 56",
+    "scrollTop": "0 → 0",
+    "pageRequests": 0,
+    "tabStops": ["01a1b6b8-e0bb-7231-94a8-16ce2c18ec63"],
+    "focus": "Query"
+  },
+  "PASS new query, focus elsewhere: Tab back in lands on that event, in view": {
+    "index": 56,
+    "presses": 9,
+    "via": "row",
+    "immediately": {
+      "inView": true,
+      "scrollTop": 1447,
+      "row": "856–892",
+      "box": "254–891"
+    },
+    "after500ms": {
+      "inView": true,
+      "scrollTop": 1447,
+      "row": "856–892",
+      "box": "254–891"
+    }
+  },
+  "PASS empty: a refetch emptying the list moves focus from the row to the query bar": {
+    "from": "row 1",
+    "to": {
+      "role": "combobox",
+      "label": "Query",
+      "body": false
+    }
+  },
+  "PASS empty: the sheet closing over an emptied list returns focus to the query bar": {
+    "dialog": false,
+    "role": "combobox",
+    "body": false
+  },
+  "axe overview desktop-light": "0",
+  "axe settings-keys desktop-light": "0",
+  "axe explorer desktop-dark": "aria-allowed-role(1)",
+  "axe event-sheet desktop-dark": "0",
+  "axe activity desktop-dark": "0",
+  "axe overview desktop-dark": "0",
+  "axe settings-keys desktop-dark": "0",
+  "PASS settings ltr 390px → Danger zone: active tab fully visible": {
+    "active": "Danger zone",
+    "visible": true,
+    "span": "267–374 in 16–374",
+    "scrollLeft": 236,
+    "mask": "linear-gradient(to right, rgba(0, 0, 0, 0), rgb(0, 0, 0) 28p"
+  },
+  "PASS settings ltr 390px → General: active tab fully visible": {
+    "active": "General",
+    "visible": true,
+    "span": "16–91 in 16–374",
+    "scrollLeft": 0,
+    "mask": "linear-gradient(to right, rgb(0, 0, 0), rgb(0, 0, 0) 28px, r"
+  },
+  "axe settings phone-light": "0",
+  "PASS settings rtl 390px → Danger zone: active tab fully visible": {
+    "active": "Danger zone",
+    "visible": true,
+    "span": "16–123 in 16–374",
+    "scrollLeft": -236,
+    "mask": "linear-gradient(to left, rgba(0, 0, 0, 0), rgb(0, 0, 0) 28px"
+  },
+  "PASS settings rtl 390px → General: active tab fully visible": {
+    "active": "General",
+    "visible": true,
+    "span": "299–374 in 16–374",
+    "scrollLeft": 0,
+    "mask": "linear-gradient(to left, rgb(0, 0, 0), rgb(0, 0, 0) 28px, rg"
+  },
+  "PASS settings 390px: each Tab-focused tab clears the fade": [
+    {
+      "tab": "Retention",
+      "clear": true,
+      "span": "95–181 in 16–374"
+    },
+    {
+      "tab": "API keys",
+      "clear": true,
+      "span": "185–263 in 16–374"
+    },
+    {
+      "tab": "Members",
+      "clear": true,
+      "span": "262–346 in 16–374"
+    },
+    {
+      "tab": "Workspace activity",
+      "clear": true,
+      "span": "200–346 in 16–374"
+    },
+    {
+      "tab": "Danger zone",
+      "clear": true,
+      "span": "269–374 in 16–374"
+    }
+  ],
+  "PASS forced colors (settings 390px): only the focused tab is outlined, inset": {
+    "focused": {
+      "el": "a Danger zone",
+      "style": "solid",
+      "width": "2px",
+      "offset": "-2px",
+      "color": "rgb(55, 0, 110)"
+    },
+    "unfocusedOutlined": 0,
+    "sample": []
+  },
+  "PASS phone: one real gridcell per row (display flex, not contents), no aria-selected": {
+    "cells": 1,
+    "display": "flex",
+    "ariaSelected": false
+  },
+  "axe explorer phone-light": "aria-allowed-role(1)",
+  "axe event-sheet phone-light": "0",
+  "axe settings-keys phone-light": "0",
+  "axe explorer phone-dark": "aria-allowed-role(1)",
+  "axe event-sheet phone-dark": "0",
+  "console problems": [],
+  "cleanup: QA project deleted": 204
+}

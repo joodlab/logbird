@@ -86,8 +86,9 @@ export function TimeRangePicker({
           <div className="flex flex-row flex-wrap gap-0.5 border-b p-1.5 sm:w-44 sm:flex-col sm:flex-nowrap sm:border-e sm:border-b-0">
             {presets.map((p) => (
               <button
+                aria-current={p.value === value || undefined}
                 className={cn(
-                  'flex h-8 items-center justify-between gap-2 rounded-md px-2 text-start text-sm outline-none hover:bg-muted focus-visible:bg-muted',
+                  'flex h-8 items-center justify-between gap-2 rounded-md px-2 text-start text-sm outline-none focus-visible:outline-hidden hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:h-11 pointer-coarse:px-3',
                   p.value === value && 'font-medium text-foreground',
                   p.value !== value && 'text-muted-foreground',
                 )}
