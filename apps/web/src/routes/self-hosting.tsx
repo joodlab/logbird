@@ -17,7 +17,12 @@ const quickstart = `git clone ${GITHUB_URL}.git
 cd logbird
 sh scripts/selfhost-init.sh   # creates .env and generates secrets
 # Set SMTP in .env, or set AUTH_LOG_SIGN_IN_CODES=true for a first test.
-docker compose up -d`;
+# Build the four roles one at a time (less peak memory), then start without rebuilding.
+docker compose build migrate
+docker compose build server
+docker compose build worker
+docker compose build app
+docker compose up -d --no-build`;
 
 const firstEvent = `curl http://localhost:4600/v1/events \\
   -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" \\
@@ -109,7 +114,7 @@ function SelfHostingPage() {
                 eyebrow="Quickstart"
                 id="quickstart-title"
                 lead="You need Docker Engine and Docker Compose 2.24.4 or newer. The first build takes longer, depending on your CPU and network."
-                title="Five minutes to your first event."
+                title="From clone to your first event."
               />
               <ol className="flex flex-col gap-4 text-sm leading-relaxed">
                 {[
@@ -156,9 +161,9 @@ function SelfHostingPage() {
               The quickstart is published when the repository opens.
             </h2>
             <p className="lead max-w-3xl">
-              It's five minutes on one VM: clone the repository, generate secrets, configure SMTP, then <code>docker compose up -d</code> and send
-              your first event. You need Docker Engine and Docker Compose 2.24.4 or newer. Self-hosting builds from source; no images are published
-              yet.
+              On one VM: clone the repository, generate secrets, configure SMTP, build the four roles one at a time, start them with{' '}
+              <code>docker compose up -d --no-build</code> and send your first event. You need Docker Engine and Docker Compose 2.24.4 or newer.
+              Self-hosting builds from source; no images are published yet.
             </p>
             <div>
               <SelfHostCta size="default" variant="outline" />
@@ -169,14 +174,18 @@ function SelfHostingPage() {
 
       <Section compact id="requirements" labelledBy="requirements-title" tone="sunken">
         <SectionHeader eyebrow="Requirements" id="requirements-title" title="What you need." />
-        <dl className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <dl className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {[
             ['Host', 'A Linux host, or any machine that runs Linux containers, with Docker Engine and Compose 2.24.4 or newer.'],
             ['Email', 'An SMTP provider for sign-in codes and invitations, for example Amazon SES, Postmark or Brevo.'],
             ['HTTPS', 'A domain and ports 80 and 443 if you want automatic HTTPS.'],
             [
               'Starting size',
-              '4 vCPU, 8 GB RAM and SSD storage. That is an initial allocation, not measured capacity. Reserve disk for ClickHouse merges and backups, and measure your own growth with representative test traffic.',
+              '4 vCPU, 8 GB RAM and SSD storage. That is an initial allocation, not measured capacity. Building from source needs more headroom: build the roles one at a time, and leave disk for images and build cache as well as your data, ClickHouse merges and backups.',
+            ],
+            [
+              'Access',
+              'Sign-up is open: anyone who can reach the console can create an account and a workspace. Keep it private while you evaluate, or restrict who can reach it.',
             ],
           ].map(([term, detail]) => (
             <div className="panel flex flex-col gap-2 p-5" key={term}>
@@ -195,8 +204,8 @@ function SelfHostingPage() {
               title: 'Bundled Compose',
               body: (
                 <>
-                  One <code>docker compose up -d</code> starts Postgres, ClickHouse, Redis, the API, the worker and the console. Only the console port
-                  is published, on <code>127.0.0.1</code> by default. A one-off migration step runs before the API and worker start.
+                  One Compose project runs Postgres, ClickHouse, Redis, the API, the worker and the console. Only the console port is published, on{' '}
+                  <code>127.0.0.1</code> by default. A one-off migration step runs before the API and worker start.
                 </>
               ),
               stack: (
@@ -288,12 +297,17 @@ function SelfHostingPage() {
             </h3>
             <Steps
               items={[
-                { title: 'Back up', body: 'Postgres with pg_dump, ClickHouse with BACKUP DATABASE to a disk or S3.' },
-                { title: 'Stop writes', body: 'And pin a tested revision.' },
+                { title: 'Stop writes', body: 'Block ingress and stop the console, server and worker; the worker finishes its current job first.' },
                 {
-                  title: 'Rebuild',
-                  body: "docker compose up -d --build. Migrations run first; if one fails, the new version doesn't start.",
+                  title: 'Back up',
+                  body: 'Matched backups of Postgres (pg_dump) and ClickHouse (BACKUP DATABASE), with a checksum and the image IDs.',
                 },
+                { title: 'Switch revision', body: 'Check out a tested revision.' },
+                {
+                  title: 'Build, then start',
+                  body: "Build the four roles one at a time, then docker compose up -d --no-build. Migrations run first; if one fails, the new version doesn't start.",
+                },
+                { title: 'Verify', body: 'Readiness, sign-in, your events, settings and keys, and the retention runs, before you reopen ingress.' },
               ]}
               vertical
             />
@@ -311,7 +325,7 @@ function SelfHostingPage() {
         <SectionHeader eyebrow="Not there yet" id="not-yet-title" title="What self-hosting doesn't include today." />
         <dl className="mt-10 grid gap-x-10 gap-y-2 md:grid-cols-2">
           {[
-            ['Published images', 'You build from source. Image tags come with the first release.'],
+            ['Published images', 'You build from source; publishing to a registry is still being decided. Smaller runtime images are in progress.'],
             ['High availability', 'The Compose setup is a single VM. It has no failover.'],
             ['Published capacity numbers', "We haven't published load-test results yet. Size from your own measurements."],
             ['SSO', 'Sign-in is by emailed code only. SSO is on the roadmap.'],

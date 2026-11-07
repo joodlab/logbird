@@ -54,7 +54,11 @@ new Worker('refunds', async (job) => {
 const selfHost = `git clone ${GITHUB_URL}.git
 cd logbird
 sh scripts/selfhost-init.sh
-docker compose up -d`;
+docker compose build migrate
+docker compose build server
+docker compose build worker
+docker compose build app
+docker compose up -d --no-build`;
 
 function HomePage() {
   return (
@@ -203,11 +207,7 @@ function HomePage() {
               eyebrow="Open source"
               id="oss-title"
               lead="The whole product is in one repository: the API, the console, the retention worker, the SDK and the integrations. Self-hosting builds it from source on your server, so your events stay on your infrastructure. No images are published yet."
-              title={
-                <>
-                  MIT-licensed. Runs with <code className="font-mono text-[0.8em] tracking-normal">docker compose up</code>.
-                </>
-              }
+              title={<>MIT-licensed. Runs with Docker Compose.</>}
             />
             <ul className="flex flex-col gap-3 text-sm">
               <li className="flex gap-3">
@@ -246,8 +246,8 @@ function HomePage() {
               <p className="eyebrow">Self-host quickstart</p>
               <p className="font-semibold text-lg">Available when the repository opens.</p>
               <p className="text-muted-foreground text-sm leading-relaxed">
-                Four commands on one VM: clone, generate secrets, configure SMTP, <code>docker compose up -d</code>. We'll publish them here the day
-                the source is public.
+                On one VM: clone, generate secrets, configure SMTP, build the four roles, then <code>docker compose up -d --no-build</code>. We'll
+                publish the commands here the day the source is public.
               </p>
               <div>
                 <ButtonLink search={{ interest: 'self-host' }} to="/contact" variant="outline">

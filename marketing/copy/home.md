@@ -155,7 +155,7 @@ path: /
 
 - **id:** `open-source`
 - **eyebrow:** Open source
-- **heading:** MIT-licensed. Runs with `docker compose up`.
+- **heading:** MIT-licensed. Runs with Docker Compose.
 - **body:** The whole product is in one repository: the API, the console, the retention worker, the SDK and the
   integrations. Self-hosting builds it from source on your server, so your events stay on your infrastructure.
   No images are published yet.
@@ -166,8 +166,8 @@ path: /
   - Source on GitHub — coming soon. The repository opens publicly soon.
 - **cta:** Self-host it → `/self-hosting` (public repo only; see the CTA rule) · What's in the repository → `/open-source`
 - **while the repository is private:** replace the quickstart code block with "Available when the repository opens.
-  Four commands on one VM: clone, generate secrets, configure SMTP, `docker compose up -d`. We'll publish them here the
-  day the source is public." and a "Tell me when it opens" button → `/contact?interest=self-host`.
+  On one VM: clone, generate secrets, configure SMTP, build the four roles, then `docker compose up -d --no-build`. We'll
+  publish the commands here the day the source is public." and a "Tell me when it opens" button → `/contact?interest=self-host`.
 - **visual:** `marketing/captures/2026-11-05-self-hosting/12-compose-ps.png` (terminal: `docker compose ps` with the
   stack running). Check the terminal for paths or hostnames before use.
 
