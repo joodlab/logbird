@@ -5,7 +5,7 @@ import { WaitlistForm } from '../components/waitlist-form';
 import { GITHUB_PUBLIC } from '../env';
 import { pageHead } from '../lib/seo';
 
-const INTERESTS = new Set(['cloud', 'self-host', 'updates', 'other']);
+const INTERESTS = new Set(['cloud', 'self-host', 'updates', 'correction', 'other']);
 
 export const Route = createFileRoute('/contact')({
   head: () => pageHead('/contact'),

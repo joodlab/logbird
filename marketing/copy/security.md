@@ -1,6 +1,6 @@
 ---
 title: Security and data handling — Logbird
-description: How Logbird isolates projects, stores keys, guards SQL, deletes expired data and audits itself, and what we don't claim yet.
+description: How Logbird isolates projects, stores keys, guards SQL, deletes expired data and records its own management actions, and what we don't claim yet.
 path: /security
 ---
 
@@ -12,8 +12,9 @@ path: /security
 - **eyebrow:** Security
 - **heading (H1):** How Logbird handles your data.
 - **body:** An audit log holds sensitive history, so this page says what Logbird does with it and where each
-  protection stops. The repository's `SECURITY.md` and `docs/SPEC.md` have the details.
-- **visual:** none
+  protection stops. The repository's `SECURITY.md` and `docs/SPEC.md` have the details. <!-- this sentence only once
+  WEB_GITHUB_PUBLIC=true: readers can't open the repository before then -->
+- **visual:** an "On this page" list linking to each section below.
 
 ## self-host
 
@@ -21,11 +22,13 @@ path: /security
 - **eyebrow:** Where data lives
 - **heading:** Self-hosted, your events stay on your servers.
 - **body:** When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your
-  own Postgres. Logbird doesn't send usage data back to us. The one outside service it needs is the SMTP provider
+  own Postgres. The self-hosted software doesn't send usage data back to us. The server's only outbound connection is to the SMTP provider
   you choose, which delivers sign-in codes and invitations.
   <!-- source: docs/self-hosting.md; README.md §Architecture; no analytics/telemetry code found in apps/ or packages/ (grep, 2026-11-07) — owner to confirm -->
 - **visual:** diagram: one box labelled "Your server" holding console, API, worker, Postgres, ClickHouse and Redis.
   The only arrow leaving the box goes to "Your SMTP provider", labelled "sign-in codes, invitations".
+  Caption: "Self-hosted: the console, API, worker, Postgres, ClickHouse and Redis all run on your server. The only
+  connection out goes to your SMTP provider, for sign-in codes and invitations."
 
 ## retention
 
@@ -76,7 +79,7 @@ path: /security
   4. **Row policies.** Database row policies limit that user to the project you're authorized for. Even
      `1 OR 1` can't return another project's rows.
   <!-- source: docs/SPEC.md §5.1.2; docs/query-language.md §Security model -->
-- **limit line:** These layers protect against a broadened or malformed filter. They don't replace the server's own
+- **limit line (callout titled "Where these layers stop"):** These layers protect against a broadened or malformed filter. They don't replace the server's own
   authorization, and they don't protect against stolen database credentials. SQL mode is for the console only; the
   public API rejects it. <!-- source: docs/query-language.md §Security model -->
 - **visual:** `marketing/captures/2026-11-05-final-walkthrough/qb-23-sql-rejected.png`. Re-capture first (see `README.md` § Captures).
@@ -102,19 +105,28 @@ path: /security
 - **eyebrow:** Impersonation
 - **heading:** When staff act for a customer, both names are recorded.
 - **body:** Send the staff member as `impersonator` and keep the customer as `actor`. The event detail shows both.
-  Search `impersonator:*` to list every event done on someone's behalf.
-  <!-- source: docs/concepts.md §Actors; docs/query-language.md -->
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/06-impersonation.png`. Re-capture first (see `README.md` § Captures).
+  Search `impersonator:*` to list every event done on someone's behalf. In the console, those rows are marked "via
+  support", the "Done by support" filter lists them, and each support agent has a page with everything they did while
+  signed in as a customer.
+  <!-- source: docs/concepts.md §Actors; docs/query-language.md; #69 (apps/app explorer columns, facet-sidebar
+  "Done by support", support-agent-profile) -->
+- **visual (site, until a clean capture exists):** a JSON event: action `room.rate.updated`, actor Lina Haddad
+  (`lina@example.test`), impersonator Omar Saleh, tenant Azure Hotels, target Room 12. Title: "Support changes a rate
+  for Lina". Caption: "Lina stays the actor. Omar, from support, is on the event as the impersonator."
+  Capture to use later: `marketing/captures/2026-11-05-final-walkthrough/06-impersonation.png`. Re-capture first (see `README.md` § Captures).
 
 ## self-audit
 
 - **id:** `self-audit`
 - **eyebrow:** Workspace activity
-- **heading:** Logbird audits its own management actions.
-- **body:** Creating a project, creating or revoking a key, changing retention, inviting a member: each of these is
-  recorded as an event in your workspace's activity stream. Every member can read it.
-  <!-- source: docs/SPEC.md §1.5, §7.1 (workspace activity readable by members) -->
-- **visual:** `marketing/captures/2026-11-04-ui-foundation/light-workspace-activity.png`. Re-capture first (see `README.md` § Captures).
+- **heading:** Logbird records its own management actions.
+- **body:** Logbird records management actions (projects, keys, retention, invitations) in workspace activity. Every
+  member can read it.
+  <!-- source: docs/SPEC.md §1.5, §7.1 (workspace activity readable by members). Don't say "each" or imply guaranteed
+  or atomic capture until #73 (atomic audit rows for management mutations) merges; strengthen in a follow-up then. -->
+- **visual (site, until a clean capture exists):** four log rows: `project.created`, `api_key.created`,
+  `api_key.revoked`, `project.retention.changed`. Caption: "Examples of management actions in the activity stream."
+  Capture to use later: `marketing/captures/2026-11-04-ui-foundation/light-workspace-activity.png`. Re-capture first (see `README.md` § Captures).
 
 ## limits
 
@@ -137,13 +149,14 @@ path: /security
 - **id:** `reporting`
 - **eyebrow:** Responsible disclosure
 - **heading:** Report a vulnerability privately.
-- **body:** Please don't post details in a public issue. Once the repository is public, report through GitHub's
-  private vulnerability reporting. Until then, email the security contact below. Include the affected version, a
-  reproduction using fictional data, and the impact. We'll coordinate the fix and the disclosure with you. We
-  don't offer a response-time SLA yet.
+- **body:** Please don't post details in a public issue. Email the security contact below. Include the affected
+  version, a reproduction using fictional data, and the impact. We'll coordinate the fix and the disclosure with
+  you. We don't offer a response-time SLA yet.
+  <!-- site rule: the site names only the security email, never a GitHub reporting flow -->
   <!-- source: SECURITY.md -->
-- **contact:** `security@logbird.dev` — **placeholder**. The domain isn't bought yet, and `SECURITY.md` has no
-  contact address configured. The owner must set a real address before launch.
+- **contact:** `WEB_SECURITY_EMAIL`, with **no default**. Until the owner sets it, say what `SECURITY.md` says: ask the
+  maintainers for a private channel (through the contact form), and don't include details. A missing mailbox or the
+  provisional domain is a release blocker (`apps/web/src/lib/release.ts`).
 - **visual:** none
 
 ## dont-claim

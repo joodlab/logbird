@@ -1,3 +1,5 @@
+import { GITHUB_PUBLIC } from '../env';
+
 export interface SitePage {
   path: string;
   title: string;
@@ -72,11 +74,11 @@ export const siteMap: SitePage[] = [
   {
     path: '/cloud',
     title: 'Cloud',
-    description: 'Cloud page content is being prepared.',
+    description: "Logbird Cloud will run the same open-source codebase for you. It isn't open yet. Join the waitlist. Pricing isn't set yet.",
     section: 'product',
     priority: 0.9,
     changefreq: 'weekly',
-    ready: false,
+    ready: true,
     ogSlug: 'cloud',
     inNav: true,
     inFooter: true,
@@ -84,11 +86,11 @@ export const siteMap: SitePage[] = [
   {
     path: '/open-source',
     title: 'Open source',
-    description: 'Open source page content is being prepared.',
+    description: `The Logbird product is MIT-licensed: API, console, worker, SDK and integrations, in one repository${GITHUB_PUBLIC ? ' on GitHub' : ' that opens publicly soon'}.`,
     section: 'developers',
     priority: 0.8,
     changefreq: 'monthly',
-    ready: false,
+    ready: true,
     ogSlug: 'open-source',
     inNav: true,
     inFooter: true,
@@ -96,11 +98,12 @@ export const siteMap: SitePage[] = [
   {
     path: '/security',
     title: 'Security',
-    description: 'Security page content is being prepared.',
+    description:
+      "How Logbird isolates projects, stores keys, guards SQL, deletes expired data and records its own management actions, and what we don't claim yet.",
     section: 'company',
     priority: 0.7,
     changefreq: 'monthly',
-    ready: false,
+    ready: true,
     ogSlug: 'security',
     inNav: false,
     inFooter: true,
@@ -108,11 +111,12 @@ export const siteMap: SitePage[] = [
   {
     path: '/compare',
     title: 'Compare',
-    description: 'Compare page content is being prepared.',
+    description:
+      'Fair, sourced comparisons of Logbird with Retraced, WorkOS Audit Logs, Pangea Secure Audit Log and Bemi, including when to choose them.',
     section: 'compare',
     priority: 0.8,
     changefreq: 'monthly',
-    ready: false,
+    ready: true,
     ogSlug: 'compare',
     inNav: true,
     inFooter: true,
@@ -121,11 +125,11 @@ export const siteMap: SitePage[] = [
   {
     path: '/compare/retraced',
     title: 'Retraced',
-    description: 'Retraced page content is being prepared.',
+    description: 'Retraced is an Apache-2.0 audit log service with an embeddable React viewer. How it compares with Logbird, sourced and dated.',
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',
-    ready: false,
+    ready: true,
     ogSlug: 'compare-retraced',
     inNav: false,
     inFooter: true,
@@ -133,11 +137,12 @@ export const siteMap: SitePage[] = [
   {
     path: '/compare/workos-audit-logs',
     title: 'WorkOS Audit Logs',
-    description: 'WorkOS Audit Logs page content is being prepared.',
+    description:
+      'WorkOS Audit Logs is a hosted audit log API with an Admin Portal viewer and SIEM log streams. How it compares with Logbird, sourced.',
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',
-    ready: false,
+    ready: true,
     ogSlug: 'compare-workos-audit-logs',
     inNav: false,
     inFooter: true,
@@ -145,11 +150,12 @@ export const siteMap: SitePage[] = [
   {
     path: '/compare/pangea',
     title: 'Pangea',
-    description: 'Pangea page content is being prepared.',
+    description:
+      'Pangea Secure Audit Log, now part of CrowdStrike, is a hosted, tamperproof audit log. How it compares with Logbird, sourced and dated.',
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',
-    ready: false,
+    ready: true,
     ogSlug: 'compare-pangea',
     inNav: false,
     inFooter: true,
@@ -157,11 +163,12 @@ export const siteMap: SitePage[] = [
   {
     path: '/compare/bemi',
     title: 'Bemi',
-    description: 'Bemi page content is being prepared.',
+    description:
+      'Bemi captures every Postgres row change automatically. Logbird records the actions your app reports. Different tools, sometimes used together.',
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',
-    ready: false,
+    ready: true,
     ogSlug: 'compare-bemi',
     inNav: false,
     inFooter: true,
