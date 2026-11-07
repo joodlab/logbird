@@ -35,8 +35,7 @@ values for missing optional data. JSONL keeps structured objects/arrays and the 
 
 CSV quotes preserve delimiters/newlines. Separately, an apostrophe is prefixed to text beginning with `= + - @`
 or full-width `＝ ＋ － ＠`, including after leading whitespace/control/format characters. Leading tab/CR/LF is
-also protected. Original text after that apostrophe is retained. This policy treats **every CSV cell as text**, including
-numeric `-1`; it is intentionally not number-preserving. A negative number, or an id beginning with `-`/`@`, may
+also protected. Original text after that apostrophe is retained. CSV has no numeric cell types: every value is quoted. Formula-leading values, including numeric `-1`, receive an apostrophe. Positive numerals are unchanged and spreadsheet imports may infer their types; this encoding is intentionally not number-preserving. A negative number, or an id beginning with `-`/`@`, may
 therefore differ from its JSONL spelling. Use complete JSONL for exact reconciliation. Import CSV with text columns;
 spreadsheet applications and locale-specific import modes are not certified by the byte-level regression tests.
 
