@@ -96,7 +96,7 @@ it.each([
   ['context.operationId', 256],
   ['context.parentEventId', 256],
   ['context.requestId', 256],
-  ['context.traceId', 64],
+  ['context.traceId', 256],
   ['context.ip', 64],
   ['context.userAgent', 1024],
 ] as const)('includes content beyond the %s cap (%i)', (path, cap) => {

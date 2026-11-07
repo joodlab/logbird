@@ -3,11 +3,11 @@ import {
   type ClickHouseClient,
   INGEST_CLAIM_LEASE_MS,
   rawEventIdentities,
-  rebuildProjectRollups,
   repairEventIndex,
   retryFingerprint,
 } from '@logbird/clickhouse';
 import { confirmIngestReceipts, INGEST_RECEIPT_WINDOW_MS, prisma, withProjectLock } from '@logbird/database';
+import { rebuildProjectReadModel } from './project-repair';
 
 const FLUSH_INTERVAL_MS = 60_000;
 let flushedAt = 0;
@@ -31,14 +31,44 @@ async function flushAfter(ch: ClickHouseClient, proofAfter: number) {
   return true;
 }
 
+export function ingestRecoveryRetryAfter() {
+  return Math.max(0, Math.ceil((flushAttemptedAt + FLUSH_INTERVAL_MS - Date.now()) / 1000));
+}
+export function logIngestRecoveryFailure(error: unknown, projectId?: string) {
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      event: 'ingest.recovery_failed',
+      projectId,
+      code,
+      message: (error instanceof Error ? error.message : String(error)).slice(0, 512),
+    }),
+  );
+}
+export async function probeIngestRecovery(ch: ClickHouseClient) {
+  try {
+    await flushAfter(ch, Date.now());
+    return true;
+  } catch (error) {
+    logIngestRecoveryFailure(error);
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        event: 'ingest.recovery_grant_unavailable',
+        message: 'Grant SYSTEM FLUSH ASYNC INSERT QUEUE to the writer. Recovery requires one ClickHouse node.',
+      }),
+    );
+    return false;
+  }
+}
+export interface IngestRecoveryOptions {
+  eventIds?: string[];
+  replay?: () => Promise<void>;
+  candidates?: { input: unknown; eventId: string }[];
+}
 /** Run outside a shared lock. Only matching retries, terminal grace cleanup and operators enter recovery. */
-export async function recoverProjectIngest(
-  ch: ClickHouseClient,
-  projectId: string,
-  eventIds?: string[],
-  replay?: () => Promise<void>,
-  candidates?: { input: unknown; eventId: string }[],
-) {
+export async function recoverProjectIngest(ch: ClickHouseClient, projectId: string, { eventIds, replay, candidates }: IngestRecoveryOptions = {}) {
   const now = Date.now();
   const expiredAt = new Date(now - INGEST_CLAIM_LEASE_MS - ASYNC_INSERT_FLUSH_BOUND_MS);
   const readyCutoff = new Date(now - INGEST_RECEIPT_WINDOW_MS);
@@ -74,7 +104,7 @@ export async function recoverProjectIngest(
     const requiredProof = newestClaim?.claimedAt ? newestClaim.claimedAt.getTime() + INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS : 0;
     if (requiredProof && !(await flushAfter(ch, requiredProof))) return false;
     // A failed MV can commit any subset of destinations. Repair before confirming any page.
-    await rebuildProjectRollups(ch, projectId);
+    if (newestClaim) await rebuildProjectReadModel(ch, projectId);
     let after: string | undefined;
     while (true) {
       const receipts = await prisma.ingestReceipt.findMany({

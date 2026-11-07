@@ -221,7 +221,7 @@ it('surfaces duplicate_id_conflict guidance and drops only the conflicting index
         JSON.stringify({
           accepted: 1,
           ids: ['healthy'],
-          rejected: [{ index: 0, reason: 'duplicate_id_conflict: original is kept; send a correction with a new id' }],
+          rejected: [{ index: 0, code: 'duplicate_id_conflict', reason: 'duplicate_id_conflict: original is kept; send a correction with a new id' }],
         }),
         { status: 202 },
       ),

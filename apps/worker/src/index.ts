@@ -1,10 +1,11 @@
 import { closeProjectLocks, prisma, pruneIngestReceipts } from '@logbird/database';
 import { Worker } from 'bullmq';
 import { env } from './env';
-import { recoverProjectIngest } from './ingest-recovery';
+import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from './ingest-recovery';
 import { closeRetentionQueue, connection, retentionQueue, retentionQueueName } from './queue';
 import { clickhouse, enforceProjectRetention } from './retention';
 
+await probeIngestRecovery(clickhouse);
 const worker = new Worker(
   retentionQueueName,
   async (job) => {
@@ -20,6 +21,7 @@ const worker = new Worker(
         try {
           await recoverProjectIngest(clickhouse, pending.projectId);
         } catch (error) {
+          logIngestRecoveryFailure(error, pending.projectId);
           failures.push(error);
         }
       }

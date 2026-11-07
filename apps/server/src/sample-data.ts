@@ -1,15 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import {
-  ASYNC_INSERT_FLUSH_BOUND_MS,
-  INGEST_CLAIM_LEASE_MS,
-  normalizeEvent,
-  rawEventIdentities,
-  read,
-  rebuildProjectRollups,
-  repairEventIndex,
-} from '@logbird/clickhouse';
+import { ASYNC_INSERT_FLUSH_BOUND_MS, INGEST_CLAIM_LEASE_MS, normalizeEvent, rawEventIdentities, read, repairEventIndex } from '@logbird/clickhouse';
 import { SAMPLE_DATA_EVENTS, SAMPLE_DATA_SOURCE, SAMPLE_DATA_SOURCES } from '@logbird/contracts';
 import { confirmIngestReceipts, prisma } from '@logbird/database';
+import { rebuildProjectReadModel } from '@logbird/worker/project-repair';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { insertImmutableEvents } from './immutable-ingest';
@@ -42,7 +35,7 @@ export async function removeSampleData(projectId: string) {
     const absent = ids.filter((id) => !surviving.has(id));
     if (absent.length) await prisma.ingestReceipt.deleteMany({ where: { projectId, eventId: { in: absent } } });
   }
-  await rebuildProjectRollups(clickhouse, projectId);
+  await rebuildProjectReadModel(clickhouse, projectId);
 }
 export async function loadSampleData(projectId: string) {
   await removeSampleData(projectId);

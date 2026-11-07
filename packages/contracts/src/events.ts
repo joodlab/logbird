@@ -91,11 +91,12 @@ export const ingestBodySchema = z.union([
   z.record(z.string(), z.unknown()),
 ]);
 
+export const ingestRejectionCodeSchema = z.enum(['invalid_event', 'invalid_event_id', 'duplicate_id_conflict', 'stored_event_unreadable']);
 export const ingestResponseSchema = z.object({
   accepted: z.number().int(),
   ids: z.array(z.string()),
   /** Conflicts start with duplicate_id_conflict: followed by actionable guidance. Original content is kept. */
-  rejected: z.array(z.object({ index: z.number().int(), reason: z.string(), code: z.string() })),
+  rejected: z.array(z.object({ index: z.number().int(), reason: z.string(), code: ingestRejectionCodeSchema })),
   /** Accepted events that were adjusted, e.g. an unusable occurredAt stored at receive time (original kept in attributes). */
   warnings: z.array(z.object({ index: z.number().int(), reason: z.string() })).default([]),
 });

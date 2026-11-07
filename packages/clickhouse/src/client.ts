@@ -57,7 +57,7 @@ export async function insertEvents(ch: ClickHouseClient, rows: EventRow[], lease
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
     // The same parse code can originate inside a failing MV after the source row was written.
-    const viewFailure = error instanceof Error && /\bview\b|materialized.?view/i.test(error.message);
+    const viewFailure = error instanceof Error && /(?:^|:\s*|\n\s*)while pushing to (?:materialized )?view\b/i.test(error.message);
     const definite = CLICKHOUSE_PREWRITE_ERROR_CODES.has(code) && !viewFailure;
     if (bodySent && !definite) throw new AmbiguousInsertError();
     throw error;

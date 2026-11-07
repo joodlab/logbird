@@ -13,6 +13,7 @@ import {
 } from '@logbird/clickhouse';
 import { ingestPendingDetailsSchema } from '@logbird/contracts';
 import { confirmIngestReceipts, INGEST_RECEIPT_WINDOW_MS, type IngestReceipt, prisma, pruneIngestReceipts } from '@logbird/database';
+import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
 
@@ -233,45 +234,55 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
       const pending = candidates.filter((c) => pendingIds.has(c.row.event_id));
       const ids = result.ids.filter((id) => !pendingIds.has(id));
       const unsettled = new Set(pending.map((c) => c.index));
-      const details = ingestPendingDetailsSchema.parse({
-        accepted: ids.length,
+      throw pendingError(
+        error.message,
         ids,
-        rejected: result.rejected.filter((r) => !unsettled.has(r.index)),
-        warnings: [],
-        indices: pending.map((c) => c.index),
-        eventIds: pending.map((c) => c.row.event_id),
-      });
-      throw new ApiError(503, error.code, error.message, details, pendingRetryAfter(pendingIds, receipts));
+        result.rejected.filter((r) => !unsettled.has(r.index)),
+        pending.map((c) => ({ index: c.index, eventId: c.row.event_id })),
+        receipts,
+      );
     }
     throw error;
   }
   // Healthy siblings are already durable; an identical batch retry will not insert them again.
-  if (result.pending.length) {
-    const details = ingestPendingDetailsSchema.parse({
-      accepted: result.ids.length,
-      ids: result.ids,
-      rejected: result.rejected,
-      warnings: [],
-      indices: result.pending.map((p) => p.index),
-      eventIds: result.pending.map((p) => p.eventId),
-    });
-    throw new ApiError(
-      503,
-      'ingest_pending',
-      'Some event ids have unresolved writes. Retry the listed indices.',
-      details,
-      pendingRetryAfter(new Set(result.pending.map((p) => p.eventId)), receipts),
+  if (result.pending.length)
+    throw pendingError(
+      'Some event ids have unresolved writes. Retry this batch; listed indices are unresolved.',
+      result.ids,
+      result.rejected,
+      result.pending,
+      receipts,
     );
-  }
   return { ids: result.ids, rejected: result.rejected };
 }
 
-function pendingRetryAfter(ids: Set<string>, receipts: Map<string, IngestReceipt>) {
-  return Math.max(
+function pendingError(
+  message: string,
+  ids: string[],
+  rejected: { index: number; reason: string; code: string }[],
+  pending: { index: number; eventId: string }[],
+  receipts: Map<string, IngestReceipt>,
+) {
+  const details = ingestPendingDetailsSchema.parse({
+    accepted: ids.length,
+    ids,
+    rejected,
+    warnings: [],
+    indices: pending.map((p) => p.index),
+    eventIds: pending.map((p) => p.eventId),
+  });
+  const now = Date.now();
+  const retryAfter = Math.max(
     1,
-    ...[...ids].map((id) => {
-      const claim = receipts.get(id)?.claimedAt;
-      return claim ? Math.ceil((claim.getTime() + INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS - Date.now()) / 1000) : 1;
+    ingestRecoveryRetryAfter(),
+    ...pending.map((p) => {
+      const receipt = receipts.get(p.eventId);
+      if (!receipt) return 1;
+      const settlesAt = receipt.claimedAt
+        ? receipt.claimedAt.getTime() + INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS
+        : receipt.receivedAt.getTime() + INGEST_RECEIPT_WINDOW_MS;
+      return Math.ceil((settlesAt - now) / 1000);
     }),
   );
+  return new ApiError(503, 'ingest_pending', message, details, retryAfter);
 }

@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     "./ingest-recovery": "./src/ingest-recovery.ts",
+    "./project-repair": "./src/project-repair.ts",
     "./queue": "./src/queue.ts",
     "./retention": "./src/retention.ts"
   },

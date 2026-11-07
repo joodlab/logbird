@@ -197,6 +197,7 @@ model SavedView {
 }
 
 model RetentionRun {
+  kind          String    @default("retention")
   id            String    @id @default(cuid())
   projectId     String
   project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)

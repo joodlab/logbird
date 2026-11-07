@@ -9,10 +9,16 @@ import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 let f: ImmutableFixture;
+let clock = Date.now();
 beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  clock = Math.max(clock, Date.now()) + 61_000;
+  vi.setSystemTime(clock);
   f = await immutableFixture();
 });
 afterEach(async () => {
+  clock = Date.now();
+  vi.useRealTimers();
   await f.cleanup();
 });
 const original = { id: 'original', action: 'evidence.original', actor: { id: 'actor' }, metadata: { status: 'pending' } };
@@ -83,7 +89,7 @@ it('stores healthy siblings before reporting one unresolved id with indices and 
   await f.pending(original);
   const response = await f.post([original, { id: 'healthy', action: 'healthy' }]);
   expect(response.status).toBe(503);
-  expect(response.headers.get('Retry-After')).toBe('1');
+  expect(response.headers.get('Retry-After')).toBe('70');
   expect(await response.json()).toMatchObject({ error: { code: 'ingest_pending', details: { indices: [0], eventIds: ['original'] } } });
   expect((await getEvent(clickhouse, f.project, 'healthy'))?.event.action).toBe('healthy');
   expect((await f.post([original, { id: 'healthy', action: 'healthy' }])).status).toBe(503);
@@ -146,6 +152,7 @@ it('retention cutoff cleanup preserves an unresolved delayed original while a co
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, eventId: original.id, confirmedAt: null } })).toBe(1);
   expect((await f.post({ ...input, action: 'conflict' })).status).toBe(503);
   await insertEvents(clickhouse, [delayed]);
+  vi.setSystemTime(Date.now() + 80_000);
   expect((await f.post(input)).status).toBe(202);
   expect(await f.count()).toBe(1);
   await enforceProjectRetention(f.project);

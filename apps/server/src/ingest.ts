@@ -3,7 +3,7 @@ import { createGunzip } from 'node:zlib';
 import { normalizeEvent } from '@logbird/clickhouse';
 import { ingestPendingDetailsSchema, ingestResponseSchema } from '@logbird/contracts';
 import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
-import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
+import { logIngestRecoveryFailure, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enqueueProjectRetention } from '@logbird/worker/queue';
 import type { Context } from 'hono';
 import { clickhouse } from './clickhouse';
@@ -49,7 +49,8 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
   for (const [index, event] of events.entries()) {
     const normalized = normalizeEvent(event, { projectId, receivedAt: new Date(), sdk });
     if (normalized.ok) {
-      candidates.push({ index, input: event, row: normalized.row });
+      // Internal audit callers can pass Dates/toJSON values; identity is always the parsed wire payload.
+      candidates.push({ index, input: JSON.parse(normalized.row.payload), row: normalized.row });
       if (normalized.warning) warnings.push({ index, reason: normalized.warning });
     } else {
       const code = normalized.reason.startsWith('invalid_event_id:') ? 'invalid_event_id' : 'invalid_event';
@@ -65,18 +66,24 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
     rejected.push(...result.rejected);
     invalidateSetup(projectId);
   };
-  let replayed: boolean;
+  let replayed = false,
+    replayStarted = false;
   try {
-    replayed = await recoverProjectIngest(
-      clickhouse,
-      projectId,
-      candidates.map((c) => c.row.event_id),
-      () => store(prisma),
-      candidates.map((c) => ({ input: c.input, eventId: c.row.event_id })),
-    );
+    replayed = await recoverProjectIngest(clickhouse, projectId, {
+      eventIds: candidates.map((c) => c.row.event_id),
+      replay: () => {
+        replayStarted = true;
+        return store(prisma);
+      },
+      candidates: candidates.map((c) => ({ input: c.input, eventId: c.row.event_id })),
+    });
   } catch (error) {
-    if (error instanceof ApiError) throw settledDetails(error, rejected, warnings);
-    throw new ApiError(503, 'ingest_unavailable', 'Event identity recovery is unavailable. Retry this batch.');
+    if (replayStarted) {
+      if (error instanceof ApiError) throw settledDetails(error, rejected, warnings);
+      throw new ApiError(503, 'ingest_unavailable', 'Event storage is unavailable. Retry this batch.');
+    }
+    logIngestRecoveryFailure(error, projectId);
+    // Expired ids remain fenced; the shared phase can still commit healthy siblings.
   }
   // Healthy traffic remains concurrent. Only an expired/worker-readied replay holds the exclusive lock through INSERT.
   if (!replayed) {
@@ -108,17 +115,26 @@ export function audit(c: Context<AppEnv>, action: string, target: { type: string
 export async function requireRetentionReady(tx: import('@logbird/database').Prisma.TransactionClient, projectId: string) {
   const recovered = await recoverAbandonedRetention(tx, projectId);
   if (recovered.count) await enqueueProjectRetention(projectId);
-  const latest = await tx.retentionRun.findFirst({ where: { projectId, status: 'running' } });
-  if (latest) throw new ApiError(503, 'retention_unavailable', 'Retention rebuild must complete before accessing project data.');
+  const latest = await tx.retentionRun.findFirst({ where: { projectId, kind: 'retention', status: 'running' } });
+  if (latest) throw new ApiError(503, 'retention_unavailable', 'Project data is being rebuilt. Retry shortly.');
 }
 
 /** Reads use short statements only; stale recovery alone needs a non-blocking project lock. */
 export async function requireProjectReadable(projectId: string) {
-  const run = await prisma.retentionRun.findFirst({ where: { projectId, status: 'running' }, orderBy: { startedAt: 'desc' } });
+  const run = await prisma.retentionRun.findFirst({
+    where: { projectId, OR: [{ status: 'running' }, { kind: 'ingest_repair', status: 'failed' }] },
+    orderBy: { startedAt: 'desc' },
+  });
   if (!run) return;
+  if (run.kind === 'ingest_repair' && run.status === 'failed')
+    throw new ApiError(503, 'retention_unavailable', 'Project data is being rebuilt. Retry shortly.');
   if ((run.heartbeatAt ?? run.startedAt).getTime() >= Date.now() - RETENTION_LEASE_MS)
-    throw new ApiError(503, 'retention_unavailable', 'Retention rebuild is in progress. Retry shortly.');
-  await withProjectLock(projectId, (db) => requireRetentionReady(db, projectId));
+    throw new ApiError(503, 'retention_unavailable', 'Project data is being rebuilt. Retry shortly.');
+  await withProjectLock(projectId, async (db) => {
+    await requireRetentionReady(db, projectId);
+    if (await db.retentionRun.findFirst({ where: { projectId, kind: 'ingest_repair', status: { in: ['running', 'failed'] } } }))
+      throw new ApiError(503, 'retention_unavailable', 'Project data is being rebuilt. Retry shortly.');
+  });
 }
 
 function settledDetails(error: ApiError, rejected: { index: number; reason: string; code: string }[], warnings: { index: number; reason: string }[]) {

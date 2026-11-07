@@ -1,5 +1,6 @@
 import { createClickHouseClient, hasExpiredEvents, purgeProject, rebuildProjectRollups } from '@logbird/clickhouse';
 import { prisma, pruneIngestReceipts, purgeIngestReceipts, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
+import { heartbeatMaintenanceRun } from './project-repair';
 export const clickhouse = createClickHouseClient();
 export async function enforceProjectRetention(projectId: string) {
   await pruneIngestReceipts(projectId);
@@ -38,13 +39,11 @@ export async function enforceProjectRetention(projectId: string) {
     if (!project) return;
     const previous = await tx.retentionRun.findFirst({ where: { projectId }, orderBy: { startedAt: 'desc' } });
     const cutoff = new Date(Date.now() - project.retentionDays * 86_400_000);
-    const run = await prisma.retentionRun.create({ data: { projectId, retentionDays: project.retentionDays, cutoff, status: 'running' } });
+    const run = await prisma.retentionRun.create({
+      data: { projectId, retentionDays: project.retentionDays, cutoff, status: 'running', startedAt: new Date(), heartbeatAt: new Date() },
+    });
     // Short Prisma statements remain independent of the session holding the project lock.
-    const heartbeat = setInterval(() => {
-      void prisma.retentionRun
-        .updateMany({ where: { id: run.id, status: 'running' }, data: { heartbeatAt: new Date() } })
-        .catch(() => console.error(JSON.stringify({ level: 'error', event: 'retention.heartbeat_failed', runId: run.id })));
-    }, 30_000);
+    const stopHeartbeat = heartbeatMaintenanceRun(run.id);
     try {
       const rows = await (
         await clickhouse.query({
@@ -56,8 +55,16 @@ export async function enforceProjectRetention(projectId: string) {
       // Resume index deletion even when an earlier attempt already removed every expired raw row.
       await purgeProject(clickhouse, projectId, cutoff);
       await purgeIngestReceipts(projectId, cutoff);
-      if (previous?.status === 'failed') await rebuildProjectRollups(clickhouse, projectId);
+      if (
+        previous?.status === 'failed' ||
+        (await prisma.retentionRun.count({ where: { projectId, kind: 'ingest_repair', status: { in: ['running', 'failed'] } } }))
+      )
+        await rebuildProjectRollups(clickhouse, projectId);
       if (await hasExpiredEvents(clickhouse, projectId, cutoff)) throw new Error('Retention cutoff invariant failed');
+      await prisma.retentionRun.updateMany({
+        where: { projectId, kind: 'ingest_repair', status: { in: ['running', 'failed'] } },
+        data: { status: 'completed', finishedAt: new Date(), error: null },
+      });
       await prisma.retentionRun.update({
         where: { id: run.id },
         data: { status: 'completed', finishedAt: new Date(), deletedEvents: Number(rows[0]?.n ?? 0) },
@@ -69,7 +76,7 @@ export async function enforceProjectRetention(projectId: string) {
       });
       throw error;
     } finally {
-      clearInterval(heartbeat);
+      stopHeartbeat();
     }
   });
 }
