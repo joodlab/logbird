@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import * as ch from '@logbird/clickhouse';
 import * as s from '@logbird/contracts';
 import { prisma } from '@logbird/database';
@@ -184,6 +185,7 @@ export const dataRoutes = new Hono<AppEnv>()
       const q = { ...input, ...ch.timeRange(input), q: input.q?.trim() ?? '', lang: input.lang ?? ('query' as const) };
       const client = queryClient(q);
       const project = c.get('project');
+      const exportId = randomUUID();
       const body = await auditedExport(
         ch.exportEvents(client, project.id, q),
         q.format === 'csv',
@@ -194,8 +196,13 @@ export const dataRoutes = new Hono<AppEnv>()
             actor: { type: 'user', ...c.get('user') },
             executor: { type: 'api', id: 'api-server' },
             targets: [{ type: 'project', id: project.id, name: project.name }],
-            context: { requestId: c.get('requestId'), ip: clientAddress(c) ?? '', userAgent: c.req.header('user-agent') ?? '' },
-            metadata: { export: { projectId: project.id, format: q.format, query: q.q, lang: q.lang, from: q.from, to: q.to, ...counts } },
+            context: {
+              operationId: exportId,
+              requestId: c.get('requestId'),
+              ip: clientAddress(c) ?? '',
+              userAgent: c.req.header('user-agent') ?? '',
+            },
+            metadata: { export: { exportId, projectId: project.id, format: q.format, query: q.q, lang: q.lang, from: q.from, to: q.to, ...counts } },
           }),
         c.req.raw.signal,
       );

@@ -108,10 +108,13 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
         const text = await response.text();
         const rows = await receipts(response.headers.get('x-request-id') ?? '');
         expect(rows.map((r) => r.action).sort()).toEqual(['export.completed', 'export.requested']);
+        expect(new Set(rows.map((r) => r.metadata.export.exportId)).size).toBe(1);
         for (const row of rows) {
           expect(row.actor.id).toBe(actor.id);
           expect(row.targets[0].id).toBe(projectId);
           expect(row.context.ip).toBe('203.0.113.73');
+          expect(row.context.operationId).toBe(row.metadata.export.exportId);
+          expect(row.metadata.export.exportId).toMatch(/^[a-f0-9-]{36}$/);
           expect(row.metadata.export).toMatchObject({ format, query: 'action:evidence.updated', projectId });
           expect(row.metadata.export.from).toMatch(/Z$/);
           expect(row).not.toHaveProperty('changes');

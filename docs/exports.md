@@ -24,7 +24,8 @@ The default range is resolved once, before paging, and recorded as UTC timestamp
 ## Workspace receipts and failure policy
 
 Every authorized export stores `export.requested` before reading/sending event bytes, followed by
-`export.completed` or `export.failed`. The request ID correlates these records. Each retains actor, affected project,
+`export.completed` or `export.failed`. A server-generated export ID (also `context.operationId`) correlates these records,
+even if clients reuse request IDs. Each retains actor, affected project,
 format, trimmed query text and language, canonical range, request IP/user agent, row count and UTF-8 byte count.
 No event content is copied into receipts. CSV counts exclude the header from rows, but include it in bytes.
 Failed records distinguish `client_aborted` from `export_error`; exceptions and credentials are not recorded.
@@ -36,4 +37,5 @@ If the initial receipt cannot be stored, the export fails closed. If a terminal 
 errors and the requested receipt remains pending; operators must investigate pending receipts and storage health.
 There is no automatic receipt retry or guaranteed terminal receipt during process termination/storage outage.
 Consumers must discard partial/errored downloads. Paging is not a snapshot; concurrent retention or deletion can
-change results. No migration or self-hoster configuration change is required.
+change results. The console buffers the response as a Blob; very large exports depend on available browser memory.
+Bulk HTTP clients can stream to disk. There is no whole-export row/byte budget. No migration or self-hoster configuration change is required.

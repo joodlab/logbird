@@ -2745,7 +2745,8 @@
             "schema": {
               "enum": [
                 "csv",
-                "jsonl"
+                "jsonl",
+                "jsonl-evidence"
               ],
               "type": "string"
             }
@@ -2773,7 +2774,7 @@
                 }
               }
             },
-            "description": "Event export"
+            "description": "Normalized CSV/JSONL or original-payload evidence JSONL. See docs/exports.md for schemas and audit semantics."
           },
           "default": {
             "content": {

@@ -487,16 +487,21 @@ export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQu
     first = false;
     const payloads = new Map<string, string>();
     if (q.format === 'jsonl-evidence' && page.data.length) {
-      const rows = await read<{ event_id: string; payload: string }>(
+      const rows = await read<{ event_id: string; timestamp: string; received_at: string; payload: string }>(
         ch,
-        'SELECT event_id,payload FROM events WHERE project_id={p:String} AND event_id IN {ids:Array(String)} ORDER BY received_at DESC LIMIT 1 BY event_id',
-        { p, ids: page.data.map((e) => e.id) },
+        'SELECT event_id,timestamp,received_at,payload FROM events WHERE project_id={p:String} AND event_id IN {ids:Array(String)} AND (event_id,toString(timestamp),toString(received_at)) IN arrayZip({ids:Array(String)},{timestamps:Array(String)},{receipts:Array(String)}) LIMIT 1 BY event_id,timestamp,received_at',
+        {
+          p,
+          ids: page.data.map((e) => e.id),
+          timestamps: page.data.map((e) => e.timestamp.replace('T', ' ').slice(0, -1)),
+          receipts: page.data.map((e) => e.receivedAt.replace('T', ' ').slice(0, -1)),
+        },
       );
-      for (const row of rows) payloads.set(row.event_id, row.payload);
+      for (const row of rows) payloads.set(JSON.stringify([row.event_id, iso(row.timestamp), iso(row.received_at)]), row.payload);
     }
     for (const e of page.data) {
       if (q.format === 'jsonl-evidence') {
-        const payload = payloads.get(e.id);
+        const payload = payloads.get(JSON.stringify([e.id, e.timestamp, e.receivedAt]));
         if (payload === undefined) throw new Error('Export payload no longer available');
         // Embed stored JSON verbatim: no normalized-field caps or JSON parse/stringify round trip.
         yield `{"exportSchemaVersion":1,"event":${JSON.stringify(e)},"payload":${payload}}\n`;
