@@ -12,7 +12,8 @@ are preserved; this update adds evidence for future operations and does not back
 - Repeated failed attempts are audit-rate-limited across replicas/IPs: one record per email hash and reason every
   five minutes. Lockout is a separate reason, so the first lockout is retained even after invalid-code failures.
   Suppressed attempts are not counted or backfilled. Existing authentication throttles remain independent.
-  Audit errors emit `auth.audit_failed` without changing the authentication response/status. This path is best effort
+  Membership lookup and audit storage run after the auth response is returned, so their latency does not reveal
+  workspace membership to a caller. Audit errors emit `auth.audit_failed` without changing the response/status. This path is best effort
   during storage failures; no durable outbox or crash replay is added. Responses do not reveal user/workspace lookup
   results, and do not claim constant-time authentication.
 - Actual session deletion through better-auth records `auth.signed_out` for sign-out and `auth.session.revoked` for

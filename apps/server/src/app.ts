@@ -130,11 +130,14 @@ app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
       async () => {
         const response = await auth.handler(c.req.raw);
         if (!response.ok && c.req.path === '/api/auth/sign-in/email-otp') {
-          try {
-            await recordFailedSignIn(c, authBody?.email, response);
-          } catch {
-            console.error(JSON.stringify({ event: 'auth.audit_failed', requestId: c.get('requestId') }));
-          }
+          const email = authBody?.email;
+          const auditResponse = response.clone();
+          // Workspace lookup/storage latency must not become an account-enumeration signal in the auth response.
+          setImmediate(() => {
+            void recordFailedSignIn(c, email, auditResponse).catch(() => {
+              console.error(JSON.stringify({ event: 'auth.audit_failed', requestId: c.get('requestId') }));
+            });
+          });
         }
         // Installed better-auth skips organization hooks on resend; audit the successful endpoint result.
         if (response.ok && c.req.path === '/api/auth/organization/invite-member' && session && pendingResend) {
