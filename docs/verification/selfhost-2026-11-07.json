@@ -1,0 +1,624 @@
+{
+  "date": "2026-11-07",
+  "applicationImagesSource": "1a62ff4983728d770688b31128c8a4b4ea1581fb",
+  "previousSource": "2bce2fa",
+  "clickhouseVersion": "26.9.27.3",
+  "restoredBeforeWorker": [
+    {
+      "metric": "attribute_actual",
+      "total": 20000
+    },
+    {
+      "metric": "attribute_expected",
+      "total": 20000
+    },
+    {
+      "metric": "entity_actual",
+      "total": 30000
+    },
+    {
+      "metric": "entity_expected",
+      "total": 30000
+    },
+    {
+      "metric": "minute",
+      "total": 10002
+    },
+    {
+      "metric": "raw",
+      "total": 10002
+    },
+    {
+      "table": "attribute_keys",
+      "name": "all_1_1_82_405",
+      "rows": 13,
+      "data_version": 405
+    },
+    {
+      "table": "attribute_keys",
+      "name": "all_2_2_1_405",
+      "rows": 2,
+      "data_version": 405
+    },
+    {
+      "table": "entities",
+      "name": "all_1_1_245_1204",
+      "rows": 113,
+      "data_version": 1204
+    },
+    {
+      "table": "events",
+      "name": "197001_4_4_1_410",
+      "rows": 1,
+      "data_version": 410
+    },
+    {
+      "table": "events",
+      "name": "202604_2_2_1_410",
+      "rows": 1,
+      "data_version": 410
+    },
+    {
+      "table": "events",
+      "name": "202604_5_5_1_410",
+      "rows": 1,
+      "data_version": 410
+    },
+    {
+      "table": "events",
+      "name": "202611_1_1_83_410",
+      "rows": 9984,
+      "data_version": 410
+    },
+    {
+      "table": "events",
+      "name": "202611_3_3_1_410",
+      "rows": 25,
+      "data_version": 410
+    },
+    {
+      "table": "events_by_minute",
+      "name": "all_1_1_84_410",
+      "rows": 9,
+      "data_version": 410
+    },
+    {
+      "table": "migrations",
+      "name": "all_1_1_1",
+      "rows": 5,
+      "data_version": 1
+    }
+  ],
+  "freshNoRestoreControl": {
+    "projectId": "cmw6gcrfu0000b4youpqe1bnu",
+    "snapshots": [
+      {
+        "stage": "before-fault",
+        "totals": [
+          {
+            "metric": "attribute_actual",
+            "total": 21
+          },
+          {
+            "metric": "attribute_expected",
+            "total": 21
+          },
+          {
+            "metric": "entity_actual",
+            "total": 63
+          },
+          {
+            "metric": "entity_expected",
+            "total": 63
+          },
+          {
+            "metric": "minute",
+            "total": 21
+          },
+          {
+            "metric": "raw",
+            "total": 21
+          }
+        ],
+        "parts": [
+          {
+            "table": "attribute_keys",
+            "name": "all_1_1_1",
+            "rows": 1,
+            "data_version": 1
+          },
+          {
+            "table": "entities",
+            "name": "all_1_1_1",
+            "rows": 1,
+            "data_version": 1
+          },
+          {
+            "table": "entities",
+            "name": "all_2_2_1",
+            "rows": 1,
+            "data_version": 2
+          },
+          {
+            "table": "entities",
+            "name": "all_3_3_1",
+            "rows": 1,
+            "data_version": 3
+          },
+          {
+            "table": "events",
+            "name": "202604_3_3_1",
+            "rows": 1,
+            "data_version": 3
+          },
+          {
+            "table": "events",
+            "name": "202611_4_4_1",
+            "rows": 20,
+            "data_version": 4
+          },
+          {
+            "table": "events_by_minute",
+            "name": "all_1_1_1",
+            "rows": 2,
+            "data_version": 1
+          }
+        ],
+        "mutations": [
+          {
+            "table": "events",
+            "mutation_id": "mutation_1.txt",
+            "command": "(MATERIALIZE INDEX idx_search_text)",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "events",
+            "mutation_id": "mutation_2.txt",
+            "command": "(MATERIALIZE INDEX idx_attribute_items)",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          }
+        ]
+      },
+      {
+        "stage": "after-fault",
+        "totals": [
+          {
+            "metric": "attribute_actual",
+            "total": 0
+          },
+          {
+            "metric": "attribute_expected",
+            "total": 20
+          },
+          {
+            "metric": "entity_actual",
+            "total": 0
+          },
+          {
+            "metric": "entity_expected",
+            "total": 60
+          },
+          {
+            "metric": "minute",
+            "total": 20
+          },
+          {
+            "metric": "raw",
+            "total": 20
+          }
+        ],
+        "parts": [
+          {
+            "table": "attribute_keys",
+            "name": "all_1_1_1_2",
+            "rows": 1,
+            "data_version": 2
+          },
+          {
+            "table": "entities",
+            "name": "all_1_1_1_4",
+            "rows": 1,
+            "data_version": 4
+          },
+          {
+            "table": "entities",
+            "name": "all_2_2_1_4",
+            "rows": 1,
+            "data_version": 4
+          },
+          {
+            "table": "entities",
+            "name": "all_3_3_1_4",
+            "rows": 1,
+            "data_version": 4
+          },
+          {
+            "table": "events",
+            "name": "202604_3_3_1_5",
+            "rows": 1,
+            "data_version": 5
+          },
+          {
+            "table": "events",
+            "name": "202611_4_4_1_5",
+            "rows": 20,
+            "data_version": 5
+          },
+          {
+            "table": "events_by_minute",
+            "name": "all_1_1_1_2",
+            "rows": 2,
+            "data_version": 2
+          }
+        ],
+        "mutations": [
+          {
+            "table": "events",
+            "mutation_id": "mutation_1.txt",
+            "command": "(MATERIALIZE INDEX idx_search_text)",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "events",
+            "mutation_id": "mutation_2.txt",
+            "command": "(MATERIALIZE INDEX idx_attribute_items)",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "attribute_keys",
+            "mutation_id": "mutation_2.txt",
+            "command": "(UPDATE _row_exists = 0 WHERE (project_id = 'cmw6gcrfu0000b4youpqe1bnu') AND (key IN _CAST(['metadata.fixture'], 'Array(String)')))",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "entities",
+            "mutation_id": "mutation_4.txt",
+            "command": "(UPDATE _row_exists = 0 WHERE (project_id = 'cmw6gcrfu0000b4youpqe1bnu') AND ((kind, entity_id) IN arrayZip(_CAST(['actor', 'tenant', 'target'], 'Array(String)'), _CAST(['qa-actor', 'qa-tenant', 'record:qa-record'], 'Array(String)'))))",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "events",
+            "mutation_id": "mutation_5.txt",
+            "command": "(UPDATE _row_exists = 0 WHERE (project_id = 'cmw6gcrfu0000b4youpqe1bnu') AND (timestamp < _CAST('1786282911.438', 'DateTime64(3)')))",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "events_by_minute",
+            "mutation_id": "mutation_2.txt",
+            "command": "(UPDATE _row_exists = 0 WHERE (project_id = 'cmw6gcrfu0000b4youpqe1bnu') AND (bucket <= _CAST('1786282860', 'DateTime64(3)')))",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          }
+        ],
+        "receiptStatus": "failed"
+      },
+      {
+        "stage": "after-retry",
+        "totals": [
+          {
+            "metric": "attribute_actual",
+            "total": 20
+          },
+          {
+            "metric": "attribute_expected",
+            "total": 20
+          },
+          {
+            "metric": "entity_actual",
+            "total": 60
+          },
+          {
+            "metric": "entity_expected",
+            "total": 60
+          },
+          {
+            "metric": "minute",
+            "total": 20
+          },
+          {
+            "metric": "raw",
+            "total": 20
+          }
+        ],
+        "parts": [
+          {
+            "table": "attribute_keys",
+            "name": "all_1_1_1_3",
+            "rows": 1,
+            "data_version": 3
+          },
+          {
+            "table": "attribute_keys",
+            "name": "all_4_4_1",
+            "rows": 1,
+            "data_version": 4
+          },
+          {
+            "table": "entities",
+            "name": "all_1_8_2_5",
+            "rows": 3,
+            "data_version": 5
+          },
+          {
+            "table": "events",
+            "name": "202604_3_3_1_5",
+            "rows": 1,
+            "data_version": 5
+          },
+          {
+            "table": "events",
+            "name": "202611_4_4_1_5",
+            "rows": 20,
+            "data_version": 5
+          },
+          {
+            "table": "events_by_minute",
+            "name": "all_1_1_1_3",
+            "rows": 2,
+            "data_version": 3
+          },
+          {
+            "table": "events_by_minute",
+            "name": "all_4_4_1",
+            "rows": 1,
+            "data_version": 4
+          }
+        ],
+        "mutations": [
+          {
+            "table": "events",
+            "mutation_id": "mutation_1.txt",
+            "command": "(MATERIALIZE INDEX idx_search_text)",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "events",
+            "mutation_id": "mutation_2.txt",
+            "command": "(MATERIALIZE INDEX idx_attribute_items)",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "attribute_keys",
+            "mutation_id": "mutation_2.txt",
+            "command": "(UPDATE _row_exists = 0 WHERE (project_id = 'cmw6gcrfu0000b4youpqe1bnu') AND (key IN _CAST(['metadata.fixture'], 'Array(String)')))",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "attribute_keys",
+            "mutation_id": "mutation_3.txt",
+            "command": "(UPDATE _row_exists = 0 WHERE project_id = 'cmw6gcrfu0000b4youpqe1bnu')",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "entities",
+            "mutation_id": "mutation_4.txt",
+            "command": "(UPDATE _row_exists = 0 WHERE (project_id = 'cmw6gcrfu0000b4youpqe1bnu') AND ((kind, entity_id) IN arrayZip(_CAST(['actor', 'tenant', 'target'], 'Array(String)'), _CAST(['qa-actor', 'qa-tenant', 'record:qa-record'], 'Array(String)'))))",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "entities",
+            "mutation_id": "mutation_5.txt",
+            "command": "(UPDATE _row_exists = 0 WHERE project_id = 'cmw6gcrfu0000b4youpqe1bnu')",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "events",
+            "mutation_id": "mutation_5.txt",
+            "command": "(UPDATE _row_exists = 0 WHERE (project_id = 'cmw6gcrfu0000b4youpqe1bnu') AND (timestamp < _CAST('1786282911.438', 'DateTime64(3)')))",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "events_by_minute",
+            "mutation_id": "mutation_2.txt",
+            "command": "(UPDATE _row_exists = 0 WHERE (project_id = 'cmw6gcrfu0000b4youpqe1bnu') AND (bucket <= _CAST('1786282860', 'DateTime64(3)')))",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          },
+          {
+            "table": "events_by_minute",
+            "mutation_id": "mutation_3.txt",
+            "command": "(UPDATE _row_exists = 0 WHERE project_id = 'cmw6gcrfu0000b4youpqe1bnu')",
+            "is_done": 1,
+            "latest_fail_reason": ""
+          }
+        ],
+        "receiptStatus": "completed"
+      }
+    ]
+  },
+  "afterRestoredRepair": {
+    "raw": 10002,
+    "minute": 20004,
+    "entities": 60000,
+    "entityExpected": 30000,
+    "attributes": 40000,
+    "attributeExpected": 20000
+  },
+  "normalization": {
+    "fullRowExceptAllBefore": [0, 0],
+    "fullRowExceptAllAfter": [0, 0],
+    "rollupMismatchFlags": [0, 0, 0],
+    "receivedAtAndPayloadPreserved": true,
+    "eventIdsMigrationPresent": false,
+    "newGuardOnRestoredRuntime": "pending"
+  },
+  "images": [
+    {
+      "tag": "logbird-selfhost-test/app:local",
+      "id": "sha256:6f7060de9b0cac2ddea9be9dd8a802b432769e40a7a6643218a85483597b05bc",
+      "architecture": "amd64",
+      "user": "node",
+      "inspectBytes": 337258676,
+      "historyBytes": 255254528,
+      "buildArgsInEnv": 0
+    },
+    {
+      "tag": "logbird-selfhost-test/server:local",
+      "id": "sha256:4a0147cecf4a9c72f38796774ff485501bcb5e6953f0624de5b432f231143281",
+      "architecture": "amd64",
+      "user": "node",
+      "inspectBytes": 727452338,
+      "historyBytes": 561762304,
+      "buildArgsInEnv": 0
+    },
+    {
+      "tag": "logbird-selfhost-test/worker:local",
+      "id": "sha256:6e29abb9eea91324ca1edf1575acdd0851df8ab7eced522ae11522f017943592",
+      "architecture": "amd64",
+      "user": "node",
+      "inspectBytes": 521804851,
+      "historyBytes": 396316672,
+      "buildArgsInEnv": 0
+    },
+    {
+      "tag": "logbird-selfhost-test/migrate:local",
+      "id": "sha256:3ee22915331797272890d2821ebc5dedc09c38755bc43658be83e2f1950c3a71",
+      "architecture": "amd64",
+      "user": "node",
+      "inspectBytes": 1793614488,
+      "historyBytes": 1405325312,
+      "buildArgsInEnv": 0
+    }
+  ],
+  "resources": {
+    "peakSampledContainerMemory": {
+      "utc": "2026-11-07T12:38:55.3415125Z",
+      "containerMemoryBytes": 859275526.144
+    },
+    "peakConservativeDockerFootprint": {
+      "utc": "2026-11-07T12:18:03.056Z",
+      "ownedCacheRecords": 53,
+      "privateCacheBytes": 8657320908,
+      "fullImageBytes": 6036000000,
+      "conservativeDockerBytes": 14693320908,
+      "limitBytes": 15000000000
+    },
+    "minimumHostFreeRamGiB": 2.5195159912109375,
+    "minimumHostFreeDiskGiB": 110.70241928100586,
+    "buildAndWslPeakRamAttribution": "unknown under concurrent host load"
+  },
+  "cleanup": {
+    "verifiedUtc": "2026-11-07T14:10:39.075Z",
+    "project": "logbird-selfhost-test",
+    "containers": 0,
+    "volumes": 0,
+    "ownedApplicationImageIdsRemaining": 0,
+    "newRedisDependencyImageRemaining": false,
+    "preexistingImagesPreserved": 23,
+    "preexistingContainersUnchanged": 6,
+    "ownBuildHistoryRemaining": 0,
+    "heavyLockReleased": true,
+    "helperTreesStopped": true,
+    "finalCachePlanIds": 47,
+    "removedCachePlanIds": 40,
+    "unrelatedCacheIdsRemoved": 0,
+    "remainingOwnedCacheBytes": 1707678900,
+    "remainingOwnedCache": [
+      {
+        "id": "pxlgowbu6mqsz555m5xksvwkt",
+        "bytes": 225300,
+        "reclaimable": false,
+        "description": "[build 4/9] COPY --from=prune /source/out/json/ ."
+      },
+      {
+        "id": "2pcc6y67highwtl5311jt8dgo",
+        "bytes": 360400,
+        "reclaimable": false,
+        "description": "[build 4/9] COPY --from=prune /source/out/json/ ."
+      },
+      {
+        "id": "k33885llkjs1s7sixyrf2lyzw",
+        "bytes": 393200,
+        "reclaimable": false,
+        "description": "[build 4/7] COPY --from=prune /source/out/json/ ."
+      },
+      {
+        "id": "cfbhh4cea917euc094zy0uhi5",
+        "bytes": 212600000,
+        "reclaimable": false,
+        "description": "mount / from exec /bin/sh -c pnpm install --frozen-lockfile"
+      },
+      {
+        "id": "nocp0y6bko7g3boidr1qo3sxy",
+        "bytes": 454700000,
+        "reclaimable": false,
+        "description": "mount / from exec /bin/sh -c pnpm install --frozen-lockfile"
+      },
+      {
+        "id": "r3sgzgluxfs60y9j8guzywg7q",
+        "bytes": 481900000,
+        "reclaimable": false,
+        "description": "mount / from exec /bin/sh -c pnpm install --frozen-lockfile"
+      },
+      {
+        "id": "iqg7zsvefyegzith9oochwu04",
+        "bytes": 557500000,
+        "reclaimable": false,
+        "description": "mount / from exec /bin/sh -c pnpm install --frozen-lockfile"
+      }
+    ],
+    "note": "Exact-ID prune repeated after removing own images and build histories. Seven records remain Reclaimable=false. No shared-daemon restart or broad prune was used. Retry these exact IDs when BuildKit releases leases.",
+    "followUpIssue": "https://github.com/joodlab/logbird/issues/77",
+    "snapshots": [
+      {
+        "name": "logbird.pg.dump",
+        "bytes": 28969,
+        "sha256": "4fbd990148c44c0c1f12e484f5100f2ac0edb10d5aa3f0e0a86b88b7fdb2bcf5"
+      },
+      {
+        "name": "logbird.zip",
+        "bytes": 65723,
+        "sha256": "e4a863c13a2871c08f9720ffd82ceb6614697d85c45763801a0f23e9ea5f74df"
+      },
+      {
+        "name": "logbird-failed.pg.dump",
+        "bytes": 29150,
+        "sha256": "a8df8271ac822cb66052cf19833d1011771f76ec6ef973e810b116a9e9b8e15a"
+      },
+      {
+        "name": "logbird-failed.zip",
+        "bytes": 590255,
+        "sha256": "2d8069fd2b27945971b4ed86edf4dabef10a65939395b390b66e4d2d76f30ad6"
+      }
+    ]
+  },
+  "followUpIssue": "https://github.com/joodlab/logbird/issues/77",
+  "cleanNativeRestore": {
+    "startedUtc": "2026-11-07T12:32:21.880Z",
+    "verifiedUtc": "2026-11-07T12:34:51.398Z",
+    "destroyedOwnVolumesBeforeRestore": true,
+    "totals": {
+      "raw": 8,
+      "minute": 8,
+      "entities": 21,
+      "attributes": 35
+    },
+    "persisted": [
+      "user session",
+      "project settings retention180/description",
+      "event",
+      "read key"
+    ]
+  },
+  "runtimeUid": {
+    "server": 1000,
+    "worker": 1000,
+    "app": 1000,
+    "migrateEffectiveUid": "pending; Config.User=node"
+  },
+  "sourceSafetyChanges": "39cb62a56c67cf65f29c7f2ce37bbfb0d94a4713"
+}

@@ -59,6 +59,11 @@ export async function enforceProjectRetention(projectId: string) {
         data: { status: 'completed', finishedAt: new Date(), deletedEvents: Number(rows[0]?.n ?? 0) },
       });
     } catch (error) {
+      const errorCode =
+        typeof error === 'object' && error !== null && 'code' in error && (typeof error.code === 'string' || typeof error.code === 'number')
+          ? error.code
+          : undefined;
+      console.error(JSON.stringify({ level: 'error', event: 'retention.run_failed', runId: run.id, projectId, errorCode }));
       await prisma.retentionRun.update({
         where: { id: run.id },
         data: { status: 'failed', finishedAt: new Date(), error: 'ClickHouse retention failed; retry required.' },
