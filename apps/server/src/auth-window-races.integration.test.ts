@@ -12,6 +12,161 @@ import {
 import { env } from './env';
 import { sweepAuditRetention } from './outbox-delivery';
 
+it.each([false, true])('keeps the occurrence hour when a fast closer precedes a slow stager (overflow=%s)', async (overflow) => {
+  const ns = auditNamespace(),
+    userId = randomUUID(),
+    org = `qa-skew-${userId}`,
+    email = `qa-skew-${userId}@example.test`;
+  const hash = authEmailHash(email, env.BETTER_AUTH_SECRET);
+  const before = new Date('2053-01-01T12:59:59Z'),
+    end = new Date('2053-01-01T13:00:00Z'),
+    after = new Date(+end + 1000);
+  const budget = `${ns}:ws:${org}:${+end - 3_600_000}`;
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(before);
+  try {
+    await prisma.user.create({ data: { id: userId, name: 'QA Clock Skew', email, emailHash: hash } });
+    await prisma.organization.create({
+      data: {
+        id: org,
+        name: 'QA Clock Skew',
+        slug: org,
+        createdAt: before,
+        members: { create: { id: randomUUID(), userId, role: 'member', createdAt: before } },
+      },
+    });
+    await prisma.authAuditBudget.create({ data: { id: budget, namespace: ns, stream: `ws:${org}`, windowEnd: end, admitted: 60 } });
+    if (overflow)
+      await prisma.authAuditBudget.create({
+        data: { id: `${ns}:global:${+end / 3_600_000 - 1}`, namespace: ns, windowEnd: end, admitted: AUTH_AUDIT_GLOBAL_LIMIT },
+      });
+    for (let i = 0; i < 2; i++) await stageFailedSignIn(email, 'locked_out', { ip: '192.0.2.81' }, env.BETTER_AUTH_SECRET, before);
+    const old = await prisma.authAuditWindow.findFirstOrThrow({ where: { namespace: ns, emailHash: hash } });
+    await flushFailedSignIns(before, [old.id]);
+    vi.setSystemTime(after);
+    await flushFailedSignIns(after, [old.id]);
+    await flushAuthAuditBudgets(after, [budget]);
+    // The closer has committed in the next hour, but this replica's frozen attempt is still in the old one.
+    vi.setSystemTime(before);
+    await stageFailedSignIn(email, 'locked_out', { ip: '192.0.2.82' }, env.BETTER_AUTH_SECRET, before);
+    const next = await prisma.authAuditWindow.findFirstOrThrow({ where: { namespace: ns, emailHash: hash, closedAt: null } });
+    expect(next).toMatchObject({ generation: 1, windowEnd: end, firstAttemptAt: before, lastAttemptAt: before, overflow });
+    expect(next.id).not.toBe(old.id);
+    vi.setSystemTime(after);
+    await flushFailedSignIns(after, [next.id]);
+    await flushFailedSignIns(after, [next.id]);
+    await flushAuthAuditBudgets(after, [budget]);
+    await flushAuthAuditBudgets(new Date(+after + 60_000), [budget]);
+    const windows = await prisma.authAuditWindow.findMany({ where: { namespace: ns, emailHash: hash } });
+    expect(windows).toHaveLength(2);
+    expect(windows.every((w) => w.closedAt && !w.quarantinedAt && w.prepareAttempts === 0 && w.attempts === w.flushedAttempts)).toBe(true);
+    const rows = await prisma.auditOutbox.findMany({ where: { stream: `ws:${org}` }, orderBy: { id: 'asc' } });
+    expect(rows.map((r) => (r.payload as { metadata: { attempts: number } }).metadata.attempts)).toEqual([2, 1]);
+    expect(rows.map((r) => (r.payload as { metadata: { targets: unknown } }).metadata.targets)).toEqual([
+      [{ userId, attempts: 2 }],
+      [{ userId, attempts: 1 }],
+    ]);
+    expect(new Set(rows.map((r) => r.id)).size).toBe(2);
+    expect(await prisma.authAuditBudget.findUniqueOrThrow({ where: { id: budget } })).toMatchObject({
+      suppressed: 3,
+      reportedSuppressed: 3,
+      generation: 2,
+    });
+    expect(await prisma.authAuditBudget.count({ where: { namespace: ns, stream: `ws:${org}`, windowEnd: new Date(+end + 3_600_000) } })).toBe(0);
+  } finally {
+    vi.useRealTimers();
+    await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${org}` } });
+    await prisma.authAuditWindow.deleteMany({ where: { namespace: ns, emailHash: hash } });
+    await prisma.authAuditBudget.deleteMany({ where: { namespace: ns } });
+    await prisma.organization.deleteMany({ where: { id: org } });
+    await prisma.user.deleteMany({ where: { id: userId } });
+  }
+});
+
+it('rotates more than 100 deferred budgets and reports past a quarantined window', async () => {
+  const ns = auditNamespace(),
+    prefix = `qa-rotation-${randomUUID()}`;
+  const end = new Date('2054-01-01T13:00:00Z'),
+    now = new Date(+end + 1000),
+    previous = new Date(+end - 3_600_000);
+  const deferredIds = Array.from({ length: 100 }, (_, i) => `${prefix}:a:${String(i).padStart(3, '0')}`);
+  const ready = `${prefix}:z-ready`,
+    stream = `ws:${prefix}`;
+  try {
+    await prisma.authAuditWindow.createMany({
+      data: [
+        { id: `${prefix}:open`, namespace: ns, reason: 'invalid_otp', context: {}, windowEnd: end, nextAttemptAt: end },
+        {
+          id: `${prefix}:poison`,
+          namespace: ns,
+          reason: 'invalid_otp',
+          context: {},
+          windowEnd: previous,
+          nextAttemptAt: previous,
+          quarantinedAt: previous,
+          prepareAttempts: 5,
+        },
+      ],
+    });
+    await prisma.authAuditBudget.createMany({
+      data: [
+        ...deferredIds.map((id) => ({ id, namespace: ns, stream, windowEnd: end, suppressed: 1, nextAttemptAt: previous })),
+        { id: ready, namespace: ns, stream, windowEnd: previous, suppressed: 2, nextAttemptAt: previous },
+      ],
+    });
+    await flushAuthAuditBudgets(now);
+    expect(await prisma.authAuditBudget.count({ where: { id: { in: deferredIds }, nextAttemptAt: { gt: now }, reported: false } })).toBe(100);
+    await flushAuthAuditBudgets(now);
+    expect(await prisma.authAuditBudget.findUniqueOrThrow({ where: { id: ready } })).toMatchObject({ reported: true, reportedSuppressed: 2 });
+    expect((await prisma.auditOutbox.findUniqueOrThrow({ where: { id: `auth-suppression-${ready}-1` } })).payload).toMatchObject({
+      metadata: { attempts: 2 },
+    });
+    // A stale healthy-looking window must not wait forever either; recovery will create a later delta.
+    await flushAuthAuditBudgets(new Date(+now + 60_001));
+    expect(await prisma.authAuditBudget.count({ where: { id: { in: deferredIds }, reported: true } })).toBe(100);
+  } finally {
+    await prisma.auditOutbox.deleteMany({ where: { stream } });
+    await prisma.authAuditBudget.deleteMany({ where: { id: { startsWith: prefix } } });
+    await prisma.authAuditWindow.deleteMany({ where: { id: { startsWith: prefix } } });
+  }
+});
+
+it('stages member and unknown identities without account or membership lookups', async () => {
+  const id = randomUUID(),
+    email = `qa-private-${id}@example.test`,
+    unknown = `qa-unknown-${id}@example.test`;
+  await prisma.user.create({ data: { id, name: 'QA Private Admission', email, emailHash: authEmailHash(email, env.BETTER_AUTH_SECRET) } });
+  const userQuery = vi.spyOn(prisma.user, 'findUnique'),
+    userHashQuery = vi.spyOn(prisma.user, 'findFirst'),
+    memberships = vi.spyOn(prisma.member, 'findMany');
+  try {
+    await stageFailedSignIn(email, 'invalid_otp', {}, env.BETTER_AUTH_SECRET);
+    await stageFailedSignIn(unknown, 'invalid_otp', {}, env.BETTER_AUTH_SECRET);
+    expect(userQuery).not.toHaveBeenCalled();
+    expect(userHashQuery).not.toHaveBeenCalled();
+    expect(memberships).not.toHaveBeenCalled();
+    const windows = await prisma.authAuditWindow.findMany({
+      where: {
+        emailHash: { in: [authEmailHash(email, env.BETTER_AUTH_SECRET), authEmailHash(unknown, env.BETTER_AUTH_SECRET)] },
+        namespace: auditNamespace(),
+      },
+    });
+    expect(windows).toHaveLength(2);
+    expect(JSON.stringify(windows)).not.toContain('@example.test');
+  } finally {
+    userQuery.mockRestore();
+    userHashQuery.mockRestore();
+    memberships.mockRestore();
+    await prisma.authAuditWindow.deleteMany({
+      where: {
+        emailHash: { in: [authEmailHash(email, env.BETTER_AUTH_SECRET), authEmailHash(unknown, env.BETTER_AUTH_SECRET)] },
+        namespace: auditNamespace(),
+      },
+    });
+    await prisma.user.delete({ where: { id } });
+  }
+});
+
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
@@ -89,13 +244,22 @@ it.each([false, true])('routes late increments to a new generation after a real 
     await closing;
     await staging;
     control.summary = undefined;
-    const windows = await prisma.authAuditWindow.findMany({ where: { namespace: ns, emailHash: hash }, orderBy: { windowEnd: 'asc' } });
+    const windows = await prisma.authAuditWindow.findMany({ where: { namespace: ns, emailHash: hash }, orderBy: { generation: 'asc' } });
     expect(windows).toHaveLength(2);
     expect(windows[0]).toMatchObject({ id: old.id, attempts: 2, flushedAttempts: 2 });
     expect(windows[0]?.closedAt).not.toBeNull();
     const next = windows[1];
     if (!next) throw new Error('Next window missing');
-    expect(next).toMatchObject({ attempts: 1, flushedAttempts: 0, firstAttemptAt: after, lastAttemptAt: after, closedAt: null, overflow });
+    expect(next).toMatchObject({
+      attempts: 1,
+      flushedAttempts: 0,
+      firstAttemptAt: before,
+      lastAttemptAt: before,
+      windowEnd: old.windowEnd,
+      generation: 1,
+      closedAt: null,
+      overflow,
+    });
     await flushFailedSignIns(after, [next.id]);
     await flushFailedSignIns(new Date(+next.windowEnd + 1000), [next.id]);
     const events = await prisma.auditOutbox.findMany({ where: { namespace: ns, stream: `ws:${org}` } });
@@ -103,8 +267,8 @@ it.each([false, true])('routes late increments to a new generation after a real 
     expect(new Set(events.map((row) => row.id)).size).toBe(events.length);
     const late = events.find((row) => (row.payload as { context?: { requestId: string } }).context?.requestId === 'late-request');
     expect(late?.payload).toMatchObject({
-      occurredAt: after.toISOString(),
-      metadata: { firstAttemptAt: after.toISOString(), lastAttemptAt: after.toISOString() },
+      occurredAt: before.toISOString(),
+      metadata: { firstAttemptAt: before.toISOString(), lastAttemptAt: before.toISOString() },
     });
   } finally {
     release.resolve();
@@ -224,7 +388,7 @@ it('fences finalization while a fresh window is uncommitted after INSERT, then r
     reporting = flushAuthAuditBudgets(new Date(), [budget]);
     await vi.waitFor(async () => {
       const rows = await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) n FROM pg_stat_activity WHERE ${stagingPid}=ANY(pg_blocking_pids(pid))`;
-      expect(Number(rows[0]?.n)).toBeGreaterThan(0); // Finalizer waits on the admission's shared workspace-budget lock.
+      expect(Number(rows[0]?.n)).toBeGreaterThan(0); // Finalizer waits on the admission's shared namespace/hour fence.
     });
     release.resolve();
     await holder;
@@ -235,8 +399,8 @@ it('fences finalization while a fresh window is uncommitted after INSERT, then r
     const window = await prisma.authAuditWindow.findFirstOrThrow({ where: { namespace: ns, emailHash: hash } });
     await flushFailedSignIns(new Date(), [window.id]);
     await flushFailedSignIns(new Date(), [window.id]);
-    await flushAuthAuditBudgets(new Date(), [budget]);
-    await flushAuthAuditBudgets(new Date(), [budget]);
+    await flushAuthAuditBudgets(new Date(+end + 61_001), [budget]);
+    await flushAuthAuditBudgets(new Date(+end + 61_001), [budget]);
     const rows = await prisma.auditOutbox.findMany({ where: { stream: `ws:${org}` } });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.payload).toMatchObject({

@@ -234,6 +234,7 @@ model AuditOutbox {
 
 // Membership-independent failed-auth staging. Legacy encrypted identities are quarantined; new rows hold only HMACs.
 model AuthAuditWindow {
+  generation Int @default(0)
   namespace String @default("{logbird}")
   id String @id
   identity String @default("")
@@ -257,6 +258,14 @@ model AuthAuditWindow {
 
   @@index([nextAttemptAt])
   @@index([namespace, closedAt, windowEnd])
+}
+
+model AuthAuditAdmission {
+  id String @id
+  namespace String @default("{logbird}")
+  windowEnd DateTime
+
+  @@index([namespace, windowEnd])
 }
 
 model AuthAuditBudget {

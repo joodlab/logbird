@@ -6,7 +6,7 @@ new evidence starts at deployment and does not backfill gaps.
 ## Durable delivery and atomicity
 
 Run `pnpm db:deploy` before deploying the server. Additive migrations add the outbox/staging tables,
-recovery/retention indexes, and nullable indexed `User.emailHash`. Existing records, keys and constraints remain
+recovery/retention indexes, namespace/hour admission fences, window generations, and nullable indexed `User.emailHash`. Existing records, keys and constraints remain
 intact. Roll back application code while keeping these columns/tables; never drop pending evidence.
 
 Owned Postgres mutations commit their frozen redacted outbox payload in the **same transaction**: project creation,
@@ -58,11 +58,13 @@ authentication claim is made.
 
 ## Failed sign-ins and budgets
 
-Failed OTP requests attempt to stage a HMAC only, plus bounded request context, before returning. An indexed lookup of the
-canonical email resolves current workspace memberships for the admission fence; the attempted email is never staged.
-Admissions take workspace hour-budget rows FOR SHARE before touching windows. Expansion takes those budget rows
-FOR UPDATE before window locks, and finalization takes FOR UPDATE before its pending-window check. Workspace ids
-are sorted consistently. A fresh uncommitted INSERT therefore cannot be invisible to a concurrent finalization.
+Failed OTP requests attempt to stage a HMAC only, plus bounded request context, before returning. They never query
+users or memberships. Every identity takes the same namespace/occurrence-hour admission row FOR SHARE before
+touching windows; preparation shares that fence, then locks workspace budgets FOR UPDATE in sorted order before
+window locks. Finalization takes the hour fence FOR UPDATE before its workspace budget and pending-window check.
+A fresh uncommitted INSERT therefore cannot be invisible to a concurrent finalization, without membership-dependent
+request round trips or workspace locks. This removes the audit-path account-existence timing signal; it does not
+claim constant-time authentication or hide hash-specific contention.
 No AES encryption/decryption or advisory lock is used. Fresh identities also contend on the short global
 conditional admission-counter update. User hashes are backfilled in batches of 100 by the API and refreshed
 on successful sign-in. The lookup waits while initial backfill is incomplete. Legacy encrypted windows are preserved
@@ -86,11 +88,12 @@ The older `global_overflow` reason is preserved only for legacy counters, where 
 Overflow counters may grow with fresh identities until the hourly retention boundary;
 the cap bounds ordinary evidence production, not arbitrary hash cardinality. Each workspace admits 60 rows/hour plus
 counted suppression summaries with `metadata.targets` (top 20 user delta counts, plus a truncation flag). Summary
-freezing waits for that hour's pending/quarantined windows to resolve, preventing late increments from being lost.
-A request delayed behind a closing summary rechecks `closedAt` under that row lock and increments the next window
-generation instead. Its first/last occurrence times are the actual late-admission time, with a new immutable event id;
-a closed summary is never reopened. Requests delayed beyond retention also enter a current generation. Normal and
-hourly overflow windows use the same policy, including the next hour's budget.
+freezing briefly waits for healthy, recently due windows from that hour. Quarantined, failed or over-60-second-stale
+windows do not hold reports; late recovery produces a new suppression delta. A deferred budget moves its next attempt
+60 seconds forward so 100 waiting rows cannot starve later pages.
+A request encountering `closedAt` under the row lock advances only its generation suffix (`:g1`, `:g2`, …), preserving
+the frozen attempt time and original five-minute/hour bucket. Normal and hourly overflow windows use the same policy.
+Replica clock skew never moves an occurrence into another hour's budget. A closed summary is never reopened.
 A finalized budget can receive a late expansion (for example after replica clock skew or membership/backfill changes).
 `reportedSuppressed` and per-target watermarks advance atomically with an outbox INSERT, emitting only the new delta
 under `auth-suppression-<budgetId>-<generation>`. Existing payloads/ids never change. `metadata.attempts` is that delta;
@@ -99,6 +102,11 @@ A previously truncated legacy target list establishes a partial watermark: unkno
 `targetsTruncated: true`, while the overall delta count remains exact. Later watermarks use the full stored target map.
 All window/budget/suppression identities include the namespace. Legacy round-2 budgets are retained/reported separately
 in the transition hour. Authentication's separate peer/code limits are unchanged.
+
+The populated reporting-migration proof is reproducible with
+`pnpm --filter @logbird/server exec dotenv -e ../../.env -- vitest run src/audit-budget-migration.integration.test.ts`.
+It runs the two committed migration UPDATE statements against transaction-local temporary tables, preserving all
+public tables, and asserts legacy watermarks 5/5/25/0 and unreported deltas 2/2/4.
 
 Email correlation uses `hashVersion: 1`, HMAC-SHA256 with key
 `HMAC-SHA256(BETTER_AUTH_SECRET, "logbird/auth-audit/hash/v1")`, over trimmed lower-case canonical email. In a source
@@ -121,6 +129,7 @@ Each API replica runs batched sweeps (200 rows/table/minute), using short `SKIP 
 - delivered outbox rows: after 7 days;
 - fully expanded closed windows (`flushedAttempts = attempts`): after window end + 1 hour;
 - fully reported, non-quarantined budgets (`reportedSuppressed = suppressed`): after window end + 24 hours, once no unresolved window from that hour remains.
+- namespace/hour admission fences: after hour end + 24 hours, once no unresolved window from that hour remains; no identities or personal context are stored in these rows.
 
 A separate bounded compatibility pass (100 rows/tick, indexed) closes completed round-2 windows only when their
 identity was erased, `flushedAttempts = attempts > 0`, and `nextAttemptAt` is the round-2 year-9999 sentinel. It does not

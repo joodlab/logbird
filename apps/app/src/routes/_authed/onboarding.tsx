@@ -4,10 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { CheckIcon, LogOutIcon } from 'lucide-react';
 import { useEffect } from 'react';
-import { toast } from 'sonner';
 import { BrandLockup } from '@/components/brand';
-import { meQuery, workspaceSetupQuery } from '@/lib/api/queries';
-import { signOut } from '@/lib/auth-client';
+import { workspaceSetupQuery } from '@/lib/api/queries';
+import { signOutFromConsole } from '@/lib/sign-out';
 import { hasName } from '@/lib/user';
 
 export const Route = createFileRoute('/_authed/onboarding')({
@@ -55,20 +54,7 @@ function OnboardingLayout() {
         <BrandLockup />
         <div className="flex items-center gap-3 text-muted-foreground text-sm">
           <span className="hidden sm:inline">{me.user.email}</span>
-          <Button
-            onClick={async () => {
-              try {
-                await signOut();
-                await queryClient.invalidateQueries({ queryKey: meQuery().queryKey, exact: true, refetchType: 'none' });
-                await navigate({ to: '/login' });
-                queryClient.clear();
-              } catch (error) {
-                toast.error('Could not sign out', { description: error instanceof Error ? error.message : undefined });
-              }
-            }}
-            size="sm"
-            variant="ghost"
-          >
+          <Button onClick={() => signOutFromConsole(queryClient, () => navigate({ to: '/login' }))} size="sm" variant="ghost">
             <LogOutIcon />
             Sign out
           </Button>

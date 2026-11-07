@@ -69,6 +69,7 @@ afterAll(async () => {
     await prisma.auditOutbox.deleteMany({ where: { namespace: prefix } });
     await prisma.authAuditWindow.deleteMany({ where: { namespace: prefix } });
     await prisma.authAuditBudget.deleteMany({ where: { namespace: prefix } });
+    await prisma.authAuditAdmission.deleteMany({ where: { namespace: prefix } });
   } finally {
     await queue.close();
     await connection.quit();

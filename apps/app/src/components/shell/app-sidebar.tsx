@@ -50,8 +50,9 @@ import { UserAvatar } from '@/components/account/user-avatar';
 import { BrandMark } from '@/components/brand';
 import { SetupProgress } from '@/components/setup/setup-progress';
 import { meQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
-import { authCall, authClient, signOut } from '@/lib/auth-client';
+import { authCall, authClient } from '@/lib/auth-client';
 import { canDo } from '@/lib/permissions';
+import { signOutFromConsole } from '@/lib/sign-out';
 import { displayName, hasName } from '@/lib/user';
 import { PROJECT_NAV } from './nav';
 
@@ -307,18 +308,7 @@ function UserMenu() {
             <BookOpenIcon />
             Product spec
           </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={async () => {
-              try {
-                await signOut();
-                await queryClient.invalidateQueries({ queryKey: meQuery().queryKey, exact: true, refetchType: 'none' });
-                await navigate({ to: '/login' });
-                queryClient.clear();
-              } catch (error) {
-                toast.error('Could not sign out', { description: error instanceof Error ? error.message : undefined });
-              }
-            }}
-          >
+          <DropdownMenuItem onClick={() => signOutFromConsole(queryClient, () => navigate({ to: '/login' }))}>
             <LogOutIcon />
             Sign out
           </DropdownMenuItem>
