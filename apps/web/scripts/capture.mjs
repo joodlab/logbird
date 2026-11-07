@@ -7,7 +7,8 @@ const base = process.env.BASE_URL ?? 'http://127.0.0.1:4620';
 const output = resolve(process.env.OUT_DIR ?? '.tmp/captures');
 const paths = process.env.PATHS ? process.env.PATHS.split(',').map((path) => path.trim()) : prerenderPaths;
 await mkdir(output, { recursive: true });
-const browser = await chromium.launch({ channel: 'chrome' });
+// Playwright's bundled Chromium only (shared-machine rule: never the installed Chrome or a personal profile).
+const browser = await chromium.launch();
 const failures = [];
 try {
   for (const path of paths) {
