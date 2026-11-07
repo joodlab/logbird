@@ -11,10 +11,7 @@
     "after-dark-390-workspace.png",
     "after-dark-390-sessions.png"
   ],
-  "videos": [
-    "light-1440-interactions.webm",
-    "light-390-interactions.webm"
-  ],
+  "videos": ["light-1440-interactions.webm", "light-390-interactions.webm"],
   "problems": [],
   "cleanup": {
     "clickhouse": {
