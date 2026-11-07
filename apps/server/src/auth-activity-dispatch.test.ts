@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '@logbird/database';
-import { expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import { app } from './app';
+import { authEmailHash } from './auth-failures';
+import { env } from './env';
 
-const { stage } = vi.hoisted(() => ({ stage: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('./auth-failures', () => ({ stageFailedSignIn: stage }));
 it('known and unknown identities receive byte-identical failed-auth responses and await the same durable stage', async () => {
   const id = randomUUID();
   const email = `qa-fix-dispatch-${id}@example.test`;
@@ -25,10 +25,15 @@ it('known and unknown identities receive byte-identical failed-auth responses an
     expect(known.status).toBe(400);
     expect(unknown.status).toBe(known.status);
     expect(await known.text()).toBe(await unknown.text());
-    expect(stage).toHaveBeenCalledTimes(2);
-    stage.mockRejectedValueOnce(new Error('Storage unavailable'));
-    expect((await request(email)).status).toBe(400);
+    const hashes = [email, `qa-fix-unknown-${id}@example.test`].map((email) => authEmailHash(email, env.BETTER_AUTH_SECRET));
+    const windows = await prisma.authAuditWindow.findMany({ where: { emailHash: { in: hashes } } });
+    expect(windows).toHaveLength(2);
+    expect(windows.every((row) => row.attempts === 1 && row.identity === '')).toBe(true);
+    expect(JSON.stringify(windows)).not.toContain('@example.test');
   } finally {
+    await prisma.authAuditWindow.deleteMany({
+      where: { emailHash: { in: [email, `qa-fix-unknown-${id}@example.test`].map((email) => authEmailHash(email, env.BETTER_AUTH_SECRET)) } },
+    });
     await prisma.user.delete({ where: { id } });
   }
 });

@@ -15,8 +15,10 @@ import {
   retentionStatusSchema,
   savedViewSchema,
   updateProjectSchema,
+  updateWorkspaceSchema,
+  workspaceSchema,
 } from '@logbird/contracts';
-import { prisma, withProjectLock } from '@logbird/database';
+import { type Prisma, prisma, withProjectLock } from '@logbird/database';
 import { retentionQueue } from '@logbird/worker/queue';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { Hono } from 'hono';
@@ -45,27 +47,64 @@ function auditApiKey(
   key: { id: string; name: string; kind: string; prefix: string },
   project: { id: string; name: string; organizationId: string },
   reason?: 'project_deleted',
+  tx?: Prisma.TransactionClient,
 ) {
-  return audit(c, action, { type: 'api_key', id: key.id, name: key.name }, undefined, {
-    organizationId: project.organizationId,
-    targets: [
-      { type: 'api_key', id: key.id, name: key.name },
-      { type: 'project', id: project.id, name: project.name },
-    ],
-    metadata: {
-      apiKey: {
-        kind: key.kind,
-        scope: API_KEY_SCOPES[key.kind as keyof typeof API_KEY_SCOPES],
-        prefix: key.prefix,
-        state: action === 'api_key.created' ? 'active' : 'revoked',
-        ...(reason ? { reason } : {}),
+  return audit(
+    c,
+    action,
+    { type: 'api_key', id: key.id, name: key.name },
+    undefined,
+    {
+      organizationId: project.organizationId,
+      targets: [
+        { type: 'api_key', id: key.id, name: key.name },
+        { type: 'project', id: project.id, name: project.name },
+      ],
+      metadata: {
+        apiKey: {
+          kind: key.kind,
+          scope: API_KEY_SCOPES[key.kind as keyof typeof API_KEY_SCOPES],
+          prefix: key.prefix,
+          state: action === 'api_key.created' ? 'active' : 'revoked',
+          ...(reason ? { reason } : {}),
+        },
       },
     },
-  });
+    tx,
+  );
 }
 
 export const managementRoutes = new Hono<AppEnv>()
   .use('*', requireSession)
+  .patch('/workspace', doc('Update workspace name or URL slug', workspaceSchema), validator('json', updateWorkspaceSchema), async (c) => {
+    const id = await activeOrganization(c);
+    const input = c.req.valid('json');
+    const organization = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM organization WHERE id=${id} FOR UPDATE`;
+      const before = await tx.organization.findUniqueOrThrow({ where: { id } });
+      const after = await tx.organization.update({ where: { id }, data: input });
+      const changes = (['name', 'slug'] as const)
+        .filter((field) => before[field] !== after[field])
+        .map((field) => ({ field, before: before[field], after: after[field] }));
+      if (changes.length)
+        await audit(
+          c,
+          'organization.updated',
+          { type: 'organization', id, name: after.name },
+          changes,
+          {
+            description:
+              before.name !== after.name
+                ? `Renamed the workspace from ${before.name} to ${after.name}` +
+                  (before.slug !== after.slug ? ` (slug: ${before.slug} → ${after.slug})` : '')
+                : `Changed the workspace URL slug from ${before.slug} to ${after.slug}`,
+          },
+          tx,
+        );
+      return after;
+    });
+    return c.json(workspaceSchema.parse(organization));
+  })
   .get('/me', doc('Current user and workspaces', meResponseSchema), async (c) => {
     const memberships = await prisma.member.findMany({ where: { userId: c.get('user').id }, include: { organization: true } });
     return c.json(
@@ -112,10 +151,10 @@ export const managementRoutes = new Hono<AppEnv>()
           },
           include: creatorSelect,
         });
+        await audit(c, 'project.created', { type: 'project', id: project.id, name: project.name }, undefined, undefined, tx);
+        await auditApiKey(c, 'api_key.created', key, project, undefined, tx);
         return { project: serializeProject(project), ingestKey: { key: serializeKey(key), secret: material.secret } };
       });
-      await audit(c, 'project.created', { type: 'project', id: result.project.id, name: result.project.name });
-      await auditApiKey(c, 'api_key.created', result.ingestKey.key, { ...result.project, organizationId });
       return c.json(createProjectResponseSchema.parse(result), 201);
     },
   )
@@ -163,13 +202,13 @@ export const managementRoutes = new Hono<AppEnv>()
     async (c) => {
       const { confirm, retentionReviewed, setupDismissed, ...input } = c.req.valid('json');
       // Serialize policy changes so concurrent requests cannot bypass slug confirmation.
-      const { project, before } = await withProjectLock(c.get('project').id, async (tx) => {
-        const id = c.get('project').id;
-        const current = await tx.project.findUniqueOrThrow({ where: { id } });
-        if (input.retentionDays !== undefined && input.retentionDays < current.retentionDays && confirm !== current.slug)
-          throw new ApiError(422, 'confirmation_required', 'Type the project slug to lower retention.');
-        return {
-          project: await tx.project.update({
+      const { project, before } = await withProjectLock(c.get('project').id, () =>
+        prisma.$transaction(async (tx) => {
+          const id = c.get('project').id;
+          const current = await tx.project.findUniqueOrThrow({ where: { id } });
+          if (input.retentionDays !== undefined && input.retentionDays < current.retentionDays && confirm !== current.slug)
+            throw new ApiError(422, 'confirmation_required', 'Type the project slug to lower retention.');
+          const project = await tx.project.update({
             where: { id },
             data: {
               ...input,
@@ -178,25 +217,37 @@ export const managementRoutes = new Hono<AppEnv>()
                 : {}),
               ...(setupDismissed !== undefined ? { setupDismissedAt: setupDismissed ? new Date() : null } : {}),
             },
-          }),
-          before: current,
-        };
-      });
+          });
+          const before = current;
+          if (retentionReviewed)
+            await audit(c, 'project.retention.reviewed', { type: 'project', id: project.id, name: project.name }, undefined, undefined, tx);
+          if (setupDismissed !== undefined)
+            await audit(
+              c,
+              'project.setup.dismissed',
+              { type: 'project', id: project.id, name: project.name },
+              [{ field: 'setupDismissed', after: setupDismissed }],
+              undefined,
+              tx,
+            );
+          const changes = (['name', 'description'] as const)
+            .filter((field) => before[field] !== project[field])
+            .map((field) => ({ field, before: before[field], after: project[field] }));
+          if (changes.length) await audit(c, 'project.updated', { type: 'project', id: project.id, name: project.name }, changes, undefined, tx);
+          if (input.retentionDays !== undefined && input.retentionDays !== before.retentionDays)
+            await audit(
+              c,
+              'project.retention.changed',
+              { type: 'project', id: project.id, name: project.name },
+              [{ field: 'retentionDays', before: before.retentionDays, after: project.retentionDays }],
+              undefined,
+              tx,
+            );
+          return { project, before };
+        }),
+      );
       invalidateSetup(project.id);
       if (input.retentionDays !== undefined && input.retentionDays < before.retentionDays) await enforceProjectRetention(project.id);
-      if (retentionReviewed) await audit(c, 'project.retention.reviewed', { type: 'project', id: project.id, name: project.name });
-      if (setupDismissed !== undefined)
-        await audit(c, 'project.setup.dismissed', { type: 'project', id: project.id, name: project.name }, [
-          { field: 'setupDismissed', after: setupDismissed },
-        ]);
-      const changes = (['name', 'description'] as const)
-        .filter((field) => before[field] !== project[field])
-        .map((field) => ({ field, before: before[field], after: project[field] }));
-      if (changes.length) await audit(c, 'project.updated', { type: 'project', id: project.id, name: project.name }, changes);
-      if (input.retentionDays !== undefined && input.retentionDays !== before.retentionDays)
-        await audit(c, 'project.retention.changed', { type: 'project', id: project.id, name: project.name }, [
-          { field: 'retentionDays', before: before.retentionDays, after: project.retentionDays },
-        ]);
       return c.json(serializeProject(project));
     },
   )
@@ -208,13 +259,15 @@ export const managementRoutes = new Hono<AppEnv>()
       const { confirm } = c.req.valid('query');
       if (confirm !== c.get('project').slug) throw new ApiError(422, 'confirmation_required', 'Type the project slug to delete the project.');
       const projectId = c.get('project').id;
-      await withProjectLock(projectId, async (tx) => {
-        const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
-        for (const key of revoked) await auditApiKey(c, 'api_key.revoked', key, c.get('project'), 'project_deleted');
+      await withProjectLock(projectId, async () => {
         await purgeProjectEvents(projectId);
-        await tx.project.delete({ where: { id: projectId } });
+        await prisma.$transaction(async (tx) => {
+          const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
+          for (const key of revoked) await auditApiKey(c, 'api_key.revoked', key, c.get('project'), 'project_deleted', tx);
+          await audit(c, 'project.deleted', { type: 'project', id: projectId, name: c.get('project').name }, undefined, undefined, tx);
+          await tx.project.delete({ where: { id: projectId } });
+        });
       });
-      await audit(c, 'project.deleted', { type: 'project', id: projectId, name: c.get('project').name });
       return c.body(null, 204);
     },
   )
@@ -234,24 +287,33 @@ export const managementRoutes = new Hono<AppEnv>()
     async (c) => {
       const input = c.req.valid('json');
       const material = generateApiKey(input.kind);
-      const key = await prisma.apiKey.create({
-        data: { ...input, projectId: c.get('project').id, createdById: c.get('user').id, hash: material.hash, prefix: material.prefix },
-        include: creatorSelect,
-      });
+      const key = await withProjectLock(c.get('project').id, () =>
+        prisma.$transaction(async (tx) => {
+          const key = await tx.apiKey.create({
+            data: { ...input, projectId: c.get('project').id, createdById: c.get('user').id, hash: material.hash, prefix: material.prefix },
+            include: creatorSelect,
+          });
+          await auditApiKey(c, 'api_key.created', key, c.get('project'), undefined, tx);
+          return key;
+        }),
+      );
       invalidateSetup(c.get('project').id);
-      await auditApiKey(c, 'api_key.created', key, c.get('project'));
       return c.json({ key: serializeKey(key), secret: material.secret }, 201);
     },
   )
   .delete('/projects/:projectId/keys/:keyId', routeDoc('Revoke API key', { responses: { 204: { description: 'Revoked' } } }), async (c) => {
     const key = await prisma.apiKey.findFirst({ where: { id: c.req.param('keyId'), projectId: c.get('project').id } });
     if (!key) throw new ApiError(404, 'not_found', 'API key not found.');
-    const result = await prisma.apiKey.updateMany({
-      where: { id: key.id, projectId: c.get('project').id, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await withProjectLock(c.get('project').id, () =>
+      prisma.$transaction(async (tx) => {
+        const result = await tx.apiKey.updateMany({
+          where: { id: key.id, projectId: c.get('project').id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        if (result.count) await auditApiKey(c, 'api_key.revoked', key, c.get('project'), undefined, tx);
+      }),
+    );
     invalidateSetup(c.get('project').id);
-    if (result.count) await auditApiKey(c, 'api_key.revoked', key, c.get('project'));
     return c.body(null, 204);
   })
   .get('/projects/:projectId/views', doc('List saved views', z.object({ data: z.array(savedViewSchema) })), async (c) =>
@@ -273,24 +335,29 @@ export const managementRoutes = new Hono<AppEnv>()
         if (!queryClickhouse) throw new ApiError(503, 'sql_mode_unavailable', 'Configure the restricted ClickHouse query user to enable SQL mode.');
         await validateSql(queryClickhouse, state.q);
       } else compileQuery(state.q);
-      const view = await prisma.savedView.create({
-        data: { ...c.req.valid('json'), projectId: c.get('project').id, createdById: c.get('user').id },
-        include: creatorSelect,
+      const view = await prisma.$transaction(async (tx) => {
+        const view = await tx.savedView.create({
+          data: { ...c.req.valid('json'), projectId: c.get('project').id, createdById: c.get('user').id },
+          include: creatorSelect,
+        });
+        await audit(c, 'saved_view.created', { type: 'saved_view', id: view.id, name: view.name }, undefined, undefined, tx);
+        return view;
       });
-      await audit(c, 'saved_view.created', { type: 'saved_view', id: view.id, name: view.name });
       return c.json(serializeView(view), 201);
     },
   )
   .delete('/projects/:projectId/views/:viewId', routeDoc('Delete saved view', { responses: { 204: { description: 'Deleted' } } }), async (c) => {
     const view = await prisma.savedView.findFirst({ where: { id: c.req.param('viewId'), projectId: c.get('project').id } });
-    const result = await prisma.savedView.deleteMany({
-      where: {
-        id: c.req.param('viewId'),
-        projectId: c.get('project').id,
-        ...(hasAdminRole(c.get('member').role) ? {} : { createdById: c.get('user').id }),
-      },
+    await prisma.$transaction(async (tx) => {
+      const result = await tx.savedView.deleteMany({
+        where: {
+          id: c.req.param('viewId'),
+          projectId: c.get('project').id,
+          ...(hasAdminRole(c.get('member').role) ? {} : { createdById: c.get('user').id }),
+        },
+      });
+      if (!result.count) throw new ApiError(404, 'not_found', 'Saved view not found.');
+      await audit(c, 'saved_view.deleted', { type: 'saved_view', id: c.req.param('viewId'), name: view?.name }, undefined, undefined, tx);
     });
-    if (!result.count) throw new ApiError(404, 'not_found', 'Saved view not found.');
-    await audit(c, 'saved_view.deleted', { type: 'saved_view', id: c.req.param('viewId'), name: view?.name });
     return c.body(null, 204);
   });

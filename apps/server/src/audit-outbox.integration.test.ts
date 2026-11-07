@@ -107,7 +107,7 @@ it('counts suppressed attempts, targets known members, fans out atomically, and 
   const orgs = [`qa-${id}-a`, `qa-${id}-b`];
   const hash = authEmailHash(email, secret);
   try {
-    await prisma.user.create({ data: { id, name: 'QA Target Member', email } });
+    await prisma.user.create({ data: { id, name: 'QA Target Member', email, emailHash: hash } });
     for (const org of orgs)
       await prisma.organization.create({
         data: {
@@ -121,18 +121,20 @@ it('counts suppressed attempts, targets known members, fans out atomically, and 
     for (let i = 0; i < 5; i++) await stageFailedSignIn(email, 'invalid_otp', context, secret, now);
     const staged = await prisma.authAuditWindow.findFirstOrThrow({ where: { id: { startsWith: hash } } });
     expect(JSON.stringify(staged)).not.toContain(email);
-    const workspaceBudget = `ws:${orgs[1]}:${Math.floor(now.getTime() / 3_600_000)}`;
+    const workspaceBudget = `${auditNamespace()}:ws:${orgs[1]}:${Math.floor(now.getTime() / 3_600_000) * 3_600_000}`;
     await prisma.authAuditBudget.create({
       data: { id: workspaceBudget, namespace: auditNamespace(), stream: `ws:${orgs[1]}`, windowEnd: new Date('2041-01-01T01:00:00Z'), admitted: 59 },
     });
-    await flushFailedSignIns(secret, now, [staged.id]);
-    await flushFailedSignIns(secret, new Date(now.getTime() + 300_000), [staged.id]);
-    for (const org of [orgs[0]]) {
+    await flushFailedSignIns(now, [staged.id]);
+    await flushFailedSignIns(new Date(now.getTime() + 300_000), [staged.id]);
+    {
+      const org = orgs[0];
       const events = await prisma.auditOutbox.findMany({ where: { stream: `ws:${org}` }, orderBy: { createdAt: 'asc' } });
       expect(events).toHaveLength(2);
       expect(events.map((r) => (r.payload as { metadata: { attempts: number } }).metadata.attempts)).toEqual([1, 4]);
       expect(events[0]?.payload).toMatchObject({ targets: [{ type: 'user', id, name: 'QA Target Member' }] });
     }
+    expect(await prisma.auditOutbox.count({ where: { stream: `ws:${orgs[1]}` } })).toBe(1);
     expect((await prisma.authAuditBudget.findUniqueOrThrow({ where: { id: workspaceBudget } })).suppressed).toBe(4);
     await flushAuthAuditBudgets(new Date('2041-01-01T01:00:01Z'), [workspaceBudget]);
     const summary = await prisma.auditOutbox.findFirstOrThrow({
@@ -142,7 +144,7 @@ it('counts suppressed attempts, targets known members, fans out atomically, and 
     await prisma.authAuditBudget.update({ where: { id: globalId }, data: { admitted: AUTH_AUDIT_GLOBAL_LIMIT } });
     for (let i = 0; i < 3; i++) await stageFailedSignIn(`qa-fresh-${i}-${id}@example.test`, 'invalid_otp', context, secret, now);
     expect((await prisma.authAuditBudget.findUniqueOrThrow({ where: { id: globalId } })).suppressed).toBe(3);
-    expect(await prisma.authAuditWindow.count({ where: { context: { path: ['requestId'], equals: id } } })).toBe(1);
+    expect(await prisma.authAuditWindow.count({ where: { context: { path: ['requestId'], equals: id } } })).toBe(4);
   } finally {
     await prisma.auditOutbox.deleteMany({ where: { stream: { in: orgs.map((org) => `ws:${org}`) } } });
     await prisma.authAuditWindow.deleteMany({ where: { id: { startsWith: hash } } });

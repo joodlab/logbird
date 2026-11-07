@@ -61,10 +61,17 @@ export const inviteLinkRoutes = new Hono<AppEnv>()
       await tx.inviteLink.update({ where: { id: link.id }, data: { uses: { increment: 1 } } });
       // better-auth stores activeOrganizationId on the session; cookie caching is disabled in our auth config.
       await tx.session.update({ where: { id: c.get('session').id }, data: { activeOrganizationId: link.organizationId } });
+      await audit(
+        c,
+        'member.joined_via_link',
+        { type: 'user', id: c.get('user').id, name: c.get('user').email },
+        undefined,
+        { organizationId: link.organizationId },
+        tx,
+      );
       return { organizationId: link.organizationId, role: link.role };
     });
     c.set('activeOrganizationId', result.organizationId);
-    await audit(c, 'member.joined_via_link', { type: 'user', id: c.get('user').id, name: c.get('user').email });
     return c.json(acceptInviteLinkResponseSchema.parse(result));
   })
   .get('/workspace/invite-links', doc('List invite links', inviteLinkListResponseSchema), requireSession, async (c) => {
@@ -85,18 +92,21 @@ export const inviteLinkRoutes = new Hono<AppEnv>()
     async (c) => {
       const organizationId = (await requireRole(c)).organizationId;
       const { expiresInDays, ...input } = c.req.valid('json');
-      const link = await prisma.inviteLink.create({
-        data: {
-          ...input,
-          allowedDomain: input.allowedDomain?.toLowerCase() ?? null,
-          organizationId,
-          token: randomBytes(32).toString('base64url'),
-          expiresAt: new Date(Date.now() + expiresInDays * 86_400_000),
-          createdById: c.get('user').id,
-        },
-        include,
+      const link = await prisma.$transaction(async (tx) => {
+        const link = await tx.inviteLink.create({
+          data: {
+            ...input,
+            allowedDomain: input.allowedDomain?.toLowerCase() ?? null,
+            organizationId,
+            token: randomBytes(32).toString('base64url'),
+            expiresAt: new Date(Date.now() + expiresInDays * 86_400_000),
+            createdById: c.get('user').id,
+          },
+          include,
+        });
+        await audit(c, 'invite_link.created', { type: 'invite_link', id: link.id, name: link.role }, undefined, undefined, tx);
+        return link;
       });
-      await audit(c, 'invite_link.created', { type: 'invite_link', id: link.id, name: link.role });
       return c.json(serialize(link), 201);
     },
   )
@@ -109,8 +119,10 @@ export const inviteLinkRoutes = new Hono<AppEnv>()
       const where = { id: c.req.param('linkId'), organizationId };
       const link = await prisma.inviteLink.findFirst({ where });
       if (!link) throw new ApiError(404, 'invite_link_not_found', 'This invite link does not exist.');
-      await prisma.inviteLink.updateMany({ where: { ...where, revokedAt: null }, data: { revokedAt: new Date() } });
-      await audit(c, 'invite_link.revoked', { type: 'invite_link', id: where.id, name: link.role });
+      await prisma.$transaction(async (tx) => {
+        const result = await tx.inviteLink.updateMany({ where: { ...where, revokedAt: null }, data: { revokedAt: new Date() } });
+        if (result.count) await audit(c, 'invite_link.revoked', { type: 'invite_link', id: where.id, name: link.role }, undefined, undefined, tx);
+      });
       return c.body(null, 204);
     },
   );

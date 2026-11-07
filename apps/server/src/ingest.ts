@@ -84,18 +84,23 @@ export function audit(
     description?: string;
     organizationId?: string;
   },
+  tx?: import('@logbird/database').Prisma.TransactionClient,
 ) {
-  return queueAuditEvent(`ws:${extra?.organizationId ?? c.get('activeOrganizationId')}`, {
-    action,
-    occurredAt: new Date().toISOString(),
-    actor: { type: 'user', id: c.get('user').id, name: c.get('user').name || c.get('user').email },
-    executor: { type: 'api', id: 'api-server' },
-    targets: extra?.targets ?? [target],
-    changes: changes as import('@logbird/database').Prisma.InputJsonValue[],
-    metadata: extra?.metadata,
-    description: extra?.description ?? action,
-    context: { requestId: c.get('requestId'), ip: clientAddress(c) ?? '', userAgent: c.req.header('user-agent') ?? '' },
-  });
+  return queueAuditEvent(
+    `ws:${extra?.organizationId ?? c.get('activeOrganizationId')}`,
+    {
+      action,
+      occurredAt: new Date().toISOString(),
+      actor: { type: 'user', id: c.get('user').id, name: c.get('user').name || c.get('user').email },
+      executor: { type: 'api', id: 'api-server' },
+      targets: extra?.targets ?? [target],
+      changes: changes as import('@logbird/database').Prisma.InputJsonValue[],
+      metadata: extra?.metadata,
+      description: extra?.description ?? action,
+      context: { requestId: c.get('requestId'), ip: clientAddress(c) ?? '', userAgent: c.req.header('user-agent') ?? '' },
+    },
+    tx,
+  );
 }
 
 export async function requireRetentionReady(tx: import('@logbird/database').Prisma.TransactionClient, projectId: string) {

@@ -5,6 +5,11 @@ import { clientIp, primaryRole } from '@logbird/email';
 import { sendMemberJoined, sendOrganizationInvitation, sendRoleChanged, sendSignInCode } from '@logbird/email/send';
 import { createEnv } from '@t3-oss/env-core';
 import { betterAuth } from 'better-auth';
+import { APIError } from 'better-auth/api';
+import { confirmSessionEnd, recordSessionSignIn, stageSessionEnd } from './session-audit';
+
+export { reconcileSessionAudit } from './session-audit';
+
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { emailOTP, organization } from 'better-auth/plugins';
 import { z } from 'zod';
@@ -25,7 +30,6 @@ export const authAuditContext = new AsyncLocalStorage<{
   ip: string;
   userAgent: string;
   path?: string;
-  organizationBefore?: { id: string; name: string; slug: string };
 }>();
 let auditHandler: ((event: AuthAudit) => Promise<unknown>) | undefined;
 export const setAuthAuditHandler = (handler: NonNullable<typeof auditHandler>) => {
@@ -69,25 +73,6 @@ async function notify(kind: string, send: () => Promise<unknown>) {
     console.error(JSON.stringify({ level: 'error', event: 'email.failed', kind, message: error instanceof Error ? error.message : String(error) }));
   }
 }
-async function recordSessionActivity(session: { id: string; userId: string }, action: string) {
-  try {
-    const user = await prisma.user.findUnique({ where: { id: session.userId } });
-    if (!user) return;
-    const members = await prisma.member.findMany({ where: { userId: user.id } });
-    await Promise.all(
-      members.map((member) =>
-        record(
-          member.organizationId,
-          action,
-          user,
-          action === 'auth.signed_in' ? { type: 'user', id: user.id, name: user.name } : { type: 'session', id: session.id },
-        ),
-      ),
-    );
-  } catch {
-    console.error(JSON.stringify({ event: 'auth.audit_storage_unavailable', action }));
-  }
-}
 export const auth = betterAuth({
   baseURL: env.APP_URL,
   // The API boundary enforces shared Redis limits across replicas.
@@ -102,17 +87,23 @@ export const auth = betterAuth({
   },
   databaseHooks: {
     session: {
-      create: { after: (session) => recordSessionActivity(session, 'auth.signed_in') },
-      delete: {
+      create: {
         after: async (session) => {
-          const path = authAuditContext.getStore()?.path;
-          if (
-            new Date(session.expiresAt).getTime() <= Date.now() ||
-            !path ||
-            !['/api/auth/sign-out', '/api/auth/revoke-session', '/api/auth/revoke-sessions', '/api/auth/revoke-other-sessions'].includes(path)
-          )
-            return;
-          await recordSessionActivity(session, path === '/api/auth/sign-out' ? 'auth.signed_out' : 'auth.session.revoked');
+          try {
+            await recordSessionSignIn(session, env.BETTER_AUTH_SECRET, authAuditContext.getStore());
+          } catch {
+            console.error(JSON.stringify({ event: 'auth.audit_storage_unavailable', action: 'auth.signed_in' }));
+          }
+        },
+      },
+      delete: {
+        before: (session) => stageSessionEnd(session, authAuditContext.getStore()),
+        after: async (session) => {
+          try {
+            await confirmSessionEnd(session);
+          } catch {
+            console.error(JSON.stringify({ event: 'auth.audit_storage_unavailable', action: 'auth.session.end.confirm' }));
+          }
         },
       },
     },
@@ -143,30 +134,9 @@ export const auth = betterAuth({
         afterCreateOrganization: async ({ organization, user }) => {
           await record(organization.id, 'organization.created', user, { type: 'organization', id: organization.id, name: organization.name });
         },
-        beforeUpdateOrganization: async ({ member }) => {
-          const context = authAuditContext.getStore();
-          if (context)
-            context.organizationBefore = await prisma.organization.findUniqueOrThrow({
-              where: { id: member.organizationId },
-              select: { id: true, name: true, slug: true },
-            });
-        },
-        afterUpdateOrganization: async ({ organization, user }) => {
-          const before = authAuditContext.getStore()?.organizationBefore;
-          if (!organization || before?.id !== organization.id) return;
-          const changes = (['name', 'slug'] as const)
-            .filter((field) => before[field] !== organization[field])
-            .map((field) => ({ field, before: before[field], after: organization[field] }));
-          if (changes.length)
-            await record(
-              organization.id,
-              'organization.updated',
-              user,
-              { type: 'organization', id: organization.id, name: organization.name },
-              changes,
-              `Renamed the workspace from ${before.name} to ${organization.name}` +
-                (before.slug !== organization.slug ? ` (slug: ${before.slug} -> ${organization.slug})` : ''),
-            );
+        beforeUpdateOrganization: async ({ organization: input }) => {
+          if (input.name !== undefined || input.slug !== undefined)
+            throw new APIError('FORBIDDEN', { message: 'Use PATCH /api/workspace to change the workspace name or URL slug.' });
         },
         afterCreateInvitation: async ({ organization, inviter, invitation }) => {
           await record(organization.id, 'member.invited', inviter, { type: 'invitation', id: invitation.id, name: invitation.email });

@@ -1,7 +1,7 @@
 import { auth, authAuditContext, setAuthAuditHandler } from '@logbird/auth';
 import { QueryError } from '@logbird/clickhouse';
 import { queryErrorDetailsSchema } from '@logbird/contracts';
-import { Prisma, ProjectBusyError, prisma, withProjectLock } from '@logbird/database';
+import { Prisma, ProjectBusyError, prisma } from '@logbird/database';
 import { connection } from '@logbird/worker/queue';
 import { apiReference } from '@scalar/hono-api-reference';
 import { Hono } from 'hono';
@@ -22,6 +22,7 @@ import { invitationRoutes } from './invitation-routes';
 import { inviteLinkRoutes } from './invite-link-routes';
 import { authorizeMutation } from './middlewares/require-role';
 import { doc, routeDoc } from './openapi';
+import { auditDrainStatus } from './outbox-delivery';
 import { clientAddress, rateLimit } from './rate-limit';
 import { managementRoutes } from './routes';
 import { setupRoutes } from './setup-routes';
@@ -99,7 +100,7 @@ setAuthAuditHandler((e) =>
 );
 app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  const authBody = ['/api/auth/organization/invite-member', '/api/auth/sign-in/email-otp', '/api/auth/organization/update'].includes(c.req.path)
+  const authBody = ['/api/auth/organization/invite-member', '/api/auth/sign-in/email-otp'].includes(c.req.path)
     ? await c.req.raw
         .clone()
         .json()
@@ -146,14 +147,7 @@ app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
         return response;
       },
     );
-  // Rename serialization ends after durable enqueue. Delivery never reacquires this pool inside the hook.
-  const organizationId = (typeof authBody?.organizationId === 'string' && authBody.organizationId) || session?.session.activeOrganizationId;
-  return c.req.path === '/api/auth/organization/update' && organizationId
-    ? withProjectLock(`organization-update:${organizationId}`, runAuth).catch((error) => {
-        if (error instanceof ProjectBusyError) throw new ApiError(503, 'workspace_busy', 'Another workspace update is in progress. Retry shortly.');
-        throw error;
-      })
-    : runAuth();
+  return runAuth();
 });
 app.get('/livez', (c) => c.json({ status: 'ok' }));
 app.get('/readyz', async (c) => {
@@ -165,7 +159,8 @@ app.get('/readyz', async (c) => {
     connection.ping(),
   ]);
   const ready = checks.every((r) => r.status === 'fulfilled');
-  return c.json({ status: ready ? 'ok' : 'degraded' }, ready ? 200 : 503);
+  const audit = await auditDrainStatus().catch(() => ({ unavailable: true }));
+  return c.json({ status: ready ? 'ok' : 'degraded', audit }, ready ? 200 : 503);
 });
 app.get(
   '/health',
