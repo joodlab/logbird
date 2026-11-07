@@ -19,7 +19,7 @@ import { translateQueryToSql } from '@/lib/query-translate';
 import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
 import { appendSqlPredicate } from '@/lib/sql-language';
 import { EventSheet } from './event-sheet';
-import { EventsTable } from './events-table';
+import { EventsTable, type EventsTableHandle } from './events-table';
 import { ColumnPicker, ExplorerOverflowMenu, ExportMenu, SaveViewButton } from './explorer-toolbar';
 import { FacetSidebar } from './facet-sidebar';
 
@@ -49,6 +49,14 @@ interface ExplorerProps {
 
 const FACETS_KEY = 'logbird.explorer.facets';
 
+/**
+ * The `EventsTable` result-set key: every input of the events query. That is the project, the range and the effective
+ * query, including an entity page's `baseQuery`. The language only matters when there is a query to parse.
+ */
+export function explorerResultKey(projectId: string, range: string, effectiveQ: string, lang: QueryLang): string {
+  return JSON.stringify([projectId, range, effectiveQ, effectiveQ ? lang : 'query']);
+}
+
 function newestArrival(events: AuditEvent[]): string | undefined {
   return events.reduce<string | undefined>((max, e) => (!max || e.receivedAt > max ? e.receivedAt : max), undefined);
 }
@@ -56,6 +64,12 @@ function newestArrival(events: AuditEvent[]): string | undefined {
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   return Boolean(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.closest('[role=dialog]')));
+}
+
+/** `o` opens the cursor row only from the page or the grid itself, never while another control has focus. */
+function isPageOrRow(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  return !el || el === document.body || el.getAttribute('role') === 'row';
 }
 
 export function Explorer({
@@ -72,6 +86,7 @@ export function Explorer({
   const lang: QueryLang = allowSql && state.lang === 'sql' ? 'sql' : 'query';
   const effectiveQ = [baseQuery, q].filter(Boolean).join(' ');
   const queryBar = useRef<QueryInputHandle>(null);
+  const eventsTable = useRef<EventsTableHandle>(null);
   const [facetsOpen, setFacetsOpen] = useState(() => {
     if (embedded || typeof window === 'undefined') return false;
     try {
@@ -82,7 +97,8 @@ export function Explorer({
   });
   const [mobileFacets, setMobileFacets] = useState(false);
   const [showChart, setShowChart] = useState(true);
-  const [cursor, setCursor] = useState(-1);
+  // The keyboard cursor, by event id: it stays on its event when live tail prepends rows.
+  const [cursorId, setCursorId] = useState<string | null>(null);
 
   const events = useInfiniteQuery(eventsInfiniteQuery(projectId, range, effectiveQ, lang));
   // Round bucket sizes (30 min for 24 h, 3 h for 7 d) so bars line up with the axis ticks.
@@ -91,9 +107,23 @@ export function Explorer({
   /* ---------------- query errors ---------------- */
   // A rejected query keeps the last good results on screen (dimmed) and explains itself in the bar.
   const problem = queryProblem(events.error, lang) ?? queryProblem(histogram.error, lang);
-  const lastGood = useRef<{ pages?: SearchResponse[]; histogram?: HistogramResponse; query?: { q: string; lang: QueryLang } }>({});
+  const lastGood = useRef<{
+    pages?: SearchResponse[];
+    histogram?: HistogramResponse;
+    query?: { q: string; lang: QueryLang };
+    range?: string;
+    resultKey?: string;
+  }>({});
   if (events.data && !events.isError) lastGood.current.pages = events.data.pages;
-  if (events.isSuccess && !events.isPlaceholderData) lastGood.current.query = { q, lang };
+  if (events.isSuccess && !events.isPlaceholderData) {
+    lastGood.current.query = { q, lang };
+    lastGood.current.range = range;
+    lastGood.current.resultKey = explorerResultKey(projectId, range, effectiveQ, lang);
+  }
+  // The result set the table shows: it changes only when non-placeholder results for a new project, query, language or
+  // range are committed, so the table starts that set at the top even when it shares rows with the old one (e.g. moving
+  // between two entity profiles, where `q` stays empty but `baseQuery` changes).
+  const resultKey = lastGood.current.resultKey;
   if (histogram.data && !histogram.isError) lastGood.current.histogram = histogram.data;
   // Nothing valid to save or export while the query is rejected (the export would fail the same way).
   const saveBlocked = problem ? 'Fix the query first — a view must run without errors.' : null;
@@ -166,15 +196,22 @@ export function Explorer({
   const selected = selectedFromRows ?? deepLinked.data?.event ?? null;
 
   const select = useCallback((e: AuditEvent | null) => onChange({ ev: e?.id }), [onChange]);
+  // The table moves the cursor onto the open event itself (clicks, j/k in the sheet, deep links), so closing the sheet
+  // returns focus to it.
+  const cursorIndex = cursorId ? rows.findIndex((e) => e.id === cursorId) : -1;
   const move = useCallback(
     (delta: number) => {
       if (rows.length === 0) return;
-      const from = ev ? selectedIndex : cursor;
+      const from = ev ? selectedIndex : cursorIndex;
       const next = Math.min(rows.length - 1, Math.max(0, (from < 0 ? -1 : from) + delta));
-      setCursor(next);
-      if (ev) select(rows[next] ?? null);
+      const target = rows[next];
+      if (!target) return;
+      setCursorId(target.id);
+      if (ev) select(target);
+      // With the sheet closed, j/k move real focus through the grid (the sheet keeps focus while it is open).
+      else eventsTable.current?.focusRow(next);
     },
-    [rows, ev, selectedIndex, cursor, select],
+    [rows, ev, selectedIndex, cursorIndex, select],
   );
 
   useEffect(() => {
@@ -192,14 +229,15 @@ export function Explorer({
       } else if (event.key === 'k') {
         event.preventDefault();
         move(-1);
-      } else if ((event.key === 'Enter' || event.key === 'o') && cursor >= 0 && !ev) {
+      } else if (event.key === 'o' && cursorIndex >= 0 && !ev && isPageOrRow(event.target)) {
+        // Enter on a focused row is handled by the grid itself.
         event.preventDefault();
-        select(rows[cursor] ?? null);
+        select(rows[cursorIndex] ?? null);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [move, cursor, ev, rows, select]);
+  }, [move, cursorIndex, ev, rows, select]);
 
   /** "Filter by this value" from the event sheet: a query term, translated to a predicate in SQL mode. */
   const addFilter = (term: string) => {
@@ -267,6 +305,8 @@ export function Explorer({
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
+      {/* The page's heading for screen-reader navigation; the visible title is the breadcrumb. */}
+      {embedded ? null : <h1 className="sr-only">Events</h1>}
       <div className="flex flex-col gap-2 border-b px-3 py-2.5 sm:px-4">
         <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
           {embedded ? null : (
@@ -402,7 +442,12 @@ export function Explorer({
               </>
             )}
           </span>
-          <button className="flex shrink-0 items-center gap-1 hover:text-foreground" onClick={() => setShowChart((s) => !s)} type="button">
+          <button
+            aria-expanded={showChart}
+            className="-my-2 flex shrink-0 items-center gap-1 py-2 hover:text-foreground pointer-coarse:-my-3.5 pointer-coarse:py-3.5"
+            onClick={() => setShowChart((s) => !s)}
+            type="button"
+          >
             <ChevronDownIcon className={cn('size-3.5 transition-transform', !showChart && '-rotate-90')} />
             {showChart ? 'Hide chart' : 'Show chart'}
           </button>
@@ -419,7 +464,21 @@ export function Explorer({
       </div>
 
       <div className="flex min-h-0 flex-1">
-        {facetsOpen ? <div className="hidden w-60 shrink-0 border-e xl:flex xl:flex-col">{facetsPanel}</div> : null}
+        {facetsOpen ? (
+          <div className="relative hidden w-60 shrink-0 border-e xl:flex xl:flex-col">
+            {/* The facet list is dozens of Tab stops: let keyboard users jump past it to the events (shown on focus). */}
+            {rows.length ? (
+              <button
+                className="sr-only rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md outline-none focus-visible:outline-hidden focus-visible:not-sr-only focus-visible:absolute focus-visible:start-2 focus-visible:top-2 focus-visible:z-30 focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => eventsTable.current?.focusCursor()}
+                type="button"
+              >
+                Skip filters to events
+              </button>
+            ) : null}
+            {facetsPanel}
+          </div>
+        ) : null}
         <div className={cn('relative flex min-h-0 min-w-0 flex-1 flex-col transition-opacity', problem && rows.length > 0 && 'opacity-45')}>
           {liveActive && liveRows.length > 0 ? (
             <div className="pointer-events-none absolute inset-x-0 top-10 z-20 flex justify-center">
@@ -431,17 +490,22 @@ export function Explorer({
           ) : null}
           <EventsTable
             columns={columns}
-            cursorIndex={ev ? selectedIndex : cursor}
+            cursorId={cursorId}
             empty={empty}
             fetchingMore={events.isFetchingNextPage}
+            // A refetch emptied the list while a row had focus: back to the query, the way to widen it.
+            focusFallback={() => queryBar.current?.element()}
             freshIds={fresh}
             hasMore={!problem && events.hasNextPage}
             loadMore={() => events.fetchNextPage()}
             loading={events.isPending && !problem}
+            onCursorChange={setCursorId}
+            resultKey={resultKey}
             onSelect={(e) => {
-              setCursor(rows.indexOf(e));
+              setCursorId(e.id);
               select(e);
             }}
+            ref={eventsTable}
             rows={rows}
             selectedId={ev}
             total={total}
@@ -451,6 +515,9 @@ export function Explorer({
 
       <EventSheet
         event={selected}
+        // Back to the row the sheet showed last (it may differ from the one opened, after j/k): never to <body>.
+        // With no rows left (a refetch emptied the list meanwhile), to the query bar.
+        finalFocus={() => eventsTable.current?.cursorElement() ?? queryBar.current?.element() ?? true}
         onFilter={(term) => {
           addFilter(term);
         }}
