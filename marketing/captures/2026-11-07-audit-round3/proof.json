@@ -1,0 +1,52 @@
+{
+  "beforeAuthCaptureRevision": "4f9b138",
+  "revision": "9c678e1882679bfd88b289b421b18ac76e9a9e15",
+  "screenshots": [
+    "after-light-1440-workspace.png",
+    "after-light-1440-sessions.png",
+    "after-dark-1440-workspace.png",
+    "after-dark-1440-sessions.png",
+    "after-light-390-workspace.png",
+    "after-light-390-sessions.png",
+    "after-dark-390-workspace.png",
+    "after-dark-390-sessions.png"
+  ],
+  "videos": [
+    "light-1440-interactions.webm",
+    "light-390-interactions.webm"
+  ],
+  "problems": [],
+  "cleanup": {
+    "clickhouse": {
+      "events": 0,
+      "events_by_minute": 0,
+      "entities": 0,
+      "attribute_keys": 0,
+      "event_ids": 0
+    },
+    "postgresProjects": 0,
+    "postgres": {
+      "users": 0,
+      "organizations": 0,
+      "projects": 0,
+      "members": 0,
+      "outbox": 0,
+      "windows": 0,
+      "budgets": 0,
+      "receipts": 0
+    },
+    "windowLookup": "exact canonical fixture HMAC, resolved from own Mailpit messages"
+  },
+  "fixture": {
+    "userId": "JsoXHgAZynvUIH0awGTSD2luHwmAdklr",
+    "orgId": "0WHjbppU55l36UYM5FTsesOXc3UCCwc8",
+    "projectId": "cmw6liiyh00003wyode6fjdor"
+  },
+  "resources": {
+    "minFreeGiB": 23.901756286621094,
+    "minDiskGiB": 109.07366561889648,
+    "reason": "completed",
+    "date": "2026-11-07T17:07:52.2085583+01:00",
+    "peakTreeGiB": 2.135028839111328
+  }
+}
