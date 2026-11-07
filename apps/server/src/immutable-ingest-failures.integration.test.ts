@@ -247,6 +247,6 @@ it('a failed async-queue drain keeps expired claims fenced', async () => {
   vi.spyOn(clickhouse, 'command').mockRejectedValueOnce(new Error('queue drain timeout'));
   const response = await f.post(input);
   expect(response.status).toBe(503);
-  expect((await response.json()).error.code).toBe('ingest_unavailable');
+  expect((await response.json()).error).toMatchObject({ code: 'ingest_pending', details: { accepted: 0, indices: [0], eventIds: ['same'] } });
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, confirmedAt: null, claimedAt: { not: null } } })).toBe(1);
 });

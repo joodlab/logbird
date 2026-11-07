@@ -11,6 +11,7 @@ import { ApiError } from './errors';
 import { ingest, readIngestBody, requireProjectReadable } from './ingest';
 import { requireApiKey, requireProjectAccess, requireSession } from './middlewares';
 import { doc as responseDoc, routeDoc } from './openapi';
+import { beginRollupRead, finishRollupRead } from './project-read';
 import { publicRateLimits } from './rate-limit';
 import type { AppEnv } from './types';
 
@@ -55,8 +56,17 @@ const found = <T>(value: T | null) => {
 };
 const projectRead = createMiddleware<AppEnv>(async (c, next) => {
   if (c.req.method !== 'GET') return next();
-  await requireProjectReadable(c.get('project').id);
+  const projectId = c.get('project').id;
+  // These non-streaming responses use derived destinations (fields is guarded for compatibility).
+  const rollup = /^\/api\/projects\/[^/]+\/(?:entities(?:\/.*)?|overview|fields|suggest)$/.test(c.req.path);
+  if (!rollup) {
+    await requireProjectReadable(projectId);
+    return next();
+  }
+  const generation = await beginRollupRead(projectId);
   await next();
+  // Hono has materialized even an error response here: a concurrent repair must override false 404s too.
+  await finishRollupRead(projectId, generation);
 });
 const publicQueryLanguage = createMiddleware<AppEnv>(async (c, next) => {
   if (c.req.query('lang') === 'sql')

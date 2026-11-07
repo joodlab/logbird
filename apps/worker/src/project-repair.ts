@@ -16,16 +16,19 @@ export async function rebuildProjectReadModel(ch: ClickHouseClient, projectId: s
   // Workspace activity exposes raw search only, with no rollup-backed read routes or Project FK.
   if (projectId.startsWith('ws:')) return rebuildProjectRollups(ch, projectId);
   const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
-  const run = await prisma.retentionRun.create({
-    data: {
-      projectId,
-      kind: 'ingest_repair',
-      retentionDays: project.retentionDays,
-      cutoff: new Date(Date.now() - project.retentionDays * 86_400_000),
-      status: 'running',
-      startedAt: new Date(),
-      heartbeatAt: new Date(),
-    },
+  const run = await prisma.$transaction(async (tx) => {
+    await tx.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } });
+    return tx.retentionRun.create({
+      data: {
+        projectId,
+        kind: 'ingest_repair',
+        retentionDays: project.retentionDays,
+        cutoff: new Date(Date.now() - project.retentionDays * 86_400_000),
+        status: 'running',
+        startedAt: new Date(),
+        heartbeatAt: new Date(),
+      },
+    });
   });
   const stop = heartbeatMaintenanceRun(run.id);
   try {

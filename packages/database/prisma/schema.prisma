@@ -134,6 +134,7 @@ model Project {
   slug           String
   description    String?
   retentionDays  Int            @default(90)
+  maintenanceGeneration BigInt @default(0)
   retentionReviewedAt DateTime?
   setupDismissedAt DateTime?
   setupCompletedAt DateTime?

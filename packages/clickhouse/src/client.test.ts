@@ -7,6 +7,8 @@ it.each([
   ['60', 'Unknown table events', false],
   ['6', 'Parse failed: while pushing to view logbird.events_mv', true],
   ['60', 'Target missing: while pushing to view logbird.event_ids_mv', true],
+  ['60', "Target table 'logbird.event_ids_v2' of view 'logbird.events' doesn't exists: While executing WaitForAsyncInsert.", true],
+  ['6', 'Parse failed (while pushing to view logbird.events_mv)', true],
 ])('classifies %s with server context %s', async (code, message, ambiguous) => {
   const row = normalizeEvent({ id: 'safe', action: 'safe' }, { projectId: 'fictional', receivedAt: new Date() });
   if (!row.ok) throw new Error(row.reason);

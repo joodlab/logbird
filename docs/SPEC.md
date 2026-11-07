@@ -56,6 +56,15 @@ or readies absent writes for an exact retry with the original receipt clock. Rea
 claims expire under exclusive recovery after the ten-minute grace period; ordinary
 retention never releases unresolved claims. `503 ingest_pending` includes settled
 202 response fields plus pending `indices`/`eventIds` and a lease-aware Retry-After.
+Rollup-backed console reads (entities, overview, suggestions; fields is also guarded)
+read a monotonic project maintenance generation and fence before and after ClickHouse.
+Maintenance increments the generation in the same short transaction that persists its
+running fence, before any destructive statement. Changed generations or an unfinished
+fence discard the response with `503 retention_unavailable` and Retry-After, including
+repairs that finish during a read. Readers hold neither a project lock nor a Postgres
+connection across ClickHouse I/O. Raw-event reads retain the existing **not a snapshot**
+semantics: concurrent ingest/retention can change results, and rebuilds do not empty raw events.
+
 The SDK retries the identical body. See [ingest-identity.md](ingest-identity.md) for
 migration, failure classification, permissions, cleanup and proof limits.
 

@@ -21,6 +21,7 @@ it('records the underlying retention error code without logging query content', 
     await expect(enforceProjectRetention(project.id)).rejects.toMatchObject({ code: '241' });
     const receipt = await prisma.retentionRun.findFirstOrThrow({ where: { projectId: project.id }, orderBy: { startedAt: 'desc' } });
     expect(receipt.status).toBe('failed');
+    expect((await prisma.project.findUniqueOrThrow({ where: { id: project.id } })).maintenanceGeneration).toBe(1n);
     expect(receipt.error).toBe('ClickHouse retention failed; retry required.');
     expect(log).toHaveBeenCalledWith(
       JSON.stringify({ level: 'error', event: 'retention.run_failed', runId: receipt.id, projectId: project.id, errorCode: '241' }),

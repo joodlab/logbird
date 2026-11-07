@@ -185,6 +185,8 @@ ALTER TABLE logbird.migrations DELETE WHERE name IN
 -- Postgres: retain IngestReceipt and its original migration.
 BEGIN;
 -- Only after all maintenance has completed and its durable state is preserved.
+ALTER TABLE "Project" DROP COLUMN "maintenanceGeneration";
+DELETE FROM "_prisma_migrations" WHERE migration_name = '20261107180000_maintenance_generation';
 ALTER TABLE "RetentionRun" DROP CONSTRAINT IF EXISTS "RetentionRun_kind_check";
 ALTER TABLE "RetentionRun" DROP COLUMN "kind";
 DELETE FROM "_prisma_migrations" WHERE migration_name = '20261107170000_ingest_repair_kind';
@@ -217,3 +219,12 @@ definite storage parse failure. Neither changes ambiguity classification here.
 
 Removal of pre-merge compatibility after safe shared-DB reconciliation is tracked
 in [#94](https://github.com/joodlab/logbird/issues/94).
+
+Rollup read admission also uses `Project.maintenanceGeneration` (additive migration
+20261107180000_maintenance_generation). Repair and destructive retention increment
+it atomically with their running fence before ClickHouse deletes. A short PG
+statement reads both generation and fence before and after each affected response.
+If a repair overlaps either query, even if it completes before the second check,
+the response is discarded with 503. No read holds a project lock or a PG connection
+during ClickHouse I/O. Raw events remain non-snapshot reads; they are not emptied
+by a rollup rebuild. Deploy the additive column before new server/worker binaries.
