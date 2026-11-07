@@ -279,6 +279,17 @@ bundled metrics collector or Prometheus endpoint; configure external host/Docker
 monitoring and alerts. See [manual releases](releases.md) for architecture and
 image-publishing gates.
 
+Retention-heavy installations also need background mutation capacity. ClickHouse
+merges and mutations share `background_pool_size`; a very small pool (for example,
+two threads) can leave lightweight deletes waiting behind concurrent purges. Inspect
+`system.mutations`, `system.merges`, retention completion time and disk/CPU pressure.
+Review `background_merges_mutations_concurrency_ratio` and
+`number_of_free_entries_in_pool_to_execute_mutation` together before changing the
+pool: a larger pool consumes resources, and incompatible mutation thresholds can
+prevent progress. Benchmark representative retention alongside ingestion rather
+than copying a shared development server's settings or extrapolating its purge
+latency to production. See the [ClickHouse background-pool reference](https://clickhouse.com/docs/reference/settings/server-settings/settings/background#background_pool_size).
+
 ## Disposable acceptance fixture
 
 For a disposable evaluation only, `scripts/selfhost-smoke.mjs` creates a fictional
