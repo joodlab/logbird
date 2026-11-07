@@ -4,9 +4,7 @@
   "scope": "SDK request/carrier/jobAudit real HTTP ingest and readback; job attempts are SDK fixtures, not a BullMQ retry",
   "projectId": "cmw6bxxzb0000acyosopalx0b",
   "operationId": "01a1b5cd-6e96-7344-8222-35f5d8ca574b",
-  "ingestStatuses": [
-    202
-  ],
+  "ingestStatuses": [202],
   "readStatus": 200,
   "eventCount": 4,
   "events": [
