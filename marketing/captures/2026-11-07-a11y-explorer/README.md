@@ -67,3 +67,23 @@ Full JSON: `axe-report-before.json`, `axe-report-after.json`. Video narration: `
 | queryArrowRightAccepts | outcome:failure OR action:guest.updated act | outcome:failure action: |
 | rangePresetFocusRing | Last hour outline=none box-shadow=none | Last hour outline=none box-shadow=rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0,  |
 
+
+## Round 2 (review follow-up) — rerunnable proof
+
+`apps/app/scripts/a11y-grid-proof.mjs` (committed this time) drives one Playwright Chromium against the real local stack with a
+fictional fixture (`qa-fix-a11y-r2-*@example.test`, workspace "QA Fix a11y r2", project deleted at the end) and axe-core 4.10.3.
+Output: `round2-proof.txt` (narration) and `round2-proof.json` (all checks and axe results). All 21 checks passed:
+
+- **Explorer live tail:** keyboard into the grid (10 presses from the query), ↓ ×50 to row 50, then 150 live events arrive in two
+  batches. Focus stays on the same event and the same DOM node, which is now index 200 and still the only tab stop. Its row stays at y = 856 on
+  screen (scrollTop +5400 px = 150 rows: no jump). ↓ continues from that event (index 201), `k` goes back, and Enter → Escape
+  returns focus to it.
+- **Workspace Activity:** Tab reaches the grid, then ↓ ×3 moves the roving tab stop to row 3. Shift+Tab out and Tab back return to row 3, and the
+  event sheet's Escape returns to row 3. The focused row survives scrolling the list to the bottom.
+- **Query bar:** Tab / Shift+Tab out of and back into `outcome:failure OR ` leave the draft unchanged.
+- **Settings at 390 px:** General → Danger zone → General keeps the active tab fully visible in LTR and under `dir=rtl`, where
+  scrollLeft is −236 and the fade is drawn from the right.
+- **axe:** explorer `aria-allowed-role(1)`, `page-has-heading-one(1)` (both pre-existing, see the PR); event sheet, Workspace
+  Activity (light and dark), its event sheet, and Settings: 0.
+
+No visuals changed in round 2, so the screenshots and video above still apply.

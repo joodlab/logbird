@@ -1,5 +1,5 @@
 import { cn } from '@logbird/ui/lib/utils';
-import { createFileRoute, Link, Outlet, useRouterState } from '@tanstack/react-router';
+import { createFileRoute, Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { logicalScroll, logicalTabSpan, physicalScroll, revealScroll, stripEdges, stripMask } from '@/lib/tab-strip';
 
@@ -36,19 +36,26 @@ function useTabStrip(activeKey: string) {
       observer.disconnect();
     };
   }, []);
+  const router = useRouter();
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run when the active section changes
   useEffect(() => {
-    const nav = ref.current;
-    const active = nav?.querySelector<HTMLElement>('[aria-current="page"]');
-    if (!nav || !active) return;
     // Scroll only the strip (scrollIntoView would also scroll the page): bring the active tab fully into view, clear of
     // the fades.
-    const rtl = getComputedStyle(nav).direction === 'rtl';
-    const scroll = logicalScroll(nav.scrollLeft);
-    const tab = logicalTabSpan(nav.getBoundingClientRect(), active.getBoundingClientRect(), scroll, rtl);
-    const target = revealScroll(tab, { scroll, width: nav.clientWidth, scrollWidth: nav.scrollWidth }, FADE);
-    if (target !== null) nav.scrollLeft = physicalScroll(target, rtl);
-  }, [activeKey]);
+    const reveal = () => {
+      const nav = ref.current;
+      const active = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+      if (!nav || !active) return;
+      const rtl = getComputedStyle(nav).direction === 'rtl';
+      const scroll = logicalScroll(nav.scrollLeft);
+      const tab = logicalTabSpan(nav.getBoundingClientRect(), active.getBoundingClientRect(), scroll, rtl);
+      const target = revealScroll(tab, { scroll, width: nav.clientWidth, scrollWidth: nav.scrollWidth }, FADE);
+      if (target !== null) nav.scrollLeft = physicalScroll(target, rtl);
+    };
+    reveal();
+    // The router's scroll restoration carries the strip's previous offset over to the new location and applies it on
+    // `onRendered`, possibly after this effect: check again then (it subscribed first, so it has already run).
+    return router.subscribe('onRendered', reveal);
+  }, [activeKey, router]);
   const mask = stripMask(state, FADE, state.rtl);
   return { ref, style: mask ? { maskImage: mask, WebkitMaskImage: mask } : undefined };
 }

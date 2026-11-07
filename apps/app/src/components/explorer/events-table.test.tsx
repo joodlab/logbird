@@ -165,6 +165,13 @@ describe.each([
     expect(tabStops()).toEqual(['e8']);
   });
 
+  it('returns focus to a real row when the open event is not in the loaded rows (a deep link)', () => {
+    const t = mount(page('e', 200), controlled);
+    act(() => t.harness().setSelected('elsewhere'));
+    expect(t.table().cursorElement()?.dataset.eventId).toBe('e0');
+    expect(tabStops()).toEqual(['e0']);
+  });
+
   it('keeps focus on the same event when live tail prepends more rows than the overscan, without moving the view', () => {
     const t = mount(page('e', 10_000), controlled);
     act(() => {
