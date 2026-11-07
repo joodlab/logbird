@@ -573,6 +573,9 @@
                     "rejected": {
                       "items": {
                         "properties": {
+                          "code": {
+                            "type": "string"
+                          },
                           "index": {
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
@@ -584,7 +587,8 @@
                         },
                         "required": [
                           "index",
-                          "reason"
+                          "reason",
+                          "code"
                         ],
                         "type": "object"
                       },

@@ -68,7 +68,7 @@ app.onError((error, c) => {
     return c.json({ error: { code: 'invalid_query', message: error.message, details: queryErrorDetailsSchema.parse(error.details) } }, 422);
   if (error instanceof ApiError) {
     if (error.code === 'retention_unavailable' || error.code === 'ingest_pending' || error.code === 'ingest_unavailable')
-      c.header('Retry-After', '1');
+      c.header('Retry-After', String(Math.max(1, Math.ceil(error.retryAfter ?? 1))));
     return c.json({ error: { code: error.code, message: error.message, details: error.details } }, error.status);
   }
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')

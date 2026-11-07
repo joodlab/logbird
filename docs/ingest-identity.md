@@ -1,129 +1,190 @@
 # Immutable event ids
 
 An id names one immutable event within a project, across all timestamps and
-partitions. Public ingest, workspace audit writes and sample generation use the
-same receipt lifecycle. See [Event ids and retries](concepts.md#event-ids-and-retries)
-for integration guidance.
+partitions. Public ingest, workspace audit writes and sample generation share the
+receipt lifecycle. See [Event ids and retries](concepts.md#event-ids-and-retries).
 
 ## Coordination and identity
 
-Shared project advisory locks permit concurrent API processes; the Postgres unique
+Shared project advisory locks permit concurrent API processes. The Postgres unique
 key on `IngestReceipt(projectId,eventId)` arbitrates ownership. Claims are inserted
-in sorted order with `createManyAndReturn(skipDuplicates)` and use Prisma's date
-encoding rather than session-timezone-sensitive raw Date parameters. No Postgres
-transaction spans ClickHouse I/O. Maintenance/recovery takes the exclusive lock.
+in sorted order with `createManyAndReturn(skipDuplicates)` and Prisma date encoding.
+No Postgres transaction spans ClickHouse I/O. Maintenance and recovery take the
+exclusive project lock, including any recovered INSERT.
 
 `v1:` fingerprints hash recursively key-sorted parsed INPUT plus the resolved UTC
-timestamp. Arrays retain order; strings and values outside every indexing cap
-participate. The first receipt clock resolves omitted/invalid occurredAt. Transport
-SDK headers do not participate. Search normalization must never define v1 identity.
-Unprefixed receipts retain the former normalized-column comparison for rollout
-compatibility; stored payloads upgrade them on confirmation. A missing old receipt
-has only its old digest, so its original lossy comparison remains until reinsertion.
-Stop/drain old writer binaries before rollout; direct ClickHouse writes bypass fencing.
+timestamp. Array order, string contents and values beyond every indexing cap
+participate. Omitted or invalid occurredAt keeps the first receipt clock. SDK
+headers do not participate. Search normalization and today's admission rules must
+never redefine stored identity. Stored v1 identity uses the original payload and
+stored timestamp directly. One malformed legacy payload is rejected individually
+as `stored_event_unreadable`; it cannot block healthy siblings or free its id.
+Unprefixed pending receipts retain the old normalized-column comparison until
+stored evidence or reinsertion upgrades them. Frozen 3a1541f fixtures and literal
+legacy/v1 digest vectors protect this rollout path.
 
-Confirmed receipts expire after ten minutes. Hot-path pruning is throttled to once
-per minute per project/process, with idle entries evicted. DELETE statements prune
-at most 5000 rows each, including the hourly global sweep. Unresolved receipts never
-expire through ordinary pruning or retention cutoff cleanup.
+Confirmed receipts are a ten-minute cache. Hot-path pruning runs at most once per
+minute per project/process; each DELETE removes at most 5000 receipts. Ordinary
+pruning and retention never remove unresolved receipts. Only exclusive recovery
+can settle or remove an unresolved receipt.
 
-`event_ids` is an additive ReplacingMergeTree keyed by `(project_id,event_id)`, fed
-by a materialized view. Migration 006 backfills with INSERT SELECT once (a retry is
-idempotent under replacement). No projection materialization or events mutation is
-required. The first SELECT reads narrow identity keys; payload is fetched only for
-hits, using `(timestamp,event_id)` to bound raw-table work. The ownership recheck is
-skipped if claim time minus first lookup time is less than half the receipt window.
-Retention and project deletion purge `event_ids` alongside the four existing tables.
-Legacy conflicting ids may retain only one index timestamp after replacement;
-historical ambiguity remains outside the new-write guarantee.
+## Identity index and online migrations
+
+Migration 006 creates the additive `event_ids` table and attaches its MV BEFORE
+INSERT SELECT backfill. Migration 007 replaces its ReplacingMergeTree engine with
+plain MergeTree, preserving all surviving raw tuples, including legacy duplicate
+ids. Its order is `(project_id,event_id,received_at,timestamp)`. Lookup orders by
+received_at and timestamp with `LIMIT 1 BY event_id`, so overlapping backfills are
+harmless and the oldest surviving row wins. Payload is fetched only for index
+hits, with timestamp/id primary-key predicates and exact receipt-time pointers;
+dangling pointers fall back to raw evidence per id. Recovery always checks raw
+rows, including when a failed MV left no index entry. The ownership recheck is
+skipped when the post-claim clock is less than half the receipt window after the
+first lookup.
+
+007 requires an Atomic ClickHouse database and one migration runner. Concurrent
+writers are supported. The runner keys on the FULL filename in `migrations.name`,
+without a checksum. It guards the following phases using durable table engines,
+so restarting after any completed statement cannot swap the tables backwards:
+
+1. Create `event_ids_v2` as plain MergeTree with the same columns and receipt-time
+   hard TTL as events: +3650 days, clamped to the DateTime upper bound.
+2. Attach `event_ids_v2_mv` before backfill; both MVs now receive new writes.
+3. Backfill v2 from raw events.
+4. Atomically `EXCHANGE TABLES event_ids AND event_ids_v2`.
+5. Drop the TEMPORARY `event_ids_v2_mv SYNC`. ClickHouse TO targets bind by name:
+   the original `event_ids_mv` now writes to the new stable `event_ids` table.
+6. Drop the retired replacing table, now named `event_ids_v2`, with SYNC.
+7. Insert missing raw `(project_id,event_id,received_at,timestamp)` tuples into the
+   stable index. This idempotent coverage pass runs after the synchronous retire.
+
+An INSERT SELECT can start before the second MV attaches and finish after the
+backfill snapshot. Attaching the MV does not retroactively change that running
+pipeline. Its old target must retire synchronously before the final coverage
+pass, which catches those late rows. Tests cover a writer finishing between
+backfill and exchange and one active through retirement, plus interruption after
+each of the seven phases. No events-table mutation or writer drain is needed for
+this schema migration. Retention and project deletion purge the index alongside
+the four existing tables. Retention retries clean index rows even when a prior
+attempt already removed the raw rows, rebuild surviving pointers and verify the
+cutoff invariant before completion.
 
 ## Bounded ambiguous writes
 
 INSERT uses max_execution_time=30 seconds, async_insert_busy_timeout_max_ms=1000,
-wait_for_async_insert=1 and a 60-second claim lease/client deadline. The body stream
-checks the lease when consumed, before passing the body to transport. An expired
-lease is never sent. Any numeric ClickHouse server exception releases this attempt's
-claims: parse codes 6,27,38,41,53,69,72 return 422 invalid_event; other failures return
-503 ingest_unavailable. Only a client timeout/reset after body handoff retains the
-pending lease. Identity-read errors, including resource exhaustion and corrupt
-legacy payloads, return 503 ingest_unavailable with Retry-After rather than 422.
+wait_for_async_insert=1 and a 60-second claim lease/client deadline. The body checks
+the lease when consumed, before transport handoff; an expired lease is not sent.
+Failures proven to precede any write release this attempt's claims. This includes
+before-body transport errors and an explicit server-code allowlist: parse codes
+6,27,38,41,53,69,72 (422 invalid_event), and unknown table/database, syntax,
+readonly, ACL/auth codes 60,62,81,164,497,516 (503 ingest_unavailable). A code wrapped
+by an MV failure is ambiguous even if its underlying code is on that list.
+All other errors after handoff retain the claim, including timeout 159, memory
+limit 241, and client timeout/reset. A server exception can follow a committed
+raw write or only some materialized destinations. Identity-read errors return
+503 ingest_unavailable with Retry-After, including timeout and memory exhaustion.
 
-An exact retry or hourly worker recovers expired claims per project after the
-60-second lease plus a conservative 10-second async-flush bound. Recovery takes the
-EXCLUSIVE project lock, runs SYSTEM FLUSH ASYNC INSERT QUEUE, then rechecks storage.
-Matching rows are bulk-confirmed. Missing rows become ready (`claimedAt=null`) while
-retaining the original fingerprint, receivedAt and eventAt; the next exact retry
-atomically takes them over and reinserts with the original receipt clock while still
-holding the exclusive recovery lock. Worker-readied claims use that same exclusive
-replay path. The hourly
-worker cannot recreate missing payloads (receipts deliberately store no payload),
-so it readies them for the producer's retry. Mismatching stored rows remain fenced.
-A failed flush/lookup releases nothing. No fleet-wide outage/operator attestation
-is required; `scripts/reconcile-ingest.ts PROJECT` runs the same safe recovery.
+An exact retry or hourly worker recovers per project after the lease plus a
+conservative ten-second async flush bound. Candidate fingerprints are checked
+before taking the exclusive lock or flushing. Recovery drains the async queue,
+reads raw evidence, repairs the index and rebuilds every rollup before confirming
+receipts. Stored evidence wins even when it differs from the abandoned claim:
+the stored identity is confirmed and the conflicting retry is rejected. Missing
+rows become ready (`claimedAt=null`) while preserving their fingerprint, receipt
+clock and event clock. An exact retry takes them over and inserts under the same
+exclusive lock. The worker cannot recreate a missing payload; receipts store none.
+A ready receipt with no raw row is deleted after the original ten-minute receipt
+grace period, under that lock. A failed flush or lookup releases nothing.
 
-Healthy siblings are inserted first, then unresolved indices return 503
-ingest_pending with `details: {indices,eventIds}` and Retry-After: 1. Conflicts
-against an unconfirmed competing claim also remain pending until its outcome is
-known; a parse rollback therefore cannot cause a permanent false rejection.
-Confirmed conflicts use a code-first explanatory rejected[].reason. The SDK retains
-and retries the identical body and reports permanent conflicts through onDrop/onError.
+Global SYSTEM FLUSH attempts, including failures, are throttled to once per minute
+per server/worker process. Successful proof is reused only for leases it covers.
+This implementation assumes a single ClickHouse node: queues on other nodes are
+not drained by a local SYSTEM command. The writer/recovery principal needs
+`SYSTEM FLUSH ASYNC INSERT QUEUE` privilege (for example `GRANT SYSTEM FLUSH ASYNC
+INSERT QUEUE ON *.* TO <writer>`), plus its existing SELECT/INSERT/DELETE and
+migration DDL privileges. Distributed ClickHouse requires a coordinated per-node
+drain before adopting this guarantee. `scripts/reconcile-ingest.ts PROJECT` runs
+the same per-project operator recovery.
 
-Sample generation uses random run-prefixed ids plus receipt arbitration, so even
-retained customer sample-event-N ids are safe. Removal drains expired async writes,
-refuses live pending leases, deletes only matching sample row identities/receipts,
-and rebuilds rollups under the exclusive project lock. Removed sample ids can retry.
-Retention cutoff cleanup removes confirmed receipts only; pending claims survive
-until reconciliation. Project deletion purges every receipt after the ClickHouse
-purge. Organization FK cascade covers project receipts and ws: audit receipts (see
-cloud-accounts-design.md); the deletion workflow still needs locked raw-data purges.
+Healthy siblings commit before 503 ingest_pending. Its details are a superset of
+the 202 response: `{accepted,ids,rejected,warnings,indices,eventIds}`. Each rejected
+entry includes `code` and a code-first explanatory `reason`. Every input index
+outside `indices` is settled, including permanent rejections; retrying the entire
+identical batch is safe. Retry-After reflects the longest remaining pending lease
+plus flush bound, with a one-second minimum. A different-content retry against
+an unresolved claimant stays pending until the original outcome is known. The
+SDK retries the identical body and honors Retry-After. Permanent conflicts reach
+onDrop/onError; a structured SDK LogbirdError class is tracked in [#89](https://github.com/joodlab/logbird/issues/89).
+
+## Sample and retention lifecycle
+
+New sample ids include a random run prefix and still use receipt arbitration.
+Removal takes the exclusive lock, drains expired claims and refuses live pending
+leases. After deleting only sample raw rows, it checks every affected id against
+surviving raw evidence. It repairs customer pointers and receipts when a customer
+row survives, including old fixed sample-event-N collisions. Index and receipt
+entries are removed only for ids with no surviving raw row. Rollups are rebuilt.
+
+Known sample-removal interruption window: process death after raw deletion but
+before confirmed-receipt cleanup can leave a cache receipt falsely acknowledging
+an exact retry of a removed sample. The entry disappears after the ten-minute
+cache window (plus up to one minute of hot-prune throttling). This accepted narrow
+window avoids a durable sample-deletion journal; it cannot overwrite surviving customer evidence. Ordinary retention
+removes only confirmed receipts. Project deletion purges all receipts after the
+locked ClickHouse purge; organization deletion also handles ws: audit streams.
 
 ## Deployment, rollback and proof limits
 
-Run pnpm db:deploy, pnpm db:generate and pnpm ch:migrate before starting the new
-writer/worker binaries. Postgres migration 20261107140000_ingest_claim_lease adds
-nullable claimedAt and an index after 20261107130000_ingest_receipts; old pending
-claims receive the deployment clock as a conservative lease start. No shared DB
-reset, migrate dev or db push is permitted. Back up receipt state before rollout.
+Run pnpm db:deploy, pnpm db:generate and pnpm ch:migrate before new writer/worker
+binaries. Back up receipt state first. Migration 20261107140000_ingest_claim_lease
+adds nullable claimedAt and its index; the later 20261107160000_ingest_utc_lease
+corrects the default and conservatively refreshes only unresolved non-null leases
+using CURRENT_TIMESTAMP AT TIME ZONE 'UTC'. Original receipt/event clocks and the
+already-applied migration checksum stay unchanged. A Pacific/Auckland session
+regression verifies the correction. Never use migrate dev, reset or db push on a
+shared DB. Stop old writer binaries before enabling the immutable runtime contract;
+old binaries and direct ClickHouse inserts bypass the Postgres fences.
 
-Rollback requires stopping all new writers and preserving pending receipts. The
-additive tables/column may be left in place for old binaries. To remove only the
-ClickHouse addition, drop event_ids_mv then event_ids after stopping new writers;
-events and the original rollups remain intact. Do not drop receipts with unresolved
-writes. Additive schema compatibility does not grant old writers immutable semantics.
-
-Search/export return the row that passed the filter; detail chooses the oldest
-surviving receipt. Filters may surface a legacy non-canonical duplicate matching
-that filter. This change cannot restore overwritten originals, fix historical
-rollup overcounts, or globally canonicalize historical cursor pages.
-
-The >=10M retained-history paired ingest/explorer benchmark and 1M receipt bytes
-remain a separately scheduled acceptance gate. scripts/benchmark-ingest-identity.ts
-must run at the final PR head under both heavy and logbird-stack slots with the
-cloud load owner's approved fixture. Unit and small real-service proofs are not
-10M/day capacity evidence.
-
-Exact rollback (only after stopping all new writers and preserving unresolved
-receipt state; commands target the verified logbird DBs):
+Rollback requires stopping new writers and preserving unresolved receipt state.
+Leaving the additive schema in place is safest. To remove the identity additions
+only, use the following against the verified databases. Both MV names are included
+so this also handles an interrupted 007. Raw events and original rollups survive.
+Do not remove the receipt table or its migration while pending writes exist.
 
 ```sql
--- ClickHouse
-DROP VIEW IF EXISTS logbird.event_ids_mv;
-DROP TABLE IF EXISTS logbird.event_ids;
-ALTER TABLE logbird.migrations DELETE WHERE name = '006_event_ids.sql' SETTINGS mutations_sync=2;
+-- ClickHouse: after stopping writers and the migration runner.
+DROP VIEW IF EXISTS logbird.event_ids_v2_mv SYNC;
+DROP VIEW IF EXISTS logbird.event_ids_mv SYNC;
+DROP TABLE IF EXISTS logbird.event_ids_v2 SYNC;
+DROP TABLE IF EXISTS logbird.event_ids SYNC;
+ALTER TABLE logbird.migrations DELETE WHERE name IN
+  ('006_event_ids.sql','007_event_ids_merge_tree.sql') SETTINGS mutations_sync=2;
 
--- Postgres: keep IngestReceipt and the original migration intact.
+-- Postgres: retain IngestReceipt and its original migration.
 BEGIN;
 DROP INDEX IF EXISTS "IngestReceipt_projectId_confirmedAt_claimedAt_idx";
 ALTER TABLE "IngestReceipt" DROP COLUMN "claimedAt";
-DELETE FROM "_prisma_migrations" WHERE migration_name = '20261107140000_ingest_claim_lease';
+DELETE FROM "_prisma_migrations" WHERE migration_name IN
+  ('20261107140000_ingest_claim_lease','20261107160000_ingest_utc_lease');
 COMMIT;
 ```
 
-The ClickHouse migration runner keys on the full filename stored in migrations.name;
-it has no checksum and does not key solely on the numeric prefix. Recheck master's
-migration directory immediately before merge, and coordinate a ledger rename if
-006_event_ids.sql needs renumbering on an already-migrated installation.
+The UTC correction alone may safely remain deployed; do not restore shifted
+leases. Recheck origin/master's migration filenames immediately before merging
+and coordinate ledger renames for any already-applied migration that is renumbered.
+Shared-dev orphan index cleanup is an operator-owned one-off, outside this PR.
+The shipped reconciliation command accepts one project id only.
 
-The orphan-index cleanup for artefacts left by unmerged shared-dev QA branches is
-an operator-owned one-off note, outside this PR. The shipped reconciliation command
-accepts one project id only; it does not delete orphan namespaces.
+Search/export return the row that passed the filter; detail chooses the oldest
+surviving receipt. Historical non-canonical rows can still match filters. This
+change cannot restore overwritten originals or globally canonicalize historical
+cursor pages. The >=10M retained-history benchmark and 1M receipt bytes remain a
+separately scheduled acceptance gate. The script shipped separately in PR #79;
+run it at the final clean PR head under heavy and logbird-stack with the approved
+cloud fixture and fourth argument `immutable`. Small real-service proofs are not
+10M/day capacity evidence.
+
+Other scoped follow-ups: [#90](https://github.com/joodlab/logbird/issues/90) covers
+the shared ingest/recovery dependency boundary, and
+[#91](https://github.com/joodlab/logbird/issues/91) covers per-event isolation of a
+definite storage parse failure. Neither changes ambiguity classification here.

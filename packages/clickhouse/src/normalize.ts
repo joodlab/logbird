@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { resolveTimestamp } from './timestamp';
 
 function uuidv7() {
   const b = randomBytes(16);
@@ -18,7 +19,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   // Changing caps/flattening must not change v1 or remove the legacy receipt compatibility path.
   const e = object(input);
   if (typeof e.action !== 'string') return { ok: false as const, reason: 'action must be a string' };
-  if (typeof e.id === 'string' && (e.id.includes('\u0000') || /[\uD800-\uDFFF]/u.test(e.id) || e.id.length > 256))
+  if (typeof e.id === 'string' && (e.id.includes('\u0000') || /[\uD800-\uDFFF]/u.test(e.id) || e.id.trim().length > 256))
     return { ok: false as const, reason: 'invalid_event_id: id must be valid Unicode, at most 256 UTF-16 code units, and contain no NUL' };
   let payload: string;
   try {
@@ -74,21 +75,15 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     imp = object(e.impersonator);
   // Only `action` is required: a bad occurredAt never drops the event. It is stored at receive time, the original value
   // is kept in attributes['logbird.occurredAt.rejected'] (and in payload), and the caller gets a warning.
-  const occurredAtProblem = (() => {
-    if (e.occurredAt === undefined || e.occurredAt === null || e.occurredAt === '') return null;
-    if (typeof e.occurredAt !== 'string' && typeof e.occurredAt !== 'number') return 'occurredAt must be ISO-8601 or epoch milliseconds';
-    if (typeof e.occurredAt === 'number' && Math.abs(e.occurredAt) < 1e11)
-      return 'occurredAt looks like epoch seconds; send milliseconds or ISO-8601';
-    const t = new Date(e.occurredAt).getTime();
-    if (!Number.isFinite(t)) return 'occurredAt is not a valid date';
-    if (t < ctx.receivedAt.getTime() - 3650 * 86_400_000 || t > ctx.receivedAt.getTime() + 86_400_000)
-      return 'occurredAt must be within the last 3650 days and the next 24 hours';
-    return null;
-  })();
-  const occurredAtValid = e.occurredAt !== undefined && e.occurredAt !== null && e.occurredAt !== '' && !occurredAtProblem;
-  const date = occurredAtValid ? new Date(e.occurredAt as string | number) : ctx.receivedAt;
+  const { timestamp: date, problem: occurredAtProblem, valid: occurredAtValid } = resolveTimestamp(e.occurredAt, ctx.receivedAt);
   if (occurredAtProblem) attributes['logbird.occurredAt.rejected'] = value(e.occurredAt).slice(0, 256);
-  const warning = occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null;
+  const warning =
+    [
+      occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,
+      typeof e.id === 'number' ? 'Numeric id is not a stable event id; send a string id for safe retries.' : null,
+    ]
+      .filter(Boolean)
+      .join('; ') || null;
   const id = text(e.id, 256) || uuidv7();
   const row = {
     project_id: ctx.projectId,

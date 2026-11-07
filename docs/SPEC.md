@@ -46,16 +46,18 @@ Ingestion path (v0): `POST /v1/events` → validate/normalize → ClickHouse `IN
 `async_insert=1, wait_for_async_insert=1` (ack only after ClickHouse has the rows) → 202. Large batches are
 inserted in one statement. A Postgres/queue buffer can be added later behind the same API.
 
-Ingestion reserves ids in Postgres before inserting into ClickHouse. Confirmed receipts
-are a ten-minute cache; older ids are checked in ClickHouse by `(project_id,event_id)`
-using the existing bloom index, without `FINAL`. Claims use one bulk
-`INSERT ... ON CONFLICT` for up to 1000 ids, shared by every server process. No
-Postgres transaction spans ClickHouse I/O. Unresolved claims never expire automatically:
-an uncertain ClickHouse acknowledgement returns `503 ingest_pending` with
-`Retry-After: 1`. Retry the identical batch and ids. The SDK already retries 5xx
-responses and honors this header. A retry confirms a pending claim when the stored
-event is visible; it never inserts another version. See [ingest-identity.md](ingest-identity.md)
-for cost, cleanup, deployment and reconciliation of claims with no visible row.
+Ingestion reserves immutable ids in Postgres before ClickHouse writes. Confirmed
+receipts form a ten-minute cache; older ids use the additive `event_ids` MergeTree
+index, fetching full payload only for hits. Sorted bulk claims arbitrate across
+API processes without a transaction spanning ClickHouse I/O. A 60-second lease
+and bounded async flush permit exclusive per-project recovery of ambiguous writes.
+Recovery checks raw evidence, repairs partial destinations, confirms stored rows
+or readies absent writes for an exact retry with the original receipt clock. Ready
+claims expire under exclusive recovery after the ten-minute grace period; ordinary
+retention never releases unresolved claims. `503 ingest_pending` includes settled
+202 response fields plus pending `indices`/`eventIds` and a lease-aware Retry-After.
+The SDK retries the identical body. See [ingest-identity.md](ingest-identity.md) for
+migration, failure classification, permissions, cleanup and proof limits.
 
 ## 3. Recommended event envelope
 
@@ -93,17 +95,18 @@ Semantics worth documenting to users:
 - **id is immutable within a project**, regardless of `occurredAt`. Exact retries
   appear in `ids` as accepted, without another raw insert or rollup increment.
   Conflicting canonical full input or resolved timestamp is reported in `rejected`
-  with a reason starting `duplicate_id_conflict:`; the original is kept. Recursively
+  with `code: duplicate_id_conflict` and a code-first reason; the original is kept. Recursively
   reordered object keys are equivalent; array order and all string contents matter,
   including values beyond indexing caps. SDK headers do not participate. Omitted
   or invalid `occurredAt` uses the first receipt clock. Identity digests are versioned.
   Corrections need a fresh id and may link through `context.parentEventId`.
-  Unconfirmed competing claims return `503 ingest_pending` with Retry-After: 1 and
-  details `{indices,eventIds}` after healthy siblings are stored. Identity lookup
+  Unconfirmed competing claims return `503 ingest_pending` with a lease-aware
+  Retry-After. Details include the settled 202 response fields plus `indices` and
+  `eventIds`; every index outside `indices` is settled. Healthy siblings commit first. Identity lookup
   failures return retryable `503 ingest_unavailable`. Expired leases reconcile under
   the exclusive project lock after draining the async queue. Ordinary retention
   never releases unresolved receipts. After confirmed retention deletion and cleanup,
-  an id may be used again. Unsafe ids (NUL, lone surrogates or >256 UTF-16 units)
+  an id may be used again. Unsafe ids (NUL, lone surrogates or >256 trimmed UTF-16 units)
   are per-event `invalid_event_id` rejections, so healthy siblings can proceed.
 - **actor = who caused it** (person, API key, scheduler…); **executor = who performed it** (api, worker, job,
   attempt). A worker doing work requested by Lina has `actor=Lina`, `executor=crm-worker`. Scheduled runs use

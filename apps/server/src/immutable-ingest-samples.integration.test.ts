@@ -1,5 +1,5 @@
-﻿import { getEvent, read } from '@logbird/clickhouse';
-import { prisma } from '@logbird/database';
+﻿import { getEvent, insertEvents, read } from '@logbird/clickhouse';
+import { prisma, pruneIngestReceipts } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
@@ -42,3 +42,30 @@ it('sample removal waits for an unresolved active write', async () => {
   expect((await response.json()).error.code).toBe('ingest_pending');
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, eventId: 'pending-sample', confirmedAt: null } })).toBe(1);
 });
+
+it('upgraded legacy sample/customer collisions retain and rebuild the customer fence', async () => {
+  const customer = { id: 'sample-event-0', action: 'customer.retained', occurredAt: new Date(Date.now() - 10_000).toISOString() };
+  expect((await f.post(customer)).status).toBe(202);
+  const sample = f.row({ id: customer.id, action: 'old.sample', source: 'logbird-sample', occurredAt: new Date().toISOString() });
+  await insertEvents(clickhouse, [sample]);
+  await clickhouse.command({
+    query: 'DELETE FROM event_ids WHERE project_id={p:String}',
+    query_params: { p: f.project },
+    clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
+  });
+  await clickhouse.insert({
+    table: 'event_ids',
+    format: 'JSONEachRow',
+    values: [{ project_id: f.project, event_id: customer.id, timestamp: sample.timestamp, received_at: sample.received_at }],
+  });
+  expect((await f.management(`/api/projects/${f.project}/sample-data`, 'DELETE')).status).toBe(204);
+  expect(await f.count()).toBe(1);
+  expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, eventId: customer.id } })).toBe(1);
+  await prisma.ingestReceipt.updateMany({ where: { projectId: f.project }, data: { confirmedAt: new Date(0) } });
+  await pruneIngestReceipts(f.project);
+  const conflict = await f.post({ ...customer, action: 'overwrite' });
+  expect(conflict.status).toBe(202);
+  expect(await conflict.json()).toMatchObject({ accepted: 0, rejected: [{ code: 'duplicate_id_conflict' }] });
+  expect((await getEvent(clickhouse, f.project, customer.id))?.event.action).toBe(customer.action);
+  expect(await f.count()).toBe(1);
+}, 60_000);

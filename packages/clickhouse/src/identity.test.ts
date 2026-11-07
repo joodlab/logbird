@@ -1,6 +1,8 @@
-﻿import { expect, it } from 'vitest';
-import { eventFingerprint, legacyEventFingerprint, retryFingerprint } from './identity';
-import { normalizeEvent } from './normalize';
+import { readFileSync } from 'node:fs';
+import { eventInputSchema } from '@logbird/contracts';
+import { expect, it } from 'vitest';
+import { canonicalFingerprint, eventFingerprint, legacyEventFingerprint, retryFingerprint } from './identity';
+import { type EventRow, normalizeEvent } from './normalize';
 
 const receivedAt = new Date('2026-11-07T12:00:00Z');
 const digest = (input: Record<string, unknown>) => {
@@ -44,12 +46,21 @@ it.each([undefined, 'invalid', 123])('uses original receive clock for occurredAt
   const input = { id: 'same', action: 'evidence.original', occurredAt };
   expect(retryFingerprint(input, 'fictional', receivedAt, 'same')).toBe(digest({ occurredAt }));
 });
-it('keeps an explicit legacy digest compatibility path', () => {
-  const input = { id: 'same', action: 'evidence.original' };
-  const normalized = normalizeEvent(input, { projectId: 'fictional', receivedAt });
-  if (!normalized.ok) throw new Error('Invalid fixture');
-  const legacy = legacyEventFingerprint(normalized.row);
-  expect(retryFingerprint(input, 'fictional', receivedAt, 'same', legacy)).toBe(legacy);
+const goldens = JSON.parse(readFileSync(new URL('./fixtures/identity-goldens.json', import.meta.url), 'utf8')) as {
+  sourceRevision: string;
+  cases: { input: Record<string, unknown>; projectId: string; receivedAt: string; row: EventRow; legacy: string; v1: string }[];
+};
+it.each(goldens.cases)('preserves frozen 3a1541f legacy and v1 vectors for $row.event_id', (vector) => {
+  expect(goldens.sourceRevision).toBe('3a1541f632ce4be4c42b022a7da0d83fa6e7fbbd');
+  expect(legacyEventFingerprint(vector.row)).toBe(vector.legacy);
+  expect(canonicalFingerprint(vector.input, vector.row.timestamp)).toBe(vector.v1);
+  expect(
+    retryFingerprint(vector.input, vector.projectId, new Date(vector.receivedAt), vector.row.event_id, vector.v1, new Date(vector.row.timestamp)),
+  ).toBe(vector.v1);
+  // Old id truncation is represented by the frozen row; the safe stored id can recover an unversioned claim.
+  expect(
+    retryFingerprint({ ...vector.input, id: vector.row.event_id }, vector.projectId, new Date(vector.receivedAt), vector.row.event_id, vector.legacy),
+  ).toBe(vector.legacy);
 });
 it.each(['a\0b', '\ud800', `${'x'.repeat(255)}😀`, 'x'.repeat(257)])('rejects an unsafe id individually (%#)', (id) => {
   expect(normalizeEvent({ id, action: 'safe' }, { projectId: 'fictional', receivedAt })).toMatchObject({
@@ -109,4 +120,14 @@ it('includes capped numeric attempts, change field names and deep metadata leave
   expect(digest({ metadata: { a: { b: { c: { d: { e: { f: { leaf: 1 } } } } } } } })).not.toBe(
     digest({ metadata: { a: { b: { c: { d: { e: { f: { leaf: 2 } } } } } } } }),
   );
+});
+
+it('checks the trimmed id length consistently and warns when a numeric id generates a UUID', () => {
+  const input = { id: ` ${'x'.repeat(250)} `, action: 'event' };
+  expect(eventInputSchema.safeParse(input).success).toBe(true);
+  expect(normalizeEvent(input, { projectId: 'fictional', receivedAt })).toMatchObject({ ok: true, id: 'x'.repeat(250) });
+  expect(normalizeEvent({ id: 42, action: 'event' }, { projectId: 'fictional', receivedAt })).toMatchObject({
+    ok: true,
+    warning: expect.stringContaining('Numeric id'),
+  });
 });

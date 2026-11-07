@@ -1,16 +1,17 @@
 import {
   AmbiguousInsertError,
+  ASYNC_INSERT_FLUSH_BOUND_MS,
   CLICKHOUSE_PARSE_ERROR_CODES,
-  type EventIdentity,
   type EventRow,
   eventFingerprint,
   existingEventIdentities,
   INGEST_CLAIM_LEASE_MS,
   insertEvents,
-  matchesIdentity,
   normalizeEvent,
+  resolveTimestamp,
   retryFingerprint,
 } from '@logbird/clickhouse';
+import { ingestPendingDetailsSchema } from '@logbird/contracts';
 import { confirmIngestReceipts, INGEST_RECEIPT_WINDOW_MS, type IngestReceipt, prisma, pruneIngestReceipts } from '@logbird/database';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
@@ -35,6 +36,49 @@ async function releaseClaims(projectId: string, owned: Map<string, IngestReceipt
     });
 }
 
+async function upgradeLegacyReceipts(projectId: string, cached: Map<string, IngestReceipt>, stored: Awaited<ReturnType<typeof lookup>>) {
+  // Existing confirmed legacy receipts also need raw-input identity after rollout.
+  await confirmIngestReceipts(
+    projectId,
+    [...stored]
+      .filter(([id]) => cached.get(id)?.confirmedAt && !cached.get(id)?.fingerprint.startsWith('v1:'))
+      .map(([eventId, identity]) => ({ eventId, ...identity })),
+  );
+}
+
+async function takeOverReadyClaims(projectId: string, prior: IngestReceipt[], candidates: IngestCandidate[], owned: Map<string, IngestReceipt>) {
+  const readyIds = prior
+    .filter(
+      (r) =>
+        !r.confirmedAt &&
+        !r.claimedAt &&
+        candidates.some(
+          (c) =>
+            c.row.event_id === r.eventId && retryFingerprint(c.input, projectId, r.receivedAt, r.eventId, r.fingerprint, r.eventAt) === r.fingerprint,
+        ),
+    )
+    .map((r) => r.eventId);
+  if (!readyIds.length) return;
+  for (const receipt of await prisma.ingestReceipt.updateManyAndReturn({
+    where: { projectId, eventId: { in: readyIds }, confirmedAt: null, claimedAt: null },
+    data: { claimedAt: new Date() },
+  }))
+    owned.set(receipt.eventId, receipt);
+}
+
+async function recheckAfterPause(projectId: string, owned: Map<string, IngestReceipt>, stored: Awaited<ReturnType<typeof lookup>>, lookupAt: number) {
+  // A fast claim cannot outlive another writer's confirmed receipt window. Use the clock after claiming.
+  if (Date.now() - lookupAt < INGEST_RECEIPT_WINDOW_MS / 2) return;
+  const rechecked = await lookup(
+    projectId,
+    [...owned.keys()].filter((id) => !stored.has(id)),
+  );
+  await confirmIngestReceipts(
+    projectId,
+    [...rechecked].map(([eventId, identity]) => ({ eventId, ...identity })),
+  );
+}
+
 /** Claim/recheck owns release until it hands the claims to the insert phase. */
 async function claimEvents(projectId: string, organizationId: string, candidates: IngestCandidate[]) {
   await pruneIngestReceipts(projectId, true);
@@ -48,13 +92,7 @@ async function claimEvents(projectId: string, organizationId: string, candidates
     projectId,
     eventIds.filter((id) => !cached.get(id)?.confirmedAt || !cached.get(id)?.fingerprint.startsWith('v1:')),
   );
-  // Existing confirmed legacy receipts also need raw-input identity after rollout.
-  await confirmIngestReceipts(
-    projectId,
-    [...stored]
-      .filter(([id]) => cached.get(id)?.confirmedAt && !cached.get(id)?.fingerprint.startsWith('v1:'))
-      .map(([eventId, identity]) => ({ eventId, ...identity })),
-  );
+  await upgradeLegacyReceipts(projectId, cached, stored);
   const values = eventIds
     .filter((id) => !cached.has(id))
     .map((id) => {
@@ -75,55 +113,27 @@ async function claimEvents(projectId: string, organizationId: string, candidates
   try {
     const inserted = values.length ? await prisma.ingestReceipt.createManyAndReturn({ data: values, skipDuplicates: true }) : [];
     for (const receipt of inserted) owned.set(receipt.eventId, receipt);
-    // A reconciled missing receipt is ready to be retried, retaining the first receive clock.
-    const readyIds = prior
-      .filter(
-        (r) =>
-          !r.confirmedAt &&
-          !r.claimedAt &&
-          candidates.some(
-            (c) => c.row.event_id === r.eventId && retryFingerprint(c.input, projectId, r.receivedAt, r.eventId, r.fingerprint) === r.fingerprint,
-          ),
-      )
-      .map((r) => r.eventId);
-    if (readyIds.length)
-      for (const receipt of await prisma.ingestReceipt.updateManyAndReturn({
-        where: { projectId, eventId: { in: readyIds }, confirmedAt: null, claimedAt: null },
-        data: { claimedAt: new Date() },
-      }))
-        owned.set(receipt.eventId, receipt);
-    // A fast claim cannot outlive another writer's confirmed receipt window. Recheck only after a long pause.
-    const recheckIds = [...owned]
-      .filter(([id, claim]) => !stored.has(id) && (claim.claimedAt?.getTime() ?? 0) - lookupAt >= INGEST_RECEIPT_WINDOW_MS / 2)
-      .map(([id]) => id);
-    const rechecked = await lookup(projectId, recheckIds);
-    for (const [eventId, identity] of rechecked) {
-      stored.set(eventId, identity);
-    }
-    await confirmIngestReceipts(
-      projectId,
-      [...rechecked].map(([eventId, identity]) => ({ eventId, ...identity })),
-    );
+    await takeOverReadyClaims(projectId, prior, candidates, owned);
+    await recheckAfterPause(projectId, owned, stored, lookupAt);
     const receipts = new Map((await prisma.ingestReceipt.findMany({ where: { projectId, eventId: { in: eventIds } } })).map((r) => [r.eventId, r]));
-    return { owned, receipts, stored };
+    return { owned, receipts };
   } catch (error) {
     await releaseClaims(projectId, owned);
     throw error;
   }
 }
 
-async function classifyCandidates(
+/** Pure classification: the orchestrator releases its claims if this phase throws. */
+function classifyCandidates(
   projectId: string,
   candidates: IngestCandidate[],
   receipts: Map<string, IngestReceipt>,
-  stored: Map<string, EventIdentity>,
   owned: Map<string, IngestReceipt>,
 ) {
   const ids: string[] = [],
-    rejected: { index: number; reason: string }[] = [],
+    rejected: { index: number; reason: string; code: string }[] = [],
     pending: { index: number; eventId: string }[] = [];
   const rows = new Map<string, EventRow>();
-  const confirmations: { eventId: string; fingerprint: string; receivedAt: Date; eventAt: Date }[] = [];
   for (const candidate of candidates) {
     const id = candidate.row.event_id;
     const receipt = receipts.get(id);
@@ -132,17 +142,27 @@ async function classifyCandidates(
       continue;
     }
     if (!receipt.confirmedAt && !owned.has(id)) {
-      const existing = stored.get(id);
-      if (!existing || !matchesIdentity(receipt.fingerprint, existing)) {
-        pending.push({ index: candidate.index, eventId: id });
-        continue;
-      }
-      confirmations.push({ eventId: id, ...existing });
+      pending.push({ index: candidate.index, eventId: id });
+      continue;
+    }
+    if (receipt.fingerprint.startsWith('unreadable:')) {
+      rejected.push({
+        index: candidate.index,
+        code: 'stored_event_unreadable',
+        reason: 'stored_event_unreadable: retained evidence cannot be compared; keep it and send a correction with a new id.',
+      });
+      continue;
     }
     const planned = rows.get(id);
+    // An unversioned ready receipt switches to canonical identity after its first planned row.
     const fingerprint = planned ? eventFingerprint(planned) : receipt.fingerprint;
-    if (retryFingerprint(candidate.input, projectId, receipt.receivedAt, id, fingerprint) !== fingerprint) {
-      rejected.push({ index: candidate.index, reason: DUPLICATE_ID_CONFLICT });
+    if (retryFingerprint(candidate.input, projectId, receipt.receivedAt, id, fingerprint, receipt.eventAt) !== fingerprint) {
+      const value = candidate.input && typeof candidate.input === 'object' ? (candidate.input as Record<string, unknown>).occurredAt : undefined;
+      const difference =
+        resolveTimestamp(value, receipt.receivedAt).timestamp.getTime() === receipt.eventAt.getTime()
+          ? 'Content differs.'
+          : 'Resolved timestamp differs.';
+      rejected.push({ index: candidate.index, code: 'duplicate_id_conflict', reason: `${DUPLICATE_ID_CONFLICT} ${difference}` });
       continue;
     }
     if (!receipt.confirmedAt && owned.has(id) && !rows.has(id)) {
@@ -153,11 +173,10 @@ async function classifyCandidates(
     }
     ids.push(id);
   }
-  await confirmIngestReceipts(projectId, confirmations);
   return { ids, rejected, pending, rows: [...rows.values()] };
 }
 
-/** Insert owns release before send and on definite failure. Only transport ambiguity retains the lease. */
+/** Insert owns release before send and on definite failure. Unproven write outcomes retain the lease. */
 async function persistRows(projectId: string, rows: EventRow[], owned: Map<string, IngestReceipt>) {
   if (!rows.length) {
     await releaseClaims(projectId, owned);
@@ -197,11 +216,11 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
 
 /** Caller holds a project lock: exclusive during recovery, shared otherwise. Receipts fence every API process. */
 export async function insertImmutableEvents(projectId: string, organizationId: string, candidates: IngestCandidate[]) {
-  if (!candidates.length) return { ids: [] as string[], rejected: [] as { index: number; reason: string }[] };
-  const { owned, receipts, stored } = await claimEvents(projectId, organizationId, candidates);
-  let result: Awaited<ReturnType<typeof classifyCandidates>>;
+  if (!candidates.length) return { ids: [] as string[], rejected: [] as { index: number; reason: string; code: string }[] };
+  const { owned, receipts } = await claimEvents(projectId, organizationId, candidates);
+  let result: ReturnType<typeof classifyCandidates>;
   try {
-    result = await classifyCandidates(projectId, candidates, receipts, stored, owned);
+    result = classifyCandidates(projectId, candidates, receipts, owned);
   } catch (error) {
     await releaseClaims(projectId, owned);
     throw error;
@@ -212,15 +231,47 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
     if (error instanceof ApiError && error.code === 'ingest_pending') {
       const pendingIds = new Set([...result.pending.map((p) => p.eventId), ...result.rows.map((r) => r.event_id)]);
       const pending = candidates.filter((c) => pendingIds.has(c.row.event_id));
-      throw new ApiError(503, error.code, error.message, { indices: pending.map((c) => c.index), eventIds: pending.map((c) => c.row.event_id) });
+      const ids = result.ids.filter((id) => !pendingIds.has(id));
+      const unsettled = new Set(pending.map((c) => c.index));
+      const details = ingestPendingDetailsSchema.parse({
+        accepted: ids.length,
+        ids,
+        rejected: result.rejected.filter((r) => !unsettled.has(r.index)),
+        warnings: [],
+        indices: pending.map((c) => c.index),
+        eventIds: pending.map((c) => c.row.event_id),
+      });
+      throw new ApiError(503, error.code, error.message, details, pendingRetryAfter(pendingIds, receipts));
     }
     throw error;
   }
   // Healthy siblings are already durable; an identical batch retry will not insert them again.
-  if (result.pending.length)
-    throw new ApiError(503, 'ingest_pending', 'Some event ids have unresolved writes. Retry this batch.', {
+  if (result.pending.length) {
+    const details = ingestPendingDetailsSchema.parse({
+      accepted: result.ids.length,
+      ids: result.ids,
+      rejected: result.rejected,
+      warnings: [],
       indices: result.pending.map((p) => p.index),
       eventIds: result.pending.map((p) => p.eventId),
     });
+    throw new ApiError(
+      503,
+      'ingest_pending',
+      'Some event ids have unresolved writes. Retry the listed indices.',
+      details,
+      pendingRetryAfter(new Set(result.pending.map((p) => p.eventId)), receipts),
+    );
+  }
   return { ids: result.ids, rejected: result.rejected };
+}
+
+function pendingRetryAfter(ids: Set<string>, receipts: Map<string, IngestReceipt>) {
+  return Math.max(
+    1,
+    ...[...ids].map((id) => {
+      const claim = receipts.get(id)?.claimedAt;
+      return claim ? Math.ceil((claim.getTime() + INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS - Date.now()) / 1000) : 1;
+    }),
+  );
 }

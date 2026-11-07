@@ -24,9 +24,14 @@ export function EventIdsAndRetries() {
         <code>context.parentEventId</code> pointing to the original.
       </p>
       <p>
-        <code>503 ingest_pending</code> or <code>ingest_unavailable</code> means retry the identical batch with Retry-After. Healthy siblings may
-        already be stored. Pending details name indices and eventIds. The SDK retries; if its budget expires, flush rejects and keeps the batch for a
+        <code>503 ingest_pending</code> or <code>ingest_unavailable</code> means retry the identical batch with Retry-After. Healthy siblings commit
+        before a pending response. Pending details include accepted, ids, rejected, warnings, indices and eventIds. Every index outside indices is
+        settled. Rejected entries include a code and explanation. The SDK retries; if its budget expires, flush rejects and keeps the batch for a
         later flush.
+      </p>
+      <p>
+        Use string ids. Numeric ids generate a fresh UUID and a warning; convert with String(id) first. Ids over 256 UTF-16 code units after trimming,
+        containing NUL or invalid Unicode are rejected individually as <code>invalid_event_id</code>.
       </p>
     </div>
   );

@@ -1,7 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { ASYNC_INSERT_FLUSH_BOUND_MS, INGEST_CLAIM_LEASE_MS, normalizeEvent, read, rebuildProjectRollups } from '@logbird/clickhouse';
+import {
+  ASYNC_INSERT_FLUSH_BOUND_MS,
+  INGEST_CLAIM_LEASE_MS,
+  normalizeEvent,
+  rawEventIdentities,
+  read,
+  rebuildProjectRollups,
+  repairEventIndex,
+} from '@logbird/clickhouse';
 import { SAMPLE_DATA_EVENTS, SAMPLE_DATA_SOURCE, SAMPLE_DATA_SOURCES } from '@logbird/contracts';
-import { prisma } from '@logbird/database';
+import { confirmIngestReceipts, prisma } from '@logbird/database';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { insertImmutableEvents } from './immutable-ingest';
@@ -25,12 +33,14 @@ export async function removeSampleData(projectId: string) {
   // Remove only identities whose raw rows were intentionally deleted, while writers remain excluded.
   for (let offset = 0; offset < removed.length; offset += 1000) {
     const ids = removed.slice(offset, offset + 1000).map((r) => r.event_id);
-    await clickhouse.command({
-      query: 'DELETE FROM event_ids WHERE project_id={p:String} AND event_id IN {ids:Array(String)}',
-      query_params: { p: projectId, ids },
-      clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-    });
-    await prisma.ingestReceipt.deleteMany({ where: { projectId, eventId: { in: ids } } });
+    const surviving = await rawEventIdentities(clickhouse, projectId, ids);
+    await repairEventIndex(clickhouse, projectId, ids, surviving);
+    await confirmIngestReceipts(
+      projectId,
+      [...surviving].map(([eventId, identity]) => ({ eventId, ...identity })),
+    );
+    const absent = ids.filter((id) => !surviving.has(id));
+    if (absent.length) await prisma.ingestReceipt.deleteMany({ where: { projectId, eventId: { in: absent } } });
   }
   await rebuildProjectRollups(clickhouse, projectId);
 }

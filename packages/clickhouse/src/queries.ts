@@ -514,7 +514,7 @@ export async function projectStats(
 export async function hasExpiredEvents(ch: ClickHouseClient, p: string, before: Date) {
   const rows = await read<{ n: number }>(
     ch,
-    'SELECT count() n FROM (SELECT 1 FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} LIMIT 1)',
+    'SELECT (SELECT count() FROM (SELECT 1 FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} LIMIT 1)) + (SELECT count() FROM (SELECT 1 FROM event_ids WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} LIMIT 1)) n',
     { p, before: before.toISOString().replace('T', ' ').slice(0, -1) },
   );
   return Number(rows[0]?.n ?? 0) > 0;
@@ -549,6 +549,15 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
     query_params: params,
     clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
   });
+  if (before) {
+    // A merged legacy pointer may have expired while another raw timestamp survives.
+    // Keep this cold repair server-side; do not materialize an unbounded list of ids in the worker.
+    await ch.command({
+      query:
+        'INSERT INTO event_ids SELECT DISTINCT project_id,event_id,received_at,timestamp FROM events WHERE project_id={p:String} AND event_id NOT IN (SELECT event_id FROM event_ids WHERE project_id={p:String})',
+      query_params: { p },
+    });
+  }
   if (!before) return rebuildProjectRollups(ch, p, false);
   const filters = {
     events_by_minute: 'bucket <= {bucket:DateTime64(3)}',

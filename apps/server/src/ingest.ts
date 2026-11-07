@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import { normalizeEvent } from '@logbird/clickhouse';
-import { ingestResponseSchema } from '@logbird/contracts';
+import { ingestPendingDetailsSchema, ingestResponseSchema } from '@logbird/contracts';
 import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enqueueProjectRetention } from '@logbird/worker/queue';
@@ -44,14 +44,17 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
     throw new ApiError(413, 'payload_too_large', 'Maximum 1000 events and 256 KB per event.');
   const candidates: IngestCandidate[] = [],
     ids: string[] = [],
-    rejected: { index: number; reason: string }[] = [],
+    rejected: { index: number; reason: string; code: string }[] = [],
     warnings: { index: number; reason: string }[] = [];
   for (const [index, event] of events.entries()) {
     const normalized = normalizeEvent(event, { projectId, receivedAt: new Date(), sdk });
     if (normalized.ok) {
       candidates.push({ index, input: event, row: normalized.row });
       if (normalized.warning) warnings.push({ index, reason: normalized.warning });
-    } else rejected.push({ index, reason: normalized.reason });
+    } else {
+      const code = normalized.reason.startsWith('invalid_event_id:') ? 'invalid_event_id' : 'invalid_event';
+      rejected.push({ index, reason: normalized.reason.startsWith(`${code}:`) ? normalized.reason : `${code}: ${normalized.reason}`, code });
+    }
   }
   const store = async (tx: import('@logbird/database').Prisma.TransactionClient) => {
     const project = projectId.startsWith('ws:') ? null : await tx.project.findUnique({ where: { id: projectId } });
@@ -69,13 +72,21 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
       projectId,
       candidates.map((c) => c.row.event_id),
       () => store(prisma),
+      candidates.map((c) => ({ input: c.input, eventId: c.row.event_id })),
     );
   } catch (error) {
-    if (error instanceof ApiError) throw error;
+    if (error instanceof ApiError) throw settledDetails(error, rejected, warnings);
     throw new ApiError(503, 'ingest_unavailable', 'Event identity recovery is unavailable. Retry this batch.');
   }
   // Healthy traffic remains concurrent. Only an expired/worker-readied replay holds the exclusive lock through INSERT.
-  if (!replayed) await withProjectLock(projectId, store, { mode: 'shared' });
+  if (!replayed) {
+    try {
+      await withProjectLock(projectId, store, { mode: 'shared' });
+    } catch (error) {
+      if (error instanceof ApiError) throw settledDetails(error, rejected, warnings);
+      throw error;
+    }
+  }
   return ingestResponseSchema.parse({ accepted: ids.length, ids, rejected, warnings });
 }
 function organizationIdForStream(projectId: string, organizationId?: string) {
@@ -108,4 +119,16 @@ export async function requireProjectReadable(projectId: string) {
   if ((run.heartbeatAt ?? run.startedAt).getTime() >= Date.now() - RETENTION_LEASE_MS)
     throw new ApiError(503, 'retention_unavailable', 'Retention rebuild is in progress. Retry shortly.');
   await withProjectLock(projectId, (db) => requireRetentionReady(db, projectId));
+}
+
+function settledDetails(error: ApiError, rejected: { index: number; reason: string; code: string }[], warnings: { index: number; reason: string }[]) {
+  if (error.code !== 'ingest_pending') return error;
+  const details = ingestPendingDetailsSchema.parse(error.details);
+  return new ApiError(
+    503,
+    error.code,
+    error.message,
+    ingestPendingDetailsSchema.parse({ ...details, rejected: [...rejected, ...details.rejected], warnings }),
+    error.retryAfter,
+  );
 }

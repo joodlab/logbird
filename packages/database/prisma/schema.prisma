@@ -155,7 +155,7 @@ model IngestReceipt {
   receivedAt DateTime
   eventAt DateTime
   confirmedAt DateTime?
-  claimedAt DateTime? @default(now())
+  claimedAt DateTime? @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
 
   @@id([projectId, eventId])
   @@index([projectId, confirmedAt])

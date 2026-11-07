@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ClickHouseClient } from './client';
 import { type EventRow, normalizeEvent } from './normalize';
 import { read } from './queries';
+import { resolveTimestamp } from './timestamp';
 
 function sorted(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sorted);
@@ -13,64 +14,146 @@ function sorted(value: unknown): unknown {
     );
   return value;
 }
-
-/** Compatibility only: receipts written before v1 hashed lossy indexed columns. */
-export function legacyEventFingerprint(row: EventRow) {
-  const { received_at: _received, payload: _payload, sdk: _sdk, ...content } = row;
-  return createHash('sha256')
-    .update(JSON.stringify(sorted(content)))
+const digest = (value: unknown) =>
+  createHash('sha256')
+    .update(JSON.stringify(sorted(value)))
     .digest('hex');
+const iso = (value: string) => new Date(value.endsWith('Z') ? value : `${value.replace(' ', 'T')}Z`);
+// Frozen normalized fields from 3a1541f. Materialized and future search fields never enter the old digest.
+const legacyFields = [
+  'project_id',
+  'event_id',
+  'timestamp',
+  'action',
+  'environment',
+  'outcome',
+  'severity',
+  'description',
+  'actor_type',
+  'actor_id',
+  'actor_name',
+  'actor_email',
+  'impersonator_id',
+  'impersonator_name',
+  'executor_type',
+  'executor_id',
+  'executor_name',
+  'job_id',
+  'job_attempt',
+  'tenant_id',
+  'tenant_name',
+  'source',
+  'target_types',
+  'target_ids',
+  'target_names',
+  'changes_fields',
+  'changes_before',
+  'changes_after',
+  'operation_id',
+  'parent_event_id',
+  'request_id',
+  'trace_id',
+  'ip',
+  'user_agent',
+  'conformance',
+  'schema_version',
+  'attributes',
+] as const satisfies readonly (keyof EventRow)[];
+export function legacyEventFingerprint(row: EventRow) {
+  return digest(Object.fromEntries(legacyFields.map((key) => [key, row[key]])));
 }
-
-/** v1 is canonical parsed INPUT plus resolved time. Never hash the lossy search columns. */
+export function canonicalFingerprint(input: unknown, timestamp: string) {
+  return `v1:${digest({ input, timestamp })}`;
+}
+/** v1 hashes parsed input and resolved time, never search columns or admission rules. */
 export function eventFingerprint(row: EventRow) {
-  const input = JSON.parse(row.payload);
-  return `v1:${createHash('sha256')
-    .update(JSON.stringify(sorted({ input, timestamp: row.timestamp })))
-    .digest('hex')}`;
+  return canonicalFingerprint(JSON.parse(row.payload), row.timestamp);
 }
-
-/** Use the first receipt's clock so omitted/invalid occurredAt stays idempotent on later retries. */
-export function retryFingerprint(input: unknown, projectId: string, receivedAt: Date, eventId: string, version = 'v1:') {
+export function retryFingerprint(input: unknown, projectId: string, receivedAt: Date, eventId: string, expected = 'v1:', eventAt?: Date) {
+  if (expected.startsWith('unreadable:')) return null;
+  if (expected.startsWith('v1:')) {
+    const occurredAt = input && typeof input === 'object' ? (input as Record<string, unknown>).occurredAt : undefined;
+    return canonicalFingerprint(input, (eventAt ?? resolveTimestamp(occurredAt, receivedAt).timestamp).toISOString());
+  }
   const result = normalizeEvent(input, { projectId, receivedAt });
-  if (result.ok) result.row.event_id = eventId;
-  return result.ok ? (version.startsWith('v1:') ? eventFingerprint(result.row) : legacyEventFingerprint(result.row)) : null;
+  if (!result.ok) return null;
+  result.row.event_id = eventId;
+  return legacyEventFingerprint(result.row);
 }
-
 export type EventIdentity = { fingerprint: string; legacyFingerprint: string; receivedAt: Date; eventAt: Date };
 export const matchesIdentity = (fingerprint: string, identity: EventIdentity) =>
   fingerprint === (fingerprint.startsWith('v1:') ? identity.fingerprint : identity.legacyFingerprint);
 
-/** No time restriction: an id is unique across the entire project, including different partitions. */
+function identities(rows: EventRow[]) {
+  return new Map(
+    rows.map((row) => {
+      const receivedAt = iso(row.received_at),
+        eventAt = iso(row.timestamp);
+      const normalized = { ...row, timestamp: eventAt.toISOString() };
+      let fingerprint: string;
+      try {
+        fingerprint = canonicalFingerprint(JSON.parse(row.payload), eventAt.toISOString());
+      } catch {
+        fingerprint = `unreadable:${digest({ payload: row.payload, timestamp: eventAt.toISOString() })}`;
+      }
+      return [row.event_id, { fingerprint, legacyFingerprint: legacyEventFingerprint(normalized), receivedAt, eventAt }];
+    }),
+  );
+}
+/** Cold reconciliation reads authoritative raw evidence, even when an MV never populated the index. */
+export async function rawEventIdentities(ch: ClickHouseClient, projectId: string, ids: string[]) {
+  if (!ids.length) return new Map<string, EventIdentity>();
+  return identities(
+    await read<EventRow>(
+      ch,
+      'SELECT * EXCEPT(category,search_text) FROM events WHERE project_id={project:String} AND event_id IN {ids:Array(String)} ORDER BY received_at,timestamp,event_id LIMIT 1 BY event_id',
+      { project: projectId, ids },
+    ),
+  );
+}
+/** Fresh misses stay narrow. Payload reads happen only for index hits; dangling pointers fall back per id. */
 export async function existingEventIdentities(ch: ClickHouseClient, projectId: string, ids: string[]) {
   if (!ids.length) return new Map<string, EventIdentity>();
-  const hits = await read<{ event_id: string; timestamp: string }>(
+  const hits = await read<{ event_id: string; timestamp: string; received_at: string }>(
     ch,
-    'SELECT event_id,timestamp FROM event_ids WHERE project_id={project:String} AND event_id IN {ids:Array(String)}',
+    'SELECT event_id,timestamp,received_at FROM event_ids WHERE project_id={project:String} AND event_id IN {ids:Array(String)} ORDER BY received_at,timestamp,event_id LIMIT 1 BY event_id',
     { project: projectId, ids },
   );
   if (!hits.length) return new Map<string, EventIdentity>();
-  const rows = await read<Pick<EventRow, 'event_id' | 'received_at' | 'payload'>>(
-    ch,
-    'SELECT event_id,received_at,payload FROM events WHERE project_id={project:String} AND (timestamp,event_id) IN arrayZip({timestamps:Array(DateTime64(3))},{hitIds:Array(String)}) ORDER BY received_at,timestamp,event_id LIMIT 1 BY event_id',
-    { project: projectId, timestamps: hits.map((hit) => hit.timestamp), hitIds: hits.map((hit) => hit.event_id) },
+  const found = identities(
+    await read<EventRow>(
+      ch,
+      'SELECT * EXCEPT(category,search_text) FROM events WHERE project_id={project:String} AND (timestamp,event_id) IN arrayZip({timestamps:Array(DateTime64(3))},{hitIds:Array(String)}) AND (timestamp,event_id,received_at) IN arrayZip({timestamps:Array(DateTime64(3))},{hitIds:Array(String)},{received:Array(DateTime64(3))}) ORDER BY received_at,timestamp,event_id LIMIT 1 BY event_id',
+      {
+        project: projectId,
+        timestamps: hits.map((hit) => hit.timestamp),
+        hitIds: hits.map((hit) => hit.event_id),
+        received: hits.map((hit) => hit.received_at),
+      },
+    ),
   );
-  return new Map(
-    rows.map((row) => {
-      const receivedAt = new Date(row.received_at.endsWith('Z') ? row.received_at : `${row.received_at.replace(' ', 'T')}Z`);
-      // Re-normalize to avoid materialized columns and ClickHouse date serialization in the digest.
-      const normalized = normalizeEvent(JSON.parse(row.payload), { projectId, receivedAt });
-      if (!normalized.ok) throw new Error('Stored event cannot be normalized');
-      normalized.row.event_id = row.event_id;
-      return [
-        row.event_id,
-        {
-          fingerprint: eventFingerprint(normalized.row),
-          legacyFingerprint: legacyEventFingerprint(normalized.row),
-          receivedAt,
-          eventAt: new Date(normalized.row.timestamp),
-        },
-      ];
-    }),
-  );
+  const missing = [...new Set(hits.map((hit) => hit.event_id))].filter((id) => !found.has(id));
+  for (const [id, identity] of await rawEventIdentities(ch, projectId, missing)) found.set(id, identity);
+  return found;
+}
+/** Caller holds the exclusive project lock. Keep every surviving raw identity protected. */
+export async function repairEventIndex(ch: ClickHouseClient, projectId: string, ids: string[], stored: Map<string, EventIdentity>) {
+  const absent = ids.filter((id) => !stored.has(id));
+  if (absent.length)
+    await ch.command({
+      query: 'DELETE FROM event_ids WHERE project_id={project:String} AND event_id IN {ids:Array(String)}',
+      query_params: { project: projectId, ids: absent },
+      clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
+    });
+  if (stored.size)
+    await ch.insert({
+      table: 'event_ids',
+      format: 'JSONEachRow',
+      values: [...stored].map(([event_id, identity]) => ({
+        project_id: projectId,
+        event_id,
+        received_at: identity.receivedAt.toISOString(),
+        timestamp: identity.eventAt.toISOString(),
+      })),
+    });
 }

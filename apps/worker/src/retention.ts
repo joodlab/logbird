@@ -53,9 +53,11 @@ export async function enforceProjectRetention(projectId: string) {
           format: 'JSONEachRow',
         })
       ).json<{ n: string }>();
-      if (Number(rows[0]?.n ?? 0) > 0) await purgeProject(clickhouse, projectId, cutoff);
+      // Resume index deletion even when an earlier attempt already removed every expired raw row.
+      await purgeProject(clickhouse, projectId, cutoff);
       await purgeIngestReceipts(projectId, cutoff);
       if (previous?.status === 'failed') await rebuildProjectRollups(clickhouse, projectId);
+      if (await hasExpiredEvents(clickhouse, projectId, cutoff)) throw new Error('Retention cutoff invariant failed');
       await prisma.retentionRun.update({
         where: { id: run.id },
         data: { status: 'completed', finishedAt: new Date(), deletedEvents: Number(rows[0]?.n ?? 0) },

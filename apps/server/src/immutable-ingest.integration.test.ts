@@ -1,8 +1,9 @@
-import { eventFingerprint, exportEvents, getEvent, insertEvents, legacyEventFingerprint, read, searchEvents } from '@logbird/clickhouse';
+import { eventFingerprint, exportEvents, getEvent, insertEvents, read, searchEvents } from '@logbird/clickhouse';
 import { prisma, pruneIngestReceipts, purgeIngestReceipts, withProjectLock } from '@logbird/database';
 import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { legacyFingerprint3a1541f, normalizeEvent3a1541f } from '../../../packages/clickhouse/src/fixtures/identity-3a1541f';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 
@@ -108,14 +109,16 @@ it('hourly reconciliation readies an absent claim without losing its identity or
   expect((await f.post(original)).status).toBe(202);
 });
 it('confirms a visible delayed original without reinserting it', async () => {
-  const row = await f.pending(original);
+  const row = await f.pending(original, { expired: true });
   await insertEvents(clickhouse, [row]);
   expect((await f.post(original)).status).toBe(202);
   expect(await f.count()).toBe(1);
 });
 it('recovers old unversioned pending receipts and upgrades their stored-row fingerprints', async () => {
-  const row = f.row(original);
-  await f.pending(original, { legacy: legacyEventFingerprint(row), receivedAt: new Date(row.received_at), expired: true });
+  const old = normalizeEvent3a1541f(original, { projectId: f.project, receivedAt: new Date() });
+  if (!old.ok) throw new Error(old.reason);
+  const row = old.row;
+  await f.pending(original, { legacy: legacyFingerprint3a1541f(row), receivedAt: new Date(row.received_at), expired: true });
   await insertEvents(clickhouse, [row]);
   expect((await f.post(original)).status).toBe(202);
   expect(
@@ -234,7 +237,17 @@ it('Prisma claim dates round-trip in a non-UTC Postgres session', async () => {
 it('upgrades a missing legacy receipt on reinsertion and rejects lossy same-batch variants', async () => {
   const input = { id: 'legacy-missing', action: 'legacy.original', actor: { id: 42 } };
   const receivedAt = new Date();
-  await f.pending(input, { receivedAt, expired: true, legacy: legacyEventFingerprint(f.row(input, receivedAt)) });
+  await f.pending(input, {
+    receivedAt,
+    expired: true,
+    legacy: legacyFingerprint3a1541f(
+      (() => {
+        const old = normalizeEvent3a1541f(input, { projectId: f.project, receivedAt });
+        if (!old.ok) throw new Error(old.reason);
+        return old.row;
+      })(),
+    ),
+  });
   const response = await f.post([input, { ...input, actor: { id: 43 } }]);
   expect(response.status).toBe(202);
   expect(await response.json()).toMatchObject({ accepted: 1, rejected: [{ index: 1, reason: expect.stringMatching(/^duplicate_id_conflict:/) }] });

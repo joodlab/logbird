@@ -130,9 +130,14 @@ is kept. Send a correction with a new id and `context.parentEventId` pointing to
 The SDK calls `onDrop` for that event and `onError` with the reason.
 
 `503 ingest_pending` and `503 ingest_unavailable` mean retry the identical batch,
-honoring `Retry-After`. Healthy siblings may already be stored and remain idempotent
-on retry. Pending details contain `indices` and `eventIds`. The SDK retries these
+honoring `Retry-After`. Healthy siblings commit before a pending response and remain
+idempotent on retry. Pending details include `accepted`, `ids`, `rejected`, `warnings`,
+`indices` and `eventIds`. Every index outside `indices` is settled. Each rejected
+entry has a `code` plus a code-first explanation in `reason`. The SDK retries these
 responses; after its retry budget, the batch stays queued and `flush()` rejects.
 Retry `flush()` later. Unresolved writes recover automatically per project after a
 bounded lease and ClickHouse queue drain. An id containing NUL, a lone surrogate,
-or more than 256 UTF-16 code units is rejected individually as `invalid_event_id`.
+or more than 256 UTF-16 code units after trimming is rejected individually as
+`invalid_event_id`. Earlier releases truncated long ids; this release rejects them.
+Use string ids: numeric ids generate a fresh UUID and a warning, so convert a
+numeric source id with `String(id)` before sending it.

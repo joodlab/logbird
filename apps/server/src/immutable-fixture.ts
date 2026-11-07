@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import { eventFingerprint, normalizeEvent, read } from '@logbird/clickhouse';
 import { prisma, withProjectLock } from '@logbird/database';
 import { Hono } from 'hono';
@@ -14,6 +15,8 @@ export async function immutableFixture() {
   let cookie = '';
   await prisma.organization.create({ data: { id: org, name: 'QA Immutable', slug: org, createdAt: new Date() } });
   await prisma.project.create({ data: { id: project, organizationId: org, name: 'QA Immutable', slug: project } });
+  if (process.env.INGEST_FIXTURE_LEDGER)
+    appendFileSync(process.env.INGEST_FIXTURE_LEDGER, `${JSON.stringify({ projectId: project, organizationId: org })}\n`);
   await prisma.apiKey.create({ data: { projectId: project, name: 'QA key', kind: 'ingest', hash: key.hash, prefix: key.prefix } });
   const first = new Hono().route('/', app);
   const replicas = [first, new Hono().route('/', app)];

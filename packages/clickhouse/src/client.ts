@@ -16,6 +16,8 @@ export const INGEST_CLAIM_LEASE_MS = 60_000;
 export const ASYNC_INSERT_FLUSH_BOUND_MS = 10_000;
 const INSERT_MAX_EXECUTION_SECONDS = 30;
 export const CLICKHOUSE_PARSE_ERROR_CODES = new Set(['6', '27', '38', '41', '53', '69', '72']);
+// Authentication/query rejection is definite; resource limits and async-wait timeouts are not.
+export const CLICKHOUSE_PREWRITE_ERROR_CODES = new Set([...CLICKHOUSE_PARSE_ERROR_CODES, '60', '62', '81', '164', '497', '516']);
 export class AmbiguousInsertError extends Error {
   constructor() {
     super('Storage acknowledgement is unresolved after sending the body');
@@ -53,16 +55,11 @@ export async function insertEvents(ch: ClickHouseClient, rows: EventRow[], lease
       },
     });
   } catch (error) {
-    const serverCode = error && typeof error === 'object' && 'code' in error && /^\d+$/.test(String(error.code));
-    if (
-      !serverCode &&
-      bodySent &&
-      error instanceof Error &&
-      /timeout|timed out|reset|EPIPE|socket hang up|socket closed|premature.close|aborted|ABORT_ERR/i.test(
-        `${error.message} ${'code' in error ? error.code : ''} ${error.name}`,
-      )
-    )
-      throw new AmbiguousInsertError();
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+    // The same parse code can originate inside a failing MV after the source row was written.
+    const viewFailure = error instanceof Error && /\bview\b|materialized.?view/i.test(error.message);
+    const definite = CLICKHOUSE_PREWRITE_ERROR_CODES.has(code) && !viewFailure;
+    if (bodySent && !definite) throw new AmbiguousInsertError();
     throw error;
   } finally {
     values.destroy();
