@@ -14,7 +14,7 @@
     "dev:server": "turbo watch dev -F @logbird/server...",
     "dev:app": "turbo watch dev -F @logbird/app...",
     "clean": "turbo run clean && git clean -xdf node_modules",
-    "check": "ultracite check",
+    "check": "node scripts/check-text-bom.mjs && ultracite check",
     "fix": "ultracite fix",
     "lint": "ultracite check",
     "format": "biome format --write .",
