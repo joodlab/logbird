@@ -4,6 +4,7 @@ import { insertEvents, normalizeEvent, read, searchEvents, toEvent, where } from
 import { closeProjectLocks, prisma, withProjectLock } from '@logbird/database';
 import { clickhouse, purgeProjectEvents } from '../apps/server/src/clickhouse';
 import { type IngestCandidate, insertImmutableEvents } from '../apps/server/src/immutable-ingest';
+import { recoverProjectIngest } from '../apps/worker/src/ingest-recovery';
 
 // Opt-in benchmark. Hold BOTH heavy and logbird-stack slots; check RAM before running.
 // 1M receipts, paired 1000-event INSERTs and explorer queries over 10M owned history rows.
@@ -21,8 +22,10 @@ const table = `qa_receipts_${org.replaceAll('-', '')}`;
 const project = `qa-identity-${org}`;
 const baseline = `${project}-baseline`;
 const logComment = `immutable-benchmark-${org}`;
+let queryLabel = 'setup';
 const query = clickhouse.query.bind(clickhouse);
-clickhouse.query = (params) => query({ ...params, clickhouse_settings: { ...params.clickhouse_settings, log_comment: logComment } });
+clickhouse.query = (params) =>
+  query({ ...params, clickhouse_settings: { ...params.clickhouse_settings, log_comment: `${logComment}:${queryLabel}` } });
 const batchSize = 1000;
 const p95 = (samples: number[]) => [...samples].sort((a, b) => a - b)[Math.ceil(samples.length * 0.95) - 1];
 const p50 = (samples: number[]) => [...samples].sort((a, b) => a - b)[Math.ceil(samples.length * 0.5) - 1];
@@ -81,8 +84,19 @@ try {
         return { index, input, row: normalized.row };
       });
       const rawRows = candidates.map(({ row }) => ({ ...row, project_id: baseline }));
-      const raw = () => withProjectLock(baseline, () => insertEvents(clickhouse, rawRows), { mode: 'shared' });
-      const fenced = () => withProjectLock(project, () => insertImmutableEvents(project, org, candidates), { mode: 'shared' });
+      const raw = () => {
+        queryLabel = `ingest-${batchSize}-${batch}-raw`;
+        return withProjectLock(baseline, () => insertEvents(clickhouse, rawRows), { mode: 'shared' });
+      };
+      const fenced = async () => {
+        queryLabel = `ingest-${batchSize}-${batch}-fenced`;
+        await recoverProjectIngest(
+          clickhouse,
+          project,
+          candidates.map((c) => c.row.event_id),
+        );
+        return withProjectLock(project, () => insertImmutableEvents(project, org, candidates), { mode: 'shared' });
+      };
       let rawTime: number, fencedTime: number;
       if (batch % 2 === 0) {
         rawTime = await timed(raw);
@@ -153,10 +167,14 @@ try {
       for (let sample = 0; sample < 21; sample++) {
         let oldMs: number, newMs: number;
         if (sample % 2 === 0) {
+          queryLabel = `explorer-${range}-${order}-${sample}-legacy`;
           oldMs = await timed(legacy);
+          queryLabel = `explorer-${range}-${order}-${sample}-current`;
           newMs = await timed(() => searchEvents(clickhouse, project, q));
         } else {
+          queryLabel = `explorer-${range}-${order}-${sample}-current`;
           newMs = await timed(() => searchEvents(clickhouse, project, q));
+          queryLabel = `explorer-${range}-${order}-${sample}-legacy`;
           oldMs = await timed(legacy);
         }
         if (sample) {
@@ -184,7 +202,7 @@ try {
   await clickhouse.command({ query: 'SYSTEM FLUSH LOGS' });
   const queryWork = await read(
     clickhouse,
-    "SELECT query_id,query_duration_ms,read_rows,read_bytes,result_rows,memory_usage FROM system.query_log WHERE type='QueryFinish' AND log_comment={tag:String} ORDER BY event_time_microseconds",
+    "SELECT log_comment,query_id,query_duration_ms,read_rows,read_bytes,result_rows,memory_usage FROM system.query_log WHERE type='QueryFinish' AND startsWith(log_comment,{tag:String}) ORDER BY event_time_microseconds",
     { tag: logComment },
   );
   console.log(JSON.stringify({ head, queryWork }));
