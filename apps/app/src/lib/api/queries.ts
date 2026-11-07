@@ -1,7 +1,7 @@
 import type { EntityKind, EntitySort, QueryLang } from '@logbird/contracts';
 import { infiniteQueryOptions, keepPreviousData, queryOptions } from '@tanstack/react-query';
 import { authClient } from '@/lib/auth-client';
-import { isOverBudget } from '@/lib/query-budget';
+import { isBudgetLimit, isOverBudget } from '@/lib/query-budget';
 import { resolveRange } from '@/lib/range';
 import { api, langParam } from './client';
 import { ApiRequestError, isBusyError, isTimeoutError, withDeadline } from './errors';
@@ -28,14 +28,23 @@ export const BUSY_RETRIES = 12;
 export const SESSION_DEADLINE_MS = 15_000;
 
 /**
- * Shared retry policy: never retry 4xx, a request that already hit its deadline, or a query over its storage budget
- * (an identical scan would fail the same way; pages offer a shorter range or an explicit Retry); retry busy projects
- * patiently, and give other failures (network, 5xx) two more tries.
+ * Shared retry policy: never retry 4xx, a request that already hit its client deadline, or a confirmed resource limit
+ * (`invalid_query` / `limit`: an identical scan fails the same way); retry busy projects patiently, and give other
+ * failures (network, 5xx including a transient `query_unavailable`) two more tries.
  */
 export function shouldRetry(failureCount: number, error: unknown): boolean {
   if (isBusyError(error)) return failureCount < BUSY_RETRIES;
-  if (isTimeoutError(error) || isOverBudget(error)) return false;
+  if (isTimeoutError(error) || isBudgetLimit(error)) return false;
   return !(error instanceof ApiRequestError && error.status >= 400 && error.status < 500) && failureCount < 2;
+}
+
+/**
+ * Retry policy for summaries under a page banner with its own Retry (the support agent page): also skip
+ * `query_unavailable`, usually a storage timeout for a long range, so the banner shows at once instead of after three
+ * identical scans. Everything else follows `shouldRetry`.
+ */
+export function summaryRetry(failureCount: number, error: unknown): boolean {
+  return !isOverBudget(error) && shouldRetry(failureCount, error);
 }
 
 /** Exponential backoff capped at 10 s, never sooner than the server's `Retry-After`. */

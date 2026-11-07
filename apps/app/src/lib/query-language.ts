@@ -208,6 +208,8 @@ function tidy(tokens: QueryToken[]): QueryToken[] {
       if (opens(t) && next?.raw === ')') {
         drop.add(t);
         drop.add(next);
+        // `NOT (…)` whose group emptied: the NOT goes too, or it would negate whatever follows.
+        if (prev?.raw === 'NOT') drop.add(prev);
       }
     });
     current.forEach((t, i) => {
@@ -217,6 +219,23 @@ function tidy(tokens: QueryToken[]): QueryToken[] {
     if (drop.size === 0) return current;
     current = current.filter((t) => !drop.has(t));
   }
+}
+
+/**
+ * Drop the tokens `test` accepts together with a unary `NOT` that applies to them (`NOT field:x`), so removing an
+ * operand never leaves its NOT to negate the next predicate. Every other token keeps its place and polarity.
+ */
+function dropTokens(tokens: QueryToken[], test: (t: QueryToken) => boolean): QueryToken[] {
+  const drop = new Set<QueryToken>();
+  tokens.forEach((t, i) => {
+    if (!test(t)) return;
+    drop.add(t);
+    let j = i - 1;
+    while (j >= 0 && tokens[j]?.kind === 'space') j -= 1;
+    const prev = tokens[j];
+    if (prev?.kind === 'operator' && prev.raw === 'NOT') drop.add(prev);
+  });
+  return tokens.filter((t) => !drop.has(t));
 }
 
 function join(tokens: QueryToken[]): string {
@@ -263,7 +282,21 @@ export function topLevelFieldTerms(q: string): QueryToken[] {
 
 /** Remove the tokens `test` accepts (by identity), tidying operators and groups they leave dangling. */
 export function removeTokens(q: string, test: (t: QueryToken) => boolean): string {
-  return join(tokenize(q).filter((t) => !test(t)));
+  return join(dropTokens(tokenize(q), test));
+}
+
+/** Field terms with their effective polarity: a leading `-` or a unary `NOT` before them (not both) negates. */
+export function fieldTermsWithPolarity(q: string): { token: QueryToken; negated: boolean }[] {
+  const tokens = tokenize(q);
+  const out: { token: QueryToken; negated: boolean }[] = [];
+  tokens.forEach((t, i) => {
+    if (t.kind !== 'field') return;
+    let j = i - 1;
+    while (j >= 0 && tokens[j]?.kind === 'space') j -= 1;
+    const not = tokens[j]?.kind === 'operator' && tokens[j]?.raw === 'NOT';
+    out.push({ token: t, negated: t.negated !== not });
+  });
+  return out;
 }
 
 /** Field terms present in the query (non-space tokens only). */
@@ -284,14 +317,13 @@ export function hasTerm(q: string, field: string, value: string, negated?: boole
 /** Remove every term for `field` (optionally only one value / polarity). */
 export function removeTerm(q: string, field: string, value?: string, negated?: boolean): string {
   const f = canonicalField(field);
-  const kept = tokenize(q).filter(
+  const kept = dropTokens(
+    tokenize(q),
     (t) =>
-      !(
-        t.kind === 'field' &&
-        canonicalField(t.field ?? '') === f &&
-        (value === undefined || (isSimple(t) && t.value === value)) &&
-        (negated === undefined || t.negated === negated)
-      ),
+      t.kind === 'field' &&
+      canonicalField(t.field ?? '') === f &&
+      (value === undefined || (isSimple(t) && t.value === value)) &&
+      (negated === undefined || t.negated === negated),
   );
   return join(kept);
 }

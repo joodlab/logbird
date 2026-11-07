@@ -336,3 +336,12 @@ describe('andQuery (OR precedence)', () => {
     expect(excludeTerm('action:a OR action:b', 'outcome', 'failure')).toBe('(action:a OR action:b) -outcome:failure');
   });
 });
+
+describe('removeTerm with a unary NOT (round 5)', () => {
+  it('removes the NOT with its operand and keeps every other polarity', () => {
+    expect(removeTerm('NOT actor:x action:y', 'actor')).toBe('action:y');
+    expect(removeTerm('action:y NOT actor:x -tenant:t', 'actor')).toBe('action:y -tenant:t');
+    expect(removeTerm('NOT (actor:a OR actor:b) action:y', 'actor')).toBe('action:y');
+    expect(removeTerm('NOT actor:x action:y', 'action')).toBe('NOT actor:x');
+  });
+});

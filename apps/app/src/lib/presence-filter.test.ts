@@ -170,3 +170,21 @@ describe('presence filter across OR and groups (round 3)', () => {
     expect(parsePresenceSql("(impersonator_id = 'a)')", 'impersonator_id')).toEqual({ value: 'a)', negated: false });
   });
 });
+
+describe('unary NOT on the presence group (round 5)', () => {
+  const authored = 'NOT impersonator:(support_1 OR support_2) action:booking.modified';
+
+  it('reads NOT as an exclusion and removes it with its operand, never negating another predicate', () => {
+    // Hide what support did: the NOT group goes with its NOT; the booking filter keeps its polarity.
+    expect(q(authored, '*', 'exclude')).toBe('action:booking.modified -impersonator:*');
+    // Any support agent: the NOT group is an exclusion, kept like any agent exclusion.
+    expect(q(authored, '*', 'include')).toBe('NOT impersonator:(support_1 OR support_2) action:booking.modified impersonator:*');
+    // One agent: exclusions of other agents stay, "NOT" never moves onto action.
+    expect(q(authored, 'support_3', 'include')).toBe('NOT impersonator:(support_1 OR support_2) action:booking.modified impersonator:support_3');
+    expect(q('NOT impersonator:support_1 action:booking.modified', 'support_1', 'exclude')).toBe('action:booking.modified');
+  });
+
+  it('keeps the count query honest under NOT', () => {
+    expect(withPresence('NOT impersonator:* action:x', F)).toBe('NOT impersonator:* action:x impersonator:*');
+  });
+});

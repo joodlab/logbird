@@ -15,7 +15,7 @@ import { OutcomeAreaChart } from '@/components/charts/outcome-area-chart';
 import { EntityProfileLink } from '@/components/entity-link';
 import { Explorer, type ExplorerState } from '@/components/explorer/explorer';
 import { RankList } from '@/components/rank-list';
-import { facetQuery, histogramQuery } from '@/lib/api/queries';
+import { facetQuery, histogramQuery, summaryRetry } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
 import { formatNumber } from '@/lib/format';
 import { distinctCount, SUPPORT_TERM, supportAgentQuery } from '@/lib/impersonation';
@@ -51,11 +51,13 @@ function CouldNotLoad({ className }: { className?: string }) {
 export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineChange }: SupportAgentProfileProps) {
   const baseQuery = supportAgentQuery(agentId);
   const { range } = timeline;
-  const self = useQuery(facetQuery(projectId, 'impersonator', range, baseQuery, 1));
-  const actedAs = useQuery(facetQuery(projectId, 'actor', range, withPresence(baseQuery, 'actor'), 100));
-  const tenants = useQuery(facetQuery(projectId, 'tenant', range, withPresence(baseQuery, 'tenant'), 100));
-  const actions = useQuery(facetQuery(projectId, 'action', range, baseQuery, 5));
-  const series = useQuery(histogramQuery(projectId, range, baseQuery));
+  // The five summaries sit under the page banner, whose Retry covers transient failures: no automatic retry of a
+  // storage timeout (summaryRetry), so the banner shows at once.
+  const self = useQuery({ ...facetQuery(projectId, 'impersonator', range, baseQuery, 1), retry: summaryRetry });
+  const actedAs = useQuery({ ...facetQuery(projectId, 'actor', range, withPresence(baseQuery, 'actor'), 100), retry: summaryRetry });
+  const tenants = useQuery({ ...facetQuery(projectId, 'tenant', range, withPresence(baseQuery, 'tenant'), 100), retry: summaryRetry });
+  const actions = useQuery({ ...facetQuery(projectId, 'action', range, baseQuery, 5), retry: summaryRetry });
+  const series = useQuery({ ...histogramQuery(projectId, range, baseQuery), retry: summaryRetry });
   // Their own account, if they also act as themselves: link it, never mix the two.
   const ownAccount = useQuery(facetQuery(projectId, 'actor', range, formatTerm('actor', agentId), 1));
   const summaries = [self, actedAs, tenants, actions, series];

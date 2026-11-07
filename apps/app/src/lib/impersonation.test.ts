@@ -56,6 +56,14 @@ describe('who did it', () => {
     expect(withWhoFilter('impersonator:(support_1 OR support_2)', 'self')).toBe('-impersonator:*');
   });
 
+  it('takes a unary NOT with the group it removes (round 5)', () => {
+    const authored = 'NOT impersonator:(support_1 OR support_2) action:booking.modified';
+    expect(whoFilter(authored)).toBe('all');
+    expect(withWhoFilter(authored, 'self')).toBe('action:booking.modified -impersonator:*');
+    expect(withWhoFilter(authored, 'all')).toBe('action:booking.modified');
+    expect(withWhoFilter(authored, 'support')).toBe('NOT impersonator:(support_1 OR support_2) action:booking.modified impersonator:*');
+  });
+
   it('swaps the split in SQL', () => {
     expect(withWhoFilter("outcome = 'failure'", 'support', 'sql')).toBe("outcome = 'failure' AND impersonator_id != ''");
     expect(withWhoFilter("outcome = 'failure' AND impersonator_id = 'support_1'", 'self', 'sql')).toBe(

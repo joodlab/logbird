@@ -1,6 +1,6 @@
 import type { QueryLang } from '@logbird/contracts';
 import { coreField } from '@/lib/query-catalog';
-import { andQuery, canonicalField, fieldTerms, formatTerm, hasTopLevelOr, removeTokens, topLevelFieldTerms } from '@/lib/query-language';
+import { andQuery, canonicalField, fieldTermsWithPolarity, formatTerm, hasTopLevelOr, removeTokens, topLevelFieldTerms } from '@/lib/query-language';
 import { appendSqlPredicate, removeSqlConjuncts, sqlConjuncts, sqlString } from '@/lib/sql-language';
 
 /**
@@ -36,10 +36,19 @@ const OWN_KINDS = new Set(['plain', 'quoted', 'group']);
 function queryAdapter(field: string): Adapter {
   const f = canonicalField(field);
   const isOwn = (t: { valueKind?: string; field?: string }) => OWN_KINDS.has(t.valueKind ?? '') && canonicalField(t.field ?? '') === f;
-  const term = (t: { value?: string; negated: boolean }) => ({ value: t.value ?? '', negated: Boolean(t.negated) });
+  // Polarity counts a unary NOT (`NOT impersonator:(a OR b)` is an exclusion), and removal takes that NOT with it.
+  const own = (q: string) => fieldTermsWithPolarity(q).filter((x) => isOwn(x.token));
+  const term = (x: { token: { value?: string }; negated: boolean }) => ({ value: x.token.value ?? '', negated: x.negated });
   return {
-    terms: (q) => fieldTerms(q).filter(isOwn).map(term),
-    remove: (q, test) => removeTokens(q, (t) => t.kind === 'field' && isOwn(t) && test(term(t))),
+    terms: (q) => own(q).map(term),
+    remove: (q, test) => {
+      const doomed = new Set(
+        own(q)
+          .filter((x) => test(term(x)))
+          .map((x) => x.token.start),
+      );
+      return removeTokens(q, (t) => t.kind === 'field' && doomed.has(t.start));
+    },
     add: (q, t) => andQuery(q, formatTerm(field, t.value, t.negated)),
   };
 }
@@ -143,9 +152,16 @@ export function withPresence(q: string, field: string, lang: QueryLang = 'query'
     return a.terms(q).some((x) => same(x, any)) ? q.trim() : a.add(q, any);
   }
   const f = canonicalField(field);
+  const notted = new Set(
+    fieldTermsWithPolarity(q)
+      .filter((x) => x.negated !== x.token.negated)
+      .map((x) => x.token.start),
+  );
   const constrained =
     !hasTopLevelOr(q) &&
-    topLevelFieldTerms(q).some((t) => !t.negated && t.valueKind === 'plain' && t.value === '*' && canonicalField(t.field ?? '') === f);
+    topLevelFieldTerms(q).some(
+      (t) => !t.negated && !notted.has(t.start) && t.valueKind === 'plain' && t.value === '*' && canonicalField(t.field ?? '') === f,
+    );
   return constrained ? q.trim() : andQuery(q, formatTerm(field, '*'));
 }
 
