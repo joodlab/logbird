@@ -1,6 +1,6 @@
 import { defineEventHandler } from 'nitro/h3';
 import { SITE_URL } from '../src/env';
-import { createRateLimiter, handleWaitlist } from '../src/server/waitlist';
+import { clientAddress, createRateLimiter, handleWaitlist } from '../src/server/waitlist';
 import { createCloudflareStore, type WaitlistBindings } from '../src/server/waitlist-cloudflare';
 
 const limiter = createRateLimiter();
@@ -40,7 +40,9 @@ export default defineEventHandler(async (event) => {
   return handleWaitlist(request, {
     store,
     limiter,
-    ip: cloudflare ? (request.headers.get('cf-connecting-ip') ?? 'unknown') : (event.req.ip ?? 'unknown'),
+    ip: cloudflare
+      ? (request.headers.get('cf-connecting-ip') ?? 'unknown')
+      : clientAddress(event.req.ip, request.headers.get('x-forwarded-for'), (await import('../src/server/env')).serverEnv.WEB_TRUST_PROXY),
     allowedOrigins,
   });
 });

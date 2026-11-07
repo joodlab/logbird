@@ -18,6 +18,11 @@ export const serverEnv = createEnv({
     WAITLIST_FILE: z.string().optional(),
     /** Extra origins allowed to post the form, comma-separated (e.g. a staging host). */
     WEB_ALLOWED_ORIGINS: z.string().optional(),
+    /**
+     * Reverse proxies in front of the Node server that append the client address to X-Forwarded-For (Caddy, Nginx with
+     * $proxy_add_x_forwarded_for, Traefik). 0 ignores forwarding headers and limits by socket address.
+     */
+    WEB_TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
   },
   isServer: true,
   runtimeEnv: process.env,
