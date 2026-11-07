@@ -99,6 +99,19 @@ The server Dockerfile's `migrate` target is the migration image; API runtime ima
 Build/publish manually through the owner's release process. Do not add automatic PR Docker builds
 or CI workflows. No build, push or deployment is performed by Kustomize.
 
+**Artifact qualification is a release and recovery prerequisite.** The chosen source
+must contain [PR #51](https://github.com/joodlab/logbird/pull/51)'s retention-SQL
+embedding fix, or an equivalent verified change. Record the accepted fix commit,
+all four built digests and actual running image IDs. Exercise real expired-row
+retention and failed-run repair through those exact built API/worker digests, then
+compare survivor IDs and logical values in all three aggregate tables. Migration
+success or SQL present in the migration image does not qualify runtime packaging.
+The separate native-restore mutation-version defect [#75](https://github.com/joodlab/logbird/issues/75)
+also blocks production recovery until its accepted fix link/revision and the
+[restore/repair/repeated-repair checkpoints](backup-disaster-recovery.md#logical-aggregate-checkpoints-a-b-c)
+pass with the exact images. No accepted #75 fix revision is identified in this
+baseline; record it before clearing that gate. Keep these two prerequisites separate.
+
 Before applying, make a private release copy of this directory outside Git and:
 
 1. Replace all four image references with verified `repository@sha256:...` values. Record image
@@ -113,14 +126,22 @@ Before applying, make a private release copy of this directory outside Git and:
    Redis 7, or tested Dragonfly with `--cluster_mode=emulated --lock_on_hashtags=true` and
    `noeviction` behavior. Keep `{logbird}` identical on every producer/worker. Never reset a
    shared service to prepare this deployment.
-4. Create private `logbird-runtime` and `logbird-migration` Secrets from narrowly scoped
-   environment files. Do not copy a developer `.env` wholesale. Both need `DATABASE_URL`,
-   `BETTER_AUTH_SECRET`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`,
-   `CLICKHOUSE_QUERY_PASSWORD` (64 lowercase hex), `REDIS_URL`; runtime also needs
-   `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` when required by the provider. ConfigMap defaults
-   supply the other non-secret names, including implicit SMTP TLS on port 465; verify that mode
-   with the selected provider. Keep `CLICKHOUSE_QUERY_USER=logbird_query` consistent.
-   Review optional overrides against [.env.example](../.env.example).
+4. Prepare three narrowly scoped private Secret files using the existing credential
+   values; this separation does not authorize credential rotation or new database users.
+   Do not copy a developer `.env` wholesale. Required keys are:
+
+   | Secret | Keys / purpose |
+   | --- | --- |
+   | `logbird-runtime` | API: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `REDIS_URL`, `BETTER_AUTH_SECRET`, `CLICKHOUSE_QUERY_PASSWORD` (64 lowercase hex); `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` as required by the selected provider |
+   | `logbird-worker` | Retention/health/queue only: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `REDIS_URL`. The manifest names these five `secretKeyRef` entries explicitly; no API auth secret, restricted-query password or SMTP credentials are mounted |
+   | `logbird-migration` | One-shot schema/access tooling: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, preserved `CLICKHOUSE_QUERY_PASSWORD`; no auth or mail credentials |
+
+   Back up the three object names, key inventories and encrypted recovery references
+   with the matched set. Restore/recreate each scoped Secret with its preserved values;
+   do not replace the worker Secret with the API file. ConfigMap defaults supply the
+   non-secret settings, including implicit SMTP TLS on port 465 for the API; verify
+   that mode with the selected provider. Keep `CLICKHOUSE_QUERY_USER=logbird_query`
+   consistent for API/migration. Review overrides against [.env.example](../.env.example).
 5. Give the migration identity Postgres DDL and the ClickHouse schema/access-management grants
    listed in self-hosting. Give runtime only its required data rights. Current retention and
    management paths mutate data; a read-only runtime identity is insufficient. Preserve existing
@@ -139,6 +160,36 @@ are an explicit pre-launch topology task. These manifests alone make no HA claim
 
 ## Manual release sequence
 
+### Runtime write boundaries and migration exception
+
+App, API and worker containers have `readOnlyRootFilesystem: true`, with their only
+writable mount at `/tmp`: a disk-backed `emptyDir` limited to 64 MiB. `TMPDIR` points
+there; group 1000 owns volume access. Per-container ephemeral-storage requests/limits
+are 64/128 MiB, covering scratch and logs. This configuration is statically checked,
+not proof that each real image works. Qualify the exact digests under these mounts:
+boot/probes, OTP, ingest/read/export, expired-row retention/repair and shutdown must
+pass; writes to application code must fail. Add any required extra writable path
+only as an audited bounded mount, without disabling runtime root protection.
+
+**Narrow migration-only exception:** the one-shot Job explicitly retains a writable
+root while Prisma/pnpm and the selected migration image's complete write set remain
+unverified. It has no listener, one non-root container, no automatic retry, a
+20-minute deadline, migration-only credentials and no service-account token. Its
+`/tmp` volume is limited to 256 MiB, with `TMPDIR` and `XDG_CACHE_HOME` directed there;
+ephemeral-storage request/limit is 256/512 MiB. This exception does not extend to any
+Deployment. Current query-user tooling receives the preserved password from env and
+does not need to append an env file in that mode. Cache/tool writes elsewhere have
+not been measured, and are not claimed necessary.
+
+Before production, audit the full migration command against the exact #51-or-equivalent
+image in isolated targets, recording paths, ownership, peak scratch/layer usage and
+failure/permission behavior without secret values. Bake tooling into the artifact;
+do not install it at migration time. If all writes fit audited scratch/cache mounts,
+enable read-only root for the Job too. Otherwise the release receipt must bound and
+justify this exact image's one-shot exception and cleanup; do not silently widen it.
+
+### Execute the qualified release
+
 Serialize releases using the operator's release lock and record its owner. First take and verify
 a matched [recovery set](backup-disaster-recovery.md). Review every migration for compatibility.
 Until a rolling transition is rehearsed, schedule maintenance, block public writes, drain
@@ -155,6 +206,7 @@ On first install no old writers exist. Do not apply `workloads.yaml` before the 
 ```sh
 kubectl apply -f namespace.yaml -f config.yaml
 kubectl -n logbird create secret generic logbird-runtime --from-env-file=/secure/logbird-runtime.env
+kubectl -n logbird create secret generic logbird-worker --from-env-file=/secure/logbird-worker.env
 kubectl -n logbird create secret generic logbird-migration --from-env-file=/secure/logbird-migration.env
 # On an existing install preserve these Secrets; do not recreate or rotate them.
 kubectl apply -f network-policies.yaml -n logbird
@@ -189,6 +241,11 @@ against isolated fictional fixtures. Capture OTP delivery, login, tenant isolati
 and readback of the same ID, Query/SQL denial, retention completion and HTTPS/header/client-IP
 checks. Record skipped smoke inputs as gaps. Inspect each Pod's `imageID` alongside the registry
 digest, migration inventory and source SHA; a registry tag or healthy Pod is not revision proof.
+
+Require the artifact qualification above before selecting release or rollback images.
+Record retention/failed-repair evidence for the exact API/worker digests, plus #75's
+restore/repair/repeated-repair checkpoints before recovery. Keep production recovery
+fenced when either prerequisite or any logical comparison is missing or mismatched.
 
 Test node/process restarts, a failed migration, dependency outages, recovery and a rejected
 unhealthy rollout before launch. Measure any request interruption continuously; RollingUpdate

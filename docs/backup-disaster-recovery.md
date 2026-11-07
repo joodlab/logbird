@@ -28,7 +28,7 @@ readability and key access from a recovery host.
 | Postgres | Database custom dump, needed roles/grants, schema migration inventory; verify archive listing and isolated restore |
 | ClickHouse | `logbird` database including raw events, rollups and materialized-view definitions; access users/profiles/row policies or a tested reprovisioning recipe with preserved credentials |
 | Queue | Consistent Redis 7 multipart AOF directory plus manifest/config, or the deployed Dragonfly version's tested snapshot format; record queue prefix and scheduler state |
-| Configuration | Git SHA, four image digests, manifests, non-secret settings, external service versions and encrypted references to existing secrets/keys |
+| Configuration | Git SHA, four image digests, manifests, non-secret settings, external service versions; separate `logbird-runtime`, `logbird-worker`, `logbird-migration` key inventories and encrypted references to preserved values |
 | Platform | If k3s: control-plane datastore backup and saved server token; if Coolify: its separate instance backup plus saved encryption key and SSH recovery material |
 | Receipt | Set ID, UTC fence/start/end times, last acknowledged canary IDs per QA project, artifact object IDs/sizes/checksums, off-host confirmation, operator and restore-test reference |
 
@@ -41,6 +41,35 @@ as the correct datastore backup. Store token material privately without printing
 cover the platform's own state; preserve its encryption key separately. They do not include
 application volumes/databases. [Coolify database schedules](https://coolify.io/docs/databases/backups)
 can cover supported database engines, but Redis/Dragonfly need their engine-specific procedure.
+
+### Mandatory artifact and restore-correctness gates
+
+**Keep production recovery fenced until both independent prerequisites pass.**
+
+- **Runtime SQL packaging:** select a source revision containing the retention-SQL
+  embedding fix in [PR #51](https://github.com/joodlab/logbird/pull/51), or an equivalent
+  verified change. Record its exact accepted commit and the built API/worker image
+  digests. Real expired-row retention and failed-run repair must execute through
+  those exact digests and reconcile raw/derived values before release or recovery.
+  A successful migration image/Job cannot establish API/worker runtime packaging.
+- **Native-restore mutation versions:** [issue #75](https://github.com/joodlab/logbird/issues/75)
+  records correct totals immediately after native restore, followed by doubled
+  rollups after failed-retention repair. The self-host investigation and owner's
+  2026-11-07 root-cause update identify a restore-specific mismatch between preserved
+  part mutation versions and newly allocated mutation IDs. Ordinary failed-run retry
+  without restore was exact; this is a distinct restore gate, not proof that every
+  retry doubles aggregates. Link the accepted #75 corrective PR and full fix revision
+  in the recovery receipt, and prove the three checkpoints below using its exact
+  built API/worker digests. **No accepted #75 fix revision is identified here yet:
+  this gate remains unmet.** Follow the fix and verified procedure tracked in #75;
+  this runbook prescribes no mutation-version or rebuild workaround.
+
+Record both fix links/revisions, image IDs/digests, engine version, backup set,
+fixture IDs, materialized-view definitions/destinations, and `system.parts`
+names/rows/data versions plus mutation status at every checkpoint. Retain original
+backups and restored targets on mismatch. A completed mutation or RetentionRun
+cannot close either gate when logical values disagree. Track them separately in
+[OPS-03 and OPS-04](cloud-operations-gaps.md).
 
 ## Capture procedure
 
@@ -118,7 +147,8 @@ downloads, decryption and validation. Never rehearse by importing into productio
 3. Restore ClickHouse into the isolated empty `logbird` database from the recorded backup disk.
    Keep database name and materialized-view destinations consistent. Restore/reprovision access
    policies using the **preserved** query password and that release's provisioning command.
-   Verify raw/derived table counts, samples and row-policy isolation before allowing app reads.
+   Before any worker starts, perform checkpoint A below: raw event IDs/payloads,
+   logical aggregates, view destinations and row-policy isolation. Keep public access fenced.
 4. Restore the queue persistence with its version-matched engine and original `{logbird}` prefix.
    Keep the worker stopped while inspecting pending/failed/running jobs. Reconcile jobs with
    restored Postgres projects and `RetentionRun` rows; review orphan/stale jobs before enabling
@@ -130,9 +160,11 @@ downloads, decryption and validation. Never rehearse by importing into productio
    verify compatibility. Keep the drill origin/credentials inaccessible to real users and
    isolate it from production cookies and integrations.
 6. Prove a fictional user/workspace/project, stored key compatibility, denied cross-project reads,
-   known event IDs/payloads/counts, Query/SQL restrictions and raw/rollup agreement. Confirm no
-   event acknowledged before the recorded backup fence is absent from that boundary. Start the
-   worker and prove scheduler registration, lease recovery and one completed retention fixture.
+   known event IDs/payloads, Query/SQL restrictions and checkpoint A. Confirm no event acknowledged
+   before the backup fence is absent from that boundary. Start the exact qualified worker digest
+   and prove scheduler registration, real expired-row retention, and failed/abandoned-run repair.
+   Complete checkpoint B, then repeat the repair and complete checkpoint C. Do not reopen traffic
+   or certify recovery before all checkpoints and both artifact gates pass.
 7. Record actual recovered boundary/RPO, elapsed RTO, artifact IDs, checks, omissions and operator.
    Capture unexpected reappearing users/projects/deleted data: restoring an older set can resurrect
    removals. Reapply the verified deletion inventory **before** production traffic; if that
@@ -141,6 +173,34 @@ downloads, decryption and validation. Never rehearse by importing into productio
 8. Stop all drill processes, revoke only drill-specific credentials where authorized, and remove
    only verified drill-owned resources after the evidence is retained. Do not rotate/delete
    existing production keys. Keep the source recovery artifacts unchanged.
+
+### Logical aggregate checkpoints (A, B, C)
+
+Use a version-pinned fictional fixture containing both surviving and expired events,
+all four entity kinds, multiple minute buckets and attribute keys. Include restored
+parts whose `data_version` exceeds the newly allocated mutation versions, as in #75.
+Keep each fixture entity's type/name constant so `anyLast` labels have an exact
+expected value independent of background merge order.
+Run a fresh-storage/no-restore failed-retry control separately to distinguish the
+restore defect. Compare complete grouped values to an independent aggregation of
+the expected surviving raw events; physical aggregate-table row counts vary with
+background merges and cannot establish correctness.
+
+| Check | A: immediately after restore, workers stopped | B: after retention and failed/abandoned-run repair | C: after repeating repair |
+| --- | --- | --- | --- |
+| Raw events | Backup-boundary IDs/payloads and survival policy match the fixture manifest | Expired IDs absent; survivor IDs/payloads exact; no missing acknowledged survivors | Same survivors as B, no new rows or resurrection |
+| `events_by_minute` | `sum(events)` by the full minute/environment/action/outcome/actor/executor key matches raw events | Recompute the same map from survivors and compare every key/value | Identical logical map to B; no doubled counts |
+| `entities` | Group `(project_id,kind,entity_id)`: summed events, min first_seen, max last_seen and fixture labels agree with raw actor/tenant/executor/target expansion | Same invariants against survivors; expired-only entities gone | Same counts/extrema/fixture labels as B |
+| `attribute_keys` | Per project/key: summed count and max last_seen match raw map-key expansion; merged samples belong to the fixture's permitted values | Same invariants against survivors; expired-only keys gone | Same logical counts/extrema; merged samples remain valid |
+| Views and diagnostics | Saved materialized-view definitions and `TO` destinations match this schema; record part versions and pending mutation context | Verify definitions/destinations unchanged; record completed/failed mutations and receipt alongside logical values | Repeat diagnostics; completion alone is insufficient |
+
+Checkpoint A covers the restored boundary before retention removes expired fixture
+events; B/C cover the independently computed survivor boundary. Do not compare
+only grand totals, run `OPTIMIZE FINAL` to conceal a mismatch, or delete/recreate
+restored tables as an unverified workaround. Preserve evidence and follow #75's
+accepted fix if any check fails. Measure recovery objectives only after correctness.
+Use the accepted #75 fix's built-image fixture/harness to exercise repair twice;
+a completed no-op scheduler pass is not repeated-repair evidence.
 
 ## Incident and rollback decision
 

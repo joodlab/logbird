@@ -12,15 +12,19 @@ spec:
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false
-      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: {type: RuntimeDefault}}
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, fsGroupChangePolicy: OnRootMismatch, seccompProfile: {type: RuntimeDefault}}
+      volumes: [{name: scratch, emptyDir: {sizeLimit: 256Mi}}]
       containers:
         - name: migrate
           image: registry.invalid/logbird/migrate:unconfigured
           imagePullPolicy: IfNotPresent
-          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          # Time-boxed tooling exception; see cloud-operations.md migration write audit.
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: false, capabilities: {drop: [ALL]}}
+          volumeMounts: [{name: scratch, mountPath: /tmp}]
+          env: [{name: TMPDIR, value: /tmp}, {name: XDG_CACHE_HOME, value: /tmp/.cache}]
           envFrom:
             - configMapRef: {name: logbird-config}
             - secretRef: {name: logbird-migration}
           resources:
-            requests: {cpu: 250m, memory: 512Mi}
-            limits: {cpu: '2', memory: 1Gi}
+            requests: {cpu: 250m, memory: 512Mi, ephemeral-storage: 256Mi}
+            limits: {cpu: '2', memory: 1Gi, ephemeral-storage: 512Mi}
