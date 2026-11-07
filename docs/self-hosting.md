@@ -217,15 +217,16 @@ Require `BACKUP_CREATED` from the synchronous ClickHouse command, then export it
 
 ```sh
 docker compose cp "clickhouse:/var/lib/clickhouse/backups/$BACKUP_ID.zip" ".tmp/backups/$BACKUP_ID.zip"
-sha256sum ".tmp/backups/$BACKUP_ID.pg.dump" ".tmp/backups/$BACKUP_ID.zip" > ".tmp/backups/$BACKUP_ID.sha256"
+(cd .tmp/backups && sha256sum "$BACKUP_ID.pg.dump" "$BACKUP_ID.zip" > "$BACKUP_ID.sha256")
 ```
 
 Use a new BACKUP_ID each time; ClickHouse refuses to overwrite an archive. Record
 checksums, Git revision, database versions and logical totals: `count()` for
 `events`, `sum(events)` for `events_by_minute` and `entities`, and `sum(count)` for
 `attribute_keys`. Physical rollup counts change during merges. Copy the matched
-archives, checksum file and original env securely off-host and verify the hashes
-there before deleting any copy. Host archives stay under `.tmp/backups/`, excluded
+archives, checksum file and original env securely off-host. Run
+`sha256sum -c "$BACKUP_ID.sha256"` from the off-host archive directory before
+deleting any copy. Host archives stay under `.tmp/backups/`, excluded
 from Git/Docker; legacy `/backups/` and dump/zip files are also excluded.
 
 After verifying the off-host copy, remove only this archive from the data volume:
@@ -235,7 +236,7 @@ docker compose exec -T -e BACKUP_ID="$BACKUP_ID" clickhouse sh -c 'rm -- "/var/l
 docker compose exec -T postgres rm -- /tmp/logbird.pg.dump
 ```
 
-For backup only, resume with `docker compose up -d server worker app`, verify
+For backup only, resume with `docker compose up -d --no-build server worker app`, verify
 readiness/login/readback/retention, then reopen ingress. Include usual TLS and
 override flags. For an upgrade, keep writers stopped and continue its ordered steps.
 
@@ -248,7 +249,7 @@ Start only data services; do not run migrations yet:
 
 ```sh
 BACKUP_ID=logbird-20261107T120000Z # replace with the saved backup ID
-sha256sum -c ".tmp/backups/$BACKUP_ID.sha256"
+(cd .tmp/backups && sha256sum -c "$BACKUP_ID.sha256")
 docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml up -d --wait postgres clickhouse redis
 docker compose --env-file .env.restore -p logbird-restore cp ".tmp/backups/$BACKUP_ID.pg.dump" postgres:/tmp/logbird.pg.dump
 docker compose --env-file .env.restore -p logbird-restore exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error /tmp/logbird.pg.dump'
@@ -309,11 +310,12 @@ authenticated client and require all three counts to match immediately after rep
 ```sql
 SELECT count() AS logical_receipts,
        uniqExact(tuple(project_id,event_id)) AS distinct_receipts
-FROM logbird.event_ids FINAL;
+FROM logbird.event_ids;
 SELECT uniqExact(tuple(project_id,event_id)) AS distinct_raw_ids FROM logbird.events;
 ```
 
-`FINAL` checks logical receipts; physical counts change during merges. On error
+Compare visible index rows, distinct receipt keys and distinct raw keys; duplicate
+or missing receipts block recovery. On error
 retain staging/backups, keep writers stopped and investigate; do not blindly
 rerun normalization. Staging stays until the gate passes. Nothing runs on restore
 automatically. Executing both committed files, including the final precondition
@@ -389,6 +391,12 @@ restored data remains pending in #77.
 1. Keep public ingress blocked. Stop the original project's app/server/worker and,
    when used, Caddy, freeing its original HTTP/80/443 bindings. Use its recorded
    env/project name, for example `--env-file .env -p logbird`, not `.env.restore`.
+
+   ```sh
+   docker compose --env-file .env -p logbird -f docker-compose.yml -f docker-compose.backup.yml --profile tls stop app server worker caddy
+   ```
+
+   Substitute the recorded original identity; omit Caddy/profile when unused.
 2. In `.env.restore`, restore public APP_URL, LOGBIRD_HTTP_PORT, LOGBIRD_DOMAIN,
    ACME_EMAIL and TLS ports. Preserve all credentials; set TRUST_PROXY for the
    actual proxy chain. Replace the temporary verification origin/port.
@@ -420,6 +428,10 @@ restored data remains pending in #77.
    removed with `down` using its own env/project flags. Keep original volumes for
    the rollback window; use `down -v` only after retiring that recovery copy.
    Remove staging from the restored DB only after the gate/application checks pass.
+
+   ```sh
+   docker compose --env-file .env -p logbird -f docker-compose.yml -f docker-compose.backup.yml --profile tls down
+   ```
 
 Redis uses AOF. If pending jobs must survive, back up its stopped volume at the
 same boundary; do not mix stores from different points in time. Incompatible
