@@ -1,0 +1,5 @@
+# Opt-in native ClickHouse backups. Copy archives off this data volume after backup.
+services:
+  clickhouse:
+    volumes:
+      - ./config/clickhouse-backups.xml:/etc/clickhouse-server/config.d/backups.xml:ro

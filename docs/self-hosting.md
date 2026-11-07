@@ -12,7 +12,19 @@ sh scripts/selfhost-init.sh
 docker compose up -d
 ```
 
+On a memory-constrained build host, build roles sequentially before `up -d` to
+reduce concurrent compiler/package-install memory: `docker compose build migrate`,
+then `docker compose build server`, `docker compose build worker`, and
+`docker compose build app`. Runtime sizing below does not include peak source-build
+memory or build-cache storage.
+
 Open http://localhost:4600. Enter your email; read the code in your inbox, or privately run `docker compose logs server` when the log fallback is enabled. Create a workspace and project, copy its ingest key (shown once), then send:
+
+There is no separate instance-admin bootstrap account. A verified first login creates
+a user, and creating a workspace makes that user its owner. Email sign-up is open:
+the first user does not acquire authority over other workspaces. Keep the listener
+private during evaluation; restrict ingress if the installation is intended only
+for your team.
 
 ```sh
 export LOGBIRD_INGEST_KEY=lb_ingest_...
@@ -60,11 +72,50 @@ Configure SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASSWORD and MAIL_F
 
 Without SMTP explicitly enable AUTH_LOG_SIGN_IN_CODES=true. Each auth.sign_in_code JSON line contains recipient/code: log readers can sign in. Only sign-in bypasses SMTP, never invitations or other OTP purposes. With SMTP configured it logs and sends. After SMTP works, disable the flag and run `docker compose up -d server worker`; handle existing log retention appropriately. Missing SMTP with the flag off fails delivery. Invitations/courtesy emails need SMTP.
 
+For a Docker Desktop evaluation using an existing host Mailpit, set
+`SMTP_HOST=host.docker.internal`, `SMTP_PORT=1025`, `SMTP_SECURE=false`, and leave
+SMTP credentials empty. Read the fictional recipient's message at
+http://127.0.0.1:8025. Do not set container SMTP_HOST to 127.0.0.1. On Linux,
+configure a reachable SMTP host (or an explicit host-gateway mapping); Docker
+Engine does not universally provide the Docker Desktop hostname.
+
 ## Caddy TLS
 
 Point DNS to the host and allow 80/443. Set APP_URL=https://audit.example.com, LOGBIRD_DOMAIN=audit.example.com, optional ACME_EMAIL, and TRUST_PROXY=2 (Caddy plus the console). Run `docker compose --profile tls up -d`. Pinned Caddy 2 uses the committed Caddyfile, automatic HTTPS and persistent caddy_data/caddy_config volumes.
 
 Set TRUST_PROXY explicitly: profiles cannot change another service's environment. Local TLS tests can mount a Caddyfile with `tls internal`, choose LOGBIRD_TLS_HTTP_PORT / LOGBIRD_TLS_HTTPS_PORT, and run `curl -k --resolve hostname:port:127.0.0.1 https://hostname:port/readyz`. Internal test certificates are not publicly trusted.
+
+For a local-only test without DNS changes, set `APP_URL=https://audit.logbird.test:4743`,
+`LOGBIRD_DOMAIN=audit.logbird.test`, `LOGBIRD_TLS_HTTP_PORT=4780`,
+`LOGBIRD_TLS_HTTPS_PORT=4743`, and `TRUST_PROXY=2` in the private env file. Create
+`Caddyfile.local`:
+
+```caddyfile
+audit.logbird.test {
+  tls internal
+  reverse_proxy app:4600
+}
+```
+
+Create `compose.tls-local.yml` (keep both local files out of commits):
+
+```yaml
+services:
+  caddy:
+    volumes:
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+```
+
+```sh
+docker compose -f docker-compose.yml -f compose.tls-local.yml --profile tls up -d
+curl --insecure --resolve audit.logbird.test:4743:127.0.0.1 https://audit.logbird.test:4743/readyz
+```
+
+Require HTTP 200 and inspect Caddy's issuance logs. `--insecure` is only for this
+disposable local-CA check; normal clients must trust the issued CA or use public
+certificates. The custom HTTPS port is in APP_URL so authentication's origin checks
+match it. Port 4780 redirects to standard HTTPS; use the explicit 4743 URL for this
+test. Revert local overrides before following the public ACME instructions.
 
 ## Any reverse proxy
 
@@ -109,39 +160,139 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
 
 ## Upgrades and backups
 
-Back up first, stop writes and pin a tested Git revision (image tags/digests when published). Stop existing server/worker before upgrading, then `docker compose up -d --build`. One-shot migrate gates new server/worker startup; failure blocks startup. Prisma/ClickHouse apply only unapplied migrations; query credentials stay unchanged. Initialization variables do not rotate stored database passwords. Preserve the original env securely with backups.
+Back up first, stop writes and pin a tested Git revision (image tags/digests when
+published). Record the old revision and image IDs. Block ingress, drain jobs, then
+`docker compose stop app worker server`. Build the new images before restarting:
+`docker compose build`, followed by `docker compose up -d`. One-shot migrate gates
+new server/worker startup; failure blocks startup. Prisma/ClickHouse apply only
+unapplied migrations; query credentials stay unchanged. Initialization variables
+do not rotate stored database passwords. Preserve the original env securely with
+backups. Follow the separate namespace migration below when upgrading Trailmark.
+
+### Native backup and fresh-storage restore
+
+Use the same stopped-writer boundary for both stores. The optional override enables
+ClickHouse's local backup disk inside its existing data volume. Recreating just
+ClickHouse loads the configuration; keep API/worker/app stopped:
 
 ```sh
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > logbird.pg.dump
-# Restore into an empty prepared database while writers are stopped.
-cat logbird.pg.dump | docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner'
+docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d clickhouse
+mkdir -p backups
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f /tmp/logbird.pg.dump'
+docker compose cp postgres:/tmp/logbird.pg.dump backups/logbird.pg.dump
 ```
 
-For ClickHouse BACKUP, mount this at /etc/clickhouse-server/config.d/backups.xml and durable storage at /backups, then recreate your ClickHouse container in a maintenance window:
-
-```xml
-<clickhouse>
-  <storage_configuration><disks><backups><type>local</type><path>/backups/</path></backups></disks></storage_configuration>
-  <backups><allowed_disk>backups</allowed_disk><allowed_path>/backups/</allowed_path></backups>
-</clickhouse>
-```
-
-Run with an authenticated client; supply credentials privately:
+Create `backups/backup.sql` containing the following SQL. Use a unique archive name
+for every backup; ClickHouse refuses to overwrite an existing backup.
 
 ```sql
-BACKUP DATABASE logbird TO Disk('backups', 'logbird-2026-11-05.zip');
-RESTORE DATABASE logbird FROM Disk('backups', 'logbird-2026-11-05.zip');
--- File('/backups/logbird-2026-11-05.zip') also works with allowed_path.
--- S3 alternative, scoped credentials supplied privately, not in shell history:
--- BACKUP DATABASE logbird TO S3('https://bucket.s3.region.amazonaws.com/path/backup', '<access-key>', '<secret>');
--- RESTORE DATABASE logbird FROM S3('https://bucket.s3.region.amazonaws.com/path/backup', '<access-key>', '<secret>');
+BACKUP DATABASE logbird TO Disk('backups', 'logbird.zip');
 ```
 
-Restore into isolated empty storage first and verify counts/application reads. Preserve ClickHouse access storage and query credentials, or reprovision before acceptance; database backup alone does not replace access configuration. Redis uses AOF: back up its volume consistently while stopped or follow its backup procedure. Keep matched backups off-host. `docker compose down` preserves volumes; `down -v` permanently deletes them.
+```sh
+docker compose cp backups/backup.sql clickhouse:/tmp/logbird-backup.sql
+docker compose exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --queries-file /tmp/logbird-backup.sql'
+docker compose cp clickhouse:/var/lib/clickhouse/backups/logbird.zip backups/logbird.zip
+```
+
+Check that the synchronous command returns `BACKUP_CREATED`, record checksums, Git
+revision, database versions and four table counts (`events`, `events_by_minute`,
+`entities`, `attribute_keys`). Copy the archives and original `.env` to secure
+off-host storage. Archives inside a data volume alone are not a recoverable backup.
+`docker compose cp` avoids binary redirection corruption in Windows PowerShell 5.
+The `mkdir -p` example uses POSIX sh; on PowerShell use `New-Item -ItemType Directory
+-Force backups`. Never print the env file or authentication material.
+
+Restore into a **different, empty Compose project**, keeping the original stopped
+as recovery. Copy the original configuration privately to `.env.restore`; retain
+all secrets and set an unused `LOGBIRD_HTTP_PORT` and matching `APP_URL`. Do not run
+migrations before restoring. Start only the three fresh data services:
+
+```sh
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml up -d --wait postgres clickhouse redis
+docker compose --env-file .env.restore -p logbird-restore cp backups/logbird.pg.dump postgres:/tmp/logbird.pg.dump
+docker compose --env-file .env.restore -p logbird-restore exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error /tmp/logbird.pg.dump'
+docker compose --env-file .env.restore -p logbird-restore cp backups/logbird.zip clickhouse:/var/lib/clickhouse/backups/logbird.zip
+```
+
+Create `backups/restore.sql`:
+
+```sql
+RESTORE DATABASE logbird FROM Disk('backups', 'logbird.zip');
+```
+
+```sh
+docker compose --env-file .env.restore -p logbird-restore cp backups/restore.sql clickhouse:/tmp/logbird-restore.sql
+docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --queries-file /tmp/logbird-restore.sql'
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml up -d
+```
+
+Require `RESTORED`, successful migrate/query-user provisioning, `/readyz`, SMTP
+login, unchanged users/projects/settings/API keys, event readback and matching raw
+and aggregate table counts before switching traffic. A database backup does not
+include server-configured users; bundled administrator credentials come from the
+preserved env, and migrate reprovisions the restricted account without rotating
+its password. Custom access configuration must be backed up separately. See the
+[ClickHouse backup reference](https://clickhouse.com/docs/concepts/features/backup-restore/overview).
+
+Redis uses AOF. With drained jobs, a fresh Redis starts retention scheduling when
+the worker starts; verify a real retention run. If pending jobs must survive, back
+up and restore its stopped volume at the same boundary using your volume backup
+tool. Do not combine stores from different write boundaries. Stop on restore
+errors; never force a restore into populated storage. Rollback after incompatible
+migrations means restoring the matched backup into fresh storage with the old
+revision, rather than running old binaries against a newer schema.
+
+### Uninstall
+
+`docker compose down --remove-orphans` removes this project's containers and network
+and preserves its data. Include the same `-p`, `--env-file` and `-f` options used to
+install. For permanent deletion only after exporting and verifying backups,
+`docker compose down -v --remove-orphans` also deletes its named database, queue and
+Caddy certificate volumes. It does not remove `.env`, host backup copies or images.
+Keep the env with the backups or delete it privately according to your retention
+policy. Remove only the exact image IDs recorded for this installation, after
+checking no other installation uses them; never use global `docker system prune`
+on a shared host. The restore project's storage is separate and needs its own
+explicit teardown.
 
 ## Sizing
 
 Start a bounded evaluation with 4 vCPU, 8 GB RAM and SSD. This is an initial allocation, not measured capacity. Reserve RAM/disk for ClickHouse merges/backups and measure compressed growth with fictional representative traffic. Monitor disk, readiness, 5xx/429, queue age, retention failures and backup age. One VM has no HA. See [deployment](deployment.md) and [Coolify](coolify.md).
+
+Record `docker stats --no-stream`, `docker system df` and host free memory before
+startup, at idle and during a stated workload. Image sizes and build cache are
+separate from retained event storage; keep space for both during upgrades. Review
+`docker compose logs --since 10m server worker migrate` for migration completion,
+`worker.ready`, request errors and retention results. Code logging must be disabled
+before collecting or sharing logs. `/readyz` is a dependency check; it does not
+prove SMTP, successful retention, backup freshness or spare capacity. There is no
+bundled metrics collector or Prometheus endpoint; configure external host/Docker
+monitoring and alerts. See [manual releases](releases.md) for architecture and
+image-publishing gates.
+
+## Disposable acceptance fixture
+
+For a disposable evaluation only, `scripts/selfhost-smoke.mjs` creates a fictional
+`QA ` workspace, project, settings, ingest/read keys and event through the public
+listener and verifies Explorer readback. It retrieves only that recipient's OTP
+from host Mailpit (127.0.0.1:8025) with `--smtp`; without the flag it expects the
+explicit log-code fallback. Set `BASE_URL`, `COMPOSE_PROJECT_NAME` (must begin with
+`logbird-selfhost-`), `SELFHOST_ENV`, and optionally `SELFHOST_STATE` for your stack.
+For example, in POSIX sh:
+
+```sh
+BASE_URL=http://localhost:4700 COMPOSE_PROJECT_NAME=logbird-selfhost-test SELFHOST_ENV=.env.selfhost-test node scripts/selfhost-smoke.mjs --smtp
+# After restart, fresh-storage restore or an upgrade, retain the original state:
+BASE_URL=http://localhost:4700 node scripts/selfhost-smoke.mjs --verify
+```
+
+The private `.tmp/selfhost-state.json` contains a session cookie and API keys;
+keep it out of logs/commits and delete it after the evaluation. `--verify` checks
+the original session, event, retention/description settings and read key. Do not
+run the creating command against customer storage. For an existing production
+test project use [smoke:prod](deployment.md#acceptance), which reports skipped
+optional checks explicitly.
 
 ## Upgrading from the previous namespace
 

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Rename the current product to Logbird; include an explicit namespace migration for existing installations.
+- Pin self-host base images by multi-platform digest; document native backup/restore, uninstall and manual release acceptance.
 
 ## SDK and Hono 0.2.0 - Unreleased
 

@@ -1,10 +1,10 @@
-FROM node:22-bookworm-slim AS prune
+FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS prune
 WORKDIR /source
 RUN npm install --global pnpm@10.30.3 turbo@2.10.12
 COPY . .
 RUN turbo prune @logbird/server --docker
 
-FROM node:22-bookworm-slim AS build
+FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS build
 WORKDIR /workspace
 RUN npm install --global pnpm@10.30.3 && apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 COPY --from=prune /source/out/json/ .
@@ -16,12 +16,23 @@ RUN pnpm --filter @logbird/server... build
 
 RUN pnpm --filter @logbird/server deploy --legacy --prod /runtime
 
-# Tooling is confined to the one-shot migration image, never the API runtime.
-FROM build AS migrate
+# Copy installed tooling into a fresh image: the build stage also contains the
+# package store, compiler caches and the deployed API dependency tree.
+FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS migrate
+WORKDIR /workspace
+ENV NODE_ENV=production
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+COPY --from=build /usr/local/lib/node_modules/pnpm /usr/local/lib/node_modules/pnpm
+RUN ln -s /usr/local/lib/node_modules/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm
+COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
+COPY --from=build --chown=node:node /workspace/packages ./packages
+COPY --from=build --chown=node:node /workspace/apps ./apps
+COPY --from=build /workspace/package.json /workspace/pnpm-workspace.yaml ./
+LABEL org.opencontainers.image.source="https://github.com/joodlab/logbird" org.opencontainers.image.licenses="MIT" org.opencontainers.image.title="Logbird migrations"
 USER node
 CMD ["sh", "-c", "pnpm --filter @logbird/database migrate:deploy && pnpm --filter @logbird/clickhouse migrate && cd packages/clickhouse && node --import tsx scripts/create-query-user.ts"]
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS runtime
 WORKDIR /workspace
 ENV NODE_ENV=production
 LABEL org.opencontainers.image.source="https://github.com/joodlab/logbird"       org.opencontainers.image.licenses="MIT"       org.opencontainers.image.title="Logbird"

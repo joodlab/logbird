@@ -12,6 +12,15 @@ Use the Git repository Docker Compose build pack. No images are published yet; C
 8. Open the console, request the code, sign in, create workspace/project, and send the [quickstart curl](self-hosting.md). Check /readyz publicly. Disable code logging and redeploy once SMTP works.
 9. Upgrades: back up, stop writers, pin a tested revision, redeploy, then verify login, event readback, readiness and worker health. Migrations run before the new API/worker. Preserve volumes and generated credentials; do not delete storage to fix an upgrade.
 
+The dependency images are pinned by multi-platform digest, matching the ordinary
+Compose stack. Keep both files aligned when updating those pins. Use the native
+[backup/restore procedure](self-hosting.md#native-backup-and-fresh-storage-restore)
+with Coolify's terminal/volume access and the same stopped-writer boundary; restoring
+into empty data services must happen before migration startup. A local Compose
+simulation validates this file and container behavior, but cannot validate Coolify's
+secret generator or reverse proxy. The [manual release guide](releases.md) records
+the separate publication/architecture gates; no automatic Docker builds are added.
+
 The file uses documented Compose interpolation, nested `${APP_URL:-${SERVICE_URL_APP_4600:?}}`, and required-value operators. Magic credential identifiers are single tokens: POSTGRES, CLICKHOUSE, QUERY, AUTH. Extra underscores can change generator parsing; avoid names such as SERVICE_PASSWORD_DB_PASSWORD.
 
 ## Sources and validation limits
