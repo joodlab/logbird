@@ -266,7 +266,8 @@ function SecurityPage() {
             lead={
               <>
                 Send the staff member as <code>impersonator</code> and keep the customer as <code>actor</code>. The event detail shows both. Search{' '}
-                <code>impersonator:*</code> to list every event done on someone's behalf.
+                <code>impersonator:*</code> to list every event done on someone's behalf. In the console, those rows are marked "via support", the
+                "Done by support" filter lists them, and each support agent has a page with everything they did while signed in as a customer.
               </>
             }
             title="When staff act for a customer, both names are recorded."

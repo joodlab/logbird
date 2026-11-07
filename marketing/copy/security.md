@@ -105,8 +105,11 @@ path: /security
 - **eyebrow:** Impersonation
 - **heading:** When staff act for a customer, both names are recorded.
 - **body:** Send the staff member as `impersonator` and keep the customer as `actor`. The event detail shows both.
-  Search `impersonator:*` to list every event done on someone's behalf.
-  <!-- source: docs/concepts.md §Actors; docs/query-language.md -->
+  Search `impersonator:*` to list every event done on someone's behalf. In the console, those rows are marked "via
+  support", the "Done by support" filter lists them, and each support agent has a page with everything they did while
+  signed in as a customer.
+  <!-- source: docs/concepts.md §Actors; docs/query-language.md; #69 (apps/app explorer columns, facet-sidebar
+  "Done by support", support-agent-profile) -->
 - **visual (site, until a clean capture exists):** a JSON event: action `room.rate.updated`, actor Lina Haddad
   (`lina@example.test`), impersonator Omar Saleh, tenant Azure Hotels, target Room 12. Title: "Support changes a rate
   for Lina". Caption: "Lina stays the actor. Omar, from support, is on the event as the impersonator."
