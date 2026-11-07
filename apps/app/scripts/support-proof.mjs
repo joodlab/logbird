@@ -345,9 +345,10 @@ try {
 
   // M2/m3: a summary query over budget → page banner + "Couldn't load" in that panel; Retry recovers everything.
   let failActions = true;
-  let actionHits = 0;
+  let opened = Date.now();
+  const actionRequests = [];
   await page.route(/\/facets\?.*field=action/, (route) => {
-    if (failActions) actionHits += 1;
+    if (failActions) actionRequests.push(Date.now() - opened);
     return failActions
       ? route.fulfill({
           status: 503,
@@ -358,17 +359,24 @@ try {
         })
       : route.continue();
   });
-  const opened = Date.now();
+  opened = Date.now();
   await page.goto(`${BASE}/p/${projectId}/support/${agentId(2)}?range=30d`);
   const banner = page.getByTestId('agent-page-failure');
-  // m2: an over-budget summary is not retried: the banner shows at once and the scan ran exactly once.
+  // m2: an over-budget summary is not retried. The banner shows at once, and no request follows the failure even after
+  // longer than any retry backoff (1 s, 2 s). The dev server's StrictMode double mount issues the first request twice
+  // at mount (about 1 ms apart, the first cancelled), so "no retry" means no request after the banner.
   await banner.waitFor({ timeout: 10_000 });
   const bannerAfterMs = Date.now() - opened;
-  await settle(page, 2500);
-  check('an over-budget summary is never auto-retried: one request, banner without retry delay', actionHits === 1 && bannerAfterMs < 6000, {
-    requests: actionHits,
-    bannerAfterMs,
-  });
+  await page.waitForTimeout(4000);
+  const afterFailure = actionRequests.filter((t) => t > bannerAfterMs);
+  check(
+    'an over-budget summary is never auto-retried: no request after the failure, banner without retry delay',
+    afterFailure.length === 0 && bannerAfterMs < 3000,
+    {
+      requestsAtMs: actionRequests,
+      bannerAfterMs,
+    },
+  );
   // The panel around the "Top actions" title: walk up from the title until the element holds the panel body.
   const panelText = (title) =>
     page.evaluate((t) => {
@@ -543,7 +551,7 @@ try {
     note('cleanup: QA project deleted', res.status());
   }
   await browser.close();
-  await writeFile(path.join(OUT, 'round3-support-proof.txt'), `${log.join('\n')}\n`);
-  await writeFile(path.join(OUT, 'round3-support-proof.json'), `${JSON.stringify(results, null, 2)}\n`);
+  await writeFile(path.join(OUT, 'round4-support-proof.txt'), `${log.join('\n')}\n`);
+  await writeFile(path.join(OUT, 'round4-support-proof.json'), `${JSON.stringify(results, null, 2)}\n`);
 }
 process.exit(results.failed ? 1 : 0);
