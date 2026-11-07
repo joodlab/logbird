@@ -1,0 +1,172 @@
+@import "@logbird/ui/globals.css";
+@source "./**/*.{ts,tsx}";
+.native-status {
+  display: none;
+}
+.native-status:target {
+  display: block;
+}
+:root {
+  --control-size-default: 2.75rem;
+  --control-size-compact: 2.75rem;
+  --control-size-large: 2.75rem;
+}
+body {
+  margin: 0;
+}
+a {
+  text-underline-offset: 0.2em;
+}
+a:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.site-header,
+.site-footer,
+main {
+  width: min(100% - 2rem, 76rem);
+  margin-inline: auto;
+}
+.site-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding-block: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.site-header nav,
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.site-header nav a,
+.site-footer a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+.header-actions {
+  margin-inline-start: auto;
+}
+.wordmark {
+  width: 130px;
+  height: 32px;
+}
+.theme-dark {
+  display: none;
+}
+.dark .theme-light {
+  display: none;
+}
+.dark .theme-dark {
+  display: block;
+}
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -10rem;
+  padding: 0.75rem;
+  background: var(--background);
+  z-index: 100;
+}
+.skip-link:focus {
+  top: 1rem;
+}
+main {
+  padding-block: 4rem;
+  min-height: 50vh;
+  overflow-wrap: anywhere;
+}
+h1 {
+  font-size: clamp(2rem, 5vw, 3rem);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+p {
+  margin-block: 1rem;
+}
+.site-footer {
+  border-top: 1px solid var(--border);
+  padding-block: 2rem;
+}
+.footer-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1.5rem;
+}
+.footer-groups h2 {
+  text-transform: capitalize;
+  font-weight: 600;
+}
+.footer-groups ul {
+  list-style: none;
+  padding: 0;
+}
+.mobile-menu {
+  display: none;
+}
+.theme-select {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-height: 44px;
+  padding: 0.5rem;
+  background: var(--background);
+  max-width: 100%;
+}
+.waitlist-form {
+  display: grid;
+  gap: 1rem;
+  max-width: 36rem;
+}
+.form-field {
+  display: grid;
+  gap: 0.5rem;
+}
+.honeypot {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.field-error {
+  color: var(--destructive);
+  font-size: 0.875rem;
+}
+.screenshot img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.clip video {
+  display: block;
+  width: 100%;
+}
+@media (max-width: 768px) {
+  .site-header .desktop-nav,
+  .site-header > .header-actions {
+    display: none;
+  }
+  .mobile-menu {
+    display: block;
+    margin-inline-start: auto;
+  }
+  .mobile-nav {
+    display: flex;
+    flex-direction: column;
+    padding: 1rem;
+    gap: 0.5rem;
+    overflow-y: auto;
+  }
+  .mobile-nav a {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}
