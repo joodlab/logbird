@@ -78,7 +78,7 @@ const retraced: Comparison = {
     { label: 'Licence', logbird: 'MIT', them: 'Apache-2.0', sourceIds: ['S5'] },
     {
       label: 'Self-host',
-      logbird: 'Yes: Docker Compose or Coolify, built from source',
+      logbird: 'Yes: Docker Compose or Coolify, built from source (repository opens soon)',
       them: 'Yes: Docker Compose; also documented for DigitalOcean, AWS and Skaffold; the Kubernetes docs page says "Coming soon"',
       sourceIds: ['S6', 'S7'],
     },
@@ -206,11 +206,11 @@ const workos: Comparison = {
     { label: 'Licence and source', logbird: 'MIT; source opens publicly soon', them: 'No source code or licence published', sourceIds: ['W1', 'W2'] },
     {
       label: 'Self-host',
-      logbird: 'Yes: Docker Compose or Coolify',
+      logbird: 'Yes: Docker Compose or Coolify (repository opens soon)',
       them: "No self-host option documented. The on-prem guide covers your app calling WorkOS's cloud.",
       sourceIds: ['W6'],
     },
-    { label: 'Hosting model', logbird: 'Self-host today; Logbird Cloud waitlist', them: 'Hosted by WorkOS', sourceIds: ['W2'] },
+    { label: 'Hosting model', logbird: 'Self-hosted, MIT (source opens soon); Logbird Cloud waitlist', them: 'Hosted by WorkOS', sourceIds: ['W2'] },
     {
       label: 'Schema',
       logbird: 'Any JSON with an `action`; nothing to register',
@@ -313,7 +313,7 @@ const pangea: Comparison = {
   note: {
     kind: 'status',
     title: 'Ownership, as of 7 November 2026',
-    body: "CrowdStrike completed its acquisition of Pangea on 26 September 2025. Pangea's product and signup pages now redirect to CrowdStrike, while the Secure Audit Log documentation and API are still published. Check current availability with CrowdStrike.",
+    body: "As of 7 November 2026: CrowdStrike completed its acquisition of Pangea on 26 September 2025, and Pangea's product and signup pages redirect to CrowdStrike, while the Secure Audit Log documentation and API are still published. Check current availability with CrowdStrike.",
     sourceIds: ['P5', 'P6', 'P7'],
   },
   card: 'A hosted, tamperproof audit log with cryptographic proofs. Pangea is now part of CrowdStrike.',
@@ -327,11 +327,11 @@ const pangea: Comparison = {
     },
     {
       label: 'Self-host',
-      logbird: 'Yes: Docker Compose or Coolify',
+      logbird: 'Yes: Docker Compose or Coolify (repository opens soon)',
       them: "No self-host option documented; Pangea's Edge and Private Cloud models don't list the audit service",
       sourceIds: ['P10', 'P11'],
     },
-    { label: 'Hosting model', logbird: 'Self-host today; Logbird Cloud waitlist', them: 'Hosted by Pangea', sourceIds: ['P12'] },
+    { label: 'Hosting model', logbird: 'Self-hosted, MIT (source opens soon); Logbird Cloud waitlist', them: 'Hosted by Pangea', sourceIds: ['P12'] },
     {
       label: 'Schema',
       logbird: 'Any JSON with an `action`; recommended envelope',
@@ -463,7 +463,7 @@ const bemi: Comparison = {
     { label: 'Licence', logbird: 'MIT', them: 'Core: SSPL-1.0; ORM packages: LGPL-3.0', sourceIds: ['B6', 'B7', 'B8'] },
     {
       label: 'Self-host',
-      logbird: 'Yes: Docker Compose or Coolify',
+      logbird: 'Yes: Docker Compose or Coolify (repository opens soon)',
       them: 'Open-source version "designed for evaluation and non-critical workloads"; a licensed Self-Hosting Enterprise edition for production',
       sourceIds: ['B9'],
     },

@@ -30,7 +30,7 @@ describe('comparisons', () => {
     expect(getPage(comparison.path).section).toBe('compare');
     const text = JSON.stringify(comparison);
     expect(text).not.toMatch(/\d\s?(ms|milliseconds|events\/s|req\/s|rps)\b/i);
-    expect(text.toLowerCase()).not.toContain(['jood', 'cms'].join(''));
+    expect(text.toLowerCase()).not.toContain(['jo', 'od', 'cms'].join(''));
   });
 
   it('formats the access date without locale data', () => {

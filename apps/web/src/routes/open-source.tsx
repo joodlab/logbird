@@ -4,8 +4,9 @@ import { ButtonLink } from '../components/marketing/button-link';
 import { CtaBand } from '../components/marketing/cta-band';
 import { Rich } from '../components/marketing/rich';
 import { Eyebrow, PageHero, Section, SectionHeader } from '../components/marketing/section';
+import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { StackedTable } from '../components/marketing/stacked-table';
-import { GITHUB_PUBLIC, GITHUB_URL, SECURITY_EMAIL } from '../env';
+import { GITHUB_PUBLIC, GITHUB_URL, ORG_NAME, SECURITY_EMAIL } from '../env';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/open-source')({ head: () => pageHead('/open-source'), component: OpenSourcePage });
@@ -37,7 +38,7 @@ const contributing = [
 ];
 
 function SourceButton() {
-  if (GITHUB_PUBLIC) {
+  if (GITHUB_PUBLIC && GITHUB_URL) {
     return (
       <ButtonLink href={GITHUB_URL} size="lg">
         <GitBranchIcon aria-hidden="true" className="size-4" />
@@ -65,7 +66,8 @@ function LicenseCard() {
       </div>
       <div className="flex flex-col gap-4 p-5 font-mono text-[13px] leading-relaxed md:p-6">
         <p className="font-semibold">MIT License</p>
-        <p>Copyright (c) 2026 Joodlab</p>
+        {/* The copyright line names the publisher, which is pending the owner (WEB_ORG_NAME); quote it only once set. */}
+        {ORG_NAME ? <p>Copyright (c) 2026 {ORG_NAME}</p> : null}
         <p className="text-muted-foreground">Permission is hereby granted, free of charge, to any person obtaining a copy of this software…</p>
       </div>
       <figcaption className="border-t px-5 py-4 md:px-6">
@@ -89,9 +91,7 @@ function OpenSourcePage() {
         actions={
           <>
             <SourceButton />
-            <ButtonLink size="lg" to="/self-hosting" variant="outline">
-              Self-host it
-            </ButtonLink>
+            <SelfHostCta />
             {GITHUB_PUBLIC ? null : (
               <p className="basis-full text-muted-foreground text-sm">The repository opens publicly soon. Until then, the code isn't public.</p>
             )}

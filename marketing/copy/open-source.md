@@ -16,7 +16,8 @@ path: /open-source
   <!-- source: LICENSE ("MIT License, Copyright (c) 2026 Joodlab") -->
 - **cta:** Source on GitHub — coming soon (disabled button, no link) · Self-host it → `/self-hosting`
 - **small print:** The repository opens publicly soon. Until then, the code isn't public.
-- **visual:** a LICENSE card: "MIT License", "Copyright (c) 2026 Joodlab", the licence's first sentence (truncated),
+- **visual:** a LICENSE card: "MIT License", the copyright line only once the publisher name is approved (`WEB_ORG_NAME`,
+  pending the owner), the licence's first sentence (truncated),
   and four checks: Read it · Run it · Change it · Ship it in your product.
 
 ## in-the-repo

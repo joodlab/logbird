@@ -6,6 +6,7 @@ import { Callout } from './callout';
 import { CtaBand } from './cta-band';
 import { Rich } from './rich';
 import { PageHero, Section, SectionHeader } from './section';
+import { SelfHostCta } from './self-host-cta';
 import { StackedTable } from './stacked-table';
 
 /** Footnote markers, e.g. [S6, S7], each linking to its entry in the page's Sources list. */
@@ -150,9 +151,7 @@ export function ComparisonPage({ comparison, figure }: { comparison: Comparison;
             </h2>
             <ChooseList items={comparison.chooseLogbird} />
             <div className="mt-auto flex flex-wrap gap-3 pt-2">
-              <ButtonLink to="/self-hosting" variant="outline">
-                Self-host Logbird
-              </ButtonLink>
+              <SelfHostCta size="default" />
               <ButtonLink to="/contact" variant="ghost">
                 Join the waitlist
               </ButtonLink>

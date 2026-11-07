@@ -5,6 +5,8 @@ import { ButtonLink } from '../components/marketing/button-link';
 import { CtaBand } from '../components/marketing/cta-band';
 import { type FaqItem, FaqList } from '../components/marketing/faq';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
+import { SelfHostCta } from '../components/marketing/self-host-cta';
+import { GITHUB_PUBLIC } from '../env';
 import { cx } from '../lib/cx';
 import { faqLd, pageHead } from '../lib/seo';
 
@@ -54,14 +56,24 @@ export const Route = createFileRoute('/cloud')({
   component: CloudPage,
 });
 
-const plans: { id: string; name: string; status: string; body: string; icon: ReactNode; cta: { label: string; to: string; primary?: boolean } }[] = [
+const plans: {
+  id: string;
+  name: string;
+  status: string;
+  body: string;
+  icon: ReactNode;
+  cta: { label: string; to: string; primary?: boolean; search?: Record<string, string> };
+}[] = [
   {
     id: 'self-host',
     name: 'Self-host',
     status: 'Free, MIT',
     body: 'Free and MIT-licensed. Every feature in the repository. You run it.',
     icon: <ServerIcon className="size-4" />,
-    cta: { label: 'Self-host it', to: '/self-hosting' },
+    // Until the repository is public nobody can self-host: the card leads to the waitlist instead.
+    cta: GITHUB_PUBLIC
+      ? { label: 'Self-host it', to: '/self-hosting' }
+      : { label: 'Self-host when the source opens', to: '/contact', search: { interest: 'self-host' } },
   },
   {
     id: 'cloud',
@@ -85,7 +97,9 @@ function StatusPanel() {
   const rows = [
     { label: 'Logbird Cloud', value: 'Not open yet', note: 'Waitlist' },
     { label: 'Pricing', value: "Isn't set yet", note: 'Published before launch' },
-    { label: 'Self-host', value: 'Available today', note: 'Free, MIT' },
+    GITHUB_PUBLIC
+      ? { label: 'Self-host', value: 'Available today', note: 'Free, MIT' }
+      : { label: 'Self-host', value: 'When the source opens', note: 'Free, MIT' },
   ];
   return (
     <div className="panel overflow-hidden">
@@ -116,9 +130,7 @@ function CloudPage() {
             <ButtonLink size="lg" to="/contact">
               Join the waitlist
             </ButtonLink>
-            <ButtonLink size="lg" to="/self-hosting" variant="outline">
-              Self-host it today
-            </ButtonLink>
+            <SelfHostCta />
           </>
         }
         aside={<StatusPanel />}
@@ -146,7 +158,7 @@ function CloudPage() {
               <p className="font-semibold text-2xl tracking-tight">{plan.status}</p>
               <p className="text-muted-foreground leading-relaxed">{plan.body}</p>
               <div className="mt-auto pt-2">
-                <ButtonLink className="w-full" to={plan.cta.to} variant={plan.cta.primary ? 'default' : 'outline'}>
+                <ButtonLink className="w-full" search={plan.cta.search} to={plan.cta.to} variant={plan.cta.primary ? 'default' : 'outline'}>
                   {plan.cta.label}
                 </ButtonLink>
               </div>
