@@ -188,7 +188,11 @@ function StepSection({ step, setup, projectId, hash }: { step: SetupStep; setup:
             <span
               className={cn(
                 'text-xs',
-                step.status === 'done' ? 'text-outcome-success' : step.status === 'attention' ? 'text-outcome-denied' : 'text-muted-foreground',
+                step.status === 'done'
+                  ? 'text-outcome-success-foreground'
+                  : step.status === 'attention'
+                    ? 'text-outcome-denied-foreground'
+                    : 'text-muted-foreground',
               )}
             >
               {STATUS_LABEL[step.status]}

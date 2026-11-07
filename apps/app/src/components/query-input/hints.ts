@@ -34,7 +34,7 @@ export function queryHint(context: QueryCompletion, draft: string, caret: number
   if (fix) {
     return {
       label: fix.soft ? 'Did you mean' : 'Converted when run',
-      parts: [fix.message, ' → ', c(fix.replacement), fix.incomplete ? '' : ' · Tab applies it'],
+      parts: [fix.message, ' → ', c(fix.replacement), fix.incomplete ? '' : ' · press → to apply'],
       tone: 'warn',
     };
   }
