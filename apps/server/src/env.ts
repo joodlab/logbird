@@ -18,6 +18,7 @@ export const env = createEnv({
     READ_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(1200),
     PORT: z.coerce.number().int().min(1).max(65_535).default(4601),
     APP_URL: z.url(),
+    BETTER_AUTH_SECRET: z.string().min(32),
     CLICKHOUSE_URL: z.url(),
     CLICKHOUSE_DATABASE: z.string(),
     CLICKHOUSE_USER: z.string(),

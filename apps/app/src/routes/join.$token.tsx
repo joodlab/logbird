@@ -25,7 +25,7 @@ import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { inviteLinkPreviewQuery, keys, meQuery } from '@/lib/api/queries';
-import { authCall, authClient, sendSignInCode } from '@/lib/auth-client';
+import { authCall, authClient, sendSignInCode, signOut } from '@/lib/auth-client';
 import { formatFull } from '@/lib/format';
 import { fieldErrorMessage } from '@/lib/forms';
 import { emailDomain } from '@/lib/invite-links';
@@ -118,7 +118,7 @@ function JoinLink({ link, me }: { link: InviteLinkPreview; me: MeResponse | null
 
   const switchAccount = useMutation({
     mutationFn: async () => {
-      await authClient.signOut();
+      await signOut();
       await queryClient.resetQueries({ queryKey: keys.me });
     },
   });

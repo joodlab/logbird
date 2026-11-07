@@ -1,0 +1,288 @@
+{
+  "beforeAuthCaptureRevision": "4f9b138",
+  "revision": "153937331153eef765c15ef33434eab83ad1adb9",
+  "screenshots": [
+    "after-light-1440-workspace.png",
+    "after-light-1440-sessions.png",
+    "signout-light-1440-menu.png",
+    "signout-light-1440-retry-error.png",
+    "signout-light-1440-done.png",
+    "after-dark-1440-workspace.png",
+    "after-dark-1440-sessions.png",
+    "signout-dark-1440-menu.png",
+    "signout-dark-1440-retry-error.png",
+    "signout-dark-1440-done.png",
+    "after-light-390-workspace.png",
+    "after-light-390-sessions.png",
+    "signout-light-390-menu.png",
+    "signout-light-390-retry-error.png",
+    "signout-light-390-done.png",
+    "after-dark-390-workspace.png",
+    "after-dark-390-sessions.png",
+    "signout-dark-390-menu.png",
+    "signout-dark-390-retry-error.png",
+    "signout-dark-390-done.png",
+    "onboarding-signout-retry-error.png",
+    "onboarding-signout-retry-done.png"
+  ],
+  "videos": ["light-1440-interactions.webm", "light-390-interactions.webm"],
+  "problems": [],
+  "expectedFailures": [
+    {
+      "scenario": "light-1440",
+      "problem": "[http 503] POST /api/session/sign-out"
+    },
+    {
+      "scenario": "light-1440",
+      "problem": "[error] http://localhost:4600/p/cmw6s5a1a0000t8yozy6o5wi7/settings/activity?range=90d&q=category%3Aauth Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "scenario": "dark-1440",
+      "problem": "[http 503] POST /api/session/sign-out"
+    },
+    {
+      "scenario": "dark-1440",
+      "problem": "[error] http://localhost:4600/p/cmw6s5a1a0000t8yozy6o5wi7/settings/activity?range=90d&q=category%3Aauth Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "scenario": "light-390",
+      "problem": "[http 503] POST /api/session/sign-out"
+    },
+    {
+      "scenario": "light-390",
+      "problem": "[error] http://localhost:4600/p/cmw6s5a1a0000t8yozy6o5wi7/settings/activity?range=90d&q=category%3Aauth Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "scenario": "dark-390",
+      "problem": "[http 503] POST /api/session/sign-out"
+    },
+    {
+      "scenario": "dark-390",
+      "problem": "[error] http://localhost:4600/p/cmw6s5a1a0000t8yozy6o5wi7/settings/activity?range=90d&q=category%3Aauth Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "scenario": "onboarding",
+      "problem": "[http 503] POST /api/session/sign-out"
+    },
+    {
+      "scenario": "onboarding",
+      "problem": "[error] http://localhost:4600/onboarding/profile Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    }
+  ],
+  "cleanup": {
+    "clickhouse": {
+      "events": 0,
+      "events_by_minute": 0,
+      "entities": 0,
+      "attribute_keys": 0,
+      "event_ids": 0
+    },
+    "postgresProjects": 0,
+    "postgres": {
+      "onboardingUsers": 0,
+      "users": 0,
+      "organizations": 0,
+      "projects": 0,
+      "members": 0,
+      "outbox": 0,
+      "windows": 0,
+      "budgets": 0,
+      "receipts": 0
+    }
+  },
+  "signoutEvents": [
+    {
+      "n": 4
+    }
+  ],
+  "fixture": {
+    "userId": "ocPZxPgE4fkuTyD0LHdlfL3ktpHpvQ5H",
+    "orgId": "hoePANJHZViBj8ApF2L955BYcS4IvKzV",
+    "onboardingUserId": "BqAwMK5Arm53yXjgaeCxywYPrshL58Ty",
+    "projectId": "cmw6s5a1a0000t8yozy6o5wi7"
+  },
+  "artifacts": [
+    {
+      "file": "after-dark-1440-sessions.png",
+      "bytes": 138457,
+      "sha256": "ab90084b1ca89a3c5fd2bd92dfdbbb954c936bbaff28d523e0457d8b85a06021",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "after-dark-1440-workspace.png",
+      "bytes": 106078,
+      "sha256": "6bb0f3fa92d4be6ca00cb61cc3a440bd70fa526ba40676c64e449516473c8265",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "after-dark-390-sessions.png",
+      "bytes": 73003,
+      "sha256": "1fd93110c0dce317422a5391c90ab2e3ff2d03595a016a8c8dab796cb8d2b24c",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "after-dark-390-workspace.png",
+      "bytes": 54407,
+      "sha256": "2cc3349dd056a6183baedfbbf9dc1edbbb45d9666f98a10ae24b49c32f8985cb",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "after-light-1440-sessions.png",
+      "bytes": 109660,
+      "sha256": "0676b62db5ba65c7b80300ad76996e26433bb9556833a97f37235a08fa85f5f3",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "after-light-1440-workspace.png",
+      "bytes": 95055,
+      "sha256": "29048025b1fa5fec6e55ad2171ab34fa637cb07f9a0209e2077097feffdf49f6",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "after-light-390-sessions.png",
+      "bytes": 65466,
+      "sha256": "1087f142ac636ac056977fd1d164e520424b619069a19ede6b1329ec487f54c6",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "after-light-390-workspace.png",
+      "bytes": 48260,
+      "sha256": "b3b2d73bd8797f1a9c9f28ac7aa0f33f90cb1f1b0d7029e628fe289dcc74fd62",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "before-dark-desktop-workspace.png",
+      "bytes": 131641,
+      "sha256": "acd4def5469b71d6fc45dfb7fe6d8c7fbeb8512e398b1c909f16d9cca9fdcb35",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "before-light-mobile-sessions.png",
+      "bytes": 56984,
+      "sha256": "d4f4f056f92895f15515c4f124d6d24fb925a698fd46096e9a4358cce9b63ad2",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "light-1440-interactions.webm",
+      "bytes": 1844357,
+      "sha256": "8e03b6e974762d5fbf51324986253d7bb052439cbaf59c03ffef2b9503eb1739",
+      "durationSeconds": 8.0
+    },
+    {
+      "file": "light-390-interactions.webm",
+      "bytes": 1036654,
+      "sha256": "f929ba0083639ceacc76fee82598ea8e36239c90f097667e83a6f4ce460d8be3",
+      "durationSeconds": 11.12
+    },
+    {
+      "file": "onboarding-signout-retry-done.png",
+      "bytes": 49751,
+      "sha256": "7b18842a89e7899bef630e0121ca7fc26b657cbd208c481bf36fc80a34965a4d",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "onboarding-signout-retry-error.png",
+      "bytes": 72569,
+      "sha256": "68a9cca8675801dd5155128493de038dba29904c9c923b1461667d9a46ee7287",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "signout-dark-1440-done.png",
+      "bytes": 51935,
+      "sha256": "17857615fadf5ddf05ad7f3420ced6cccb1c17388d9f03f76342d2600192e925",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "signout-dark-1440-menu.png",
+      "bytes": 148349,
+      "sha256": "c24dcbe487a1191239dfdb93c9c5b8a84f5ea4b3b8169f0f3866a6f328d3d07c",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "signout-dark-1440-retry-error.png",
+      "bytes": 142588,
+      "sha256": "75361d5599ba3e28b6d4491241e46cb3c2b1a2e45390993831ac2769fc9457cd",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "signout-dark-390-done.png",
+      "bytes": 33957,
+      "sha256": "9c72cb8312a67970adea8d802ee7b90bd6f08435f68b0ce94b5ed9bce9a5732e",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "signout-dark-390-menu.png",
+      "bytes": 55905,
+      "sha256": "8de5f6e9b639f38ae88212c98e3d111ce8ed77a05d3510f3d6ab49ea265c0ff8",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "signout-dark-390-retry-error.png",
+      "bytes": 41374,
+      "sha256": "2461988e0de1755c51ecd12fc5459370f5cba4fadbbd11b4b15fb31eea49504a",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "signout-light-1440-done.png",
+      "bytes": 49751,
+      "sha256": "7b18842a89e7899bef630e0121ca7fc26b657cbd208c481bf36fc80a34965a4d",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "signout-light-1440-menu.png",
+      "bytes": 118880,
+      "sha256": "05e750e3fabd3e723e2106bb2cac344b2ab2ecec12ed28c99a6306ec4cbc5867",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "signout-light-1440-retry-error.png",
+      "bytes": 113760,
+      "sha256": "016dd6c4717c408e6dffeacbf3fc5addc67318bc4063174df13b3de1a5a67ac0",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "signout-light-390-done.png",
+      "bytes": 31413,
+      "sha256": "52671f4527b693260b8caa0a56318ef0efd18727aa28e234fd4cf2aa6483c807",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "signout-light-390-menu.png",
+      "bytes": 53485,
+      "sha256": "ecc3c8d66d3191abc9abe43c978d4dc1844d605fa02fe84f8812b36732642de4",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "signout-light-390-retry-error.png",
+      "bytes": 39728,
+      "sha256": "a9a40c1bdebc3ef110d76e3018a5abe4620ff8a55b96ca1f242217b85a0b939f",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "failureInjection": "One browser-intercepted 503 per sidebar theme/viewport and onboarding; server session stayed live, then real retry returned 200. Expected console/HTTP errors are listed separately.",
+  "migrationSha256": "0b9751e198dcf0133658608b285bfb8a30bb863afddce7dea23c776f529d99a1"
+}

@@ -1,0 +1,197 @@
+{
+  "beforeAuthCaptureRevision": "4f9b138",
+  "revision": "c117115943a5d6cc024c6014e9ab10feb9881af7",
+  "screenshots": [
+    "after-light-1440-workspace.png",
+    "after-light-1440-sessions.png",
+    "signout-light-1440-menu.png",
+    "signout-light-1440-done.png",
+    "after-dark-1440-workspace.png",
+    "after-dark-1440-sessions.png",
+    "signout-dark-1440-menu.png",
+    "signout-dark-1440-done.png",
+    "after-light-390-workspace.png",
+    "after-light-390-sessions.png",
+    "signout-light-390-menu.png",
+    "signout-light-390-done.png",
+    "after-dark-390-workspace.png",
+    "after-dark-390-sessions.png",
+    "signout-dark-390-menu.png",
+    "signout-dark-390-done.png"
+  ],
+  "videos": ["light-1440-interactions.webm", "light-390-interactions.webm"],
+  "problems": [],
+  "cleanup": {
+    "clickhouse": {
+      "events": 0,
+      "events_by_minute": 0,
+      "entities": 0,
+      "attribute_keys": 0,
+      "event_ids": 0
+    },
+    "postgresProjects": 0,
+    "postgres": {
+      "users": 0,
+      "organizations": 0,
+      "projects": 0,
+      "members": 0,
+      "outbox": 0,
+      "windows": 0,
+      "budgets": 0,
+      "receipts": 0
+    }
+  },
+  "signoutEvents": [
+    {
+      "n": 4
+    }
+  ],
+  "fixture": {
+    "userId": "ourKm8ZV8DeaoPOcQrH1P3HfIz4k4dIF",
+    "orgId": "rlEcdPFl53yNMEIAKTTUPMbpYNFnpxOR",
+    "projectId": "cmw6piww4000c5syo7ji4cq9w"
+  },
+  "artifacts": [
+    {
+      "file": "after-dark-1440-sessions.png",
+      "bytes": 129172,
+      "sha256": "3b20b716433f341dbae86837dcde5d4d27c98ca82c331976c88a9eeeb17d52d7",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "after-dark-1440-workspace.png",
+      "bytes": 106427,
+      "sha256": "c29eac8776820f4fc272455d141e3a06862e115c6d07b4e9efb36562594bad71",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "after-dark-390-sessions.png",
+      "bytes": 68085,
+      "sha256": "6ddceedb43923891afae607ef1e32c30b1c95d890aeb750bdc53695e2f2e0e5d",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "after-dark-390-workspace.png",
+      "bytes": 54492,
+      "sha256": "4473b2e9f3fb457b614e6b963c0bfe0c60cffe667bfdf73e4f90219573760b78",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "after-light-1440-sessions.png",
+      "bytes": 106345,
+      "sha256": "59410dc019e01dd87aef5d4e70dcc34fc5ed446380188e38c5068f9d3baf06e5",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "after-light-1440-workspace.png",
+      "bytes": 95383,
+      "sha256": "05fcfc77229e1d0bd55743a50c68aa1ba9d5eb28712e400b40440fec3ee48508",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "after-light-390-sessions.png",
+      "bytes": 62492,
+      "sha256": "fa18f5e63ffbff5fbfa6bbdc6b9b559e258e4be94744700046b14d6cf82243e5",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "after-light-390-workspace.png",
+      "bytes": 48377,
+      "sha256": "a8fe368b29f44f2dab6f0da9cdf1877b9b69bd7338d5fa7525174b7e93612a7f",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "before-dark-desktop-workspace.png",
+      "bytes": 131641,
+      "sha256": "acd4def5469b71d6fc45dfb7fe6d8c7fbeb8512e398b1c909f16d9cca9fdcb35",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "before-light-mobile-sessions.png",
+      "bytes": 56984,
+      "sha256": "d4f4f056f92895f15515c4f124d6d24fb925a698fd46096e9a4358cce9b63ad2",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "light-1440-interactions.webm",
+      "bytes": 1531549,
+      "sha256": "e8eafc6844d8b58526cd026711146ac11808e4bf513cc7e767a6fc808801afd6",
+      "durationSeconds": 6.08
+    },
+    {
+      "file": "light-390-interactions.webm",
+      "bytes": 731633,
+      "sha256": "9e31be1629f9e6eb6ec54c493dcbf4aa94c62a3d6c8a9d1a11821691bb4888b5",
+      "durationSeconds": 6.36
+    },
+    {
+      "file": "signout-dark-1440-done.png",
+      "bytes": 46956,
+      "sha256": "d90d83dca7aa71cc60bdeb74945df19e813f2e259c8d8d68936b9fb2f74b6e6b",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "signout-dark-1440-menu.png",
+      "bytes": 139321,
+      "sha256": "1d0e337a83d13bcdcd446d9d0549f027e295692510f736c4e17308c520df8df6",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "signout-dark-390-done.png",
+      "bytes": 33957,
+      "sha256": "9c72cb8312a67970adea8d802ee7b90bd6f08435f68b0ce94b5ed9bce9a5732e",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "signout-dark-390-menu.png",
+      "bytes": 52896,
+      "sha256": "2da86ea3d2bac8ceed8515b23a7be656609799c14c7f96cfec79661a4c6eb083",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "signout-light-1440-done.png",
+      "bytes": 44478,
+      "sha256": "e87dfb5c042e965d9c5b595662d7607dd7067a8ad2c9bec1b8a0580c9ff0487d",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "signout-light-1440-menu.png",
+      "bytes": 115463,
+      "sha256": "eee68cfc773126ec486fd5ad43c64d37fe6f2b7b21020447c208537c833af985",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "signout-light-390-done.png",
+      "bytes": 31413,
+      "sha256": "52671f4527b693260b8caa0a56318ef0efd18727aa28e234fd4cf2aa6483c807",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "file": "signout-light-390-menu.png",
+      "bytes": 49300,
+      "sha256": "573fb67fac620b1f22c4cd257e43c48e0f37aebb2ed49b4652bf599bc22d9958",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "nativeSessionRoutes": [
+    "POST /api/session/sign-out (200) in every theme/viewport; redirect to login; zero browser/API problems"
+  ]
+}

@@ -6,6 +6,7 @@ import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock 
 import { logIngestRecoveryFailure, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enqueueProjectRetention } from '@logbird/worker/queue';
 import type { Context } from 'hono';
+import { queueAuditEvent } from './audit-outbox';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { type IngestCandidate, insertImmutableEvents } from './immutable-ingest';
@@ -99,17 +100,34 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
 function organizationIdForStream(projectId: string, organizationId?: string) {
   return organizationId ?? projectId.slice('ws:'.length);
 }
-export function audit(c: Context<AppEnv>, action: string, target: { type: string; id: string; name?: string }, changes?: unknown[]) {
-  return ingest(`ws:${c.get('activeOrganizationId')}`, {
-    action,
-    occurredAt: new Date().toISOString(),
-    actor: { type: 'user', ...c.get('user'), name: c.get('user').name || c.get('user').email },
-    executor: { type: 'api', id: 'api-server' },
-    targets: [target],
-    changes,
-    description: action,
-    context: { requestId: c.get('requestId'), ip: clientAddress(c) ?? '', userAgent: c.req.header('user-agent') ?? '' },
-  });
+export function audit(
+  c: Context<AppEnv>,
+  action: string,
+  target: { type: string; id: string; name?: string },
+  changes?: unknown[],
+  extra?: {
+    targets?: { type: string; id: string; name?: string }[];
+    metadata?: import('@logbird/database').Prisma.InputJsonObject;
+    description?: string;
+    organizationId?: string;
+  },
+  tx?: import('@logbird/database').Prisma.TransactionClient,
+) {
+  return queueAuditEvent(
+    `ws:${extra?.organizationId ?? c.get('activeOrganizationId')}`,
+    {
+      action,
+      occurredAt: new Date().toISOString(),
+      actor: { type: 'user', id: c.get('user').id, name: c.get('user').name || c.get('user').email },
+      executor: { type: 'api', id: 'api-server' },
+      targets: extra?.targets ?? [target],
+      changes: changes as import('@logbird/database').Prisma.InputJsonValue[],
+      metadata: extra?.metadata,
+      description: extra?.description ?? action,
+      context: { requestId: c.get('requestId'), ip: clientAddress(c) ?? '', userAgent: c.req.header('user-agent') ?? '' },
+    },
+    tx,
+  );
 }
 
 export async function requireRetentionReady(tx: import('@logbird/database').Prisma.TransactionClient, projectId: string) {
