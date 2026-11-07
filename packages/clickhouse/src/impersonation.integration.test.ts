@@ -49,10 +49,18 @@ it.runIf(process.env.CLICKHOUSE_URL)(
 
       // The agent page's timeline: andQuery('impersonator:support_omar', 'outcome:failure OR outcome:denied') parenthesises
       // the user's OR, so only Omar's events come back. Unparenthesised, AND binds tighter and every denied event leaks in.
-      const agentOr = await searchEvents(ch, p, { from, to, q: 'impersonator:support_omar (outcome:failure OR outcome:denied)', limit: 10, order: 'desc' });
+      const agentOr = await searchEvents(ch, p, {
+        from,
+        to,
+        q: 'impersonator:support_omar (outcome:failure OR outcome:denied)',
+        limit: 10,
+        order: 'desc',
+      });
       expect(agentOr.total).toBe(1);
       expect(agentOr.data.map((e) => e.impersonator?.id)).toEqual(['support_omar']);
-      expect((await searchEvents(ch, p, { from, to, q: 'impersonator:support_omar outcome:failure OR outcome:denied', limit: 10, order: 'desc' })).total).toBe(3);
+      expect(
+        (await searchEvents(ch, p, { from, to, q: 'impersonator:support_omar outcome:failure OR outcome:denied', limit: 10, order: 'desc' })).total,
+      ).toBe(3);
       // The sidebar's presence count over a user OR: withPresence → '(…OR…) impersonator:*' excludes the empty bucket.
       const anyOr = await facets(ch, p, { from, to, q: '(outcome:failure OR outcome:denied) impersonator:*', field: 'impersonator', limit: 1 });
       expect(anyOr.values.reduce((n, v) => n + v.count, 0) + anyOr.otherCount).toBe(2);
