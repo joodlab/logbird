@@ -16,8 +16,8 @@ path: /self-hosting
   <!-- source: LICENSE; docs/SPEC.md intro ("one codebase, self-host or cloud") -->
 - **cta:** Five-minute quickstart ↓ `#quickstart` · Join the Cloud waitlist → `/contact`
 - **small print:** Source on GitHub — coming soon. Self-hosting builds from source; no images are published yet.
-- **visual:** clip `marketing/captures/2026-11-05-self-hosting/selfhost-e2e.webm` (clean machine → `compose up` →
-  sign-in → first event). Check the clip for real email addresses and hostnames before use.
+- **visual:** a diagram of the Compose stack (console, api, worker, postgres, clickhouse, redis). The 2026-11-05
+  self-hosting captures show the old name and a real key prefix, so they aren't used.
 
 ## quickstart
 
@@ -54,8 +54,8 @@ path: /self-hosting
 - **bullets:**
   - The init script generates the secrets it needs and never overwrites values you've set.
   - `/livez` checks the API process; `/readyz` checks Postgres, ClickHouse and Redis.
-- **visual:** `marketing/captures/2026-11-05-self-hosting/08-curl-ingest.png`, then
-  `07-first-event-received.png`. Check both for real paths or addresses before use.
+- **visual:** none. The quickstart code renders only once `WEB_GITHUB_PUBLIC=true`; until then a "published when the
+  repository opens" panel.
 
 ## requirements
 
@@ -124,8 +124,7 @@ path: /self-hosting
   provider. For a first local test you can log sign-in codes to the server log instead. Turn that off once SMTP
   works: anyone who can read the logs can sign in.
   <!-- source: docs/self-hosting.md §SMTP and first login -->
-- **visual:** `marketing/captures/2026-11-05-self-hosting/02-server-log-code.png` (code in the server log). Check for
-  real addresses before use.
+- **visual:** none.
 
 ## upgrades
 
