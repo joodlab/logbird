@@ -1,33 +1,35 @@
-import { createEnv } from '@t3-oss/env-core';
-import { z } from 'zod';
-
+/**
+ * Public, client-safe site configuration. This is the ONLY file that may contain the provisional domain
+ * (pending owner decision: the domain is not bought yet). Server-only settings live in src/server/env.ts.
+ *
+ * Values come from the build (`__SITE_ENV__`, injected by vite.config.ts from SITE_URL, APP_URL, GITHUB_URL,
+ * GITHUB_PUBLIC) or from process.env in Node scripts and tests.
+ */
 declare const __SITE_ENV__: Record<string, string | undefined> | undefined;
-const publicEnv = typeof __SITE_ENV__ === 'undefined' ? process.env : __SITE_ENV__;
-const boolean = z.enum(['true', 'false']).transform((value) => value === 'true');
-export const env = createEnv({
-  shared: {
-    SITE_URL: z.url().default('https://logbird.dev'),
-    APP_URL: z.url().default('https://app.logbird.dev'),
-    GITHUB_URL: z.url().default('https://github.com/joodlab/logbird'),
-    GITHUB_PUBLIC: boolean.default(false),
-  },
-  server: {
-    SMTP_HOST: z.string().optional(),
-    SMTP_PORT: z.coerce.number().int().min(1).max(65_535).default(1025),
-    SMTP_SECURE: boolean.default(false),
-    SMTP_USER: z.string().optional(),
-    SMTP_PASSWORD: z.string().optional(),
-    MAIL_FROM: z.string().default('Logbird <hello@logbird.dev>'),
-    WAITLIST_NOTIFY_TO: z.email().default('hello@logbird.dev'),
-  },
-  runtimeEnv: { ...(typeof process === 'undefined' ? {} : process.env), ...publicEnv },
-  emptyStringAsUndefined: true,
-  onValidationError: () => {
-    throw new Error('Invalid website environment configuration. Check variable names and formats.');
-  },
-});
-export const SITE_URL = env.SITE_URL.replace(/\/$/, '');
-export const APP_URL = env.APP_URL;
-export const GITHUB_URL = env.GITHUB_URL;
-export const GITHUB_PUBLIC = env.GITHUB_PUBLIC;
-export const CONTACT_EMAIL = 'hello@logbird.dev';
+
+const source: Record<string, string | undefined> =
+  typeof __SITE_ENV__ === 'undefined' ? (typeof process === 'undefined' ? {} : process.env) : __SITE_ENV__;
+
+const DOMAIN = 'logbird.dev';
+
+function url(name: string, fallback: string): string {
+  const value = source[name]?.trim();
+  if (!value) {
+    return fallback;
+  }
+  try {
+    return new URL(value).href.replace(/\/$/, '');
+  } catch {
+    throw new Error(`${name} must be an absolute URL.`);
+  }
+}
+
+export const SITE_URL = url('SITE_URL', `https://${DOMAIN}`);
+export const APP_URL = url('APP_URL', `https://app.${DOMAIN}`);
+export const GITHUB_URL = url('GITHUB_URL', 'https://github.com/joodlab/logbird');
+export const GITHUB_PUBLIC = source.GITHUB_PUBLIC === 'true';
+
+/** Pending-domain mailboxes. Owner question: confirm these once the domain is bought. */
+export const CONTACT_EMAIL = `hello@${DOMAIN}`;
+export const SECURITY_EMAIL = `security@${DOMAIN}`;
+export const PRIVACY_EMAIL = `privacy@${DOMAIN}`;

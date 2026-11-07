@@ -1,8 +1,8 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import nodemailer from 'nodemailer';
-import { env } from '../env';
 import type { WaitlistRecord } from '../lib/waitlist-schema';
+import { serverEnv as env } from './env';
 export function createNodeStore(file: string, notify?: (record: WaitlistRecord) => Promise<void>) {
   return async (record: WaitlistRecord) => {
     await mkdir(dirname(file), { recursive: true });

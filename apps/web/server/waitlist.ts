@@ -16,7 +16,7 @@ export default defineEventHandler(async (event) => {
   } else {
     const { resolve } = await import('node:path');
     const { createNodeStore, notifyWaitlist } = await import('../src/server/waitlist-node');
-    const { env } = await import('../src/env');
+    const { serverEnv: env } = await import('../src/server/env');
     store = createNodeStore(resolve('.data/waitlist.jsonl'), env.SMTP_HOST ? notifyWaitlist : undefined);
   }
   return handleWaitlist(request, {
