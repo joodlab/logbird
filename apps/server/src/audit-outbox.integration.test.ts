@@ -131,7 +131,10 @@ it('counts suppressed attempts, targets known members, fans out atomically, and 
       const events = await prisma.auditOutbox.findMany({ where: { stream: `ws:${org}` }, orderBy: { createdAt: 'asc' } });
       expect(events).toHaveLength(2);
       expect(events.map((r) => (r.payload as { metadata: { attempts: number } }).metadata.attempts)).toEqual([1, 4]);
-      expect(events[0]?.payload).toMatchObject({ targets: [{ type: 'user', id, name: 'QA Target Member' }] });
+      expect(events[0]?.payload).toMatchObject({
+        targets: [{ type: 'user', id, name: 'QA Target Member' }],
+        description: "Failed sign-in to QA Target Member's account (wrong code)",
+      });
     }
     expect((await prisma.authAuditBudget.findUniqueOrThrow({ where: { id: workspaceBudget } })).suppressed).toBe(4);
     await flushAuthAuditBudgets(new Date('2041-01-01T01:00:01Z'), [workspaceBudget]);

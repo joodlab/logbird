@@ -3,6 +3,7 @@ import { auditNamespace, type Prisma, prisma, storeAuditEvent } from '@logbird/d
 
 const WINDOW_MS = 300_000;
 const HOUR_MS = 3_600_000;
+const reasonLabels: Record<string, string> = { invalid_otp: 'wrong code', expired_otp: 'expired code', locked_out: 'too many wrong codes' };
 export const AUTH_AUDIT_GLOBAL_LIMIT = 600;
 export const AUTH_AUDIT_WORKSPACE_LIMIT = 60;
 const key = (secret: string, purpose: string) => createHmac('sha256', secret).update(`logbird/auth-audit/${purpose}/v1`).digest();
@@ -97,8 +98,8 @@ export async function flushFailedSignIns(secret: string, now = new Date(), ids?:
             actor: { type: 'anonymous', name: 'Unverified sign-in' },
             targets: [{ type: 'user', id: user.id, name: user.name }],
             description: first
-              ? `Failed sign-in to ${user.name || 'a member'}'s account (${current.reason})`
-              : `${count} further failed sign-in attempts in the window for ${user.name || 'a member'} (${current.reason})`,
+              ? `Failed sign-in to ${user.name || 'a member'}'s account (${reasonLabels[current.reason] ?? 'verification failed'})`
+              : `${count} further failed sign-in attempts in the window for ${user.name || 'a member'} (${reasonLabels[current.reason] ?? 'verification failed'})`,
             executor: { type: 'api', id: 'api-server' },
             context: current.context,
             metadata: {
