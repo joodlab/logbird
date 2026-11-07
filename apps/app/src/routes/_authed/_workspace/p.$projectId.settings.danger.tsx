@@ -15,7 +15,7 @@ import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { Loader2Icon, Trash2Icon } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AdminNote, AdminOnly } from '@/components/admin-gate';
 import { SettingsSection } from '@/components/settings-section';
@@ -37,6 +37,8 @@ function DangerZone() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const deleteButton = useRef<HTMLButtonElement>(null);
+  const slugInput = useRef<HTMLInputElement>(null);
   const [typed, setTyped] = useState('');
   const manage = useCan()('project.delete');
   const remove = useMutation({
@@ -66,7 +68,7 @@ function DangerZone() {
         }
         footer={
           <AdminOnly allowed={manage}>
-            <Button disabled={!manage} onClick={() => setOpen(true)} size="sm" variant="destructive">
+            <Button disabled={!manage} onClick={() => setOpen(true)} ref={deleteButton} size="sm" variant="destructive">
               <Trash2Icon />
               Delete project…
             </Button>
@@ -87,7 +89,7 @@ function DangerZone() {
         }}
         open={open && manage}
       >
-        <AlertDialogContent className="sm:max-w-md">
+        <AlertDialogContent className="sm:max-w-md" finalFocus={deleteButton} initialFocus={slugInput}>
           <form
             className="flex flex-col gap-4"
             onSubmit={(event) => {
@@ -110,10 +112,10 @@ function DangerZone() {
               </Label>
               <Input
                 autoComplete="off"
-                autoFocus
                 id="delete-slug"
                 onChange={(e) => setTyped(e.target.value)}
                 placeholder={p.slug}
+                ref={slugInput}
                 spellCheck={false}
                 value={typed}
               />
