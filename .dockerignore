@@ -28,6 +28,14 @@ output
 dogfood-output
 *.log
 
+# Runtime data and PII never enter a build context (apps/web waitlist submissions, any package's .data).
+**/.data
+**/.data/**
+**/waitlist*.jsonl
+# The marketing site is not part of any self-host image; its generated media and OG cards stay out too.
+apps/web/public/media
+apps/web/public/og
+
 examples/**
 !examples/**/package.json
 .pnpm-store
