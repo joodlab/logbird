@@ -258,6 +258,7 @@ export const dataRoutes = new Hono<AppEnv>()
           }
         },
         c.req.raw.signal,
+        exportId,
       );
       c.header('Content-Type', input.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/x-ndjson');
       c.header(

@@ -64,7 +64,7 @@ lifecycle and produce correlated failure records when initial audit storage is a
 
 Completion, failure and cancellation are inserted into the [durable audit outbox](workspace-audit.md), independently
 retried by the API drainer. A terminal audit outage cannot break an otherwise successful export. A Postgres outage at the
-terminal insert is reported as `export.audit_storage_unavailable` and can leave a requested record requiring operator
+terminal insert is reported as `export.audit_storage_unavailable {exportId, action}` and can leave a requested record requiring operator
 investigation; completed bytes cannot be reconstructed after process loss. Server shutdown drains tracked terminal
 writes before closing clients. Cancellation during an in-flight completion emits a later corrective `export.failed`
 record for the same export id; treat that cancellation as the final state. Reasons are `client_aborted`, `invalid_query`,

@@ -28,6 +28,7 @@ export async function auditedExport(
   csv: boolean,
   receipt: ExportReceipt,
   signal: AbortSignal,
+  exportId?: string,
 ) {
   let rows = 0,
     bytes = 0,
@@ -37,7 +38,7 @@ export async function auditedExport(
   let completion: Promise<unknown> | undefined, failure: Promise<unknown> | undefined;
   const hash = createHash('sha256');
   const terminalReceipt = (action: 'export.completed' | 'export.failed', counts: ExportCounts) =>
-    track(receipt(action, counts).catch(() => console.error(JSON.stringify({ event: 'export.audit_storage_unavailable', action }))));
+    track(receipt(action, counts).catch(() => console.error(JSON.stringify({ event: 'export.audit_storage_unavailable', exportId, action }))));
   const fail = (reason: NonNullable<ExportCounts['reason']>) => {
     if (state === 'closed') return Promise.resolve();
     state = 'failed';
@@ -74,7 +75,7 @@ export async function auditedExport(
     if (state === 'closed') return;
     void fail('client_aborted');
     controller.error(new Error('Export aborted'));
-    void iterator?.return().catch(() => console.error('export.cleanup_failed'));
+    void iterator?.return().catch(() => console.error(JSON.stringify({ event: 'export.cleanup_failed', exportId })));
   };
   return new ReadableStream<Uint8Array>({
     start(out) {

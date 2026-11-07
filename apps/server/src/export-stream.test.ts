@@ -95,6 +95,30 @@ it('fails closed for requested storage and preserves completed bytes through ter
   expect(await reader.read()).toMatchObject({ done: true });
 });
 
+it('correlates a terminal audit outage without breaking bytes or logging private errors', async () => {
+  const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  async function* chunks() {
+    yield '{}\n';
+  }
+  try {
+    const receipt = vi.fn(async (action: string) => {
+      if (action === 'export.completed') throw new Error('private storage credentials');
+    });
+    const body = await auditedExport(chunks(), false, receipt, new AbortController().signal, 'qa-export-diagnostics');
+    expect(await new Response(body).text()).toBe('{}\n');
+    expect(log).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: 'export.audit_storage_unavailable',
+        exportId: 'qa-export-diagnostics',
+        action: 'export.completed',
+      }),
+    );
+    expect(JSON.stringify(log.mock.calls)).not.toContain('private storage credentials');
+  } finally {
+    log.mockRestore();
+  }
+});
+
 it('records cancellation after a completion receipt that is still in flight', async () => {
   let started!: () => void, release!: () => void;
   const entered = new Promise<void>((resolve) => {
