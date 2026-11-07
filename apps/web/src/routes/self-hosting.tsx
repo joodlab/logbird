@@ -92,12 +92,13 @@ function SelfHostingPage() {
         aside={
           <div className="flex flex-col gap-3">
             <Stack
-              file="docker compose up -d"
+              file="docker-compose.yml"
               inside={['console', 'api', 'worker', 'postgres', 'clickhouse', 'redis']}
               title="One Compose project runs the console, API, worker, Postgres, ClickHouse and Redis."
             />
             <p className="text-muted-foreground text-sm">
-              Source on GitHub — coming soon. Self-hosting builds from source; no images are published yet.
+              {GITHUB_PUBLIC ? 'Self-hosting builds from source' : 'Source on GitHub — coming soon. Self-hosting builds from source'}; no images are
+              published yet.
             </p>
           </div>
         }
@@ -148,7 +149,6 @@ function SelfHostingPage() {
             </div>
             <div className="flex min-w-0 flex-col gap-3">
               <SiteCode code={quickstart} language="bash" title="On your server" />
-              <p className="text-muted-foreground text-sm">The repository opens publicly soon. Until then, this command won't work for you.</p>
               <SiteCode code={firstEvent} language="bash" title="Your first event" />
             </div>
           </div>
@@ -300,7 +300,7 @@ function SelfHostingPage() {
                 { title: 'Stop writes', body: 'Block ingress and stop the console, server and worker; the worker finishes its current job first.' },
                 {
                   title: 'Back up',
-                  body: 'Matched backups of Postgres (pg_dump) and ClickHouse (BACKUP DATABASE), with a checksum and the image IDs.',
+                  body: 'With writers stopped: matched Postgres (pg_dump) and ClickHouse (BACKUP DATABASE) backups and a SHA-256 checksum file. Keep the original .env; record the Git revision and image IDs.',
                 },
                 { title: 'Switch revision', body: 'Check out a tested revision.' },
                 {

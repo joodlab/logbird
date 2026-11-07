@@ -104,7 +104,7 @@ function ProductPage() {
         bullets={[
           'Fields are suggested from what your project actually sends, with how often each one appears.',
           'Errors point at the exact token and say what was expected, for example "attempt is a number".',
-          'Any field you send, however deeply nested, is searchable by its dotted path.',
+          'Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 attributes and the first 2 KiB of each value; the full event is stored as received.',
         ]}
         eyebrow="Search"
         id="search"

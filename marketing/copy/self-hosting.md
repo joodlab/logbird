@@ -16,6 +16,7 @@ path: /self-hosting
   <!-- source: LICENSE; docs/SPEC.md intro ("one codebase, self-host or cloud") -->
 - **cta:** Five-minute quickstart ↓ `#quickstart` · Join the Cloud waitlist → `/contact`
 - **small print:** Source on GitHub — coming soon. Self-hosting builds from source; no images are published yet.
+  <!-- when WEB_GITHUB_PUBLIC=true: drop "Source on GitHub — coming soon." -->
 - **visual:** a diagram of the Compose stack (console, api, worker, postgres, clickhouse, redis). The 2026-11-05
   self-hosting captures show the old name and a real key prefix, so they aren't used.
 
@@ -43,7 +44,6 @@ path: /self-hosting
   ```
   <!-- source: docs/self-hosting.md (after #51): sequential builds, pull_policy: build, up --no-build -->
 
-  Small print: "The repository opens publicly soon. Until then, this command won't work for you."
 - **steps after the code:**
   1. Open `http://localhost:4600` and sign in with the code sent to your email.
   2. Create a workspace and a project. Copy the ingest key; it's shown once.
@@ -142,7 +142,8 @@ path: /self-hosting
 - **heading:** Upgrade with a pinned revision, after a backup.
 - **steps:**
   1. Stop writes: block ingress and stop the console, server and worker (the worker finishes its current job first).
-  2. Back up: matched Postgres (`pg_dump`) and ClickHouse (`BACKUP DATABASE`) backups, with a checksum and the image IDs.
+  2. Back up, with writers stopped: matched Postgres (`pg_dump`) and ClickHouse (`BACKUP DATABASE`) backups and a
+     SHA-256 checksum file. Keep the original `.env`; record the Git revision and image IDs.
   3. Switch to a tested revision.
   4. Build the four roles one at a time, then `docker compose up -d --no-build`. Migrations run first; if one fails,
      the new version doesn't start.

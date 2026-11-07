@@ -56,7 +56,9 @@ path: /product
 - **bullets:**
   - Fields are suggested from what your project actually sends, with how often each one appears.
   - Errors point at the exact token and say what was expected, for example "attempt is a number".
-  - Any field you send, however deeply nested, is searchable by its dotted path.
+  - Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 attributes
+    and the first 2 KiB of each value; the full event is stored as received.
+    <!-- source: docs/SPEC.md §3 (flattening); packages/clickhouse/src/normalize.ts -->
 - **visual:** `marketing/captures/2026-11-07-site-console/query-suggestions-light.png` (manifest id `query-suggestions`) under the query-language code sample.
 
 ## sql-mode

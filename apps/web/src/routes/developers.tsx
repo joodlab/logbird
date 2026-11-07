@@ -16,7 +16,8 @@ const client = new Logbird({
   apiKey: process.env.LOGBIRD_INGEST_KEY, // lb_ingest_...
   enabled: Boolean(process.env.LOGBIRD_INGEST_KEY), // off locally when no key is set
   defaults: { environment: 'production' },
-  onError: (error) => console.error(error.message),
+  onError: (error) => console.error(error.message), // permanent rejections and background failures
+  onDrop: (event) => console.warn('audit event dropped', event.action), // each rejected or discarded event
 });
 
 client.track({
@@ -27,7 +28,9 @@ client.track({
   changes: [{ field: 'status', before: 'confirmed', after: 'cancelled' }],
 });
 
-await client.flush(); // send now; rejects if delivery fails
+// flush() rejects only when retryable delivery (network, 429, 5xx) runs out of retries; the batch stays
+// queued for the next flush. Permanent rejections don't reject: they arrive through onError and onDrop.
+await client.flush().catch((error) => console.error('audit delivery pending', error));
 await client.shutdown(); // on exit: stop accepting events and drain the queue`;
 
 const http = `curl https://audit.example.com/v1/events \\
@@ -131,7 +134,7 @@ const limits: [string, string][] = [
   ['Events per request', '1 to 1000'],
   ['Request size', '5 MB'],
   ['Event size', '256 KB'],
-  ['Attributes per event', '256 keys, 6 levels deep, values up to 2 KB'],
+  ['Attributes per event', 'Up to 256 indexed, 6 levels deep, the first 2 KiB of each value'],
   ['occurredAt', 'ISO-8601 or epoch milliseconds, from 3650 days ago to 24 hours ahead'],
   ['Ingest rate (default, per project)', '3000 requests a minute'],
   ['Read rate (default, per project)', '1200 requests a minute'],
@@ -238,7 +241,8 @@ function DevelopersPage() {
             <code>track(event)</code> never throws and never waits for the network.
           </>,
           <>
-            <code>flush()</code> and <code>shutdown()</code> reject if delivery fails, so handle them.
+            <code>flush()</code> and <code>shutdown()</code> reject when retryable delivery (network, <code>429</code>, <code>5xx</code>) runs out of
+            retries, and the batch stays queued. Permanent rejections arrive through <code>onError</code> and <code>onDrop</code> instead.
           </>,
           <>
             Call <code>shutdown()</code> from your host's own exit hook. The SDK installs no process handlers.
@@ -452,8 +456,8 @@ function DevelopersPage() {
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Partial batches.</strong> Events without an <code>action</code> are rejected one by
-                  one, and the rest are stored. Permanent errors other than <code>429</code> drop the batch and report it through <code>onError</code>
-                  .
+                  one, and the rest are stored. Permanent errors other than <code>429</code> drop the batch and report it through <code>onError</code>{' '}
+                  and <code>onDrop</code>, without rejecting <code>flush()</code>.
                 </>,
               ]}
             />
