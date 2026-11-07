@@ -149,8 +149,14 @@ function suggestField(context: QueryCompletion | SqlCompletion): string | null {
   return context.field; // bare attribute key (metadata.channel)
 }
 
-/** Fields whose values are searched when free text is typed (ids with display names, and actions). */
-const ENTITY_FIELDS = ['tenant', 'actor', 'action'] as const;
+/**
+ * Fields whose values are searched when free text is typed (ids with display names, and actions). Support agents
+ * (`impersonator`) are matched by name too: free text alone never finds what they did as a customer.
+ */
+const ENTITY_FIELDS = ['tenant', 'actor', 'impersonator', 'action'] as const;
+
+/** Badge for a matched value: what kind of thing it is, in plain words. */
+const MATCH_BADGE: Record<string, string> = { impersonator: 'support agent' };
 
 interface Attribute {
   key: string;
@@ -513,7 +519,7 @@ function querySuggestions(input: Input): Suggestion[] {
         group: 'Matching values',
         label: named ? e.label : term,
         named,
-        badge: e.field,
+        badge: MATCH_BADGE[e.field] ?? e.field,
         detail: named ? term : undefined,
         meta: formatCompact(e.count),
         from: context.from,
