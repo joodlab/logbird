@@ -15,12 +15,8 @@
       "claim": "pending siblings",
       "status": 503,
       "details": {
-        "indices": [
-          0
-        ],
-        "eventIds": [
-          "pending"
-        ]
+        "indices": [0],
+        "eventIds": ["pending"]
       }
     },
     {

@@ -124,8 +124,6 @@ it has no checksum and does not key solely on the numeric prefix. Recheck master
 migration directory immediately before merge, and coordinate a ledger rename if
 006_event_ids.sql needs renumbering on an already-migrated installation.
 
-Until this PR merges, old purge code used by other QA branches may leave orphan
-index rows. Run `scripts/reconcile-ingest.ts --orphan-indexes` for counts first, then
-add `--delete-orphan-indexes` to clean them up. The tool verifies project/workspace
-absence twice, takes the exclusive project lock, and skips any id namespace with
-surviving raw evidence. It deletes only event_ids rows, never events or receipts.
+The orphan-index cleanup for artefacts left by unmerged shared-dev QA branches is
+an operator-owned one-off note, outside this PR. The shipped reconciliation command
+accepts one project id only; it does not delete orphan namespaces.

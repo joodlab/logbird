@@ -19,7 +19,7 @@ The branch server used real shared Postgres, ClickHouse and Dragonfly services, 
 
 ## Service and migration safety
 
-The additive migrations were applied after notifying the coordinator. The materialized view preceded the index backfill; its clamped receipt-time TTL matches events. The ClickHouse runner records the full filename. Master still had migrations 001 through 005 at the final fetch, leaving 006 available. Exact rollback and the counts-first orphan cleanup command are in [the design](../../ingest-identity.md).
+The additive migrations were applied after notifying the coordinator. The materialized view preceded the index backfill; its clamped receipt-time TTL matches events. The ClickHouse runner records the full filename. Master still had migrations 001 through 005 at the final fetch, leaving 006 available. Exact rollback is in [the design](../../ingest-identity.md).
 
 [Migration snapshots](migration-counts.json) retain the before/after physical counters with an explicit label; no logical count was captured before migration. The post-migration logical snapshot was 320772 event rows, 320726 distinct `(project_id,event_id)` pairs, 322802 distinct index pairs and zero missing event identities. Extra index namespaces came from old purge code. The reported 1060624 physical active-part rows in the earlier snapshot were not the logical event count. Counts-first orphan cleanup removed 81 absent namespaces and skipped 42 with surviving raw evidence. No customer project was reset or deleted.
 
@@ -28,3 +28,5 @@ The additive migrations were applied after notifying the coordinator. The materi
 [Resources](resources.json) reports per-command process-tree RSS, machine memory and disk. The successful docs capture's browser peaked at 1.201 GiB; the stack at 2.302 GiB. The stack guard stopped its whole tree after capture/cleanup when machine free memory crossed the normal 6 GiB floor. Serial test attempts that crossed the special 3 GiB floor are resource aborts, never passing test verdicts. The earlier completed build peaked at 1.396 GiB. The resource records distinguish these runs.
 
 The >=10M history / 1M receipt benchmark is intentionally unmeasured here. Run `scripts/benchmark-ingest-identity.ts` only in the coordinator's scheduled heavy+stack window, passing the approved fictional load project and this PR's final full SHA as EXPECTED_HEAD. It refuses a dirty or different checkout. Review scores and scale measurements remain coordinator merge gates.
+
+Round 3 scope trim: the historical orphan cleanup above was a one-off shared-dev operation. Its CLI has been removed; future orphan cleanup belongs to the coordinator. The benchmark is now separately maintained by PR #79 on master.
