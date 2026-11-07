@@ -22,6 +22,7 @@ import {
   useState,
 } from 'react';
 import { ActionName } from '@/components/action-name';
+import { JobHint, SupportMarker } from '@/components/impersonation';
 import { Timestamp } from '@/components/timestamp';
 import { eventSentence } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
@@ -492,7 +493,9 @@ export function EventsTable({
                       </span>
                       <span className="flex min-w-0 items-center gap-2 ps-4 text-muted-foreground text-xs">
                         <Timestamp className="shrink-0" iso={e.timestamp} />
-                        <ActionName action={e.action} className="text-[11px]" />
+                        <SupportMarker className="max-w-[11rem]" event={e} />
+                        <JobHint compact event={e} />
+                        <ActionName action={e.action} className="min-w-0 text-[11px]" />
                       </span>
                     </div>
                   ) : (
