@@ -90,6 +90,7 @@ export const FACET_FIELDS = [
   'environment',
   'actor.type',
   'actor',
+  'impersonator',
   'tenant',
   'executor',
   'executor.type',

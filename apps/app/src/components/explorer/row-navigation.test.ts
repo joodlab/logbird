@@ -45,12 +45,41 @@ describe('eventRowLabel', () => {
     expect(label).toMatch(/^Booking cancelled, by Vera Validator, failure, booking\.cancelled, /);
   });
 
-  it('mentions impersonation', () => {
+  it('says support did it, as whom, once', () => {
+    const label = eventRowLabel(
+      event({
+        actor: vera,
+        description: 'Booking cancelled',
+        impersonator: { type: 'user', id: 'usr_sam', name: 'Sam Support' } as AuditEvent['impersonator'],
+      }),
+      now,
+    );
+    expect(label).toMatch(/^Booking cancelled, done by support agent Sam Support while acting as Vera Validator, success, /);
+    expect(label).not.toContain('impersonating');
+    expect(label).not.toContain('by Vera Validator,');
+  });
+
+  it('does not repeat the actor when the generated sentence already names them (n1)', () => {
     const label = eventRowLabel(
       event({ actor: vera, impersonator: { type: 'user', id: 'usr_sam', name: 'Sam Support' } as AuditEvent['impersonator'] }),
       now,
     );
-    expect(label).toContain('while Sam Support was impersonating');
+    expect(label.startsWith('Vera Validator ')).toBe(true);
+    expect(label).toContain(', done by support agent Sam Support, success, ');
+    expect(label.split('Vera Validator')).toHaveLength(2);
+  });
+
+  it('names the support agent by id and an unknown customer when names are missing', () => {
+    const label = eventRowLabel(event({ impersonator: { id: 'support_2', name: '' } as AuditEvent['impersonator'] }), now);
+    expect(label).toContain('done by support agent support_2 while acting as an unknown customer');
+  });
+
+  it('includes the background job and its try', () => {
+    const label = eventRowLabel(
+      event({ actor: vera, executor: { type: 'worker', id: 'billing-worker', name: 'Billing worker', jobId: 'job_42', attempt: 3 } }),
+      now,
+    );
+    expect(label).toContain(', Background job job_42, run by Billing worker, try 3, ');
   });
 
   it('does not repeat the action when it is the whole sentence', () => {
