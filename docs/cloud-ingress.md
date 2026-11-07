@@ -156,15 +156,18 @@ kubectl -n logbird port-forward --address 127.0.0.1 service/logbird-app 4600:460
 An HTTPS-only APP_URL can prevent cookie/origin-sensitive login through this tunnel.
 Use it for health/ingest/read checks; do login, cookies and headers in the edge window.
 After functional checks, replace the two reserved addresses in
-`edge/operator-window.yaml` with the operators' actual public /32 or /128 addresses:
+`edge/operator-window.yaml` in the **private release copy** with the operators'
+actual public /32 or /128 addresses. Add the nightly automation host's actual
+public egress address to that same private allowlist before enabling OPS-03;
+record any additional approved sources:
 
 ```sh
 kubectl -n logbird apply -k edge
 kubectl -n logbird get ingress logbird -o yaml
 ```
 
-This opens only those two sources; a third, non-allowlisted source must receive 403.
-From that third source, record
+This opens only the approved sources; an independent non-allowlisted source must receive 403.
+From that non-allowlisted source, record
 `curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' "https://$PUBLIC_HOST/readyz"`:
 expect 404 while fenced and 403 in this window, never 200.
 Test real TLS/SNI without `-k`, Secure/HttpOnly/SameSite cookies, hostile forwarded

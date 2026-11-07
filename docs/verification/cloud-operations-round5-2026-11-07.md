@@ -41,7 +41,7 @@ ReplacingMergeTree and plain MergeTree. Only UUID-owned test objects were change
 Cleanup verified all **five owned QA tables and three temporary Memory tables**
 were removed. No database, user or server setting was created; no application table,
 shared migration inventory, real project or queue was changed. No retention mutation
-was queued: fresh QA tables model B/C. This validates the checked-in reference SQL,
+was queued: fresh QA tables model B/C. This validates the checked-in reference SQL with QA object names substituted,
 not a packaged application restore, migration, retention or repair run.
 
 ## Source checks and limits

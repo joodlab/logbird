@@ -37,9 +37,24 @@ The release owner assigns a person to each named role before provisioning.
 
 - [ ] **Launch-blocking nightly automation:** implement/rehearse fence, drain,
   three-store capture, encryption/upload/readback verification, writer restart,
-  one-host operator-window readiness/canary and unfence. On failure leave traffic
-  fenced, page the night rota and withhold success heartbeat; test each interrupted phase.
+  one-host operator-window readiness/canary and unfence. Implement the default
+  owner-overridable failure policy below as explicit phase transitions, persist
+  whether writer restart began, and rehearse failure at each interrupted phase.
+  Before restart: dump/encrypt/upload/readback failure runs the reduced reopen
+  checks against unchanged live stores, retains the previous good backup as current,
+  and raises P1 **nightly backup missing**. After restart: readiness/canary failure
+  refences and pages. Withhold the backup-success heartbeat on either failure;
+  never publish a partial set or retry blindly. Night on-call remains required
+  even after automation; its implementation effort is **unestimated**.
   The 4–8-hour monthly routine estimate assumes this exists, not manual night work.
+- [ ] **Owner decision: nightly failure policy.** Default is reopen on a capture/
+  encrypt/upload/readback failure before writers restart, keeping the previous
+  good set current and paging P1 **nightly backup missing**; a readiness/canary
+  failure after restart stays fenced and pages. Owner may override explicitly;
+  record the chosen policy, phase, accepted outage/RPO tradeoff, and named primary/
+  backup night rota before launch. An attempted reopen that fails readiness or
+  canary is an after-restart failure and stays fenced. No response deadline is
+  promised by the routine effort estimate.
 - [ ] #75 is the restore-specific mutation-version defect; [#77](https://github.com/joodlab/logbird/issues/77)
   is the live acceptance tracker. Record accepted guard/procedure revisions and exact image IDs.
 - [ ] Prove logical raw/minute/entity/attribute values after restore, failed-run repair and

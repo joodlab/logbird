@@ -16,8 +16,16 @@ by these files. No production, failover, restore or capacity acceptance is claim
 - **Effort estimate:** 3–5 engineer-days for platform setup and rehearsals, plus
   4–8 hours/month for patching, restore drills and alert checks **only after OPS-03's
   nightly fence/capture/verify/reopen automation is implemented and rehearsed**.
-  That automation is launch-blocking; its implementation is additional setup work.
-  Without it, an illustrative 0.5–0.75 attended hours/night × 30 adds **15–22.5 hours
+  That automation is launch-blocking; its implementation is additional, **unestimated**
+  setup work outside the 3–5 engineer-days. A named primary/backup night on-call
+  or paging rota is required **even with automation**; it removes routine attended
+  hours, not incident response. Default policy (owner may explicitly override):
+  dump/encrypt/upload/readback failure before writer restart reopens traffic with
+  the previous good backup still current and a P1 **nightly backup missing** alert;
+  readiness/canary failure after restart stays fenced and pages the rota. That
+  latter failure remains an ingest outage until recovery. Record the decision in
+  [OPS-03](cloud-operations-gaps.md#ops-03-recovery).
+  Without automation, an illustrative 0.5–0.75 attended hours/night × 30 adds **15–22.5 hours
   of night work/month**, or 19–30.5 hours including routine work, plus an explicit
   primary/backup night rota. Measure the actual run duration; these are estimates,
   not measured staffing costs. Do not approve the smaller effort figure for manual nights.
@@ -245,8 +253,9 @@ that copy's `deploy/k3s` directory:
    | `logbird-migration` | One-shot schema/access tooling: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, preserved `CLICKHOUSE_QUERY_PASSWORD`; no auth or mail credentials |
 
    Back up the three object names, key inventories and encrypted recovery references
-   with the matched set. Restore/recreate each scoped Secret with its preserved values;
-   do not replace the worker Secret with the API file. ConfigMap defaults supply the
+   with the matched set. Restore/recreate each scoped Secret with its preserved credentials;
+   changed restore endpoints follow the [ordered cutover](backup-disaster-recovery.md#cut-over-to-restored-targets).
+   Do not replace the worker Secret with the API file. ConfigMap defaults supply the
    non-secret settings. **Hetzner blocks outbound 25/465 by default**; request
    unblocking after account eligibility (one month and first invoice paid), and retain
    approval plus actual connection/OTP proof. Port 587 is reachable, but requires
@@ -462,7 +471,8 @@ The opt-in local receipt test is
 `LOGBIRD_CLOUD_RECEIPT_TEST=1 node --env-file=.env --test scripts/cloud-dr-receipts.integration.test.mjs`.
 It requires localhost and the existing `logbird` database, creates only UUID-owned
 QA tables plus session-private Memory expectations, validates native 006/007 engines
-and exact checked-in SQL, then verifies cleanup. It creates no database/user/settings
+and checked-in SQL with QA object names substituted, then verifies cleanup. It
+creates no database/user/settings
 and changes no application table. Follow current RAM/lock rules before execution.
 The dated [Round 5 receipt](verification/cloud-operations-round5-2026-11-07.md)
 records both native engine variants, raw namespace assertions and cleanup.

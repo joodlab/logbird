@@ -81,10 +81,21 @@ cannot close either gate when logical values disagree. Track them separately in
 
 1. Acquire the release/backup lock. Verify target identities, destination access, free disk,
    last successful restore and previous recovery set. Abort on ambiguity; never reset a service.
-   Set `RELEASE_REPO` to the absolute, qualified release checkout/operations bundle
-   (including `deploy/k3s`, smoke tooling and the SQL files). Record its source SHA;
-   do not depend on the backup host's current directory.
-2. Use only the [Ingress fence and drain commands](cloud-operations.md#fence-and-drain)
+   Set `RELEASE_REPO` to the absolute **private qualified release copy**: preserve
+   the full repository-relative layout, including `deploy/k3s`, smoke tooling,
+   dependencies and SQL files, with the approved real hostname and operator
+   allowlist configured. A pristine checkout's example hostname/IPs are not usable.
+   Include the automation host's actual egress /32 or /128 in that private allowlist.
+   Keep private configuration outside Git; record source SHA and reviewed config
+   hashes in the protected receipt. Do not depend on the backup host's directory.
+2. Set the working directory before reusing relative bootstrap/fence paths:
+
+   ```sh
+   : "${RELEASE_REPO:?Absolute private qualified release copy}"
+   cd "$RELEASE_REPO/deploy/k3s"
+   ```
+
+   Use only the [Ingress fence and drain commands](cloud-operations.md#fence-and-drain)
    for k3s (stop before its migration steps); prove external rejection before the boundary. Fence all direct writers,
    wait for acknowledged ingestion and active
    requests to finish, then drain/stop workers so retention cannot delete data during capture.
@@ -145,12 +156,24 @@ cannot close either gate when logical values disagree. Track them separately in
    Add the encrypted configuration/secret references and platform backup to the set. Hash and
    upload all artifacts; verify every object is readable from the recovery host, then record
    a complete-set receipt outside the affected host. A local success or upload attempt alone
-   is insufficient. For an **unchanged nightly capture**, restore the recorded
-   baseline replica counts (API 2, worker 1), without changing images/configuration:
+   is insufficient. **Default nightly failure policy (owner may explicitly override
+   in [OPS-03](cloud-operations-gaps.md#ops-03-recovery)):** if dump, encryption,
+   upload or readback fails **before writer restart begins**, leave the previous
+   good backup current, mark this attempt incomplete, and raise P1 **nightly backup
+   missing** to the named primary/backup night rota. Reopen the unchanged live
+   stores using the same reduced checks below; do not restore old data or advertise
+   the partial set. The next attempt must not overwrite the last good set. A rota
+   is required even with automation.
+
+   For either a verified **unchanged nightly capture** or that pre-restart failure,
+   bring any queue source stopped for capture back up using its qualified service
+   procedure and verify persistence/dependency readiness first. Restore recorded
+   baseline replica counts (API 2, worker 1), without changing images/configuration.
+   Mark the restart phase durably **before** issuing the first restart/scale command:
 
    ```sh
    set -eu
-   : "${RELEASE_REPO:?Absolute qualified release checkout}" "${PUBLIC_HOST:?Approved HTTPS hostname}"
+   : "${RELEASE_REPO:?Absolute private qualified release copy}" "${PUBLIC_HOST:?Approved HTTPS hostname}"
    kubectl -n logbird scale deployment/logbird-server --replicas=2
    kubectl -n logbird scale deployment/logbird-worker --replicas=1
    kubectl -n logbird rollout status deployment/logbird-server --timeout=300s
@@ -176,11 +199,16 @@ cannot close either gate when logical values disagree. Track them separately in
    unchanged. Reserve the two-host bucket/spoof test for releases and edge/config
    changes, which require [full acceptance](cloud-ingress.md#two-ip-rate-limit-acceptance).
    Preserve any additional middleware when removing only the operator allowlist.
-   On any failed step, delete the Ingress again, keep the fence and page the rota;
-   no success heartbeat or automatic blind retry. OPS-03 must automate and rehearse
-   the entire nightly sequence before launch.
-7. Send a success heartbeat **after** off-host verification, and alert on failure, missed schedule
-   and overdue restore drill. Do not report a complete set when one store or credential is missing.
+   A failure **after restart begins**, including readiness or canary failure,
+   deletes the Ingress again, stays fenced and pages the rota. This applies also
+   when reopening after a pre-restart backup failure. No blind retry or backup-
+   success heartbeat is allowed. OPS-03 must implement/rehearse both failure
+   branches, including process interruption at the restart boundary, before launch.
+7. Send a success heartbeat **only after** off-host verification and successful reopen.
+   Alert on failure, missed schedule and overdue restore drill. A reopened failed
+   backup still has P1 **nightly backup missing** and the previous good set's age;
+   reopening does not reset backup freshness. Never report a complete set when
+   one store or credential is missing.
 
 ## Isolated restore drill
 
@@ -531,13 +559,94 @@ against ClickHouse and the queue. Counts alone do not prove settings/keys surviv
 also run the fictional login, stored-key read/ingest, retention-policy and deletion
 checks from the fixture manifest.
 
+## Cut over to restored targets
+
+Only the authorized incident operator executes these commands against the approved
+recovery cluster. Keep the source disks/archives and rollback configuration intact.
+Complete the isolated drill above, including queue reconciliation and checkpoints
+B/C using its qualified isolated worker, then stop that worker. Until those pass,
+production's regular worker Deployment stays at zero. This procedure does not
+bypass #75/#77's accepted recovery/artifact gates.
+
+1. Retain the public fence and stop the regular production consumers:
+
+   ```sh
+   set -eu
+   : "${RELEASE_REPO:?Absolute private qualified release copy}"
+   cd "$RELEASE_REPO/deploy/k3s"
+   kubectl -n logbird delete ingress logbird --ignore-not-found --wait=true
+   kubectl -n logbird scale deployment/logbird-worker --replicas=0
+   kubectl -n logbird wait --for=delete pod -l app.kubernetes.io/name=logbird-worker --timeout=330s
+   ```
+
+   Fence every other writer and stop the old API as in the release drain. Confirm
+   all targets are the accepted restored stores, not the failed source.
+2. Prepare three protected JSON merge-patch files containing **only `stringData`**
+   for replaced endpoints, using the existing scoped Secret inventories:
+
+   | Secret / protected patch | Permitted endpoint keys, only when replaced |
+   | --- | --- |
+   | `logbird-runtime` / `/secure/cutover/runtime-endpoints.json` | `DATABASE_URL`, `CLICKHOUSE_URL`, `REDIS_URL` |
+   | `logbird-worker` / `/secure/cutover/worker-endpoints.json` | `DATABASE_URL`, `CLICKHOUSE_URL`, `REDIS_URL` |
+   | `logbird-migration` / `/secure/cutover/migration-endpoints.json` | `DATABASE_URL`, `CLICKHOUSE_URL` |
+
+   Omit unchanged endpoint keys. This is **not credential rotation**: retain URL
+   credentials, database names and required connection options while changing only
+   approved host/port/transport endpoints. Preserve every other key/value, including
+   `BETTER_AUTH_SECRET`, SMTP credentials, ClickHouse user/password and restricted
+   query password. Do not recreate whole Secrets from a different role's file.
+   Apply the privately reviewed patches without printing their contents:
+
+   ```sh
+   kubectl -n logbird patch secret logbird-runtime --type=merge --patch-file=/secure/cutover/runtime-endpoints.json
+   kubectl -n logbird patch secret logbird-worker --type=merge --patch-file=/secure/cutover/worker-endpoints.json
+   kubectl -n logbird patch secret logbird-migration --type=merge --patch-file=/secure/cutover/migration-endpoints.json
+   # Key names only; compare with the protected pre-cutover inventories.
+   kubectl -n logbird get secret logbird-runtime logbird-worker logbird-migration \
+     -o go-template='{{range .items}}{{.metadata.name}}{{"\n"}}{{range $key, $value := .data}}{{$key}}{{"\n"}}{{end}}{{end}}'
+   ```
+
+   Verify inventories match, preserved credential values compare equal in the
+   protected operator process (no values in logs), and endpoints agree across roles.
+3. Secret references are read at Pod start: roll app/API to the accepted digests
+   and restored endpoints, keeping the regular worker at zero:
+
+   ```sh
+   kubectl -n logbird rollout restart deployment/logbird-server deployment/logbird-app
+   kubectl -n logbird scale deployment/logbird-server --replicas=2
+   kubectl -n logbird rollout status deployment/logbird-server --timeout=300s
+   kubectl -n logbird rollout status deployment/logbird-app --timeout=300s
+   ```
+
+   Through the local port-forward, recheck logical values on the production-bound
+   targets against the accepted checkpoint C expectations (do not reuse pre-purge
+   A expectations after B/C). Do this before any regular worker starts. Confirm
+   queue/RetentionRun reconciliation and the isolated worker's B/C receipts cover these exact stores,
+   schema and digests; if not, stop and repeat the isolated acceptance under the
+   fence. Do not start an unqualified worker to make readiness green.
+4. Reapply the verified deletion inventory and recheck retention/tenant isolation
+   before customer access. If absent or incomplete, remain fenced. Once queue
+   reconciliation and B/C pass, start the regular worker on its updated Secret:
+
+   ```sh
+   kubectl -n logbird scale deployment/logbird-worker --replicas=1
+   kubectl -n logbird rollout status deployment/logbird-worker --timeout=300s
+   ```
+
+   Apply the [operator-only edge window](cloud-ingress.md#fence-and-operator-acceptance-window),
+   run full release acceptance (including two-source auth buckets), and only then
+   [unfence](cloud-ingress.md#unfence-and-refence). On failure refence and page;
+   keep recovered data and evidence for investigation. Record endpoint changes,
+   checkpoint receipts, running imageIDs and operator approval in the incident log.
+
 ## Incident and rollback decision
 
 For lost/corrupt storage or incompatible migration: fence writes, declare the affected component
 on the independent status page, preserve original disks/logs, choose a complete set and restore
 to new targets. Accept any loss between the backup boundary and incident explicitly; do not
 claim an unmeasured RPO of zero. Reconcile IDs/projects, deletion inventory and retention before
-switching configuration, then run acceptance and reopen traffic gradually under observation.
+[cutting over to restored targets](#cut-over-to-restored-targets), then reopen traffic
+under observation only after that ordered acceptance.
 
 For an application-only failure with compatible schema, pin the previous digests and configuration
 and validate them against current data. The release lock, evidence and acceptance gates still
