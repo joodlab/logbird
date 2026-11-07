@@ -8,6 +8,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "build": "node scripts/generate-rollup-sql.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "migrate": "node --env-file-if-exists=../../.env --import tsx scripts/migrate.ts",
