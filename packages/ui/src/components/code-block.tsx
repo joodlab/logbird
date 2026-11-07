@@ -31,7 +31,7 @@ export function CodeBlock({ code, language = 'text', title, className, maxHeight
   return (
     <div className={cn('group/code relative overflow-hidden rounded-lg border bg-muted/40', className)}>
       {title ? (
-        <div className="flex h-9 items-center justify-between border-b px-3">
+        <div className="flex h-9 items-center justify-between border-b px-3 pointer-coarse:h-11">
           <span className="font-mono text-[11px] text-muted-foreground uppercase tracking-wider">{title}</span>
           <CopyButton className="pointer-coarse:size-11" label={copyLabel} value={code} />
         </div>
@@ -71,7 +71,7 @@ export function CodeTabs({ tabs, className, defaultTab }: { tabs: CodeTab[]; cla
             <button
               aria-selected={tab.id === current.id}
               className={cn(
-                'relative h-full rounded-md px-3 font-medium text-[12px] text-muted-foreground outline-hidden transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset forced-colors:-outline-offset-2',
+                'relative h-full rounded-md px-3 font-medium text-[12px] text-muted-foreground outline-none focus-visible:outline-hidden transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:forced-colors:-outline-offset-2',
                 tab.id === current.id &&
                   'text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-brand',
               )}

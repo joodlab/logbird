@@ -1,6 +1,6 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { eventRowLabel, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
+import { eventRowLabel, isReplaced, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
 
 function event(patch: Partial<AuditEvent>): AuditEvent {
   return {
@@ -115,5 +115,19 @@ describe('prependedCount', () => {
     expect(prependedCount('a', [...rows, { id: 'more' }])).toBe(0);
     expect(prependedCount('gone', rows)).toBe(0);
     expect(prependedCount(undefined, rows)).toBe(0);
+  });
+});
+
+describe('isReplaced', () => {
+  const rows = ['a', 'b', 'c'].map((id) => ({ id }));
+  it('is true for a new result set: the old first row is gone', () => {
+    expect(isReplaced('x', rows)).toBe(true);
+  });
+  it('is false for a prepend, a removal below the first row, a refetch that keeps it, or no previous list', () => {
+    expect(isReplaced('a', [{ id: 'n1' }, ...rows])).toBe(false);
+    expect(isReplaced('a', [rows[0] as { id: string }, rows[2] as { id: string }])).toBe(false);
+    expect(isReplaced('b', rows)).toBe(false);
+    expect(isReplaced(undefined, rows)).toBe(false);
+    expect(isReplaced('x', [])).toBe(false);
   });
 });

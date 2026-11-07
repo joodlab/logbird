@@ -1,9 +1,9 @@
 /**
- * Keyboard + axe proof for the event grid (PR #70, rounds 2 and 3), against a REAL local stack (app :4600, server :4601, worker).
+ * Keyboard + axe proof for the event grid (PR #70, rounds 2 to 4), against a REAL local stack (app :4600, server :4601, worker).
  *
  *   AXE=/path/to/axe.min.js OUT=../../marketing/captures/2026-11-07-a11y-explorer node scripts/a11y-grid-proof.mjs
  *
- * Creates a fictional user/workspace/project (qa-fix-a11y-r3-*@example.test, "QA Fix a11y r3"), ingests events, and checks:
+ * Creates a fictional user/workspace/project (qa-fix-a11y-r4-*@example.test, "QA Fix a11y r4"), ingests events, and checks:
  *  - Explorer: keyboard into the grid, ArrowDown to row 50, a 150-event live-tail batch arrives → focus stays on the same
  *    event (same node, new index), the view does not jump, ArrowDown continues from that event, Enter/Escape round trip.
  *  - Workspace Activity: ArrowDown moves the roving tab stop; Shift+Tab out and Tab back returns to that row; the event
@@ -18,6 +18,13 @@
  *    dir=ltr and the polite "Inserted …" announcement; Settings tabs focused by Tab at 390px clear the fade; the phone
  *    gridcell is a real flex box.
  *  - axe-core (wcag2a/aa, wcag21a/aa, wcag22aa, best-practice) on the changed screens, light and dark.
+ * Round 4:
+ *  - Forced colors: only the focused element computes an outline. No unfocused row, sidebar item, CopyValue or Settings
+ *    tab does: Tailwind's `outline-hidden` paints a transparent outline in forced colors, so it must be focus-only.
+ *    Shoots the focused row (after) and the same screen with round 2's classes put back (before).
+ *  - "Filter by…" from the sheet, with the filtered response held back so focus returns to the old row first (the
+ *    race): focus lands on row 0 of the new results, the view at the top, and no second page is fetched. When the new
+ *    results still hold the open event, focus stays on it at its new index, scrolled into view.
  * The QA project is deleted at the end. One browser, closed in `finally`.
  */
 import { readFile, writeFile } from 'node:fs/promises';
@@ -29,7 +36,7 @@ const BASE = process.env.BASE_URL ?? 'http://localhost:4600';
 const SERVER = process.env.SERVER_URL ?? 'http://127.0.0.1:4601';
 const OUT = path.resolve(process.env.OUT ?? '.');
 const AXE = await readFile(process.env.AXE ?? 'axe.min.js', 'utf8');
-const EMAIL = `qa-fix-a11y-r3-${Date.now().toString(36)}@example.test`;
+const EMAIL = `qa-fix-a11y-r4-${Date.now().toString(36)}@example.test`;
 const ROW = 36;
 /** Better Auth (and the API's CSRF guard) want the console's origin on mutating requests. */
 const H = { Origin: BASE };
@@ -58,6 +65,8 @@ function events(prefix, n) {
     outcome: i % 7 ? 'success' : 'failure',
     description: `${actors[i % 4]} changed booking BK-${prefix}-${i}`,
     context: { operationId: `${prefix}-op-${i}` },
+    // Two fictional tenants: "Filter by tenant" then matches half the events, more than one page of them.
+    tenant: { id: `tn_qa_${i % 2}`, name: `QA Tenant ${i % 2}` },
   }));
 }
 
@@ -123,6 +132,23 @@ async function axe(page, name, include) {
   note(`axe ${name}`, violations.length ? violations.map((v) => `${v.id}(${v.nodes})`).join(', ') : '0');
 }
 
+/** In forced colors: the focused element's outline, and every other rendered element that computes one (should be none). */
+const outlines = (page) =>
+  page.evaluate(() => {
+    const describe = (el) =>
+      `${el.tagName.toLowerCase()}${el.getAttribute('role') ? `[role=${el.getAttribute('role')}]` : ''} ${(el.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 30)}`;
+    const active = document.activeElement;
+    const s = active ? getComputedStyle(active) : null;
+    const others = [...document.querySelectorAll('body *')].filter(
+      (el) => el !== active && el.getClientRects().length > 0 && getComputedStyle(el).outlineStyle !== 'none',
+    );
+    return {
+      focused: s ? { el: describe(active), style: s.outlineStyle, width: s.outlineWidth, offset: s.outlineOffset, color: s.outlineColor } : null,
+      unfocusedOutlined: others.length,
+      sample: others.slice(0, 6).map(describe),
+    };
+  });
+
 async function settle(page, ms = 800) {
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
   await page
@@ -151,11 +177,11 @@ try {
   const org = await json(
     await api.post(`${BASE}/api/auth/organization/create`, {
       headers: H,
-      data: { name: 'QA Fix a11y r3', slug: `qa-fix-a11y-r3-${Date.now().toString(36)}` },
+      data: { name: 'QA Fix a11y r4', slug: `qa-fix-a11y-r4-${Date.now().toString(36)}` },
     }),
   );
   await json(await api.post(`${BASE}/api/auth/organization/set-active`, { headers: H, data: { organizationId: org.id } }));
-  const created = await json(await api.post(`${BASE}/api/projects`, { headers: H, data: { name: 'QA a11y r3 grid' } }));
+  const created = await json(await api.post(`${BASE}/api/projects`, { headers: H, data: { name: 'QA a11y r4 grid' } }));
   projectId = created.project.id;
   projectSlug = created.project.slug;
   await json(await api.patch(`${BASE}/api/projects/${projectId}`, { headers: H, data: { retentionReviewed: true } }));
@@ -183,7 +209,7 @@ try {
     }
     throw new Error(`events never reached ${n}`);
   };
-  note('fixture', { email: EMAIL.replace(/-[a-z0-9]+@/, '-*@'), workspace: 'QA Fix a11y r3', events: await waitFor(400) });
+  note('fixture', { email: EMAIL.replace(/-[a-z0-9]+@/, '-*@'), workspace: 'QA Fix a11y r4', events: await waitFor(400) });
 
   /* ---------------- Explorer: live tail keeps focus on its event ---------------- */
   await page.goto(`${BASE}/p/${projectId}/events?range=1h&live=true`);
@@ -404,19 +430,166 @@ try {
       renderedRows: count,
     });
 
-    /* forced colors: the focus indicator is an outline Windows High Contrast can paint */
+    /* forced colors: the focus indicator is an outline Windows High Contrast can paint — on the focused row only */
     await page.emulateMedia({ forcedColors: 'active' });
     await page.waitForTimeout(200);
-    const outline = await page.evaluate(() => {
-      const s = getComputedStyle(document.activeElement);
-      return { style: s.outlineStyle, width: s.outlineWidth, offset: s.outlineOffset, color: s.outlineColor };
-    });
-    await page.emulateMedia({ forcedColors: 'none' });
+    const fc = await outlines(page);
+    const row1 = await page.$eval('[role="row"][data-index="1"]', (r) => getComputedStyle(r).outlineStyle);
     check(
       'forced colors: the focused row keeps a painted outline, inset so neighbouring rows cannot cover it',
-      outline.style !== 'none' && outline.width !== '0px' && Number.parseFloat(outline.offset) < 0,
-      outline,
+      Boolean(fc.focused) && fc.focused.style !== 'none' && fc.focused.width !== '0px' && Number.parseFloat(fc.focused.offset) < 0,
+      fc.focused,
     );
+    check('forced colors: an unfocused row computes outline-style none', row1 === 'none', { row1 });
+    check('forced colors (explorer): no unfocused element (rows, sidebar, toolbar) is outlined', fc.unfocusedOutlined === 0, fc);
+    await page.screenshot({ path: path.join(OUT, 'after-forced-colors-row-focus-desktop.png') });
+    // Before: the same screen with round 2's classes (328c227) put back, and the same row focused. The PR's controls had
+    // `outline-none`; the shadcn sidebar had its unconditional `outline-hidden`.
+    const restored = await page.evaluate(() => {
+      const els = [...document.querySelectorAll('[class*="focus-visible:outline-hidden"]')];
+      for (const el of els) {
+        el.classList.remove('focus-visible:outline-hidden', 'focus-visible:forced-colors:-outline-offset-2');
+        if (el.classList.contains('ring-sidebar-ring')) {
+          el.classList.remove('outline-none');
+          el.classList.add('outline-hidden');
+        }
+      }
+      return els.length;
+    });
+    await page.waitForTimeout(150);
+    await page.screenshot({ path: path.join(OUT, 'before-forced-colors-row-focus-desktop.png') });
+    note('forced colors: round-2 classes put back for the before shot on', `${restored} elements`);
+    // The event sheet's CopyValues and other controls under forced colors: nothing but the focused element is outlined.
+    await page.goto(`${BASE}/p/${projectId}/events?range=1h`);
+    await settle(page);
+    await page.getByRole('combobox', { name: 'Query' }).focus();
+    await enterGrid(page);
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('[role="dialog"]');
+    await page.waitForTimeout(400);
+    const sheetFc = await outlines(page);
+    check('forced colors (event sheet): no unfocused CopyValue or control is outlined', sheetFc.unfocusedOutlined === 0, sheetFc);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    await page.emulateMedia({ forcedColors: 'none' });
+  }
+
+  /* ---------------- round 4: "Filter by…" from the sheet, focus back on the old row before the results ---------------- */
+  {
+    const EVENTS = /\/api\/projects\/[^/]+\/events\?/;
+    let hold = null;
+    await page.route(EVENTS, async (route) => {
+      const q = new URL(route.request().url()).searchParams.get('q') ?? '';
+      if (hold && q.includes(hold)) await new Promise((r) => setTimeout(r, 2000));
+      return route.continue();
+    });
+    const pageRequests = [];
+    const onRequest = (req) => {
+      if (EVENTS.test(req.url()) && /[?&]cursor=/.test(req.url())) pageRequests.push(req.url());
+    };
+    const qHas = (t) => page.waitForFunction((x) => (new URL(location.href).searchParams.get('q') ?? '').includes(x), t, { timeout: 10_000 });
+
+    await page.goto(`${BASE}/p/${projectId}/events?range=1h`);
+    await settle(page);
+    await page.getByRole('combobox', { name: 'Query' }).focus();
+    await enterGrid(page);
+    // End, let the next page load, End again …: row 299.
+    for (let i = 0; i < 3; i++) {
+      await page.keyboard.press('End');
+      await page.waitForTimeout(1500);
+    }
+    const opened = await focused(page);
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('[role="dialog"]');
+    await page.waitForTimeout(400);
+    const tenantButton = page.getByRole('button', { name: /^Filter by tenant:/ });
+    const term = ((await tenantButton.getAttribute('aria-label')) ?? '').replace(/^Filter by /, '');
+    hold = term;
+    page.on('request', onRequest);
+    await tenantButton.focus();
+    await page.keyboard.press('Enter');
+    // The filtered results are held back for 2 s: the sheet closes and returns focus to the old row first.
+    await page.waitForTimeout(800);
+    const whileLoading = await focused(page);
+    await qHas(term);
+    await page.waitForTimeout(2000);
+    await settle(page, 1500);
+    page.off('request', onRequest);
+    const landed = await focused(page);
+    const top = await scrollTop(page);
+    const stops = await tabStops(page);
+    const total = await page.$eval('[role="grid"]', (g) => Number(g.getAttribute('aria-rowcount')) - 1);
+    check(
+      'filter by (race): focus lands on row 0 of the new results, view at the top, no second page',
+      opened.index === 299 &&
+        whileLoading.eventId === opened.eventId &&
+        landed.index === 0 &&
+        top === 0 &&
+        pageRequests.length === 0 &&
+        stops.length === 1 &&
+        stops[0] === landed.eventId,
+      {
+        opened: `row ${opened.index}`,
+        term,
+        focusWhileLoading: `row ${whileLoading.index} (${whileLoading.eventId === opened.eventId ? 'the old row' : 'elsewhere'})`,
+        landed: `row ${landed.index}`,
+        scrollTop: top,
+        pageRequests: pageRequests.length,
+        tabStops: stops,
+        newTotal: total,
+      },
+    );
+    await page.keyboard.press('ArrowDown');
+    check('filter by (race): ArrowDown continues from row 0', (await focused(page)).index === 1, (await focused(page)).index);
+
+    // The new results still hold the open event (its own operation): focus stays on it at its new index, in view.
+    for (let i = 0; i < 2; i++) {
+      await page.keyboard.press('End');
+      await page.waitForTimeout(1500);
+    }
+    const second = await focused(page);
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('[role="dialog"]');
+    await page.waitForTimeout(400);
+    const opButton = page.getByRole('button', { name: /^Filter by operation:/ });
+    const opTerm = ((await opButton.getAttribute('aria-label')) ?? '').replace(/^Filter by /, '');
+    hold = opTerm;
+    pageRequests.length = 0;
+    page.on('request', onRequest);
+    await opButton.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(800);
+    const whileLoading2 = await focused(page);
+    await qHas(opTerm);
+    await page.waitForTimeout(2000);
+    await settle(page, 1500);
+    page.off('request', onRequest);
+    const kept = await focused(page);
+    const inView = await page.evaluate(() => {
+      const row = document.activeElement?.closest('[role="row"]');
+      const box = document.querySelector('[role="grid"]')?.parentElement?.getBoundingClientRect();
+      const r = row?.getBoundingClientRect();
+      return Boolean(r && box && r.top >= box.top && r.bottom <= box.bottom);
+    });
+    check(
+      'filter by (event still in the results): focus stays on it at its new index, scrolled into view',
+      second.index > 100 &&
+        whileLoading2.eventId === second.eventId &&
+        kept.eventId === second.eventId &&
+        kept.index === 0 &&
+        inView &&
+        pageRequests.length === 0,
+      {
+        opened: `row ${second.index}`,
+        term: opTerm,
+        focusWhileLoading: `row ${whileLoading2.index}`,
+        now: `row ${kept.index}`,
+        sameEvent: kept.eventId === second.eventId,
+        inView,
+        pageRequests: pageRequests.length,
+      },
+    );
+    await page.unroute(EVENTS);
   }
 
   /* ---------------- round 3: empty results never drop focus to <body> ---------------- */
@@ -472,14 +645,35 @@ try {
     await page.unroute(/\/api\/projects\/[^/]+\/events\?/);
   }
 
+  /* ---------------- round 4: rescans of the other screens the PR touches ---------------- */
+  const screenAxe = async (url, name) => {
+    await page.goto(url);
+    await settle(page);
+    await axe(page, name);
+  };
+  // On the explorer: open row 0's event sheet and scan the dialog.
+  const sheetAxe = async (name) => {
+    await page.locator('[role="row"][data-index="0"]').click();
+    await page.waitForSelector('[role="dialog"]');
+    await page.waitForTimeout(400);
+    await axe(page, name, '[role="dialog"]');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+  };
+  await screenAxe(`${BASE}/p/${projectId}`, 'overview desktop-light');
+  await screenAxe(`${BASE}/p/${projectId}/settings/keys`, 'settings-keys desktop-light');
+
   /* ---------------- dark theme axe ---------------- */
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto(`${BASE}/p/${projectId}/events?range=1h`);
   await settle(page);
   await axe(page, 'explorer desktop-dark');
+  await sheetAxe('event-sheet desktop-dark');
   await page.goto(`${BASE}/p/${projectId}/settings/activity`);
   await settle(page);
   await axe(page, 'activity desktop-dark');
+  await screenAxe(`${BASE}/p/${projectId}`, 'overview desktop-dark');
+  await screenAxe(`${BASE}/p/${projectId}/settings/keys`, 'settings-keys desktop-dark');
 
   /* ---------------- phone: Settings strip under RTL ---------------- */
   await page.emulateMedia({ colorScheme: 'light' });
@@ -545,6 +739,18 @@ try {
       seen.every((s) => s.tab && s.clear),
       seen,
     );
+    await page.emulateMedia({ forcedColors: 'active' });
+    await page.waitForTimeout(200);
+    const settingsFc = await outlines(page);
+    await page.emulateMedia({ forcedColors: 'none' });
+    check(
+      'forced colors (settings 390px): only the focused tab is outlined, inset',
+      Boolean(settingsFc.focused) &&
+        settingsFc.focused.style !== 'none' &&
+        Number.parseFloat(settingsFc.focused.offset) < 0 &&
+        settingsFc.unfocusedOutlined === 0,
+      settingsFc,
+    );
   }
   await page.evaluate(() => {
     document.documentElement.dir = 'ltr';
@@ -561,6 +767,12 @@ try {
     phoneCell,
   );
   await axe(page, 'explorer phone-light');
+  await sheetAxe('event-sheet phone-light');
+  await screenAxe(`${BASE}/p/${projectId}/settings/keys`, 'settings-keys phone-light');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await screenAxe(`${BASE}/p/${projectId}/events?range=1h`, 'explorer phone-dark');
+  await sheetAxe('event-sheet phone-dark');
+  await page.emulateMedia({ colorScheme: 'light' });
 
   note('console problems', [...new Set(problems)]);
 } finally {
@@ -571,7 +783,7 @@ try {
     note('cleanup: QA project deleted', res.status());
   }
   await browser.close();
-  await writeFile(path.join(OUT, 'round3-proof.txt'), `${log.join('\n')}\n`);
-  await writeFile(path.join(OUT, 'round3-proof.json'), `${JSON.stringify(results, null, 2)}\n`);
+  await writeFile(path.join(OUT, 'round4-proof.txt'), `${log.join('\n')}\n`);
+  await writeFile(path.join(OUT, 'round4-proof.json'), `${JSON.stringify(results, null, 2)}\n`);
 }
 process.exit(results.failed ? 1 : 0);

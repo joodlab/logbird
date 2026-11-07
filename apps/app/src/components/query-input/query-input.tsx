@@ -440,8 +440,7 @@ export function QueryInput({
         </div>
       </div>
       <span className="sr-only" id={`${listId}-keys`}>
-        Suggestions appear as you type. Up and down arrows choose one, Enter or Right arrow at the end inserts it, Escape closes the list. Enter runs
-        the query.
+        Arrows choose a suggestion, Enter or Right arrow inserts it, Escape closes. Enter runs the query.
       </span>
       <span aria-live="polite" className="sr-only">
         {announcement}

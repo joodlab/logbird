@@ -49,7 +49,7 @@ export function CopyValue({ value, display, className }: { value: string; displa
     <button
       className={cn(
         // min-h-6: a 24px target (WCAG 2.5.8) without changing the text size; the copy icon shows on touch, which has no hover.
-        'group/copy inline-flex min-h-6 max-w-full items-center gap-1.5 rounded-sm font-mono text-[12px] text-foreground/90 outline-hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
+        'group/copy inline-flex min-h-6 max-w-full items-center gap-1.5 rounded-sm font-mono text-[12px] text-foreground/90 outline-none focus-visible:outline-hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
         className,
       )}
       onClick={(event) => {

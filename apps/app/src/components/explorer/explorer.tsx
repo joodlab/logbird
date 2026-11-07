@@ -447,7 +447,7 @@ export function Explorer({
             {/* The facet list is dozens of Tab stops: let keyboard users jump past it to the events (shown on focus). */}
             {rows.length ? (
               <button
-                className="sr-only rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md outline-hidden focus-visible:not-sr-only focus-visible:absolute focus-visible:start-2 focus-visible:top-2 focus-visible:z-30 focus-visible:ring-2 focus-visible:ring-ring"
+                className="sr-only rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md outline-none focus-visible:outline-hidden focus-visible:not-sr-only focus-visible:absolute focus-visible:start-2 focus-visible:top-2 focus-visible:z-30 focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => eventsTable.current?.focusCursor()}
                 type="button"
               >

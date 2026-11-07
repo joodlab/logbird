@@ -12,7 +12,10 @@ click. A clicked row takes focus by itself, which is why `afterSheetEscape` alre
 
 Full JSON: `axe-report-before.json`, `axe-report-after.json`. Video narration: `keyboard-video-log.txt`.
 
-| Screen | Before (axe violations, nodes) | After |
+This first table is the **round-1** scan. Rounds 3 and 4 changed the explorer (an sr-only `<h1>`) and focus classes, so the
+current result per screen is in [Current axe state](#current-axe-state-round-4) below; `page-has-heading-one` is gone there.
+
+| Screen | Before (axe violations, nodes) | After (round 1) |
 |---|---|---|
 | explorer desktop-light | aria-allowed-role(1), aria-required-children(1), color-contrast(3), page-has-heading-one(1) | aria-allowed-role(1), page-has-heading-one(1) |
 | event-sheet desktop-light | color-contrast(1), definition-list(2), target-size(4) | 0 |
@@ -86,7 +89,8 @@ Output: `round2-proof.txt` (narration) and `round2-proof.json` (all checks and a
 - **axe:** explorer `aria-allowed-role(1)`, `page-has-heading-one(1)` (both pre-existing, see the PR); event sheet, Workspace
   Activity (light and dark), its event sheet, and Settings: 0.
 
-No visuals changed in round 2, so the screenshots and video above still apply.
+No visuals changed in round 2, so the screenshots and video above still apply. Rounds 3 and 4 below did change visuals (forced
+colors and the `CopyValue` ring).
 
 ### Code syntax tokens (`--syntax-comment`, `--syntax-punct`)
 
@@ -94,10 +98,13 @@ Measured against every code surface (`muted`, and `muted/40` over card, backgrou
 
 | Token | Before | After |
 |---|---|---|
-| comment, light | #8a8a8a — 3.14–3.45:1 | #6b6b6b — 4.85–5.33:1 |
-| punct, light | #737373 — 4.31–4.74:1 | #666666 — 5.22–5.74:1 |
-| comment, dark | #6b6b6b — 3.19–3.69:1 | #8f8f8f — 5.26–6.08:1 |
-| punct, dark | #8a8a8a — 4.93–5.70:1 (already AA) | unchanged |
+| comment, light | #8a8a8a — 3.14–3.34:1 | #6b6b6b — 4.85–5.15:1 |
+| punct, light | #737373 — 4.31–4.58:1 | #666666 — 5.22–5.55:1 |
+| comment, dark | #6b6b6b — 3.19–3.51:1 | #8f8f8f — 5.26–5.79:1 |
+| punct, dark | #8a8a8a — 4.93–5.42:1 (already AA) | unchanged |
+
+Recomputed in round 4 (WCAG relative luminance, `muted/40` composited and rounded to 8-bit). The round-2 maxima in this table
+were too high; the minima were right and every value passes AA.
 
 Shots (docs page code block, demo workspace, read-only): `before-/after-syntax-comment-code-desktop-{light,dark}.png`. The "before"
 renders the old token values in the same running app through an injected style; the computed comment colour was checked in each.

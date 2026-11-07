@@ -321,6 +321,64 @@ describe.each([
     expect(focusedId()).toBe('n1');
   });
 
+  it('starts a new result set at the top when the grid has focus and the cursor event is not in it ("Filter by…")', () => {
+    const loadMore = vi.fn();
+    const onCursorChange = vi.fn();
+    const t = mount(page('e', 500), controlled, { loadMore, onCursorChange });
+    // The sheet closed onto event 300 and returned focus to its row before the filtered results arrived.
+    act(() => {
+      t.table().focusRow(300);
+    });
+    scrollTo(295 * ROW);
+    flush();
+    expect(focusedId()).toBe('e300');
+    loadMore.mockClear();
+
+    // Neither the old first row nor event 300 is in the new page.
+    act(() => t.harness().setRows(() => page('n', 100)));
+    flush();
+
+    expect(focusedId()).toBe('n0');
+    expect(tabStops()).toEqual(['n0']);
+    expect(scroller().scrollTop).toBe(0);
+    expect(onCursorChange).toHaveBeenLastCalledWith('n0');
+    // No second page from the old scroll position (the virtualizer has not seen a scroll event yet) — nor once the
+    // browser's scroll event has caught up.
+    expect(loadMore).not.toHaveBeenCalled();
+    scrollTo(0);
+    flush();
+    expect(loadMore).not.toHaveBeenCalled();
+    key(rowOf('n0') as Element, 'ArrowDown');
+    expect(focusedId()).toBe('n1');
+  });
+
+  it('keeps focus on its event and scrolls it into view when a new result set still holds it at another index', () => {
+    const loadMore = vi.fn();
+    const t = mount(page('e', 500), controlled, { loadMore });
+    act(() => {
+      t.table().focusRow(300);
+    });
+    scrollTo(295 * ROW);
+    flush();
+    const kept = page('e', 500)[300] as AuditEvent;
+    loadMore.mockClear();
+    // happy-dom does no layout (scrollHeight 0), and the virtualizer clamps scrolls to it: give the new list its height.
+    Object.defineProperty(scroller(), 'scrollHeight', { configurable: true, get: () => 32 + 100 * ROW + 48 });
+
+    act(() => t.harness().setRows(() => [...page('n', 10), kept, ...page('m', 89)]));
+    flush();
+    scrollTo(scroller().scrollTop);
+    flush();
+
+    expect(focusedId()).toBe('e300');
+    expect(tabStops()).toEqual(['e300']);
+    // Row 10 is inside the viewport (below the 32px column header).
+    const top = scroller().scrollTop;
+    expect(10 * ROW).toBeGreaterThanOrEqual(top);
+    expect(11 * ROW + 32).toBeLessThanOrEqual(top + VIEW.height);
+    expect(loadMore).not.toHaveBeenCalled();
+  });
+
   it('hands focus to the query field when a refetch empties the list under a focused row', () => {
     const t = mount(page('e', 50), controlled);
     act(() => {

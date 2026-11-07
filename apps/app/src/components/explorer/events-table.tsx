@@ -27,7 +27,7 @@ import { eventSentence } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { EVENT_COLUMNS } from './columns';
-import { eventRowLabel, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
+import { eventRowLabel, isReplaced, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
 
 const features = tableFeatures({ columnVisibilityFeature });
 const helper = createColumnHelper<typeof features, AuditEvent>();
@@ -79,7 +79,7 @@ interface EventsTableProps {
   cursorId?: string | null;
   /**
    * The cursor moved: to another event (arrow keys, a click, focus, the selection, the row now in its place when its
-   * event left while the grid had focus), or to `null` when a new result set replaced the list while focus was elsewhere.
+   * event left while the grid had focus), or to `null` when its event left the list in a new result set, or while focus was elsewhere.
    */
   onCursorChange?: (id: string | null) => void;
   /**
@@ -102,8 +102,10 @@ interface EventsTableProps {
  * PageUp/PageDown and Home/End (or Ctrl+Home/End) move focus between rows; Enter or Space opens the row. The cursor is
  * an event id, so it stays on its event when live tail prepends rows, and its row stays mounted even when scrolled away.
  * When its event leaves the list while the grid has focus, focus moves to the row now in its place (or to
- * `focusFallback` when no row is left), never to <body>. When a new result set replaces the list while focus is
- * elsewhere, the cursor resets to the first row without scrolling or loading more.
+ * `focusFallback` when no row is left), never to <body>. When a new result set (the old first row is gone, and nothing
+ * was prepended) no longer holds the cursor's event, the cursor resets to the first row and the view to the top, without
+ * loading more; a focused grid moves focus there. A cursor whose event moves to another index (other than by a live-tail
+ * prepend) is scrolled into view.
  *
  * In-row controls (a link inside a cell) must follow this contract, because the row's `onClick` opens the event and has
  * no target guard: give them `tabIndex={-1}` (the row is the tab stop; screen readers reach them through the row's
@@ -170,12 +172,16 @@ export function EventsTable({
   const lastCursorIndex = useRef(0);
   // Whether focus is in the grid: if the focused row unmounts (its event was filtered out), the grid takes focus back.
   const focusInside = useRef(false);
+  // The first row as last committed. When it is gone from `rows` this render is a new result set (a query, facet, range
+  // or "Filter by" change), not a removal within the same list nor a live-tail prepend (which keeps the old first row).
+  const firstId = useRef<string | undefined>(undefined);
+  const replaced = isReplaced(firstId.current, rows);
   // The tab stop: the cursor's row wherever its event is now; the first row while there is no cursor.
   const resolved = resolveCursor(rows, cursorKey, lastCursorIndex.current);
-  // The cursor's event is gone. Only a focused grid keeps its place (the row now at the cursor's index takes focus); with
-  // focus elsewhere this is a new result set (a query, facet or range change): start over at the top, without scrolling
-  // the reader away from what they are looking at or loading another page.
-  const reset = resolved.fallback && !focusInside.current;
+  // The cursor's event is gone. In a new result set, or with focus elsewhere, start over at the top: the old index means
+  // nothing there, and following it would scroll the reader away and load another page. Only a focused grid whose own
+  // list lost rows (a filter, a refetch) keeps its place: the row now at the cursor's index takes focus.
+  const reset = resolved.fallback && (replaced || !focusInside.current);
   const fallback = resolved.fallback && !reset;
   const tabStop = reset ? 0 : resolved.index;
   const rowsRef = useRef(rows);
@@ -190,10 +196,11 @@ export function EventsTable({
   useEffect(() => {
     if (fallbackId) setCursor(fallbackId);
   }, [fallbackId, setCursor]);
+  // Start over at the top: no cursor (Tab enters on the first row), or the first row itself when the grid kept focus.
   useEffect(() => {
     if (!reset) return;
     lastCursorIndex.current = 0;
-    setCursor(null);
+    setCursor(focusInside.current ? (rowsRef.current[0]?.id ?? null) : null);
   }, [reset, setCursor]);
   // The cursor follows the open event (clicks, j/k in the sheet, deep links), so closing the sheet returns focus to it.
   useEffect(() => {
@@ -220,17 +227,34 @@ export function EventsTable({
     scrollPaddingStart: headerHeight,
   });
   const items = virtualizer.getVirtualItems();
-  // The viewport's real end, not the retained tab stop: a cursor row kept far below must not trigger loading more.
+  // The viewport's real range, not the retained tab stop: a cursor row kept far below must not trigger loading more.
+  const startIndex = virtualizer.range?.startIndex ?? 0;
   const endIndex = virtualizer.range?.endIndex ?? 0;
+  // After a new result set the virtualizer still reports the old scroll position until the browser's scroll event
+  // arrives: hold off loading more until the viewport shows the tab stop again.
+  const awaitingTabStop = useRef(false);
 
   useEffect(() => {
+    if (awaitingTabStop.current) {
+      if (tabStop >= 0 && (tabStop < startIndex || tabStop > endIndex)) return;
+      awaitingTabStop.current = false;
+    }
     if (hasMore && !fetchingMore && endIndex >= tableRows.length - 15) loadMore?.();
-  }, [hasMore, fetchingMore, endIndex, tableRows.length, loadMore]);
+  }, [hasMore, fetchingMore, startIndex, endIndex, tabStop, tableRows.length, loadMore]);
 
-  // Scroll to the cursor when it moves to another event — not when its event merely shifts (a live-tail prepend).
+  // Live tail prepends rows: how many arrived in the last commit (0 for anything else).
+  const lastPrepended = useRef(0);
+  // Scroll the cursor row into view when the cursor moves to another event, or when its event moves to another index for
+  // any reason but a live-tail prepend (a reordering refetch; a new result set that still holds it). A prepend only
+  // shifts it, and the view is anchored for that below.
+  const scrolledTo = useRef<{ key: string | null | undefined; index: number }>({ key: undefined, index: -1 });
   useEffect(() => {
-    if (cursorKey && tabStopRef.current >= 0) virtualizer.scrollToIndex(tabStopRef.current, { align: 'auto' });
-  }, [cursorKey, virtualizer]);
+    const previous = scrolledTo.current;
+    scrolledTo.current = { key: cursorKey, index: tabStop };
+    if (!cursorKey || tabStop < 0) return;
+    if (previous.key === cursorKey && tabStop === previous.index + lastPrepended.current) return;
+    virtualizer.scrollToIndex(tabStop, { align: 'auto' });
+  }, [cursorKey, tabStop, virtualizer]);
 
   useEffect(() => {
     if (rowHeight > 0) virtualizer.measure();
@@ -243,13 +267,24 @@ export function EventsTable({
 
   // Live tail prepends rows. Unless the reader sits at the top watching them arrive (with focus elsewhere), keep what is
   // on screen — and the focused row — where it is instead of pushing it down.
-  const firstId = useRef<string | undefined>(undefined);
+  // A new result set without the cursor's event starts at the top: scroll there, and if the grid had focus, put it on the
+  // first row (the old focused row is gone).
   useLayoutEffect(() => {
     const added = prependedCount(firstId.current, rows);
+    lastPrepended.current = added;
     firstId.current = rows[0]?.id;
     const el = scrollRef.current;
-    if (el && added > 0 && (el.scrollTop > 0 || focusInside.current)) el.scrollTop += added * rowHeight;
-  }, [rows, rowHeight]);
+    if (!el) return;
+    if (added > 0 && (el.scrollTop > 0 || focusInside.current)) el.scrollTop += added * rowHeight;
+    if (!replaced) return;
+    // The view is about to move (to the top, or to the cursor's new index): don't load more from the old position.
+    const moved = reset || (Boolean(cursorKey) && tabStop !== scrolledTo.current.index);
+    if (moved) awaitingTabStop.current = true;
+    if (!reset) return;
+    el.scrollTop = 0;
+    pendingFocus.current = null;
+    if (focusInside.current) rowElement(0)?.focus({ preventScroll: true });
+  }, [rows, rowHeight, replaced, reset, cursorKey, tabStop, rowElement]);
 
   const focusRow = useCallback(
     (index: number) => {
@@ -390,7 +425,7 @@ export function EventsTable({
                   aria-label={rowLabel(e)}
                   aria-rowindex={item.index + (isMobile ? 1 : 2)}
                   className={cn(
-                    'absolute inset-x-0 cursor-pointer border-b border-border/60 px-2 text-[13px] outline-hidden transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset forced-colors:-outline-offset-2',
+                    'absolute inset-x-0 cursor-pointer border-b border-border/60 px-2 text-[13px] outline-none focus-visible:outline-hidden transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:forced-colors:-outline-offset-2',
                     selected && 'bg-brand/[0.08] hover:bg-brand/[0.1]',
                     isCursor && !selected && 'bg-muted/60',
                     freshIds?.has(e.id) && 'tm-row-new',

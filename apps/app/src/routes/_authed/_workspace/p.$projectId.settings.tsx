@@ -98,7 +98,7 @@ function SettingsLayout() {
                 activeOptions={{ exact: true }}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'relative shrink-0 whitespace-nowrap rounded-t-md px-3 pt-1 pb-2.5 text-sm outline-hidden transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset forced-colors:-outline-offset-2 pointer-coarse:pt-2.5 pointer-coarse:pb-3.5',
+                  'relative shrink-0 whitespace-nowrap rounded-t-md px-3 pt-1 pb-2.5 text-sm outline-none focus-visible:outline-hidden transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:forced-colors:-outline-offset-2 pointer-coarse:pt-2.5 pointer-coarse:pb-3.5',
                   active
                     ? 'font-medium text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-brand'
                     : 'text-muted-foreground',

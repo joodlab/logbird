@@ -48,8 +48,8 @@ export function nextRowIndex(key: string, current: number, count: number, page: 
  * Where the grid's cursor (its roving tab stop) is in `rows`. The cursor is an event id, so it follows its event when
  * live tail prepends rows or a refetch reorders them. When that event is gone (a filter removed it), the cursor falls
  * back to the row now at the last index it had, clamped to the list: `fallback` is then true and the caller decides —
- * the events table keeps that place only while the grid has focus, and otherwise starts over at the top (a new result
- * set). -1 when there are no rows.
+ * the events table keeps that place only while the grid has focus and the list was not replaced (`isReplaced`), and
+ * otherwise starts over at the top. -1 when there are no rows.
  */
 export function resolveCursor(
   rows: readonly { id: string }[],
@@ -74,4 +74,14 @@ export function prependedCount(previousFirstId: string | undefined, rows: readon
     0,
     rows.findIndex((r) => r.id === previousFirstId),
   );
+}
+
+/**
+ * Whether `rows` is a new result set rather than the same list changed: the previous first row is gone. Removals within
+ * the same list and live-tail prepends keep it (a prepend pushes it down, see `prependedCount`). False before there was a
+ * first row and for an empty list (the empty state handles that).
+ */
+export function isReplaced(previousFirstId: string | undefined, rows: readonly { id: string }[]): boolean {
+  if (!previousFirstId || rows.length === 0) return false;
+  return !rows.some((r) => r.id === previousFirstId);
 }

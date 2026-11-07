@@ -88,7 +88,7 @@ export function TimeRangePicker({
               <button
                 aria-current={p.value === value || undefined}
                 className={cn(
-                  'flex h-8 items-center justify-between gap-2 rounded-md px-2 text-start text-sm outline-hidden hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:h-11 pointer-coarse:px-3',
+                  'flex h-8 items-center justify-between gap-2 rounded-md px-2 text-start text-sm outline-none focus-visible:outline-hidden hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:h-11 pointer-coarse:px-3',
                   p.value === value && 'font-medium text-foreground',
                   p.value !== value && 'text-muted-foreground',
                 )}
