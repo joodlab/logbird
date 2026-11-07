@@ -20,8 +20,9 @@ export function BlogArticle({ post }: { post: Post }) {
         </p>
       </header>
       <div className="body-copy flex flex-col gap-5 text-lg leading-relaxed">
-        {post.body.map((paragraph) => (
-          <p key={paragraph}>
+        {post.body.map((paragraph, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: paragraphs are positional and may repeat; the list never reorders
+          <p key={index}>
             <Rich text={paragraph} />
           </p>
         ))}

@@ -51,8 +51,9 @@ function ChangelogPage() {
                     <div className="flex flex-col gap-2" key={group.key}>
                       <h4 className="font-semibold text-sm uppercase tracking-wider">{group.title}</h4>
                       <ul className="flex list-disc flex-col gap-1 ps-5 text-muted-foreground">
-                        {release[group.key]?.map((item) => (
-                          <li key={item}>
+                        {release[group.key]?.map((item, index) => (
+                          // biome-ignore lint/suspicious/noArrayIndexKey: items are positional and may repeat; the list never reorders
+                          <li key={index}>
                             <Rich text={item} />
                           </li>
                         ))}
@@ -72,8 +73,9 @@ function ChangelogPage() {
         <SectionHeader id="build-log-title" lead="Day by day, in public." title="Build log" />
         {buildLog.length ? (
           <ol className="mt-10 flex flex-col gap-12">
-            {newestFirst(buildLog).map((entry) => (
-              <li className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:items-start" key={`${entry.date}-${entry.title}`}>
+            {newestFirst(buildLog).map((entry, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: entries are sorted once at build time; two may share a date and title
+              <li className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:items-start" key={index}>
                 <article className="flex flex-col gap-2">
                   <time className="font-mono text-muted-foreground text-sm" dateTime={entry.date}>
                     {longDate(entry.date)}
