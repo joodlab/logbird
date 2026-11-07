@@ -7,7 +7,28 @@ export interface Step {
 }
 
 /** Numbered steps on a shared rail; vertical on phones, horizontal from md. */
-export function Steps({ items }: { items: Step[] }) {
+export function Steps({ items, vertical = false }: { items: Step[]; vertical?: boolean }) {
+  if (vertical) {
+    return (
+      <ol className="relative grid gap-6">
+        <span aria-hidden="true" className="absolute top-4 bottom-4 start-4 w-px bg-border" />
+        {items.map((step, index) => (
+          <li className="relative flex gap-4" key={step.title}>
+            <span
+              aria-hidden="true"
+              className="relative z-10 inline-flex size-8 shrink-0 items-center justify-center rounded-full border bg-background font-mono text-sm"
+            >
+              {index + 1}
+            </span>
+            <div className="flex flex-col gap-1 pt-1">
+              <h4 className="font-semibold">{step.title}</h4>
+              <div className="body-copy text-muted-foreground text-sm leading-relaxed">{step.body}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    );
+  }
   return (
     <ol className="relative grid gap-8 md:grid-cols-4 md:gap-6">
       <span

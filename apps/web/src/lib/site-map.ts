@@ -32,11 +32,12 @@ export const siteMap: SitePage[] = [
   {
     path: '/product',
     title: 'Product',
-    description: 'Product page content is being prepared.',
+    description:
+      'Search every event, follow actors, tenants, workers and records, open operation trees, and keep data for exactly as long as you choose.',
     section: 'product',
     priority: 0.9,
     changefreq: 'weekly',
-    ready: false,
+    ready: true,
     ogSlug: 'product',
     inNav: true,
     inFooter: true,
@@ -45,11 +46,12 @@ export const siteMap: SitePage[] = [
   {
     path: '/developers',
     title: 'Developers',
-    description: 'Developers page content is being prepared.',
+    description:
+      'Send audit events from TypeScript, Hono, TanStack Start, Vue, Nuxt or any HTTP client. Envelope guide, workers, delivery semantics and limits.',
     section: 'developers',
     priority: 0.9,
     changefreq: 'weekly',
-    ready: false,
+    ready: true,
     ogSlug: 'developers',
     inNav: true,
     inFooter: true,
@@ -58,11 +60,11 @@ export const siteMap: SitePage[] = [
   {
     path: '/self-hosting',
     title: 'Self-host',
-    description: 'Self-host page content is being prepared.',
+    description: 'Run Logbird on your own server with Docker Compose or Coolify. Bring your own Postgres, ClickHouse and Redis, add TLS, back it up.',
     section: 'developers',
     priority: 0.9,
     changefreq: 'weekly',
-    ready: false,
+    ready: true,
     ogSlug: 'self-hosting',
     inNav: true,
     inFooter: true,
