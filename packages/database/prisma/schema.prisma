@@ -16,6 +16,7 @@ model User {
   id            String       @id
   name          String
   email         String       @unique
+  emailHash     String?
   emailVerified Boolean      @default(false)
   image         String?
   createdAt     DateTime     @default(now())
@@ -28,6 +29,7 @@ model User {
   savedViews    SavedView[]
   inviteLinks   InviteLink[]
 
+  @@index([emailHash])
   @@map("user")
 }
 
@@ -208,4 +210,82 @@ model InviteLink {
   revokedAt DateTime?
 
   @@index([organizationId])
+}
+
+// No cascading FK: evidence and pending deliveries survive removal of source records.
+model AuditOutbox {
+  namespace String @default("{logbird}")
+  id String @id
+  stream String
+  payload Json
+  createdAt DateTime @default(now())
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  deliveredAt DateTime?
+  lastError String?
+  confirmedAt DateTime? @default(now())
+  sourceSessionId String?
+  quarantinedAt DateTime?
+
+  @@index([deliveredAt, nextAttemptAt])
+  @@index([namespace, confirmedAt, createdAt])
+  @@index([namespace, deliveredAt])
+}
+
+// Membership-independent failed-auth staging. Legacy encrypted identities are quarantined; new rows hold only HMACs.
+model AuthAuditWindow {
+  generation Int @default(0)
+  namespace String @default("{logbird}")
+  id String @id
+  identity String @default("")
+  emailHash String?
+  reason String
+  context Json
+  attempts Int @default(1)
+  flushedAttempts Int @default(0)
+  windowEnd DateTime
+  nextAttemptAt DateTime @default(now())
+  firstAttemptAt DateTime @default(now())
+  lastAttemptAt DateTime @default(now())
+  lastContext Json @default("{}")
+  distinctIps String[] @default([])
+  ipsTruncated Boolean @default(false)
+  prepareAttempts Int @default(0)
+  lastError String?
+  quarantinedAt DateTime?
+  closedAt DateTime?
+  overflow Boolean @default(false)
+
+  @@index([nextAttemptAt])
+  @@index([namespace, closedAt, windowEnd])
+}
+
+model AuthAuditAdmission {
+  id String @id
+  namespace String @default("{logbird}")
+  windowEnd DateTime
+
+  @@index([namespace, windowEnd])
+}
+
+model AuthAuditBudget {
+  namespace String @default("{logbird}")
+  id String @id
+  stream String?
+  windowEnd DateTime
+  admitted Int @default(0)
+  suppressed Int @default(0)
+  reported Boolean @default(false)
+  targets Json @default("{}")
+  reportedSuppressed Int @default(0)
+  generation Int @default(0)
+  reportedTargets Json @default("{}")
+  targetWatermarkComplete Boolean @default(true)
+  prepareAttempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastError String?
+  quarantinedAt DateTime?
+
+  @@index([reported, windowEnd])
+  @@index([namespace, reported, quarantinedAt, nextAttemptAt, windowEnd], map: "AuthAuditBudget_due_idx")
 }

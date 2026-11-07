@@ -1,6 +1,17 @@
 import { z } from 'zod';
 import { apiKeySchema, projectSchema, savedViewSchema } from './api';
 
+/** Workspace means organization profile changes; invitations and auth have their own filters. */
+export const WORKSPACE_ACTIVITY_CATEGORIES = [
+  ['project', 'Projects'],
+  ['api_key', 'API keys'],
+  ['member', 'Members'],
+  ['saved_view', 'Views'],
+  ['organization', 'Workspace'],
+  ['invite_link', 'Invite links'],
+  ['auth', 'Sign-ins & sessions'],
+] as const;
+
 /**
  * Response envelopes for console endpoints whose shape `api.ts` left implicit (matching what
  * apps/server returns). Lists are `{ data: [...] }`; `/live` and `/operations/:id` return a bare

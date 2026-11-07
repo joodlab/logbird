@@ -1,3 +1,4 @@
+import { routes, sessionActionResponseSchema } from '@logbird/contracts';
 import { emailOTPClient, organizationClient } from 'better-auth/client/plugins';
 import { createAuthClient } from 'better-auth/react';
 import { withDeadline } from '@/lib/api/errors';
@@ -16,6 +17,14 @@ export const authClient = createAuthClient({
 
 /** How long sign-in steps (send code, verify) wait before offering a retry. */
 export const AUTH_DEADLINE_MS = 15_000;
+
+/** Logbird commits deletion and session-end evidence together before clearing the cookie. */
+export async function signOut() {
+  const response = await fetch(routes.sessions.signOut.path, { method: 'POST', credentials: 'include', signal: AbortSignal.timeout(20_000) });
+  if (!response.ok && response.status !== 401) throw new Error('Sign-out failed. Retry shortly.');
+  if (response.ok) sessionActionResponseSchema.parse(await response.json());
+  authClient.$store.notify('$sessionSignal');
+}
 
 /** Unwrap better-auth's `{ data, error }` result into a value or a thrown Error. */
 export async function authCall<T>(

@@ -113,3 +113,6 @@ export async function recoverAbandonedRetention(tx: import('./generated/client')
     data: { status: 'failed', finishedAt: new Date(), error: 'abandoned' },
   });
 }
+
+export * from './audit-outbox';
+export * from './auth-email-hash';

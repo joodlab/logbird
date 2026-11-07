@@ -5,6 +5,7 @@ import { Logbird } from '@logbird/sdk';
 import { expect, it } from 'vitest';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
+import { drainTestAudit } from './test-audit';
 
 it('QA backend: invalid views, coherent sample data, named audit targets, SQL guidance and OpenAPI examples (real services)', async () => {
   const users: string[] = [];
@@ -135,6 +136,7 @@ it('QA backend: invalid views, coherent sample data, named audit targets, SQL gu
     const joiner = await login();
     expect((await request(joiner.cookie, `/api/invite-links/${link.url.split('/').at(-1)}/accept`, 'POST')).status).toBe(200);
     expect((await request(owner.cookie, `/api/workspace/invite-links/${link.id}`, 'DELETE')).status).toBe(204);
+    await drainTestAudit(orgId);
     const activity = await (await request(owner.cookie, '/api/workspace/activity?limit=200')).json();
     expect(activity.data.find((e: { action: string }) => e.action === 'member.joined_via_link').actor.name).toContain('@example.test');
     for (const action of ['api_key.created', 'api_key.revoked'])

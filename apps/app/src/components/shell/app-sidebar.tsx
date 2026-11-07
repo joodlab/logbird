@@ -52,6 +52,7 @@ import { SetupProgress } from '@/components/setup/setup-progress';
 import { meQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
 import { canDo } from '@/lib/permissions';
+import { signOutFromConsole } from '@/lib/sign-out';
 import { displayName, hasName } from '@/lib/user';
 import { PROJECT_NAV } from './nav';
 
@@ -307,13 +308,7 @@ function UserMenu() {
             <BookOpenIcon />
             Product spec
           </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={async () => {
-              await authClient.signOut();
-              queryClient.clear();
-              await navigate({ to: '/login' });
-            }}
-          >
+          <DropdownMenuItem onClick={() => signOutFromConsole(queryClient, () => navigate({ to: '/login' }))}>
             <LogOutIcon />
             Sign out
           </DropdownMenuItem>

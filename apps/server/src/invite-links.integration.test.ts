@@ -5,6 +5,7 @@ import { prisma } from '@logbird/database';
 import { expect, it } from 'vitest';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
+import { drainTestAudit } from './test-audit';
 
 it('real services: invite lifecycle, permissions, tenancy, atomic usage and persistent first completion', async () => {
   const users: string[] = [];
@@ -131,6 +132,7 @@ it('real services: invite lifecycle, permissions, tenancy, atomic usage and pers
     expect(regressed.completedAt).toBe(completedAt);
     const summary = s.workspaceSetupSchema.parse(await (await request('/api/workspace/setup', 'GET', undefined, owner.cookie)).json());
     expect(summary.projects[0]?.completedAt).toBe(completedAt);
+    await drainTestAudit(organizationId);
     const actions = await (
       await clickhouse.query({
         query: 'SELECT DISTINCT action FROM events WHERE project_id={p:String}',
@@ -144,6 +146,7 @@ it('real services: invite lifecycle, permissions, tenancy, atomic usage and pers
   } finally {
     if (projectId) await purgeProject(clickhouse, projectId);
     if (organizationId) {
+      await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${organizationId}` } });
       await purgeProject(clickhouse, `ws:${organizationId}`);
       await prisma.organization.delete({ where: { id: organizationId } });
     }
