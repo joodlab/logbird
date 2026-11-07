@@ -87,3 +87,17 @@ Output: `round2-proof.txt` (narration) and `round2-proof.json` (all checks and a
   Activity (light and dark), its event sheet, and Settings: 0.
 
 No visuals changed in round 2, so the screenshots and video above still apply.
+
+### Code syntax tokens (`--syntax-comment`, `--syntax-punct`)
+
+Measured against every code surface (`muted`, and `muted/40` over card, background and popover):
+
+| Token | Before | After |
+|---|---|---|
+| comment, light | #8a8a8a — 3.14–3.45:1 | #6b6b6b — 4.85–5.33:1 |
+| punct, light | #737373 — 4.31–4.74:1 | #666666 — 5.22–5.74:1 |
+| comment, dark | #6b6b6b — 3.19–3.69:1 | #8f8f8f — 5.26–6.08:1 |
+| punct, dark | #8a8a8a — 4.93–5.70:1 (already AA) | unchanged |
+
+Shots (docs page code block, demo workspace, read-only): `before-/after-syntax-comment-code-desktop-{light,dark}.png`. The "before"
+renders the old token values in the same running app through an injected style; the computed comment colour was checked in each.
