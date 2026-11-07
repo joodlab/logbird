@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: logbird
+resources:
+  - namespace.yaml
+  - config.yaml
+  - workloads.yaml
+  - network-policies.yaml
+  - ingress.yaml
+# The migration Job is deliberately excluded: run and verify it before workloads.

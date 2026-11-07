@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: logbird
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [audit.example.test]
+      secretName: logbird-origin-tls
+  rules:
+    - host: audit.example.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: logbird-app
+                port: {name: http}

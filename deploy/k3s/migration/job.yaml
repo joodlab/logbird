@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: logbird-migrate-unconfigured
+  namespace: logbird
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1200
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: logbird-migrate}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: migrate
+          image: registry.invalid/logbird/migrate:unconfigured
+          imagePullPolicy: IfNotPresent
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          envFrom:
+            - configMapRef: {name: logbird-config}
+            - secretRef: {name: logbird-migration}
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: '2', memory: 1Gi}
