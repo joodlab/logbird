@@ -556,9 +556,9 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
         params,
       )
     : [];
-  const predicate=`project_id={p:String}${before?' AND timestamp < {before:DateTime64(3)}':''}`;
-  await deleteAndVerify(ch,'events',predicate,params);
-  await deleteAndVerify(ch,'event_ids',predicate,params);
+  const predicate = `project_id={p:String}${before ? ' AND timestamp < {before:DateTime64(3)}' : ''}`;
+  await deleteAndVerify(ch, 'events', predicate, params);
+  await deleteAndVerify(ch, 'event_ids', predicate, params);
   if (before) {
     // A merged legacy pointer may have expired while another raw timestamp survives.
     // Keep this cold repair server-side; do not materialize an unbounded list of ids in the worker.

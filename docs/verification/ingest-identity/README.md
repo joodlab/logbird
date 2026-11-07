@@ -1,5 +1,40 @@
 # Immutable ingest verification, 2026-11-07
 
+## Round 3
+
+Source: `97b03c2dd710f4fa805c525c57fc7b8395e2aa94`. The final follow-up adjusts only
+test clocks and evidence. Sol's next review identified a separate read-fence gap;
+Round 4 will record its runtime verification separately.
+
+- [Logical shared migration counts](round3-migrations.json) include the actual
+  before/immediate-after snapshots, UTC lease correction and final seventh-phase
+  coverage. Missing raw tuples went 53 to 0 during 007 and remained 0 to 0 in the
+  final coverage pass. Extra orphan namespaces are labelled, not counted as raw
+  event rows. Writer errors observed in the recorded query-log window: none.
+- [Online proof](round3-online-proof.json) records normal operation, interruption
+  after every durable phase, both pre-attach late-writer timings and the real 159 /
+  two partial-MV-failure regressions. The coordinator explicitly approved the
+  disposable `logbird_qa_062`; it was dropped SYNC and absence was verified.
+- The native fault tests ran in that approved database before drop. The committed
+  opt-in migration wrapper ports the executed scratch harness and is skipped by
+  default; it requires an explicitly pre-created, owned database and does not
+  create/drop a database itself.
+- Current [reference captures](../../../marketing/captures/2026-11-07-ingest-identity-round3)
+  cover desktop and 390px light/dark, with a short video. No browser errors or
+  horizontal overflow; bundled Chromium, one isolated context, no personal profile.
+  The before captures remain in the dated round-2 set below.
+- [Docs cleanup](round3-docs-cleanup.json): the fictional project and workspace
+  stream have zero rows in events, event_ids, events_by_minute, entities and
+  attribute_keys, and zero receipts; user/org and private queue were removed.
+  All browser/app/server processes stopped and both stack/quiet locks released.
+
+Final serial test output and the six-assertion network HTTP/SDK proof are recorded
+with the final evidence update, rather than treating earlier test counts as proof
+of a later runtime revision. The >=10M / 1M-receipt measurements remain unmeasured,
+coordinator-scheduled merge gates; no capacity conclusion follows from these tests.
+
+## Round 2 historical evidence
+
 Runtime source: `eea756ebdb508533f067a27466e830576c82d3e9`. Later follow-ups strengthen the concurrency test, raise only the two mutation-heavy scenario budgets, update the benchmark caller, correct its lock-ownership comment and add this evidence. These changes do not alter the serving implementation.
 
 ## Listening HTTP proof

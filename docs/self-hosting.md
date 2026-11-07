@@ -212,6 +212,18 @@ operators should use their provider's matched backup/restore procedure.
 
 Block browser/SDK ingress, then stop and drain writers before either backup:
 
+### Upgrading to immutable ids
+
+Back up Postgres and ClickHouse, preserve the private environment file and stop
+server/worker writers before `docker compose up -d --build`. The migrate gate applies
+006/007, the receipt/UTC migrations and the additive maintenance-kind migration.
+External ClickHouse writers need SELECT/INSERT/DELETE on `event_ids` and
+`GRANT SYSTEM FLUSH ASYNC INSERT QUEUE ON *.* TO <writer>` in addition to existing
+grants. Recovery currently supports one ClickHouse node; a load-balanced cluster
+needs a coordinated per-node drain. The worker probes the flush grant at startup.
+See the [targeted rollback](ingest-identity.md#deployment-rollback-and-proof-limits).
+Replace `logbird` in example SQL with your configured `CLICKHOUSE_DATABASE`.
+
 ```sh
 docker compose stop app server worker
 docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d clickhouse

@@ -274,7 +274,7 @@ function pendingError(
   const now = Date.now();
   const retryAfter = Math.max(
     1,
-    ingestRecoveryRetryAfter(),
+    pending.some((p) => receipts.get(p.eventId)?.claimedAt) ? ingestRecoveryRetryAfter() : 0,
     ...pending.map((p) => {
       const receipt = receipts.get(p.eventId);
       if (!receipt) return 1;

@@ -165,8 +165,8 @@ for (const phase of ['first lookup', 'ownership recheck', 'recovery lookup'] as 
       armFailure();
       const response = await f.post(input);
       expect(response.status).toBe(503);
-      expect(response.headers.get('Retry-After')).toBe('1');
-      expect((await response.json()).error.code).toBe('ingest_unavailable');
+      expect(response.headers.get('Retry-After')).toBe(phase === 'recovery lookup' ? '60' : '1');
+      expect((await response.json()).error.code).toBe(phase === 'recovery lookup' ? 'ingest_pending' : 'ingest_unavailable');
       expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(phase === 'recovery lookup' ? 1 : 0);
       vi.restoreAllMocks();
       armFailure();
@@ -178,7 +178,7 @@ for (const phase of ['first lookup', 'ownership recheck', 'recovery lookup'] as 
         bodies.push(String(init.body));
         const result = await f.post(JSON.parse(String(init.body)));
         if (result.status === 503) {
-          expect(result.headers.get('Retry-After')).toBe('1');
+          expect(result.headers.get('Retry-After')).toBe(phase === 'recovery lookup' ? '60' : '1');
           return new Response(await result.text(), { status: 503, headers: { 'Retry-After': '0' } });
         }
         return result;

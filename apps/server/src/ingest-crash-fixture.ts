@@ -3,8 +3,19 @@ import { clickhouse } from './clickhouse';
 import { ingest } from './ingest';
 
 process.once('message', async (message) => {
-  const { projectId, input, phase } = message as { projectId: string; input: unknown; phase: 'before-send' | 'after-ack' };
+  const { projectId, input, phase } = message as { projectId: string; input: unknown; phase: 'before-send' | 'after-ack' | 'rebuild-deleted' };
   const insert = clickhouse.insert.bind(clickhouse);
+  if (phase === 'rebuild-deleted') {
+    const command = clickhouse.command.bind(clickhouse);
+    clickhouse.command = async (params) => {
+      const result = await command(params);
+      if (params.query.startsWith('DELETE FROM attribute_keys')) {
+        process.send?.({ stage: 'deleted' });
+        await new Promise(() => undefined);
+      }
+      return result;
+    };
+  }
   clickhouse.insert = async (params) => {
     if (params.table === 'events' && phase === 'before-send') {
       process.send?.({ stage: 'claimed' });

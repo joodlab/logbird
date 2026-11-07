@@ -6185,6 +6185,12 @@
                       "items": {
                         "properties": {
                           "code": {
+                            "enum": [
+                              "invalid_event",
+                              "invalid_event_id",
+                              "duplicate_id_conflict",
+                              "stored_event_unreadable"
+                            ],
                             "type": "string"
                           },
                           "index": {
@@ -8377,6 +8383,12 @@
                       "items": {
                         "properties": {
                           "code": {
+                            "enum": [
+                              "invalid_event",
+                              "invalid_event_id",
+                              "duplicate_id_conflict",
+                              "stored_event_unreadable"
+                            ],
                             "type": "string"
                           },
                           "index": {

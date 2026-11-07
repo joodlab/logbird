@@ -19,7 +19,9 @@ headers do not participate. Search normalization and today's admission rules mus
 never redefine stored identity. Stored v1 identity uses the original payload and
 stored timestamp directly. One malformed legacy payload is rejected individually
 as `stored_event_unreadable`; it cannot block healthy siblings or free its id.
-Unprefixed pending receipts retain the old normalized-column comparison until
+Unprefixed receipts exist only in pre-merge development deployments of this branch,
+including the shared dev DB; released master never created them. This compatibility
+path is not required by an ordinary release upgrade. Unprefixed pending receipts retain the old normalized-column comparison until
 stored evidence or reinsertion upgrades them. Frozen 3a1541f fixtures and literal
 legacy/v1 digest vectors protect this rollout path.
 
@@ -96,6 +98,24 @@ exclusive lock. The worker cannot recreate a missing payload; receipts store non
 A ready receipt with no raw row is deleted after the original ten-minute receipt
 grace period, under that lock. A failed flush or lookup releases nothing.
 
+Only expired ambiguous claims trigger a rollup rebuild. Ready-only takeover and
+grace-only cleanup skip it. Before the first destructive rollup DELETE, recovery
+persists a `RetentionRun(kind=ingest_repair,status=running)` maintenance lease,
+heartbeats it every 30 seconds and marks it complete only after every destination
+is rebuilt, before replay. Reads return `503 retention_unavailable` with the neutral
+message "Project data is being rebuilt". Failed or abandoned repairs remain read
+fenced until a complete repair or retention rebuild succeeds. The existing abandoned
+run path enqueues retention, whose rebuild completes the outstanding repair records.
+Settings lastRun includes only kind=retention. Sample removal uses the same repair
+fence. Workspace activity reads raw rows only, so its unused rollups need no Project
+read fence; its writes remain serialized by the workspace advisory lock.
+
+A flush or rebuild failure is logged as `ingest.recovery_failed`. The request then
+falls through to shared ingestion: unresolved ids stay pending and healthy siblings
+commit. Writes may continue while an ingest repair's reads are fenced; an active
+exclusive repair still excludes writers. Regular live retention continues to fence
+writes. Worker startup probes the flush grant and logs an actionable error on failure.
+
 Global SYSTEM FLUSH attempts, including failures, are throttled to once per minute
 per server/worker process. Successful proof is reused only for leases it covers.
 This implementation assumes a single ClickHouse node: queues on other nodes are
@@ -111,7 +131,8 @@ the 202 response: `{accepted,ids,rejected,warnings,indices,eventIds}`. Each reje
 entry includes `code` and a code-first explanatory `reason`. Every input index
 outside `indices` is settled, including permanent rejections; retrying the entire
 identical batch is safe. Retry-After reflects the longest remaining pending lease
-plus flush bound, with a one-second minimum. A different-content retry against
+plus flush bound. Ready receipts report the remaining ten-minute grace, and
+throttled flushes report the remaining minute, with a one-second minimum. A different-content retry against
 an unresolved claimant stays pending until the original outcome is known. The
 SDK retries the identical body and honors Retry-After. Permanent conflicts reach
 onDrop/onError; a structured SDK LogbirdError class is tracked in [#89](https://github.com/joodlab/logbird/issues/89).
@@ -147,7 +168,8 @@ old binaries and direct ClickHouse inserts bypass the Postgres fences.
 
 Rollback requires stopping new writers and preserving unresolved receipt state.
 Leaving the additive schema in place is safest. To remove the identity additions
-only, use the following against the verified databases. Both MV names are included
+only, use the following against the verified databases. Replace `logbird` with your
+`CLICKHOUSE_DATABASE`. Both MV names are included
 so this also handles an interrupted 007. Raw events and original rollups survive.
 Do not remove the receipt table or its migration while pending writes exist.
 
@@ -162,6 +184,10 @@ ALTER TABLE logbird.migrations DELETE WHERE name IN
 
 -- Postgres: retain IngestReceipt and its original migration.
 BEGIN;
+-- Only after all maintenance has completed and its durable state is preserved.
+ALTER TABLE "RetentionRun" DROP CONSTRAINT IF EXISTS "RetentionRun_kind_check";
+ALTER TABLE "RetentionRun" DROP COLUMN "kind";
+DELETE FROM "_prisma_migrations" WHERE migration_name = '20261107170000_ingest_repair_kind';
 DROP INDEX IF EXISTS "IngestReceipt_projectId_confirmedAt_claimedAt_idx";
 ALTER TABLE "IngestReceipt" DROP COLUMN "claimedAt";
 DELETE FROM "_prisma_migrations" WHERE migration_name IN
@@ -188,3 +214,6 @@ Other scoped follow-ups: [#90](https://github.com/joodlab/logbird/issues/90) cov
 the shared ingest/recovery dependency boundary, and
 [#91](https://github.com/joodlab/logbird/issues/91) covers per-event isolation of a
 definite storage parse failure. Neither changes ambiguity classification here.
+
+Removal of pre-merge compatibility after safe shared-DB reconciliation is tracked
+in [#94](https://github.com/joodlab/logbird/issues/94).

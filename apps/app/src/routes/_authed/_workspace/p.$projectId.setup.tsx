@@ -451,6 +451,7 @@ function Toc({ setup }: { setup?: ProjectSetup }) {
         <span className="pt-3 pb-1 font-medium text-[11px] text-muted-foreground uppercase tracking-wider">Reference</span>
         {[
           ['semantics', 'Actor, executor, operation'],
+          ['event-ids-and-retries', 'Event ids and retries'],
           ['query', 'Query language'],
           ['shortcuts', 'Keyboard shortcuts'],
         ].map(([id, label]) => (

@@ -27,6 +27,18 @@ it('refuses selective rollup inserts when a scoped delete leaves visible rows', 
   }));
   const ch = { command, query } as unknown as ClickHouseClient;
   await expect(purgeProject(ch, 'qa-restored', new Date())).rejects.toMatchObject({ code: 'LOGBIRD_DELETE_INCOMPLETE' });
+  expect(command).toHaveBeenCalledTimes(4);
+  expect(command.mock.calls.some(([args]) => /^INSERT INTO (events_by_minute|entities|attribute_keys)\b/.test(args.query))).toBe(false);
+});
+
+it('refuses further writes when the identity-index delete leaves visible rows', async () => {
+  const command = vi.fn().mockResolvedValue({});
+  const query = vi
+    .fn()
+    .mockImplementation(async ({ query: sql }: { query: string }) => ({ json: async () => [{ n: sql.includes('FROM event_ids ') ? 1 : 0 }] }));
+  await expect(purgeProject({ command, query } as unknown as ClickHouseClient, 'qa-restored')).rejects.toMatchObject({
+    code: 'LOGBIRD_DELETE_INCOMPLETE',
+  });
   expect(command).toHaveBeenCalledTimes(2);
   expect(command.mock.calls.every(([args]) => args.query.startsWith('DELETE FROM'))).toBe(true);
 });

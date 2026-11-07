@@ -41,7 +41,7 @@ describe('toApiError', () => {
     const error = await toApiError(response);
     expect(error.code).toBe('project_busy');
     expect(error.retryAfter).toBe(2);
-    expect(error.message).toMatch(/retention purge/);
+    expect(error.message).toBe('This project is busy. Try again in a moment.');
   });
 
   it('turns a role 403 into a plain explanation', async () => {
