@@ -35,14 +35,14 @@ async function sessionRows(session: AuditSession, action: string, context?: Requ
 }
 
 /** A failing before-hook prevents deletion. A crash after deletion leaves a recoverable intent. */
-export async function stageSessionEnd(session: AuditSession, context?: RequestContext): Promise<false | undefined> {
+export async function stageSessionEnd(session: AuditSession, context?: RequestContext): Promise<void> {
   if (session.expiresAt <= new Date() || !context?.path || !explicitEnds.includes(context.path)) return;
   const rows = await sessionRows(session, context.path === explicitEnds[0] ? 'auth.signed_out' : 'auth.session.revoked', context);
   if (!rows.length) return;
   return prisma.$transaction(async (tx) => {
     // Serialize before-hooks briefly on the source row, without holding a lock through better-auth's deletion.
     const source = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM session WHERE id=${session.id} FOR UPDATE`;
-    if (!source.length) return false;
+    if (!source.length) return;
     for (const row of rows) {
       const existing = await tx.auditOutbox.findUnique({ where: { id: row.id } });
       if (!existing) await tx.auditOutbox.create({ data: { ...row, confirmedAt: null } });
