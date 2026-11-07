@@ -29,7 +29,7 @@
     "app": 222,
     "sdk": 26
   },
-  "finalServerSuite": "running; final output appended in the final evidence update",
+  "finalServerSuite": "Superseded root run canceled after detecting an outdated flush-failure assertion. Final-head per-file verdicts will be posted in the PR final-validation follow-up; do not treat this older run as a pass.",
   "http": {
     "at": "2026-11-07T18:04:11.086Z",
     "sourceHead": "760b90d9a339eb7806491ece6f0ccbcebff5e4ea",

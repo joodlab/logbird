@@ -1,5 +1,25 @@
 # Immutable ingest verification, 2026-11-07
 
+## Final review delta
+
+Sol's final admitted-reader race is addressed with a monotonic maintenance generation.
+Repair and destructive retention persist generation + running fence in one short PG
+transaction before deletes. Each rollup response checks both before/after ClickHouse,
+including false-404 paths and a complete intervening rebuild. Raw reads keep their
+non-snapshot semantics; no reader holds a project lock or PG connection during I/O.
+The [additive migration snapshot](final-generation-migration.json) preserves 146
+projects and 4,567 runs, with generation 0 backfilled. Rollback is documented.
+
+The native code-60 error can begin `Target table ... of view ... doesn't exists`
+without a `while pushing to view` clause. The classifier retains that ambiguous
+claim. A real UUID-scoped source table, destination and MV reproduced it in the
+existing logbird DB; all three fixture objects are dropped in finally. The native
+case and six consumed-body classification vectors pass. This adds no new DB.
+
+Current focused counts and the final per-file suite verdict are recorded in the
+PR final-validation comments. The Round 4 media still represents the unchanged app
+reference UI; its server proof predates this generation/classifier delta.
+
 ## Round 4
 
 Serving source: `760b90d9a339eb7806491ece6f0ccbcebff5e4ea`, including latest master
@@ -8,7 +28,7 @@ source trees so subsequent evidence-only commits can be compared explicitly.
 
 [Results and resources](round4-results.json) distinguish the focused native tests,
 initial test-assumption/cleanup-budget failures and the corrected checks from the
-still-running final serial server suite. [Master comparison](audit-master-comparison.json)
+superseded root serial server run. The final-head per-file suite is reported in the PR final-validation follow-up. [Master comparison](audit-master-comparison.json)
 proves all four audit tests passed on clean master and after the #62 parsed-payload
 fix. Internal JS Dates had rejected fresh workspace audits; this was a real regression,
 not attributed to shared state. Only the exact five baseline fixture namespaces'

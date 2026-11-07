@@ -4,12 +4,18 @@ import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 
 let f: ImmutableFixture;
+let clock = Date.now();
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 60_000 });
 beforeEach(async () => {
   f = await immutableFixture();
   await f.authorize();
+  vi.useFakeTimers({ toFake: ['Date'] });
+  clock = Math.max(clock, Date.now()) + 61_000;
+  vi.setSystemTime(clock);
 });
 afterEach(async () => {
+  clock = Math.max(clock, Date.now());
+  vi.useRealTimers();
   vi.restoreAllMocks();
   await f.cleanup();
 });
