@@ -38,6 +38,8 @@ app.use(
   bodyLimit({ maxSize: 5 * 1024 * 1024, onError: (c) => c.json({ error: { code: 'payload_too_large', message: 'Request exceeds 5 MB.' } }, 413) }),
 );
 app.use('/api/auth/*', rateLimit);
+app.use('/api/session/*', rateLimit);
+app.use('/api/sessions/*', rateLimit);
 app.use(
   '*',
   cors({

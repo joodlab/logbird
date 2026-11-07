@@ -209,3 +209,17 @@ it('neutralizes ambiguous old hook intents without deleting or confirming their 
     await prisma.auditOutbox.deleteMany({ where: { id } });
   }
 });
+
+it('preserves the shared Redis auth limit on owned session endpoints before session lookup', async () => {
+  for (const path of ['/api/session/sign-out', '/api/sessions/revoke-all']) {
+    for (let n = 0; n <= env.AUTH_RATE_LIMIT_PER_MINUTE; n++) {
+      const response = await app.request(
+        path,
+        { method: 'POST', headers: { Origin: env.APP_URL } },
+        { incoming: { socket: { remoteAddress: '203.0.113.66' } } },
+      );
+      expect(response.status).toBe(n < env.AUTH_RATE_LIMIT_PER_MINUTE ? 401 : 429);
+      if (response.status === 429) expect(response.headers.get('Retry-After')).not.toBeNull();
+    }
+  }
+});
