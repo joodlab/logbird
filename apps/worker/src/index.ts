@@ -1,4 +1,4 @@
-import { closeProjectLocks, prisma } from '@logbird/database';
+import { closeProjectLocks, prisma, pruneIngestReceipts } from '@logbird/database';
 import { Worker } from 'bullmq';
 import { env } from './env';
 import { closeRetentionQueue, connection, retentionQueue, retentionQueueName } from './queue';
@@ -9,6 +9,7 @@ const worker = new Worker(
   async (job) => {
     if (job.name === 'retention.project') await enforceProjectRetention(job.data.projectId);
     else if (job.name === 'retention.enforce') {
+      await pruneIngestReceipts(); // Includes idle workspace audit streams.
       const failures: unknown[] = [];
       for (const project of await prisma.project.findMany({ select: { id: true } })) {
         try {

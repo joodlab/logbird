@@ -1,12 +1,12 @@
 import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
-import { insertEvents, normalizeEvent } from '@logbird/clickhouse';
+import { normalizeEvent } from '@logbird/clickhouse';
 import { ingestResponseSchema } from '@logbird/contracts';
 import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { enqueueProjectRetention } from '@logbird/worker/queue';
 import type { Context } from 'hono';
-import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
+import { type IngestCandidate, insertImmutableEvents } from './immutable-ingest';
 import { clientAddress } from './rate-limit';
 import { invalidateSetup } from './setup-cache';
 import type { AppEnv } from './types';
@@ -40,31 +40,26 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
   if (!Array.isArray(events) || !events.length) throw new ApiError(422, 'validation_error', 'events must be a nonempty array.');
   if (events.length > 1000 || events.some((e) => Buffer.byteLength(JSON.stringify(e)) > 256 * 1024))
     throw new ApiError(413, 'payload_too_large', 'Maximum 1000 events and 256 KB per event.');
-  const rows: import('@logbird/clickhouse').EventRow[] = [],
+  const candidates: IngestCandidate[] = [],
     ids: string[] = [],
     rejected: { index: number; reason: string }[] = [],
     warnings: { index: number; reason: string }[] = [];
   for (const [index, event] of events.entries()) {
     const normalized = normalizeEvent(event, { projectId, receivedAt: new Date(), sdk });
     if (normalized.ok) {
-      rows.push(normalized.row);
-      ids.push(normalized.id);
+      candidates.push({ index, input: event, row: normalized.row });
       if (normalized.warning) warnings.push({ index, reason: normalized.warning });
     } else rejected.push({ index, reason: normalized.reason });
   }
   await withProjectLock(
     projectId,
     async (tx) => {
-      if (!projectId.startsWith('ws:') && !(await tx.project.findUnique({ where: { id: projectId } })))
-        throw new ApiError(404, 'not_found', 'Project not found.');
+      const project = projectId.startsWith('ws:') ? null : await tx.project.findUnique({ where: { id: projectId } });
+      if (!projectId.startsWith('ws:') && !project) throw new ApiError(404, 'not_found', 'Project not found.');
       await requireRetentionReady(tx, projectId);
-      try {
-        await insertEvents(clickhouse, rows);
-      } catch (error) {
-        if (error instanceof Error && 'code' in error && ['6', '27', '38', '41', '53', '69', '72'].includes(String(error.code)))
-          throw new ApiError(422, 'invalid_event', 'Storage could not parse this batch. Check event field types and timestamps.');
-        throw error;
-      }
+      const result = await insertImmutableEvents(projectId, project?.organizationId ?? projectId.slice(3), candidates);
+      ids.push(...result.ids);
+      rejected.push(...result.rejected);
       invalidateSetup(projectId);
       // Shared: concurrent ingests (several app servers, SDK flushes, audit writes) coexist; maintenance excludes them.
     },

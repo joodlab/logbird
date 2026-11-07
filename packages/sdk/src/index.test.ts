@@ -5,6 +5,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
+it('retries ingest_pending 503 after Retry-After with identical ids and body', async () => {
+  vi.useFakeTimers();
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'ingest_pending' } }), { status: 503, headers: { 'Retry-After': '1' } }))
+    .mockResolvedValueOnce(new Response('{}', { status: 202 }));
+  vi.stubGlobal('fetch', fetch);
+  const sdk = new Logbird({ apiKey: 'fake', endpoint: 'http://test' });
+  sdk.track({ action: 'retry.pending', id: 'immutable' });
+  const flushed = sdk.flush();
+  await vi.advanceTimersByTimeAsync(999);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  await flushed;
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch.mock.calls[0]?.[1].body).toBe(fetch.mock.calls[1]?.[1].body);
+  expect(sdk.dropped).toBe(0);
+  await sdk.shutdown();
+});
 it('batches and retries the identical body with UUIDv7 ids', async () => {
   vi.useFakeTimers();
   const fetch = vi

@@ -46,6 +46,17 @@ Ingestion path (v0): `POST /v1/events` → validate/normalize → ClickHouse `IN
 `async_insert=1, wait_for_async_insert=1` (ack only after ClickHouse has the rows) → 202. Large batches are
 inserted in one statement. A Postgres/queue buffer can be added later behind the same API.
 
+Ingestion reserves ids in Postgres before inserting into ClickHouse. Confirmed receipts
+are a ten-minute cache; older ids are checked in ClickHouse by `(project_id,event_id)`
+using the existing bloom index, without `FINAL`. Claims use one bulk
+`INSERT ... ON CONFLICT` for up to 1000 ids, shared by every server process. No
+Postgres transaction spans ClickHouse I/O. Unresolved claims never expire automatically:
+an uncertain ClickHouse acknowledgement returns `503 ingest_pending` with
+`Retry-After: 1`. Retry the identical batch and ids. The SDK already retries 5xx
+responses and honors this header. A retry confirms a pending claim when the stored
+event is visible; it never inserts another version. See [ingest-identity.md](ingest-identity.md)
+for cost, cleanup, deployment and reconciliation of claims with no visible row.
+
 ## 3. Recommended event envelope
 
 Supplied `occurredAt` should be ISO-8601 or epoch milliseconds between receive time minus 3650 days
@@ -79,6 +90,17 @@ Omitted values use receive time.
 ```
 
 Semantics worth documenting to users:
+- **id is immutable within a project**, regardless of `occurredAt`. An exact normalized
+  retry appears in `ids` and counts as accepted, without another raw insert or rollup
+  increment. Conflicting content is omitted from storage and `ids`, and reported in
+  `rejected` as `{ index, reason: "duplicate_id_conflict" }`; the rest of the batch
+  still returns 202. A different timestamp is conflicting content. Raw JSON key order,
+  trimmed/capped spelling and SDK headers do not change normalized identity. Receive
+  time (including omitted/invalid `occurredAt` fallback) uses the first receipt's clock.
+  Corrections require a new id and can link to the original through `parentEventId`.
+  An unresolved exact retry gets `503 ingest_pending` plus `Retry-After: 1`, never
+  `duplicate_id_conflict`. Id uniqueness covers retained evidence; after permanent
+  retention deletion and receipt cleanup, that id may be used again.
 - **actor = who caused it** (person, API key, scheduler…); **executor = who performed it** (api, worker, job,
   attempt). A worker doing work requested by Lina has `actor=Lina`, `executor=crm-worker`. Scheduled runs use
   `actor.type=system`.

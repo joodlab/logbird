@@ -90,6 +90,7 @@ model Organization {
   invitations Invitation[]
   projects    Project[]
   inviteLinks InviteLink[]
+  ingestReceipts IngestReceipt[]
 
   @@map("organization")
 }
@@ -143,6 +144,23 @@ model Project {
   retentionRuns  RetentionRun[]
 
   @@unique([organizationId, slug])
+}
+
+model IngestReceipt {
+  projectId String
+  eventId String
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fingerprint String
+  receivedAt DateTime
+  eventAt DateTime
+  confirmedAt DateTime?
+
+  @@id([projectId, eventId])
+  @@index([projectId, confirmedAt])
+  @@index([confirmedAt])
+  @@index([projectId, eventAt])
+  @@index([organizationId])
 }
 
 model ApiKey {

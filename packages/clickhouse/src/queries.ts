@@ -148,7 +148,7 @@ export async function searchEvents(ch: ClickHouseClient, projectId: string, q: S
   }
   const rows = await read<EventRow>(
     ch,
-    `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={project:String} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id`,
+    `SELECT * EXCEPT(payload,search_text) FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
     params,
   );
   const hasMore = rows.length > q.limit,
@@ -162,7 +162,10 @@ export async function searchEvents(ch: ClickHouseClient, projectId: string, q: S
 }
 async function eventRow(ch: ClickHouseClient, p: string, id: string) {
   return (
-    await read<EventRow>(ch, 'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at DESC LIMIT 1', { p, id })
+    await read<EventRow>(ch, 'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp LIMIT 1', {
+      p,
+      id,
+    })
   )[0];
 }
 export async function getEvent(ch: ClickHouseClient, projectId: string, eventId: string): Promise<EventDetail | null> {

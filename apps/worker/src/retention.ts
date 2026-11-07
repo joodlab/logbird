@@ -1,7 +1,8 @@
 import { createClickHouseClient, hasExpiredEvents, purgeProject, rebuildProjectRollups } from '@logbird/clickhouse';
-import { prisma, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
+import { prisma, pruneIngestReceipts, purgeIngestReceipts, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 export const clickhouse = createClickHouseClient();
 export async function enforceProjectRetention(projectId: string) {
+  await pruneIngestReceipts(projectId);
   const current = await prisma.project.findUnique({ where: { id: projectId } });
   if (!current) return;
   const previewCutoff = new Date(Date.now() - current.retentionDays * 86_400_000);
@@ -53,6 +54,7 @@ export async function enforceProjectRetention(projectId: string) {
         })
       ).json<{ n: string }>();
       if (Number(rows[0]?.n ?? 0) > 0) await purgeProject(clickhouse, projectId, cutoff);
+      await purgeIngestReceipts(projectId, cutoff);
       if (previous?.status === 'failed') await rebuildProjectRollups(clickhouse, projectId);
       await prisma.retentionRun.update({
         where: { id: run.id },
