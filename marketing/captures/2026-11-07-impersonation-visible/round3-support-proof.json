@@ -1,0 +1,184 @@
+{
+  "PASS fixture ingested (10k+ rows)": 10001,
+  "PASS presence row = every support event, with 22 agents > 20 listed": {
+    "listed": 20,
+    "otherCount": 4,
+    "anyTotal": 47,
+    "blank": false
+  },
+  "PASS agent page: support events with no actor/tenant are not a customer/tenant": {
+    "customers": ["usr_long"],
+    "tenants": ["tn_qa_0"]
+  },
+  "PASS − on \"Any support agent\" is a pressed toggle with a stable name": "",
+  "PASS hidden support + click an agent → only that agent": "impersonator:qa_support_02",
+  "PASS an agent + Alt-click \"Any support agent\" → support hidden, agent dropped": "-impersonator:*",
+  "PASS support links in rows are not tab stops": {
+    "inRows": 29,
+    "tabbable": 0
+  },
+  "PASS row name says who was at the keyboard": "Booking BK-S-0-0 changed, done by support agent Maximilian Bartholomew Featherstonehaugh-Montgomery (fictional QA support) while acting as Anastasia Konstantino",
+  "PASS Tab from a row leaves the grid (no stop on the in-row links)": {
+    "tag": "BODY",
+    "role": null,
+    "inGrid": false,
+    "index": null,
+    "label": ""
+  },
+  "PASS Shift+Tab returns to the row": 11,
+  "PASS Enter on a row opens the event sheet": "",
+  "PASS Escape returns focus to the row": "",
+  "PASS Enter on a support link opens only the agent page": {
+    "historyEntries": 1,
+    "backEv": null
+  },
+  "PASS Ctrl+End lands on exactly the last loaded row (10,051-event result)": {
+    "loadedAtPress": 100,
+    "loadedAfter": 200,
+    "focusedIndex": 99
+  },
+  "PASS agent page + user OR: the request parenthesises the OR and only the agent's events come back": {
+    "rows": 2,
+    "q": "impersonator:qa_support_03 (outcome:failure OR outcome:success)"
+  },
+  "PASS agent page defaults to the last 7 days": "",
+  "PASS a summary over budget shows the range banner with shorter ranges": "Too many events to summarise for last 30 days.Try a shorter range. Last 7 daysLast 24 hoursRetry",
+  "PASS the failed panel says \"Couldn't load\", not \"Nothing in this range\"": "",
+  "PASS the panels that loaded still show their data": "",
+  "PASS Retry refetches every failed query and clears the banner": "",
+  "PASS unknown agent: one empty state, no callout or tiles": "",
+  "PASS Ctrl K: a failed agent lookup says so": "",
+  "axe": {
+    "explorer support desktop-light": [
+      {
+        "id": "aria-allowed-role",
+        "nodes": 1,
+        "sample": ["textarea"],
+        "baseline": true
+      },
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1,
+        "sample": [".w-\\(--control-size-compact\\)"],
+        "baseline": true
+      }
+    ],
+    "event-sheet support desktop-light": [],
+    "support-agent page desktop-light": [
+      {
+        "id": "aria-allowed-role",
+        "nodes": 1,
+        "sample": ["textarea"],
+        "baseline": true
+      },
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1,
+        "sample": [".w-\\(--control-size-compact\\)"],
+        "baseline": true
+      }
+    ],
+    "actor split desktop-light": [
+      {
+        "id": "aria-allowed-role",
+        "nodes": 1,
+        "sample": ["textarea"],
+        "baseline": true
+      },
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1,
+        "sample": [".w-\\(--control-size-compact\\)"],
+        "baseline": true
+      }
+    ],
+    "explorer support desktop-dark": [
+      {
+        "id": "aria-allowed-role",
+        "nodes": 1,
+        "sample": ["textarea"],
+        "baseline": true
+      },
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1,
+        "sample": [".w-\\(--control-size-compact\\)"],
+        "baseline": true
+      }
+    ],
+    "event-sheet support desktop-dark": [],
+    "support-agent page desktop-dark": [
+      {
+        "id": "aria-allowed-role",
+        "nodes": 1,
+        "sample": ["textarea"],
+        "baseline": true
+      },
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1,
+        "sample": [".w-\\(--control-size-compact\\)"],
+        "baseline": true
+      }
+    ],
+    "actor split desktop-dark": [
+      {
+        "id": "aria-allowed-role",
+        "nodes": 1,
+        "sample": ["textarea"],
+        "baseline": true
+      },
+      {
+        "id": "label-content-name-mismatch",
+        "nodes": 1,
+        "sample": [".w-\\(--control-size-compact\\)"],
+        "baseline": true
+      }
+    ],
+    "explorer support phone-light": [
+      {
+        "id": "aria-allowed-role",
+        "nodes": 1,
+        "sample": ["textarea"],
+        "baseline": true
+      }
+    ]
+  },
+  "PASS axe explorer support desktop-light: nothing outside the master baseline": "aria-allowed-role(1) [baseline], label-content-name-mismatch(1) [baseline]",
+  "PASS axe event-sheet support desktop-light: nothing outside the master baseline": "0",
+  "PASS axe support-agent page desktop-light: nothing outside the master baseline": "aria-allowed-role(1) [baseline], label-content-name-mismatch(1) [baseline]",
+  "PASS axe actor split desktop-light: nothing outside the master baseline": "aria-allowed-role(1) [baseline], label-content-name-mismatch(1) [baseline]",
+  "PASS axe explorer support desktop-dark: nothing outside the master baseline": "aria-allowed-role(1) [baseline], label-content-name-mismatch(1) [baseline]",
+  "PASS axe event-sheet support desktop-dark: nothing outside the master baseline": "0",
+  "PASS axe support-agent page desktop-dark: nothing outside the master baseline": "aria-allowed-role(1) [baseline], label-content-name-mismatch(1) [baseline]",
+  "PASS axe actor split desktop-dark: nothing outside the master baseline": "aria-allowed-role(1) [baseline], label-content-name-mismatch(1) [baseline]",
+  "console problems (desktop)": [],
+  "PASS 390px light: long names fit (no page scroll, markers inside rows, no pill/action overlap)": {
+    "pageWidth": 390,
+    "rows": 21,
+    "markersSpilling": 0,
+    "overlapping": 0
+  },
+  "PASS 390px light: agent page fits": "",
+  "PASS 390px light: \"Who did it\" control is not cut short": {
+    "width": 305,
+    "truncated": false,
+    "labels": ["Everything", "Themselves", "By support"]
+  },
+  "PASS axe explorer support phone-light: nothing outside the master baseline": "aria-allowed-role(1) [baseline]",
+  "console problems (phone light)": [],
+  "PASS 390px dark: long names fit (no page scroll, markers inside rows, no pill/action overlap)": {
+    "pageWidth": 390,
+    "rows": 21,
+    "markersSpilling": 0,
+    "overlapping": 0
+  },
+  "PASS 390px dark: agent page fits": "",
+  "PASS 390px dark: \"Who did it\" control is not cut short": {
+    "width": 305,
+    "truncated": false,
+    "labels": ["Everything", "Themselves", "By support"]
+  },
+  "console problems (phone dark)": [],
+  "cleanup: QA project deleted": 204
+}

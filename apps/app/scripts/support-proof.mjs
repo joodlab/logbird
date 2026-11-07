@@ -235,9 +235,10 @@ try {
   await page.goto(P('/events', '-impersonator:*'));
   await settle(page);
   const group = page.locator('section', { has: page.getByRole('button', { name: /Done by support/ }) }).first();
+  // n5: a stable name plus aria-pressed (APG toggle), not a label that also changes with the state.
   check(
-    '− on "Any support agent" says what it will do when active',
-    (await group.getByRole('button', { name: 'Show what support did again' }).count()) === 1,
+    '− on "Any support agent" is a pressed toggle with a stable name',
+    (await group.locator('button[aria-label="Hide what support did"][aria-pressed="true"]').count()) === 1,
   );
   await group
     .getByRole('button', { name: /QA Agent 02/ })
@@ -302,15 +303,18 @@ try {
   await page.goto(P('/events'));
   await settle(page);
   await page.locator('[role=row][data-index="0"]').focus();
+  // Reaching the end may load the next page; Ctrl+End targets the last row loaded when it was pressed.
+  const loadedAtPress = loaded;
   await page.keyboard.press('Control+End');
   await page.waitForTimeout(600);
   await settle(page, 300);
   const last = await focused(page);
   page.off('response', countPages);
-  check('Ctrl+End lands on exactly the last loaded row (10,051-event result)', last.role === 'row' && loaded > 1 && last.index === loaded - 1, {
-    loadedRows: loaded,
-    focusedIndex: last.index,
-  });
+  check(
+    'Ctrl+End lands on exactly the last loaded row (10,051-event result)',
+    last.role === 'row' && loadedAtPress > 1 && last.index === loadedAtPress - 1,
+    { loadedAtPress, loadedAfter: loaded, focusedIndex: last.index },
+  );
 
   /* ---------------- round 3: OR on the agent page, default range, failures ---------------- */
   // M1: the agent page's timeline with a user OR lists only that agent's events (failures exist outside support).
@@ -355,7 +359,17 @@ try {
   await page.goto(`${BASE}/p/${projectId}/support/${agentId(2)}?range=30d`);
   await settle(page, 2500);
   const banner = page.getByTestId('agent-page-failure');
-  const actionsPanel = page.locator('section, div', { has: page.getByText('Top actions', { exact: true }) }).last();
+  // The panel around the "Top actions" title: walk up from the title until the element holds the panel body.
+  const panelText = (title) =>
+    page.evaluate((t) => {
+      const el = [...document.querySelectorAll('body *')].find((n) => n.childElementCount === 0 && n.textContent?.trim() === t);
+      let box = el;
+      for (let i = 0; i < 6 && box; i++) {
+        box = box.parentElement;
+        if (box && (box.textContent ?? '').length > t.length + 2) break;
+      }
+      return box?.textContent ?? '';
+    }, title);
   const bannerText = (await banner.textContent().catch(() => '')) ?? '';
   check(
     'a summary over budget shows the range banner with shorter ranges',
@@ -364,7 +378,7 @@ try {
   );
   check(
     'the failed panel says "Couldn\'t load", not "Nothing in this range"',
-    (await actionsPanel.getByText("Couldn't load").count()) >= 1 && (await actionsPanel.getByText('Nothing in this range.').count()) === 0,
+    await panelText('Top actions').then((t) => t.includes("Couldn't load") && !t.includes('Nothing in this range')),
   );
   check(
     'the panels that loaded still show their data',
@@ -424,7 +438,9 @@ try {
     await axe(page, `actor split desktop-${theme}`);
   }
   await page.emulateMedia({ colorScheme: 'light' });
-  note('console problems (desktop)', [...new Set(problems)]);
+  // The 503s injected above (actions facet, agent lookup) are expected; anything else is a problem.
+  const injected = /field=action|field=impersonator|status of 503/;
+  note('console problems (desktop)', [...new Set(problems.filter((x) => !injected.test(x)))]);
 
   /* ---------------- 390px with long names ---------------- */
   for (const theme of ['light', 'dark']) {
