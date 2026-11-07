@@ -154,7 +154,7 @@ app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
       },
     );
   // Separate from the workspace stream's ingestion lock: hooks can append receipts while this lock is held.
-  const organizationId = typeof authBody?.organizationId === 'string' ? authBody.organizationId : session?.session.activeOrganizationId;
+  const organizationId = (typeof authBody?.organizationId === 'string' && authBody.organizationId) || session?.session.activeOrganizationId;
   return c.req.path === '/api/auth/organization/update' && organizationId
     ? withProjectLock(`organization-update:${organizationId}`, runAuth)
     : runAuth();

@@ -128,6 +128,24 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
     expect(noOp.status).toBe(200);
     expect((await rawActivity()).filter((r) => r.context?.requestId === noOp.headers.get('x-request-id'))).toHaveLength(0);
 
+    // better-auth accepts an empty id as the active workspace: it must share the explicit id's rename lock.
+    const concurrent = await Promise.all([
+      request(owner.cookie, '/api/auth/organization/update', 'POST', { organizationId: '', data: { name: 'QA Fix own audit race A' } }),
+      request(admin.cookie, '/api/auth/organization/update', 'POST', { organizationId, data: { name: 'QA Fix own audit race B' } }),
+    ]);
+    expect(concurrent.map((r) => r.status)).toEqual([200, 200]);
+    const requestIds = concurrent.map((r) => r.headers.get('x-request-id'));
+    const renames = (await rawActivity()).filter((r) => r.action === 'organization.updated' && requestIds.includes(r.context?.requestId));
+    expect(renames).toHaveLength(2);
+    const firstRename = renames.find((r) => r.changes[0]?.before === 'QA Fix own audit');
+    if (!firstRename) throw new Error('Concurrent renames did not start from the stored name');
+    const nextRename = renames.find((r) => r !== firstRename);
+    expect(nextRename?.changes[0]?.before).toBe(firstRename.changes[0].after);
+    expect(new Set(renames.map((r) => r.changes[0].after))).toEqual(new Set(['QA Fix own audit race A', 'QA Fix own audit race B']));
+    expect(
+      (await request(owner.cookie, '/api/auth/organization/update', 'POST', { organizationId, data: { name: 'QA Fix own audit' } })).status,
+    ).toBe(200);
+
     const raised = await request(owner.cookie, path, 'PATCH', { retentionDays: 90 });
     expect(raised.status).toBe(200);
     const raisedRows = (await rawActivity()).filter((r) => r.context?.requestId === raised.headers.get('x-request-id'));
