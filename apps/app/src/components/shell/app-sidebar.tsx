@@ -310,6 +310,7 @@ function UserMenu() {
           <DropdownMenuItem
             onClick={async () => {
               await signOut();
+              await queryClient.invalidateQueries({ queryKey: meQuery().queryKey, exact: true, refetchType: 'none' });
               await navigate({ to: '/login' });
               queryClient.clear();
             }}

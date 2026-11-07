@@ -5,7 +5,7 @@ import { createFileRoute, Outlet, useNavigate, useRouterState } from '@tanstack/
 import { CheckIcon, LogOutIcon } from 'lucide-react';
 import { useEffect } from 'react';
 import { BrandLockup } from '@/components/brand';
-import { workspaceSetupQuery } from '@/lib/api/queries';
+import { meQuery, workspaceSetupQuery } from '@/lib/api/queries';
 import { signOut } from '@/lib/auth-client';
 import { hasName } from '@/lib/user';
 
@@ -57,6 +57,7 @@ function OnboardingLayout() {
           <Button
             onClick={async () => {
               await signOut();
+              await queryClient.invalidateQueries({ queryKey: meQuery().queryKey, exact: true, refetchType: 'none' });
               await navigate({ to: '/login' });
               queryClient.clear();
             }}
