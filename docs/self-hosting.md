@@ -456,6 +456,8 @@ restored data remains pending in #77.
    original Caddy is stopped. A fresh project has no inherited certificates:
    allow inbound TCP :80 for ACME HTTP-01 while :443 remains operator-allowlisted.
    With the supplied Caddyfile, :80 serves challenges and HTTPS redirects.
+   Before requesting the certificate, point the hostname's public DNS at this
+   host so ACME reaches it; retain the application allowlist during that switch.
    Preserve the application allowlist while verifying through the public HTTPS
    origin. Production certificate issuance counts against ACME rate limits;
    use the local-CA drill above or an ACME staging issuer for repeated drills.
