@@ -18,6 +18,14 @@ then `docker compose build server`, `docker compose build worker`, and
 `docker compose build app`. Runtime sizing below does not include peak source-build
 memory or build-cache storage.
 
+Image build stages default to one pnpm build/postinstall at a time and four
+concurrent downloads (`BUILD_CONCURRENCY=1`, `DOWNLOAD_CONCURRENCY=4`). For an
+additional per-Node-process heap cap, use
+`docker compose build --build-arg NODE_OPTIONS=--max-old-space-size=1536 migrate`
+and repeat for each role. These are build arguments, not runtime environment
+settings or a hard limit on the whole Docker/WSL VM. Measure host memory before
+and after each target; source builds still need headroom beyond runtime sizing.
+
 Open http://localhost:4600. Enter your email; read the code in your inbox, or privately run `docker compose logs server` when the log fallback is enabled. Create a workspace and project, copy its ingest key (shown once), then send:
 
 There is no separate instance-admin bootstrap account. A verified first login creates

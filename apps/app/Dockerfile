@@ -1,18 +1,22 @@
 FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS prune
+ARG NODE_OPTIONS
 WORKDIR /source
 RUN npm install --global pnpm@10.30.3 turbo@2.10.12
 COPY . .
 RUN turbo prune @logbird/app --docker
 
 FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS build
+ARG NODE_OPTIONS
+ARG BUILD_CONCURRENCY=1
+ARG DOWNLOAD_CONCURRENCY=4
 WORKDIR /workspace
 RUN npm install --global pnpm@10.30.3 && apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 COPY --from=prune /source/out/json/ .
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --child-concurrency="$BUILD_CONCURRENCY" --network-concurrency="$DOWNLOAD_CONCURRENCY"
 COPY --from=prune /source/out/full/ .
 ENV DATABASE_URL=postgresql://build:build@localhost:5432/logbird
 # Console has no database client generation step.
-RUN pnpm --filter @logbird/app... build
+RUN pnpm --workspace-concurrency="$BUILD_CONCURRENCY" --filter @logbird/app... build
 
 FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS runtime
 WORKDIR /workspace
