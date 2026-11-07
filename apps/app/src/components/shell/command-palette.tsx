@@ -61,11 +61,9 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   const agents = useQuery({
     queryKey: ['palette-support-agents', projectId, debounced],
     enabled: open && Boolean(projectId) && debounced.length >= 2,
-    queryFn: ({ signal }) =>
-      api
-        .suggest(projectId ?? '', { field: 'impersonator', prefix: debounced, limit: 4 }, signal)
-        .then((r) => r.values)
-        .catch(() => []),
+    // A failure (e.g. the lookup's time budget on a very busy project) shows a row saying so, never "no agents".
+    queryFn: ({ signal }) => api.suggest(projectId ?? '', { field: 'impersonator', prefix: debounced, limit: 4 }, signal).then((r) => r.values),
+    retry: false,
     staleTime: 30_000,
   });
 
@@ -103,6 +101,18 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
       <CommandInput onValueChange={setSearch} placeholder="Search pages, actors, tenants, records, or paste an event id…" value={search} />
       <CommandList className="max-h-[min(60vh,28rem)]">
         <CommandEmpty>No matches. Try an id like usr_42 or op_…</CommandEmpty>
+        {projectId && agents.isError && trimmed ? (
+          <CommandGroup heading="Support agents">
+            <CommandItem
+              className="text-muted-foreground"
+              onSelect={() => go(() => navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: 'impersonator:*' } }))}
+              value={`${trimmed} support agents unavailable`}
+            >
+              <VenetianMaskIcon />
+              Couldn't search support agents. Try the explorer filter.
+            </CommandItem>
+          </CommandGroup>
+        ) : null}
         {projectId && agents.data && agents.data.length > 0 ? (
           <CommandGroup heading="Support agents">
             {agents.data.map((a) => (

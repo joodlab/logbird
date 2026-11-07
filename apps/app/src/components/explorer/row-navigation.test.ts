@@ -59,6 +59,16 @@ describe('eventRowLabel', () => {
     expect(label).not.toContain('by Vera Validator,');
   });
 
+  it('does not repeat the actor when the generated sentence already names them (n1)', () => {
+    const label = eventRowLabel(
+      event({ actor: vera, impersonator: { type: 'user', id: 'usr_sam', name: 'Sam Support' } as AuditEvent['impersonator'] }),
+      now,
+    );
+    expect(label.startsWith('Vera Validator ')).toBe(true);
+    expect(label).toContain(', done by support agent Sam Support, success, ');
+    expect(label.split('Vera Validator')).toHaveLength(2);
+  });
+
   it('names the support agent by id and an unknown customer when names are missing', () => {
     const label = eventRowLabel(event({ impersonator: { id: 'support_2', name: '' } as AuditEvent['impersonator'] }), now);
     expect(label).toContain('done by support agent support_2 while acting as an unknown customer');

@@ -14,6 +14,8 @@ const alertVariants = cva(
         info: "border-info/30 bg-info/10 text-info *:data-[slot=alert-description]:text-info/90",
         warning: "border-warning/30 bg-warning/10 text-warning *:data-[slot=alert-description]:text-warning/90",
         success: "border-success/30 bg-success/10 text-success *:data-[slot=alert-description]:text-success/90",
+        /** Support impersonation: who was really at the keyboard. Pass role="note" for static explanations. */
+        support: "border-support/25 bg-support/5 text-foreground *:[svg]:text-support",
       },
     },
     defaultVariants: {

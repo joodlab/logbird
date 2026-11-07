@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   andQuery,
-  hasTopLevelOr,
   canonicalField,
   excludeTerm,
   formatTerm,
+  hasTopLevelOr,
   highlightQuery,
   includeTerm,
   markErrorSpan,
@@ -321,7 +321,9 @@ describe('andQuery (OR precedence)', () => {
 
   it('parenthesises a side with a top-level OR so the other side constrains all of it', () => {
     // Explorer's effectiveQ on the agent page: the agent must constrain the whole user query.
-    expect(andQuery('impersonator:support_1', 'outcome:failure OR outcome:denied')).toBe('impersonator:support_1 (outcome:failure OR outcome:denied)');
+    expect(andQuery('impersonator:support_1', 'outcome:failure OR outcome:denied')).toBe(
+      'impersonator:support_1 (outcome:failure OR outcome:denied)',
+    );
     expect(andQuery('outcome:failure OR outcome:denied', 'impersonator:*')).toBe('(outcome:failure OR outcome:denied) impersonator:*');
     expect(andQuery('a OR b', 'c OR d')).toBe('(a OR b) (c OR d)');
     expect(andQuery('(a OR b)', 'c')).toBe('(a OR b) c');

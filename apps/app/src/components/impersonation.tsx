@@ -76,8 +76,8 @@ export function SupportMarker({
   const content = (
     <>
       <VenetianMaskIcon aria-hidden className="size-3 shrink-0 text-support" />
-      <span className="truncate" dir="auto">
-        <span className="text-support-foreground">via support:</span> <span className="font-medium text-foreground">{name}</span>
+      <span className="truncate">
+        <span className="text-support-foreground">via support:</span> <bdi className="font-medium text-foreground">{name}</bdi>
       </span>
     </>
   );
@@ -98,20 +98,23 @@ export function SupportMarker({
       <SupportAgentLink
         agentId={event.impersonator.id}
         className={cn(
-          'inline-flex min-w-0 max-w-full rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-          variant === 'inline' ? 'hover:underline hover:underline-offset-2' : 'hover:brightness-95 dark:hover:brightness-125',
+          'inline-flex max-w-full rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+          // The pill never shrinks below its own width inside a tight row (m1): the neighbouring action truncates instead.
+          variant === 'inline' ? 'min-w-0 hover:underline hover:underline-offset-2' : 'shrink-0 hover:brightness-95 dark:hover:brightness-125',
         )}
         projectId={projectId}
         tabIndex={-1}
         title={description}
       >
         {body}
-        <span className="sr-only">, acting as {personLabel(event.actor) || 'an unknown customer'}. Opens their support activity</span>
+        <span className="sr-only">
+          , acting as <bdi>{personLabel(event.actor) || 'an unknown customer'}</bdi>. Opens their support activity
+        </span>
       </SupportAgentLink>
     );
   }
   return (
-    <span className="inline-flex min-w-0 max-w-full" title={description}>
+    <span className={cn('inline-flex max-w-full', variant === 'inline' ? 'min-w-0' : 'shrink-0')} title={description}>
       {body}
       <span className="sr-only">, acting as {personLabel(event.actor) || 'an unknown customer'}</span>
     </span>

@@ -11,7 +11,13 @@
  *  - facet semantics in the UI: hide support, then pick an agent → only that agent (no contradictory query);
  *  - keyboard on #70's grid: the support links in rows are not tab stops; the row's name says who was at the keyboard;
  *    Enter on a row opens the sheet; Enter on a support link opens only the agent page (Back has no `ev`);
- *    Ctrl+End over 10k rows;
+ *    Ctrl+End lands on exactly the last loaded row of a 10k-event result;
+ *  - round 3: a user OR on the agent page returns only that agent's events; the agent page opens on 7 days; a failed
+ *    summary query shows the page banner and "Couldn't load" in its panel, and Retry recovers every failed panel; the
+ *    unknown-agent page shows only its empty state; Ctrl K says when the agent lookup failed; at 390px the support pill
+ *    and the action name never overlap;
+ *  - axe violations outside the known master baseline (the query textarea's role, the command palette button's label)
+ *    fail the run.
  *  - 390px with long names: no horizontal page scroll, markers stay inside their row (light and dark);
  *  - axe-core (wcag2a/aa, wcag21a/aa, wcag22aa, best-practice) on the changed screens, light and dark.
  * The QA project is deleted at the end. One browser, closed in `finally`.
@@ -109,10 +115,25 @@ async function axe(page, name, include) {
       }),
     { include },
   );
-  const violations = res.violations.map((v) => ({ id: v.id, nodes: v.nodes.length, sample: v.nodes.slice(0, 2).map((n) => n.target.join(' ')) }));
+  const violations = res.violations.map((v) => ({
+    id: v.id,
+    nodes: v.nodes.length,
+    sample: v.nodes.slice(0, 2).map((n) => n.target.join(' ')),
+    // Known on master, on every page: the query bar's textarea role and the top-bar command palette button's label.
+    baseline: v.nodes.every(
+      (n) =>
+        (v.id === 'aria-allowed-role' && /^<textarea/.test(n.html)) ||
+        (v.id === 'label-content-name-mismatch' && n.html.includes('aria-label="Open command palette"')),
+    ),
+  }));
   results.axe = results.axe ?? {};
   results.axe[name] = violations;
-  note(`axe ${name}`, violations.length ? violations.map((v) => `${v.id}(${v.nodes}) ${v.sample.join(' | ')}`).join(', ') : '0');
+  const fresh = violations.filter((v) => !v.baseline);
+  check(
+    `axe ${name}: nothing outside the master baseline`,
+    fresh.length === 0,
+    violations.length ? violations.map((v) => `${v.id}(${v.nodes})${v.baseline ? ' [baseline]' : ` ${v.sample.join(' | ')}`}`).join(', ') : '0',
+  );
 }
 
 const focused = (page) =>
@@ -270,13 +291,121 @@ try {
     backEv: new URL(page.url()).searchParams.get('ev'),
   });
 
+  // Count the rows the explorer has loaded (every events page it fetched), then Ctrl+End must land on the last one.
+  let loaded = 0;
+  const countPages = async (res) => {
+    if (!/\/api\/projects\/[^/]+\/events\?/.test(res.url()) || res.request().method() !== 'GET') return;
+    const body = await res.json().catch(() => null);
+    if (Array.isArray(body?.data)) loaded += body.data.length;
+  };
+  page.on('response', countPages);
   await page.goto(P('/events'));
   await settle(page);
   await page.locator('[role=row][data-index="0"]').focus();
   await page.keyboard.press('Control+End');
   await page.waitForTimeout(600);
+  await settle(page, 300);
   const last = await focused(page);
-  check('Ctrl+End over 10k rows lands on the last loaded row', last.role === 'row' && last.index > 0, last.index);
+  page.off('response', countPages);
+  check('Ctrl+End lands on exactly the last loaded row (10,051-event result)', last.role === 'row' && loaded > 1 && last.index === loaded - 1, {
+    loadedRows: loaded,
+    focusedIndex: last.index,
+  });
+
+  /* ---------------- round 3: OR on the agent page, default range, failures ---------------- */
+  // M1: the agent page's timeline with a user OR lists only that agent's events (failures exist outside support).
+  const orRequests = [];
+  const recordSearch = (req) => {
+    if (/\/events\?/.test(req.url())) orRequests.push(new URL(req.url()).searchParams.get('q'));
+  };
+  page.on('request', recordSearch);
+  await page.goto(`${BASE}/p/${projectId}/support/${agentId(3)}?range=1h&q=${encodeURIComponent('outcome:failure OR outcome:success')}`);
+  await settle(page, 1200);
+  page.off('request', recordSearch);
+  const orRows = await page.$$eval('[role=row][data-index]', (rows) => rows.map((r) => r.getAttribute('aria-label') ?? ''));
+  check(
+    "agent page + user OR: the request parenthesises the OR and only the agent's events come back",
+    orRows.length === 2 &&
+      orRows.every((l) => l.includes('QA Agent 03')) &&
+      orRequests.some((q) => q === `impersonator:${agentId(3)} (outcome:failure OR outcome:success)`),
+    {
+      rows: orRows.length,
+      q: orRequests.at(-1),
+    },
+  );
+
+  // M2: the agent page opens on 7 days.
+  await page.goto(`${BASE}/p/${projectId}/support/${agentId(2)}`);
+  await settle(page, 1200);
+  check('agent page defaults to the last 7 days', (await page.getByText('Done as support · last 7 days').count()) === 1);
+
+  // M2/m3: a summary query over budget → page banner + "Couldn't load" in that panel; Retry recovers everything.
+  let failActions = true;
+  await page.route(/\/facets\?.*field=action/, (route) =>
+    failActions
+      ? route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: { code: 'query_unavailable', message: 'Storage query failed or exceeded its budget. Narrow the time range and retry.' },
+          }),
+        })
+      : route.continue(),
+  );
+  await page.goto(`${BASE}/p/${projectId}/support/${agentId(2)}?range=30d`);
+  await settle(page, 2500);
+  const banner = page.getByTestId('agent-page-failure');
+  const actionsPanel = page.locator('section, div', { has: page.getByText('Top actions', { exact: true }) }).last();
+  const bannerText = (await banner.textContent().catch(() => '')) ?? '';
+  check(
+    'a summary over budget shows the range banner with shorter ranges',
+    /Too many events to summarise for last 30 days/.test(bannerText) && /Last 7 days/.test(bannerText) && /Last 24 hours/.test(bannerText),
+    bannerText,
+  );
+  check(
+    'the failed panel says "Couldn\'t load", not "Nothing in this range"',
+    (await actionsPanel.getByText("Couldn't load").count()) >= 1 && (await actionsPanel.getByText('Nothing in this range.').count()) === 0,
+  );
+  check(
+    'the panels that loaded still show their data',
+    (await page.getByText('Customers acted as').count()) === 1 && (await page.locator('svg.recharts-surface').count()) >= 1,
+  );
+  await page.screenshot({ path: path.join(OUT, 'after-desktop-light-agent-page-budget-banner.png') });
+  failActions = false;
+  await banner.getByRole('button', { name: 'Retry' }).click();
+  await settle(page, 1500);
+  check(
+    'Retry refetches every failed query and clears the banner',
+    (await banner.count()) === 0 && (await page.getByText("Couldn't load").count()) === 0,
+  );
+  await page.unroute(/\/facets\?.*field=action/);
+
+  // n3: unknown agent → only the empty state (no callout, no zero tiles).
+  await page.goto(`${BASE}/p/${projectId}/support/qa_support_nobody?range=1h`);
+  await settle(page, 1200);
+  check(
+    'unknown agent: one empty state, no callout or tiles',
+    (await page.getByText('No support activity in this range').count()) === 1 &&
+      (await page.getByText('Customers acted as').count()) === 0 &&
+      (await page.getByText('These are the actions').count()) === 0,
+  );
+
+  // M2: Ctrl K says when the agent lookup failed.
+  await page.route(/\/suggest\?.*field=impersonator/, (route) =>
+    route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'query_unavailable', message: 'busy' } }) }),
+  );
+  await page.goto(P('/events'));
+  await settle(page);
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('QA Agent', { delay: 30 });
+  const failedRow = await page
+    .getByText("Couldn't search support agents. Try the explorer filter.")
+    .waitFor({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+  check('Ctrl K: a failed agent lookup says so', failedRow);
+  await page.keyboard.press('Escape');
+  await page.unroute(/\/suggest\?.*field=impersonator/);
 
   /* ---------------- axe, desktop light + dark ---------------- */
   for (const theme of ['light', 'dark']) {
@@ -317,9 +446,26 @@ try {
           const box = r.getBoundingClientRect();
           return [...r.querySelectorAll('a[href*="/support/"]')].some((a) => a.getBoundingClientRect().right > box.right + 1);
         }).length;
-        return { pageWidth: document.scrollingElement.scrollWidth, rows: rows.length, markersSpilling: spill };
+        // m1: the pill and the action name next to it never overlap.
+        const overlap = rows.filter((r) =>
+          [...r.querySelectorAll('a[href*="/support/"]')].some((a) => {
+            const next = a.nextElementSibling?.nextElementSibling ?? a.nextElementSibling;
+            const action = a.parentElement?.lastElementChild;
+            const x = a.getBoundingClientRect();
+            return [next, action].some((el) => {
+              if (!el || el === a) return false;
+              const y = el.getBoundingClientRect();
+              return y.width > 0 && x.left < y.right - 0.5 && y.left < x.right - 0.5 && x.top < y.bottom && y.top < x.bottom;
+            });
+          }),
+        ).length;
+        return { pageWidth: document.scrollingElement.scrollWidth, rows: rows.length, markersSpilling: spill, overlapping: overlap };
       });
-      check(`390px ${theme}: long names fit (no page scroll, markers inside rows)`, fit.pageWidth <= 390 && fit.markersSpilling === 0, fit);
+      check(
+        `390px ${theme}: long names fit (no page scroll, markers inside rows, no pill/action overlap)`,
+        fit.pageWidth <= 390 && fit.markersSpilling === 0 && fit.overlapping === 0,
+        fit,
+      );
       await p.screenshot({ path: path.join(OUT, `after-phone-${theme}-long-names-explorer.png`) });
       await p.goto(P(`/support/${agentId(0)}`));
       await settle(p, 1200);
@@ -354,7 +500,7 @@ try {
     note('cleanup: QA project deleted', res.status());
   }
   await browser.close();
-  await writeFile(path.join(OUT, 'round2-support-proof.txt'), `${log.join('\n')}\n`);
-  await writeFile(path.join(OUT, 'round2-support-proof.json'), `${JSON.stringify(results, null, 2)}\n`);
+  await writeFile(path.join(OUT, 'round3-support-proof.txt'), `${log.join('\n')}\n`);
+  await writeFile(path.join(OUT, 'round3-support-proof.json'), `${JSON.stringify(results, null, 2)}\n`);
 }
 process.exit(results.failed ? 1 : 0);

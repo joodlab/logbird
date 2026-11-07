@@ -3,6 +3,8 @@ import { EntityAvatar } from '@logbird/ui/components/entity-chip';
 import { Panel } from '@logbird/ui/components/page-header';
 import { StatTile, StatTileGrid } from '@logbird/ui/components/stat-card';
 import { SegmentedControl, SegmentedControlItem } from '@logbird/ui/components/ui/segmented-control';
+import { SUPPORT_SURFACE, SUPPORT_SURFACE_HOVER } from '@logbird/ui/lib/tones';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRightIcon, UserIcon, VenetianMaskIcon } from 'lucide-react';
 import { SupportAgentLink } from '@/components/impersonation';
@@ -106,8 +108,8 @@ export function SupportSplitPanel({
                     projectId={projectId}
                   >
                     <EntityAvatar id={a.id} name={a.name} size="sm" />
-                    <span className="min-w-0 flex-1 truncate" dir="auto">
-                      {a.name}
+                    <span className="min-w-0 flex-1 truncate">
+                      <bdi>{a.name}</bdi>
                     </span>
                     <span className="text-muted-foreground text-xs tabular-nums">{formatNumber(a.count)}</span>
                     <span className="sr-only"> events as a support agent. Opens their support activity</span>
@@ -120,7 +122,11 @@ export function SupportSplitPanel({
         {counts.asAgent > 0 ? (
           <SupportAgentLink
             agentId={entityId}
-            className="flex items-center gap-2 rounded-md border border-support/25 bg-support/5 px-3 py-2 text-[13px] outline-none hover:bg-support/10 focus-visible:ring-2 focus-visible:ring-ring/50"
+            className={cn(
+              'flex items-center gap-2 rounded-md px-3 py-2 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+              SUPPORT_SURFACE,
+              SUPPORT_SURFACE_HOVER,
+            )}
             projectId={projectId}
           >
             <VenetianMaskIcon aria-hidden className="size-4 shrink-0 text-support" />

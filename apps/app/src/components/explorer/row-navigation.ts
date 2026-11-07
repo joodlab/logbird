@@ -12,8 +12,10 @@ export function eventRowLabel(e: AuditEvent, now = Date.now()): string {
   const sentence = eventSentence(e);
   const actor = personLabel(e.actor);
   const parts = [sentence];
-  // "done by support agent X while acting as Y" names the actor itself, so it replaces "by Y".
-  const support = supportPhrase(e);
+  // "done by support agent X while acting as Y" names the actor itself, so it replaces "by Y" — unless the sentence
+  // already says who (generated sentences start with the actor), then only the agent is added.
+  const named = Boolean(actor) && sentence.toLowerCase().includes(actor.toLowerCase());
+  const support = e.impersonator ? (named ? `done by support agent ${e.impersonator.name || e.impersonator.id}` : supportPhrase(e)) : null;
   if (support) parts.push(support);
   // Producer descriptions do not always name who acted ("Booking cancelled"): add the actor when it is missing.
   else if (actor && !sentence.toLowerCase().includes(actor.toLowerCase())) parts.push(`by ${actor}`);

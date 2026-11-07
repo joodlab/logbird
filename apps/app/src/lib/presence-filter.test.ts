@@ -150,7 +150,9 @@ describe('presence filter across OR and groups (round 3)', () => {
     // An existing impersonator:* under an OR does not constrain everything.
     expect(withPresence('outcome:failure OR impersonator:*', F)).toBe('(outcome:failure OR impersonator:*) impersonator:*');
     expect(withPresence('(a OR b) impersonator:*', F)).toBe('(a OR b) impersonator:*');
-    expect(withPresence("outcome = 'failure' OR outcome = 'denied'", F, 'sql')).toBe("(outcome = 'failure' OR outcome = 'denied') AND impersonator_id != ''");
+    expect(withPresence("outcome = 'failure' OR outcome = 'denied'", F, 'sql')).toBe(
+      "(outcome = 'failure' OR outcome = 'denied') AND impersonator_id != ''",
+    );
   });
 
   it('replaces a hand-written value group with the presence group (m2)', () => {

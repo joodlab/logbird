@@ -10,9 +10,9 @@ import { useRange } from '@/lib/use-range';
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/support/$agentId')({
   head: () => ({ meta: [{ title: 'Support agent · Logbird' }] }),
   validateSearch: z.object({ q: z.string().optional(), ev: z.string().optional(), live: z.boolean().optional() }),
-  // Support sessions are rare: open on a range that usually has some.
+  // "What did they do this week": 7 days keeps every summary cheap on busy projects; 30d/90d stay selectable.
   // The section crumb opens everything support did; agents are not in the actor directory.
-  staticData: { crumb: 'Support', crumbTo: '/p/$projectId/events', crumbSearch: { q: 'impersonator:*' }, range: true, defaultRange: '30d' },
+  staticData: { crumb: 'Support', crumbTo: '/p/$projectId/events', crumbSearch: { q: 'impersonator:*' }, range: true, defaultRange: '7d' },
   component: SupportAgentPage,
 });
 
@@ -30,7 +30,7 @@ function SupportAgentPage() {
           ...('q' in patch ? { q: patch.q || undefined } : {}),
           ...('ev' in patch ? { ev: patch.ev } : {}),
           ...('live' in patch ? { live: patch.live || undefined } : {}),
-          ...('range' in patch ? { range: patch.range === '30d' ? undefined : patch.range } : {}),
+          ...('range' in patch ? { range: patch.range === '7d' ? undefined : patch.range } : {}),
         }),
       }),
     [navigate],

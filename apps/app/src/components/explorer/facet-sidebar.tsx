@@ -258,15 +258,8 @@ function FacetGroup({
           <TooltipTrigger
             render={
               <Button
-                aria-label={
-                  presenceRow
-                    ? excluded
-                      ? (spec.presence?.show ?? `Show: ${spec.label}`)
-                      : (spec.presence?.hide ?? `Hide: ${spec.label}`)
-                    : excluded
-                      ? `Stop excluding ${v.label || '(none)'}`
-                      : `Exclude ${v.label || '(none)'}`
-                }
+                // A stable name plus aria-pressed (the APG toggle pattern): "Hide what support did, toggle button, pressed".
+                aria-label={presenceRow ? (spec.presence?.hide ?? `Hide: ${spec.label}`) : `Exclude ${v.label || '(none)'}`}
                 aria-pressed={excluded}
                 className={cn(
                   'absolute end-1 text-muted-foreground opacity-0 hover:bg-background hover:text-outcome-failure focus-visible:opacity-100 group-hover/facet:opacity-100 dark:hover:bg-background',
