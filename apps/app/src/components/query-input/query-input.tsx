@@ -33,6 +33,8 @@ function valueSourceFor(s: Suggestion): string | null {
 
 export interface QueryInputHandle {
   focus: () => void;
+  /** The text field, for callers that hand focus back to the bar (a dialog's final focus, an emptied grid). */
+  element: () => HTMLElement | null;
 }
 
 export interface QueryInputProps {
@@ -83,9 +85,12 @@ const FIRST_LINE_ICON = 'mt-[calc((var(--query-bar-height)-2px-1rem)/2)]';
  * saved views, fields, operators, values ranked by frequency), a syntax hint row, Lucene/KQL conversions, a
  * Query | SQL mode toggle and inline server errors.
  *
- * Keyboard (the APG combobox convention): ↑/↓ move, Enter after moving (or on a partly typed name) accepts, → at the
- * end of the text accepts, Enter runs, Ctrl/⌘+Enter always runs, Esc closes, Ctrl+Space reopens, Shift+Delete forgets
- * the highlighted recent query. Tab never edits the query: focus moves on and the panel closes.
+ * Keyboard: ↑/↓ move through the suggestions and Enter after moving (or on a partly typed name) accepts, as in the APG
+ * combobox pattern; Enter otherwise runs, Ctrl/⌘+Enter always runs, Esc closes, Ctrl+Space reopens, Shift+Delete forgets
+ * the highlighted recent query. → at the end of the text also accepts: that is the shell / address-bar inline-completion
+ * convention, not APG (where → only moves the caret), so it never fires mid-text or with a selection. Tab never edits
+ * the query: focus moves on and the panel closes. The keys are described to screen readers on focus (a static
+ * `aria-describedby`), and each accepted suggestion is announced politely.
  */
 export function QueryInput({
   projectId,
@@ -110,8 +115,10 @@ export function QueryInput({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
   const listId = `qi-list-${lang}`;
+  // Polite announcement of the last accepted suggestion (a zero-width toggle repeats identical ones).
+  const [announcement, setAnnouncement] = useState('');
 
-  useImperativeHandle(ref, () => ({ focus: () => inputRef.current?.focus() }), []);
+  useImperativeHandle(ref, () => ({ focus: () => inputRef.current?.focus(), element: () => inputRef.current }), []);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-sync the draft when the submitted query or its language changes
   useEffect(() => setDraft(value), [value, lang]);
 
@@ -213,6 +220,7 @@ export function QueryInput({
     }
     const text = draft.slice(0, s.from) + s.insert + draft.slice(s.to);
     setText(text, s.caret);
+    setAnnouncement((prev) => `Inserted ${s.insert.trim() || s.label}${prev.endsWith('​') ? '' : '​'}`);
     if (s.run) {
       submit(text);
       return;
@@ -358,7 +366,8 @@ export function QueryInput({
             WHERE
           </span>
         ) : null}
-        <div className="relative grid max-h-[9.75rem] min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-y-auto overflow-x-hidden">
+        {/* The query syntax is left-to-right in every locale: → at the end accepts, and the mirror lines up with the text. */}
+        <div className="relative grid max-h-[9.75rem] min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-y-auto overflow-x-hidden" dir="ltr">
           <div aria-hidden className={cn(TEXT, 'pointer-events-none [grid-area:1/1]')}>
             {draft ? (
               <>
@@ -375,7 +384,7 @@ export function QueryInput({
             aria-activedescendant={showList ? `${listId}-${activeIndex}` : undefined}
             aria-autocomplete="list"
             aria-controls={listId}
-            aria-describedby={showList ? `${listId}-keys` : undefined}
+            aria-describedby={`${listId}-keys`}
             aria-expanded={showList}
             aria-invalid={showProblem || undefined}
             aria-label={lang === 'sql' ? 'SQL WHERE expression' : 'Query'}
@@ -387,6 +396,7 @@ export function QueryInput({
               'h-full w-full resize-none overflow-hidden bg-transparent text-transparent caret-foreground outline-none [grid-area:1/1] selection:bg-brand/25 selection:text-transparent',
             )}
             data-lang={lang}
+            dir="ltr"
             onBlur={() => setTimeout(() => setOpen(false), 120)}
             onChange={(e) => {
               setDraft(e.target.value);
@@ -429,11 +439,13 @@ export function QueryInput({
           <Kbd className="me-1 hidden md:inline-flex">/</Kbd>
         </div>
       </div>
-      {showList ? (
-        <span className="sr-only" id={`${listId}-keys`}>
-          Up and down arrows choose a suggestion, Enter or Right arrow inserts it, Escape closes the list.
-        </span>
-      ) : null}
+      <span className="sr-only" id={`${listId}-keys`}>
+        Suggestions appear as you type. Up and down arrows choose one, Enter or Right arrow at the end inserts it, Escape closes the list. Enter runs
+        the query.
+      </span>
+      <span aria-live="polite" className="sr-only">
+        {announcement}
+      </span>
       {showPanel ? (
         <SuggestionPanel
           active={activeIndex}

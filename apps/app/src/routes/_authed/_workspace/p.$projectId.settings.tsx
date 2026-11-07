@@ -13,7 +13,18 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings'
 const FADE = 28;
 
 /**
- * Keeps the active section visible in a horizontally scrolling tab strip (phones), and fades the edge that has more
+ * Scroll only the strip (scrollIntoView would also scroll the page): bring `tab` fully into view, clear of the fades.
+ */
+function revealTab(nav: HTMLElement, tab: HTMLElement) {
+  const rtl = getComputedStyle(nav).direction === 'rtl';
+  const scroll = logicalScroll(nav.scrollLeft);
+  const span = logicalTabSpan(nav.getBoundingClientRect(), tab.getBoundingClientRect(), scroll, rtl);
+  const target = revealScroll(span, { scroll, width: nav.clientWidth, scrollWidth: nav.scrollWidth }, FADE);
+  if (target !== null) nav.scrollLeft = physicalScroll(target, rtl);
+}
+
+/**
+ * Keeps the active section — and the tab keyboard focus is on — visible in a horizontally scrolling tab strip (phones), and fades the edge that has more
  * tabs behind it. Works in logical coordinates, so an RTL strip scrolls and fades from its right-hand start.
  */
 function useTabStrip(activeKey: string) {
@@ -29,27 +40,26 @@ function useTabStrip(activeKey: string) {
     };
     update();
     nav.addEventListener('scroll', update, { passive: true });
+    // Tabbing to an inactive tab: the browser scrolls it only to the edge, under the fade (and its focus ring with it).
+    const onFocusIn = (event: FocusEvent) => {
+      if (event.target instanceof HTMLElement && event.target !== nav) revealTab(nav, event.target);
+    };
+    nav.addEventListener('focusin', onFocusIn);
     const observer = new ResizeObserver(update);
     observer.observe(nav);
     return () => {
       nav.removeEventListener('scroll', update);
+      nav.removeEventListener('focusin', onFocusIn);
       observer.disconnect();
     };
   }, []);
   const router = useRouter();
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run when the active section changes
   useEffect(() => {
-    // Scroll only the strip (scrollIntoView would also scroll the page): bring the active tab fully into view, clear of
-    // the fades.
     const reveal = () => {
       const nav = ref.current;
       const active = nav?.querySelector<HTMLElement>('[aria-current="page"]');
-      if (!nav || !active) return;
-      const rtl = getComputedStyle(nav).direction === 'rtl';
-      const scroll = logicalScroll(nav.scrollLeft);
-      const tab = logicalTabSpan(nav.getBoundingClientRect(), active.getBoundingClientRect(), scroll, rtl);
-      const target = revealScroll(tab, { scroll, width: nav.clientWidth, scrollWidth: nav.scrollWidth }, FADE);
-      if (target !== null) nav.scrollLeft = physicalScroll(target, rtl);
+      if (nav && active) revealTab(nav, active);
     };
     reveal();
     // The router's scroll restoration carries the strip's previous offset over to the new location and applies it on
@@ -88,7 +98,7 @@ function SettingsLayout() {
                 activeOptions={{ exact: true }}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'relative shrink-0 whitespace-nowrap rounded-t-md px-3 pt-1 pb-2.5 text-sm outline-none transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset pointer-coarse:pt-2.5 pointer-coarse:pb-3.5',
+                  'relative shrink-0 whitespace-nowrap rounded-t-md px-3 pt-1 pb-2.5 text-sm outline-hidden transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset pointer-coarse:pt-2.5 pointer-coarse:pb-3.5',
                   active
                     ? 'font-medium text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-brand'
                     : 'text-muted-foreground',

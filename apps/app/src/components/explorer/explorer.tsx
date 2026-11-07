@@ -283,6 +283,8 @@ export function Explorer({
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
+      {/* The page's heading for screen-reader navigation; the visible title is the breadcrumb. */}
+      {embedded ? null : <h1 className="sr-only">Events</h1>}
       <div className="flex flex-col gap-2 border-b px-3 py-2.5 sm:px-4">
         <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
           {embedded ? null : (
@@ -445,7 +447,7 @@ export function Explorer({
             {/* The facet list is dozens of Tab stops: let keyboard users jump past it to the events (shown on focus). */}
             {rows.length ? (
               <button
-                className="sr-only rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md outline-none focus-visible:not-sr-only focus-visible:absolute focus-visible:start-2 focus-visible:top-2 focus-visible:z-30 focus-visible:ring-2 focus-visible:ring-ring"
+                className="sr-only rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md outline-hidden focus-visible:not-sr-only focus-visible:absolute focus-visible:start-2 focus-visible:top-2 focus-visible:z-30 focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => eventsTable.current?.focusCursor()}
                 type="button"
               >
@@ -469,6 +471,8 @@ export function Explorer({
             cursorId={cursorId}
             empty={empty}
             fetchingMore={events.isFetchingNextPage}
+            // A refetch emptied the list while a row had focus: back to the query, the way to widen it.
+            focusFallback={() => queryBar.current?.element()}
             freshIds={fresh}
             hasMore={!problem && events.hasNextPage}
             loadMore={() => events.fetchNextPage()}
@@ -489,7 +493,8 @@ export function Explorer({
       <EventSheet
         event={selected}
         // Back to the row the sheet showed last (it may differ from the one opened, after j/k): never to <body>.
-        finalFocus={() => eventsTable.current?.cursorElement() ?? true}
+        // With no rows left (a refetch emptied the list meanwhile), to the query bar.
+        finalFocus={() => eventsTable.current?.cursorElement() ?? queryBar.current?.element() ?? true}
         onFilter={(term) => {
           addFilter(term);
         }}

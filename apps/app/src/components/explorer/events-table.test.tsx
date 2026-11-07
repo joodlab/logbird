@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import type { AuditEvent } from '@logbird/contracts';
-import { act, createRef, useImperativeHandle, useState } from 'react';
+import { Sheet, SheetContent, SheetTitle } from '@logbird/ui/components/ui/sheet';
+import { act, createRef, useImperativeHandle, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventsTable, type EventsTableHandle } from './events-table';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -51,43 +52,70 @@ interface HarnessHandle {
   setSelected: (id: string | undefined) => void;
 }
 
-/** Mounts the table like a consumer: Explorer controls the cursor (`controlled`), Workspace Activity does not. */
+interface HarnessOptions {
+  onCursorChange?: (id: string | null) => void;
+  loadMore?: () => void;
+  /** Mount an event sheet whose final focus is composed as in Explorer and Workspace Activity. */
+  sheet?: boolean;
+}
+
+/**
+ * Mounts the table like a consumer: Explorer controls the cursor (`controlled`), Workspace Activity does not. Around it,
+ * a query field (the focus fallback, as on both pages) and another control.
+ */
 function Harness({
   initial,
   controlled,
   table,
   harness,
-  onCursorChange,
+  options,
 }: {
   initial: AuditEvent[];
   controlled: boolean;
-  table: React.Ref<EventsTableHandle>;
+  table: React.RefObject<EventsTableHandle | null>;
   harness: React.Ref<HarnessHandle>;
-  onCursorChange?: (id: string) => void;
+  options: HarnessOptions;
 }) {
   const [rows, setRows] = useState(initial);
   const [selected, setSelected] = useState<string | undefined>();
   const [cursor, setCursor] = useState<string | null>(null);
+  const query = useRef<HTMLInputElement>(null);
   useImperativeHandle(harness, () => ({ setRows, setSelected }), []);
   return (
-    <div style={{ display: 'flex', height: VIEW.height }}>
-      <EventsTable
-        columns={['time', 'outcome', 'action', 'description', 'actor']}
-        onSelect={(e) => setSelected(e.id)}
-        ref={table}
-        rows={rows}
-        selectedId={selected}
-        {...(controlled
-          ? {
-              cursorId: cursor,
-              onCursorChange: (id: string) => {
-                setCursor(id);
-                onCursorChange?.(id);
-              },
-            }
-          : { onCursorChange })}
-      />
-    </div>
+    <>
+      <input aria-label="Query" data-testid="query" ref={query} />
+      <button data-testid="elsewhere" type="button">
+        Elsewhere
+      </button>
+      <div style={{ display: 'flex', height: VIEW.height }}>
+        <EventsTable
+          columns={['time', 'outcome', 'action', 'description', 'actor']}
+          focusFallback={() => query.current}
+          hasMore={Boolean(options.loadMore)}
+          loadMore={options.loadMore}
+          onSelect={(e) => setSelected(e.id)}
+          ref={table}
+          rows={rows}
+          selectedId={selected}
+          {...(controlled
+            ? {
+                cursorId: cursor,
+                onCursorChange: (id: string | null) => {
+                  setCursor(id);
+                  options.onCursorChange?.(id);
+                },
+              }
+            : { onCursorChange: options.onCursorChange })}
+        />
+      </div>
+      {options.sheet ? (
+        <Sheet onOpenChange={(open) => !open && setSelected(undefined)} open={Boolean(selected)}>
+          <SheetContent finalFocus={() => table.current?.cursorElement() ?? query.current ?? true}>
+            <SheetTitle>Event {selected}</SheetTitle>
+          </SheetContent>
+        </Sheet>
+      ) : null}
+    </>
   );
 }
 
@@ -103,10 +131,11 @@ afterEach(() => {
   host.remove();
 });
 
-function mount(rows: AuditEvent[], controlled: boolean, onCursorChange?: (id: string) => void) {
+function mount(rows: AuditEvent[], controlled: boolean, options: HarnessOptions | ((id: string | null) => void) = {}) {
+  const opts = typeof options === 'function' ? { onCursorChange: options } : options;
   const table = createRef<EventsTableHandle>();
   const harness = createRef<HarnessHandle>();
-  act(() => root.render(<Harness controlled={controlled} harness={harness} initial={rows} onCursorChange={onCursorChange} table={table} />));
+  act(() => root.render(<Harness controlled={controlled} harness={harness} initial={rows} options={opts} table={table} />));
   // Let the virtualizer measure the viewport and render its range.
   flush();
   return { table: () => table.current as EventsTableHandle, harness: () => harness.current as HarnessHandle };
@@ -114,14 +143,22 @@ function mount(rows: AuditEvent[], controlled: boolean, onCursorChange?: (id: st
 
 /** Let the virtualizer's measurement and focus effects settle. */
 const flush = () => act(() => undefined);
+/** Let the dialog's open/close (Base UI waits for its transitions) finish. */
+const settle = () =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
 
 const scroller = () => host.querySelector<HTMLElement>('.overflow-auto') as HTMLElement;
 const rowOf = (id: string) => host.querySelector<HTMLElement>(`[role="row"][data-event-id="${id}"]`);
 const focusedId = () => (document.activeElement as HTMLElement | null)?.dataset.eventId;
+const byTestId = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`) as HTMLElement;
 const tabStops = () => [...host.querySelectorAll<HTMLElement>('[role="row"][tabindex="0"]')].map((r) => r.dataset.eventId);
-function key(target: Element, k: string) {
+const keydown = (target: Element, k: string, init: KeyboardEventInit = {}) =>
+  target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init }));
+function key(target: Element, k: string, init: KeyboardEventInit = {}) {
   act(() => {
-    target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+    keydown(target, k, init);
   });
 }
 function scrollTo(top: number) {
@@ -213,19 +250,119 @@ describe.each([
     expect(t.table().cursorElement()?.dataset.eventId).toBe('e21');
   });
 
-  it('drops a pending far-jump focus whose event left the list', () => {
+  it('drops a pending far-jump focus whose event leaves the list before its row mounts', () => {
     const t = mount(page('e', 2000), controlled);
     act(() => {
       rowOf('e0')?.focus();
     });
-    // End: the target row is not rendered yet, so focus is pending until the virtualizer mounts it.
-    key(rowOf('e0') as Element, 'End');
+    // End, and in the same pass (before the virtualizer has mounted row 1999) a refetch removes that event: the focus
+    // request is still pending when its target disappears.
+    act(() => {
+      keydown(rowOf('e0') as Element, 'End');
+      expect(rowOf('e1999')).toBeNull();
+      t.harness().setRows((rows) => rows.slice(0, 1999));
+    });
     flush();
-    expect(focusedId()).toBe('e1999');
-    // Remove that event: the grid keeps focus on a real row instead of a stale index.
-    act(() => t.harness().setRows((rows) => rows.slice(0, 1999)));
+    // Not moved to the row that took its index: focus stays where it was.
+    expect(focusedId()).toBe('e0');
+    // The event comes back and scrolls into view: the dropped request must not fire late and steal focus.
+    act(() => t.harness().setRows(() => page('e', 2000)));
+    scrollTo(1990 * ROW);
     flush();
-    expect(focusedId()).toBe('e1998');
+    expect(rowOf('e1999')).not.toBeNull();
+    expect(focusedId()).toBe('e0');
+  });
+
+  it('accepts Ctrl+Home and Ctrl+End (the APG grid keys) as well as Home and End', () => {
+    mount(page('e', 300), controlled);
+    act(() => {
+      rowOf('e0')?.focus();
+    });
+    key(rowOf('e0') as Element, 'End', { ctrlKey: true });
+    flush();
+    expect(focusedId()).toBe('e299');
+    key(rowOf('e299') as Element, 'Home', { ctrlKey: true });
+    flush();
+    expect(focusedId()).toBe('e0');
+    // Other Ctrl chords stay the browser's.
+    key(rowOf('e0') as Element, 'ArrowDown', { ctrlKey: true });
+    expect(focusedId()).toBe('e0');
+  });
+
+  it('does not scroll or load more when a new result set replaces the list while focus is elsewhere', () => {
+    const loadMore = vi.fn();
+    const onCursorChange = vi.fn();
+    const t = mount(page('e', 500), controlled, { loadMore, onCursorChange });
+    // The reader opened event 300 earlier, went back to the top with the mouse, and then clicked a facet.
+    act(() => {
+      t.table().focusRow(300);
+    });
+    flush();
+    expect(focusedId()).toBe('e300');
+    act(() => byTestId('elsewhere').focus());
+    scrollTo(0);
+    flush();
+    loadMore.mockClear();
+
+    act(() => t.harness().setRows(() => page('n', 100)));
+    flush();
+
+    expect(scroller().scrollTop).toBe(0);
+    expect(loadMore).not.toHaveBeenCalled();
+    expect(tabStops()).toEqual(['n0']);
+    expect(onCursorChange).toHaveBeenLastCalledWith(null);
+    expect(document.activeElement).toBe(byTestId('elsewhere'));
+    // Tabbing back in lands on the first row of the new results, and the arrows start from there.
+    act(() => {
+      t.table().focusCursor();
+    });
+    expect(focusedId()).toBe('n0');
+    key(rowOf('n0') as Element, 'ArrowDown');
+    expect(focusedId()).toBe('n1');
+  });
+
+  it('hands focus to the query field when a refetch empties the list under a focused row', () => {
+    const t = mount(page('e', 50), controlled);
+    act(() => {
+      t.table().focusRow(5);
+    });
+    expect(focusedId()).toBe('e5');
+    act(() => t.harness().setRows(() => []));
+    flush();
+    expect(host.querySelector('[role="grid"]')).toBeNull();
+    expect(document.activeElement).toBe(byTestId('query'));
+    expect(t.table().cursorElement()).toBeNull();
+  });
+
+  it('leaves focus alone when the list empties while another control has it', () => {
+    const t = mount(page('e', 50), controlled);
+    act(() => byTestId('elsewhere').focus());
+    act(() => t.harness().setRows(() => []));
+    flush();
+    expect(document.activeElement).toBe(byTestId('elsewhere'));
+  });
+
+  it('returns focus from the sheet to its row, or to the query field when the list emptied meanwhile', async () => {
+    const t = mount(page('e', 50), controlled, { sheet: true });
+    act(() => {
+      t.table().focusRow(4);
+    });
+    key(rowOf('e4') as Element, 'Enter');
+    await settle();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    key(document.activeElement as Element, 'Escape');
+    await settle();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(focusedId()).toBe('e4');
+
+    // Open it again; behind the modal sheet a refetch empties the list before it closes.
+    key(rowOf('e4') as Element, 'Enter');
+    await settle();
+    act(() => t.harness().setRows(() => []));
+    key(document.activeElement as Element, 'Escape');
+    await settle();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(byTestId('query'));
   });
 });
 
@@ -236,5 +373,27 @@ describe('EventsTable live tail at the top', () => {
     act(() => t.harness().setRows((rows) => [...page('live', 5), ...rows]));
     expect(scroller().scrollTop).toBe(0);
     expect(rowOf('live0')).not.toBeNull();
+  });
+});
+
+describe('EventsTable on a phone', () => {
+  beforeAll(() => Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 }));
+  afterAll(() => Object.defineProperty(window, 'innerWidth', { configurable: true, value: VIEW.width }));
+
+  it('renders one real gridcell per 64px row (not display: contents) and keeps the grid keys', () => {
+    mount(page('e', 100), false);
+    const row = rowOf('e0') as HTMLElement;
+    expect(host.querySelector('[role="columnheader"]')).toBeNull();
+    expect(host.querySelector('[role="grid"]')?.getAttribute('aria-colcount')).toBe('1');
+    const cells = row.querySelectorAll<HTMLElement>('[role="gridcell"]');
+    expect(cells).toHaveLength(1);
+    expect(cells[0]?.classList.contains('contents')).toBe(false);
+    expect(cells[0]?.classList.contains('flex')).toBe(true);
+    expect(row.style.height).toBe('64px');
+    expect(row.getAttribute('aria-rowindex')).toBe('1');
+    expect(row.hasAttribute('aria-selected')).toBe(false);
+    act(() => row.focus());
+    key(row, 'ArrowDown');
+    expect(focusedId()).toBe('e1');
   });
 });

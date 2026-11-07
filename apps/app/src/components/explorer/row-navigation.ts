@@ -47,8 +47,9 @@ export function nextRowIndex(key: string, current: number, count: number, page: 
 /**
  * Where the grid's cursor (its roving tab stop) is in `rows`. The cursor is an event id, so it follows its event when
  * live tail prepends rows or a refetch reorders them. When that event is gone (a filter removed it), the cursor falls
- * back to the row now at the last index it had, clamped to the list: `fallback` is then true and the caller moves the
- * cursor there for real. -1 when there are no rows.
+ * back to the row now at the last index it had, clamped to the list: `fallback` is then true and the caller decides —
+ * the events table keeps that place only while the grid has focus, and otherwise starts over at the top (a new result
+ * set). -1 when there are no rows.
  */
 export function resolveCursor(
   rows: readonly { id: string }[],

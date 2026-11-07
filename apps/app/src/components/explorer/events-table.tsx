@@ -77,8 +77,16 @@ interface EventsTableProps {
    * the first row). It follows `selectedId` whenever the selected event is in `rows`.
    */
   cursorId?: string | null;
-  /** The cursor moved to another event: arrow keys, a click, focus, the selection, or a fallback when its event left. */
-  onCursorChange?: (id: string) => void;
+  /**
+   * The cursor moved: to another event (arrow keys, a click, focus, the selection, the row now in its place when its
+   * event left while the grid had focus), or to `null` when a new result set replaced the list while focus was elsewhere.
+   */
+  onCursorChange?: (id: string | null) => void;
+  /**
+   * Where focus goes when the grid had it and the list becomes empty (a refetch or filter removed every row), e.g. the
+   * page's query or search input. Never used while focus is elsewhere.
+   */
+  focusFallback?: () => HTMLElement | null | undefined;
   /**
    * The row's accessible name. Focus lands on the row (not a cell), so screen readers announce this name rather than the
    * cells: anything meaningful a caller adds to a cell (a marker, a job hint) belongs here too. Defaults to `eventRowLabel`.
@@ -91,10 +99,17 @@ interface EventsTableProps {
  * Virtualized, infinite event table. TanStack Table owns the column model; TanStack Virtual the rows.
  *
  * Accessibility: an ARIA grid with a roving tab stop on the rows. Tab enters the grid on the cursor row; ↑/↓,
- * PageUp/PageDown and Home/End move focus between rows; Enter or Space opens the row. The cursor is an event id, so it
- * stays on its event when live tail prepends rows, and its row stays mounted even when scrolled away: focus never falls
- * back to <body>. Cells may hold their own controls (links): their keys stay with them, and focusing one moves the cursor
- * to — and so keeps mounted — the row that owns it.
+ * PageUp/PageDown and Home/End (or Ctrl+Home/End) move focus between rows; Enter or Space opens the row. The cursor is
+ * an event id, so it stays on its event when live tail prepends rows, and its row stays mounted even when scrolled away.
+ * When its event leaves the list while the grid has focus, focus moves to the row now in its place (or to
+ * `focusFallback` when no row is left), never to <body>. When a new result set replaces the list while focus is
+ * elsewhere, the cursor resets to the first row without scrolling or loading more.
+ *
+ * In-row controls (a link inside a cell) must follow this contract, because the row's `onClick` opens the event and has
+ * no target guard: give them `tabIndex={-1}` (the row is the tab stop; screen readers reach them through the row's
+ * cells) and stop click and key propagation (`event.stopPropagation()`) so activating one does not also open the row or
+ * move the cursor. Their keys never reach the row's grid keys, and focusing one moves the cursor to — and so keeps
+ * mounted — the row that owns it. Anything they convey belongs in `rowLabel` too.
  */
 export function EventsTable({
   rows,
@@ -112,6 +127,7 @@ export function EventsTable({
   cursorId,
   onCursorChange,
   rowLabel = eventRowLabel,
+  focusFallback,
   ref,
 }: EventsTableProps) {
   const isMobile = useIsMobile();
@@ -143,7 +159,7 @@ export function EventsTable({
   const cursorKeyRef = useRef(cursorKey);
   cursorKeyRef.current = cursorKey;
   const setCursor = useCallback(
-    (id: string) => {
+    (id: string | null) => {
       if (id === cursorKeyRef.current) return;
       cursorKeyRef.current = id;
       if (!controlled) setOwnCursor(id);
@@ -152,8 +168,16 @@ export function EventsTable({
     [controlled],
   );
   const lastCursorIndex = useRef(0);
+  // Whether focus is in the grid: if the focused row unmounts (its event was filtered out), the grid takes focus back.
+  const focusInside = useRef(false);
   // The tab stop: the cursor's row wherever its event is now; the first row while there is no cursor.
-  const { index: tabStop, fallback } = resolveCursor(rows, cursorKey, lastCursorIndex.current);
+  const resolved = resolveCursor(rows, cursorKey, lastCursorIndex.current);
+  // The cursor's event is gone. Only a focused grid keeps its place (the row now at the cursor's index takes focus); with
+  // focus elsewhere this is a new result set (a query, facet or range change): start over at the top, without scrolling
+  // the reader away from what they are looking at or loading another page.
+  const reset = resolved.fallback && !focusInside.current;
+  const fallback = resolved.fallback && !reset;
+  const tabStop = reset ? 0 : resolved.index;
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   const tabStopRef = useRef(tabStop);
@@ -166,6 +190,11 @@ export function EventsTable({
   useEffect(() => {
     if (fallbackId) setCursor(fallbackId);
   }, [fallbackId, setCursor]);
+  useEffect(() => {
+    if (!reset) return;
+    lastCursorIndex.current = 0;
+    setCursor(null);
+  }, [reset, setCursor]);
   // The cursor follows the open event (clicks, j/k in the sheet, deep links), so closing the sheet returns focus to it.
   useEffect(() => {
     if (selectedId && rows.some((r) => r.id === selectedId)) setCursor(selectedId);
@@ -208,8 +237,6 @@ export function EventsTable({
   }, [rowHeight, virtualizer]);
 
   /* ---------------- roving focus ---------------- */
-  // Whether focus is in the grid: if the focused row unmounts (its event was filtered out), the grid takes focus back.
-  const focusInside = useRef(false);
   // An event to focus as soon as its row mounts (a far jump).
   const pendingFocus = useRef<string | null>(null);
   const rowElement = useCallback((index: number) => scrollRef.current?.querySelector<HTMLElement>(`[role="row"][data-index="${index}"]`) ?? null, []);
@@ -241,6 +268,8 @@ export function EventsTable({
     },
     [setCursor, virtualizer, rowElement],
   );
+  const focusFallbackRef = useRef(focusFallback);
+  focusFallbackRef.current = focusFallback;
   useLayoutEffect(() => {
     const pending = pendingFocus.current;
     if (pending) {
@@ -259,7 +288,14 @@ export function EventsTable({
     // The focused row unmounted (its event was filtered out, the list was replaced) and focus fell to <body>: put it on
     // the tab stop, the row now in the cursor's place.
     const active = document.activeElement;
-    if (focusInside.current && tabStop >= 0 && (!active || active === document.body)) rowElement(tabStop)?.focus({ preventScroll: true });
+    if (!focusInside.current || (active && active !== document.body)) return;
+    if (tabStop >= 0) rowElement(tabStop)?.focus({ preventScroll: true });
+    else if (rows.length === 0) {
+      // No row is left to hold focus (the grid itself is gone): hand it to the page's fallback, e.g. the query input.
+      focusInside.current = false;
+      pendingFocus.current = null;
+      focusFallbackRef.current?.()?.focus();
+    }
   });
   useImperativeHandle(
     ref,
@@ -273,7 +309,9 @@ export function EventsTable({
 
   const onRowKeyDown = (ev: KeyboardEvent<HTMLDivElement>, index: number, e: AuditEvent) => {
     // Keys pressed on a control inside a cell (a link) belong to that control.
-    if (ev.target !== ev.currentTarget || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    if (ev.target !== ev.currentTarget || ev.altKey || ev.metaKey) return;
+    // Ctrl+Home/End are the APG grid keys for the first and last row; other Ctrl chords are not ours.
+    if (ev.ctrlKey && ev.key !== 'Home' && ev.key !== 'End') return;
     if (ev.key === 'Enter' || ev.key === ' ') {
       ev.preventDefault();
       onSelect(e);
@@ -351,9 +389,8 @@ export function EventsTable({
                 <div
                   aria-label={rowLabel(e)}
                   aria-rowindex={item.index + (isMobile ? 1 : 2)}
-                  aria-selected={selected}
                   className={cn(
-                    'absolute inset-x-0 cursor-pointer border-b border-border/60 px-2 text-[13px] outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+                    'absolute inset-x-0 cursor-pointer border-b border-border/60 px-2 text-[13px] outline-hidden transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
                     selected && 'bg-brand/[0.08] hover:bg-brand/[0.1]',
                     isCursor && !selected && 'bg-muted/60',
                     freshIds?.has(e.id) && 'tm-row-new',
@@ -375,7 +412,9 @@ export function EventsTable({
                   tabIndex={item.index === tabStop ? 0 : -1}
                 >
                   {isMobile ? (
-                    <div className="contents" role="gridcell">
+                    // A real box, not `display: contents`: older WebKit drops those from the accessibility tree, which would
+                    // leave the row without its gridcell.
+                    <div className="flex min-w-0 flex-col gap-1" role="gridcell">
                       <span className="flex min-w-0 items-center gap-2">
                         <OutcomeDot outcome={e.outcome} />
                         <span className="truncate" dir="auto">

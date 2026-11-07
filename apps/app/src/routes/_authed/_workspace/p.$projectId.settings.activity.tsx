@@ -54,6 +54,8 @@ function WorkspaceActivity() {
   const select = (e: AuditEvent | null | undefined) => navigate({ search: (prev) => ({ ...prev, ev: e?.id }), replace: true });
   // The table tracks its own keyboard cursor (by event id, following the open event); closing the sheet returns to it.
   const table = useRef<EventsTableHandle>(null);
+  // Where focus goes when no row is left to take it (an emptied list, the sheet closing over one).
+  const searchInput = useRef<HTMLInputElement>(null);
 
   return (
     <div className="flex min-h-[28rem] flex-1 flex-col">
@@ -70,6 +72,7 @@ function WorkspaceActivity() {
               className="ps-9"
               onChange={(e) => setDraft(e.target.value)}
               placeholder="Search activity…"
+              ref={searchInput}
               size="sm"
               value={draft}
             />
@@ -113,6 +116,7 @@ function WorkspaceActivity() {
               />
             }
             fetchingMore={activity.isFetchingNextPage}
+            focusFallback={() => searchInput.current}
             hasMore={activity.hasNextPage}
             loadMore={() => activity.fetchNextPage()}
             loading={activity.isPending}
@@ -127,7 +131,8 @@ function WorkspaceActivity() {
         event={selectedIndex >= 0 ? (rows[selectedIndex] ?? null) : null}
         fetchDetail={false}
         // Back to the row the sheet showed last (it may differ from the one opened, after prev/next): never to <body>.
-        finalFocus={() => table.current?.cursorElement() ?? true}
+        // With no rows left (a refetch emptied the list meanwhile), to the search field.
+        finalFocus={() => table.current?.cursorElement() ?? searchInput.current ?? true}
         onNext={selectedIndex >= 0 && selectedIndex < rows.length - 1 ? () => select(rows[selectedIndex + 1]) : undefined}
         onOpenChange={(open) => {
           if (!open) select(null);
