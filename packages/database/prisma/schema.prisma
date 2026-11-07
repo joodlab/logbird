@@ -246,10 +246,13 @@ model ExportLease {
   projectId String
   expiresAt DateTime
   weight Int @default(1)
+  receivedBefore DateTime @default(now())
+  invalidated Boolean @default(false)
 
   @@index([namespace, expiresAt])
   @@index([namespace, userId, expiresAt])
   @@index([namespace, workspaceId, expiresAt])
+  @@index([projectId, expiresAt])
 }
 
 // Membership-independent failed-auth staging. Legacy encrypted identities are quarantined; new rows hold only HMACs.

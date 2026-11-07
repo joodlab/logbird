@@ -13,6 +13,8 @@ try {
     ['Project', 'exportDeleteStartedAt'],
     ['Project', 'exportGeneration'],
     ['ExportLease', 'weight'],
+    ['ExportLease', 'receivedBefore'],
+    ['ExportLease', 'invalidated'],
   ])
     assert.ok(
       columns.some((c) => c.table_name === table && c.column_name === name),

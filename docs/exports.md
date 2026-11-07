@@ -7,14 +7,17 @@ its resolved range, compiled predicate/parameters and clock appear in the termin
 and SQL `now`, `now64`, `today`, `yesterday` calls stay fixed across pages. SQL clock functions need literal
 precision/time zones; use explicit timestamps for more complex expressions.
 
-Membership is the matching stored rows with `received_at <=` the frozen export start, ordered by occurrence time/id.
+Membership is the matching rows committed at the short admission boundary with `received_at <=` the frozen export start, ordered by occurrence time/id.
 Later received backdated rows are excluded on both sides of the cursor. The receive-time fence is applied to both
 the candidate lookup and the selected physical row. It uses stored receive timestamps, not a cross-replica wall-clock
 or transaction-commit ordering guarantee. Legacy duplicate arbitration remains the existing search policy.
 
 Retention/sample replacement advance a Postgres project generation **before** destructive I/O. Deletion persists
-a start marker before purging. Export preparation and the final validation take the existing short shared project
-lock and compare the generation/retention-run boundary. A changed boundary, in-progress/failed retention or deletion
+a start marker before purging. Export admission drains earlier ingests with the existing short exclusive project lock
+and commits its receive fence before allowing new writers in. Writers whose receive timestamps fall inside an active
+fence mark that export invalid **before** inserting into ClickHouse, covering delayed normalization and replica clock
+skew. Ordinary later-received writes stay excluded. Final validation takes the same short exclusive lock, drains prior
+writes and compares the lease invalidation flag and generation/retention-run boundary. A changed boundary, in-progress/failed retention or deletion
 fails the stream with `membership_changed`, rather than recording completion of an incomplete file. Discard the
 partial file and retry. No lock or Postgres transaction spans the download. Direct administrative ClickHouse writes
 that bypass these application fences require stopping exports first. This is not a general database snapshot.

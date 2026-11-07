@@ -8,7 +8,7 @@ import { resolver, validator } from 'hono-openapi';
 import { z } from 'zod';
 import { clickhouse, queryClickhouse } from './clickhouse';
 import { ApiError } from './errors';
-import { exportMembership, finishExport, releaseExport, renewExport, stageExport, validateExportMembership } from './export-outcomes';
+import { finishExport, releaseExport, renewExport, stageExport, validateExportMembership } from './export-outcomes';
 import { auditedExport } from './export-stream';
 import { ingest, readIngestBody, requireProjectReadable } from './ingest';
 import { requireApiKey, requireProjectAccess, requireSession } from './middlewares';
@@ -206,7 +206,6 @@ export const dataRoutes = new Hono<AppEnv>()
       c.header(s.EXPORT_SCHEMA_HEADER, `${input.format}/${s.EXPORT_SCHEMA_VERSION}`);
       const body = await auditedExport(
         async () => {
-          membership = await exportMembership(project.id);
           const client = queryClient(input);
           resolved = await ch.prepareExport(client, input, clock);
           return ch.exportEvents(client, project.id, input, resolved);
@@ -230,7 +229,7 @@ export const dataRoutes = new Hono<AppEnv>()
               ? `Started a ${formatName} export of ${project.name}`
               : action === 'export.completed'
                 ? `Exported ${counts.rows} ${noun} from ${project.name} as ${formatName}`
-                : `${formatName} export of ${project.name} stopped after ${counts.rows} ${noun} (${reasons[counts.reason ?? 'export_error']})`;
+                : `${reasons[counts.reason ?? 'export_error']} after ${counts.rows} ${noun}: ${formatName} export of ${project.name}`;
           const event: AuditPayload = {
             id: `${exportId}-${action.split('.')[1]}`,
             occurredAt: new Date().toISOString(),
@@ -274,7 +273,7 @@ export const dataRoutes = new Hono<AppEnv>()
               id: `${exportId}-outcome`,
               action: 'export.outcome_unknown',
               outcome: 'unknown',
-              description: `Export ${exportId.slice(0, 8)}: ${formatName} export of ${project.name} has no confirmed outcome (producer outcome not confirmed)`,
+              description: `Export ${exportId.slice(0, 8)}: Outcome unknown for ${formatName} export of ${project.name} (producer outcome not confirmed)`,
               metadata: {
                 export: {
                   ...(event.metadata as { export: Prisma.InputJsonObject }).export,
@@ -293,7 +292,9 @@ export const dataRoutes = new Hono<AppEnv>()
               requested: event,
               unknown,
               sql: input.lang === 'sql',
+              receivedBefore: new Date(clock),
             });
+            membership = requested.membership;
             heartbeat = setInterval(() => {
               void renewExport(exportId).catch(() =>
                 expired.abort(new ApiError(503, 'export_lease_expired', 'The export lease could not be renewed. Retry.')),
@@ -310,7 +311,7 @@ export const dataRoutes = new Hono<AppEnv>()
         AbortSignal.any([c.req.raw.signal, expired.signal]),
         exportId,
         {
-          beforeComplete: () => validateExportMembership(project.id, membership),
+          beforeComplete: () => validateExportMembership(project.id, membership, exportId),
           onSettled: async (action) => {
             clearInterval(heartbeat);
             await releaseExport(exportId, action);

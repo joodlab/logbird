@@ -7,14 +7,21 @@ import { drainAuditOutbox } from './outbox-delivery';
 it('atomically reserves terminal evidence, recovers write failures/crashes, and bounds replica admission', async () => {
   const ids: string[] = [];
   const namespace = auditNamespace();
+  const organizationId = `qa-export-outcome-${randomUUID()}`;
+  await prisma.organization.create({ data: { id: organizationId, name: 'QA Export outcome recovery', slug: organizationId, createdAt: new Date() } });
+  const projects = await prisma.project.createManyAndReturn({
+    data: [0, 1, 2].map((index) => ({ organizationId, name: `QA Export outcome ${index}`, slug: `outcome-${index}` })),
+  });
   const make = () => {
     const id = randomUUID();
     ids.push(id);
+    const project = projects[ids.length % projects.length];
+    if (!project) throw new Error('Fictional project missing');
     return {
       id,
       userId: `qa-export-${id}`,
       workspaceId: `qa-export-${id}`,
-      projectId: `qa-export-${id}`,
+      projectId: project.id,
       stream: `ws:qa-export-${id}`,
       requested: { id: `${id}-requested`, action: 'export.requested' },
       unknown: { id: `${id}-outcome`, action: 'export.outcome_unknown' },
@@ -106,5 +113,6 @@ it('atomically reserves terminal evidence, recovers write failures/crashes, and 
     vi.restoreAllMocks();
     await prisma.auditOutbox.deleteMany({ where: { namespace, stream: { in: ids.map((id) => `ws:qa-export-${id}`) } } });
     await prisma.exportLease.deleteMany({ where: { namespace, id: { in: ids } } });
+    await prisma.organization.delete({ where: { id: organizationId } });
   }
 });

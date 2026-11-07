@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { purgeProject } from '@logbird/clickhouse';
-import { createProjectResponseSchema, exportEvidenceRowSchema } from '@logbird/contracts';
+import { createProjectResponseSchema, EXPORT_FORMAT_LABELS, exportEvidenceRowSchema } from '@logbird/contracts';
 import { prisma, storeAuditEvent } from '@logbird/database';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { expect, it, vi } from 'vitest';
@@ -83,10 +83,11 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     const result = createProjectResponseSchema.parse(await createdProject.json());
     project = result.project;
     const projectId = project.id;
+    const eventClock = Date.now();
     const events = Array.from({ length: 205 }, (_, i) => ({
       id: `export-${i.toString().padStart(3, '0')}`,
       action: 'evidence.updated',
-      occurredAt: new Date().toISOString(),
+      occurredAt: new Date(eventClock).toISOString(),
       actor: { id: 'effective', name: '=1+1', type: 'user' },
       impersonator: { id: 'support', name: 'Support' },
       executor: { type: 'worker', id: 'worker', jobId: 'job', attempt: 2 },
@@ -108,7 +109,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     ).toBe(202);
     const query = `from=${encodeURIComponent(new Date(Date.now() - 60_000).toISOString())}&to=${encodeURIComponent(new Date(Date.now() + 60_000).toISOString())}&q=action:evidence.updated`;
     for (const actor of actors) {
-      for (const format of ['jsonl', 'csv', 'jsonl-evidence']) {
+      for (const format of ['jsonl', 'csv', 'jsonl-evidence'] as const) {
         const response = await request(actor.cookie, `/api/projects/${projectId}/export?${query}&format=${format}`);
         expect(response.status).toBe(200);
         const exportId = response.headers.get('X-Logbird-Export-Id');
@@ -127,6 +128,8 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
           expect(row.metadata.export.exportId).toBe(exportId);
           expect(row.description).toContain(exportId?.slice(0, 8));
           expect(row.metadata.export).toMatchObject({ format, query: 'action:evidence.updated', projectId });
+          expect(row.metadata.export.formatLabel).toBe(EXPORT_FORMAT_LABELS[format]);
+          expect(row.description).toContain(EXPORT_FORMAT_LABELS[format]);
           expect(row.metadata.export.from).toMatch(/Z$/);
           expect(row).not.toHaveProperty('changes');
           expect(JSON.stringify(row)).not.toContain('longEvidence');
@@ -214,16 +217,20 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
       rejected.mockRestore();
     }
     // Retention starts after the first page. Both timestamp orderings must fail closed at final validation.
-    for (const lateTimestamp of [new Date(Date.now() - 30_000), new Date(Date.now() + 30_000)]) {
-      const paused = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
+    for (const lateTimestamp of [new Date(eventClock - 30_000), new Date(eventClock + 30_000)]) {
+      const fastClock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60_000);
+      let paused: Response;
+      try {
+        paused = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
+      } finally {
+        fastClock.mockRestore();
+      }
       if (!paused.body) throw new Error('Export body missing');
       const reader = paused.body.getReader();
       await reader.read();
-      const run = await prisma.retentionRun.create({
-        data: { projectId, retentionDays: 90, cutoff: new Date(), status: 'completed', finishedAt: new Date() },
-      });
-      // A newly ingested event is fenced out whether it sorts behind or ahead of the cursor.
+      // A slow-clock/delayed writer can have a receive timestamp inside the fence. It must invalidate the export.
       await ingestion.ingest(projectId, { id: randomUUID(), action: 'evidence.updated', occurredAt: lateTimestamp.toISOString() });
+      expect((await prisma.exportLease.findUniqueOrThrow({ where: { id: paused.headers.get('X-Logbird-Export-Id') ?? '' } })).invalidated).toBe(true);
       let failed = false;
       try {
         while (!(await reader.read()).done) {
@@ -235,7 +242,6 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
       expect(failed).toBe(true);
       const terminal = (await receipts(paused.headers.get('x-request-id') ?? '')).find((row) => row.action === 'export.failed');
       expect(terminal.metadata.export.reason).toBe('membership_changed');
-      await prisma.retentionRun.delete({ where: { id: run.id } });
     }
     await ingestion.ingest(
       projectId,

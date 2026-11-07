@@ -8,26 +8,24 @@ async function leaseClock(tx: Prisma.TransactionClient, override?: Date) {
   return override ?? (await tx.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() now`)[0].now;
 }
 
-/** Hold a project lock only for the boundary check, never for the whole download. */
-export const exportMembership = (projectId: string) =>
-  withProjectLock(
-    projectId,
-    async () => {
-      const project = await prisma.project.findUnique({
-        where: { id: projectId },
-        select: { id: true, exportDeleteStartedAt: true, exportGeneration: true },
-      });
-      const run = await prisma.retentionRun.findFirst({ where: { projectId }, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }] });
-      if (!project || project.exportDeleteStartedAt || run?.status === 'running' || run?.status === 'failed') throw unavailable();
-      return `${project.exportGeneration}:${run?.id ?? ''}`;
-    },
-    { mode: 'shared' },
-  ).catch(() => {
+/** Caller holds the exclusive project boundary lock; never hold it over a download. */
+async function readMembership(db: Prisma.TransactionClient, projectId: string) {
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    select: { id: true, exportDeleteStartedAt: true, exportGeneration: true },
+  });
+  const run = await db.retentionRun.findFirst({ where: { projectId }, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }] });
+  if (!project || project.exportDeleteStartedAt || run?.status === 'running' || run?.status === 'failed') throw unavailable();
+  return `${project.exportGeneration}:${run?.id ?? ''}`;
+}
+
+export async function validateExportMembership(projectId: string, initial: string | null, id: string) {
+  await withProjectLock(projectId, async (db) => {
+    const lease = await db.exportLease.findUnique({ where: { id } });
+    if (!lease || lease.invalidated || (await readMembership(db, projectId)) !== initial) throw unavailable();
+  }).catch(() => {
     throw unavailable();
   });
-
-export async function validateExportMembership(projectId: string, initial: string | null) {
-  if ((await exportMembership(projectId)) !== initial) throw unavailable();
 }
 
 /** Requested evidence, unknown-outcome fallback and cross-replica admission commit together. */
@@ -41,32 +39,46 @@ export async function stageExport(
     requested: AuditPayload;
     unknown: AuditPayload;
     sql?: boolean;
+    receivedBefore?: Date;
   },
   at?: Date,
 ) {
   const namespace = auditNamespace();
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${namespace}:exports`},0))`;
-    const now = await leaseClock(tx, at);
-    const active = { namespace, expiresAt: { gt: now } };
-    const [total, user, workspace] = await Promise.all([
-      tx.exportLease.aggregate({ where: active, _sum: { weight: true } }),
-      tx.exportLease.count({ where: { ...active, userId: input.userId } }),
-      tx.exportLease.count({ where: { ...active, workspaceId: input.workspaceId } }),
-    ]);
-    const weight = input.sql ? 2 : 1;
-    if ((total._sum.weight ?? 0) + weight > EXPORT_CONCURRENCY || user >= 1 || workspace >= 2)
-      throw new ApiError(429, 'export_busy', 'An export is already running. Finish or cancel it, then retry.');
-    const expiresAt = new Date(+now + EXPORT_LEASE_MS);
-    await tx.exportLease.create({
-      data: { id: input.id, namespace, userId: input.userId, workspaceId: input.workspaceId, projectId: input.projectId, expiresAt, weight },
-    });
-    const requested = await storeAuditEvent(input.stream, input.requested, tx);
-    await tx.auditOutbox.create({
-      data: { ...freezeAuditEvent(input.unknown), stream: input.stream, namespace, confirmedAt: null, awaitingUntil: expiresAt },
-    });
-    return requested;
-  });
+  // Drain earlier writers, then register the fence before letting new writers enter.
+  return withProjectLock(input.projectId, () =>
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${namespace}:exports`},0))`;
+      const now = await leaseClock(tx, at);
+      const membership = await readMembership(tx, input.projectId);
+      const active = { namespace, expiresAt: { gt: now } };
+      const [total, user, workspace] = await Promise.all([
+        tx.exportLease.aggregate({ where: active, _sum: { weight: true } }),
+        tx.exportLease.count({ where: { ...active, userId: input.userId } }),
+        tx.exportLease.count({ where: { ...active, workspaceId: input.workspaceId } }),
+      ]);
+      const weight = input.sql ? 2 : 1;
+      if ((total._sum.weight ?? 0) + weight > EXPORT_CONCURRENCY || user >= 1 || workspace >= 2)
+        throw new ApiError(429, 'export_busy', 'An export is already running. Finish or cancel it, then retry.');
+      const expiresAt = new Date(+now + EXPORT_LEASE_MS);
+      await tx.exportLease.create({
+        data: {
+          id: input.id,
+          namespace,
+          userId: input.userId,
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          expiresAt,
+          weight,
+          receivedBefore: input.receivedBefore ?? now,
+        },
+      });
+      const requested = await storeAuditEvent(input.stream, input.requested, tx);
+      await tx.auditOutbox.create({
+        data: { ...freezeAuditEvent(input.unknown), stream: input.stream, namespace, confirmedAt: null, awaitingUntil: expiresAt },
+      });
+      return { ...requested, membership };
+    }),
+  );
 }
 
 export async function renewExport(id: string, at?: Date) {
