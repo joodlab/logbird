@@ -7,14 +7,12 @@ export function ScreenshotFrame({
   id,
   caption,
   sizes = '(min-width: 1152px) 1104px, calc(100vw - 2rem)',
-  priority = false,
   className,
   label,
 }: {
   id: string;
   caption?: string;
   sizes?: string;
-  priority?: boolean;
   className?: string;
   /** Text in the window bar, e.g. the console page shown. */
   label?: string;
@@ -28,7 +26,7 @@ export function ScreenshotFrame({
           <i />
           {label ? <span className="ms-2 truncate font-mono text-[11px] text-muted-foreground">{label}</span> : null}
         </div>
-        <Screenshot id={id} priority={priority} sizes={sizes} />
+        <Screenshot id={id} sizes={sizes} />
       </div>
       {caption ? <figcaption className="text-muted-foreground text-sm">{caption}</figcaption> : null}
     </figure>

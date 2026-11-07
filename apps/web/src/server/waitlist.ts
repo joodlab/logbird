@@ -3,21 +3,36 @@ import { type WaitlistRecord, waitlistSchema } from '../lib/waitlist-schema';
 const MAX_BODY = 8192;
 interface WaitlistDependencies {
   store: (record: WaitlistRecord) => Promise<void>;
-  allowedOrigin: string;
+  /** Origins a browser may post from (the site's own origin, plus explicit extras). */
+  allowedOrigins: string[];
   /** The adapter must use a trusted platform/socket address, never an arbitrary forwarding header. */
   ip: string;
   limiter: ReturnType<typeof createRateLimiter>;
   now?: () => number;
 }
-export function createRateLimiter() {
+/**
+ * Five submissions per client per minute. Per process (per isolate on Cloudflare): bind a Cloudflare Rate Limiting
+ * rule before opening the waitlist there. Memory is bounded: expired buckets are swept at most once a second, and
+ * while MAX_CLIENTS buckets are live, new clients are refused rather than tracked.
+ */
+const MAX_CLIENTS = 10_000;
+export function createRateLimiter(maxClients = MAX_CLIENTS) {
   const clients = new Map<string, { count: number; until: number }>();
+  let sweptAt = 0;
   return (ip: string, now: number) => {
-    for (const [key, value] of clients) {
-      if (value.until <= now) {
-        clients.delete(key);
+    if (now - sweptAt >= 1000) {
+      sweptAt = now;
+      for (const [key, value] of clients) {
+        if (value.until <= now) {
+          clients.delete(key);
+        }
       }
     }
-    const bucket = clients.get(ip) ?? { count: 0, until: now + 60_000 };
+    const existing = clients.get(ip);
+    if (!existing && clients.size >= maxClients) {
+      return false;
+    }
+    const bucket = existing ?? { count: 0, until: now + 60_000 };
     bucket.count += 1;
     clients.set(ip, bucket);
     return bucket.count <= 5;
@@ -28,10 +43,11 @@ export async function handleWaitlist(request: Request, deps: WaitlistDependencie
   const form = contentType === 'application/x-www-form-urlencoded';
   const respond = (status: number, code?: string, message?: string, details?: unknown) => {
     if (form) {
-      const outcome = status === 200 ? 'ok' : 'error';
+      // The status code travels back to the static page: the fragment targets a no-JS message for exactly this outcome,
+      // and the query parameter drives the message after hydration.
+      const outcome = status === 200 ? 'ok' : (code ?? 'error');
       return new Response(null, {
         status: 303,
-        // A fragment gives static HTML a no-JS feedback target; query state is used after hydration.
         headers: { Location: `/contact?status=${outcome}#waitlist-${outcome}`, 'Cache-Control': 'no-store' },
       });
     }
@@ -41,7 +57,7 @@ export async function handleWaitlist(request: Request, deps: WaitlistDependencie
     });
   };
   const origin = request.headers.get('origin');
-  if (origin && origin !== deps.allowedOrigin) {
+  if (origin && !deps.allowedOrigins.includes(origin)) {
     return respond(400, 'invalid_origin', 'Submit this form from the website.');
   }
   if (!deps.limiter(deps.ip, (deps.now ?? Date.now)())) {

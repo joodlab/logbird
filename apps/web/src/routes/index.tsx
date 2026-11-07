@@ -8,7 +8,9 @@ import { ScreenshotFrame } from '../components/marketing/frame';
 import { Guarantees } from '../components/marketing/guarantees';
 import { LogStack } from '../components/marketing/log-stack';
 import { Eyebrow, Feature, Section, SectionHeader } from '../components/marketing/section';
+import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { Architecture, Steps } from '../components/marketing/steps';
+import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import { DESIGN_PARTNER_LINE } from '../lib/copy-flags';
 import { pageHead } from '../lib/seo';
 
@@ -45,7 +47,8 @@ new Worker('refunds', async (job) => {
   await audit.pending();
 });`;
 
-const selfHost = `git clone https://github.com/joodlab/logbird.git
+// Only rendered once the repository is public (GITHUB_PUBLIC); the URL comes from config.
+const selfHost = `git clone ${GITHUB_URL}.git
 cd logbird
 sh scripts/selfhost-init.sh
 docker compose up -d`;
@@ -61,7 +64,6 @@ function HomePage() {
             caption="The explorer: search, facets, a histogram you can zoom, and every event in a dense table."
             id="explorer"
             label="Explorer"
-            priority
           />
         </div>
       </section>
@@ -82,7 +84,7 @@ function HomePage() {
               </li>
               <li className="text-sm leading-relaxed">
                 <strong className="font-medium">Middleware</strong>
-                <span className="text-muted-foreground"> for Hono, TanStack Start, Vue and Nuxt.</span>
+                <span className="text-muted-foreground"> for Hono, TanStack Start and Nuxt; a Vue read composable.</span>
               </li>
               <li className="text-sm leading-relaxed">
                 <strong className="font-medium">
@@ -213,21 +215,35 @@ function HomePage() {
               </li>
             </ul>
             <div className="flex flex-wrap gap-3">
-              <ButtonLink to="/self-hosting" variant="outline">
-                Self-host it
-              </ButtonLink>
+              <SelfHostCta size="default" />
               <ButtonLink to="/open-source" variant="ghost">
                 What's in the repository
               </ButtonLink>
             </div>
           </div>
-          <div className="flex min-w-0 flex-col gap-3">
-            <SiteCode code={selfHost} language="bash" title="Self-host quickstart" />
-            <p className="text-muted-foreground text-sm">
-              Then open <code>http://localhost:4600</code>, sign in with the emailed code and create a project. Configure SMTP first, or enable
-              sign-in codes in the server log.
-            </p>
-          </div>
+          {GITHUB_PUBLIC ? (
+            <div className="flex min-w-0 flex-col gap-3">
+              <SiteCode code={selfHost} language="bash" title="Self-host quickstart" />
+              <p className="text-muted-foreground text-sm">
+                Then open <code>http://localhost:4600</code>, sign in with the emailed code and create a project. Configure SMTP first, or enable
+                sign-in codes in the server log.
+              </p>
+            </div>
+          ) : (
+            <div className="panel flex min-w-0 flex-col gap-4 p-6 md:p-8">
+              <p className="eyebrow">Self-host quickstart</p>
+              <p className="font-semibold text-lg">Available when the repository opens.</p>
+              <p className="text-muted-foreground text-sm leading-relaxed">
+                Four commands on one VM: clone, generate secrets, configure SMTP, <code>docker compose up -d</code>. We'll publish them here the day
+                the source is public.
+              </p>
+              <div>
+                <ButtonLink search={{ interest: 'self-host' }} to="/contact" variant="outline">
+                  Tell me when it opens
+                </ButtonLink>
+              </div>
+            </div>
+          )}
         </div>
       </Section>
 
@@ -284,17 +300,17 @@ function Hero() {
             <ButtonLink size="lg" to="/contact">
               Join the waitlist
             </ButtonLink>
-            <ButtonLink size="lg" to="/self-hosting" variant="outline">
-              Self-host it
-            </ButtonLink>
+            <SelfHostCta />
           </div>
-          <p className="text-muted-foreground text-sm">Source on GitHub — coming soon. Logbird Cloud is not open yet.</p>
+          <p className="text-muted-foreground text-sm">
+            {GITHUB_PUBLIC ? 'Logbird Cloud is not open yet.' : 'Source on GitHub — coming soon. Logbird Cloud is not open yet.'}
+          </p>
         </div>
         <div className="flex min-w-0 flex-col gap-4">
           <LogStack className="hidden sm:flex" />
           <LogStack className="sm:hidden" limit={3} />
           <div className="flex min-w-0 flex-col gap-2">
-            <SiteCode code={curl} language="bash" title="Send your first event" />
+            <SiteCode code={curl} language="bash" title="Send your first event" wrap />
             <p className="text-muted-foreground text-sm">
               That's a valid event. Only <code>action</code> is required.
             </p>

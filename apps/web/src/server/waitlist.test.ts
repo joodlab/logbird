@@ -16,7 +16,7 @@ const req = (input: unknown = valid, headers: Record<string, string> = {}) =>
   });
 const dependencies = () => ({
   store: vi.fn(async () => undefined),
-  allowedOrigin: origin,
+  allowedOrigins: [origin],
   ip: '192.0.2.1',
   limiter: createRateLimiter(),
   now: () => 1000,
@@ -63,7 +63,7 @@ describe('waitlist boundary', () => {
   it('redirects native form submissions for success and validation errors', async () => {
     for (const [email, status] of [
       ['test-waitlist@example.test', 'ok'],
-      ['invalid', 'error'],
+      ['invalid', 'validation_error'],
     ]) {
       const request = new Request(`${origin}/api/waitlist`, {
         method: 'POST',
@@ -74,6 +74,24 @@ describe('waitlist boundary', () => {
       expect(response.status).toBe(303);
       expect(response.headers.get('Location')).toBe(`/contact?status=${status}#waitlist-${status}`);
     }
+  });
+  it('bounds the limiter: new clients are refused while the table is full, and old buckets are swept', () => {
+    const limiter = createRateLimiter(2);
+    expect(limiter('a', 0)).toBe(true);
+    expect(limiter('b', 0)).toBe(true);
+    expect(limiter('c', 0)).toBe(false);
+    expect(limiter('c', 61_000)).toBe(true);
+  });
+  it('accepts only the listed origins', async () => {
+    const response = await handleWaitlist(
+      new Request(`${origin}/api/waitlist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://elsewhere.example.test' },
+        body: JSON.stringify({ email: 'test-waitlist@example.test', interest: 'cloud' }),
+      }),
+      dependencies(),
+    );
+    expect(response.status).toBe(400);
   });
   it('reports storage failure as unavailable without exposing details', async () => {
     const response = await handleWaitlist(req(), {

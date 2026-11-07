@@ -10,6 +10,11 @@ export interface SitePage {
   inFooter?: boolean;
   /** Shorter label for the footer, when the title is long. */
   footerTitle?: string;
+  /**
+   * Designed and approved for publishing. Pages that aren't ready render a placeholder, are `noindex`, and are left out
+   * of the nav, footer, sitemap and llms.txt. Each page PR flips its own flag.
+   */
+  ready: boolean;
 }
 export const siteMap: SitePage[] = [
   {
@@ -19,6 +24,7 @@ export const siteMap: SitePage[] = [
     section: 'product',
     priority: 1,
     changefreq: 'daily',
+    ready: true,
     ogSlug: 'home',
     inNav: false,
     inFooter: false,
@@ -30,6 +36,7 @@ export const siteMap: SitePage[] = [
     section: 'product',
     priority: 0.9,
     changefreq: 'weekly',
+    ready: false,
     ogSlug: 'product',
     inNav: true,
     inFooter: true,
@@ -42,6 +49,7 @@ export const siteMap: SitePage[] = [
     section: 'developers',
     priority: 0.9,
     changefreq: 'weekly',
+    ready: false,
     ogSlug: 'developers',
     inNav: true,
     inFooter: true,
@@ -54,6 +62,7 @@ export const siteMap: SitePage[] = [
     section: 'developers',
     priority: 0.9,
     changefreq: 'weekly',
+    ready: false,
     ogSlug: 'self-hosting',
     inNav: true,
     inFooter: true,
@@ -65,6 +74,7 @@ export const siteMap: SitePage[] = [
     section: 'product',
     priority: 0.9,
     changefreq: 'weekly',
+    ready: false,
     ogSlug: 'cloud',
     inNav: true,
     inFooter: true,
@@ -76,6 +86,7 @@ export const siteMap: SitePage[] = [
     section: 'developers',
     priority: 0.8,
     changefreq: 'monthly',
+    ready: false,
     ogSlug: 'open-source',
     inNav: true,
     inFooter: true,
@@ -87,6 +98,7 @@ export const siteMap: SitePage[] = [
     section: 'company',
     priority: 0.7,
     changefreq: 'monthly',
+    ready: false,
     ogSlug: 'security',
     inNav: false,
     inFooter: true,
@@ -99,6 +111,7 @@ export const siteMap: SitePage[] = [
     section: 'compare',
     priority: 0.8,
     changefreq: 'monthly',
+    ready: false,
     ogSlug: 'compare',
     inNav: true,
     inFooter: true,
@@ -111,6 +124,7 @@ export const siteMap: SitePage[] = [
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',
+    ready: false,
     ogSlug: 'compare-retraced',
     inNav: false,
     inFooter: true,
@@ -123,6 +137,7 @@ export const siteMap: SitePage[] = [
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',
+    ready: false,
     ogSlug: 'compare-workos-audit-logs',
     inNav: false,
     inFooter: true,
@@ -135,6 +150,7 @@ export const siteMap: SitePage[] = [
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',
+    ready: false,
     ogSlug: 'compare-pangea',
     inNav: false,
     inFooter: true,
@@ -147,6 +163,7 @@ export const siteMap: SitePage[] = [
     section: 'compare',
     priority: 0.7,
     changefreq: 'monthly',
+    ready: false,
     ogSlug: 'compare-bemi',
     inNav: false,
     inFooter: true,
@@ -158,6 +175,7 @@ export const siteMap: SitePage[] = [
     section: 'resources',
     priority: 0.6,
     changefreq: 'weekly',
+    ready: false,
     ogSlug: 'changelog',
     inNav: false,
     inFooter: true,
@@ -169,6 +187,7 @@ export const siteMap: SitePage[] = [
     section: 'resources',
     priority: 0.6,
     changefreq: 'weekly',
+    ready: false,
     ogSlug: 'blog',
     inNav: false,
     inFooter: true,
@@ -180,6 +199,7 @@ export const siteMap: SitePage[] = [
     section: 'resources',
     priority: 0.3,
     changefreq: 'monthly',
+    ready: false,
     ogSlug: 'blog-draft',
     inNav: false,
     inFooter: false,
@@ -191,6 +211,7 @@ export const siteMap: SitePage[] = [
     section: 'company',
     priority: 0.6,
     changefreq: 'monthly',
+    ready: false,
     ogSlug: 'about',
     inNav: false,
     inFooter: true,
@@ -198,10 +219,11 @@ export const siteMap: SitePage[] = [
   {
     path: '/contact',
     title: 'Contact',
-    description: 'Contact page content is being prepared.',
+    description: 'Join the Logbird Cloud waitlist or send us a question. We store your email only to contact you about Logbird. No trackers.',
     section: 'company',
     priority: 0.7,
     changefreq: 'monthly',
+    ready: true,
     ogSlug: 'contact',
     inNav: false,
     inFooter: true,
@@ -213,6 +235,7 @@ export const siteMap: SitePage[] = [
     section: 'legal',
     priority: 0.3,
     changefreq: 'yearly',
+    ready: false,
     ogSlug: 'privacy',
     inNav: false,
     inFooter: true,
@@ -224,6 +247,7 @@ export const siteMap: SitePage[] = [
     section: 'legal',
     priority: 0.3,
     changefreq: 'yearly',
+    ready: false,
     ogSlug: 'terms',
     inNav: false,
     inFooter: true,
@@ -235,10 +259,13 @@ export const siteMap: SitePage[] = [
     section: 'resources',
     priority: 0,
     changefreq: 'yearly',
+    ready: false,
     ogSlug: '404',
   },
 ];
 export const staticPages = siteMap.filter((page) => !page.path.includes('$') && page.path !== '/404');
+/** Pages that are linked from the nav/footer and listed in the sitemap and llms.txt. */
+export const publishedPages = staticPages.filter((page) => page.ready);
 /** The draft route is exercised in static output but deliberately never indexed. */
 export const prerenderPaths = [...staticPages.map((page) => page.path), '/blog/draft'];
 export function getPage(path: string): SitePage {

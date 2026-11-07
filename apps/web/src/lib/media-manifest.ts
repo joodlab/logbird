@@ -1,91 +1,127 @@
-export interface ScreenshotEntry {
-  id: string;
+/**
+ * Real console captures shown on the site. Sources live in marketing/captures (Git LFS); scripts/media.ts encodes them.
+ *
+ * Every entry comes from the fictional "QA Azure Hotels" workspace (marketing/captures/2026-11-07-site-console/README.md).
+ * Mark an entry `interim: true` when its capture still shows anything that may not be published (a real customer or
+ * workspace name, a person's name, a timing). The Cloudflare build refuses to package while any entry is interim, and
+ * every page is noindex + robots `Disallow: /` until then (see src/lib/release.ts).
+ */
+export interface Variant {
   light: string;
   dark?: string;
-  alt: string;
   width: number;
   height: number;
+}
+export interface ScreenshotEntry extends Variant {
+  id: string;
+  alt: string;
+  /** A narrow capture served below 640px instead of a shrunken desktop one. */
+  phone?: Variant;
+  interim?: boolean;
 }
 export interface VideoEntry {
   id: string;
   src: string;
   poster: string;
   alt: string;
+  interim?: boolean;
 }
+
+const C = 'marketing/captures/2026-11-07-site-console';
+const desktop = { width: 1440, height: 900 };
+const phone = { width: 390, height: 844 };
+
 export const screenshots: ScreenshotEntry[] = [
   {
     id: 'explorer',
-    light: 'marketing/captures/2026-11-06-logbird-rename/04-explorer-light.png',
-    dark: 'marketing/captures/2026-11-06-logbird-rename/05-explorer-dark.png',
-    alt: 'The event explorer shows a timeline histogram, filters and a table of audit events.',
-    width: 1280,
-    height: 800,
+    light: `${C}/explorer-light.png`,
+    dark: `${C}/explorer-dark.png`,
+    ...desktop,
+    phone: { light: `${C}/phone-explorer-light.png`, dark: `${C}/phone-explorer-dark.png`, ...phone },
+    alt: 'The explorer filtered to booking actions: a histogram of the last seven days, facets for outcome, severity and action, and a table of events.',
   },
   {
     id: 'overview',
-    light: 'marketing/captures/2026-11-06-logbird-rename/03-overview-light.png',
-    dark: 'marketing/captures/2026-11-06-logbird-rename/06-overview-dark.png',
-    alt: 'The overview shows an integration checklist, event summary cards and an empty outcome chart.',
-    width: 1280,
-    height: 800,
+    light: `${C}/overview-light.png`,
+    dark: `${C}/overview-dark.png`,
+    ...desktop,
+    alt: 'The overview: event, actor and tenant counts, failure rate, average conformance, events by outcome, and the top actions, actors, tenants and executors.',
   },
   {
     id: 'event-sheet',
-    light: 'marketing/captures/2026-11-05-final-walkthrough/04-event-sheet.png',
-    dark: 'marketing/captures/2026-11-05-final-walkthrough/13-dark-event-sheet.png',
-    alt: 'An event detail sheet shows an audit event alongside the event explorer.',
-    width: 1440,
-    height: 900,
+    light: `${C}/event-sheet-light.png`,
+    dark: `${C}/event-sheet-dark.png`,
+    ...desktop,
+    phone: { light: `${C}/phone-event-sheet-light.png`, dark: `${C}/phone-event-sheet-dark.png`, ...phone },
+    alt: 'An event in detail: the actor and executor cards, the tenant, two target records, the status change from pending to confirmed, and the causation chain.',
+  },
+  {
+    id: 'impersonation',
+    light: `${C}/impersonation-light.png`,
+    ...desktop,
+    alt: 'An event where a support agent acted for a customer: the customer is the actor, and the support agent appears on a separate impersonator card.',
   },
   {
     id: 'operation',
-    light: 'marketing/captures/2026-11-05-final-walkthrough/05-operation.png',
-    alt: 'The operation page shows a failed delivery event and its operation summary.',
-    width: 1440,
-    height: 900,
+    light: `${C}/operation-light.png`,
+    ...desktop,
+    alt: 'An operation tree: a scheduler request, the worker jobs it started, two failed attempts and the retries that succeeded, each with its executor and attempt number.',
   },
   {
     id: 'sql',
-    light: 'marketing/captures/2026-11-05-final-walkthrough/qb-22-sql-results.png',
-    dark: 'marketing/captures/2026-11-05-final-walkthrough/qb-28-dark-sql.png',
-    alt: 'The explorer shows a SQL query above a histogram and a table of matching events.',
-    width: 1440,
-    height: 900,
+    light: `${C}/sql-light.png`,
+    dark: `${C}/sql-dark.png`,
+    ...desktop,
+    alt: "SQL mode with the expression job_attempt > 1 AND outcome = 'success', a histogram and the matching events.",
   },
   {
-    id: 'retention',
-    light: 'marketing/captures/2026-11-05-final-walkthrough/10-retention-preview.png',
-    alt: 'Retention settings show a shorter retention window and a warning about permanent event deletion.',
-    width: 1440,
-    height: 900,
+    id: 'sql-rejected',
+    light: `${C}/sql-rejected-light.png`,
+    ...desktop,
+    alt: 'SQL mode rejecting a subquery before it runs, with the message that subqueries are not allowed.',
+  },
+  {
+    id: 'query-suggestions',
+    light: `${C}/query-suggestions-light.png`,
+    ...desktop,
+    alt: 'The search bar suggesting values for the outcome field, with how many events have each value.',
+  },
+  {
+    id: 'tenant',
+    light: `${C}/tenant-light.png`,
+    ...desktop,
+    alt: "A tenant's page: event counts, an activity chart, outcomes, top actions and the related actors, executors and records.",
   },
   {
     id: 'actor',
-    light: 'marketing/captures/2026-11-05-final-walkthrough/08-actor-profile.png',
-    alt: 'An actor profile shows event counts, an activity chart and recent events.',
-    width: 1440,
-    height: 900,
+    light: `${C}/actor-light.png`,
+    ...desktop,
+    alt: "An actor's page for a scheduled job: event counts, activity, outcomes, top actions and related entities.",
   },
   {
-    id: 'first-event',
-    light: 'marketing/captures/2026-11-05-final-walkthrough/23-first-event-received.png',
-    alt: 'The integration checklist confirms that the first event has been received.',
-    width: 1440,
-    height: 900,
+    id: 'setup',
+    light: `${C}/setup-light.png`,
+    ...desktop,
+    alt: 'The setup page checking each part of the integration against the events received.',
+  },
+  {
+    id: 'retention',
+    light: `${C}/retention-light.png`,
+    ...desktop,
+    alt: 'Retention settings while lowering the window to 30 days: a preview of how many events will be permanently deleted.',
   },
 ];
+
 export const clips: VideoEntry[] = [
   {
-    id: 'onboarding',
-    src: 'marketing/captures/2026-11-05-final-walkthrough/onboarding.webm',
-    poster: 'marketing/captures/2026-11-05-final-walkthrough/22-first-event-listening.png',
-    alt: 'The integration checklist demonstrates sending a first audit event.',
-  },
-  {
-    id: 'query-investigation',
-    src: 'marketing/captures/2026-11-05-final-walkthrough/query-investigation.webm',
-    poster: 'marketing/captures/2026-11-05-final-walkthrough/qb-inv-02-query-results.png',
-    alt: 'The explorer demonstrates building a query and investigating matching events.',
+    id: 'investigate',
+    src: `${C}/investigate-explorer-operation.webm`,
+    poster: `${C}/explorer-light.png`,
+    alt: 'A query is typed into the explorer, an event is opened, and its operation tree is followed.',
   },
 ];
+
 export const imageWidths = (width: number) => [...new Set([640, 1024, 1600].map((size) => Math.min(size, width)))];
+
+/** Entries whose capture still needs replacing before a public build. */
+export const interimMedia = () => [...screenshots.filter((entry) => entry.interim), ...clips.filter((clip) => clip.interim)].map((entry) => entry.id);

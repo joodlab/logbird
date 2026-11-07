@@ -1,10 +1,20 @@
 /**
- * Public, client-safe site configuration. This is the ONLY file that may contain the provisional domain
- * (pending owner decision: the domain is not bought yet). Server-only settings live in src/server/env.ts.
+ * Public, client-safe site configuration. This is the ONLY file that may contain the provisional domain (pending the
+ * owner: the domain is not bought yet); a test enforces it. Server-only settings live in src/server/env.ts.
  *
- * Values come from the build (`__SITE_ENV__`, injected by vite.config.ts from SITE_URL, APP_URL, GITHUB_URL,
- * GITHUB_PUBLIC) or from process.env in Node scripts and tests.
+ * The site's variables are prefixed `WEB_` so they never collide with the console's (`APP_URL` in the root .env is the
+ * local console). Values come from the build (`__SITE_ENV__`, injected by vite.config.ts) or from process.env in Node
+ * scripts and tests.
+ *
+ *   WEB_SITE_URL       canonical origin of this site               default https://<provisional domain>
+ *   WEB_APP_URL        console sign-in URL; unset hides "Sign in"   default unset (Cloud is waitlist-only)
+ *   WEB_GITHUB_PUBLIC  "true" once the repository is public        default false
+ *   WEB_GITHUB_URL     repository URL; required when public        default unset
+ *   WEB_ORG_NAME       legal name for © and JSON-LD (pending owner) default unset → "Logbird contributors", no Organization
  */
+/** The only variables the build passes to the site (vite.config.ts) and that Turbo hashes (turbo.json). */
+export const PUBLIC_ENV_KEYS = ['WEB_SITE_URL', 'WEB_APP_URL', 'WEB_GITHUB_URL', 'WEB_GITHUB_PUBLIC', 'WEB_ORG_NAME'] as const;
+
 declare const __SITE_ENV__: Record<string, string | undefined> | undefined;
 
 const source: Record<string, string | undefined> =
@@ -12,7 +22,7 @@ const source: Record<string, string | undefined> =
 
 const DOMAIN = 'logbird.dev';
 
-function url(name: string, fallback: string): string {
+function url(name: string, fallback?: string): string | undefined {
   const value = source[name]?.trim();
   if (!value) {
     return fallback;
@@ -24,12 +34,29 @@ function url(name: string, fallback: string): string {
   }
 }
 
-export const SITE_URL = url('SITE_URL', `https://${DOMAIN}`);
-export const APP_URL = url('APP_URL', `https://app.${DOMAIN}`);
-export const GITHUB_URL = url('GITHUB_URL', 'https://github.com/joodlab/logbird');
-export const GITHUB_PUBLIC = source.GITHUB_PUBLIC === 'true';
+export const SITE_URL = url('WEB_SITE_URL', `https://${DOMAIN}`) as string;
+/** Undefined while Cloud is waitlist-only: the header shows no "Sign in" link. */
+export const APP_URL = url('WEB_APP_URL');
+export const GITHUB_PUBLIC = source.WEB_GITHUB_PUBLIC === 'true';
+export const GITHUB_URL = url('WEB_GITHUB_URL');
+if (GITHUB_PUBLIC && !GITHUB_URL) {
+  throw new Error('WEB_GITHUB_PUBLIC=true needs WEB_GITHUB_URL.');
+}
+/** The publisher's legal name is pending the owner; until it is set the site names no company. */
+export const ORG_NAME = source.WEB_ORG_NAME?.trim() || undefined;
+export const COPYRIGHT_HOLDER = ORG_NAME ?? 'Logbird contributors';
 
 /** Pending-domain mailboxes. Owner question: confirm these once the domain is bought. */
 export const CONTACT_EMAIL = `hello@${DOMAIN}`;
 export const SECURITY_EMAIL = `security@${DOMAIN}`;
 export const PRIVACY_EMAIL = `privacy@${DOMAIN}`;
+
+const LOCAL = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0)$/i;
+/** Public URLs that would point visitors at a developer machine. A Cloudflare (public) build must have none. */
+export function localPublicUrls(
+  values: Record<string, string | undefined> = { WEB_SITE_URL: SITE_URL, WEB_APP_URL: APP_URL, WEB_GITHUB_URL: GITHUB_URL },
+) {
+  return Object.entries(values)
+    .filter(([key, value]) => key.endsWith('_URL') && value && LOCAL.test(new URL(value).hostname))
+    .map(([key]) => key);
+}

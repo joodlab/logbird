@@ -1,119 +1,160 @@
-import { Button } from '@logbird/ui/components/ui/button';
 import { Input } from '@logbird/ui/components/ui/input';
 import { Label } from '@logbird/ui/components/ui/label';
 import { Textarea } from '@logbird/ui/components/ui/textarea';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, type ReactNode, useState } from 'react';
 import { CONTACT_EMAIL } from '../env';
-export function WaitlistForm({ status }: { status?: string }) {
-  const [state, setState] = useState(status === 'ok' ? 'success' : status === 'error' ? 'unavailable' : 'idle');
+
+// Copy: marketing/copy/contact.md (form, states).
+const mail = (
+  <a className="text-link" href={`mailto:${CONTACT_EMAIL}`}>
+    {CONTACT_EMAIL}
+  </a>
+);
+export const STATUS_MESSAGES: Record<string, { tone: 'ok' | 'error'; text: ReactNode }> = {
+  ok: { tone: 'ok', text: "Thanks. You're on the list, and if you asked something we'll reply by email." },
+  validation_error: { tone: 'error', text: 'Something in the form needs fixing. Check the email address and try again.' },
+  invalid_body: { tone: 'error', text: 'Something in the form needs fixing. Check the email address and try again.' },
+  rate_limited: { tone: 'error', text: 'Too many attempts. Wait a minute, then try again.' },
+  waitlist_unavailable: { tone: 'error', text: <>The form isn't available right now. Email us at {mail} instead.</> },
+  error: { tone: 'error', text: <>We couldn't send that. Check your connection and try again, or email {mail}.</> },
+};
+const messageFor = (code: string | undefined) => (code ? (STATUS_MESSAGES[code] ?? STATUS_MESSAGES.error) : undefined);
+
+const INTERESTS = [
+  { value: 'cloud', label: 'The Logbird Cloud waitlist' },
+  { value: 'self-host', label: 'Self-hosting, when the source opens' },
+  { value: 'updates', label: 'Product updates only' },
+  { value: 'other', label: 'A question, or support and enterprise' },
+] as const;
+
+/**
+ * Progressive enhancement: a real form post that works without JavaScript (the server redirects back with
+ * `?status=<code>#waitlist-<code>`, and a :target message shows), upgraded to fetch with inline field errors.
+ */
+export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; interest?: string }) {
+  const [code, setCode] = useState<string | undefined>(status);
+  const [sending, setSending] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
-  const [message, setMessage] = useState('');
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    setState('submitting');
+    setSending(true);
     setErrors({});
+    setCode(undefined);
     try {
       const response = await fetch(form.action, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(Object.fromEntries(new FormData(form))),
       });
-      const body = await response.json();
+      const body = await response.json().catch(() => ({}));
       if (response.ok) {
-        setState('success');
+        setCode('ok');
         form.reset();
       } else {
-        setState(response.status === 503 ? 'unavailable' : 'error');
-        setMessage(body.error?.message ?? 'Unable to submit. Please try again.');
+        setCode(body.error?.code ?? 'error');
         setErrors(body.error?.details ?? {});
       }
     } catch {
-      setState('error');
-      setMessage('Unable to connect. Please try again.');
+      setCode('error');
+    } finally {
+      setSending(false);
     }
   }
+  const current = messageFor(code);
+  const field = (name: string) => ({
+    'aria-invalid': Boolean(errors[name]),
+    'aria-describedby': errors[name] ? `${name}-error` : undefined,
+  });
+  const fieldError = (name: string) =>
+    errors[name] ? (
+      <p className="field-error" id={`${name}-error`}>
+        {name === 'email' ? 'Enter a valid email address.' : errors[name].join(' ')}
+      </p>
+    ) : null;
   return (
-    <form className="waitlist-form" method="post" action="/api/waitlist" onSubmit={submit}>
+    <form action="/api/waitlist" className="waitlist-form" method="post" onSubmit={submit}>
       <noscript>
-        <p className="native-status" id="waitlist-ok" tabIndex={-1}>
-          Thank you. Your submission was received.
-        </p>
-        <p className="native-status" id="waitlist-error" tabIndex={-1}>
-          Your submission could not be accepted. Check the fields and try again, or email <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
-        </p>
-      </noscript>
-      {(['email', 'name', 'company'] as const).map((field) => (
-        <div key={field} className="form-field">
-          <Label htmlFor={field}>{field === 'email' ? 'Email (required)' : field === 'name' ? 'Name' : 'Company'}</Label>
-          <Input
-            id={field}
-            name={field}
-            type={field === 'email' ? 'email' : 'text'}
-            required={field === 'email'}
-            maxLength={field === 'email' ? 254 : 200}
-            autoComplete={field === 'email' ? 'email' : field === 'name' ? 'name' : 'organization'}
-            aria-invalid={!!errors[field]}
-            aria-describedby={errors[field] ? `${field}-error` : undefined}
-          />
-          {errors[field] && (
-            <p className="field-error" id={`${field}-error`}>
-              {errors[field].join(' ')}
-            </p>
-          )}
-        </div>
-      ))}
-      <div className="form-field">
-        <Label htmlFor="interest">Interest</Label>
-        <select
-          id="interest"
-          name="interest"
-          className="theme-select"
-          defaultValue="cloud"
-          aria-invalid={!!errors.interest}
-          aria-describedby={errors.interest ? 'interest-error' : undefined}
-        >
-          <option value="cloud">Cloud</option>
-          <option value="self-host">Self-host</option>
-          <option value="updates">Updates</option>
-          <option value="other">Other</option>
-        </select>
-        {errors.interest && (
-          <p id="interest-error" className="field-error">
-            {errors.interest.join(' ')}
+        {Object.entries(STATUS_MESSAGES).map(([key, value]) => (
+          <p className="native-status rounded-lg border px-4 py-3 text-sm" id={`waitlist-${key}`} key={key} tabIndex={-1}>
+            {value.text}
           </p>
-        )}
+        ))}
+      </noscript>
+      <div className="form-field">
+        <Label htmlFor="email">Work email</Label>
+        <Input
+          autoComplete="email"
+          id="email"
+          maxLength={254}
+          name="email"
+          placeholder="you@example.test"
+          required
+          type="email"
+          {...field('email')}
+        />
+        <p className="text-muted-foreground text-xs">We'll only use it to contact you about Logbird.</p>
+        {fieldError('email')}
       </div>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div className="form-field">
+          <Label htmlFor="name">Name</Label>
+          <Input autoComplete="name" id="name" maxLength={200} name="name" {...field('name')} />
+          {fieldError('name')}
+        </div>
+        <div className="form-field">
+          <Label htmlFor="company">Company</Label>
+          <Input autoComplete="organization" id="company" maxLength={200} name="company" {...field('company')} />
+          {fieldError('company')}
+        </div>
+      </div>
+      <fieldset className="form-field">
+        <legend className="mb-2 font-medium text-sm">What's this about?</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {INTERESTS.map((option) => (
+            <label
+              className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border bg-background px-3 py-2 text-sm has-[:checked]:border-brand has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50"
+              key={option.value}
+            >
+              <input className="accent-[var(--brand)]" defaultChecked={option.value === interest} name="interest" type="radio" value={option.value} />
+              {option.label}
+            </label>
+          ))}
+        </div>
+        {fieldError('interest')}
+      </fieldset>
       <div className="form-field">
         <Label htmlFor="message">Message</Label>
-        <Textarea
-          id="message"
-          name="message"
-          maxLength={2000}
-          aria-invalid={!!errors.message}
-          aria-describedby={errors.message ? 'message-error' : undefined}
-        />
-        {errors.message && (
-          <p id="message-error" className="field-error">
-            {errors.message.join(' ')}
-          </p>
-        )}
+        <Textarea id="message" maxLength={2000} name="message" rows={4} {...field('message')} />
+        <p className="text-muted-foreground text-xs">What are you building, and what do you need from an audit log?</p>
+        {fieldError('message')}
       </div>
-      <div className="honeypot" aria-hidden="true">
+      <div aria-hidden="true" className="honeypot">
         <label htmlFor="website">Website</label>
-        <input id="website" name="website" tabIndex={-1} autoComplete="off" />
+        <input autoComplete="off" id="website" name="website" tabIndex={-1} />
       </div>
-      <Button type="submit" disabled={state === 'submitting'}>
-        {state === 'submitting' ? 'Submitting…' : 'Join the waitlist'}
-      </Button>
-      <div aria-live="polite" aria-atomic="true">
-        {state === 'success' && <p>Thank you. Your submission was received.</p>}
-        {state === 'error' && <p>{message}</p>}
-        {state === 'unavailable' && (
-          <p>
-            The waitlist isn't open on this deployment yet — email <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
+      <div className="flex flex-col gap-3">
+        <button
+          className="inline-flex h-12 items-center justify-center rounded-md bg-primary px-5 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/80 disabled:opacity-60 sm:self-start"
+          disabled={sending}
+          type="submit"
+        >
+          {sending ? 'Sending…' : 'Send'}
+        </button>
+        <p className="text-muted-foreground text-xs">We store your email to contact you about Logbird. No trackers.</p>
+      </div>
+      <div aria-atomic="true" aria-live="polite">
+        {current ? (
+          <p
+            className={
+              current.tone === 'ok'
+                ? 'rounded-lg border border-outcome-success/40 px-4 py-3 text-sm'
+                : 'rounded-lg border border-destructive/40 px-4 py-3 text-sm'
+            }
+          >
+            {current.text}
           </p>
-        )}
+        ) : null}
       </div>
     </form>
   );

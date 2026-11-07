@@ -15,7 +15,8 @@ path: /
 - **body:** Logbird is the audit log for your product. Send who-did-what events over HTTP or the SDK. Search them,
   follow any user, customer account or record, and run it on your own servers.
 - **cta (primary):** Join the waitlist → `/contact`
-- **cta (secondary):** Self-host it → `/self-hosting`
+- **cta (secondary):** Self-host it → `/self-hosting` (only once the repository is public; until then "Self-host when
+  the source opens" → `/contact?interest=self-host`, see `README.md` § Self-host CTA rule)
 - **code sample (copy button):**
 
   ```sh
@@ -43,7 +44,7 @@ path: /
   <!-- source: docs/SPEC.md §1.1, §3 normalization rules -->
 - **bullets:**
   - A TypeScript SDK with batching, retries and an explicit `flush` and `shutdown`.
-  - Middleware for Hono, TanStack Start, Vue and Nuxt. <!-- source: docs/integrations.md -->
+  - Middleware for Hono, TanStack Start and Nuxt; a Vue read composable. <!-- source: docs/integrations.md (Vue is useAuditTrail/AuditTimeline, a reader, not middleware) -->
   - `jobAudit` for queue workers: the job keeps the original actor and joins the request's operation.
     <!-- source: packages/sdk/README.md §Requests and workers -->
   - A conformance score on every event, so you can see which recommended fields you're missing.
@@ -164,7 +165,10 @@ path: /
   - Bundled Docker Compose, a Coolify build, or your own Postgres, ClickHouse and Redis.
   - Automatic HTTPS with Caddy, or any reverse proxy you already run.
   - Source on GitHub — coming soon. The repository opens publicly soon.
-- **cta:** Self-host it → `/self-hosting` · What's in the repository → `/open-source`
+- **cta:** Self-host it → `/self-hosting` (public repo only; see the CTA rule) · What's in the repository → `/open-source`
+- **while the repository is private:** replace the quickstart code block with "Available when the repository opens.
+  Four commands on one VM: clone, generate secrets, configure SMTP, `docker compose up -d`. We'll publish them here the
+  day the source is public." and a "Tell me when it opens" button → `/contact?interest=self-host`.
 - **visual:** `marketing/captures/2026-11-05-self-hosting/12-compose-ps.png` (terminal: `docker compose ps` with the
   stack running). Check the terminal for paths or hostnames before use.
 
@@ -191,7 +195,8 @@ path: /
 
 - **id:** `final-cta`
 - **heading:** Start with one event.
-- **body:** Self-host Logbird today, or join the waitlist for Logbird Cloud.
+- **body:** Self-host Logbird today, or join the waitlist for Logbird Cloud. (Public repo only. While private: "The source
+  opens soon. Join the waitlist to hear when you can self-host Logbird, and when Logbird Cloud opens.")
 - **cta (primary):** Join the waitlist → `/contact`
 - **cta (secondary):** Self-host it → `/self-hosting`
 - **visual:** none

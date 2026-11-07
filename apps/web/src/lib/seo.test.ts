@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SITE_URL } from '../env';
 import { llmsTxt, robotsTxt, sitemapXml } from './discovery';
 import { articleLd, breadcrumbLd, faqLd, organizationLd, pageHead, pageMeta, softwareLd, websiteLd } from './seo';
-import { staticPages } from './site-map';
+import { publishedPages, staticPages } from './site-map';
 
 describe('metadata', () => {
   it('uses a canonical origin, page title and 1200×63 social card', () => {
@@ -17,13 +17,17 @@ describe('metadata', () => {
       title: 'Logbird — open-source audit logs for your product',
     });
   });
-  it('keeps drafts out of search', () => {
+  it('keeps drafts and pages that are not ready out of search', () => {
     expect(pageHead('/blog/$slug').meta).toContainEqual({ name: 'robots', content: 'noindex' });
+    expect(pageHead('/product').meta).toContainEqual({ name: 'robots', content: 'noindex' });
+    expect(pageHead('/').meta).not.toContainEqual({ name: 'robots', content: 'noindex' });
   });
   it('emits real schema types and limits the zero-price offer to self-hosting', () => {
     const parse = (script: { children: string }) => JSON.parse(script.children);
-    expect(parse(organizationLd())).toMatchObject({ '@type': 'Organization', name: 'Joodlab', alternateName: 'Logbird' });
+    // No publisher name is set (WEB_ORG_NAME is pending the owner): no Organization, and the WebSite names no publisher.
+    expect(organizationLd()).toBeNull();
     expect(parse(websiteLd())).toMatchObject({ '@type': 'WebSite', name: 'Logbird' });
+    expect(parse(websiteLd())).not.toHaveProperty('publisher');
     expect(parse(softwareLd())).toMatchObject({
       '@type': 'SoftwareApplication',
       operatingSystem: 'Linux, Docker',
@@ -48,18 +52,25 @@ describe('metadata', () => {
         .children,
     ).not.toContain('</script>');
     expect(parse(faqLd([{ q: 'Question?', a: 'Answer.' }])).mainEntity[0].acceptedAnswer.text).toBe('Answer.');
-    expect(pageHead('/').scripts).toHaveLength(3);
+    expect(pageHead('/').scripts).toHaveLength(2);
   });
 });
 describe('static discovery', () => {
-  it('includes all public pages, excludes drafts and the not-found page', () => {
+  it('lists only ready pages, never drafts or the not-found page', () => {
     const xml = sitemapXml();
     for (const page of staticPages) {
-      expect(xml).toContain(`<loc>${new URL(page.path, SITE_URL).href}</loc>`);
+      const loc = `<loc>${new URL(page.path, SITE_URL).href}</loc>`;
+      if (page.ready) {
+        expect(xml).toContain(loc);
+      } else {
+        expect(xml).not.toContain(loc);
+      }
     }
+    expect(publishedPages.length).toBeGreaterThan(0);
     expect(xml).not.toMatch(/404|\$slug|blog\/draft/);
     expect(xml).toContain('<priority>1</priority>');
     expect(robotsTxt()).toBe(`User-agent: *\nAllow: /\nSitemap: ${SITE_URL}/sitemap.xml\n`);
-    expect(llmsTxt()).toContain(`[Product](${SITE_URL}/product)`);
+    expect(llmsTxt()).toContain(`(${SITE_URL}/contact)`);
+    expect(llmsTxt()).not.toContain(`(${SITE_URL}/product)`);
   });
 });

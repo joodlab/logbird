@@ -2,7 +2,7 @@ import { type Theme, useTheme } from '@logbird/ui/theme';
 import { Link } from '@tanstack/react-router';
 import { MenuIcon, MonitorIcon, MoonIcon, SunIcon, XIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { APP_URL, GITHUB_PUBLIC, GITHUB_URL } from '../env';
+import { APP_URL, COPYRIGHT_HOLDER, GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import { siteMap } from '../lib/site-map';
 import { ButtonLink } from './marketing/button-link';
 import { BilingualWordmark, Wordmark } from './marketing/wordmark';
@@ -35,7 +35,8 @@ function ThemeSwitch() {
   );
 }
 
-const navPages = siteMap.filter((page) => page.inNav);
+// Only designed pages appear in navigation (site-map `ready`).
+const navPages = siteMap.filter((page) => page.inNav && page.ready);
 
 function HomeLink() {
   return (
@@ -63,18 +64,22 @@ export function SiteHeader() {
     <header className="site-header" data-scrolled={scrolled}>
       <div className="container-site flex h-full items-center gap-6">
         <HomeLink />
-        <nav aria-label="Primary" className="hidden items-center lg:flex">
-          {navPages.map((page) => (
-            <Link activeOptions={{ exact: page.path === '/' }} className="nav-link" key={page.path} to={page.path}>
-              {page.title}
-            </Link>
-          ))}
-        </nav>
+        {navPages.length ? (
+          <nav aria-label="Primary" className="hidden items-center lg:flex">
+            {navPages.map((page) => (
+              <Link activeOptions={{ exact: page.path === '/' }} className="nav-link" key={page.path} to={page.path}>
+                {page.title}
+              </Link>
+            ))}
+          </nav>
+        ) : null}
         <div className="ms-auto hidden items-center gap-2 lg:flex">
           <ThemeSwitch />
-          <a className="nav-link" href={APP_URL}>
-            Sign in
-          </a>
+          {APP_URL ? (
+            <a className="nav-link" href={APP_URL}>
+              Sign in
+            </a>
+          ) : null}
           <ButtonLink to="/contact">Join the waitlist</ButtonLink>
         </div>
         <details className="mobile-menu ms-auto lg:hidden" ref={menu}>
@@ -83,25 +88,29 @@ export function SiteHeader() {
             <XIcon aria-hidden="true" className="icon-close size-5" />
           </summary>
           <div className="mobile-menu-panel">
-            <nav aria-label="Mobile" className="container-site flex flex-col py-3">
-              {navPages.map((page) => (
-                <Link
-                  className="flex min-h-12 items-center border-b font-medium text-base last:border-b-0"
-                  key={page.path}
-                  onClick={closeMenu}
-                  to={page.path}
-                >
-                  {page.title}
-                </Link>
-              ))}
-            </nav>
+            {navPages.length ? (
+              <nav aria-label="Mobile" className="container-site flex flex-col py-3">
+                {navPages.map((page) => (
+                  <Link
+                    className="flex min-h-12 items-center border-b font-medium text-base last:border-b-0"
+                    key={page.path}
+                    onClick={closeMenu}
+                    to={page.path}
+                  >
+                    {page.title}
+                  </Link>
+                ))}
+              </nav>
+            ) : null}
             <div className="container-site flex flex-col gap-3 border-t py-4">
               <ButtonLink className="w-full" onClick={closeMenu} size="lg" to="/contact">
                 Join the waitlist
               </ButtonLink>
-              <ButtonLink className="w-full" href={APP_URL} size="lg" variant="outline">
-                Sign in
-              </ButtonLink>
+              {APP_URL ? (
+                <ButtonLink className="w-full" href={APP_URL} size="lg" variant="outline">
+                  Sign in
+                </ButtonLink>
+              ) : null}
               <div className="flex items-center justify-between pt-1">
                 <span className="text-muted-foreground text-sm">Theme</span>
                 <ThemeSwitch />
@@ -139,7 +148,10 @@ export function SiteFooter() {
         </div>
         <div className="grid grid-cols-2 gap-8 sm:grid-cols-3 lg:grid-cols-5">
           {footerGroups.map((group) => {
-            const pages = siteMap.filter((page) => page.inFooter && group.sections.includes(page.section));
+            const pages = siteMap.filter((page) => page.inFooter && page.ready && group.sections.includes(page.section));
+            if (pages.length === 0) {
+              return null;
+            }
             return (
               <section key={group.label}>
                 <h2 className="font-medium text-sm">{group.label}</h2>
@@ -158,9 +170,9 @@ export function SiteFooter() {
         </div>
       </div>
       <div className="container-site flex flex-col gap-2 border-t py-6 text-muted-foreground text-sm sm:flex-row sm:items-center sm:justify-between">
-        <p>© 2026 Joodlab. Logbird is MIT-licensed.</p>
+        <p>© 2026 {COPYRIGHT_HOLDER}. Logbird is MIT-licensed.</p>
         <p>
-          {GITHUB_PUBLIC ? (
+          {GITHUB_PUBLIC && GITHUB_URL ? (
             <a className="hover:text-foreground" href={GITHUB_URL}>
               Source on GitHub
             </a>
