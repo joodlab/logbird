@@ -193,6 +193,16 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
       const blocked = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
       expect(blocked.status).toBe(503);
       expect((await blocked.json()).error.code).toBe('export_audit_unavailable');
+      const queued = await prisma.auditOutbox.findMany({
+        where: {
+          stream: `ws:${organizationId}`,
+          payload: { path: ['context', 'requestId'], equals: blocked.headers.get('x-request-id') },
+        },
+      });
+      expect(queued.map((row) => (row.payload as { action: string }).action).sort()).toEqual(['export.failed', 'export.requested']);
+      expect(queued.find((row) => (row.payload as { action: string }).action === 'export.failed')?.payload).toMatchObject({
+        metadata: { export: { reason: 'storage_unavailable', rows: 0, bytes: 0 } },
+      });
     } finally {
       rejected.mockRestore();
     }

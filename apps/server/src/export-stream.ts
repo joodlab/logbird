@@ -51,7 +51,13 @@ export async function auditedExport(
     return failure;
   };
   // Fail closed: the caller must verify accepted/rejected before any generator is consumed.
-  await receipt('export.requested', { rows, bytes });
+  try {
+    await receipt('export.requested', { rows, bytes });
+  } catch (error) {
+    // Staging may succeed even if acknowledgement fails. Independently persist the no-bytes failure when possible.
+    await fail('storage_unavailable');
+    throw error;
+  }
   let first: IteratorResult<string> | undefined;
   try {
     if (signal.aborted) throw new Error('Export aborted');

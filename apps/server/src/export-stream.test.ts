@@ -87,6 +87,8 @@ it('fails closed for requested storage and preserves completed bytes through ter
   const receipt = vi.fn().mockRejectedValue(new Error('audit unavailable'));
   await expect(auditedExport(chunks(), false, receipt, new AbortController().signal)).rejects.toThrow('audit unavailable');
   expect(next).not.toHaveBeenCalled();
+  expect(receipt.mock.calls.map(([action]) => action)).toEqual(['export.requested', 'export.failed']);
+  expect(receipt.mock.calls.at(-1)?.[1]).toEqual({ rows: 0, bytes: 0, reason: 'storage_unavailable' });
   receipt.mockResolvedValueOnce(undefined);
   const reader = (await auditedExport(chunks(), false, receipt, new AbortController().signal)).getReader();
   await reader.read();

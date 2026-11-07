@@ -58,7 +58,8 @@ it does not establish who saved it or when it reached a client's disk.
 Every authorized export stores a durable `export.requested` record and obtains its ingest acknowledgement **before
 reading or sending event bytes**. Rejected entries and `503 ingest_pending` are not acknowledgement; the HTTP
 response uses export-specific `503 export_audit_unavailable` copy. The pending frozen record stays in the outbox
-for reconciliation. Invalid range, invalid query and unavailable restricted SQL-client preparation occur inside this
+for reconciliation. A failed acknowledgement independently attempts a correlated zero-byte failure record when
+Postgres is available. Invalid range, invalid query and unavailable restricted SQL-client preparation occur inside this
 lifecycle and produce correlated failure records when initial audit storage is available.
 
 Completion, failure and cancellation are inserted into the [durable audit outbox](workspace-audit.md), independently
