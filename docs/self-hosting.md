@@ -244,7 +244,9 @@ fails with `LOGBIRD_DELETE_INCOMPLETE` before inserting duplicate rollups. See
 
 Normalization is an explicit offline operator step. Stop server, worker and all
 ingesters, preserve the matched backup, and reserve disk for another full raw
-table plus merge headroom. Copy `scripts/clickhouse-restore-dry-run.sql` into the
+table plus merge headroom. These SQL examples and scripts target the default
+`logbird` database; adapt both scripts and verification queries before using a
+custom database name. Copy `scripts/clickhouse-restore-dry-run.sql` into the
 container and execute it with `--multiquery --queries-file`, using the same
 `docker compose cp` and authenticated client pattern above. This read-only dry
 run shows the table/view inventory, active parts, mutations and raw checksums:
