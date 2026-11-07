@@ -1,0 +1,313 @@
+{
+  "dateUtc": "2026-11-07",
+  "testedCodeHead": "81baee6fc08d4448d90bdbf194dd6f84366c60fc",
+  "mergedMaster": "2a9d37894def3f995c91229478f8171939d3bbcd",
+  "scope": "Round 4 cutover/operator docs, Compose role pull policy and text-encoding guard; refreshed app inputs after master #70 merge",
+  "checks": {
+    "encoding": {
+      "probes": 16,
+      "extensions": ["md", "sql"],
+      "corruptionPatterns": 3,
+      "bomSignatures": 4,
+      "validUnicode": true,
+      "fixturesRemoved": true
+    },
+    "compose": {
+      "version": "5.5.1",
+      "variants": ["default", "backup/TLS", "external", "Coolify"],
+      "fourBuildPoliciesEach": true,
+      "externalBundledDataServices": 0,
+      "runtimeExecuted": false
+    },
+    "install": {
+      "pnpm": "10.30.3",
+      "frozen": true,
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": 17,
+      "total": 17,
+      "cached": 0
+    },
+    "repository": {
+      "files": 430,
+      "existingWarnings": 76,
+      "exitCode": 0,
+      "note": "First inclusion of the evidence JSON needed formatter normalization; formatted and root check rerun passed."
+    },
+    "build": {
+      "passed": 12,
+      "total": 12,
+      "cached": 0,
+      "concurrency": 1,
+      "force": true
+    }
+  },
+  "appTests": {
+    "sourceHead": "81baee6fc08d4448d90bdbf194dd6f84366c60fc",
+    "codeHash": "f270377546a21e66df09be186a1185af6a5b91650520009214e08f955e236a7f",
+    "startedUtc": "2026-11-07T16:31:40.126Z",
+    "finishedUtc": "2026-11-07T16:32:07.941Z",
+    "files": [
+      {
+        "file": "apps/app/src/lib/tab-strip.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:31:40.927Z",
+        "durationSeconds": 0.695
+      },
+      {
+        "file": "apps/app/src/lib/sql-language.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 24,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:31:42.381Z",
+        "durationSeconds": 0.884
+      },
+      {
+        "file": "apps/app/src/lib/recent-queries.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:31:44.113Z",
+        "durationSeconds": 0.678
+      },
+      {
+        "file": "apps/app/src/lib/query-lint.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:31:45.579Z",
+        "durationSeconds": 0.854
+      },
+      {
+        "file": "apps/app/src/lib/query-language.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 30,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:31:47.240Z",
+        "durationSeconds": 0.828
+      },
+      {
+        "file": "apps/app/src/lib/platform.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:31:48.832Z",
+        "durationSeconds": 0.737
+      },
+      {
+        "file": "apps/app/src/lib/permissions.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:31:50.338Z",
+        "durationSeconds": 0.935
+      },
+      {
+        "file": "apps/app/src/lib/events.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:31:52.122Z",
+        "durationSeconds": 0.696
+      },
+      {
+        "file": "apps/app/src/lib/api/retry.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:31:53.609Z",
+        "durationSeconds": 0.944
+      },
+      {
+        "file": "apps/app/src/components/explorer/row-navigation.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 18,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:31:55.314Z",
+        "durationSeconds": 0.738
+      },
+      {
+        "file": "apps/app/src/components/explorer/explorer-result-key.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:31:56.936Z",
+        "durationSeconds": 2.475
+      },
+      {
+        "file": "apps/app/src/components/explorer/events-table.test.tsx",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 44,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:32:00.292Z",
+        "durationSeconds": 4.101
+      },
+      {
+        "file": "apps/app/src/components/query-input/use-completions.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:32:05.254Z",
+        "durationSeconds": 1.075
+      },
+      {
+        "file": "apps/app/src/components/charts/outcome-series.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0,
+        "startedUtc": "2026-11-07T16:32:07.216Z",
+        "durationSeconds": 0.72
+      }
+    ],
+    "totals": {
+      "files": 14,
+      "passed": 171,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "previousFullRun": {
+    "passed": 512,
+    "failed": 0,
+    "skipped": 48,
+    "evidence": "selfhost-round3-2026-11-07.json",
+    "status": "Historical full run; non-app suites not rerun in Round4",
+    "unchangedImplementationPaths": [
+      "apps/server",
+      "apps/worker",
+      "packages/clickhouse",
+      "packages/database",
+      "packages/contracts",
+      "packages/email",
+      "packages/sdk"
+    ]
+  },
+  "resources": [
+    {
+      "mode": "Install",
+      "startedUtc": "2026-11-07T16:29:09.5222622+00:00",
+      "minimumFreeRamGiB": 18.596332550048828,
+      "peakOwnTreeGiB": 0.6199607849121094,
+      "exitCode": 0,
+      "finishedUtc": "2026-11-07T16:29:21.1606315+00:00",
+      "stoppedReason": null,
+      "freeDiskGiB": 110.2598762512207
+    },
+    {
+      "mode": "Check",
+      "startedUtc": "2026-11-07T16:34:24.5934455+00:00",
+      "minimumFreeRamGiB": 22.145938873291016,
+      "peakOwnTreeGiB": 1.6428489685058594,
+      "exitCode": 0,
+      "finishedUtc": "2026-11-07T16:34:28.3865831+00:00",
+      "stoppedReason": null,
+      "freeDiskGiB": 110.22376251220703
+    },
+    {
+      "mode": "Typecheck",
+      "startedUtc": "2026-11-07T16:30:02.9557655+00:00",
+      "minimumFreeRamGiB": 19.23086166381836,
+      "peakOwnTreeGiB": 0.8075180053710938,
+      "exitCode": 0,
+      "finishedUtc": "2026-11-07T16:30:20.3157663+00:00",
+      "stoppedReason": null,
+      "freeDiskGiB": 110.2574691772461
+    },
+    {
+      "mode": "Build",
+      "startedUtc": "2026-11-07T16:30:40.5348853+00:00",
+      "minimumFreeRamGiB": 19.04644012451172,
+      "peakOwnTreeGiB": 1.3302764892578125,
+      "exitCode": 0,
+      "finishedUtc": "2026-11-07T16:31:01.8905899+00:00",
+      "stoppedReason": null,
+      "freeDiskGiB": 110.2606430053711
+    },
+    {
+      "mode": "Tests",
+      "startedUtc": "2026-11-07T16:31:39.7158010+00:00",
+      "minimumFreeRamGiB": 21.489730834960938,
+      "peakOwnTreeGiB": 0.8320846557617188,
+      "exitCode": 0,
+      "finishedUtc": "2026-11-07T16:32:08.7103984+00:00",
+      "stoppedReason": null,
+      "freeDiskGiB": 110.25577926635742
+    },
+    {
+      "mode": "Check (initial pass before evidence JSON)",
+      "startedUtc": "2026-11-07T16:29:51.0267120+00:00",
+      "finishedUtc": "2026-11-07T16:29:56.8278589+00:00",
+      "minimumFreeRamGiB": 19.879467010498047,
+      "peakOwnTreeGiB": 1.7361030578613281,
+      "freeDiskGiB": 110.25761032104492,
+      "exitCode": 0,
+      "stoppedReason": null
+    }
+  ],
+  "cleanup": {
+    "dockerBuilds": 0,
+    "containersStarted": 0,
+    "servicesStarted": 0,
+    "databaseWrites": 0,
+    "pruneOperations": 0,
+    "buildSlotReleased": true,
+    "encodingFixturesRemoved": true
+  },
+  "knownLimits": [
+    "New pull_policy build changes startup semantics; prior live install/upgrade/restore evidence predates it. Runtime matrix is pending in #88/#77.",
+    "Recovery enqueue, final SQL files, staging removal and Caddy cutover need live execution in #77.",
+    "Migrate head build/run/cancellation, restored guard and normalized retry remain owner-accepted post-merge gates.",
+    "Registry default ownership and defensive Docker Hub organization claim are owner decisions; nothing claimed or published."
+  ],
+  "followUps": [
+    "https://github.com/joodlab/logbird/issues/77",
+    "https://github.com/joodlab/logbird/issues/88"
+  ],
+  "cleanupReview": "Task-owned Round4 diff reviewed with ai-slop-cleanup; no actionable slop found. App UI merge belongs to #70; no UI edits by this task.",
+  "resourceScope": "Sampled own process trees and host headroom for the recorded successful source runs; excludes attributable Docker/WSL memory."
+}
