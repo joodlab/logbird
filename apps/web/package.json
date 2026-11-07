@@ -18,7 +18,8 @@
     "lighthouse": "node --import tsx scripts/lighthouse.mjs",
     "capture": "node --import tsx scripts/capture.mjs",
     "clean": "git clean -xdf .cache .turbo .output .nitro .tanstack .tmp public/media public/og node_modules",
-    "serve:static": "tsx scripts/serve-static.ts"
+    "serve:static": "tsx scripts/serve-static.ts",
+    "check:source-state": "tsx scripts/check-source-state.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

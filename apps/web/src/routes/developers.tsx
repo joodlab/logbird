@@ -4,6 +4,7 @@ import { SiteCode, SiteCodeTabs } from '../components/marketing/code';
 import { CtaBand } from '../components/marketing/cta-band';
 import { FeatureRow } from '../components/marketing/feature-row';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
+import { GITHUB_PUBLIC } from '../env';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/developers')({ head: () => pageHead('/developers'), component: DevelopersPage });
@@ -31,7 +32,8 @@ client.track({
 // flush() rejects only when retryable delivery (network, 429, 5xx) runs out of retries; the batch stays
 // queued for the next flush. Permanent rejections don't reject: they arrive through onError and onDrop.
 await client.flush().catch((error) => console.error('audit delivery pending', error));
-await client.shutdown(); // on exit: stop accepting events and drain the queue`;
+// On exit: stop accepting events and drain the queue. Rejects under the same condition as flush().
+await client.shutdown().catch((error) => console.error('audit events left undelivered', error));`;
 
 const http = `curl https://audit.example.com/v1/events \\
   -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" \\
@@ -263,7 +265,11 @@ function DevelopersPage() {
           <div className="flex flex-col gap-3">
             <SiteCode code="npm install @logbird/sdk" language="bash" title="After the first npm release" />
             <SiteCode code={quickstart} language="ts" title="server.ts" />
-            <p className="text-muted-foreground text-sm">The packages publish to npm with the first release, when the repository opens.</p>
+            <p className="text-muted-foreground text-sm">
+              {GITHUB_PUBLIC
+                ? 'The packages publish to npm with the first release.'
+                : 'The packages publish to npm with the first release, when the repository opens.'}
+            </p>
           </div>
         }
       >

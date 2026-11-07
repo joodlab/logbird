@@ -14,7 +14,7 @@ path: /self-hosting
 - **body:** Logbird is MIT-licensed and self-hosts with Docker Compose. Run it on one VM and your events stay on your
   own servers. It's the same codebase Logbird Cloud will run.
   <!-- source: LICENSE; docs/SPEC.md intro ("one codebase, self-host or cloud") -->
-- **cta:** Five-minute quickstart ↓ `#quickstart` · Join the Cloud waitlist → `/contact`
+- **cta:** Quickstart ↓ `#quickstart` (public repo only) · Join the Cloud waitlist → `/contact`
 - **small print:** Source on GitHub — coming soon. Self-hosting builds from source; no images are published yet.
   <!-- when WEB_GITHUB_PUBLIC=true: drop "Source on GitHub — coming soon." -->
 - **visual:** a diagram of the Compose stack (console, api, worker, postgres, clickhouse, redis). The 2026-11-05

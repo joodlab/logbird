@@ -31,7 +31,8 @@ path: /developers
   npm install @logbird/sdk
   ```
 
-  Small print: "The packages publish to npm with the first release, when the repository opens."
+  Small print: "The packages publish to npm with the first release, when the repository opens." Once
+  `WEB_GITHUB_PUBLIC=true`: "The packages publish to npm with the first release."
   <!-- source: docs/roadmap.md P0-3; npm registry 404 for @logbird/sdk on 2026-11-07 -->
 - **code sample:**
 
@@ -58,7 +59,8 @@ path: /developers
   // flush() rejects only when retryable delivery (network, 429, 5xx) runs out of retries; the batch stays
   // queued for the next flush. Permanent rejections don't reject: they arrive through onError and onDrop.
   await client.flush().catch((error) => console.error('audit delivery pending', error));
-  await client.shutdown(); // on exit: stop accepting events and drain the queue
+  // On exit: stop accepting events and drain the queue. Rejects under the same condition as flush().
+  await client.shutdown().catch((error) => console.error('audit events left undelivered', error));
   ```
 
 - **bullets:**

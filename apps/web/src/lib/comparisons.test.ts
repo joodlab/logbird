@@ -70,9 +70,15 @@ describe('source availability (WEB_GITHUB_PUBLIC)', () => {
     vi.stubEnv('WEB_GITHUB_PUBLIC', 'true');
     vi.stubEnv('WEB_GITHUB_URL', 'https://github.example.test/acme/logbird');
     const { comparisons: current } = await import('./comparisons');
-    const { getPage: page } = await import('./site-map');
+    const { getPage: page, staticPages } = await import('./site-map');
+    const { SOURCE_STATE_PHRASES } = await import('./source-state');
     const cells = logbirdCells(current.flatMap((comparison) => comparison.rows));
     expect(cells).not.toMatch(/opens|soon|Planned/);
+    const descriptions = staticPages.map((entry) => entry.description).join(' | ');
+    for (const phrase of SOURCE_STATE_PHRASES) {
+      expect(cells).not.toContain(phrase);
+      expect(descriptions).not.toContain(phrase);
+    }
     expect(cells).toContain('MIT; source on GitHub');
     expect(cells).toContain('Self-hosted, MIT; Logbird Cloud waitlist');
     expect(page('/open-source').description).toBe(

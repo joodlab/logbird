@@ -77,7 +77,7 @@ function SelfHostingPage() {
           <>
             {GITHUB_PUBLIC ? (
               <ButtonLink href="#quickstart" size="lg">
-                Five-minute quickstart
+                Quickstart
               </ButtonLink>
             ) : (
               <ButtonLink search={{ interest: 'self-host' }} size="lg" to="/contact">

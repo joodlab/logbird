@@ -13,6 +13,7 @@ pnpm --filter @logbird/web typecheck
 pnpm --filter @logbird/web test
 pnpm --filter @logbird/web build              # media + OG + prerender + pre-compressed HTML (Node preset)
 pnpm --filter @logbird/web serve:static       # serves .output/public like Cloudflare (compression, real 404) on 4620
+pnpm --filter @logbird/web check:source-state  # after a build: fails if a WEB_GITHUB_PUBLIC=true build still says the source is closed
 pnpm --filter @logbird/web start              # the Node server (needed for /api/waitlist) on 4620
 pnpm --filter @logbird/web build:cloudflare   # the public build; refuses interim media or localhost URLs
 ```

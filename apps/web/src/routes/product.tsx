@@ -219,21 +219,22 @@ function ProductPage() {
           'The causation breadcrumb, with a link to the whole operation.',
           'Context ids (request, trace, IP), every custom attribute, and the raw JSON exactly as received.',
           'Copy a link, or copy the event as a curl command.',
+          'Support work stands out: rows show "via support", the Done by support filter lists them, and each support agent has a page.',
         ]}
         eyebrow="Event detail"
         id="event-detail"
         title="The full story of one event."
         visual={
           <ScreenshotFrame
-            caption="When staff act for a customer, the customer stays the actor and the staff member gets an impersonator card."
-            id="impersonation"
+            caption="An event in detail: actor and executor, tenant, targets, the status change and the causation chain."
+            id="event-sheet"
             label="Event detail"
             sizes={sideSizes}
           />
         }
       >
         Open any event to read it as a sentence: who did what, in which account, to which records, and how it ended. The actor and the executor are on
-        separate cards. When staff acted for a customer, the impersonator gets a card too.
+        separate cards. When a support agent acted for a customer, the agent appears beside the customer.
       </FeatureRow>
 
       <Section compact labelledBy="more-title" tone="sunken">

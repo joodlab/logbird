@@ -117,15 +117,20 @@ path: /product
 - **eyebrow:** Event detail
 - **heading:** The full story of one event.
 - **body:** Open any event to read it as a sentence: who did what, in which account, to which records, and how it
-  ended. The actor and the executor are on separate cards. When staff acted for a customer, the impersonator gets a
-  card too.
+  ended. The actor and the executor are on separate cards. When a support agent acted for a customer, the agent
+  appears beside the customer.
 - **bullets:**
   - Before and after values for every changed field.
   - The causation breadcrumb, with a link to the whole operation.
   - Context ids (request, trace, IP), every custom attribute, and the raw JSON exactly as received.
   - Copy a link, or copy the event as a curl command.
-  <!-- source: docs/SPEC.md §8 journey 4 (event sheet) -->
-- **visual:** `marketing/captures/2026-11-07-site-console/impersonation-light.png` (manifest id `impersonation`: the impersonator card).
+  - Support work stands out: rows show "via support", the Done by support filter lists them, and each support agent
+    has a page.
+  <!-- source: docs/SPEC.md §8 journey 4 (event sheet); #69 (explorer columns, facet-sidebar, support-agent-profile) -->
+- **visual:** `marketing/captures/2026-11-07-site-console/event-sheet-light.png` / `event-sheet-dark.png` (manifest id
+  `event-sheet`). The impersonation still is set aside: it shows the card as it was before #69 ("Impersonator", not
+  "Support"). Re-shoot it on master in a stack window, ideally with a "via support" row and the Done by support filter,
+  before using it again.
 
 ## live-tail
 

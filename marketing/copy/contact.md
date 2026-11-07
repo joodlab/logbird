@@ -30,7 +30,7 @@ path: /contact
 
 - **topic options:**
   - `waitlist` — Logbird Cloud waitlist (default)
-  - `self-host` — Self-hosting help
+  - `self-host` — "Self-hosting, when the source opens" (once `WEB_GITHUB_PUBLIC=true`: "Self-hosting")
   - `support` — Support or enterprise
   - `question` — A question
 - **placeholder for email:** `you@example.test`
