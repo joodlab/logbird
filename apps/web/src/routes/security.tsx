@@ -17,8 +17,9 @@ import { Callout } from '../components/marketing/callout';
 import { SiteCode } from '../components/marketing/code';
 import { CtaBand } from '../components/marketing/cta-band';
 import { Feature, PageHero, Section, SectionHeader } from '../components/marketing/section';
+import { SecurityContact } from '../components/marketing/security-contact';
 import { Steps } from '../components/marketing/steps';
-import { SECURITY_EMAIL } from '../env';
+import { GITHUB_PUBLIC, SECURITY_EMAIL } from '../env';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/security')({ head: () => pageHead('/security'), component: SecurityPage });
@@ -106,8 +107,8 @@ function SelfHostDiagram() {
         </div>
       </div>
       <figcaption className="text-muted-foreground text-sm">
-        Self-hosted: the console, API, worker, Postgres, ClickHouse and Redis all run on your server. The only connection out goes to your SMTP
-        provider, for sign-in codes and invitations.
+        Self-hosted: the console, API, worker, Postgres, ClickHouse and Redis all run on your server. The server's only outbound connection is to your
+        SMTP provider, for sign-in codes and invitations.
       </figcaption>
     </figure>
   );
@@ -121,8 +122,13 @@ function SecurityPage() {
         eyebrow="Security"
         lead={
           <>
-            An audit log holds sensitive history, so this page says what Logbird does with it and where each protection stops. The repository's{' '}
-            <code>SECURITY.md</code> and <code>docs/SPEC.md</code> have the details.
+            An audit log holds sensitive history, so this page says what Logbird does with it and where each protection stops.
+            {GITHUB_PUBLIC ? (
+              <>
+                {' '}
+                The repository's <code>SECURITY.md</code> and <code>docs/SPEC.md</code> have the details.
+              </>
+            ) : null}
           </>
         }
         title="How Logbird handles your data."
@@ -133,7 +139,7 @@ function SecurityPage() {
           <SectionHeader
             eyebrow="Where data lives"
             id="self-host-title"
-            lead="When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your own Postgres. The self-hosted software doesn't send usage data back to us. The one outside service it needs is the SMTP provider you choose, which delivers sign-in codes and invitations."
+            lead="When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your own Postgres. The self-hosted software doesn't send usage data back to us. The server's only outbound connection is to the SMTP provider you choose, which delivers sign-in codes and invitations."
             title="Self-hosted, your events stay on your servers."
           />
           <SelfHostDiagram />
@@ -317,15 +323,17 @@ function SecurityPage() {
           <div className="panel flex flex-col gap-5 p-6 md:p-8">
             <SectionHeader eyebrow="Responsible disclosure" id="reporting-title" title="Report a vulnerability privately." />
             <p className="text-muted-foreground leading-relaxed">
-              Please don't post details in a public issue. Email the security contact below. Include the affected version, a reproduction using
-              fictional data, and the impact. We'll coordinate the fix and the disclosure with you. We don't offer a response-time SLA yet.
+              Please don't post details in a public issue. <SecurityContact /> Include the affected version, a reproduction using fictional data, and
+              the impact. We'll coordinate the fix and the disclosure with you. We don't offer a response-time SLA yet.
             </p>
-            <div className="mt-auto pt-2">
-              <ButtonLink href={`mailto:${SECURITY_EMAIL}`} variant="outline">
-                <MailIcon aria-hidden="true" className="size-4" />
-                Email {SECURITY_EMAIL}
-              </ButtonLink>
-            </div>
+            {SECURITY_EMAIL ? (
+              <div className="mt-auto pt-2">
+                <ButtonLink href={`mailto:${SECURITY_EMAIL}`} variant="outline">
+                  <MailIcon aria-hidden="true" className="size-4" />
+                  Email {SECURITY_EMAIL}
+                </ButtonLink>
+              </div>
+            ) : null}
           </div>
           <section aria-labelledby="dont-claim-title" className="panel flex flex-col gap-5 p-6 md:p-8" id="dont-claim">
             <p className="eyebrow">What we don't claim</p>

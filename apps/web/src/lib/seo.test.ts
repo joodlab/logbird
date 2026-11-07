@@ -57,7 +57,7 @@ describe('metadata', () => {
 });
 describe('static discovery', () => {
   it('uses the resolved build origin everywhere, not process.env', () => {
-    const config = siteConfigFrom({ WEB_SITE_URL: 'https://site.example.test' });
+    const config = siteConfigFrom({ WEB_SITE_URL: 'https://site.example.test', WEB_SECURITY_EMAIL: 'security@example.test' });
     expect(sitemapXml(config)).toContain('<loc>https://site.example.test/</loc>');
     expect(robotsTxt(config)).toContain('Sitemap: https://site.example.test/sitemap.xml');
     expect(llmsTxt(config)).toContain('(https://site.example.test/contact)');

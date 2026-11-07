@@ -1,10 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { PageHero } from '../components/marketing/section';
+import { SecurityContact } from '../components/marketing/security-contact';
 import { WaitlistForm } from '../components/waitlist-form';
-import { GITHUB_PUBLIC, SECURITY_EMAIL } from '../env';
+import { GITHUB_PUBLIC } from '../env';
 import { pageHead } from '../lib/seo';
 
-const INTERESTS = new Set(['cloud', 'self-host', 'updates', 'other']);
+const INTERESTS = new Set(['cloud', 'self-host', 'updates', 'correction', 'other']);
 
 export const Route = createFileRoute('/contact')({
   head: () => pageHead('/contact'),
@@ -42,11 +43,7 @@ function ContactPage() {
               <div className="py-3">
                 <dt className="font-medium">Security issues</dt>
                 <dd className="mt-1 text-muted-foreground leading-relaxed">
-                  Don't use this form. Email{' '}
-                  <a className="text-link" href={`mailto:${SECURITY_EMAIL}`}>
-                    {SECURITY_EMAIL}
-                  </a>
-                  .
+                  Don't describe the issue in this form. <SecurityContact />
                 </dd>
               </div>
               <div className="py-3">

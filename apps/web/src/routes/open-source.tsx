@@ -4,9 +4,10 @@ import { ButtonLink } from '../components/marketing/button-link';
 import { CtaBand } from '../components/marketing/cta-band';
 import { Rich } from '../components/marketing/rich';
 import { Eyebrow, PageHero, Section, SectionHeader } from '../components/marketing/section';
+import { SecurityContact } from '../components/marketing/security-contact';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { StackedTable } from '../components/marketing/stacked-table';
-import { GITHUB_PUBLIC, GITHUB_URL, ORG_NAME, SECURITY_EMAIL } from '../env';
+import { GITHUB_PUBLIC, GITHUB_URL, ORG_NAME } from '../env';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/open-source')({ head: () => pageHead('/open-source'), component: OpenSourcePage });
@@ -99,8 +100,8 @@ function OpenSourcePage() {
         }
         aside={<LicenseCard />}
         eyebrow="Open source"
-        lead="Logbird is released under the MIT licence. The API, the console, the retention worker, the SDK and the integrations are in one repository. You can read the code, run it, change it and ship it in your own product."
-        title="MIT-licensed. All of it."
+        lead="The product is MIT-licensed: the API, the console, the retention worker, the SDK and the integrations, all in one repository. You can read the code, run it, change it and ship it in your own product. Experimental folders may carry their own licence; each one says so."
+        title="The product is MIT-licensed."
       />
 
       <Section id="repo" labelledBy="repo-title">
@@ -180,12 +181,8 @@ function OpenSourcePage() {
               Found a vulnerability? Tell us privately.
             </h2>
             <p className="text-muted-foreground leading-relaxed">
-              Don't open a public issue. Email{' '}
-              <a className="text-link" href={`mailto:${SECURITY_EMAIL}`}>
-                {SECURITY_EMAIL}
-              </a>
-              . Include the affected version, a reproduction with fictional data, and the impact. We coordinate the fix and the disclosure with you
-              privately. We don't offer a response-time SLA yet.
+              Don't open a public issue. <SecurityContact /> Include the affected version, a reproduction with fictional data, and the impact. We
+              coordinate the fix and the disclosure with you privately. We don't offer a response-time SLA yet.
             </p>
             <div className="mt-auto pt-2">
               <ButtonLink to="/security" variant="outline">

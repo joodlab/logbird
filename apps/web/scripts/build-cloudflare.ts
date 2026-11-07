@@ -2,13 +2,16 @@ import { spawn } from 'node:child_process';
 import { access, copyFile, mkdir, mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
+import { siteConfigFrom } from '../src/env';
 import { releaseBlockers } from '../src/lib/release';
+import { loadPublicEnv } from './public-env';
 
 // A Cloudflare build is a public build: refuse while any console capture is interim (release.ts).
-const blockers = releaseBlockers();
+// Evaluated on the same resolved WEB_* values the build uses (scripts/public-env.ts).
+const blockers = releaseBlockers(siteConfigFrom(loadPublicEnv()));
 if (blockers.length && process.env.LOGBIRD_WEB_ALLOW_INTERIM !== '1') {
   throw new Error(
-    `Refusing to package a public build: ${blockers.join('; ')}. Replace the capture, or set LOGBIRD_WEB_ALLOW_INTERIM=1 for a local preview only.`,
+    `Refusing to package a public build: ${blockers.join('; ')}. Resolve them (see src/lib/release.ts), or set LOGBIRD_WEB_ALLOW_INTERIM=1 for a local preview only.`,
   );
 }
 const pnpm = process.env.npm_execpath ?? '';
