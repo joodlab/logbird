@@ -101,7 +101,7 @@ export function SupportSplitPanel({
         {counts.agents.length > 0 ? (
           <div className="flex flex-col gap-1">
             <span className="px-1 text-[11px] text-muted-foreground uppercase tracking-wider">Support agents</span>
-            <ul className="flex flex-col gap-px">
+            <ul className="grid gap-px sm:grid-cols-2 lg:grid-cols-3">
               {counts.agents.slice(0, 6).map((a) => (
                 <li key={a.id}>
                   <SupportAgentLink

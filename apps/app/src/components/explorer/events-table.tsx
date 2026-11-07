@@ -11,7 +11,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Loader2Icon } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef } from 'react';
 import { ActionName } from '@/components/action-name';
-import { EventListProjectContext, JobHint, SupportMarker } from '@/components/impersonation';
+import { EventListContext, JobHint, SupportMarker } from '@/components/impersonation';
 import { Timestamp } from '@/components/timestamp';
 import { eventSentence } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
@@ -71,6 +71,7 @@ export function EventsTable({
 }: EventsTableProps) {
   const isMobile = useIsMobile();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const listContext = useMemo(() => ({ projectId, columns }), [projectId, columns]);
   const columnVisibility = useMemo(() => Object.fromEntries(EVENT_COLUMNS.map((c) => [c.id, columns.includes(c.id)])), [columns]);
 
   const table = useTable({
@@ -121,7 +122,7 @@ export function EventsTable({
   if (rows.length === 0) return <div className={cn('flex flex-1 items-center justify-center', className)}>{empty}</div>;
 
   return (
-    <EventListProjectContext value={projectId}>
+    <EventListContext value={listContext}>
       <div className={cn('relative flex min-h-0 flex-1 flex-col', className)}>
         <div aria-label="Events" aria-rowcount={total ?? rows.length} className="min-h-0 flex-1 overflow-auto" ref={scrollRef} role="table">
           {isMobile ? null : (
@@ -209,6 +210,6 @@ export function EventsTable({
           </div>
         </div>
       </div>
-    </EventListProjectContext>
+    </EventListContext>
   );
 }

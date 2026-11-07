@@ -4,6 +4,7 @@ import { Panel } from '@logbird/ui/components/page-header';
 import { EmptyState } from '@logbird/ui/components/states';
 import { Button } from '@logbird/ui/components/ui/button';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Rows3Icon, UserIcon, VenetianMaskIcon } from 'lucide-react';
@@ -110,7 +111,12 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
         </p>
 
         <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-3">
-          <Stat label={`Done as support · ${rangeLabel(range).toLowerCase()}`} loading={total === undefined} value={formatNumber(total ?? 0)} />
+          <Stat
+            className="col-span-2 sm:col-span-1"
+            label={`Done as support · ${rangeLabel(range).toLowerCase()}`}
+            loading={total === undefined}
+            value={formatNumber(total ?? 0)}
+          />
           <Stat label="Customers acted as" loading={!actedAsData} value={distinct(actedAsData)} />
           <Stat label="Tenants" loading={!tenantData} value={distinct(tenantData)} />
         </dl>
@@ -202,9 +208,9 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
   );
 }
 
-function Stat({ label, value, loading }: { label: string; value: ReactNode; loading: boolean }) {
+function Stat({ label, value, loading, className }: { label: string; value: ReactNode; loading: boolean; className?: string }) {
   return (
-    <div className="flex flex-col gap-1 bg-card px-4 py-3">
+    <div className={cn('flex flex-col gap-1 bg-card px-4 py-3', className)}>
       <dt className="truncate text-muted-foreground text-xs">{label}</dt>
       <dd className="font-semibold text-lg tabular-nums tracking-tight">{loading ? <Skeleton className="h-6 w-16" /> : value}</dd>
     </div>

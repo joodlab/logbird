@@ -3,7 +3,7 @@ import { OutcomeDot, SeverityBadge, TypePill } from '@logbird/ui/components/badg
 import { EntityChip } from '@logbird/ui/components/entity-chip';
 import type { ReactNode } from 'react';
 import { ActionName } from '@/components/action-name';
-import { JobHint, SupportMarker } from '@/components/impersonation';
+import { JobHint, PlacedSupportMarker, SupportMarker } from '@/components/impersonation';
 import { Timestamp } from '@/components/timestamp';
 import { typeIcon } from '@/lib/entities';
 import { eventSentence } from '@/lib/events';
@@ -49,29 +49,35 @@ export const EVENT_COLUMNS: EventColumn[] = [
     defaultVisible: true,
     render: (e) => (
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
-        <SupportMarker event={e} />
+        <PlacedSupportMarker event={e} placement="description" />
         {e.severity === 'critical' || e.severity === 'warning' ? (
           <SeverityBadge className="h-4 shrink-0 px-1.5 text-[10px]" severity={e.severity} />
         ) : null}
         <span className="truncate" dir="auto">
           {eventSentence(e)}
         </span>
-        <JobHint className="ms-auto hidden max-w-[14rem] ps-2 lg:inline-flex" event={e} />
+        <JobHint className="ms-auto hidden ps-1 lg:inline-flex" event={e} />
       </span>
     ),
   },
   {
     id: 'actor',
     label: 'Actor',
-    width: 164,
+    // Room for the "via support: <name>" line under the actor.
+    width: 188,
     defaultVisible: true,
     render: (e) =>
       e.actor ? (
-        <EntityChip
-          icon={e.actor.type === 'user' ? undefined : typeIcon('actor', e.actor.type)}
-          id={e.actor.id}
-          name={e.actor.name || e.actor.email}
-        />
+        <span className="flex min-w-0 flex-col justify-center gap-0.5">
+          <EntityChip
+            icon={e.actor.type === 'user' ? undefined : typeIcon('actor', e.actor.type)}
+            id={e.actor.id}
+            name={e.actor.name || e.actor.email}
+          />
+          <PlacedSupportMarker className="ps-[22px]" event={e} placement="actor" variant="inline" />
+        </span>
+      ) : e.impersonator ? (
+        <PlacedSupportMarker event={e} placement="actor" />
       ) : (
         <span className="text-muted-foreground text-xs">—</span>
       ),
