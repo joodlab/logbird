@@ -1,0 +1,25 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: logbird-acme
+spec:
+  acme:
+    # Start with staging. Replace email and select production only after challenge proof.
+    email: ops@example.test
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef: {name: logbird-acme-account}
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: traefik
+            serviceType: ClusterIP
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: logbird-origin
+  namespace: logbird
+spec:
+  secretName: logbird-origin-tls
+  dnsNames: [audit.example.test]
+  issuerRef: {name: logbird-acme, kind: ClusterIssuer}

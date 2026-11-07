@@ -1,0 +1,32 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    deployment:
+      kind: DaemonSet
+    nodeSelector:
+      logbird.io/edge: 'true'
+    service:
+      labels:
+        svccontroller.k3s.cattle.io/lbpool: logbird-edge
+      spec:
+        type: LoadBalancer
+        externalTrafficPolicy: Local
+    ports:
+      web:
+        forwardedHeaders:
+          insecure: false
+          trustedIPs: []
+        proxyProtocol:
+          insecure: false
+          trustedIPs: []
+      websecure:
+        forwardedHeaders:
+          insecure: false
+          trustedIPs: []
+        proxyProtocol:
+          insecure: false
+          trustedIPs: []
