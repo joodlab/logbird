@@ -1,6 +1,7 @@
 /** Explicit review inventory. New routes must receive a policy and a matrix case. */
 export const consoleMatrix = [
   ['GET', '/api/me', 'self'],
+  ['PATCH', '/api/workspace', 'admin'],
   ['GET', '/api/projects', 'workspace'],
   ['POST', '/api/projects', 'admin'],
   ['GET', '/api/projects/:projectId', 'project'],
@@ -87,7 +88,7 @@ export const authMatrix = {
   requestEmailChangeEmailOTP: 'inactive',
   changeEmailEmailOTP: 'inactive',
   createOrganization: 'self',
-  updateOrganization: 'organization-admin',
+  updateOrganization: 'organization-admin-no-name-or-slug',
   deleteOrganization: 'organization-owner',
   setActiveOrganization: 'organization-member',
   getOrganization: 'organization-member',

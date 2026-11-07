@@ -1,0 +1,183 @@
+{
+  "fixture": {
+    "email": "qa-fix-a11y-r2-*@example.test",
+    "workspace": "QA Fix a11y r2",
+    "events": 400
+  },
+  "explorer / focuses": "Query",
+  "PASS explorer: keyboard reaches the grid": "10 presses → row 0",
+  "PASS explorer: ArrowDown ×50 → row 50": {
+    "tag": "DIV",
+    "role": "row",
+    "eventId": "01a1b63a-1bb0-7972-97d7-dd742336feae",
+    "index": 50,
+    "top": 856,
+    "tabIndex": 0,
+    "name": "Lina Placeholder changed booking BK-base-350, failure, booking.modified, 14:36:4"
+  },
+  "live pill": "250 new since live started",
+  "PASS live tail: focus stays on the same event": {
+    "before": "01a1b63a-1bb0-7972-97d7-dd742336feae",
+    "after": "01a1b63a-1bb0-7972-97d7-dd742336feae",
+    "sameNode": true
+  },
+  "PASS live tail: its index moved by the batch": "50 → 200",
+  "PASS live tail: it is still the only tab stop": [
+    "01a1b63a-1bb0-7972-97d7-dd742336feae"
+  ],
+  "PASS live tail: no scroll jump (row stays put on screen)": {
+    "rowTop": "856 → 856",
+    "scrollTop": "1231 → 6631 (Δ 5400 = 150 rows)"
+  },
+  "PASS live tail: ArrowDown continues from that event": {
+    "tag": "DIV",
+    "role": "row",
+    "eventId": "01a1b63a-1bb0-794d-aedb-ad2534e9066d",
+    "index": 201,
+    "top": 856,
+    "tabIndex": 0,
+    "name": "Vera Validator changed booking BK-base-332, success, booking.modified, 14:36:47"
+  },
+  "PASS live tail: k moves back to it": 200,
+  "PASS explorer: Escape returns focus to the opened row": {
+    "tag": "DIV",
+    "role": "row",
+    "eventId": "01a1b63a-1bb0-7972-97d7-dd742336feae",
+    "index": 200,
+    "top": 820,
+    "tabIndex": 0,
+    "name": "Lina Placeholder changed booking BK-base-350, failure, booking.modified, 14:36:4"
+  },
+  "axe": {
+    "explorer desktop-light (live)": [
+      {
+        "id": "aria-allowed-role",
+        "impact": "minor",
+        "nodes": 1,
+        "sample": ["textarea"]
+      },
+      {
+        "id": "page-has-heading-one",
+        "impact": "moderate",
+        "nodes": 1,
+        "sample": ["html"]
+      }
+    ],
+    "event-sheet desktop-light": [],
+    "activity event-sheet desktop-light": [],
+    "activity desktop-light": [],
+    "explorer desktop-dark": [
+      {
+        "id": "aria-allowed-role",
+        "impact": "minor",
+        "nodes": 1,
+        "sample": ["textarea"]
+      },
+      {
+        "id": "page-has-heading-one",
+        "impact": "moderate",
+        "nodes": 1,
+        "sample": ["html"]
+      }
+    ],
+    "activity desktop-dark": [],
+    "settings phone-light": [],
+    "explorer phone-light": [
+      {
+        "id": "aria-allowed-role",
+        "impact": "minor",
+        "nodes": 1,
+        "sample": ["textarea"]
+      },
+      {
+        "id": "page-has-heading-one",
+        "impact": "moderate",
+        "nodes": 1,
+        "sample": ["html"]
+      }
+    ]
+  },
+  "axe explorer desktop-light (live)": "aria-allowed-role(1), page-has-heading-one(1)",
+  "axe event-sheet desktop-light": "0",
+  "activity rows rendered": 20,
+  "PASS activity: Tab reaches the grid": "6 presses → row 0",
+  "PASS activity: ArrowDown moves the roving tab stop": {
+    "index": 3,
+    "tabStops": ["01a1b63a-19e4-7686-9433-b49d8960323f"]
+  },
+  "PASS activity: Shift+Tab out, Tab back → same row": {
+    "out": "Workspace",
+    "back": 3
+  },
+  "axe activity event-sheet desktop-light": "0",
+  "PASS activity: Escape returns focus to the opened row": {
+    "tag": "DIV",
+    "role": "row",
+    "eventId": "01a1b63a-19e4-7686-9433-b49d8960323f",
+    "index": 3,
+    "top": 409,
+    "tabIndex": 0,
+    "name": "Rowan Fixture created API key ‘QA read 6’, success, api_key.created, 14:37:03"
+  },
+  "PASS activity: focused row survives scrolling away": {
+    "tag": "DIV",
+    "role": "row",
+    "eventId": "01a1b63a-19e4-7686-9433-b49d8960323f",
+    "index": 3,
+    "top": 231,
+    "tabIndex": 0,
+    "name": "Rowan Fixture created API key ‘QA read 6’, success, api_key.created, 14:37:03"
+  },
+  "axe activity desktop-light": "0",
+  "PASS query: Tab / Shift+Tab never edit the draft": [
+    {
+      "key": "Tab",
+      "draft": "outcome:failure OR ",
+      "focus": "Clear query"
+    },
+    {
+      "key": "Shift+Tab",
+      "draft": "outcome:failure OR ",
+      "focus": "Query"
+    },
+    {
+      "key": "Shift+Tab",
+      "draft": "outcome:failure OR ",
+      "focus": "SQL"
+    }
+  ],
+  "axe explorer desktop-dark": "aria-allowed-role(1), page-has-heading-one(1)",
+  "axe activity desktop-dark": "0",
+  "PASS settings ltr 390px → Danger zone: active tab fully visible": {
+    "active": "Danger zone",
+    "visible": true,
+    "span": "267–374 in 16–374",
+    "scrollLeft": 236,
+    "mask": "linear-gradient(to right, rgba(0, 0, 0, 0), rgb(0, 0, 0) 28p"
+  },
+  "PASS settings ltr 390px → General: active tab fully visible": {
+    "active": "General",
+    "visible": true,
+    "span": "16–91 in 16–374",
+    "scrollLeft": 0,
+    "mask": "linear-gradient(to right, rgb(0, 0, 0), rgb(0, 0, 0) 28px, r"
+  },
+  "axe settings phone-light": "0",
+  "PASS settings rtl 390px → Danger zone: active tab fully visible": {
+    "active": "Danger zone",
+    "visible": true,
+    "span": "16–123 in 16–374",
+    "scrollLeft": -236,
+    "mask": "linear-gradient(to left, rgba(0, 0, 0, 0), rgb(0, 0, 0) 28px"
+  },
+  "PASS settings rtl 390px → General: active tab fully visible": {
+    "active": "General",
+    "visible": true,
+    "span": "299–374 in 16–374",
+    "scrollLeft": 0,
+    "mask": "linear-gradient(to left, rgb(0, 0, 0), rgb(0, 0, 0) 28px, rg"
+  },
+  "axe explorer phone-light": "aria-allowed-role(1), page-has-heading-one(1)",
+  "console problems": [],
+  "cleanup: QA project deleted": 204
+}

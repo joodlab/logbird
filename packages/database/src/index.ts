@@ -115,3 +115,4 @@ export async function recoverAbandonedRetention(tx: import('./generated/client')
 }
 
 export * from './audit-outbox';
+export * from './auth-email-hash';

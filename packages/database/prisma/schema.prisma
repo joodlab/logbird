@@ -16,6 +16,7 @@ model User {
   id            String       @id
   name          String
   email         String       @unique
+  emailHash     String?
   emailVerified Boolean      @default(false)
   image         String?
   createdAt     DateTime     @default(now())
@@ -28,6 +29,7 @@ model User {
   savedViews    SavedView[]
   inviteLinks   InviteLink[]
 
+  @@index([emailHash])
   @@map("user")
 }
 
@@ -221,23 +223,40 @@ model AuditOutbox {
   nextAttemptAt DateTime @default(now())
   deliveredAt DateTime?
   lastError String?
+  confirmedAt DateTime? @default(now())
+  sourceSessionId String?
+  quarantinedAt DateTime?
 
   @@index([deliveredAt, nextAttemptAt])
+  @@index([namespace, confirmedAt, createdAt])
+  @@index([namespace, deliveredAt])
 }
 
-// Membership-independent failed-auth staging. The lookup identity is encrypted, never event content.
+// Membership-independent failed-auth staging. Legacy encrypted identities are quarantined; new rows hold only HMACs.
 model AuthAuditWindow {
   namespace String @default("{logbird}")
   id String @id
-  identity String
+  identity String @default("")
+  emailHash String?
   reason String
   context Json
   attempts Int @default(1)
   flushedAttempts Int @default(0)
   windowEnd DateTime
   nextAttemptAt DateTime @default(now())
+  firstAttemptAt DateTime @default(now())
+  lastAttemptAt DateTime @default(now())
+  lastContext Json @default("{}")
+  distinctIps String[] @default([])
+  ipsTruncated Boolean @default(false)
+  prepareAttempts Int @default(0)
+  lastError String?
+  quarantinedAt DateTime?
+  closedAt DateTime?
+  overflow Boolean @default(false)
 
   @@index([nextAttemptAt])
+  @@index([namespace, closedAt, windowEnd])
 }
 
 model AuthAuditBudget {
@@ -248,6 +267,7 @@ model AuthAuditBudget {
   admitted Int @default(0)
   suppressed Int @default(0)
   reported Boolean @default(false)
+  targets Json @default("{}")
 
   @@index([reported, windowEnd])
 }

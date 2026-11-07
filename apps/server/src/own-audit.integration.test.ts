@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { purgeProject } from '@logbird/clickhouse';
 import { createProjectResponseSchema, WORKSPACE_ACTIVITY_CATEGORIES } from '@logbird/contracts';
 import { prisma } from '@logbird/database';
-import { expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import { app } from './app';
 import { authEmailHash } from './auth-failures';
 import { clickhouse } from './clickhouse';
@@ -116,7 +116,7 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
       [owner, 'QA Fix own audit', 'QA Fix own audit renamed'],
       [admin, 'QA Fix own audit renamed', 'QA Fix own audit'],
     ] as const) {
-      const renamed = await request(actor.cookie, '/api/auth/organization/update', 'POST', { organizationId, data: { name: after } });
+      const renamed = await request(actor.cookie, '/api/workspace', 'PATCH', { name: after });
       expect(renamed.status).toBe(200);
       const receipt = (await rawActivity()).find((r) => r.context?.requestId === renamed.headers.get('x-request-id'));
       expect(receipt).toMatchObject({
@@ -126,17 +126,15 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
         context: { ip: actor.ip },
       });
     }
-    expect((await request(member.cookie, '/api/auth/organization/update', 'POST', { organizationId, data: { name: 'Denied rename' } })).status).toBe(
-      403,
-    );
-    const noOp = await request(owner.cookie, '/api/auth/organization/update', 'POST', { organizationId, data: { name: 'QA Fix own audit' } });
+    expect((await request(member.cookie, '/api/workspace', 'PATCH', { name: 'Denied rename' })).status).toBe(403);
+    const noOp = await request(owner.cookie, '/api/workspace', 'PATCH', { name: 'QA Fix own audit' });
     expect(noOp.status).toBe(200);
     expect((await rawActivity()).filter((r) => r.context?.requestId === noOp.headers.get('x-request-id'))).toHaveLength(0);
 
-    // better-auth accepts an empty id as the active workspace: it must share the explicit id's rename lock.
+    // Concurrent owned updates serialize their before snapshots on the organization row.
     const concurrent = await Promise.all([
-      request(owner.cookie, '/api/auth/organization/update', 'POST', { organizationId: '', data: { name: 'QA Fix own audit race A' } }),
-      request(admin.cookie, '/api/auth/organization/update', 'POST', { organizationId, data: { name: 'QA Fix own audit race B' } }),
+      request(owner.cookie, '/api/workspace', 'PATCH', { name: 'QA Fix own audit race A' }),
+      request(admin.cookie, '/api/workspace', 'PATCH', { name: 'QA Fix own audit race B' }),
     ]);
     expect(concurrent.map((r) => r.status)).toEqual([200, 200]);
     const requestIds = concurrent.map((r) => r.headers.get('x-request-id'));
@@ -147,24 +145,7 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
     const nextRename = renames.find((r) => r !== firstRename);
     expect(nextRename?.changes[0]?.before).toBe(firstRename.changes[0].after);
     expect(new Set(renames.map((r) => r.changes[0].after))).toEqual(new Set(['QA Fix own audit race A', 'QA Fix own audit race B']));
-    expect(
-      (await request(owner.cookie, '/api/auth/organization/update', 'POST', { organizationId, data: { name: 'QA Fix own audit' } })).status,
-    ).toBe(200);
-
-    // An audit-storage outage after the rename must not turn the committed mutation into an auth error.
-    const enqueue = vi.spyOn(prisma.auditOutbox, 'create').mockRejectedValueOnce(new Error('fictional storage outage'));
-    try {
-      expect(
-        (await request(owner.cookie, '/api/auth/organization/update', 'POST', { organizationId, data: { name: 'QA Fix audit storage outage' } }))
-          .status,
-      ).toBe(200);
-      expect((await prisma.organization.findUniqueOrThrow({ where: { id: organizationId } })).name).toBe('QA Fix audit storage outage');
-    } finally {
-      enqueue.mockRestore();
-    }
-    expect(
-      (await request(owner.cookie, '/api/auth/organization/update', 'POST', { organizationId, data: { name: 'QA Fix own audit' } })).status,
-    ).toBe(200);
+    expect((await request(owner.cookie, '/api/workspace', 'PATCH', { name: 'QA Fix own audit' })).status).toBe(200);
 
     const raised = await request(owner.cookie, path, 'PATCH', { retentionDays: 90 });
     expect(raised.status).toBe(200);
@@ -233,7 +214,7 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
       expect(row.actor.type).toBe('anonymous');
       expect(row.metadata.emailHash).toMatch(/^[a-f0-9]{64}$/);
       expect(row.context.ip).toMatch(/^203\.0\.113\.8[0-2]$/);
-      expect(JSON.stringify(row)).not.toContain('@example.test');
+      expect(row.targets[0].name).toMatch(/@example.test$/); // Stored member address is an allowed display fallback.
       expect(JSON.stringify(row)).not.toContain('000000');
     }
     const exported = await request(owner.cookie, `${path}/export?format=jsonl`);

@@ -9,6 +9,7 @@ const all = ['owner', 'admin', 'member'] as const;
 const admins = ['owner', 'admin'] as const;
 // All console mutations must be listed here. Auth routes are owned by better-auth.
 export const mutationPermissions = [
+  { method: 'PATCH', path: /^\/api\/workspace$/, roles: admins },
   { method: 'POST', path: /^\/api\/projects$/, roles: admins },
   { method: 'PATCH', path: /^\/api\/projects\/[^/]+$/, roles: admins },
   { method: 'DELETE', path: /^\/api\/projects\/[^/]+$/, roles: admins },

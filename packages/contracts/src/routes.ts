@@ -12,6 +12,7 @@ export const routes = {
   auth: '/api/auth/*',
 
   me: { method: 'GET', path: '/api/me', auth: 'session' },
+  workspace: { method: 'PATCH', path: '/api/workspace', auth: 'session' },
 
   projects: {
     list: { method: 'GET', path: '/api/projects', auth: 'session' },

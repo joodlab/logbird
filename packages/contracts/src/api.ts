@@ -1,8 +1,20 @@
-export const API_KEY_SCOPES = { read: 'events:read', ingest: 'events:ingest' } as const;
-
 import { z } from 'zod';
 import { eventSchema } from './events';
 import { queryLangSchema } from './query';
+export const API_KEY_SCOPES = { read: 'events:read', ingest: 'events:ingest' } as const;
+export const updateWorkspaceSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    slug: z
+      .string()
+      .min(1)
+      .max(120)
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      .optional(),
+  })
+  .strict()
+  .refine((input) => input.name !== undefined || input.slug !== undefined, 'Provide a name or slug.');
+export const workspaceSchema = z.object({ id: z.string(), name: z.string(), slug: z.string() });
 
 /* ------------------------------------------------------------------ */
 /* Shared query params                                                 */

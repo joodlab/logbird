@@ -27,7 +27,7 @@ The receipt also carries the export schema version.
 ### Data dictionary
 
 `id` is the stable event id; `project_id` identifies its stream. `timestamp` is occurrence time and `received_at`
-is the first accepted receive time, both ISO UTC strings. `job_attempt` is an integer; `conformance` is a score
+is the stored receive time of the selected event version, both ISO UTC strings. `job_attempt` is an integer; `conformance` is a score
 from 0 to 100. `targets`, `changes`, `context`, `attributes` are JSON cells. Other CSV fields are strings, with empty
 values for missing optional data. JSONL keeps structured objects/arrays and the contract's numeric types.
 
@@ -72,3 +72,5 @@ Completion means the producer exhausted its pages and handed bytes to the stream
 acknowledgement. Discard partial or errored downloads. An in-flight database query may finish before iterator cleanup.
 The console buffers a Blob, so very large downloads depend on browser memory; HTTP clients can stream to disk.
 There is no whole-export row/byte budget. Deploy the server and console together after the outbox migrations.
+
+Until #62 lands, this branch uses the existing duplicate-id arbitration. Complete exports pair the selected normalized row with its exact stored payload; immutable first-acceptance and ambiguous-retry guarantees belong to #62 and require combined verification.

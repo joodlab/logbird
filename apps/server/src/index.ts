@@ -1,8 +1,9 @@
 import { serve } from '@hono/node-server';
+import { reconcileSessionAudit } from '@logbird/auth';
 import { closeProjectLocks, prisma } from '@logbird/database';
 import { closeRetentionQueue } from '@logbird/worker/queue';
 import { app } from './app';
-import { flushFailedSignIns } from './auth-failures';
+import { backfillAuthEmailHashes, flushFailedSignIns } from './auth-failures';
 import { clickhouse, queryClickhouse } from './clickhouse';
 import { env } from './env';
 import { drainExportAudits } from './export-stream';
@@ -20,7 +21,11 @@ if ('keepAliveTimeout' in server) {
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 66_000;
 }
-const auditDrainer = startAuditDrainer(ingest, () => flushFailedSignIns(env.BETTER_AUTH_SECRET));
+const auditDrainer = startAuditDrainer(ingest, async () => {
+  await backfillAuthEmailHashes(env.BETTER_AUTH_SECRET);
+  const results = await Promise.allSettled([flushFailedSignIns(), reconcileSessionAudit()]);
+  if (results.some((result) => result.status === 'rejected')) throw new Error('Audit preparation unavailable');
+});
 let stopping = false;
 function shutdown() {
   if (stopping) return;

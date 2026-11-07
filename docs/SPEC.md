@@ -384,7 +384,8 @@ invitation acceptance remain available; organization administration uses its rol
 
 | /api operation | Owner | Admin | Member |
 |---|---|---|---|
-| better-auth organization update | yes | yes | no |
+| PATCH /api/workspace (name / slug) | yes | yes | no |
+| better-auth organization update (other fields only) | yes | yes | no |
 | better-auth organization delete | yes | no | no |
 | better-auth invite/cancel invitation, manage members | yes | yes (owner safeguards apply) | no |
 | better-auth profile/session, create workspace, accept/reject invitation, leave workspace | self-service | self-service | self-service (last-owner safeguards apply) |
@@ -399,6 +400,9 @@ invitation acceptance remain available; organization administration uses its rol
 | POST workspace invite-links / DELETE workspace invite-link | yes | yes | no |
 | POST invite-links/:token/accept | valid invitation | valid invitation | valid invitation |
 | GET export, workspace activity and other workspace/project reads | yes | yes | yes |
+
+See [event exports](exports.md) for complete original payloads, CSV/JSONL schemas, fixed query clocks and file-to-record verification.
+
 | GET workspace invite-links | yes | yes | no (contains bearer invitations) |
 
 Link acceptance requires a session and valid token, domain, expiry and remaining
@@ -457,7 +461,7 @@ User journeys (each must work end-to-end against the real server):
    destructive confirm dialog requiring the slug, explains permanent deletion; shows last purge + oldest event),
    **API keys** (create dialog → secret shown once with copy + snippet; list with kind badges, last used,
    revoke confirm), workspace members + invite by email, **workspace activity** (Logbird's own audit stream,
-   rendered with the same explorer components), danger zone (delete project).
+   rendered with the same explorer components; see the [activity action catalogue](workspace-audit.md)), danger zone (delete project).
 10. **Setup** (`/p/$projectId/setup`, replaces Docs / Quickstart; `/docs` redirects): live checklist from
     `GET /api/projects/:projectId/setup` with one section per step (inline ingest/read keys, first event, envelope
     coverage with "find missing" explorer links, operationId, retention review, invite), followed by the envelope
@@ -482,6 +486,3 @@ website/member/role/integration/media/export/auth.*/crm.sync.*/catalog.sync.*); 
 job → child record changes), retries (attempt 2/3), failures/denied/unknown outcomes at realistic low rates,
 some events deliberately off-standard (missing actor, custom top-level keys) to exercise conformance. Seed also
 creates a dev login user `demo@logbird.local` as owner of "Jood" (OTP arrives in Mailpit).
-
-Workspace activity actions, targets, delivery guarantees and operator procedures are listed in the [activity action catalogue](workspace-audit.md).
-See [event exports](exports.md) for complete original payloads, normalized CSV/JSONL, versioned schemas, fixed query clocks and file-to-record verification.
