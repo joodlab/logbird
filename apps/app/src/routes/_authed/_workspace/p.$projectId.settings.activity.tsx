@@ -50,6 +50,10 @@ function WorkspaceActivity() {
 
   const activity = useInfiniteQuery(workspaceActivityQuery(range, q));
   const rows = useMemo(() => activity.data?.pages.flatMap((p) => p.data) ?? [], [activity.data]);
+  // The result set the table shows, as of the last non-placeholder results (the query keeps the previous rows while a
+  // new search or chip loads): the table starts a new set at the top even when it shares rows with the old one.
+  const resultKey = useRef<string | undefined>(undefined);
+  if (activity.isSuccess && !activity.isPlaceholderData) resultKey.current = `${range}|${q}|${category ?? ''}`;
   const selectedIndex = search.ev ? rows.findIndex((e) => e.id === search.ev) : -1;
   const select = (e: AuditEvent | null | undefined) => navigate({ search: (prev) => ({ ...prev, ev: e?.id }), replace: true });
   // The table tracks its own keyboard cursor (by event id, following the open event); closing the sheet returns to it.
@@ -122,6 +126,7 @@ function WorkspaceActivity() {
             loading={activity.isPending}
             onSelect={select}
             ref={table}
+            resultKey={resultKey.current}
             rows={rows}
             selectedId={search.ev}
           />

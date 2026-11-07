@@ -1,6 +1,6 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { eventRowLabel, isReplaced, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
+import { anchorShift, eventRowLabel, isReplaced, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
 
 function event(patch: Partial<AuditEvent>): AuditEvent {
   return {
@@ -115,6 +115,23 @@ describe('prependedCount', () => {
     expect(prependedCount('a', [...rows, { id: 'more' }])).toBe(0);
     expect(prependedCount('gone', rows)).toBe(0);
     expect(prependedCount(undefined, rows)).toBe(0);
+  });
+});
+
+describe('anchorShift', () => {
+  const live = [{ id: 'l0' }, { id: 'l1' }, { id: 'l2' }];
+  const paged = [{ id: 'p0' }, { id: 'p1' }];
+  // A capped tail: two new rows on top, its two oldest dropped.
+  const next = [{ id: 'n0' }, { id: 'n1' }, { id: 'l0' }, ...paged];
+  it('follows a row of the live tail down by the batch size', () => {
+    expect(anchorShift([...live, ...paged], next, 0, 2)).toBe(2);
+  });
+  it('is 0 for a paged row once the capped tail drops as many rows as it adds', () => {
+    expect(anchorShift([...live, ...paged], next, 4, 2)).toBe(0);
+  });
+  it('falls back when the anchor row is gone or out of range', () => {
+    expect(anchorShift([...live, ...paged], next, 1, 2)).toBe(2);
+    expect(anchorShift([...live, ...paged], next, 99, 2)).toBe(2);
   });
 });
 

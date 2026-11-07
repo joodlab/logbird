@@ -99,9 +99,16 @@ export function Explorer({
   /* ---------------- query errors ---------------- */
   // A rejected query keeps the last good results on screen (dimmed) and explains itself in the bar.
   const problem = queryProblem(events.error, lang) ?? queryProblem(histogram.error, lang);
-  const lastGood = useRef<{ pages?: SearchResponse[]; histogram?: HistogramResponse; query?: { q: string; lang: QueryLang } }>({});
+  const lastGood = useRef<{ pages?: SearchResponse[]; histogram?: HistogramResponse; query?: { q: string; lang: QueryLang }; range?: string }>({});
   if (events.data && !events.isError) lastGood.current.pages = events.data.pages;
-  if (events.isSuccess && !events.isPlaceholderData) lastGood.current.query = { q, lang };
+  if (events.isSuccess && !events.isPlaceholderData) {
+    lastGood.current.query = { q, lang };
+    lastGood.current.range = range;
+  }
+  // The result set the table shows: it changes only when non-placeholder results for a new query, language or range are
+  // committed, so the table starts that set at the top even when it shares rows with the old one.
+  const committed = lastGood.current.query;
+  const resultKey = committed ? JSON.stringify([lastGood.current.range, committed.lang, committed.q]) : undefined;
   if (histogram.data && !histogram.isError) lastGood.current.histogram = histogram.data;
   // Nothing valid to save or export while the query is rejected (the export would fail the same way).
   const saveBlocked = problem ? 'Fix the query first — a view must run without errors.' : null;
@@ -478,6 +485,7 @@ export function Explorer({
             loadMore={() => events.fetchNextPage()}
             loading={events.isPending && !problem}
             onCursorChange={setCursorId}
+            resultKey={resultKey}
             onSelect={(e) => {
               setCursorId(e.id);
               select(e);

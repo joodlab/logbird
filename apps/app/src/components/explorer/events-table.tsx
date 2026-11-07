@@ -27,7 +27,7 @@ import { eventSentence } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { EVENT_COLUMNS } from './columns';
-import { eventRowLabel, isReplaced, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
+import { anchorShift, eventRowLabel, isReplaced, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
 
 const features = tableFeatures({ columnVisibilityFeature });
 const helper = createColumnHelper<typeof features, AuditEvent>();
@@ -92,6 +92,13 @@ interface EventsTableProps {
    * cells: anything meaningful a caller adds to a cell (a marker, a job hint) belongs here too. Defaults to `eventRowLabel`.
    */
   rowLabel?: (event: AuditEvent) => string;
+  /**
+   * Identifies the result set `rows` belongs to (its query, language and range). Change it only when non-placeholder
+   * data for a new query is committed: a changed key marks `rows` as a new result set, however many rows it shares with
+   * the old one. Without it, a new result set is inferred from the rows (`isReplaced`: the old first row is gone), which
+   * misses a new query whose newest match is the old first row.
+   */
+  resultKey?: string;
   ref?: Ref<EventsTableHandle>;
 }
 
@@ -102,10 +109,10 @@ interface EventsTableProps {
  * PageUp/PageDown and Home/End (or Ctrl+Home/End) move focus between rows; Enter or Space opens the row. The cursor is
  * an event id, so it stays on its event when live tail prepends rows, and its row stays mounted even when scrolled away.
  * When its event leaves the list while the grid has focus, focus moves to the row now in its place (or to
- * `focusFallback` when no row is left), never to <body>. When a new result set (the old first row is gone, and nothing
- * was prepended) no longer holds the cursor's event, the cursor resets to the first row and the view to the top, without
- * loading more; a focused grid moves focus there. A cursor whose event moves to another index (other than by a live-tail
- * prepend) is scrolled into view.
+ * `focusFallback` when no row is left), never to <body>. A new result set (`resultKey` changed; without a key, the old
+ * first row is gone) starts at the top without loading more: when it no longer holds the cursor's event, the cursor
+ * resets to the first row, and a focused grid moves focus there. Only a focused grid follows a cursor whose event moves
+ * to another index (other than by a live-tail prepend) and scrolls it into view.
  *
  * In-row controls (a link inside a cell) must follow this contract, because the row's `onClick` opens the event and has
  * no target guard: give them `tabIndex={-1}` (the row is the tab stop; screen readers reach them through the row's
@@ -130,6 +137,7 @@ export function EventsTable({
   onCursorChange,
   rowLabel = eventRowLabel,
   focusFallback,
+  resultKey,
   ref,
 }: EventsTableProps) {
   const isMobile = useIsMobile();
@@ -172,10 +180,15 @@ export function EventsTable({
   const lastCursorIndex = useRef(0);
   // Whether focus is in the grid: if the focused row unmounts (its event was filtered out), the grid takes focus back.
   const focusInside = useRef(false);
-  // The first row as last committed. When it is gone from `rows` this render is a new result set (a query, facet, range
-  // or "Filter by" change), not a removal within the same list nor a live-tail prepend (which keeps the old first row).
+  // The first row and the result key as last committed. This render is a new result set (a query, facet, range or
+  // "Filter by" change) when the consumer's `resultKey` changed; without a key, when the old first row is gone — not a
+  // removal within the same list nor a live-tail prepend (which keeps the old first row).
   const firstId = useRef<string | undefined>(undefined);
-  const replaced = isReplaced(firstId.current, rows);
+  const committedKey = useRef(resultKey);
+  const replaced =
+    resultKey === undefined
+      ? isReplaced(firstId.current, rows)
+      : rows.length > 0 && committedKey.current !== undefined && committedKey.current !== resultKey;
   // The tab stop: the cursor's row wherever its event is now; the first row while there is no cursor.
   const resolved = resolveCursor(rows, cursorKey, lastCursorIndex.current);
   // The cursor's event is gone. In a new result set, or with focus elsewhere, start over at the top: the old index means
@@ -231,28 +244,32 @@ export function EventsTable({
   const startIndex = virtualizer.range?.startIndex ?? 0;
   const endIndex = virtualizer.range?.endIndex ?? 0;
   // After a new result set the virtualizer still reports the old scroll position until the browser's scroll event
-  // arrives: hold off loading more until the viewport shows the tab stop again.
-  const awaitingTabStop = useRef(false);
+  // arrives: hold off loading more until the viewport shows where the view went — the tab stop it scrolled to, or the
+  // top (a new result set while focus is elsewhere).
+  const awaiting = useRef<'tabStop' | 'top' | null>(null);
 
   useEffect(() => {
-    if (awaitingTabStop.current) {
-      if (tabStop >= 0 && (tabStop < startIndex || tabStop > endIndex)) return;
-      awaitingTabStop.current = false;
+    if (awaiting.current) {
+      const target = awaiting.current === 'top' ? 0 : tabStop;
+      if (target >= 0 && (target < startIndex || target > endIndex)) return;
+      awaiting.current = null;
     }
     if (hasMore && !fetchingMore && endIndex >= tableRows.length - 15) loadMore?.();
   }, [hasMore, fetchingMore, startIndex, endIndex, tabStop, tableRows.length, loadMore]);
 
   // Live tail prepends rows: how many arrived in the last commit (0 for anything else).
   const lastPrepended = useRef(0);
-  // Scroll the cursor row into view when the cursor moves to another event, or when its event moves to another index for
-  // any reason but a live-tail prepend (a reordering refetch; a new result set that still holds it). A prepend only
-  // shifts it, and the view is anchored for that below.
+  // Scroll the cursor row into view when the cursor moves to another event. When its event moves to another index for any
+  // reason but a live-tail prepend (a reordering refetch; a new result set that still holds it; a capped live tail that
+  // drops rows above it), follow it only while the grid has focus: with focus elsewhere the row stays mounted off-screen,
+  // and Tab or a dialog's return focus brings it into view once it is focused. A prepend only shifts it, and the view is
+  // anchored for that below.
   const scrolledTo = useRef<{ key: string | null | undefined; index: number }>({ key: undefined, index: -1 });
   useEffect(() => {
     const previous = scrolledTo.current;
     scrolledTo.current = { key: cursorKey, index: tabStop };
     if (!cursorKey || tabStop < 0) return;
-    if (previous.key === cursorKey && tabStop === previous.index + lastPrepended.current) return;
+    if (previous.key === cursorKey && (!focusInside.current || tabStop === previous.index + lastPrepended.current)) return;
     virtualizer.scrollToIndex(tabStop, { align: 'auto' });
   }, [cursorKey, tabStop, virtualizer]);
 
@@ -266,30 +283,46 @@ export function EventsTable({
   const rowElement = useCallback((index: number) => scrollRef.current?.querySelector<HTMLElement>(`[role="row"][data-index="${index}"]`) ?? null, []);
 
   // Live tail prepends rows. Unless the reader sits at the top watching them arrive (with focus elsewhere), keep what is
-  // on screen — and the focused row — where it is instead of pushing it down.
-  // A new result set without the cursor's event starts at the top: scroll there, and if the grid had focus, put it on the
-  // first row (the old focused row is gone).
+  // on screen — and the focused row — where it is instead of pushing it down: scroll by how far the focused row (or the
+  // top row in view) moved, which is less than the batch once the capped tail drops rows above it.
+  const previousRows = useRef(rows);
+  // A new result set starts at the top, unless a focused grid follows its cursor's event to its new index: with focus
+  // elsewhere it goes to the top even when the cursor's event survives. Without the cursor's event, a focused grid moves
+  // focus to the first row (the old focused row is gone).
   useLayoutEffect(() => {
-    const added = prependedCount(firstId.current, rows);
+    const added = replaced ? 0 : prependedCount(firstId.current, rows);
+    const before = previousRows.current;
     lastPrepended.current = added;
     firstId.current = rows[0]?.id;
+    previousRows.current = rows;
+    if (rows.length > 0) committedKey.current = resultKey;
     const el = scrollRef.current;
     if (!el) return;
-    if (added > 0 && (el.scrollTop > 0 || focusInside.current)) el.scrollTop += added * rowHeight;
+    if (added > 0 && (el.scrollTop > 0 || focusInside.current)) {
+      const focused = focusInside.current && cursorKey ? before.findIndex((r) => r.id === cursorKey) : -1;
+      const anchor = focused >= 0 ? focused : Math.floor(el.scrollTop / rowHeight);
+      el.scrollTop += anchorShift(before, rows, anchor, added) * rowHeight;
+    }
     if (!replaced) return;
-    // The view is about to move (to the top, or to the cursor's new index): don't load more from the old position.
-    const moved = reset || (Boolean(cursorKey) && tabStop !== scrolledTo.current.index);
-    if (moved) awaitingTabStop.current = true;
-    if (!reset) return;
+    if (!reset && focusInside.current) {
+      // The scroll effect above follows the cursor to its new index: don't load more from the old position meanwhile.
+      if (cursorKey && tabStop !== scrolledTo.current.index) awaiting.current = 'tabStop';
+      return;
+    }
+    // To the top, loading no more from the old position either.
+    awaiting.current = reset ? 'tabStop' : 'top';
     el.scrollTop = 0;
+    if (!reset) return;
     pendingFocus.current = null;
     if (focusInside.current) rowElement(0)?.focus({ preventScroll: true });
-  }, [rows, rowHeight, replaced, reset, cursorKey, tabStop, rowElement]);
+  }, [rows, rowHeight, replaced, reset, cursorKey, tabStop, rowElement, resultKey]);
 
   const focusRow = useCallback(
     (index: number) => {
       const event = rowsRef.current[index];
       if (!event) return false;
+      // An explicit move takes the view to this row: stop waiting for it to show the top.
+      if (awaiting.current === 'top') awaiting.current = null;
       setCursor(event.id);
       virtualizer.scrollToIndex(index, { align: 'auto' });
       const el = rowElement(index);

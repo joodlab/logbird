@@ -50,6 +50,8 @@ const page = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => 
 interface HarnessHandle {
   setRows: (update: (rows: AuditEvent[]) => AuditEvent[]) => void;
   setSelected: (id: string | undefined) => void;
+  /** Commit a new result set and its key together, as Explorer and Workspace Activity do. */
+  setResult: (rows: AuditEvent[], key: string) => void;
 }
 
 interface HarnessOptions {
@@ -57,6 +59,8 @@ interface HarnessOptions {
   loadMore?: () => void;
   /** Mount an event sheet whose final focus is composed as in Explorer and Workspace Activity. */
   sheet?: boolean;
+  /** Pass a `resultKey` (starting with this one), as both pages do. */
+  resultKey?: string;
 }
 
 /**
@@ -79,8 +83,20 @@ function Harness({
   const [rows, setRows] = useState(initial);
   const [selected, setSelected] = useState<string | undefined>();
   const [cursor, setCursor] = useState<string | null>(null);
+  const [resultKey, setResultKey] = useState(options.resultKey);
   const query = useRef<HTMLInputElement>(null);
-  useImperativeHandle(harness, () => ({ setRows, setSelected }), []);
+  useImperativeHandle(
+    harness,
+    () => ({
+      setRows,
+      setSelected,
+      setResult: (next, key) => {
+        setRows(next);
+        setResultKey(key);
+      },
+    }),
+    [],
+  );
   return (
     <>
       <input aria-label="Query" data-testid="query" ref={query} />
@@ -95,6 +111,7 @@ function Harness({
           loadMore={options.loadMore}
           onSelect={(e) => setSelected(e.id)}
           ref={table}
+          resultKey={resultKey}
           rows={rows}
           selectedId={selected}
           {...(controlled
@@ -377,6 +394,155 @@ describe.each([
     expect(10 * ROW).toBeGreaterThanOrEqual(top);
     expect(11 * ROW + 32).toBeLessThanOrEqual(top + VIEW.height);
     expect(loadMore).not.toHaveBeenCalled();
+  });
+
+  it('starts a new result set at the top when its key changes, though its newest event is the old first row ("Filter by" a common value)', () => {
+    const loadMore = vi.fn();
+    const onCursorChange = vi.fn();
+    const t = mount(page('e', 500), controlled, { loadMore, onCursorChange, resultKey: 'all' });
+    // The sheet closed onto event 300 and returned focus to its row before the filtered results arrived.
+    act(() => {
+      t.table().focusRow(300);
+    });
+    scrollTo(295 * ROW);
+    flush();
+    expect(focusedId()).toBe('e300');
+    loadMore.mockClear();
+
+    // The newest event matches the filter too, so the old first row is row 0 again; event 300 is not on page 1.
+    const [e0] = page('e', 1) as [AuditEvent];
+    act(() => t.harness().setResult([e0, ...page('n', 100).slice(1)], 'outcome:success'));
+    flush();
+
+    expect(focusedId()).toBe('e0');
+    expect(tabStops()).toEqual(['e0']);
+    expect(scroller().scrollTop).toBe(0);
+    expect(onCursorChange).toHaveBeenLastCalledWith('e0');
+    expect(loadMore).not.toHaveBeenCalled();
+    scrollTo(0);
+    flush();
+    expect(loadMore).not.toHaveBeenCalled();
+    key(rowOf('e0') as Element, 'ArrowDown');
+    expect(focusedId()).toBe('n1');
+  });
+
+  it('treats a changed list under the same key as the same list: a focused grid keeps its place when its event leaves', () => {
+    const t = mount(page('e', 300), controlled, { resultKey: 'all' });
+    act(() => {
+      t.table().focusRow(20);
+    });
+    // Same key, and the old first row is gone too: still the same list, so the row now at its index (20) takes focus.
+    act(() => t.harness().setRows((rows) => rows.filter((e) => e.id !== 'e0' && e.id !== 'e20')));
+    flush();
+    expect(focusedId()).toBe('e22');
+  });
+
+  it.each([
+    ['without a result key', undefined],
+    ['with a result key', 'all'],
+  ])('does not scroll to the cursor event at its new index while focus is elsewhere (%s)', (_, resultKey) => {
+    const loadMore = vi.fn();
+    const t = mount(page('e', 500), controlled, { loadMore, resultKey });
+    // Opened row 3 earlier, then went back to the query: the cursor stays on that event.
+    act(() => {
+      t.table().focusRow(3);
+    });
+    act(() => byTestId('elsewhere').focus());
+    flush();
+    expect(scroller().scrollTop).toBe(0);
+    loadMore.mockClear();
+    // happy-dom does no layout (scrollHeight 0), and the virtualizer clamps scrolls to it: give the new list its height.
+    Object.defineProperty(scroller(), 'scrollHeight', { configurable: true, get: () => 32 + 100 * ROW + 48 });
+
+    // A broader query: the event is now row 60.
+    const kept = page('e', 4)[3] as AuditEvent;
+    const next = [...page('n', 60), kept, ...page('m', 39)];
+    act(() => (resultKey ? t.harness().setResult(next, 'broader') : t.harness().setRows(() => next)));
+    flush();
+    scrollTo(scroller().scrollTop);
+    flush();
+
+    expect(scroller().scrollTop).toBe(0);
+    expect(loadMore).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(byTestId('elsewhere'));
+    // Still the tab stop, mounted off-screen: Tab back in brings it into view.
+    expect(tabStops()).toEqual(['e3']);
+    expect(rowOf('e3')?.dataset.index).toBe('60');
+  });
+
+  it('returns a new result set to the top while focus is elsewhere, even when it still holds the cursor event', () => {
+    const loadMore = vi.fn();
+    const t = mount(page('e', 500), controlled, { loadMore, resultKey: 'all' });
+    act(() => {
+      t.table().focusRow(300);
+    });
+    act(() => byTestId('elsewhere').focus());
+    scrollTo(280 * ROW);
+    flush();
+    loadMore.mockClear();
+    Object.defineProperty(scroller(), 'scrollHeight', { configurable: true, get: () => 32 + 100 * ROW + 48 });
+
+    const kept = page('e', 301)[300] as AuditEvent;
+    act(() => t.harness().setResult([...page('n', 60), kept, ...page('m', 39)], 'filtered'));
+    flush();
+    // The browser's scroll event catches up with the reset.
+    scrollTo(scroller().scrollTop);
+    flush();
+
+    expect(scroller().scrollTop).toBe(0);
+    expect(loadMore).not.toHaveBeenCalled();
+    expect(tabStops()).toEqual(['e300']);
+    expect(document.activeElement).toBe(byTestId('elsewhere'));
+  });
+
+  it.each([
+    ['focus elsewhere', false],
+    ['focus on the row', true],
+  ])('keeps the paged rows still once live tail is capped and drops rows above them (%s)', (_, focused) => {
+    // 2000 live rows (the cap) above the paged results; the cursor is on a paged event, and the view shows it.
+    const live = page('l', 2000);
+    const paged = page('e', 500);
+    const t = mount([...live, ...paged], controlled);
+    Object.defineProperty(scroller(), 'scrollHeight', { configurable: true, get: () => 32 + 2600 * ROW + 48 });
+    act(() => {
+      t.table().focusRow(2010);
+    });
+    flush();
+    expect(focusedId()).toBe('e10');
+    if (!focused) act(() => byTestId('elsewhere').focus());
+    scrollTo(2005 * ROW);
+    flush();
+    const before = scroller().scrollTop;
+
+    // A batch of 5 arrives and the capped tail drops its oldest 5: e10 (and every paged row) keeps its index.
+    act(() => t.harness().setRows(() => [...page('x', 5), ...live.slice(0, 1995), ...paged]));
+    flush();
+    scrollTo(scroller().scrollTop);
+    flush();
+    // The next poll does the same.
+    act(() => t.harness().setRows((rows) => [...page('y', 5), ...rows.slice(0, 1995), ...paged]));
+    flush();
+    scrollTo(scroller().scrollTop);
+    flush();
+
+    expect(rowOf('e10')?.dataset.index).toBe('2010');
+    expect(tabStops()).toEqual(['e10']);
+    // Nothing on screen moved, so neither does the view: not 5 rows further per poll, and no scroll to the cursor.
+    expect(scroller().scrollTop).toBe(before);
+    expect(document.activeElement).toBe(focused ? rowOf('e10') : byTestId('elsewhere'));
+  });
+
+  it('still follows the live rows on screen down by the batch size once the tail is capped', () => {
+    const live = page('l', 2000);
+    const paged = page('e', 500);
+    const t = mount([...live, ...paged], controlled);
+    act(() => byTestId('elsewhere').focus());
+    scrollTo(1500 * ROW);
+    flush();
+    const before = scroller().scrollTop;
+    act(() => t.harness().setRows(() => [...page('x', 5), ...live.slice(0, 1995), ...paged]));
+    flush();
+    expect(scroller().scrollTop).toBe(before + 5 * ROW);
   });
 
   it('hands focus to the query field when a refetch empties the list under a focused row', () => {

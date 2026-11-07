@@ -77,6 +77,17 @@ export function prependedCount(previousFirstId: string | undefined, rows: readon
 }
 
 /**
+ * How far the row at `anchorIndex` of `before` moved in `rows`: what to scroll by to keep it where it is on screen after
+ * a live-tail batch. Usually the batch size, but once the live tail is capped it also drops its oldest rows, so a row
+ * below them (the paged results) does not move at all. `fallback` when that row is gone or there is none.
+ */
+export function anchorShift(before: readonly { id: string }[], rows: readonly { id: string }[], anchorIndex: number, fallback: number): number {
+  const id = before[anchorIndex]?.id;
+  const index = id === undefined ? -1 : rows.findIndex((r) => r.id === id);
+  return index < 0 ? fallback : index - anchorIndex;
+}
+
+/**
  * Whether `rows` is a new result set rather than the same list changed: the previous first row is gone. Removals within
  * the same list and live-tail prepends keep it (a prepend pushes it down, see `prependedCount`). False before there was a
  * first row and for an empty list (the empty state handles that).
