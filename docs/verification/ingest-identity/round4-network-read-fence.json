@@ -1,0 +1,33 @@
+{
+  "at": "2026-11-07T18:04:04.041Z",
+  "sourceHead": "760b90d9a339eb7806491ece6f0ccbcebff5e4ea",
+  "results": [
+    {
+      "claim": "native startup flush-grant probe",
+      "passed": true
+    },
+    {
+      "claim": "network reader while rollups deleted",
+      "route": "entities?kind=actor",
+      "status": 503,
+      "code": "retention_unavailable"
+    },
+    {
+      "claim": "network reader while rollups deleted",
+      "route": "overview",
+      "status": 503,
+      "code": "retention_unavailable"
+    },
+    {
+      "claim": "network reader after complete repair",
+      "route": "entities?kind=actor",
+      "status": 200
+    },
+    {
+      "claim": "network reader after complete repair",
+      "route": "overview",
+      "status": 200
+    }
+  ],
+  "rawRowsPreserved": 1
+}

@@ -1,5 +1,38 @@
 # Immutable ingest verification, 2026-11-07
 
+## Round 4
+
+Serving source: `760b90d9a339eb7806491ece6f0ccbcebff5e4ea`, including latest master
+#51/#69. The media metadata records exact app/server/worker/contracts/ClickHouse
+source trees so subsequent evidence-only commits can be compared explicitly.
+
+[Results and resources](round4-results.json) distinguish the focused native tests,
+initial test-assumption/cleanup-budget failures and the corrected checks from the
+still-running final serial server suite. [Master comparison](audit-master-comparison.json)
+proves all four audit tests passed on clean master and after the #62 parsed-payload
+fix. Internal JS Dates had rejected fresh workspace audits; this was a real regression,
+not attributed to shared state. Only the exact five baseline fixture namespaces'
+2038 derived index rows were cleaned; all five destinations are now empty.
+
+[Network read-fence proof](round4-network-read-fence.json) uses independent CLI and
+HTTP server clients. After all three destructive rollup deletes, real entities and
+overview requests returned 503 retention_unavailable; after the actual recovery
+completed they returned 200 with the original raw row intact. The native startup
+grant probe passed. The six additional HTTP/SDK ingest assertions also passed.
+
+[Approved additive kind migration](round4-kind-migration.json) preserved 4,565 runs,
+backfilled kind=retention and verified the CHECK constraint. No reset or new DB.
+[Final docs cleanup](round4-docs-cleanup.json) proves both project/ws: streams and
+receipts empty, org/user deleted and private queue removed. The four-minute process
+deadline stopped server/app; stack/quiet locks were released. One bundled Chromium
+context produced [current screenshots/video](../../../marketing/captures/2026-11-07-ingest-identity-round4),
+including the reference rail and code table, desktop/390px light/dark, without page
+errors or horizontal overflow. Historical before shots are in the first capture set.
+
+The baseline worktree is unregistered and its clean-state snapshot was saved.
+Automatic approval review blocked recursive deletion of leftover dependency folders
+with reason "blocked by policy"; these remain under the former baseline path.
+
 ## Round 3
 
 Source: `97b03c2dd710f4fa805c525c57fc7b8395e2aa94`. The final follow-up adjusts only

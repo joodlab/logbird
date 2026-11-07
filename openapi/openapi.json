@@ -2871,6 +2871,7 @@
                     "environment",
                     "actor.type",
                     "actor",
+                    "impersonator",
                     "tenant",
                     "executor",
                     "executor.type",
