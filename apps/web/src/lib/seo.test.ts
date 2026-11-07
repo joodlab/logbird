@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SITE_URL } from '../env';
+import { SITE_URL, siteConfigFrom } from '../env';
 import { llmsTxt, robotsTxt, sitemapXml } from './discovery';
 import { articleLd, breadcrumbLd, faqLd, organizationLd, pageHead, pageMeta, softwareLd, websiteLd } from './seo';
 import { publishedPages, staticPages } from './site-map';
@@ -56,6 +56,12 @@ describe('metadata', () => {
   });
 });
 describe('static discovery', () => {
+  it('uses the resolved build origin everywhere, not process.env', () => {
+    const config = siteConfigFrom({ WEB_SITE_URL: 'https://site.example.test' });
+    expect(sitemapXml(config)).toContain('<loc>https://site.example.test/</loc>');
+    expect(robotsTxt(config)).toContain('Sitemap: https://site.example.test/sitemap.xml');
+    expect(llmsTxt(config)).toContain('(https://site.example.test/contact)');
+  });
   it('lists only ready pages, never drafts or the not-found page', () => {
     const xml = sitemapXml();
     for (const page of staticPages) {

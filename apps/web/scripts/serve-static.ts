@@ -9,7 +9,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
-import { securityHeaders } from '../src/lib/security-headers';
+import { MEDIA_CACHE, securityHeaders } from '../src/lib/security-headers';
 
 const root = resolve('.output/public');
 const port = Number(process.env.PORT ?? 4620);
@@ -60,7 +60,11 @@ createServer(async (request, response) => {
     ...securityHeaders,
     'Content-Type': types[extname(found.file)] ?? 'application/octet-stream',
     Vary: 'Accept-Encoding',
-    'Cache-Control': /\/(assets|media)\//.test(url.pathname) ? 'public, max-age=31536000, immutable' : 'public, max-age=0, must-revalidate',
+    'Cache-Control': url.pathname.startsWith('/assets/')
+      ? 'public, max-age=31536000, immutable'
+      : url.pathname.startsWith('/media/')
+        ? MEDIA_CACHE
+        : 'public, max-age=0, must-revalidate',
   };
   for (const [encoding, suffix] of [
     ['br', '.br'],
