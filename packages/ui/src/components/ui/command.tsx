@@ -39,12 +39,15 @@ function CommandDialog({
   children,
   className,
   showCloseButton = false,
+  commandProps,
   ...props
 }: Omit<React.ComponentProps<typeof Dialog>, "children"> & {
   title?: string
   description?: string
   className?: string
   showCloseButton?: boolean
+  /** Props for the cmdk root, e.g. a controlled `value` (the highlighted item). */
+  commandProps?: Omit<React.ComponentProps<typeof Command>, "children">
   children: React.ReactNode
 }) {
   return (
@@ -62,7 +65,7 @@ function CommandDialog({
           {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
         {/* cmdk root: CommandInput/CommandList read their store from this context. */}
-        <Command>{children}</Command>
+        <Command {...commandProps}>{children}</Command>
       </DialogContent>
     </Dialog>
   )

@@ -208,6 +208,8 @@ function tidy(tokens: QueryToken[]): QueryToken[] {
       if (opens(t) && next?.raw === ')') {
         drop.add(t);
         drop.add(next);
+        // `NOT (…)` whose group emptied: the NOT goes too, or it would negate whatever follows.
+        if (prev?.raw === 'NOT') drop.add(prev);
       }
     });
     current.forEach((t, i) => {
@@ -219,12 +221,82 @@ function tidy(tokens: QueryToken[]): QueryToken[] {
   }
 }
 
+/**
+ * Drop the tokens `test` accepts together with a unary `NOT` that applies to them (`NOT field:x`), so removing an
+ * operand never leaves its NOT to negate the next predicate. Every other token keeps its place and polarity.
+ */
+function dropTokens(tokens: QueryToken[], test: (t: QueryToken) => boolean): QueryToken[] {
+  const drop = new Set<QueryToken>();
+  tokens.forEach((t, i) => {
+    if (!test(t)) return;
+    drop.add(t);
+    let j = i - 1;
+    while (j >= 0 && tokens[j]?.kind === 'space') j -= 1;
+    const prev = tokens[j];
+    if (prev?.kind === 'operator' && prev.raw === 'NOT') drop.add(prev);
+  });
+  return tokens.filter((t) => !drop.has(t));
+}
+
 function join(tokens: QueryToken[]): string {
   return tidy(tokens)
     .map((t) => t.raw)
     .join('')
     .replace(/\s{2,}/g, ' ')
     .trim();
+}
+
+/** True when `q` has an `OR` outside every group. Adjacent terms bind tighter than `OR` (`a b OR c` = `(a b) OR c`). */
+export function hasTopLevelOr(q: string): boolean {
+  let depth = 0;
+  for (const t of tokenize(q)) {
+    if (t.kind === 'paren') depth += t.raw === ')' ? -1 : 1;
+    else if (depth === 0 && t.kind === 'operator' && t.raw === 'OR') return true;
+  }
+  return false;
+}
+
+/**
+ * `a` AND `b`, as one query. A side with a top-level `OR` is parenthesised, so the other side constrains all of it:
+ * `andQuery('impersonator:x', 'outcome:failure OR outcome:denied')` → `impersonator:x (outcome:failure OR outcome:denied)`.
+ */
+export function andQuery(a: string, b: string): string {
+  const x = a.trim();
+  const y = b.trim();
+  if (!x) return y;
+  if (!y) return x;
+  const wrap = (s: string) => (hasTopLevelOr(s) ? `(${s})` : s);
+  return `${wrap(x)} ${wrap(y)}`;
+}
+
+/** Terms outside every group (`depth 0`), i.e. the ones that constrain the whole query when it has no top-level OR. */
+export function topLevelFieldTerms(q: string): QueryToken[] {
+  let depth = 0;
+  const out: QueryToken[] = [];
+  for (const t of tokenize(q)) {
+    if (t.kind === 'paren') depth += t.raw === ')' ? -1 : 1;
+    else if (depth === 0 && t.kind === 'field') out.push(t);
+  }
+  return out;
+}
+
+/** Remove the tokens `test` accepts (by identity), tidying operators and groups they leave dangling. */
+export function removeTokens(q: string, test: (t: QueryToken) => boolean): string {
+  return join(dropTokens(tokenize(q), test));
+}
+
+/** Field terms with their effective polarity: a leading `-` or a unary `NOT` before them (not both) negates. */
+export function fieldTermsWithPolarity(q: string): { token: QueryToken; negated: boolean }[] {
+  const tokens = tokenize(q);
+  const out: { token: QueryToken; negated: boolean }[] = [];
+  tokens.forEach((t, i) => {
+    if (t.kind !== 'field') return;
+    let j = i - 1;
+    while (j >= 0 && tokens[j]?.kind === 'space') j -= 1;
+    const not = tokens[j]?.kind === 'operator' && tokens[j]?.raw === 'NOT';
+    out.push({ token: t, negated: t.negated !== not });
+  });
+  return out;
 }
 
 /** Field terms present in the query (non-space tokens only). */
@@ -245,14 +317,13 @@ export function hasTerm(q: string, field: string, value: string, negated?: boole
 /** Remove every term for `field` (optionally only one value / polarity). */
 export function removeTerm(q: string, field: string, value?: string, negated?: boolean): string {
   const f = canonicalField(field);
-  const kept = tokenize(q).filter(
+  const kept = dropTokens(
+    tokenize(q),
     (t) =>
-      !(
-        t.kind === 'field' &&
-        canonicalField(t.field ?? '') === f &&
-        (value === undefined || (isSimple(t) && t.value === value)) &&
-        (negated === undefined || t.negated === negated)
-      ),
+      t.kind === 'field' &&
+      canonicalField(t.field ?? '') === f &&
+      (value === undefined || (isSimple(t) && t.value === value)) &&
+      (negated === undefined || t.negated === negated),
   );
   return join(kept);
 }
@@ -264,13 +335,13 @@ export function removeTerm(q: string, field: string, value?: string, negated?: b
  */
 export function includeTerm(q: string, field: string, value: string): string {
   const without = removeTerm(removeTerm(q, field, undefined, false), field, value, true);
-  return `${without} ${formatTerm(field, value)}`.trim();
+  return andQuery(without, formatTerm(field, value));
 }
 
 /** Exclude `field:value` (any number of exclusions can coexist). */
 export function excludeTerm(q: string, field: string, value: string): string {
   const without = removeTerm(q, field, value);
-  return `${without} ${formatTerm(field, value, true)}`.trim();
+  return andQuery(without, formatTerm(field, value, true));
 }
 
 /** Toggle helper used by facet rows: click → include / un-include; alt-click → exclude / un-exclude. */
