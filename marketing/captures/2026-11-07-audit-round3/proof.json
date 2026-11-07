@@ -1,6 +1,6 @@
 {
   "beforeAuthCaptureRevision": "4f9b138",
-  "revision": "9c678e1882679bfd88b289b421b18ac76e9a9e15",
+  "revision": "b51929dee2dafddc41acf51615e483c30c315485",
   "screenshots": [
     "after-light-1440-workspace.png",
     "after-light-1440-sessions.png",
@@ -31,19 +31,74 @@
       "windows": 0,
       "budgets": 0,
       "receipts": 0
-    },
-    "windowLookup": "exact canonical fixture HMAC, resolved from own Mailpit messages"
+    }
   },
   "fixture": {
-    "userId": "JsoXHgAZynvUIH0awGTSD2luHwmAdklr",
-    "orgId": "0WHjbppU55l36UYM5FTsesOXc3UCCwc8",
-    "projectId": "cmw6liiyh00003wyode6fjdor"
+    "userId": "GN9NFkoeO8aU4NpcvKQwJXBFuTIb4mXQ",
+    "orgId": "vDZCRjuy5FnSUkG9NSrGN8vAbmjPvn42",
+    "projectId": "cmw6lzuv60000z4yo75bkldxa"
   },
   "resources": {
-    "minFreeGiB": 23.901756286621094,
-    "minDiskGiB": 109.07366561889648,
+    "minFreeGiB": 18.405628204345703,
+    "minDiskGiB": 110.28804779052734,
     "reason": "completed",
-    "date": "2026-11-07T17:07:52.2085583+01:00",
-    "peakTreeGiB": 2.135028839111328
+    "date": "2026-11-07T17:21:57.3150904+01:00",
+    "peakTreeGiB": 2.518402099609375
+  },
+  "media": {
+    "after-light-1440-workspace.png": {
+      "width": 1440,
+      "height": 900,
+      "sha256": "47753f863dabfdf2f9aac27d51081f2ce8fdab7d554d09e9d07cd8f08860d894"
+    },
+    "after-light-1440-sessions.png": {
+      "width": 1440,
+      "height": 900,
+      "sha256": "3af7296cda609d2842366c5da3a6b30d1b3d61df3c3bb5d57dc7bd3730aa51c4"
+    },
+    "after-dark-1440-workspace.png": {
+      "width": 1440,
+      "height": 900,
+      "sha256": "815e98fbc337fcd32f8d7c5e67ea886c1a5553847ce2a388f1944a5b37bcfb78"
+    },
+    "after-dark-1440-sessions.png": {
+      "width": 1440,
+      "height": 900,
+      "sha256": "4e8c44493d04aeb88611440598d470d5a15542d2ca023a8239cc4ebe35a1b03c"
+    },
+    "after-light-390-workspace.png": {
+      "width": 390,
+      "height": 844,
+      "sha256": "d9e04499f5ac7db5d457edef1f7175c00eebcebec7c7385ce79fe9cf6968b4cb"
+    },
+    "after-light-390-sessions.png": {
+      "width": 390,
+      "height": 844,
+      "sha256": "b602d5248d1c81744ffe50bed28e9bd2af64929606e0fb0fa09895996121ed63"
+    },
+    "after-dark-390-workspace.png": {
+      "width": 390,
+      "height": 844,
+      "sha256": "9f6aeb56c45b14871ae034255f2f8d42465337cb9114f139cbfdfb963b61d9c4"
+    },
+    "after-dark-390-sessions.png": {
+      "width": 390,
+      "height": 844,
+      "sha256": "b1f2206abd2dfac20c2df16b66b7bae3e2094dca4790c2baf6fb2bf267c6773f"
+    },
+    "light-1440-interactions.webm": {
+      "bytes": 745641,
+      "probe": [
+        "Duration: 00:00:04.92, start: 0.000000, bitrate: 1212 kb/s",
+        "Stream #0:0(eng): Video: vp9 (libvpx-vp9) (Profile 0), yuv420p(tv, progressive), 1440x900, SAR 1:1 DAR 8:5, 25 fps, 25 tbr, 1k tbn (default)"
+      ]
+    },
+    "light-390-interactions.webm": {
+      "bytes": 310154,
+      "probe": [
+        "Duration: 00:00:02.40, start: 0.000000, bitrate: 1033 kb/s",
+        "Stream #0:0(eng): Video: vp9 (libvpx-vp9) (Profile 0), yuv420p(tv, progressive), 390x844, SAR 1:1 DAR 195:422, 25 fps, 25 tbr, 1k tbn (default)"
+      ]
+    }
   }
 }
