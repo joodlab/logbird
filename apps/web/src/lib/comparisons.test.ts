@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ACCESSED, comparisons, longDate } from './comparisons';
 import { getPage } from './site-map';
 
@@ -47,4 +47,36 @@ describe('trust page metadata', () => {
       expect(description.length).toBeLessThanOrEqual(155);
     },
   );
+});
+
+describe('source availability (WEB_GITHUB_PUBLIC)', () => {
+  const logbirdCells = (rows: { logbird: string }[]) => rows.map((row) => row.logbird).join('\n');
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+  it('says the source is not open yet while the repository is private', async () => {
+    vi.resetModules();
+    const { comparisons: current } = await import('./comparisons');
+    const { getPage: page } = await import('./site-map');
+    const cells = logbirdCells(current.flatMap((comparison) => comparison.rows));
+    expect(cells).toContain('MIT; source opens publicly soon');
+    expect(cells).toContain('Self-hosted when the source opens (MIT); Logbird Cloud waitlist');
+    expect(cells).not.toMatch(/Self-hosted, MIT;|source on GitHub/);
+    expect(page('/open-source').description).toMatch(/opens publicly soon\.$/);
+  });
+  it('drops every "opens soon" string once the repository is public', async () => {
+    vi.resetModules();
+    vi.stubEnv('WEB_GITHUB_PUBLIC', 'true');
+    vi.stubEnv('WEB_GITHUB_URL', 'https://github.example.test/acme/logbird');
+    const { comparisons: current } = await import('./comparisons');
+    const { getPage: page } = await import('./site-map');
+    const cells = logbirdCells(current.flatMap((comparison) => comparison.rows));
+    expect(cells).not.toMatch(/opens|soon|Planned/);
+    expect(cells).toContain('MIT; source on GitHub');
+    expect(cells).toContain('Self-hosted, MIT; Logbird Cloud waitlist');
+    expect(page('/open-source').description).toBe(
+      'The Logbird product is MIT-licensed: API, console, worker, SDK and integrations, in one repository on GitHub.',
+    );
+  });
 });

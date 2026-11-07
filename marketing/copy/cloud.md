@@ -11,8 +11,9 @@ path: /cloud
 - **id:** `hero`
 - **eyebrow:** Logbird Cloud
 - **heading (H1):** The same Logbird, run by us.
-- **body:** Logbird Cloud will run the same open-source codebase you can self-host. We'll run the servers, the
-  upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.
+- **body:** Logbird Cloud will run the same open-source codebase you'll be able to self-host. We'll run the servers,
+  the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.
+  <!-- when WEB_GITHUB_PUBLIC=true: "…codebase you can self-host." -->
   <!-- source: docs/SPEC.md intro ("one codebase, self-host or cloud"); docs/deployment.md ("No cloud deployment or public signup is assumed") -->
 - **cta (primary):** Join the waitlist → `/contact`
 - **cta (secondary):** while the repository is private: "Self-host when the source opens" → `/contact?interest=self-host`;
@@ -46,7 +47,8 @@ path: /cloud
 - **items:**
   - **When does Logbird Cloud open?** We haven't set a date. People on the waitlist hear first.
   - **Where will my data be stored?** Not decided yet. We'll publish the hosting region before the cloud opens. If
-    your data must stay in a particular place today, self-host Logbird.
+    your data must stay in a particular place, self-hosting is an option once the source opens.
+    <!-- when WEB_GITHUB_PUBLIC=true: "If your data must stay in a particular place today, self-host Logbird." -->
   - **Is the cloud a different product?** No. It runs the same codebase as the self-hosted version. One difference is
     already decided: Logbird Cloud won't offer a free-form SQL console. The guarded SQL `WHERE` mode in the explorer
     is in both. <!-- source: docs/SPEC.md intro, §5.1.2; docs/roadmap.md -->

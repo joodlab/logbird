@@ -1,6 +1,6 @@
 ---
 title: Open source — Logbird
-description: Logbird is MIT-licensed. API, console, worker, SDK and integrations live in one repository, which opens publicly soon.
+description: Logbird is MIT-licensed. API, console, worker, SDK and integrations live in one repository, which opens publicly soon. <!-- when WEB_GITHUB_PUBLIC=true: "…in one repository on GitHub." -->
 path: /open-source
 ---
 

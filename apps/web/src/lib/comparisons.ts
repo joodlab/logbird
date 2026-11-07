@@ -65,6 +65,11 @@ const range = (prefix: string, from: number, to: number) => Array.from({ length:
 const LOGBIRD_SELF_HOST = GITHUB_PUBLIC
   ? 'Yes: Docker Compose or Coolify, built from source'
   : 'Planned: Docker Compose or Coolify, when the source opens';
+// Licence and hosting cells follow the same availability state.
+const LOGBIRD_SOURCE = GITHUB_PUBLIC ? 'MIT; source on GitHub' : 'MIT; source opens publicly soon';
+const LOGBIRD_HOSTING = GITHUB_PUBLIC
+  ? 'Self-hosted, MIT; Logbird Cloud waitlist'
+  : 'Self-hosted when the source opens (MIT); Logbird Cloud waitlist';
 const LOGBIRD_PRICING = 'Self-host free (MIT); Cloud pricing not set';
 const LOGBIRD_VIEWER = 'None yet; read API plus headless Vue helpers';
 const LOGBIRD_READ = '`GET /v1/events` with a project read key';
@@ -209,14 +214,14 @@ const workos: Comparison = {
   card: "A hosted audit log API with an Admin Portal viewer for your customers' IT admins, and streaming to SIEM tools.",
   fit: "Your enterprise customers' IT admins need a ready-made portal and SIEM streams today, and you'd rather not run any infrastructure.",
   rows: [
-    { label: 'Licence and source', logbird: 'MIT; source opens publicly soon', them: 'No source code or licence published', sourceIds: ['W1', 'W2'] },
+    { label: 'Licence and source', logbird: LOGBIRD_SOURCE, them: 'No source code or licence published', sourceIds: ['W1', 'W2'] },
     {
       label: 'Self-host',
       logbird: LOGBIRD_SELF_HOST,
       them: "No self-host option documented. The on-prem guide covers your app calling WorkOS's cloud.",
       sourceIds: ['W6'],
     },
-    { label: 'Hosting model', logbird: 'Self-hosted, MIT (source opens soon); Logbird Cloud waitlist', them: 'Hosted by WorkOS', sourceIds: ['W2'] },
+    { label: 'Hosting model', logbird: LOGBIRD_HOSTING, them: 'Hosted by WorkOS', sourceIds: ['W2'] },
     {
       label: 'Schema',
       logbird: 'Any JSON with an `action`; nothing to register',
@@ -337,7 +342,7 @@ const pangea: Comparison = {
       them: "No self-host option documented; Pangea's Edge and Private Cloud models don't list the audit service",
       sourceIds: ['P10', 'P11'],
     },
-    { label: 'Hosting model', logbird: 'Self-hosted, MIT (source opens soon); Logbird Cloud waitlist', them: 'Hosted by Pangea', sourceIds: ['P12'] },
+    { label: 'Hosting model', logbird: LOGBIRD_HOSTING, them: 'Hosted by Pangea', sourceIds: ['P12'] },
     {
       label: 'Schema',
       logbird: 'Any JSON with an `action`; recommended envelope',

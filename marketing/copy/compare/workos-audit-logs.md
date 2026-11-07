@@ -26,9 +26,9 @@ path: /compare/workos-audit-logs
 
   | | Logbird | WorkOS Audit Logs |
   | --- | --- | --- |
-  | Licence and source | MIT; source opens publicly soon | No source code or licence published [W1, W2] |
+  | Licence and source | MIT; source opens publicly soon <!-- public repo: MIT; source on GitHub --> | No source code or licence published [W1, W2] |
   | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: …, built from source" once public) | No self-host option documented. The on-prem guide covers your app calling WorkOS's cloud. [W6] |
-  | Hosting model | Self-hosted, MIT (source opens soon); Logbird Cloud waitlist | Hosted by WorkOS [W2] |
+  | Hosting model | Self-hosted when the source opens (MIT); Logbird Cloud waitlist <!-- public repo: Self-hosted, MIT; Logbird Cloud waitlist --> | Hosted by WorkOS [W2] |
   | Schema | Any JSON with an `action`; nothing to register | Event schemas must be configured per action before you emit; metadata JSON Schema validation is optional [W2, W7, W8] |
   | Required event fields | `action` | `organization_id`, `action`, `occurred_at`, `actor`, `targets`, `context` [W9] |
   | Search | Query language and guarded SQL `WHERE` mode in the console | Filter by actors, events, targets and dates in the Dashboard and Admin Portal [W1, W2] |

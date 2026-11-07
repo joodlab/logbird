@@ -1,3 +1,5 @@
+import { GITHUB_PUBLIC } from '../env';
+
 export interface SitePage {
   path: string;
   title: string;
@@ -82,7 +84,7 @@ export const siteMap: SitePage[] = [
   {
     path: '/open-source',
     title: 'Open source',
-    description: 'The Logbird product is MIT-licensed: API, console, worker, SDK and integrations, in one repository that opens publicly soon.',
+    description: `The Logbird product is MIT-licensed: API, console, worker, SDK and integrations, in one repository${GITHUB_PUBLIC ? ' on GitHub' : ' that opens publicly soon'}.`,
     section: 'developers',
     priority: 0.8,
     changefreq: 'monthly',

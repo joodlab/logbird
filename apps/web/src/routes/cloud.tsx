@@ -18,7 +18,9 @@ const faq: FaqItem[] = [
   { q: 'When does Logbird Cloud open?', a: "We haven't set a date. People on the waitlist hear first." },
   {
     q: 'Where will my data be stored?',
-    a: "Not decided yet. We'll publish the hosting region before the cloud opens. If your data must stay in a particular place today, self-host Logbird.",
+    a: GITHUB_PUBLIC
+      ? "Not decided yet. We'll publish the hosting region before the cloud opens. If your data must stay in a particular place today, self-host Logbird."
+      : "Not decided yet. We'll publish the hosting region before the cloud opens. If your data must stay in a particular place, self-hosting is an option once the source opens.",
   },
   {
     q: 'Is the cloud a different product?',
@@ -141,7 +143,7 @@ function CloudPage() {
         }
         aside={<StatusPanel />}
         eyebrow="Logbird Cloud"
-        lead="Logbird Cloud will run the same open-source codebase you can self-host. We'll run the servers, the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is."
+        lead={`Logbird Cloud will run the same open-source codebase you${GITHUB_PUBLIC ? ' can' : "'ll be able to"} self-host. We'll run the servers, the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.`}
         title="The same Logbird, run by us."
       />
 
