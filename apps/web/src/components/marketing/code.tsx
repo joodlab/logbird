@@ -64,7 +64,7 @@ export function SiteCode({
         <span className="truncate font-mono text-[11px] text-muted-foreground uppercase tracking-wider">{title ?? language}</span>
         <CopyCode label="Copy code" value={code} />
       </div>
-      <pre className={cn(pre, wrap && 'whitespace-pre-wrap break-all')}>
+      <pre className={cn(pre, wrap && 'whitespace-pre-wrap break-words')}>
         <code>
           <Highlighted code={code} language={language} />
         </code>

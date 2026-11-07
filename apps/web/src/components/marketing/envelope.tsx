@@ -11,7 +11,7 @@ const lines: { text: string; key?: string }[] = [
   { text: '  "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },', key: 'actor' },
   { text: '  "executor": { "type": "api", "id": "api-server" },', key: 'executor' },
   { text: '  "tenant": { "id": "biz_7", "name": "Azure Hotels" },', key: 'tenant' },
-  { text: '  "targets": [{ "type": "booking", "id": "bk_1042", "name": "Booking #1042" }],', key: 'targets' },
+  { text: '  "targets": [{ "type": "booking", "id": "bk_1042" }],', key: 'targets' },
   { text: '  "changes": [{ "field": "status", "before": "confirmed", "after": "cancelled" }],', key: 'changes' },
   { text: '  "context": { "operationId": "op_cancel_bk_1042" }', key: 'operationId' },
   { text: '}' },
@@ -29,7 +29,7 @@ const notes: { key: string; label: string; text: string; required?: boolean }[] 
 
 export function Envelope({ className }: { className?: string }) {
   return (
-    <div className={cn('grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-10', className)}>
+    <div className={cn('grid gap-6 lg:grid-cols-[minmax(0,1.75fr)_minmax(0,1fr)] lg:gap-10', className)}>
       <div className="frame min-w-0">
         <div className="frame-bar">
           <span className="font-mono text-[11px] text-muted-foreground">POST /v1/events</span>

@@ -43,7 +43,7 @@ function ContactPage() {
               <div className="py-3">
                 <dt className="font-medium">Security issues</dt>
                 <dd className="mt-1 text-muted-foreground leading-relaxed">
-                  Don't describe the issue in this form. <SecurityContact />
+                  <SecurityContact onContactPage />
                 </dd>
               </div>
               <div className="py-3">

@@ -1,6 +1,6 @@
 import { GITHUB_PUBLIC, GITHUB_URL, ORG_NAME, SITE_URL } from '../env';
 import { pageIndexable } from './release';
-import { getPage } from './site-map';
+import { getPage, isReady } from './site-map';
 export const canonicalHref = (path: string) => new URL(path, `${SITE_URL}/`).href;
 export function pageMeta({
   title,
@@ -69,7 +69,10 @@ export const softwareLd = () =>
     applicationCategory: 'DeveloperApplication',
     operatingSystem: 'Linux, Docker',
     license: 'https://opensource.org/licenses/MIT',
-    offers: { '@type': 'Offer', name: 'Self-hosted', price: '0', priceCurrency: 'USD', url: canonicalHref('/self-hosting') },
+    // A $0 self-hosted offer only once anyone can self-host: the source is public and the self-host page is published.
+    ...(GITHUB_PUBLIC && isReady('/self-hosting')
+      ? { offers: { '@type': 'Offer', name: 'Self-hosted', price: '0', priceCurrency: 'USD', url: canonicalHref('/self-hosting') } }
+      : {}),
   });
 export const breadcrumbLd = (items: { name: string; path: string }[]) =>
   ld({

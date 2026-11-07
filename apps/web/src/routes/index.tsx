@@ -13,6 +13,7 @@ import { Architecture, Steps } from '../components/marketing/steps';
 import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import { DESIGN_PARTNER_LINE } from '../lib/copy-flags';
 import { pageHead } from '../lib/seo';
+import { isReady } from '../lib/site-map';
 
 export const Route = createFileRoute('/')({ head: () => pageHead('/'), component: HomePage });
 
@@ -28,7 +29,9 @@ app.post('/bookings/:id/cancel', async (c) => {
   // ...cancel the booking
   const eventId = c.var.audit('booking.cancelled', {
     targets: [{ type: 'booking', id }],
-    changes: [{ field: 'status', before: 'confirmed', after: 'cancelled' }],
+    changes: [
+      { field: 'status', before: 'confirmed', after: 'cancelled' },
+    ],
   });
   const carrier = await c.var.audit.carrier({ parentEventId: eventId });
   await refunds.add('refund', { bookingId: id, carrier });
@@ -97,11 +100,13 @@ function HomePage() {
                 <span className="text-muted-foreground"> on every event shows which recommended fields you're missing.</span>
               </li>
             </ul>
-            <div>
-              <ButtonLink to="/developers" variant="outline">
-                Read the developer guide
-              </ButtonLink>
-            </div>
+            {isReady('/developers') ? (
+              <div>
+                <ButtonLink to="/developers" variant="outline">
+                  Read the developer guide
+                </ButtonLink>
+              </div>
+            ) : null}
           </div>
           <div className="flex min-w-0 flex-col gap-3">
             <SiteCodeTabs
@@ -147,11 +152,13 @@ function HomePage() {
             </Feature>
           </div>
         </div>
-        <div className="mt-10">
-          <ButtonLink to="/product" variant="outline">
-            Take the product tour
-          </ButtonLink>
-        </div>
+        {isReady('/product') ? (
+          <div className="mt-10">
+            <ButtonLink to="/product" variant="outline">
+              Take the product tour
+            </ButtonLink>
+          </div>
+        ) : null}
       </Section>
 
       <Section id="how-it-works" labelledBy="how-title">
@@ -180,11 +187,13 @@ function HomePage() {
           title="Who caused it, what did the work, what changed."
         />
         <Envelope className="mt-12" />
-        <div className="mt-10">
-          <ButtonLink to="/developers" variant="outline">
-            Read the envelope guide
-          </ButtonLink>
-        </div>
+        {isReady('/developers') ? (
+          <div className="mt-10">
+            <ButtonLink to="/developers" variant="outline">
+              Read the envelope guide
+            </ButtonLink>
+          </div>
+        ) : null}
       </Section>
 
       <Section id="open-source" labelledBy="oss-title">
@@ -211,15 +220,18 @@ function HomePage() {
               </li>
               <li className="flex gap-3">
                 <span aria-hidden="true" className="mt-2 size-1.5 shrink-0 rounded-full bg-brand" />
-                Source on GitHub — coming soon. The repository opens publicly soon.
+                {GITHUB_PUBLIC ? 'Source on GitHub, under the MIT licence.' : 'Source on GitHub — coming soon.'}
               </li>
             </ul>
-            <div className="flex flex-wrap gap-3">
-              <SelfHostCta size="default" />
-              <ButtonLink to="/open-source" variant="ghost">
-                What's in the repository
-              </ButtonLink>
-            </div>
+            {GITHUB_PUBLIC || isReady('/open-source') ? (
+              <div className="flex flex-wrap gap-3">
+                {/* While the source is private the panel beside this carries the one self-host link. */}
+                {GITHUB_PUBLIC ? <SelfHostCta size="default" /> : null}
+                <ButtonLink to="/open-source" variant="ghost">
+                  What's in the repository
+                </ButtonLink>
+              </div>
+            ) : null}
           </div>
           {GITHUB_PUBLIC ? (
             <div className="flex min-w-0 flex-col gap-3">
@@ -266,12 +278,14 @@ function HomePage() {
             ]}
           />
         </div>
-        <div className="mt-10 flex items-center gap-3">
-          <ShieldCheckIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-          <ButtonLink to="/security" variant="link">
-            Read how Logbird handles data
-          </ButtonLink>
-        </div>
+        {isReady('/security') ? (
+          <div className="mt-10 flex items-center gap-3">
+            <ShieldCheckIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+            <ButtonLink to="/security" variant="link">
+              Read how Logbird handles data
+            </ButtonLink>
+          </div>
+        ) : null}
       </Section>
 
       <CtaBand note={DESIGN_PARTNER_LINE} />

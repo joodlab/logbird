@@ -30,8 +30,7 @@ path: /
   <!-- source: README.md Quickstart; docs/SPEC.md §1.1 -->
 - **small print under the CTAs:** Source on GitHub — coming soon. Logbird Cloud is not open yet.
 - **visual:** `marketing/captures/2026-11-06-logbird-rename/04-explorer-light.png` (dark-mode pair:
-  `marketing/captures/2026-11-06-logbird-rename/05-explorer-dark.png`). Re-capture with a neutral workspace name and
-  without the query timer first; see `README.md` § Captures.
+  `marketing/captures/2026-11-06-logbird-rename/05-explorer-dark.png`).
 
 ## for-developers
 
@@ -100,7 +99,7 @@ path: /
     <!-- source: packages/contracts/src/api.ts RETENTION_OPTIONS (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days) -->
 - **cta:** Take the product tour → `/product`
 - **visual:** `marketing/captures/2026-11-05-final-walkthrough/04-event-sheet.png` (event detail with actor, executor,
-  tenant, targets and changes). Re-capture first: it shows the design partner's name (see `README.md` § Captures).
+  tenant, targets and changes).
 
 ## how-it-works
 
