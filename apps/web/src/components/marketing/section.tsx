@@ -12,17 +12,25 @@ export function Section({
   className,
   tone = 'plain',
   labelledBy,
+  compact = false,
 }: {
   id?: string;
   children: ReactNode;
   className?: string;
   tone?: 'plain' | 'sunken';
   labelledBy?: string;
+  /** Less vertical padding, for sections between product-tour rows. */
+  compact?: boolean;
 }) {
   return (
     <section
       aria-labelledby={labelledBy}
-      className={cn('py-20 md:py-28', tone === 'sunken' && 'border-y bg-[var(--surface-sunken)]', className)}
+      className={cn(
+        compact ? 'py-14 md:py-20' : 'py-20 md:py-28',
+        tone === 'sunken' && 'border-y bg-[var(--surface-sunken)]',
+        'scroll-mt-24',
+        className,
+      )}
       id={id}
     >
       <div className="container-site">{children}</div>

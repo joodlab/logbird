@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { APP_URL, GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import { siteMap } from '../lib/site-map';
 import { ButtonLink } from './marketing/button-link';
+import { BilingualWordmark, Wordmark } from './marketing/wordmark';
 
 const themes: { value: Theme; label: string; Icon: typeof SunIcon }[] = [
   { value: 'light', label: 'Light theme', Icon: SunIcon },
@@ -36,11 +37,10 @@ function ThemeSwitch() {
 
 const navPages = siteMap.filter((page) => page.inNav);
 
-function Wordmark() {
+function HomeLink() {
   return (
     <Link aria-label="Logbird home" className="flex shrink-0 items-center rounded-md" to="/">
-      <img alt="" className="wordmark theme-light" height="28" src="/brand/logbird-wordmark-light.svg" width="114" />
-      <img alt="" className="wordmark theme-dark" height="28" src="/brand/logbird-wordmark-dark.svg" width="114" />
+      <Wordmark className="h-7 w-auto" />
     </Link>
   );
 }
@@ -62,7 +62,7 @@ export function SiteHeader() {
   return (
     <header className="site-header" data-scrolled={scrolled}>
       <div className="container-site flex h-full items-center gap-6">
-        <Wordmark />
+        <HomeLink />
         <nav aria-label="Primary" className="hidden items-center lg:flex">
           {navPages.map((page) => (
             <Link activeOptions={{ exact: page.path === '/' }} className="nav-link" key={page.path} to={page.path}>
@@ -127,20 +127,10 @@ export function SiteFooter() {
     <footer className="mt-24 border-t bg-[var(--surface-sunken)]">
       <div className="container-site grid gap-12 py-14 md:grid-cols-[1.2fr_2fr]">
         <div className="flex flex-col gap-4">
-          <img
-            alt="Logbird · لوغبيرد"
-            className="theme-light h-9 w-auto self-start"
-            height="36"
-            src="/brand/logbird-wordmark-bilingual-light.svg"
-            width="220"
-          />
-          <img
-            alt="Logbird · لوغبيرد"
-            className="theme-dark h-9 w-auto self-start"
-            height="36"
-            src="/brand/logbird-wordmark-bilingual-dark.svg"
-            width="220"
-          />
+          <p className="self-start">
+            <BilingualWordmark className="h-9 w-auto" />
+            <span className="sr-only">Logbird · لوغبيرد</span>
+          </p>
           <p className="max-w-xs text-muted-foreground text-sm leading-relaxed">
             Retrace every step. <span lang="ar">تتبّع كل خطوة.</span>
             <br />

@@ -15,6 +15,11 @@
   --ledger: color-mix(in oklab, var(--foreground) 6%, transparent);
   --surface: var(--card);
   --surface-sunken: color-mix(in oklab, var(--muted) 70%, var(--background));
+  /* The mark's newest-entry segment: brand indigo, inverted against the ink tile (docs/brand.md §3). */
+  --mark-newest: #818cf8;
+}
+.dark {
+  --mark-newest: #4f46e5;
 }
 @media (min-width: 768px) {
   :root {
