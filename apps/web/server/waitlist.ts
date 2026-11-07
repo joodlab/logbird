@@ -4,6 +4,7 @@ import { clientAddress, createRateLimiter, handleWaitlist } from '../src/server/
 import { createCloudflareStore, type WaitlistBindings } from '../src/server/waitlist-cloudflare';
 
 const limiter = createRateLimiter();
+let warned = false;
 export default defineEventHandler(async (event) => {
   const request = event.req;
   if (request.method !== 'POST') {
@@ -15,7 +16,7 @@ export default defineEventHandler(async (event) => {
     store = createCloudflareStore(cloudflare?.env ?? {});
   } else {
     const { createNodeStore, notifyWaitlist, waitlistFile } = await import('../src/server/waitlist-node');
-    const { serverEnv: env } = await import('../src/server/env');
+    const { notificationSettings, serverEnv: env } = await import('../src/server/env');
     const file = waitlistFile(env.WAITLIST_FILE);
     if (!file) {
       return Response.json(
@@ -23,7 +24,13 @@ export default defineEventHandler(async (event) => {
         { status: 503 },
       );
     }
-    store = createNodeStore(file, env.SMTP_HOST ? notifyWaitlist : undefined);
+    const notifications = notificationSettings(env);
+    if (env.SMTP_HOST && !notifications.enabled && !warned) {
+      warned = true;
+      // Configuration only, never personal data.
+      console.error(JSON.stringify({ level: 'warn', event: 'waitlist.notify_disabled', reason: notifications.reason }));
+    }
+    store = createNodeStore(file, notifications.enabled ? notifyWaitlist : undefined);
   }
   const extra = cloudflare
     ? []

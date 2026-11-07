@@ -17,7 +17,7 @@ path: /product
   <!-- source: docs/SPEC.md intro ("not an end-customer portal") -->
 - **cta:** Self-host it → `/self-hosting` · Join the waitlist → `/contact`
 - **visual:** `marketing/captures/2026-11-06-logbird-rename/03-overview-light.png` (overview: KPI cards, events by
-  outcome, top actions). Re-capture first: it shows the design partner's name (see `README.md` § Captures).
+  outcome, top actions).
 
 ## explorer
 
@@ -34,7 +34,7 @@ path: /product
     palette.
   - Export the current results as CSV or JSONL. <!-- source: packages/contracts/src/routes.ts (export ?format=csv|jsonl) -->
 - **visual:** clip `marketing/captures/2026-11-04-ui-foundation/explorer-search-filter-zoom.webm` (search, filter by a
-  facet, zoom the chart). Re-capture first (see `README.md` § Captures).
+  facet, zoom the chart).
 
 ## search
 
@@ -59,7 +59,7 @@ path: /product
   - Errors point at the exact token and say what was expected, for example "attempt is a number".
   - Any field you send, however deeply nested, is searchable by its dotted path.
 - **visual:** `marketing/captures/2026-11-05-final-walkthrough/qb-03-values-and-operators.png` (value suggestions with
-  counts); alternative `qb-13-inline-error.png` (inline error). Re-capture first (see `README.md` § Captures).
+  counts); alternative `qb-13-inline-error.png` (inline error).
 
 ## sql-mode
 
@@ -82,7 +82,7 @@ path: /product
 - **limit line (small print):** SQL mode is for the console only. The public read API accepts the query language,
   not SQL. A free-form SQL console isn't part of Logbird. <!-- source: docs/query-language.md -->
 - **visual:** `marketing/captures/2026-11-05-final-walkthrough/qb-23-sql-rejected.png` (a subquery rejected inline:
-  "Subqueries are not allowed"); alternative `qb-22-sql-results.png`. Re-capture first (see `README.md` § Captures).
+  "Subqueries are not allowed"); alternative `qb-22-sql-results.png`.
 
 ## entity-pages
 
@@ -99,7 +99,7 @@ path: /product
   - **Executors:** what did the work. The API, each queue worker and cron job, with job ids and attempts.
   - **Records:** what changed. `booking:bk_1042` has a history of its own.
 - **visual:** `marketing/captures/2026-11-05-final-walkthrough/09-tenant-profile.png`; alternative
-  `08-actor-profile.png`. Re-capture first (see `README.md` § Captures).
+  `08-actor-profile.png`.
 
 ## operations
 
@@ -130,7 +130,7 @@ path: /product
   - Copy a link, or copy the event as a curl command.
   <!-- source: docs/SPEC.md §8 journey 4 (event sheet) -->
 - **visual:** `marketing/captures/2026-11-05-final-walkthrough/04-event-sheet.png` and
-  `06-impersonation.png` (impersonator card). Re-capture first: it shows the design partner's name (see `README.md` § Captures).
+  `06-impersonation.png` (impersonator card).
 
 ## live-tail
 
@@ -141,7 +141,7 @@ path: /product
   applied.
 - **limit line:** Live tail polls over HTTP. It doesn't use WebSockets, so it works behind any proxy.
   <!-- source: docs/self-hosting.md §Any reverse proxy -->
-- **visual:** clip `marketing/captures/2026-11-04-ui-foundation/explorer-detail-live-tail.webm`. Re-capture first (see `README.md` § Captures).
+- **visual:** clip `marketing/captures/2026-11-04-ui-foundation/explorer-detail-live-tail.webm`.
 
 ## saved-views
 
@@ -151,7 +151,7 @@ path: /product
 - **body:** Save a query, its time range and its columns as a view, in query or SQL mode. Views appear in the sidebar
   and in the search bar's suggestions. Anyone in the workspace can open them; members can delete their own.
   <!-- source: docs/SPEC.md §7.1, §8 journey 7 -->
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/qb-25-views-sql-badge.png`. Re-capture first (see `README.md` § Captures).
+- **visual:** `marketing/captures/2026-11-05-final-walkthrough/qb-25-views-sql-badge.png`.
 
 ## setup
 
@@ -169,7 +169,7 @@ path: /product
     <!-- source: docs/SPEC.md §5 sample-data -->
   - A conformance score on every event, and a Fields page that shows every field you send and how often.
 - **visual:** clip `marketing/captures/2026-11-05-final-walkthrough/onboarding.webm` (curl → event received); stills
-  `23-first-event-received.png`, `27-setup-envelope.png`. Re-capture first (see `README.md` § Captures).
+  `23-first-event-received.png`, `27-setup-envelope.png`.
 
 ## retention
 
@@ -183,7 +183,7 @@ path: /product
 - **limit line:** Retention deletes are permanent. There's no archive and no undo. The preview count is
   approximate, because storage is at least once.
 - **visual:** `marketing/captures/2026-11-05-final-walkthrough/10-retention-preview.png` (lowering to 30 days, with
-  the preview warning and the last and next purge). Re-capture first (see `README.md` § Captures); the preview shows a real event count from the
+  the preview warning and the last and next purge). The preview shows a real event count from the
   fictional seed, which is fine.
 
 ## workspace-activity
@@ -195,7 +195,7 @@ path: /product
   each of these management actions as an event in your workspace's own activity stream. You read it with the same
   explorer.
   <!-- source: docs/SPEC.md §1.5, §8 journey 9 -->
-- **visual:** `marketing/captures/2026-11-04-ui-foundation/light-workspace-activity.png`. Re-capture first (see `README.md` § Captures).
+- **visual:** `marketing/captures/2026-11-04-ui-foundation/light-workspace-activity.png`.
 
 ## team
 
@@ -207,7 +207,7 @@ path: /product
   role on every request, not just the UI.
   <!-- source: docs/SPEC.md §7, §7.1; SECURITY.md -->
 - **limit line:** SSO isn't available yet. It's on the roadmap.
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/47-members-after.png`. Re-capture first (see `README.md` § Captures).
+- **visual:** `marketing/captures/2026-11-05-final-walkthrough/47-members-after.png`.
 
 ## read-api
 

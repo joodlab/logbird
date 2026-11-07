@@ -5,6 +5,6 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     // Tests run against a fictional released configuration; release.test.ts checks the blocked states explicitly.
-    env: { WEB_SITE_URL: 'https://site.example.test', WEB_SECURITY_EMAIL: 'security@example.test' },
+    env: { WEB_SITE_URL: 'https://site.example.test', WEB_SECURITY_EMAIL: 'security@example.test', WEB_CONTACT_EMAIL: 'hello@example.test' },
   },
 });

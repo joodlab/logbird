@@ -1,4 +1,4 @@
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, type ReactNode, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { Button } from './button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './dialog';
 import { Input } from './input';
@@ -42,6 +42,8 @@ export function ConfirmProvider({ children, labels }: { children: ReactNode; lab
   const [confirmState, setConfirmState] = useState<{ options: ConfirmOptions; resolve: (value: boolean) => void } | null>(null);
   const [promptState, setPromptState] = useState<{ options: PromptOptions; resolve: (value: string | null) => void } | null>(null);
   const [promptValue, setPromptValue] = useState('');
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
 
   const confirm = useCallback<ConfirmFn>((options) => new Promise<boolean>((resolve) => setConfirmState({ options, resolve })), []);
   const prompt = useCallback<PromptFn>(
@@ -75,16 +77,17 @@ export function ConfirmProvider({ children, labels }: { children: ReactNode; lab
         {children}
 
         <Dialog open={Boolean(confirmState)} onOpenChange={(open) => !open && settleConfirm(false)}>
-          <DialogContent className="max-w-sm">
+          {/* A destructive confirm opens on Cancel (WAI-ARIA APG alertdialog), so a repeated Enter cannot delete. */}
+          <DialogContent className="max-w-sm" initialFocus={c?.destructive ? cancelRef : confirmRef}>
             <DialogHeader>
               <DialogTitle>{c?.title}</DialogTitle>
               {c?.description ? <DialogDescription>{c.description}</DialogDescription> : null}
             </DialogHeader>
             <DialogFooter>
-              <Button onClick={() => settleConfirm(false)} variant="outline">
+              <Button onClick={() => settleConfirm(false)} ref={cancelRef} variant="outline">
                 {c?.cancelLabel ?? labels?.cancel ?? 'Cancel'}
               </Button>
-              <Button autoFocus onClick={() => settleConfirm(true)} variant={c?.destructive ? 'destructive' : 'default'}>
+              <Button onClick={() => settleConfirm(true)} ref={confirmRef} variant={c?.destructive ? 'destructive' : 'default'}>
                 {c?.confirmLabel ?? labels?.delete ?? 'Delete'}
               </Button>
             </DialogFooter>

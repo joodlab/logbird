@@ -416,17 +416,8 @@ a {
   }
 }
 
-/* Unlayered on purpose: it must beat the .text-syntax-comment utility. */
-/* The console's comment token is below 4.5:1 on the site's code surfaces; lift it here only. */
-.site-code .text-syntax-comment {
-  color: #636363;
-}
-.dark .site-code .text-syntax-comment {
-  color: #9a9a9a;
-}
-
 /* ---------- trust pages (cloud, open source, security, compare) ----------
-   .panel is unlayered, so Tailwind border/background utilities can't override it; these modifiers can. */
+   Small modifiers for panels (kept as classes so pages read clearly). */
 .panel-accent {
   border-color: color-mix(in oklab, var(--brand) 50%, var(--border));
 }

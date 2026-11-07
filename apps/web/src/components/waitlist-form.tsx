@@ -5,18 +5,29 @@ import { type FormEvent, type ReactNode, useState } from 'react';
 import { CONTACT_EMAIL } from '../env';
 
 // Copy: marketing/copy/contact.md (form, states).
-const mail = (
+// No mailbox is named unless WEB_CONTACT_EMAIL is configured (never a guessed address).
+const mail = CONTACT_EMAIL ? (
   <a className="text-link" href={`mailto:${CONTACT_EMAIL}`}>
     {CONTACT_EMAIL}
   </a>
-);
+) : null;
 export const STATUS_MESSAGES: Record<string, { tone: 'ok' | 'error'; text: ReactNode }> = {
   ok: { tone: 'ok', text: "Thanks. You're on the list, and if you asked something we'll reply by email." },
   validation_error: { tone: 'error', text: 'Something in the form needs fixing. Check the email address and try again.' },
   invalid_body: { tone: 'error', text: 'Something in the form needs fixing. Check the email address and try again.' },
   rate_limited: { tone: 'error', text: 'Too many attempts. Wait a minute, then try again.' },
-  waitlist_unavailable: { tone: 'error', text: <>The form isn't available right now. Email us at {mail} instead.</> },
-  error: { tone: 'error', text: <>We couldn't send that. Check your connection and try again, or email {mail}.</> },
+  waitlist_unavailable: {
+    tone: 'error',
+    text: mail ? <>The form isn't available right now. Email us at {mail} instead.</> : "The form isn't available right now. Please try again later.",
+  },
+  error: {
+    tone: 'error',
+    text: mail ? (
+      <>We couldn't send that. Check your connection and try again, or email {mail}.</>
+    ) : (
+      "We couldn't send that. Check your connection and try again."
+    ),
+  },
 };
 const messageFor = (code: string | undefined) => (code ? (STATUS_MESSAGES[code] ?? STATUS_MESSAGES.error) : undefined);
 

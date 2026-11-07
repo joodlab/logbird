@@ -136,7 +136,11 @@ function VerifyStep() {
         </Button>
       </form>
       <div className="flex items-center justify-between text-sm">
-        <Link className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground" search={{ redirect: target }} to="/login">
+        <Link
+          className="-my-2 inline-flex items-center gap-1 py-2 text-muted-foreground hover:text-foreground pointer-coarse:-my-3 pointer-coarse:py-3"
+          search={{ redirect: target }}
+          to="/login"
+        >
           <ArrowLeftIcon className="size-3.5" />
           Use another email
         </Link>
