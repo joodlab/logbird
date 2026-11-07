@@ -141,7 +141,10 @@ export function SiteFooter() {
             <span className="sr-only">Logbird · لوغبيرد</span>
           </p>
           <p className="max-w-xs text-muted-foreground text-sm leading-relaxed">
-            Retrace every step. <span lang="ar">تتبّع كل خطوة.</span>
+            Retrace every step.{' '}
+            <span dir="rtl" lang="ar">
+              تتبّع كل خطوة.
+            </span>
             <br />
             The open-source audit log for your product.
           </p>

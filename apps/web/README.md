@@ -27,7 +27,8 @@ Stop the server's whole process tree when done. Never start the console or its s
 - `ready: false` pages render a placeholder, are `noindex`, and stay out of the nav, footer, sitemap and `llms.txt`.
   Internal `ButtonLink`s to them render nothing. Each page PR flips its own flag.
 - `src/lib/release.ts` closes the whole site while any media entry is `interim`, `WEB_SITE_URL` is unset (provisional
-  domain), or `WEB_SECURITY_EMAIL` or `WEB_CONTACT_EMAIL` is unset (no mailbox is ever derived from the provisional domain): every page is `noindex`, `robots.txt`
+  domain), `WEB_SECURITY_EMAIL` or `WEB_CONTACT_EMAIL` is unset (no mailbox is ever derived from the provisional domain),
+  or `/legal/privacy` or `/legal/terms` is still a placeholder (`ready: false`): every page is `noindex`, `robots.txt`
   is `Disallow: /`, and `build:cloudflare` fails unless `LOGBIRD_WEB_ALLOW_INTERIM=1` (local previews only).
 
 ## Configuration
@@ -83,6 +84,8 @@ OG cards (`scripts/og.ts`, Satori + Resvg, local fonts) render one 1200×630 PNG
 
 - `scripts/lighthouse.mjs` runs Lighthouse on demand through `npx` (not a dependency) against Playwright's bundled
   Chromium, mobile and desktop, median of `RUNS` (3). Serve the static build first. `PATHS`, `OUT_DIR`, `--no-fail`.
+  The pass mark (95) applies to SEO without the `is-crawlable` audit (`seo-content`): noindex comes from the release
+  gate and `ready`, which have their own tests, so a gated build still measures every other SEO check.
 - `scripts/capture.mjs` takes 1440×900 and 390×844 stills in both themes (`PATHS`, `OUT_DIR`, `VIDEO=1` for scroll clips)
   with Playwright's bundled Chromium only, and fails on console errors or failed requests.
 

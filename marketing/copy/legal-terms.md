@@ -12,6 +12,8 @@ path: /legal/terms
 - **body (shown at the top of the page, prominent):** Placeholder — to be replaced by counsel-reviewed text before
   launch.
 - **visual:** none
+- **site:** the page renders the banner and the summary only, and stays `ready: false` (noindex, not in the footer or
+  sitemap) until counsel-reviewed text replaces it.
 
 ## summary
 
@@ -37,5 +39,6 @@ path: /legal/terms
     `docs/brand.md` §8). Third-party product names are used only to identify those products.
   - **Liability limits and governing law:** for counsel to set, given where the publisher is established.
   - **Changes to the terms**, with a "last updated" date.
-  - **Contact:** placeholder `legal@logbird.dev` (domain not bought yet).
+  - **Contact:** a legal contact address (owner to provide; there is no default mailbox, and the domain isn't bought
+    yet).
 - **visual:** none
