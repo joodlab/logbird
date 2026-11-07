@@ -33,7 +33,9 @@ path: /changelog
 - **id:** `build-log`
 - **heading:** Build log
 - **body:** Day by day, in public. Drafts in `marketing/devlog/` are published here only after the owner approves
-  them.
+  them; each one becomes an entry in `apps/web/src/lib/publications.ts`.
+- **empty state:** No entries yet. Each day's post appears here once it's published.
+- **site:** the page is `ready` (indexed, in the footer and sitemap) from the first release or approved entry.
   <!-- source: marketing/README.md -->
 - **visual:** each entry uses the still or clip named in its `post.md`
 

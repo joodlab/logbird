@@ -15,6 +15,8 @@ path: /blog
   progress, see the changelog.
 - **cta:** Changelog and build log → `/changelog`
 - **empty state:** No posts yet. The first one is on its way.
+- **site:** posts live in `apps/web/src/lib/publications.ts`. The blog is `ready` from the first published post; the
+  draft below isn't on the site.
 - **visual:** none
 
 ---

@@ -19,6 +19,8 @@ path: /about
        "Logbird is built by {WEB_ORG_NAME}. It started as the audit log for a hotel-booking SaaS, where every support
        question begins the same way: …" -->
 
+- **site:** while `WEB_ORG_NAME` is set, the lead starts with "Logbird is built by {WEB_ORG_NAME}." The origin story
+  stays the neutral version above until the owner approves it.
 - **visual:** none
 
 ## design-partner
@@ -64,4 +66,5 @@ path: /about
 - **heading:** Follow the build.
 - **body:** We write up what we ship as we go. Every post uses real captures from the product.
 - **cta:** Read the changelog → `/changelog` · Contact us → `/contact`
+- **site:** this section renders only once `/changelog` is ready.
 - **visual:** none

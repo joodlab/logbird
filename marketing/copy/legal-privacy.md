@@ -12,6 +12,8 @@ path: /legal/privacy
 - **body (shown at the top of the page, prominent):** Placeholder — to be replaced by counsel-reviewed text before
   launch.
 - **visual:** none
+- **site:** the page renders the banner and the summary only, and stays `ready: false` (noindex, not in the footer or
+  sitemap) until counsel-reviewed text replaces it.
 
 ## summary
 
@@ -38,7 +40,8 @@ path: /legal/privacy
   - **Retention:** how long waitlist entries are kept, and when they're deleted.
   - **Rights:** how to see, correct or delete your data, and how to withdraw from the waitlist.
   - **International transfers**, if the storage or email provider is outside the visitor's country.
-  - **Contact:** a privacy contact address. Placeholder: `privacy@logbird.dev` (domain not bought yet).
+  - **Contact:** a privacy contact address (owner to provide; there is no default mailbox, and the domain isn't bought
+    yet).
   - **Scope:** this policy covers the website only. Self-hosted Logbird installations are run by their operators;
     Logbird Cloud will have its own terms and data processing terms before it opens.
   - **Changes:** how and when the policy is updated, with a "last updated" date.

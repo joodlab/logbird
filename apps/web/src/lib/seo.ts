@@ -1,5 +1,6 @@
 import { GITHUB_PUBLIC, GITHUB_URL, ORG_NAME, SITE_URL } from '../env';
-import { pageIndexable } from './release';
+import { type Post, postPath } from './publications';
+import { pageIndexable, siteIndexable } from './release';
 import { getPage, isReady } from './site-map';
 export const canonicalHref = (path: string) => new URL(path, `${SITE_URL}/`).href;
 export function pageMeta({
@@ -122,5 +123,25 @@ export function pageHead(path: string) {
               { name: page.title, path: canonicalPath },
             ]),
           ],
+  };
+}
+
+/** Head for one published post: its own canonical, article card and BlogPosting data. */
+export function postHead(post: Post) {
+  const path = postPath(post);
+  return {
+    meta: [
+      ...pageMeta({ title: post.title, description: post.description, path, type: 'article', ogSlug: 'blog' }),
+      ...(siteIndexable() ? [] : [{ name: 'robots', content: 'noindex' }]),
+    ],
+    links: [{ rel: 'canonical', href: canonicalHref(path) }],
+    scripts: [
+      articleLd({ ...post, path, ogSlug: 'blog' }),
+      breadcrumbLd([
+        { name: 'Home', path: '/' },
+        { name: 'Blog', path: '/blog' },
+        { name: post.title, path },
+      ]),
+    ],
   };
 }

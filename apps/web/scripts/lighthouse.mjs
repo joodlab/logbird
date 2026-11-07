@@ -19,7 +19,7 @@ const paths = process.env.PATHS ? process.env.PATHS.split(',').map((path) => pat
 const runs = Math.max(1, Number(process.env.RUNS ?? 3));
 const categories = ['performance', 'accessibility', 'best-practices', 'seo'];
 // noindex pages (drafts, 404, pages not marked ready) lose SEO points by design.
-const noindex = new Set(['/blog/draft', '/404', ...siteMap.filter((page) => !page.ready).map((page) => page.path)]);
+const noindex = new Set(['/404', ...siteMap.filter((page) => !page.ready).map((page) => page.path)]);
 const chromePath = chromium.executablePath();
 await mkdir(output, { recursive: true });
 
