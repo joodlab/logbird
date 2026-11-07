@@ -1,0 +1,161 @@
+import { randomUUID } from 'node:crypto';
+import { purgeProject } from '@logbird/clickhouse';
+import { createProjectResponseSchema, exportEvidenceRowSchema } from '@logbird/contracts';
+import { prisma } from '@logbird/database';
+import { expect, it } from 'vitest';
+import { app } from './app';
+import { clickhouse } from './clickhouse';
+
+it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/failed/aborted receipts', async () => {
+  const users: string[] = [];
+  let organizationId = '';
+  let project: { id: string; slug: string } | undefined;
+  let ownerCookie = '';
+  const request = (cookie: string, path: string, method = 'GET', body?: unknown) =>
+    app.request(
+      path,
+      {
+        method,
+        headers: { cookie, 'Content-Type': 'application/json', Origin: process.env.APP_URL ?? 'http://localhost:4600' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      },
+      { incoming: { socket: { remoteAddress: '203.0.113.73' } } },
+    );
+  async function login() {
+    const email = `qa-fix-exports-${randomUUID()}@example.test`;
+    expect((await request('', '/api/auth/email-otp/send-verification-otp', 'POST', { email, type: 'sign-in' })).status).toBe(200);
+    const mailbox = await (await fetch('http://127.0.0.1:8025/api/v1/messages?limit=100')).json();
+    const message = mailbox.messages.find((m: { To: { Address: string }[] }) => m.To.some((t) => t.Address === email));
+    const content = await (await fetch(`http://127.0.0.1:8025/api/v1/message/${message.ID}`)).json();
+    const response = await request('', '/api/auth/sign-in/email-otp', 'POST', { email, otp: content.Text.match(/\b\d{6}\b/)[0] });
+    expect(response.status).toBe(200);
+    const { user } = await response.json();
+    users.push(user.id);
+    return {
+      id: user.id,
+      email,
+      cookie: response.headers
+        .getSetCookie()
+        .map((s) => s.split(';')[0])
+        .join('; '),
+    };
+  }
+  async function receipts(requestId: string) {
+    return (
+      await clickhouse.query({
+        query: 'SELECT payload FROM events WHERE project_id={p:String} AND request_id={id:String} ORDER BY timestamp,event_id',
+        query_params: { p: `ws:${organizationId}`, id: requestId },
+        format: 'JSONEachRow',
+      })
+    )
+      .json<{ payload: string }>()
+      .then((rows) => rows.map((r) => JSON.parse(r.payload)));
+  }
+  try {
+    const owner = await login();
+    ownerCookie = owner.cookie;
+    const created = await request(owner.cookie, '/api/auth/organization/create', 'POST', {
+      name: 'QA Fix exports',
+      slug: `qa-fix-exports-${randomUUID()}`,
+    });
+    expect(created.status).toBe(200);
+    organizationId = (await created.json()).id;
+    const actors = [owner];
+    for (const role of ['admin', 'member']) {
+      const user = await login();
+      const invitation = await request(owner.cookie, '/api/auth/organization/invite-member', 'POST', { organizationId, email: user.email, role });
+      expect(invitation.status).toBe(200);
+      expect(
+        (await request(user.cookie, '/api/auth/organization/accept-invitation', 'POST', { invitationId: (await invitation.json()).id })).status,
+      ).toBe(200);
+      expect((await request(user.cookie, '/api/auth/organization/set-active', 'POST', { organizationId })).status).toBe(200);
+      actors.push(user);
+    }
+    await request(owner.cookie, '/api/auth/organization/set-active', 'POST', { organizationId });
+    const createdProject = await request(owner.cookie, '/api/projects', 'POST', { name: 'QA Fix export evidence', retentionDays: 90 });
+    expect(createdProject.status).toBe(201);
+    const result = createProjectResponseSchema.parse(await createdProject.json());
+    project = result.project;
+    const projectId = project.id;
+    const events = Array.from({ length: 205 }, (_, i) => ({
+      id: `export-${i.toString().padStart(3, '0')}`,
+      action: 'evidence.updated',
+      occurredAt: new Date().toISOString(),
+      actor: { id: 'effective', name: '=1+1', type: 'user' },
+      impersonator: { id: 'support', name: 'Support' },
+      executor: { type: 'worker', id: 'worker', jobId: 'job', attempt: 2 },
+      changes: [{ field: 'status', before: { state: 'old' }, after: ['new', null] }],
+      targets: [{ type: 'record', id: 'record-1' }],
+      context: { requestId: 'event-request', ip: '203.0.113.9' },
+      description: '=1+1',
+      metadata: { longEvidence: 'Z'.repeat(3000), nested: { array: [null, 1, 'é'] } },
+      unknown: { preserved: true },
+    }));
+    expect(
+      (
+        await app.request('/v1/events', {
+          method: 'POST',
+          headers: { authorization: `Bearer ${result.ingestKey.secret}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(events),
+        })
+      ).status,
+    ).toBe(202);
+    const query = `from=${encodeURIComponent(new Date(Date.now() - 60_000).toISOString())}&to=${encodeURIComponent(new Date(Date.now() + 60_000).toISOString())}&q=action:evidence.updated`;
+    for (const actor of actors) {
+      for (const format of ['jsonl', 'csv', 'jsonl-evidence']) {
+        const response = await request(actor.cookie, `/api/projects/${projectId}/export?${query}&format=${format}`);
+        expect(response.status).toBe(200);
+        const text = await response.text();
+        const rows = await receipts(response.headers.get('x-request-id') ?? '');
+        expect(rows.map((r) => r.action).sort()).toEqual(['export.completed', 'export.requested']);
+        for (const row of rows) {
+          expect(row.actor.id).toBe(actor.id);
+          expect(row.targets[0].id).toBe(projectId);
+          expect(row.context.ip).toBe('203.0.113.73');
+          expect(row.metadata.export).toMatchObject({ format, query: 'action:evidence.updated', projectId });
+          expect(row.metadata.export.from).toMatch(/Z$/);
+          expect(row).not.toHaveProperty('changes');
+          expect(JSON.stringify(row)).not.toContain('longEvidence');
+        }
+        expect(rows.find((r) => r.action === 'export.completed').metadata.export).toMatchObject({ rows: 205, bytes: Buffer.byteLength(text) });
+        const lines = text.trimEnd().split('\n');
+        if (format === 'csv') {
+          expect(lines).toHaveLength(206);
+          expect(lines[0]).toContain('impersonator_id');
+          expect(lines[1]).toContain('"\'=1+1"');
+          expect(lines[1]).toContain('"support"');
+        } else {
+          expect(lines).toHaveLength(205);
+          expect(new Set(lines.map((line) => JSON.parse(line).event?.id ?? JSON.parse(line).id)).size).toBe(205);
+          if (format === 'jsonl-evidence') {
+            const evidence = lines.map((line) => exportEvidenceRowSchema.parse(JSON.parse(line)));
+            expect(evidence.map((e) => e.payload)).toEqual(events);
+            expect(evidence[0]?.exportSchemaVersion).toBe(1);
+            expect(evidence[0]?.event.attributes['metadata.longEvidence']).toHaveLength(2048);
+          }
+        }
+      }
+    }
+    const aborted = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
+    if (!aborted.body) throw new Error('Export body missing');
+    const reader = aborted.body.getReader();
+    await reader.read();
+    await reader.cancel();
+    const canceled = await receipts(aborted.headers.get('x-request-id') ?? '');
+    expect(canceled.map((r) => r.action).sort()).toEqual(['export.failed', 'export.requested']);
+    expect(canceled.find((r) => r.action === 'export.failed').metadata.export).toMatchObject({ reason: 'client_aborted' });
+    const invalid = await request(owner.cookie, `/api/projects/${projectId}/export?format=jsonl&q=%28`);
+    expect(invalid.status).toBe(422);
+    expect((await receipts(invalid.headers.get('x-request-id') ?? '')).map((r) => r.action).sort()).toEqual(['export.failed', 'export.requested']);
+    console.log(
+      'SECURITY exports: owner/admin/member x 3 formats, 205 unique rows across pages; original payload deep equality; formula neutralization; completed, failed and canceled receipts verified against Postgres/ClickHouse/Redis/Mailpit.',
+    );
+  } finally {
+    if (project) expect((await request(ownerCookie, `/api/projects/${project.id}?confirm=${project.slug}`, 'DELETE')).status).toBe(204);
+    if (organizationId) {
+      await purgeProject(clickhouse, `ws:${organizationId}`);
+      await prisma.organization.delete({ where: { id: organizationId } });
+    }
+    await prisma.user.deleteMany({ where: { id: { in: users } } });
+  }
+}, 120_000);

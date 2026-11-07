@@ -5,6 +5,7 @@ import type {
   EntityProfile,
   EntitySort,
   EventDetail,
+  ExportQuery,
   entityListQuerySchema,
   FacetResponse,
   facetQuerySchema,
@@ -20,6 +21,7 @@ import { pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import { isQueryClient } from './client';
+import { CSV_COLUMNS, csvEvent } from './export';
 import type { EventRow } from './normalize';
 import { columns, compileQuery, QueryError } from './query';
 import { sqlSyntaxError, validateSql } from './sql-guard';
@@ -476,17 +478,30 @@ export async function operationEvents(ch: ClickHouseClient, p: string, operation
     )
   ).map(toEvent);
 }
-export async function* exportEvents(ch: ClickHouseClient, p: string, q: RangeQuery & { format: 'csv' | 'jsonl' }) {
+export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQuery) {
   let nextCursor: string | undefined;
   let first = true;
   do {
     const page = await searchEvents(ch, p, { ...q, cursor: nextCursor, limit: 200, order: 'asc' });
-    if (first && q.format === 'csv') yield 'id,timestamp,action,outcome,description\n';
+    if (first && q.format === 'csv') yield `${CSV_COLUMNS.join(',')}\n`;
     first = false;
-    for (const e of page.data)
-      yield q.format === 'jsonl'
-        ? `${JSON.stringify(e)}\n`
-        : `${[e.id, e.timestamp, e.action, e.outcome, e.description].map((v) => `"${v.replaceAll('"', '""')}"`).join(',')}\n`;
+    const payloads = new Map<string, string>();
+    if (q.format === 'jsonl-evidence' && page.data.length) {
+      const rows = await read<{ event_id: string; payload: string }>(
+        ch,
+        'SELECT event_id,payload FROM events WHERE project_id={p:String} AND event_id IN {ids:Array(String)} ORDER BY received_at DESC LIMIT 1 BY event_id',
+        { p, ids: page.data.map((e) => e.id) },
+      );
+      for (const row of rows) payloads.set(row.event_id, row.payload);
+    }
+    for (const e of page.data) {
+      if (q.format === 'jsonl-evidence') {
+        const payload = payloads.get(e.id);
+        if (payload === undefined) throw new Error('Export payload no longer available');
+        // Embed stored JSON verbatim: no normalized-field caps or JSON parse/stringify round trip.
+        yield `{"exportSchemaVersion":1,"event":${JSON.stringify(e)},"payload":${payload}}\n`;
+      } else yield q.format === 'jsonl' ? `${JSON.stringify(e)}\n` : csvEvent(e);
+    }
     nextCursor = page.nextCursor ?? undefined;
   } while (nextCursor);
 }

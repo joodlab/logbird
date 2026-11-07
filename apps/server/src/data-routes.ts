@@ -3,15 +3,15 @@ import * as s from '@logbird/contracts';
 import { prisma } from '@logbird/database';
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
-import { stream } from 'hono/streaming';
 import { resolver, validator } from 'hono-openapi';
 import { z } from 'zod';
 import { clickhouse, queryClickhouse } from './clickhouse';
 import { ApiError } from './errors';
+import { auditedExport } from './export-stream';
 import { ingest, readIngestBody, requireProjectReadable } from './ingest';
 import { requireApiKey, requireProjectAccess, requireSession } from './middlewares';
 import { doc as responseDoc, routeDoc } from './openapi';
-import { publicRateLimits } from './rate-limit';
+import { clientAddress, publicRateLimits } from './rate-limit';
 import type { AppEnv } from './types';
 
 const ingestRequestSchema = (await resolver(s.ingestBodySchema).toOpenAPISchema()).schema;
@@ -173,25 +173,37 @@ export const dataRoutes = new Hono<AppEnv>()
     routeDoc('Stream CSV or JSONL', {
       responses: {
         200: {
-          description: 'Event export',
+          description: 'Normalized CSV/JSONL or original-payload evidence JSONL. See docs/exports.md for schemas and audit semantics.',
           content: { 'text/csv': { schema: { type: 'string' } }, 'application/x-ndjson': { schema: { type: 'string' } } },
         },
       },
     }),
-    query(s.rangeQuerySchema.extend({ format: z.enum(['csv', 'jsonl']) })),
+    query(s.exportQuerySchema),
     async (c) => {
-      const q = c.req.valid('query');
-      const iterator = ch.exportEvents(queryClient(q), c.get('project').id, q);
-      const first = await iterator.next();
+      const input = c.req.valid('query');
+      const q = { ...input, ...ch.timeRange(input), q: input.q?.trim() ?? '', lang: input.lang ?? ('query' as const) };
+      const client = queryClient(q);
+      const project = c.get('project');
+      const body = await auditedExport(
+        ch.exportEvents(client, project.id, q),
+        q.format === 'csv',
+        (action, counts) =>
+          ingest(`ws:${project.organizationId}`, {
+            action,
+            outcome: action === 'export.failed' ? 'failure' : 'success',
+            actor: { type: 'user', ...c.get('user') },
+            executor: { type: 'api', id: 'api-server' },
+            targets: [{ type: 'project', id: project.id, name: project.name }],
+            context: { requestId: c.get('requestId'), ip: clientAddress(c) ?? '', userAgent: c.req.header('user-agent') ?? '' },
+            metadata: { export: { projectId: project.id, format: q.format, query: q.q, lang: q.lang, from: q.from, to: q.to, ...counts } },
+          }),
+        c.req.raw.signal,
+      );
       c.header('Content-Type', q.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/x-ndjson');
-      c.header('Content-Disposition', `attachment; filename="events.${q.format}"`);
-      return stream(c, async (out) => {
-        try {
-          if (!first.done) await out.write(first.value);
-          for await (const chunk of iterator) await out.write(chunk);
-        } finally {
-          await iterator.return();
-        }
-      });
+      c.header(
+        'Content-Disposition',
+        `attachment; filename="events${q.format === 'jsonl-evidence' ? '-evidence' : ''}.${q.format === 'csv' ? 'csv' : 'jsonl'}"`,
+      );
+      return c.body(body);
     },
   );

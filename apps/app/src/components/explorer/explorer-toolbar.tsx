@@ -65,10 +65,11 @@ export function ColumnPicker({ columns, onChange }: { columns: string[]; onChang
   );
 }
 
-type ExportFormat = 'csv' | 'jsonl';
+type ExportFormat = import('@logbird/contracts').ExportFormat;
 const EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
-  { format: 'csv', label: 'CSV (spreadsheet)' },
-  { format: 'jsonl', label: 'JSON Lines (full events)' },
+  { format: 'csv', label: 'CSV (normalized, spreadsheet-safe)' },
+  { format: 'jsonl', label: 'JSON Lines (normalized)' },
+  { format: 'jsonl-evidence', label: 'JSON Lines (original evidence)' },
 ];
 
 /** Downloads every match of the range and query as CSV or JSON Lines (the toolbar menu and the mobile menu share it). */
@@ -86,7 +87,7 @@ function useExport({ projectId, range, q, lang = 'query' }: { projectId: string;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `logbird-events-${new Date().toISOString().slice(0, 19).replaceAll(':', '')}.${format}`;
+      a.download = `logbird-events-${new Date().toISOString().slice(0, 19).replaceAll(':', '')}${format === 'jsonl-evidence' ? '-evidence' : ''}.${format === 'csv' ? 'csv' : 'jsonl'}`;
       a.click();
       URL.revokeObjectURL(url);
       toast.success('Export ready', { description: `${rangeLabel(range)}${q ? ` · ${q}` : ''}` });
@@ -131,7 +132,7 @@ export function ExportMenu({
           {busy ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />}
           <span className="hidden xl:inline">Export</span>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuContent align="end" className="w-72">
           <DropdownMenuGroup>
             <DropdownMenuLabel className="font-normal text-muted-foreground text-xs">
               Exports every match in the current range and query.
@@ -183,7 +184,7 @@ export function ExplorerOverflowMenu({
         >
           {busy ? <Loader2Icon className="animate-spin" /> : <MoreHorizontalIcon />}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-60">
+        <DropdownMenuContent align="end" className="w-72">
           {disabledReason ? (
             <DropdownMenuGroup>
               <DropdownMenuLabel className="flex items-start gap-1.5 font-normal text-muted-foreground text-xs" data-testid="explorer-more-reason">

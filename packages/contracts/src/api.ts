@@ -21,6 +21,13 @@ export const rangeQuerySchema = z.object({
 });
 export type RangeQuery = z.infer<typeof rangeQuerySchema>;
 
+export const exportFormatSchema = z.enum(['csv', 'jsonl', 'jsonl-evidence']);
+export type ExportFormat = z.infer<typeof exportFormatSchema>;
+export const exportQuerySchema = rangeQuerySchema.extend({ format: exportFormatSchema });
+export type ExportQuery = z.infer<typeof exportQuerySchema>;
+export const exportEvidenceRowSchema = z.object({ exportSchemaVersion: z.literal(1), event: eventSchema, payload: z.unknown() });
+export type ExportEvidenceRow = z.infer<typeof exportEvidenceRowSchema>;
+
 export const searchQuerySchema = rangeQuerySchema.extend({
   cursor: z.string().optional(), // opaque, returned as nextCursor
   limit: z.coerce.number().int().min(1).max(200).default(50),

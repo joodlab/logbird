@@ -40,7 +40,7 @@ export const routes = {
     histogram: { method: 'GET', path: '/api/projects/:projectId/histogram', auth: 'session' },
     facets: { method: 'GET', path: '/api/projects/:projectId/facets', auth: 'session' },
     operation: { method: 'GET', path: '/api/projects/:projectId/operations/:operationId', auth: 'session' },
-    export: { method: 'GET', path: '/api/projects/:projectId/export', auth: 'session' }, // ?format=csv|jsonl + range query, streamed
+    export: { method: 'GET', path: '/api/projects/:projectId/export', auth: 'session' }, // exportQuerySchema; streamed
     testEvent: { method: 'POST', path: '/api/projects/:projectId/test-event', auth: 'session' },
   },
   overview: { method: 'GET', path: '/api/projects/:projectId/overview', auth: 'session' },

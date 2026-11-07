@@ -6,6 +6,7 @@ import {
   createProjectResponseSchema,
   type EntityKind,
   type EntitySort,
+  type ExportQuery,
   entityListResponseSchema,
   entityProfileSchema,
   eventDetailSchema,
@@ -208,8 +209,7 @@ export const api = {
     operation: (projectId: string, operationId: string, signal?: AbortSignal) =>
       request(z.array(eventSchema), 'GET', pathFor(routes.events.operation.path, { projectId, operationId }), { signal }),
     testEvent: (projectId: string) => request(ingestResponseSchema, 'POST', pathFor(routes.events.testEvent.path, { projectId }), { body: {} }),
-    exportUrl: (projectId: string, query: RangeParams & { format: 'csv' | 'jsonl' }) =>
-      withQuery(pathFor(routes.events.export.path, { projectId }), { ...query }),
+    exportUrl: (projectId: string, query: ExportQuery) => withQuery(pathFor(routes.events.export.path, { projectId }), { ...query }),
   },
 
   overview: (projectId: string, query: RangeParams, signal?: AbortSignal) =>
