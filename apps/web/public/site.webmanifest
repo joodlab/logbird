@@ -1,0 +1,21 @@
+{
+  "name": "Logbird",
+  "short_name": "Logbird",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#0b0b0c",
+  "icons": [
+    {
+      "src": "/brand/logbird-favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/logbird-apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
