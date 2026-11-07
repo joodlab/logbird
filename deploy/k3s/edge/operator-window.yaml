@@ -1,0 +1,10 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  namespace: logbird
+  name: operator-window
+spec:
+  ipAllowList:
+    # Replace with the two acceptance operators' real public /32 or /128 addresses.
+    # No forwarded-header strategy: the Local ingress path preserves the socket IP.
+    sourceRange: [203.0.113.10/32, 203.0.113.11/32]
