@@ -19,16 +19,24 @@ Workspace name/slug changes use owner/admin `PATCH /api/workspace`: `SELECT FOR 
 one transaction. better-auth rejects name/slug changes on its organization-update endpoint. A slug-only change says
 "Changed the workspace URL slug". No rename advisory lock or before-snapshot request state remains.
 
-Explicit session ends write deterministic `auth:end:<sessionId>:<orgId>:<namespace>` intents **before** deletion,
-with `confirmedAt = null`. Before-hook failure prevents deletion. The after-hook confirms the intent without changing
-the payload or failing an already successful action. The API reconciles intents older than 60 seconds: a missing
-Session confirms deletion; a still-present Session is retained in quarantine as `not_committed`. Expiry cleanup is
-excluded. Non-secret revoked-session creation time, address and user-agent are separate from requester context.
-A later explicit retry may refresh a proved-aborted, never-claimed intent with the new action/request before deletion.
-Pending concurrent attempts return a retryable error; a stale after-hook cannot confirm another request's intent.
-Confirmed payloads and all delivery retries remain frozen.
-If an unconfirmed session has disappeared after its original expiry, reconciliation quarantines it as
-`expired_session_intent`: implicit expiry cleanup is ambiguous and must never become an attributed user revocation.
+Explicit session ends use self-only Logbird routes: `POST /api/session/sign-out`,
+`POST /api/sessions/revoke` (`{sessionId}`; a non-secret id), `POST /api/sessions/revoke-all`, and
+`POST /api/sessions/revoke-others`. They need an authenticated session, with no active-workspace/role requirement.
+Each locks the selected live Session rows, deletes exactly those ids, and inserts frozen end evidence for each
+workspace membership in **one Postgres transaction**. A concurrent sign-in outside that selection survives.
+An insert failure/crash before commit rolls back both deletion and evidence; loss after commit leaves both durable.
+Expiry cleanup is unaudited. Revoked-device creation/expiry/address/user-agent are distinct from requester context;
+session tokens are never serialized. Sign-out and any revocation including the current session expire cookies using
+better-auth's native helper (including chunked cache cookies). Repeated signed-out requests return 401; the console
+handles an already-ended session as success. The four original better-auth HTTP endpoints return 409; API clients must
+switch to these owned routes. Cross-origin POSTs are rejected independently of CORS.
+
+The former before/after-hook intents and reconciler are removed. The migration neutralizes up to 100 ambiguous
+unconfirmed intents in quarantine as `legacy_session_intent`; a bounded per-minute sweep handles any remainder or
+late writes from an older replica. It never guesses which action committed or refreshes its actor/payload. Deprecated
+`confirmedAt`/`sourceSessionId` columns remain for rolling schema compatibility; new owned records use the default
+confirmed state and no source intent. Delivered/confirmed historical evidence remains intact. Roll back code while
+retaining the schema and quarantined rows, and investigate legacy intents against independent request evidence.
 `auth.signed_in` uses deterministic `auth:signin:?` ids; the short creation-to-after-hook crash/storage window remains
 tracked in [#82](https://github.com/joodlab/logbird/issues/82), along with better-auth member/invitation/organization-creation
 hooks. Those successful committed actions retain their successful response if enqueue fails, with a safe diagnostic.
@@ -49,7 +57,7 @@ authentication claim is made.
 ## Failed sign-ins and budgets
 
 Every failed OTP request stages a HMAC only, plus bounded request context, before returning. It does no membership
-lookup, AES encryption/decryption or advisory locking. Existing windows increment directly; only new windows contend
+lookup, AES encryption/decryption or advisory locking. Existing windows increment under their own row lock; only new windows contend
 on an atomic conditional admission-counter update. User hashes are backfilled in batches of 100 by the API and refreshed
 on successful sign-in. The lookup waits while initial backfill is incomplete. Legacy encrypted windows are preserved
 in quarantine (`legacy_identity_unresolved`) for explicit operator recovery, never guessed or silently dropped.
@@ -70,6 +78,10 @@ resolve members to counted workspace evidence; junk identities cannot blind all 
 the cap bounds ordinary evidence production, not arbitrary hash cardinality. Each workspace admits 60 rows/hour plus
 one counted suppression summary with `metadata.targets` (top 20 user ids/counts, plus a truncation flag). Summary
 freezing waits for that hour's pending/quarantined windows to resolve, preventing late increments from being lost.
+A request delayed behind a closing summary rechecks `closedAt` under that row lock and increments the next window
+generation instead. Its first/last occurrence times are the actual late-admission time, with a new immutable event id;
+a closed summary is never reopened. Requests delayed beyond retention also enter a current generation. Normal and
+hourly overflow windows use the same policy, including the next hour's budget.
 All window/budget/suppression identities include the namespace. Legacy round-2 budgets are retained/reported separately
 in the transition hour. Authentication's separate peer/code limits are unchanged.
 
@@ -95,6 +107,11 @@ Each API replica runs batched sweeps (200 rows/table/minute), using short `SKIP 
 - fully expanded closed windows (`flushedAttempts = attempts`): after window end + 1 hour;
 - reported budgets: after window end + 24 hours, once no unresolved window from that hour remains.
 
+A separate bounded compatibility pass (100 rows/tick, indexed) closes completed round-2 windows only when their
+identity was erased, `flushedAttempts = attempts > 0`, and `nextAttemptAt` is the round-2 year-9999 sentinel. It does not
+reconstruct historical occurrence times. Those rows and their resolved budgets then follow normal retention.
+Unresolved legacy rows remain retained for operator recovery.
+
 Undelivered, unconfirmed and quarantined evidence is never automatically deleted. Retention limits duplicate personal
 context in Postgres after delivery; workspace ClickHouse retention/purge is a separate policy. Quarantine is a deliberate
 recovery exception: operators must investigate and explicitly dispose of unrecoverable evidence under their privacy policy.
@@ -108,8 +125,8 @@ Safe codes: `ingest_pending` means retry the exact payload; `duplicate_id_confli
 identity (never mint a new id); `invalid_event` is a rejected event shape/type; `audit_rejected` covers other non-throwing
 rejections; `audit_storage_unavailable` covers transient delivery/state failures. Delivery quarantines after 10 attempts.
 Staging backs off per window and quarantines after 5 preparation failures; `legacy_identity_unresolved` quarantines
-immediately, and `hash_backfill_pending` waits without consuming the quarantine budget. `not_committed` is a session
-intent whose Session remained present during reconciliation. No error messages or credentials are persisted.
+immediately, and `hash_backfill_pending` waits without consuming the quarantine budget. `legacy_session_intent` means
+an ambiguous pre-upgrade hook intent retained for investigation, never automatically confirmed. No error messages or credentials are persisted.
 
 ```sql
 SELECT namespace, count(*) AS undelivered,
@@ -122,13 +139,17 @@ SELECT id, "emailHash", "prepareAttempts", "lastError", "quarantinedAt", "window
 FROM "AuthAuditWindow" WHERE "closedAt" IS NULL ORDER BY "nextAttemptAt" LIMIT 100;
 -- After fixing the cause and checking the exact namespace/id; keep attempt fences monotonic.
 UPDATE "AuditOutbox" SET "quarantinedAt"=NULL, "nextAttemptAt"=now()
-WHERE namespace='<namespace>' AND id='<reviewed-id>' AND "deliveredAt" IS NULL AND "confirmedAt" IS NOT NULL;
+WHERE namespace='<namespace>' AND id='<reviewed-id>' AND "deliveredAt" IS NULL AND "confirmedAt" IS NOT NULL AND "sourceSessionId" IS NULL;
 UPDATE "AuthAuditWindow" SET "quarantinedAt"=NULL, "nextAttemptAt"=now()
-WHERE namespace='<namespace>' AND id='<recovered-hash-window>' AND "emailHash" IS NOT NULL;
+WHERE namespace='<namespace>' AND id='<recovered-hash-window>' AND "emailHash" IS NOT NULL AND "closedAt" IS NULL AND "flushedAttempts"<attempts;
 ```
 
 A requeue grants a new attempt; another failure at the threshold quarantines again. Do not reset attempts (the lease
-fence), edit frozen payloads, or blindly confirm `not_committed` intents. Recover legacy identities securely with the old
+fence), edit frozen payloads, clear `closedAt`, or confirm legacy session intents from a Session existence check.
+A pre-upgrade closed window with `flushedAttempts < attempts` is retained but cannot be requeued: its summary id is
+already frozen. Recover only the unreported delta into a **new generation/id**, verifying its hash, counts and first/last
+times against independent request logs, then mark the old source resolved in the same operator transaction. Do not
+reuse the closed summary id or infer the delta's occurrence times from the full window. Recover legacy identities securely with the old
 deployment secret/tooling, verify the canonical hash and original occurrence times against independent request logs,
 then restore the hash/times and requeue the retained window. Migration defaults cannot establish historical attempt
 times. If those times cannot be verified, leave the legacy window in quarantine; do not invent historical evidence.
@@ -156,7 +177,7 @@ user-agent context where available. Keys and session tokens are never recorded. 
 | `member.removed`, `member.joined_via_link` | member | acting user / member | member id/name |
 | `invite_link.created`, `invite_link.revoked` | invite_link | user / invite link | link id and role, never its secret |
 | `auth.signed_in` | auth | signed-in user / user | successful sign-in |
-| `auth.signed_out`, `auth.session.revoked` | auth | acting user / non-secret session id | explicit sign-out/revoke routes only; repeated sign-out is a no-op |
+| `auth.signed_out`, `auth.session.revoked` | auth | acting user / non-secret session id | owned self-only sign-out/revoke routes; replay after sign-out returns 401 |
 | `auth.sign_in.failed` | auth | anonymous / targeted member user id | hashVersion, emailHash, reason, attempts, windowEnd, auditWindowSeconds |
 | `export.requested`, `export.completed`, `export.failed` | export | user / project and export | linked export id, format/version, resolved query clock/range, rows/bytes; completion SHA-256; safe failure reason; see [exports](exports.md) |
 | `auth.sign_in.suppressed` | auth | system / workspace stream | aggregate attempts and windowEnd |

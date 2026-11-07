@@ -10,7 +10,7 @@ import { DetailRow, LoadingCard, PublicInviteLayout, StateCard } from '@/compone
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { invitationPreviewQuery, keys, meQuery } from '@/lib/api/queries';
-import { authCall, authClient } from '@/lib/auth-client';
+import { authCall, authClient, signOut } from '@/lib/auth-client';
 import { formatFull } from '@/lib/format';
 import { ROLE_INFO, type Role, roleLabel } from '@/lib/organization';
 import { markOtpSent } from '@/lib/otp';
@@ -68,7 +68,7 @@ function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview;
   const signInAsInvited = useMutation({
     mutationFn: async () => {
       if (signedInAs) {
-        await authClient.signOut();
+        await signOut();
         queryClient.removeQueries({ queryKey: keys.me });
       }
       await authCall(authClient.emailOtp.sendVerificationOtp({ email: invitation.email, type: 'sign-in' }));

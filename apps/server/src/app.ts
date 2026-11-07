@@ -25,6 +25,7 @@ import { doc, routeDoc } from './openapi';
 import { auditDrainStatus } from './outbox-delivery';
 import { clientAddress, rateLimit } from './rate-limit';
 import { managementRoutes } from './routes';
+import { sessionRoutes } from './session-routes';
 import { setupRoutes } from './setup-routes';
 import type { AppEnv } from './types';
 
@@ -37,6 +38,8 @@ app.use(
   bodyLimit({ maxSize: 5 * 1024 * 1024, onError: (c) => c.json({ error: { code: 'payload_too_large', message: 'Request exceeds 5 MB.' } }, 413) }),
 );
 app.use('/api/auth/*', rateLimit);
+app.use('/api/session/*', rateLimit);
+app.use('/api/sessions/*', rateLimit);
 app.use(
   '*',
   cors({
@@ -107,6 +110,9 @@ setAuthAuditHandler((e) =>
   }),
 );
 app.on(['GET', 'POST'], '/api/auth/*', async (c) => {
+  const authPath = c.req.path.replace(/\/+$/, '');
+  if (['sign-out', 'revoke-session', 'revoke-sessions', 'revoke-other-sessions'].some((path) => authPath === `/api/auth/${path}`))
+    return c.json({ error: { code: 'use_owned_session_endpoint', message: 'Use the self-only /api/session or /api/sessions routes.' } }, 409);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   const authBody = ['/api/auth/organization/invite-member', '/api/auth/sign-in/email-otp'].includes(c.req.path)
     ? await c.req.raw
@@ -190,6 +196,7 @@ app.get(
 );
 app.use('/api/*', authorizeMutation);
 export const routes = app
+  .route('/api', sessionRoutes)
   .route('/api', inviteLinkRoutes)
   .route('/api', invitationRoutes)
   .route('/api', setupRoutes)

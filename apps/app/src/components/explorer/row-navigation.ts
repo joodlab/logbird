@@ -1,20 +1,28 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { eventSentence, personLabel } from '@/lib/events';
 import { formatTimestamp } from '@/lib/format';
+import { jobHint, supportPhrase } from '@/lib/impersonation';
 
 /**
- * The row's accessible name: what happened (actor, action, target), how it ended and when. Screen readers announce
- * it when the roving focus lands on the row, so it must stand on its own without the visual columns.
+ * The row's accessible name: what happened (actor, action, target), who was really at the keyboard, how it ended,
+ * which background job ran it, and when. Screen readers announce it when the roving focus lands on the row, so it
+ * must stand on its own without the visual columns (the in-cell support marker and job hint are not tab stops).
  */
 export function eventRowLabel(e: AuditEvent, now = Date.now()): string {
   const sentence = eventSentence(e);
   const actor = personLabel(e.actor);
   const parts = [sentence];
+  // "done by support agent X while acting as Y" names the actor itself, so it replaces "by Y" — unless the sentence
+  // already says who (generated sentences start with the actor), then only the agent is added.
+  const named = Boolean(actor) && sentence.toLowerCase().includes(actor.toLowerCase());
+  const support = e.impersonator ? (named ? `done by support agent ${e.impersonator.name || e.impersonator.id}` : supportPhrase(e)) : null;
+  if (support) parts.push(support);
   // Producer descriptions do not always name who acted ("Booking cancelled"): add the actor when it is missing.
-  if (actor && !sentence.toLowerCase().includes(actor.toLowerCase())) parts.push(`by ${actor}`);
-  if (e.impersonator) parts.push(`while ${e.impersonator.name || e.impersonator.id} was impersonating`);
+  else if (actor && !sentence.toLowerCase().includes(actor.toLowerCase())) parts.push(`by ${actor}`);
   parts.push(e.outcome);
   if (sentence !== e.action) parts.push(e.action);
+  const job = jobHint(e);
+  if (job) parts.push(job.label);
   parts.push(formatTimestamp(e.timestamp, now));
   return parts.join(', ');
 }

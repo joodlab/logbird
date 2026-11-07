@@ -1,4 +1,4 @@
-﻿import { type AuthAuditWindow, auditNamespace, authEmailHash, type Prisma, prisma, storeAuditEvent } from '@logbird/database';
+import { type AuthAuditWindow, auditNamespace, authEmailHash, type Prisma, prisma, storeAuditEvent } from '@logbird/database';
 
 export { authEmailHash } from '@logbird/database';
 
@@ -17,41 +17,58 @@ const budgetId = (stream: string, end: Date) => `${auditNamespace()}:${stream}:$
 
 async function insertWindow(
   tx: Prisma.TransactionClient,
-  id: string,
   emailHash: string,
   reason: string,
   context: Prisma.InputJsonObject,
-  end: Date,
-  now: Date,
+  initialEnd: Date,
+  initialTime: Date,
   overflow = false,
 ) {
+  let end = initialEnd,
+    now = initialTime;
   const ip = typeof context.ip === 'string' ? context.ip : '';
-  const rows = await tx.$queryRaw<{ id: string }[]>`INSERT INTO "AuthAuditWindow"
+  const duration = overflow ? HOUR_MS : WINDOW_MS;
+  for (;;) {
+    if (+end <= Date.now()) {
+      now = new Date();
+      end = new Date((Math.floor(+now / duration) + 1) * duration);
+    }
+    const id = `${emailHash}:${overflow ? 'overflow' : reason}:${+end}:${auditNamespace()}`;
+    const rows = await tx.$queryRaw<{ id: string }[]>`INSERT INTO "AuthAuditWindow"
     (id, namespace, identity, "emailHash", reason, context, "lastContext", "windowEnd", "nextAttemptAt", "firstAttemptAt", "lastAttemptAt", "distinctIps", overflow)
     VALUES (${id}, ${auditNamespace()}, '', ${emailHash}, ${reason}, ${JSON.stringify(context)}::jsonb, ${JSON.stringify(context)}::jsonb,
       ${end}, ${now}, ${now}, ${now}, array_remove(ARRAY[${ip}]::text[], ''), ${overflow}) ON CONFLICT (id) DO NOTHING RETURNING id`;
-  if (rows.length) return true;
-  await tx.$executeRaw`UPDATE "AuthAuditWindow" SET attempts=attempts+1,
+    if (rows.length) return { fresh: true, id, at: now };
+    const locked = await tx.$queryRaw<{ closedAt: Date | null }[]>`SELECT "closedAt" FROM "AuthAuditWindow" WHERE id=${id} FOR UPDATE`;
+    if (!locked.length) continue; // Retention removed an old generation before we obtained its lock.
+    if (locked[0]?.closedAt) {
+      now = new Date();
+      end = new Date(Math.max(+end + duration, (Math.floor(+now / duration) + 1) * duration));
+      continue;
+    }
+    await tx.$executeRaw`UPDATE "AuthAuditWindow" SET attempts=attempts+1,
     context=CASE WHEN ${now}<"firstAttemptAt" THEN ${JSON.stringify(context)}::jsonb ELSE context END,
     "lastContext"=CASE WHEN ${now}>="lastAttemptAt" THEN ${JSON.stringify(context)}::jsonb ELSE "lastContext" END,
     "firstAttemptAt"=LEAST("firstAttemptAt",${now}), "lastAttemptAt"=GREATEST("lastAttemptAt",${now}),
     "ipsTruncated"="ipsTruncated" OR (${ip}<>'' AND NOT (${ip}=ANY("distinctIps")) AND cardinality("distinctIps")>=10),
     "distinctIps"=CASE WHEN ${ip}<>'' AND NOT (${ip}=ANY("distinctIps")) AND cardinality("distinctIps")<10 THEN array_append("distinctIps", ${ip}) ELSE "distinctIps" END
     WHERE id=${id}`;
-  return false;
+    return { fresh: false, id, at: now };
+  }
 }
 
 /** Same hash-only durable path for every identity; no membership lookup, AES or advisory lock in the request. */
 export async function stageFailedSignIn(email: string, reason: string, context: Prisma.InputJsonObject, secret: string, now = new Date()) {
   const hash = authEmailHash(email, secret),
     end = new Date((Math.floor(+now / WINDOW_MS) + 1) * WINDOW_MS);
-  const id = `${hash}:${reason}:${+end}:${auditNamespace()}`,
-    globalId = `${auditNamespace()}:global:${Math.floor(+now / HOUR_MS)}`;
   await prisma.$transaction(async (tx) => {
-    if (!(await insertWindow(tx, id, hash, reason, context, end, now))) return;
+    const window = await insertWindow(tx, hash, reason, context, end, now);
+    if (!window.fresh) return;
+    const admittedAt = window.at;
+    const globalId = `${auditNamespace()}:global:${Math.floor(+admittedAt / HOUR_MS)}`;
     await tx.authAuditBudget.upsert({
       where: { id: globalId },
-      create: { id: globalId, namespace: auditNamespace(), windowEnd: hourEnd(now) },
+      create: { id: globalId, namespace: auditNamespace(), windowEnd: hourEnd(admittedAt) },
       update: {},
     });
     const admitted = await tx.authAuditBudget.updateMany({
@@ -63,8 +80,8 @@ export async function stageFailedSignIn(email: string, reason: string, context: 
     if (budget.suppressed === 1)
       console.warn(JSON.stringify({ event: 'global_suppression_started', namespace: auditNamespace(), windowEnd: budget.windowEnd }));
     // Fresh sprays cannot consume the member evidence budget: preserve a hash-only counter per identity/hour.
-    await insertWindow(tx, `${hash}:overflow:${+hourEnd(now)}:${auditNamespace()}`, hash, 'global_overflow', context, hourEnd(now), now, true);
-    await tx.authAuditWindow.delete({ where: { id } });
+    await insertWindow(tx, hash, 'global_overflow', context, hourEnd(admittedAt), admittedAt, true);
+    await tx.authAuditWindow.delete({ where: { id: window.id } });
   });
 }
 
@@ -160,7 +177,16 @@ async function expandWindow(window: AuthAuditWindow, now: Date) {
   });
 }
 
+/** Round-2 parked completed windows have no identity left and no counts awaiting expansion. */
+export async function closeLegacyAuthWindows(now = new Date()) {
+  return prisma.$executeRaw`UPDATE "AuthAuditWindow" SET "closedAt"=${now} WHERE id IN (
+    SELECT id FROM "AuthAuditWindow" WHERE namespace=${auditNamespace()} AND "emailHash" IS NULL
+    AND identity='' AND "closedAt" IS NULL AND "quarantinedAt" IS NULL AND attempts>0 AND "flushedAttempts"=attempts
+    AND "nextAttemptAt">=TIMESTAMP '9999-01-01' ORDER BY "nextAttemptAt", id LIMIT 100 FOR UPDATE SKIP LOCKED)`;
+}
+
 export async function flushFailedSignIns(now = new Date(), ids?: string[]) {
+  if (!ids) await closeLegacyAuthWindows(now);
   const windows = await prisma.authAuditWindow.findMany({
     where: { namespace: auditNamespace(), quarantinedAt: null, closedAt: null, nextAttemptAt: { lte: now }, ...(ids ? { id: { in: ids } } : {}) },
     take: 100,

@@ -50,7 +50,7 @@ import { UserAvatar } from '@/components/account/user-avatar';
 import { BrandMark } from '@/components/brand';
 import { SetupProgress } from '@/components/setup/setup-progress';
 import { meQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
-import { authCall, authClient } from '@/lib/auth-client';
+import { authCall, authClient, signOut } from '@/lib/auth-client';
 import { canDo } from '@/lib/permissions';
 import { displayName, hasName } from '@/lib/user';
 import { PROJECT_NAV } from './nav';
@@ -309,9 +309,10 @@ function UserMenu() {
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={async () => {
-              await authClient.signOut();
-              queryClient.clear();
+              await signOut();
+              await queryClient.invalidateQueries({ queryKey: meQuery().queryKey, exact: true, refetchType: 'none' });
               await navigate({ to: '/login' });
+              queryClient.clear();
             }}
           >
             <LogOutIcon />

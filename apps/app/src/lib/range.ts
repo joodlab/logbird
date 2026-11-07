@@ -63,6 +63,15 @@ export function absoluteRange(fromMs: number, toMs: number): string {
   return `${new Date(Math.min(fromMs, toMs)).toISOString()}..${new Date(Math.max(fromMs, toMs)).toISOString()}`;
 }
 
+/**
+ * A range inside a sentence: "the last 30 days", "the last hour", or an absolute span as written ("Nov 1 09:00 – Nov 7
+ * 09:00"), never a lowercased date.
+ */
+export function rangePhrase(range: string): string {
+  const preset = RANGE_PRESETS.find((p) => p.value === range);
+  return preset ? `the ${preset.label.charAt(0).toLowerCase()}${preset.label.slice(1)}` : rangeLabel(range);
+}
+
 export function rangeLabel(range: string): string {
   const preset = RANGE_PRESETS.find((p) => p.value === range);
   if (preset) return preset.label;

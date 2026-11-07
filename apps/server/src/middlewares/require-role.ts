@@ -7,8 +7,10 @@ import { requireSession } from './require-session';
 
 const all = ['owner', 'admin', 'member'] as const;
 const admins = ['owner', 'admin'] as const;
-// All console mutations must be listed here. Auth routes are owned by better-auth.
+// All console mutations must be listed here, including self-only session endpoints.
 export const mutationPermissions = [
+  { method: 'POST', path: /^\/api\/session\/sign-out$/, roles: all, self: true },
+  { method: 'POST', path: /^\/api\/sessions\/revoke(?:-all|-others)?$/, roles: all, self: true },
   { method: 'PATCH', path: /^\/api\/workspace$/, roles: admins },
   { method: 'POST', path: /^\/api\/projects$/, roles: admins },
   { method: 'PATCH', path: /^\/api\/projects\/[^/]+$/, roles: admins },
@@ -47,7 +49,7 @@ export const authorizeMutation = createMiddleware<AppEnv>(async (c, next) => {
       if (!project || project.organizationId !== organizationId) throw new ApiError(404, 'not_found', 'Project not found.');
       organizationId = project.organizationId;
     }
-    await requireRole(c, permission.roles, organizationId);
+    if (!('self' in permission && permission.self)) await requireRole(c, permission.roles, organizationId);
     await next();
   });
 });

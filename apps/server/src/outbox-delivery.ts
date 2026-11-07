@@ -119,6 +119,11 @@ export async function auditDrainStatus(now = new Date()) {
 /** Bounded deletes take short row locks. Unconfirmed, undelivered and quarantined evidence is retained. */
 export async function sweepAuditRetention(now = new Date()) {
   const ns = auditNamespace();
+  // Old replicas may have staged ambiguous hook intents before the owned routes deployed.
+  // Preserve these rows for investigation; session existence is never proof of a committed action.
+  await prisma.$executeRaw`UPDATE "AuditOutbox" SET "quarantinedAt"=${now}, "lastError"='legacy_session_intent'
+    WHERE id IN (SELECT id FROM "AuditOutbox" WHERE namespace=${ns} AND "sourceSessionId" IS NOT NULL
+    AND "confirmedAt" IS NULL AND "quarantinedAt" IS NULL ORDER BY "createdAt" LIMIT 100 FOR UPDATE SKIP LOCKED)`;
   const delivered = await prisma.$executeRaw`DELETE FROM "AuditOutbox" WHERE id IN (
     SELECT id FROM "AuditOutbox" WHERE namespace=${ns} AND "deliveredAt" < ${new Date(+now - 7 * 86_400_000)}
     AND "quarantinedAt" IS NULL ORDER BY "deliveredAt" LIMIT 200 FOR UPDATE SKIP LOCKED)`;

@@ -5,14 +5,12 @@ import { clientIp, primaryRole } from '@logbird/email';
 import { sendMemberJoined, sendOrganizationInvitation, sendRoleChanged, sendSignInCode } from '@logbird/email/send';
 import { createEnv } from '@t3-oss/env-core';
 import { betterAuth } from 'better-auth';
-import { APIError } from 'better-auth/api';
-import { confirmSessionEnd, recordSessionSignIn, stageSessionEnd } from './session-audit';
-
-export { reconcileSessionAudit } from './session-audit';
-
 import { prismaAdapter } from 'better-auth/adapters/prisma';
+import { APIError, createAuthEndpoint } from 'better-auth/api';
+import { deleteSessionCookie } from 'better-auth/cookies';
 import { emailOTP, organization } from 'better-auth/plugins';
 import { z } from 'zod';
+import { recordSessionSignIn } from './sign-in-audit';
 
 type AuditUser = { id: string; name: string; email: string };
 type AuthAudit = {
@@ -75,6 +73,8 @@ async function notify(kind: string, send: () => Promise<unknown>) {
 }
 export const auth = betterAuth({
   baseURL: env.APP_URL,
+  // Session ends belong to Logbird's atomic deletion/outbox routes. Keep the library router closed too.
+  disabledPaths: ['/sign-out', '/revoke-session', '/revoke-sessions', '/revoke-other-sessions'],
   // The API boundary enforces shared Redis limits across replicas.
   rateLimit: { enabled: false },
   secret: env.BETTER_AUTH_SECRET,
@@ -93,16 +93,6 @@ export const auth = betterAuth({
             await recordSessionSignIn(session, env.BETTER_AUTH_SECRET, authAuditContext.getStore());
           } catch {
             console.error(JSON.stringify({ event: 'auth.audit_storage_unavailable', action: 'auth.signed_in' }));
-          }
-        },
-      },
-      delete: {
-        before: (session) => stageSessionEnd(session, authAuditContext.getStore()),
-        after: async (session) => {
-          try {
-            await confirmSessionEnd(session, authAuditContext.getStore());
-          } catch {
-            console.error(JSON.stringify({ event: 'auth.audit_storage_unavailable', action: 'auth.session.end.confirm' }));
           }
         },
       },
@@ -203,3 +193,13 @@ export const auth = betterAuth({
   ],
 });
 export type AuthSession = typeof auth.$Infer.Session;
+
+// Called locally only; this endpoint is not registered on better-auth's HTTP router.
+const expireSessionCookies = createAuthEndpoint('/internal-cookie-expiry', { method: 'POST' }, async (ctx) => {
+  deleteSessionCookie(ctx);
+  return ctx.json({ success: true });
+});
+export async function clearSessionCookies(headers: Headers) {
+  const response = await expireSessionCookies({ headers, context: await auth.$context, asResponse: true });
+  return response.headers.getSetCookie();
+}

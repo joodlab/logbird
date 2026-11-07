@@ -12,6 +12,13 @@ export const routes = {
   auth: '/api/auth/*',
 
   me: { method: 'GET', path: '/api/me', auth: 'session' },
+  /** Self-only session mutations. Evidence and exactly the selected ids commit atomically. */
+  sessions: {
+    signOut: { method: 'POST', path: '/api/session/sign-out', auth: 'session' },
+    revoke: { method: 'POST', path: '/api/sessions/revoke', auth: 'session' },
+    revokeAll: { method: 'POST', path: '/api/sessions/revoke-all', auth: 'session' },
+    revokeOthers: { method: 'POST', path: '/api/sessions/revoke-others', auth: 'session' },
+  },
   workspace: { method: 'PATCH', path: '/api/workspace', auth: 'session' },
 
   projects: {
