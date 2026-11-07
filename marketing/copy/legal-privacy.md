@@ -20,8 +20,8 @@ path: /legal/privacy
 - **id:** `summary`
 - **heading (H1):** Privacy
 - **body:** This website collects the details you type into the waitlist and contact form, and we use them to contact
-  you about Logbird. Like any web server, it also processes your IP address: in memory to rate-limit the form, and in
-  our host's request logs. The site uses no trackers, no analytics cookies and no third-party advertising scripts.
+  you about Logbird. Like any web server, it also processes your IP address: in memory to rate-limit the form, and it
+  may appear in our host's request logs. The site uses no trackers, no analytics cookies and no third-party advertising scripts.
   <!-- source: apps/web/server/waitlist.ts and src/server/waitlist.ts (the IP keys an in-memory limiter only; it is
   not written to the waitlist file) -->
 - **visual:** none

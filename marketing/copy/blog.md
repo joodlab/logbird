@@ -12,7 +12,7 @@ path: /blog
 - **eyebrow:** Blog
 - **heading (H1):** Notes from building Logbird.
 - **body:** Longer posts on how Logbird works and why: the decisions, the guarantees, and the limits. For day-by-day
-  progress, see the changelog.
+  progress, see the changelog. (The last sentence and the CTA appear only once `/changelog` is ready.)
 - **cta:** Changelog and build log → `/changelog`
 - **empty state:** No posts yet. The first one is on its way.
 - **site:** posts live in `apps/web/src/lib/publications.ts`. The blog is `ready` from the first published post; the

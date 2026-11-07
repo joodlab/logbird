@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { Callout } from '../components/marketing/callout';
 import { ScreenshotFrame } from '../components/marketing/frame';
 import { Rich } from '../components/marketing/rich';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
@@ -31,11 +30,6 @@ function ChangelogPage() {
         }
         title="What changed, and when."
       />
-      {releases.length ? null : (
-        <div className="container-site pt-10">
-          <Callout title="Nothing has been released yet.">Version 0.1 is in progress.</Callout>
-        </div>
-      )}
 
       <Section labelledBy="releases-title">
         <SectionHeader id="releases-title" title="Releases" />
@@ -44,7 +38,10 @@ function ChangelogPage() {
             {newestFirst(releases).map((release) => (
               <li className="panel flex flex-col gap-4 p-5 md:p-6" key={release.version}>
                 <h3 className="font-semibold text-xl">
-                  {release.version} <time className="ms-2 font-normal text-base text-muted-foreground">{longDate(release.date)}</time>
+                  {release.version}{' '}
+                  <time className="ms-2 font-normal text-base text-muted-foreground" dateTime={release.date}>
+                    {longDate(release.date)}
+                  </time>
                 </h3>
                 {releaseGroups.map((group) =>
                   release[group.key]?.length ? (
@@ -65,7 +62,9 @@ function ChangelogPage() {
             ))}
           </ol>
         ) : (
-          <Empty>No releases yet. The first one, 0.1.0, will list everything since the start of the project.</Empty>
+          <Empty>
+            Nothing has been released yet. The first release, 0.1.0, is in progress and will list everything since the start of the project.
+          </Empty>
         )}
       </Section>
 

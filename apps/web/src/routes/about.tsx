@@ -4,7 +4,8 @@ import { CtaBand } from '../components/marketing/cta-band';
 import { Rich } from '../components/marketing/rich';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { BilingualWordmark } from '../components/marketing/wordmark';
-import { ORG_NAME } from '../env';
+import { GITHUB_PUBLIC, ORG_NAME } from '../env';
+import { DESIGN_PARTNER_LINE } from '../lib/copy-flags';
 import { pageHead } from '../lib/seo';
 import { isReady } from '../lib/site-map';
 
@@ -44,8 +45,10 @@ function AboutPage() {
         lead={
           <>
             {ORG_NAME ? `Logbird is built by ${ORG_NAME}. ` : null}Logbird started as the audit log a product team needed, where every support
-            question begins the same way: who changed this, and when? We wanted the answer to take one search, on servers we run ourselves. We
-            released it under the MIT licence so any product team can do the same.
+            question begins the same way: who changed this, and when? We wanted the answer to take one search, on servers we run ourselves.{' '}
+            {GITHUB_PUBLIC
+              ? 'We released it under the MIT licence so any product team can do the same.'
+              : "It's MIT-licensed, and the source opens publicly soon, so any product team can do the same."}
           </>
         }
         title="We built the audit log we needed."
@@ -55,7 +58,7 @@ function AboutPage() {
         <SectionHeader
           eyebrow="First design partner"
           id="partner-title"
-          lead="Logbird is being integrated with a hotel-booking SaaS, our first design partner. Its code drives the roadmap: we add an item only when that integration shows the need."
+          lead={`${DESIGN_PARTNER_LINE} Its code drives the roadmap: we add an item only when that integration shows the need.`}
           title="Shaped by a real product."
         />
       </Section>

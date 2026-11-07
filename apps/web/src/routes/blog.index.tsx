@@ -3,6 +3,7 @@ import { ButtonLink } from '../components/marketing/button-link';
 import { PageHero, Section } from '../components/marketing/section';
 import { newestFirst, posts, publicationDate } from '../lib/publications';
 import { pageHead } from '../lib/seo';
+import { isReady } from '../lib/site-map';
 
 export const Route = createFileRoute('/blog/')({ head: () => pageHead('/blog'), component: BlogIndex });
 
@@ -17,7 +18,7 @@ function BlogIndex() {
           </ButtonLink>
         }
         eyebrow="Blog"
-        lead="Longer posts on how Logbird works and why: the decisions, the guarantees, and the limits. For day-by-day progress, see the changelog."
+        lead={`Longer posts on how Logbird works and why: the decisions, the guarantees, and the limits.${isReady('/changelog') ? ' For day-by-day progress, see the changelog.' : ''}`}
         title="Notes from building Logbird."
       />
       <Section labelledBy="posts-title">

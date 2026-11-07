@@ -14,7 +14,6 @@ path: /changelog
 - **body:** Two lists live here. **Releases** follow the repository's `CHANGELOG.md`: what changed in each version,
   and anything you must do to upgrade. The **build log** is a short post for each day of work, showing what we shipped
   with a real capture from the product.
-- **status line:** Nothing has been released yet. Version 0.1 is in progress.
   <!-- source: CHANGELOG.md (all sections "Unreleased") -->
 - **visual:** none
 
@@ -24,8 +23,8 @@ path: /changelog
 - **heading:** Releases
 - **body:** Rendered from `CHANGELOG.md`. Each entry links to the pull requests it came from once the repository is
   public.
-- **empty state (until the first release):** No releases yet. The first one, 0.1.0, will list everything since the
-  start of the project.
+- **empty state (until the first release):** Nothing has been released yet. The first release, 0.1.0, is in progress
+  and will list everything since the start of the project. (Said once, here; there's no separate status line.)
 - **visual:** none
 
 ## build-log

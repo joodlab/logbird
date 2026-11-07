@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { chromium } from '@playwright/test';
-import { prerenderPaths, siteMap } from '../src/lib/site-map.ts';
+import { prerenderPaths } from '../src/lib/site-map.ts';
 
 const LIGHTHOUSE = 'lighthouse@13.6.0';
 const base = process.env.BASE_URL ?? 'http://127.0.0.1:4620';
@@ -18,8 +18,14 @@ const output = resolve(process.env.OUT_DIR ?? '.tmp/lighthouse');
 const paths = process.env.PATHS ? process.env.PATHS.split(',').map((path) => path.trim()) : prerenderPaths;
 const runs = Math.max(1, Number(process.env.RUNS ?? 3));
 const categories = ['performance', 'accessibility', 'best-practices', 'seo'];
-// noindex pages (drafts, 404, pages not marked ready) lose SEO points by design.
-const noindex = new Set(['/404', ...siteMap.filter((page) => !page.ready).map((page) => page.path)]);
+// noindex pages (404, unready pages, and every page while a release blocker is open) fail Lighthouse's is-crawlable
+// audit by design; the release gate decides crawlability and has its own tests. So the pass mark applies to the SEO
+// score without that one audit (`seo-content`), and the plain score is reported beside it.
+const seoWithoutCrawlable = (lhr) => {
+  const refs = lhr.categories.seo.auditRefs.filter((ref) => ref.weight > 0 && ref.id !== 'is-crawlable' && lhr.audits[ref.id]?.score !== null);
+  const weight = refs.reduce((sum, ref) => sum + ref.weight, 0);
+  return weight ? Math.round((refs.reduce((sum, ref) => sum + ref.weight * (lhr.audits[ref.id]?.score ?? 0), 0) / weight) * 100) : 0;
+};
 const chromePath = chromium.executablePath();
 await mkdir(output, { recursive: true });
 
@@ -63,6 +69,7 @@ for (const path of paths) {
       path,
       formFactor,
       ...Object.fromEntries(categories.map((key) => [key, median(scores(key))])),
+      'seo-content': median(reports.map(seoWithoutCrawlable)),
       runs: scores('performance').join(' '),
     };
     rows.push(row);
@@ -76,6 +83,6 @@ for (const path of paths) {
 }
 console.table(rows);
 await writeFile(resolve(output, 'summary.json'), JSON.stringify(rows, null, 2));
-if (!process.argv.includes('--no-fail') && rows.some((row) => categories.some((key) => row[key] < 95 && !(key === 'seo' && noindex.has(row.path))))) {
+if (!process.argv.includes('--no-fail') && rows.some((row) => categories.some((key) => (key === 'seo' ? row['seo-content'] : row[key]) < 95))) {
   process.exitCode = 1;
 }

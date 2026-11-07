@@ -107,12 +107,14 @@ export const faqLd = (items: { q: string; a: string }[]) =>
   });
 export function pageHead(path: string) {
   const page = getPage(path);
+  // A template path (`/blog/$slug`) is never a real URL: it gets no canonical and is always noindex. Published posts
+  // use postHead() instead.
   const draft = path.includes('$');
-  const canonicalPath = draft ? '/blog/draft' : path;
+  const canonicalPath = draft ? '/blog' : path;
   return {
     // Not-ready pages, drafts, and every page while a release blocker is open are noindex (release.ts).
     meta: [...pageMeta({ ...page, path: canonicalPath }), ...(pageIndexable(page) && !draft ? [] : [{ name: 'robots', content: 'noindex' }])],
-    links: [{ rel: 'canonical', href: canonicalHref(canonicalPath) }],
+    links: draft ? [] : [{ rel: 'canonical', href: canonicalHref(canonicalPath) }],
     scripts:
       path === '/'
         ? [organizationLd(), websiteLd(), softwareLd()].filter((script) => script !== null)
