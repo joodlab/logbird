@@ -2,6 +2,15 @@ import { spawn } from 'node:child_process';
 import { access, copyFile, mkdir, mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
+import { releaseBlockers } from '../src/lib/release';
+
+// A Cloudflare build is a public build: refuse while any console capture is interim (release.ts).
+const blockers = releaseBlockers();
+if (blockers.length && process.env.LOGBIRD_WEB_ALLOW_INTERIM !== '1') {
+  throw new Error(
+    `Refusing to package a public build: ${blockers.join('; ')}. Replace the capture, or set LOGBIRD_WEB_ALLOW_INTERIM=1 for a local preview only.`,
+  );
+}
 const pnpm = process.env.npm_execpath ?? '';
 if (!pnpm) {
   throw new Error('Run this script through pnpm build:cloudflare.');

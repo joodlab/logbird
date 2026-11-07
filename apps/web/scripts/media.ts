@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
-import { clips, imageWidths, screenshots } from '../src/lib/media-manifest';
+import { clips, imageWidths, screenshots, type Variant } from '../src/lib/media-manifest';
 
 const root = resolve('../..');
 const output = resolve('public/media');
@@ -18,25 +18,32 @@ async function source(path: string) {
 }
 // Sequential encoding keeps the build's memory use bounded.
 sharp.concurrency(1);
-for (const entry of screenshots) {
+async function encode(id: string, variant: Variant, widths: number[]) {
   for (const theme of ['light', 'dark'] as const) {
-    const path = entry[theme];
+    const path = variant[theme];
     if (!path) {
       continue;
     }
     const { bytes } = await source(path);
     const metadata = await sharp(bytes).metadata();
-    if (metadata.width !== entry.width || metadata.height !== entry.height) {
-      throw new Error(`Media dimensions changed: ${entry.id}/${theme}. Update the manifest after inspection.`);
+    if (metadata.width !== variant.width || metadata.height !== variant.height) {
+      throw new Error(`Media dimensions changed: ${id}/${theme}. Update the manifest after inspection.`);
     }
-    for (const width of imageWidths(entry.width)) {
+    for (const width of widths) {
       for (const format of ['avif', 'webp'] as const) {
         await sharp(bytes)
           .resize({ width, withoutEnlargement: true })
           [format]({ quality: format === 'avif' ? 55 : 82 })
-          .toFile(resolve(output, `${entry.id}-${theme}-${width}.${format}`));
+          .toFile(resolve(output, `${id}-${theme}-${width}.${format}`));
       }
     }
+  }
+}
+for (const entry of screenshots) {
+  await encode(entry.id, entry, imageWidths(entry.width));
+  if (entry.phone) {
+    // Phone captures are served at their native width (390 CSS px).
+    await encode(`${entry.id}-phone`, entry.phone, [entry.phone.width]);
   }
 }
 for (const clip of clips) {
