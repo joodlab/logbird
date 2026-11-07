@@ -85,7 +85,7 @@ function SelfHostDiagram() {
   const parts = ['Console', 'API', 'Worker', 'Postgres', 'ClickHouse', 'Redis'];
   return (
     <figure className="flex flex-col gap-4">
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,14rem)] md:items-center">
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,14rem)] md:items-center lg:grid-cols-1">
         <div className="rounded-2xl border-2 border-brand/40 border-dashed p-4 md:p-5">
           <p className="mb-3 font-mono text-muted-foreground text-xs uppercase tracking-wider">Your server</p>
           <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -96,9 +96,9 @@ function SelfHostDiagram() {
             ))}
           </ul>
         </div>
-        <div aria-hidden="true" className="flex items-center gap-2 self-center px-2 text-muted-foreground text-xs max-md:flex-col">
-          <span className="max-md:order-2">sign-in codes, invitations</span>
-          <ArrowRightIcon className="size-4 max-md:rotate-90" />
+        <div aria-hidden="true" className="flex items-center gap-2 self-center px-2 text-muted-foreground text-xs max-md:flex-col lg:flex-col">
+          <span className="max-md:order-2 lg:order-2">sign-in codes, invitations</span>
+          <ArrowRightIcon className="size-4 max-md:rotate-90 lg:rotate-90" />
         </div>
         <div className="panel flex items-center gap-3 px-4 py-3">
           <MailIcon aria-hidden="true" className="size-4 shrink-0 text-brand" />
