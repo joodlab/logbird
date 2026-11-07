@@ -4,15 +4,9 @@ import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
 import { defineConfig, loadEnv } from 'vite';
 import { llmsTxt, robotsTxt, sitemapXml } from './src/lib/discovery';
+import { securityHeaders } from './src/lib/security-headers';
 import { prerenderPaths } from './src/lib/site-map';
-export const securityHeaders = {
-  'Content-Security-Policy':
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
-  'X-Content-Type-Options': 'nosniff',
-  'Referrer-Policy': 'strict-origin-when-cross-origin',
-  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
-  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
-};
+
 export default defineConfig(({ mode }) => {
   const loaded = { ...loadEnv(mode, '../..', ''), ...loadEnv(mode, process.cwd(), ''), ...process.env };
   const publicEnv = Object.fromEntries(['SITE_URL', 'APP_URL', 'GITHUB_URL', 'GITHUB_PUBLIC'].map((key) => [key, loaded[key]]));
