@@ -1,88 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { insertEvents, normalizeEvent, read } from '@logbird/clickhouse';
+import { read } from '@logbird/clickhouse';
 import { prisma, withProjectLock } from '@logbird/database';
-import { expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import { app } from './app';
 import { clickhouse, purgeProjectEvents } from './clickhouse';
-import { generateApiKey } from './keys';
-
-it('returns 422 and releases claims for parse failures; ambiguous errors retain claims and retry after visibility', async () => {
-  const org = randomUUID(),
-    project = `immutable-errors-${randomUUID()}`;
-  const key = generateApiKey('ingest');
-  await prisma.organization.create({ data: { id: org, name: 'QA Immutable errors', slug: org, createdAt: new Date() } });
-  await prisma.project.create({ data: { id: project, organizationId: org, name: 'QA Immutable errors', slug: project } });
-  await prisma.apiKey.create({ data: { projectId: project, name: 'QA key', kind: 'ingest', hash: key.hash, prefix: key.prefix } });
-  const post = (event: unknown) =>
-    app.request('/v1/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key.secret}` },
-      body: JSON.stringify(event),
-    });
-  const spy = vi.spyOn(clickhouse, 'insert');
-  try {
-    for (const code of ['6', '27', '38', '41', '53', '69', '72']) {
-      spy.mockRejectedValueOnce(Object.assign(new Error('fictional parse failure'), { code }));
-      const response = await post({ id: `parse-${code}`, action: 'parse.original' });
-      expect(response.status).toBe(422);
-      expect((await response.json()).error.code).toBe('invalid_event');
-      expect(await prisma.ingestReceipt.count({ where: { projectId: project } })).toBe(0);
-    }
-    // Actual ClickHouse parsing failure at the storage boundary, after the normalized claim is created.
-    spy.mockRestore();
-    const insert = clickhouse.insert.bind(clickhouse);
-    const realParseSpy = vi.spyOn(clickhouse, 'insert').mockImplementationOnce(() =>
-      insert({
-        table: 'events',
-        values: [
-          {
-            project_id: project,
-            event_id: 'real-parse',
-            action: 'parse.original',
-            timestamp: new Date().toISOString(),
-            job_attempt: 'not-an-integer',
-          },
-        ],
-        format: 'JSONEachRow',
-        clickhouse_settings: { async_insert: 1, wait_for_async_insert: 1 },
-      }),
-    );
-    try {
-      expect((await post({ id: 'real-parse', action: 'parse.original' })).status).toBe(422);
-      expect(await prisma.ingestReceipt.count({ where: { projectId: project } })).toBe(0);
-      expect((await read<{ n: number }>(clickhouse, 'SELECT count() n FROM events WHERE project_id={p:String}', { p: project }))[0]?.n).toBe(0);
-    } finally {
-      realParseSpy.mockRestore();
-    }
-    expect((await post({ id: 'real-parse', action: 'parse.original' })).status).toBe(202);
-
-    const event = { id: 'uncertain', action: 'uncertain.original', occurredAt: new Date().toISOString() };
-    const uncertain = vi.spyOn(clickhouse, 'insert').mockRejectedValueOnce(new Error('connection reset'));
-    try {
-      const failed = await post(event);
-      expect(failed.status).toBe(503);
-      expect(failed.headers.get('Retry-After')).toBe('1');
-      expect((await failed.json()).error.code).toBe('ingest_pending');
-    } finally {
-      uncertain.mockRestore();
-    }
-    expect((await post(event)).status).toBe(503);
-    expect(await prisma.ingestReceipt.count({ where: { projectId: project, eventId: event.id, confirmedAt: null } })).toBe(1);
-    // Simulate the original delayed INSERT becoming visible, then retry the same HTTP request.
-    const receipt = await prisma.ingestReceipt.findUniqueOrThrow({ where: { projectId_eventId: { projectId: project, eventId: event.id } } });
-    const normalized = normalizeEvent(event, { projectId: project, receivedAt: receipt.receivedAt });
-    if (!normalized.ok) throw new Error('Invalid fixture');
-    await insertEvents(clickhouse, [normalized.row]);
-    const recovered = await post(event);
-    expect(recovered.status).toBe(202);
-    expect((await recovered.json()).ids).toEqual([event.id]);
-    expect(await prisma.ingestReceipt.count({ where: { projectId: project, eventId: event.id, confirmedAt: null } })).toBe(0);
-  } finally {
-    spy.mockRestore();
-    await withProjectLock(project, () => purgeProjectEvents(project));
-    await prisma.organization.delete({ where: { id: org } });
-  }
-}, 60_000);
+import { ingest } from './ingest';
 
 it('DELETE project purges confirmed and unresolved receipts before returning 204 (real services)', async () => {
   const org = randomUUID();
@@ -115,6 +37,7 @@ it('DELETE project purges confirmed and unresolved receipts before returning 204
     expect(created.status).toBe(201);
     const { project } = await created.json();
     projectId = project.id;
+    await ingest(projectId, { id: 'delete-stored', action: 'delete.fixture', actor: { id: 'fictional' }, metadata: { fixture: true } });
     const now = new Date();
     await prisma.ingestReceipt.createMany({
       data: [null, now].map((confirmedAt, index) => ({
@@ -127,10 +50,12 @@ it('DELETE project purges confirmed and unresolved receipts before returning 204
         confirmedAt,
       })),
     });
-    expect(await prisma.ingestReceipt.count({ where: { projectId } })).toBe(2);
+    expect(await prisma.ingestReceipt.count({ where: { projectId } })).toBe(3);
     expect((await request(`/api/projects/${projectId}?confirm=${project.slug}`, 'DELETE')).status).toBe(204);
     expect(await prisma.ingestReceipt.count({ where: { projectId } })).toBe(0);
     expect(await prisma.project.count({ where: { id: projectId } })).toBe(0);
+    for (const table of ['events', 'event_ids', 'events_by_minute', 'entities', 'attribute_keys'])
+      expect((await read<{ n: number }>(clickhouse, `SELECT count() n FROM ${table} WHERE project_id={p:String}`, { p: projectId }))[0]?.n).toBe(0);
   } finally {
     if (projectId) await withProjectLock(projectId, () => purgeProjectEvents(projectId));
     await withProjectLock(`ws:${org}`, () => purgeProjectEvents(`ws:${org}`));

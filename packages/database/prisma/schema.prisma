@@ -155,12 +155,14 @@ model IngestReceipt {
   receivedAt DateTime
   eventAt DateTime
   confirmedAt DateTime?
+  claimedAt DateTime? @default(now())
 
   @@id([projectId, eventId])
   @@index([projectId, confirmedAt])
   @@index([confirmedAt])
   @@index([projectId, eventAt])
   @@index([organizationId])
+  @@index([projectId, confirmedAt, claimedAt])
 }
 
 model ApiKey {

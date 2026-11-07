@@ -14,8 +14,12 @@ const object = (v: unknown): Record<string, unknown> =>
 const text = (v: unknown, cap = 512): string => (typeof v === 'string' ? v.trim().slice(0, cap) : '');
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
 export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string }) {
+  // Search normalization is intentionally lossy. Identity v1 hashes canonical raw input, NOT these columns.
+  // Changing caps/flattening must not change v1 or remove the legacy receipt compatibility path.
   const e = object(input);
   if (typeof e.action !== 'string') return { ok: false as const, reason: 'action must be a string' };
+  if (typeof e.id === 'string' && (e.id.includes('\u0000') || /[\uD800-\uDFFF]/u.test(e.id) || e.id.length > 256))
+    return { ok: false as const, reason: 'invalid_event_id: id must be valid Unicode, at most 256 UTF-16 code units, and contain no NUL' };
   let payload: string;
   try {
     payload = JSON.stringify(input);

@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./ingest-recovery": "./src/ingest-recovery.ts",
     "./queue": "./src/queue.ts",
     "./retention": "./src/retention.ts"
   },

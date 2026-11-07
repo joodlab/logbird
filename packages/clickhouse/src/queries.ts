@@ -544,6 +544,11 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
     query_params: params,
     clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
   });
+  await ch.command({
+    query: `DELETE FROM event_ids WHERE project_id={p:String}${before ? ' AND timestamp < {before:DateTime64(3)}' : ''}`,
+    query_params: params,
+    clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
+  });
   if (!before) return rebuildProjectRollups(ch, p, false);
   const filters = {
     events_by_minute: 'bucket <= {bucket:DateTime64(3)}',

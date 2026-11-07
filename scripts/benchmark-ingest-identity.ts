@@ -1,18 +1,28 @@
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { insertEvents, normalizeEvent, read, searchEvents, toEvent, where } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma, withProjectLock } from '@logbird/database';
 import { clickhouse, purgeProjectEvents } from '../apps/server/src/clickhouse';
 import { type IngestCandidate, insertImmutableEvents } from '../apps/server/src/immutable-ingest';
 
-// Opt-in benchmark. Hold the shared heavy slot and check RAM before running.
+// Opt-in benchmark. Hold BOTH heavy and logbird-stack slots; check RAM before running.
 // 1M receipts, paired 1000-event INSERTs and explorer queries over 10M owned history rows.
 // Supply the cloud load owner's approved fictional source project. It is read, never modified.
 const historySource = process.argv[2];
-if (!historySource) throw new Error('Usage: node --env-file=.env --import tsx scripts/benchmark-ingest-identity.ts APPROVED_10M_SOURCE_PROJECT');
+const expectedHead = process.argv[3];
+const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+if (!historySource || !expectedHead)
+  throw new Error('Usage: node --env-file=.env --import tsx scripts/benchmark-ingest-identity.ts APPROVED_10M_SOURCE_PROJECT EXPECTED_HEAD');
+if (head !== expectedHead || execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' }).trim())
+  throw new Error('Benchmark requires a clean checkout at EXPECTED_HEAD');
+console.log(JSON.stringify({ head, historySource, startedAt: new Date().toISOString() }));
 const org = randomUUID();
 const table = `qa_receipts_${org.replaceAll('-', '')}`;
 const project = `qa-identity-${org}`;
 const baseline = `${project}-baseline`;
+const logComment = `immutable-benchmark-${org}`;
+const query = clickhouse.query.bind(clickhouse);
+clickhouse.query = (params) => query({ ...params, clickhouse_settings: { ...params.clickhouse_settings, log_comment: logComment } });
 const batchSize = 1000;
 const p95 = (samples: number[]) => [...samples].sort((a, b) => a - b)[Math.ceil(samples.length * 0.95) - 1];
 const p50 = (samples: number[]) => [...samples].sort((a, b) => a - b)[Math.ceil(samples.length * 0.5) - 1];
@@ -34,7 +44,7 @@ try {
         prisma.$queryRawUnsafe(
           `INSERT INTO ${table}
       ("projectId","eventId","organizationId","fingerprint","receivedAt","eventAt","confirmedAt")
-      SELECT $1,id,$2,repeat('f',64),now(),now(),now() FROM unnest($3::text[]) id
+      SELECT $1,id,$2,'v1:' || repeat('f',64),now(),now(),now() FROM unnest($3::text[]) id
       ON CONFLICT ("projectId","eventId") DO NOTHING RETURNING "eventId"`,
           project,
           org,
@@ -58,53 +68,55 @@ try {
   });
   const historyRows = (await read<{ n: number }>(clickhouse, 'SELECT count() n FROM events WHERE project_id={p:String}', { p: project }))[0]?.n;
   if (Number(historyRows) < 10_000_000) throw new Error('Owned benchmark history must have at least 10M rows');
-  const rawMs: number[] = [],
-    fencedMs: number[] = [],
-    addedMs: number[] = [];
-  for (let batch = 0; batch < 21; batch++) {
-    const now = new Date();
-    const candidates: IngestCandidate[] = Array.from({ length: batchSize }, (_, index) => {
-      const input = { id: randomUUID(), action: 'benchmark.immutable', occurredAt: now.toISOString(), actor: { id: 'fictional' } };
-      const normalized = normalizeEvent(input, { projectId: project, receivedAt: now });
-      if (!normalized.ok) throw new Error('Invalid fixture');
-      return { index, input, row: normalized.row };
-    });
-    const rawRows = candidates.map(({ row }) => ({ ...row, project_id: baseline }));
-    const raw = () => withProjectLock(baseline, () => insertEvents(clickhouse, rawRows), { mode: 'shared' });
-    const fenced = () => withProjectLock(project, () => insertImmutableEvents(project, org, candidates), { mode: 'shared' });
-    let rawTime: number, fencedTime: number;
-    if (batch % 2 === 0) {
-      rawTime = await timed(raw);
-      fencedTime = await timed(fenced);
-    } else {
-      fencedTime = await timed(fenced);
-      rawTime = await timed(raw);
+  for (const batchSize of [1, 100, 1000]) {
+    const rawMs: number[] = [],
+      fencedMs: number[] = [],
+      addedMs: number[] = [];
+    for (let batch = 0; batch < 21; batch++) {
+      const now = new Date();
+      const candidates: IngestCandidate[] = Array.from({ length: batchSize }, (_, index) => {
+        const input = { id: randomUUID(), action: 'benchmark.immutable', occurredAt: now.toISOString(), actor: { id: 'fictional' } };
+        const normalized = normalizeEvent(input, { projectId: project, receivedAt: now });
+        if (!normalized.ok) throw new Error('Invalid fixture');
+        return { index, input, row: normalized.row };
+      });
+      const rawRows = candidates.map(({ row }) => ({ ...row, project_id: baseline }));
+      const raw = () => withProjectLock(baseline, () => insertEvents(clickhouse, rawRows), { mode: 'shared' });
+      const fenced = () => withProjectLock(project, () => insertImmutableEvents(project, org, candidates), { mode: 'shared' });
+      let rawTime: number, fencedTime: number;
+      if (batch % 2 === 0) {
+        rawTime = await timed(raw);
+        fencedTime = await timed(fenced);
+      } else {
+        fencedTime = await timed(fenced);
+        rawTime = await timed(raw);
+      }
+      if (batch) {
+        rawMs.push(rawTime);
+        fencedMs.push(fencedTime);
+        addedMs.push(fencedTime - rawTime);
+      }
     }
-    if (batch) {
-      rawMs.push(rawTime);
-      fencedMs.push(fencedTime);
-      addedMs.push(fencedTime - rawTime);
-    }
+    console.log(
+      JSON.stringify({
+        receiptRows: 1_000_000,
+        historyRows,
+        batchSize,
+        receiptBulkClaimP95Ms: p95(claims),
+        size,
+        samples: rawMs.length,
+        rawP95Ms: p95(rawMs),
+        rawP50Ms: p50(rawMs),
+        fencedP95Ms: p95(fencedMs),
+        fencedP50Ms: p50(fencedMs),
+        pairedAddedP95Ms: p95(addedMs),
+        pairedAddedP50Ms: p50(addedMs),
+        rawMs,
+        fencedMs,
+        addedMs,
+      }),
+    );
   }
-  console.log(
-    JSON.stringify({
-      receiptRows: 1_000_000,
-      historyRows,
-      batchSize,
-      receiptBulkClaimP95Ms: p95(claims),
-      size,
-      samples: rawMs.length,
-      rawP95Ms: p95(rawMs),
-      rawP50Ms: p50(rawMs),
-      fencedP95Ms: p95(fencedMs),
-      fencedP50Ms: p50(fencedMs),
-      pairedAddedP95Ms: p95(addedMs),
-      pairedAddedP50Ms: p50(addedMs),
-      rawMs,
-      fencedMs,
-      addedMs,
-    }),
-  );
   const bounds = (
     await read<{ first: string; last: string }>(
       clickhouse,
@@ -169,6 +181,13 @@ try {
         }),
       );
     }
+  await clickhouse.command({ query: 'SYSTEM FLUSH LOGS' });
+  const queryWork = await read(
+    clickhouse,
+    "SELECT query_id,query_duration_ms,read_rows,read_bytes,result_rows,memory_usage FROM system.query_log WHERE type='QueryFinish' AND log_comment={tag:String} ORDER BY event_time_microseconds",
+    { tag: logComment },
+  );
+  console.log(JSON.stringify({ head, queryWork }));
 } finally {
   await withProjectLock(project, () => purgeProjectEvents(project));
   await withProjectLock(baseline, () => purgeProjectEvents(baseline));

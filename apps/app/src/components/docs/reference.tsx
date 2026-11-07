@@ -7,6 +7,31 @@ import { modKeyLabel, useIsMac } from '@/lib/platform';
 
 /* Reference material that used to live on the Quickstart page; the Setup page renders it below the checklist. */
 
+export function EventIdsAndRetries() {
+  return (
+    <div className="flex flex-col gap-3 text-muted-foreground text-sm" id="event-ids-and-retries">
+      <h3 className="font-medium text-foreground">Event ids and retries</h3>
+      <p>
+        Each id names one immutable event in a project. Exact retries are accepted without storing or counting the event again. Object key order may
+        change; array order and string contents must stay identical.
+      </p>
+      <p>
+        The SDK creates an id and timestamp once per queued event. Deterministic ids need identical content across calls, including occurredAt and
+        executor.attempt. Omitted or invalid occurredAt keeps the first receipt clock.
+      </p>
+      <p>
+        <code>duplicate_id_conflict</code> means different content reused an id; the original is kept. Send a correction with a new id and{' '}
+        <code>context.parentEventId</code> pointing to the original.
+      </p>
+      <p>
+        <code>503 ingest_pending</code> or <code>ingest_unavailable</code> means retry the identical batch with Retry-After. Healthy siblings may
+        already be stored. Pending details name indices and eventIds. The SDK retries; if its budget expires, flush rejects and keeps the batch for a
+        later flush.
+      </p>
+    </div>
+  );
+}
+
 export const QUERY_SYNTAX: [string, string][] = [
   ['action:hotel.policy.updated', 'Exact action'],
   ['action:hotel.*', 'Prefix wildcard'],

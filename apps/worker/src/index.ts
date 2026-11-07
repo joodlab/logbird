@@ -1,6 +1,7 @@
 import { closeProjectLocks, prisma, pruneIngestReceipts } from '@logbird/database';
 import { Worker } from 'bullmq';
 import { env } from './env';
+import { recoverProjectIngest } from './ingest-recovery';
 import { closeRetentionQueue, connection, retentionQueue, retentionQueueName } from './queue';
 import { clickhouse, enforceProjectRetention } from './retention';
 
@@ -11,6 +12,17 @@ const worker = new Worker(
     else if (job.name === 'retention.enforce') {
       await pruneIngestReceipts(); // Includes idle workspace audit streams.
       const failures: unknown[] = [];
+      for (const pending of await prisma.ingestReceipt.findMany({
+        where: { confirmedAt: null },
+        distinct: ['projectId'],
+        select: { projectId: true },
+      })) {
+        try {
+          await recoverProjectIngest(clickhouse, pending.projectId);
+        } catch (error) {
+          failures.push(error);
+        }
+      }
       for (const project of await prisma.project.findMany({ select: { id: true } })) {
         try {
           await enforceProjectRetention(project.id);

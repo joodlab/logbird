@@ -95,3 +95,7 @@ clients require `enabled: false` when no key is configured. See [SDK README](../
 for merge rules, fail-closed hooks, redaction patterns and carrier/jobAudit examples.
 The verification runner also exercises a global Hono capture with late route identity,
 host request IDs, redacted attributes/raw payload, and worker causation/attempt readback.
+
+For event identity and retry semantics, see [Event ids and retries](concepts.md#event-ids-and-retries).
+Deterministic ids require stable content, including occurredAt and executor.attempt;
+corrections use a fresh id and context.parentEventId.

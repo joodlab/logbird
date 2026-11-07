@@ -56,7 +56,7 @@ export const contextInputSchema = z.looseObject({
 
 /** What clients send. Loose on purpose: unknown keys are accepted and stored. */
 export const eventInputSchema = z.looseObject({
-  id: id.optional(), // idempotency key; server generates a UUIDv7 when absent
+  id: id.refine((value) => !value.includes('\u0000') && !/[\uD800-\uDFFF]/u.test(value), 'id must be valid Unicode without NUL').optional(), // stable event id; retries resend identical content
   action: z.string().min(1).max(200),
   occurredAt: z.union([z.string(), z.number()]).optional(), // ISO-8601 or epoch ms; defaults to receive time
   environment: z.string().max(64).optional(), // default "production"
@@ -86,11 +86,14 @@ export const ingestBodySchema = z.union([
 export const ingestResponseSchema = z.object({
   accepted: z.number().int(),
   ids: z.array(z.string()),
+  /** Conflicts start with duplicate_id_conflict: followed by actionable guidance. Original content is kept. */
   rejected: z.array(z.object({ index: z.number().int(), reason: z.string() })),
   /** Accepted events that were adjusted, e.g. an unusable occurredAt stored at receive time (original kept in attributes). */
   warnings: z.array(z.object({ index: z.number().int(), reason: z.string() })).default([]),
 });
 export type IngestResponse = z.infer<typeof ingestResponseSchema>;
+/** 503 ingest_pending: healthy siblings may already be stored; retry the identical batch with Retry-After. */
+export const ingestPendingDetailsSchema = z.object({ indices: z.array(z.number().int().nonnegative()), eventIds: z.array(z.string()) });
 
 /** Normalized event as returned by every read API. */
 export const eventSchema = z.object({

@@ -210,3 +210,28 @@ it.each(['null', 'undefined', 'throw'])('filters %s without overflow diagnostics
   expect(onDrop).not.toHaveBeenCalled();
   expect(onError).toHaveBeenCalledTimes(mode === 'throw' ? 1 : 0);
 });
+
+it('surfaces duplicate_id_conflict guidance and drops only the conflicting index', async () => {
+  const onError = vi.fn(),
+    onDrop = vi.fn();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          accepted: 1,
+          ids: ['healthy'],
+          rejected: [{ index: 0, reason: 'duplicate_id_conflict: original is kept; send a correction with a new id' }],
+        }),
+        { status: 202 },
+      ),
+    ),
+  );
+  const sdk = new Logbird({ apiKey: 'fake', endpoint: 'http://test', onError, onDrop });
+  sdk.track({ id: 'conflict', action: 'different' });
+  sdk.track({ id: 'healthy', action: 'original' });
+  await sdk.shutdown();
+  expect(onDrop.mock.calls.map(([event]) => event.id)).toEqual(['conflict']);
+  expect(onError.mock.calls[0]?.[0].message).toContain('duplicate_id_conflict: original is kept');
+  expect(sdk.queueSize).toBe(0);
+});

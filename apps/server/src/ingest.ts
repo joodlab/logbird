@@ -3,8 +3,10 @@ import { createGunzip } from 'node:zlib';
 import { normalizeEvent } from '@logbird/clickhouse';
 import { ingestResponseSchema } from '@logbird/contracts';
 import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
+import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enqueueProjectRetention } from '@logbird/worker/queue';
 import type { Context } from 'hono';
+import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { type IngestCandidate, insertImmutableEvents } from './immutable-ingest';
 import { clientAddress } from './rate-limit';
@@ -51,13 +53,22 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
       if (normalized.warning) warnings.push({ index, reason: normalized.warning });
     } else rejected.push({ index, reason: normalized.reason });
   }
+  try {
+    await recoverProjectIngest(
+      clickhouse,
+      projectId,
+      candidates.map((c) => c.row.event_id),
+    );
+  } catch {
+    throw new ApiError(503, 'ingest_unavailable', 'Event identity recovery is unavailable. Retry this batch.');
+  }
   await withProjectLock(
     projectId,
     async (tx) => {
       const project = projectId.startsWith('ws:') ? null : await tx.project.findUnique({ where: { id: projectId } });
       if (!projectId.startsWith('ws:') && !project) throw new ApiError(404, 'not_found', 'Project not found.');
       await requireRetentionReady(tx, projectId);
-      const result = await insertImmutableEvents(projectId, project?.organizationId ?? projectId.slice(3), candidates);
+      const result = await insertImmutableEvents(projectId, organizationIdForStream(projectId, project?.organizationId), candidates);
       ids.push(...result.ids);
       rejected.push(...result.rejected);
       invalidateSetup(projectId);
@@ -66,6 +77,9 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
     { mode: 'shared' },
   );
   return ingestResponseSchema.parse({ accepted: ids.length, ids, rejected, warnings });
+}
+function organizationIdForStream(projectId: string, organizationId?: string) {
+  return organizationId ?? projectId.slice('ws:'.length);
 }
 export function audit(c: Context<AppEnv>, action: string, target: { type: string; id: string; name?: string }, changes?: unknown[]) {
   return ingest(`ws:${c.get('activeOrganizationId')}`, {

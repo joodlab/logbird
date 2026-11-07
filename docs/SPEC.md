@@ -67,7 +67,7 @@ Omitted values use receive time.
 
 ```jsonc
 {
-  "id": "01J…",                     // idempotency key (UUIDv7/ULID). Server generates when absent.
+  "id": "01J…",                     // stable event id; retries resend identical content. Generated when absent.
   "action": "hotel.policy.updated", // REQUIRED. dot-namespaced: <entity>.<sub>.<verb>
   "occurredAt": "2026-11-04T14:32:10.123Z",
   "environment": "production",
@@ -90,17 +90,21 @@ Omitted values use receive time.
 ```
 
 Semantics worth documenting to users:
-- **id is immutable within a project**, regardless of `occurredAt`. An exact normalized
-  retry appears in `ids` and counts as accepted, without another raw insert or rollup
-  increment. Conflicting content is omitted from storage and `ids`, and reported in
-  `rejected` as `{ index, reason: "duplicate_id_conflict" }`; the rest of the batch
-  still returns 202. A different timestamp is conflicting content. Raw JSON key order,
-  trimmed/capped spelling and SDK headers do not change normalized identity. Receive
-  time (including omitted/invalid `occurredAt` fallback) uses the first receipt's clock.
-  Corrections require a new id and can link to the original through `parentEventId`.
-  An unresolved exact retry gets `503 ingest_pending` plus `Retry-After: 1`, never
-  `duplicate_id_conflict`. Id uniqueness covers retained evidence; after permanent
-  retention deletion and receipt cleanup, that id may be used again.
+- **id is immutable within a project**, regardless of `occurredAt`. Exact retries
+  appear in `ids` as accepted, without another raw insert or rollup increment.
+  Conflicting canonical full input or resolved timestamp is reported in `rejected`
+  with a reason starting `duplicate_id_conflict:`; the original is kept. Recursively
+  reordered object keys are equivalent; array order and all string contents matter,
+  including values beyond indexing caps. SDK headers do not participate. Omitted
+  or invalid `occurredAt` uses the first receipt clock. Identity digests are versioned.
+  Corrections need a fresh id and may link through `context.parentEventId`.
+  Unconfirmed competing claims return `503 ingest_pending` with Retry-After: 1 and
+  details `{indices,eventIds}` after healthy siblings are stored. Identity lookup
+  failures return retryable `503 ingest_unavailable`. Expired leases reconcile under
+  the exclusive project lock after draining the async queue. Ordinary retention
+  never releases unresolved receipts. After confirmed retention deletion and cleanup,
+  an id may be used again. Unsafe ids (NUL, lone surrogates or >256 UTF-16 units)
+  are per-event `invalid_event_id` rejections, so healthy siblings can proceed.
 - **actor = who caused it** (person, API key, scheduler…); **executor = who performed it** (api, worker, job,
   attempt). A worker doing work requested by Lina has `actor=Lina`, `executor=crm-worker`. Scheduled runs use
   `actor.type=system`.

@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { type ClickHouseClient, createClient } from '@clickhouse/client';
 import type { EventRow } from './normalize';
 
@@ -11,9 +12,61 @@ export function createClickHouseClient(env = process.env): ClickHouseClient {
     clickhouse_settings: { date_time_input_format: 'best_effort', output_format_json_quote_64bit_integers: 0 },
   });
 }
-export async function insertEvents(ch: ClickHouseClient, rows: EventRow[]) {
+export const INGEST_CLAIM_LEASE_MS = 60_000;
+export const ASYNC_INSERT_FLUSH_BOUND_MS = 10_000;
+const INSERT_MAX_EXECUTION_SECONDS = 30;
+export const CLICKHOUSE_PARSE_ERROR_CODES = new Set(['6', '27', '38', '41', '53', '69', '72']);
+export class AmbiguousInsertError extends Error {
+  constructor() {
+    super('Storage acknowledgement is unresolved after sending the body');
+    this.name = 'AmbiguousInsertError';
+  }
+}
+export async function insertEvents(ch: ClickHouseClient, rows: EventRow[], leaseExpiresAt = Date.now() + INGEST_CLAIM_LEASE_MS) {
   if (!rows.length) return;
-  await ch.insert({ table: 'events', values: rows, format: 'JSONEachRow', clickhouse_settings: { async_insert: 1, wait_for_async_insert: 1 } });
+  let bodySent = false;
+  const values = Readable.from(
+    (function* () {
+      // Check again when the HTTP client consumes the stream: a paused process must never send an expired lease.
+      if (Date.now() + INSERT_MAX_EXECUTION_SECONDS * 1000 + ASYNC_INSERT_FLUSH_BOUND_MS > leaseExpiresAt)
+        throw new Error('Insert lease lacks time to finish before expiry');
+      for (const row of rows) {
+        if (Date.now() >= leaseExpiresAt) throw new Error('Insert timeout: lease expired while sending');
+        bodySent = true;
+        yield row;
+      }
+    })(),
+  );
+  try {
+    if (Date.now() >= leaseExpiresAt) throw new Error('Insert lease expired before sending');
+    await ch.insert({
+      table: 'events',
+      values,
+      format: 'JSONEachRow',
+      abort_signal: AbortSignal.timeout(Math.max(1, leaseExpiresAt - Date.now())),
+      clickhouse_settings: {
+        async_insert: 1,
+        wait_for_async_insert: 1,
+        max_execution_time: INSERT_MAX_EXECUTION_SECONDS,
+        async_insert_busy_timeout_max_ms: 1000,
+        wait_for_async_insert_timeout: 40,
+      },
+    });
+  } catch (error) {
+    const serverCode = error && typeof error === 'object' && 'code' in error && /^\d+$/.test(String(error.code));
+    if (
+      !serverCode &&
+      bodySent &&
+      error instanceof Error &&
+      /timeout|timed out|reset|EPIPE|socket hang up|socket closed|premature.close|aborted|ABORT_ERR/i.test(
+        `${error.message} ${'code' in error ? error.code : ''} ${error.name}`,
+      )
+    )
+      throw new AmbiguousInsertError();
+    throw error;
+  } finally {
+    values.destroy();
+  }
 }
 
 const restricted = new WeakSet<ClickHouseClient>();

@@ -113,3 +113,26 @@ executor changes.
 
 Useful Explorer queries for this example: `actor:usr_42`, `tenant:biz_7`, `executor:refunds-worker`,
 `target:bk_1042 target.type:booking`, `operation:op_cancel_bk_1042`, `job:job_981`.
+
+## Event ids and retries
+
+An id names one immutable event within a project, across every timestamp. An exact
+retry is accepted without inserting or incrementing rollups again. Object keys may
+be reordered recursively; array order and string contents must stay identical.
+Identity includes the full input, including values outside indexing caps, and the
+resolved timestamp. Omitted or invalid `occurredAt` keeps the first receipt's clock.
+
+The SDK generates ids and timestamps once before queuing. If you use deterministic
+ids across separate `track()` calls, resend identical content, including `occurredAt`
+and `executor.attempt`; a new call otherwise gets a fresh timestamp. A different
+event with the same id is rejected with `duplicate_id_conflict: ...`; the original
+is kept. Send a correction with a new id and `context.parentEventId` pointing to it.
+The SDK calls `onDrop` for that event and `onError` with the reason.
+
+`503 ingest_pending` and `503 ingest_unavailable` mean retry the identical batch,
+honoring `Retry-After`. Healthy siblings may already be stored and remain idempotent
+on retry. Pending details contain `indices` and `eventIds`. The SDK retries these
+responses; after its retry budget, the batch stays queued and `flush()` rejects.
+Retry `flush()` later. Unresolved writes recover automatically per project after a
+bounded lease and ClickHouse queue drain. An id containing NUL, a lone surrogate,
+or more than 256 UTF-16 code units is rejected individually as `invalid_event_id`.
