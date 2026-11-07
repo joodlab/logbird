@@ -42,7 +42,7 @@ domain, and no site source may contain the company or design-partner names (test
 | `WEB_ORG_NAME` | © holder and JSON-LD Organization (pending owner) | unset → "Logbird contributors", no Organization |
 | `SMTP_*`, `MAIL_FROM`, `WAITLIST_NOTIFY_TO` | Server-only waitlist notification (Mailpit locally) | — |
 | `WAITLIST_FILE` | Node adapter's JSONL file | `apps/web/.data/waitlist.jsonl` when run from `apps/web` |
-| `WEB_ALLOWED_ORIGINS` | Extra origins allowed to post the form | — |
+| `WEB_ALLOWED_ORIGINS` | Extra origins allowed to post the form (set `http://127.0.0.1:4620` for a local `pnpm start`, which runs as production) | — |
 
 A `cloudflare-module` build fails if any public URL is localhost.
 
