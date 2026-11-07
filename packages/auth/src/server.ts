@@ -18,7 +18,14 @@ type AuthAudit = {
   changes?: unknown[];
   context?: { requestId: string; ip: string; userAgent: string };
 };
-export const authAuditContext = new AsyncLocalStorage<{ actor?: AuditUser; requestId: string; ip: string; userAgent: string }>();
+export const authAuditContext = new AsyncLocalStorage<{
+  actor?: AuditUser;
+  requestId: string;
+  ip: string;
+  userAgent: string;
+  path?: string;
+  organizationBefore?: { id: string; name: string; slug: string };
+}>();
 let auditHandler: ((event: AuthAudit) => Promise<unknown>) | undefined;
 export const setAuthAuditHandler = (handler: NonNullable<typeof auditHandler>) => {
   auditHandler = handler;
@@ -80,6 +87,15 @@ export const auth = betterAuth({
             await record(member.organizationId, 'auth.signed_in', user, { type: 'user', id: user.id, name: user.email });
         },
       },
+      delete: {
+        after: async (session) => {
+          const user = await prisma.user.findUnique({ where: { id: session.userId } });
+          if (!user) return;
+          const action = authAuditContext.getStore()?.path === '/api/auth/sign-out' ? 'auth.signed_out' : 'auth.session.revoked';
+          for (const member of await prisma.member.findMany({ where: { userId: user.id } }))
+            await record(member.organizationId, action, user, { type: 'session', id: session.id });
+        },
+      },
     },
   },
   plugins: [
@@ -107,6 +123,29 @@ export const auth = betterAuth({
       organizationHooks: {
         afterCreateOrganization: async ({ organization, user }) => {
           await record(organization.id, 'organization.created', user, { type: 'organization', id: organization.id, name: organization.name });
+        },
+        beforeUpdateOrganization: async ({ member }) => {
+          const context = authAuditContext.getStore();
+          if (context)
+            context.organizationBefore = await prisma.organization.findUniqueOrThrow({
+              where: { id: member.organizationId },
+              select: { id: true, name: true, slug: true },
+            });
+        },
+        afterUpdateOrganization: async ({ organization, user }) => {
+          const before = authAuditContext.getStore()?.organizationBefore;
+          if (!organization || before?.id !== organization.id) return;
+          const changes = (['name', 'slug'] as const)
+            .filter((field) => before[field] !== organization[field])
+            .map((field) => ({ field, before: before[field], after: organization[field] }));
+          if (changes.length)
+            await record(
+              organization.id,
+              'organization.updated',
+              user,
+              { type: 'organization', id: organization.id, name: organization.name },
+              changes,
+            );
         },
         afterCreateInvitation: async ({ organization, inviter, invitation }) => {
           await record(organization.id, 'member.invited', inviter, { type: 'invitation', id: invitation.id, name: invitation.email });

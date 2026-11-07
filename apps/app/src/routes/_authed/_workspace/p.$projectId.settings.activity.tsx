@@ -1,4 +1,4 @@
-import type { AuditEvent } from '@logbird/contracts';
+import { type AuditEvent, WORKSPACE_ACTIVITY_CATEGORIES } from '@logbird/contracts';
 import { FilterChip } from '@logbird/ui/components/filter-chip';
 import { EmptyState, ErrorState } from '@logbird/ui/components/states';
 import { Input } from '@logbird/ui/components/ui/input';
@@ -24,13 +24,6 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/
 });
 
 const COLUMNS = ['time', 'outcome', 'action', 'description', 'actor'];
-const CATEGORIES = [
-  ['project', 'Projects'],
-  ['api_key', 'API keys'],
-  ['member', 'Members'],
-  ['view', 'Views'],
-  ['workspace', 'Workspace'],
-] as const;
 
 function WorkspaceActivity() {
   const search = Route.useSearch();
@@ -74,7 +67,7 @@ function WorkspaceActivity() {
           </div>
           <fieldset className="flex flex-wrap gap-1.5">
             <legend className="sr-only">Filter by area</legend>
-            {CATEGORIES.map(([value, label]) => (
+            {WORKSPACE_ACTIVITY_CATEGORIES.map(([value, label]) => (
               <FilterChip
                 active={category === value}
                 key={value}
