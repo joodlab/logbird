@@ -94,7 +94,8 @@ export const siteMap: SitePage[] = [
   {
     path: '/security',
     title: 'Security',
-    description: "How Logbird isolates projects, stores keys, guards SQL, deletes expired data and records its own management actions, and what we don't claim yet.",
+    description:
+      "How Logbird isolates projects, stores keys, guards SQL, deletes expired data and records its own management actions, and what we don't claim yet.",
     section: 'company',
     priority: 0.7,
     changefreq: 'monthly',
