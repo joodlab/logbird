@@ -12,7 +12,8 @@ concurrent ingestion, retention and deletion can still change the rows visible b
 
 - **Complete (original payloads)** — `jsonl-evidence`. Each line contains `exportSchemaVersion: 1`, the normalized
   `event`, and the stored original JSON in `payload`. The latter preserves accepted nested/unknown/long values;
-  it does not preserve HTTP whitespace, compression or the batch wrapper. Missing stored payloads fail the export.
+  it does not preserve HTTP whitespace, compression or the batch wrapper. Normalized fields and payload are selected
+  from the same physical row, including legacy versions with tied timestamps. Missing stored payloads fail the export.
 - **Spreadsheet (CSV)** — every normalized field; long values follow normalizer caps. UTF-8, comma delimiters,
   quoted cells, escaped double quotes, LF records, no BOM. The original five-column prefix is preserved:
   `id,timestamp,action,outcome,description`. Appended columns are

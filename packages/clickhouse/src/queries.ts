@@ -136,12 +136,13 @@ function cursor(s: string): [string, string] {
   }
   throw new Error('Invalid cursor');
 }
-export async function searchEvents(
+async function searchPage(
   ch: ClickHouseClient,
   projectId: string,
   q: SearchQuery,
   compiled?: Awaited<ReturnType<typeof filter>>,
-): Promise<SearchResponse> {
+  includePayload = false,
+): Promise<{ page: SearchResponse; payloads: string[] }> {
   const start = performance.now(),
     w = await where(ch, projectId, q, compiled),
     asc = q.order === 'asc',
@@ -157,7 +158,7 @@ export async function searchEvents(
   }
   const rows = await read<EventRow>(
     ch,
-    `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={project:String} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id`,
+    `SELECT * EXCEPT(${includePayload ? 'search_text' : 'payload,search_text'}) FROM events WHERE project_id={project:String} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id`,
     params,
   );
   const hasMore = rows.length > q.limit,
@@ -167,7 +168,18 @@ export async function searchEvents(
     (await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT 10001)`, w.params, 1))[0]?.n ??
       0,
   );
-  return { data, total, nextCursor: hasMore && last ? encode([last.timestamp, last.id]) : null, tookMs: performance.now() - start };
+  return {
+    page: { data, total, nextCursor: hasMore && last ? encode([last.timestamp, last.id]) : null, tookMs: performance.now() - start },
+    payloads: includePayload ? rows.slice(0, q.limit).map((row) => row.payload) : [],
+  };
+}
+export async function searchEvents(
+  ch: ClickHouseClient,
+  projectId: string,
+  q: SearchQuery,
+  compiled?: Awaited<ReturnType<typeof filter>>,
+): Promise<SearchResponse> {
+  return (await searchPage(ch, projectId, q, compiled)).page;
 }
 async function eventRow(ch: ClickHouseClient, p: string, id: string) {
   return (
@@ -498,26 +510,19 @@ export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQu
   let nextCursor: string | undefined;
   let first = true;
   do {
-    const page = await searchEvents(ch, p, { ...query, cursor: nextCursor, limit: 200, order: 'asc' }, frozen.compiled);
+    const { page, payloads } = await searchPage(
+      ch,
+      p,
+      { ...query, cursor: nextCursor, limit: 200, order: 'asc' },
+      frozen.compiled,
+      q.format === 'jsonl-evidence',
+    );
     if (first && q.format === 'csv') yield `${CSV_COLUMNS.join(',')}\n`;
     first = false;
-    const payloads = new Map<string, string>();
-    if (q.format === 'jsonl-evidence' && page.data.length) {
-      const rows = await read<{ event_id: string; timestamp: string; received_at: string; payload: string }>(
-        ch,
-        'SELECT event_id,timestamp,received_at,payload FROM events WHERE project_id={p:String} AND event_id IN {ids:Array(String)} AND (event_id,toString(timestamp),toString(received_at)) IN arrayZip({ids:Array(String)},{timestamps:Array(String)},{receipts:Array(String)}) LIMIT 1 BY event_id,timestamp,received_at',
-        {
-          p,
-          ids: page.data.map((e) => e.id),
-          timestamps: page.data.map((e) => e.timestamp.replace('T', ' ').slice(0, -1)),
-          receipts: page.data.map((e) => e.receivedAt.replace('T', ' ').slice(0, -1)),
-        },
-      );
-      for (const row of rows) payloads.set(JSON.stringify([row.event_id, iso(row.timestamp), iso(row.received_at)]), row.payload);
-    }
-    for (const e of page.data) {
+    for (const [index, e] of page.data.entries()) {
       if (q.format === 'jsonl-evidence') {
-        const payload = payloads.get(JSON.stringify([e.id, e.timestamp, e.receivedAt]));
+        // Same selected physical row, including when legacy conflicting versions share every identity timestamp.
+        const payload = payloads[index];
         if (payload === undefined) throw new Error('Export payload no longer available');
         // Embed stored JSON verbatim: no normalized-field caps or JSON parse/stringify round trip.
         yield `{"exportSchemaVersion":${EXPORT_SCHEMA_VERSION},"event":${JSON.stringify(e)},"payload":${payload}}\n`;

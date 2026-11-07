@@ -111,6 +111,23 @@ it('matches search in both orders, retains legacy canonical payloads and half-op
       for (const row of sqlRows)
         expect(row.payload).toEqual(inputs.find((event) => event.id === row.event.id && event.description === row.event.description));
     }
+    // The legacy path can contain conflicts with identical id, occurrence AND receive times.
+    // Whatever physical version the query selects, its payload must come from that same row.
+    const tied = ['tie-a', 'tie-b'].map((description) => {
+      const result = normalizeEvent(
+        { id: 'legacy-tie', action: 'export.tie', occurredAt: new Date(clock - 1000).toISOString(), description },
+        { projectId, receivedAt: new Date(clock + 1000) },
+      );
+      if (!result.ok) throw new Error(result.reason);
+      return result.row;
+    });
+    await insertEvents(ch, tied);
+    const tiedEvidence: ExportEvidenceRow[] = [];
+    for await (const row of exportEvents(ch, projectId, { ...range, q: 'action:export.tie', format: 'jsonl-evidence' }))
+      tiedEvidence.push(JSON.parse(row));
+    expect(tiedEvidence).toHaveLength(1);
+    expect(['tie-a', 'tie-b']).toContain(tiedEvidence[0]?.event.description);
+    expect(tiedEvidence[0]?.payload).toMatchObject({ description: tiedEvidence[0]?.event.description });
   } finally {
     if (projectId) await purgeProject(ch, projectId);
     await prisma.organization.deleteMany({ where: { id: organizationId } });
