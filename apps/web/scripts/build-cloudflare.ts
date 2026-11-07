@@ -6,9 +6,12 @@ import { siteConfigFrom } from '../src/env';
 import { releaseBlockers } from '../src/lib/release';
 import { loadPublicEnv } from './public-env';
 
-// A Cloudflare build is a public build: refuse while any console capture is interim (release.ts).
-// Evaluated on the same resolved WEB_* values the build uses (scripts/public-env.ts).
-const blockers = releaseBlockers(siteConfigFrom(loadPublicEnv()));
+// Resolve the public WEB_* values once (scripts/public-env.ts: root .env*, then apps/web .env*, then the process env)
+// and hand the same values to the release gate and to both build phases. No phase reloads a .env file itself: a
+// dotenv preload would put root values into process.env, where they would outrank apps/web's .env files.
+const publicEnv = Object.fromEntries(Object.entries(loadPublicEnv()).filter((entry): entry is [string, string] => entry[1] !== undefined));
+// A Cloudflare build is a public build: refuse while any release blocker remains (release.ts).
+const blockers = releaseBlockers(siteConfigFrom(publicEnv));
 if (blockers.length && process.env.LOGBIRD_WEB_ALLOW_INTERIM !== '1') {
   throw new Error(
     `Refusing to package a public build: ${blockers.join('; ')}. Resolve them (see src/lib/release.ts), or set LOGBIRD_WEB_ALLOW_INTERIM=1 for a local preview only.`,
@@ -17,6 +20,9 @@ if (blockers.length && process.env.LOGBIRD_WEB_ALLOW_INTERIM !== '1') {
 const pnpm = process.env.npm_execpath ?? '';
 if (!pnpm) {
   throw new Error('Run this script through pnpm build:cloudflare.');
+}
+function phaseEnv(preset: 'node-server' | 'cloudflare-module', staticReady: string): NodeJS.ProcessEnv {
+  return { ...process.env, ...publicEnv, NITRO_PRESET: preset, LOGBIRD_WEB_STATIC_READY: staticReady };
 }
 async function run(args: string[], env: NodeJS.ProcessEnv) {
   await new Promise<void>((done, reject) => {
@@ -34,7 +40,7 @@ async function run(args: string[], env: NodeJS.ProcessEnv) {
 
 // Nitro's Worker preview requires Wrangler. Prerender with the Node adapter instead,
 // then verify that the Worker client build can serve every referenced hashed asset.
-await run(['run', 'build'], { ...process.env, NITRO_PRESET: 'node-server', LOGBIRD_WEB_STATIC_READY: '' });
+await run(['run', 'build'], phaseEnv('node-server', ''));
 const publicDir = resolve('.output/public');
 await mkdir('.tmp', { recursive: true });
 const snapshot = await mkdtemp(resolve('.tmp/cloudflare-html-'));
@@ -54,7 +60,7 @@ for (const page of pages) {
   await mkdir(dirname(target), { recursive: true });
   await copyFile(resolve(publicDir, page), target);
 }
-await run(['run', 'with-env', 'vite', 'build'], { ...process.env, NITRO_PRESET: 'cloudflare-module', LOGBIRD_WEB_STATIC_READY: '1' });
+await run(['exec', 'vite', 'build'], phaseEnv('cloudflare-module', '1'));
 for (const asset of assets) {
   await access(resolve(publicDir, asset)).catch(() => {
     throw new Error(`Client output changed between adapters: ${asset}. Refusing to publish stale prerendered HTML.`);

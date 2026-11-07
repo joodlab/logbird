@@ -31,7 +31,7 @@ Stop the server's whole process tree when done. Never start the console or its s
 
 ## Configuration
 
-Only `WEB_*` variables reach the site (`src/env.ts` lists them; Turbo hashes them and `apps/web/.env*` in `apps/web/turbo.json`, and a test keeps the list complete), so the
+Only `WEB_*` variables reach the site (`src/env.ts` lists them; Turbo hashes them and every env file the loader reads, root `.env*` and `apps/web/.env*`, in `apps/web/turbo.json`, and a test keeps the list complete), so the
 console's `APP_URL` in the root `.env` can't leak in. `scripts/public-env.ts` resolves them once per build (root `.env*`,
 then `apps/web/.env*`, then the process environment) and the bundle, sitemap, robots, `llms.txt` and OG cards all use
 that one result, so their origins always agree. `src/env.ts` is the only file allowed to contain the provisional
