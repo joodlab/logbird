@@ -18,7 +18,7 @@ ENV DATABASE_URL=postgresql://build:build@localhost:5432/logbird
 RUN DATABASE_URL=postgresql://build:build@localhost:5432/logbird pnpm --filter @logbird/database generate
 RUN pnpm --workspace-concurrency="$BUILD_CONCURRENCY" --filter @logbird/worker... build
 
-RUN pnpm --filter @logbird/worker deploy --legacy --prod /runtime
+RUN pnpm --child-concurrency="$BUILD_CONCURRENCY" --network-concurrency="$DOWNLOAD_CONCURRENCY" --filter @logbird/worker deploy --legacy --prod /runtime
 FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS runtime
 WORKDIR /workspace
 ENV NODE_ENV=production

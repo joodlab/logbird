@@ -18,7 +18,7 @@ ENV DATABASE_URL=postgresql://build:build@localhost:5432/logbird
 RUN DATABASE_URL=postgresql://build:build@localhost:5432/logbird pnpm --filter @logbird/database generate
 RUN pnpm --workspace-concurrency="$BUILD_CONCURRENCY" --filter @logbird/server... build
 
-RUN pnpm --filter @logbird/server deploy --legacy --prod /runtime
+RUN pnpm --child-concurrency="$BUILD_CONCURRENCY" --network-concurrency="$DOWNLOAD_CONCURRENCY" --filter @logbird/server deploy --legacy --prod /runtime
 
 # Copy installed tooling into a fresh image: the build stage also contains the
 # package store, compiler caches and the deployed API dependency tree.
