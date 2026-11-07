@@ -22,6 +22,7 @@ import type { ClickHouseClient } from './client';
 import { isQueryClient } from './client';
 import type { EventRow } from './normalize';
 import { columns, compileQuery, QueryError } from './query';
+import { rollupSql } from './rollup-sql';
 import { sqlSyntaxError, validateSql } from './sql-guard';
 
 const sqlExpression = Symbol('sqlExpression');
@@ -560,9 +561,7 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
       clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
     });
   // Recompute the boundary minute and affected entity/key histories exactly; newer buckets stay intact.
-  const { readFile } = await import('node:fs/promises');
-  const sql = await readFile(new URL('../migrations/002_rollups.sql', import.meta.url), 'utf8');
-  for (const statement of sql.split(';')) {
+  for (const statement of rollupSql.split(';')) {
     const m = statement.match(/CREATE MATERIALIZED VIEW IF NOT EXISTS \w+ TO (\w+) AS (SELECT[\s\S]+)/);
     if (!m) continue;
     const table = m[1] as keyof typeof filters;
@@ -582,9 +581,7 @@ export async function rebuildProjectRollups(ch: ClickHouseClient, p: string, reb
       clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
     });
   if (rebuild) {
-    const { readFile } = await import('node:fs/promises');
-    const sql = await readFile(new URL('../migrations/002_rollups.sql', import.meta.url), 'utf8');
-    for (const statement of sql.split(';')) {
+    for (const statement of rollupSql.split(';')) {
       const m = statement.match(/CREATE MATERIALIZED VIEW IF NOT EXISTS \w+ TO (\w+) AS (SELECT[\s\S]+)/);
       if (!m) continue;
       const select = m[2]?.replace(
