@@ -53,7 +53,9 @@ An exact retry or hourly worker recovers expired claims per project after the
 EXCLUSIVE project lock, runs SYSTEM FLUSH ASYNC INSERT QUEUE, then rechecks storage.
 Matching rows are bulk-confirmed. Missing rows become ready (`claimedAt=null`) while
 retaining the original fingerprint, receivedAt and eventAt; the next exact retry
-atomically takes them over and reinserts with the original receipt clock. The hourly
+atomically takes them over and reinserts with the original receipt clock while still
+holding the exclusive recovery lock. Worker-readied claims use that same exclusive
+replay path. The hourly
 worker cannot recreate missing payloads (receipts deliberately store no payload),
 so it readies them for the producer's retry. Mismatching stored rows remain fenced.
 A failed flush/lookup releases nothing. No fleet-wide outage/operator attestation

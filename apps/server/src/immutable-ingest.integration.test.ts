@@ -215,3 +215,21 @@ it('upgrades a missing legacy receipt on reinsertion and rejects lossy same-batc
   expect(receipt.fingerprint).toMatch(/^v1:/);
   expect(await f.count()).toBe(1);
 });
+
+it('keeps the exclusive project lock through an expired-claim reinsert', async () => {
+  await f.pending(original, { expired: true });
+  const insert = clickhouse.insert.bind(clickhouse);
+  const spy = vi.spyOn(clickhouse, 'insert').mockImplementationOnce(async (params) => {
+    await expect(withProjectLock(f.project, async () => undefined, { mode: 'shared', waitMs: 0 })).rejects.toMatchObject({
+      name: 'ProjectBusyError',
+    });
+    return insert(params);
+  });
+  try {
+    expect((await f.post(original)).status).toBe(202);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(await f.count()).toBe(1);
+  } finally {
+    spy.mockRestore();
+  }
+});

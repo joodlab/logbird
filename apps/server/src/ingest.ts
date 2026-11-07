@@ -53,29 +53,29 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
       if (normalized.warning) warnings.push({ index, reason: normalized.warning });
     } else rejected.push({ index, reason: normalized.reason });
   }
+  const store = async (tx: import('@logbird/database').Prisma.TransactionClient) => {
+    const project = projectId.startsWith('ws:') ? null : await tx.project.findUnique({ where: { id: projectId } });
+    if (!projectId.startsWith('ws:') && !project) throw new ApiError(404, 'not_found', 'Project not found.');
+    await requireRetentionReady(tx, projectId);
+    const result = await insertImmutableEvents(projectId, organizationIdForStream(projectId, project?.organizationId), candidates);
+    ids.push(...result.ids);
+    rejected.push(...result.rejected);
+    invalidateSetup(projectId);
+  };
+  let replayed: boolean;
   try {
-    await recoverProjectIngest(
+    replayed = await recoverProjectIngest(
       clickhouse,
       projectId,
       candidates.map((c) => c.row.event_id),
+      () => store(prisma),
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
     throw new ApiError(503, 'ingest_unavailable', 'Event identity recovery is unavailable. Retry this batch.');
   }
-  await withProjectLock(
-    projectId,
-    async (tx) => {
-      const project = projectId.startsWith('ws:') ? null : await tx.project.findUnique({ where: { id: projectId } });
-      if (!projectId.startsWith('ws:') && !project) throw new ApiError(404, 'not_found', 'Project not found.');
-      await requireRetentionReady(tx, projectId);
-      const result = await insertImmutableEvents(projectId, organizationIdForStream(projectId, project?.organizationId), candidates);
-      ids.push(...result.ids);
-      rejected.push(...result.rejected);
-      invalidateSetup(projectId);
-      // Shared: concurrent ingests (several app servers, SDK flushes, audit writes) coexist; maintenance excludes them.
-    },
-    { mode: 'shared' },
-  );
+  // Healthy traffic remains concurrent. Only an expired/worker-readied replay holds the exclusive lock through INSERT.
+  if (!replayed) await withProjectLock(projectId, store, { mode: 'shared' });
   return ingestResponseSchema.parse({ accepted: ids.length, ids, rejected, warnings });
 }
 function organizationIdForStream(projectId: string, organizationId?: string) {
