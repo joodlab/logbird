@@ -1,6 +1,6 @@
 ---
 title: Security and data handling — Logbird
-description: How Logbird isolates projects, stores keys, guards SQL, deletes expired data and audits itself, and what we don't claim yet.
+description: How Logbird isolates projects, stores keys, guards SQL, deletes expired data and records its own management actions, and what we don't claim yet.
 path: /security
 ---
 
@@ -116,10 +116,11 @@ path: /security
 
 - **id:** `self-audit`
 - **eyebrow:** Workspace activity
-- **heading:** Logbird audits its own management actions.
-- **body:** Creating a project, creating or revoking a key, changing retention, inviting a member: each of these is
-  recorded as an event in your workspace's activity stream. Every member can read it.
-  <!-- source: docs/SPEC.md §1.5, §7.1 (workspace activity readable by members) -->
+- **heading:** Logbird records its own management actions.
+- **body:** Logbird records management actions (projects, keys, retention, invitations) in workspace activity. Every
+  member can read it.
+  <!-- source: docs/SPEC.md §1.5, §7.1 (workspace activity readable by members). Don't say "each" or imply guaranteed
+  or atomic capture until #73 (atomic audit rows for management mutations) merges; strengthen in a follow-up then. -->
 - **visual (site, until a clean capture exists):** four log rows: `project.created`, `api_key.created`,
   `api_key.revoked`, `project.retention.changed`. Caption: "Examples of management actions in the activity stream."
   Capture to use later: `marketing/captures/2026-11-04-ui-foundation/light-workspace-activity.png`. Re-capture first (see `README.md` § Captures).

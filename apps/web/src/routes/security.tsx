@@ -283,8 +283,8 @@ function SecurityPage() {
           <SectionHeader
             eyebrow="Workspace activity"
             id="self-audit-title"
-            lead="Creating a project, creating or revoking a key, changing retention, inviting a member: each of these is recorded as an event in your workspace's activity stream. Every member can read it."
-            title="Logbird audits its own management actions."
+            lead="Logbird records management actions (projects, keys, retention, invitations) in workspace activity. Every member can read it."
+            title="Logbird records its own management actions."
           />
           <figure className="flex flex-col gap-3">
             <ul className="flex flex-col gap-2">
