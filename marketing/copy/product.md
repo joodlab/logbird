@@ -181,11 +181,11 @@ path: /product
 
 - **id:** `workspace-activity`
 - **eyebrow:** Workspace activity
-- **heading:** Logbird keeps an audit log of itself.
-- **body:** Creating a project, creating or revoking a key, changing retention, inviting a member: Logbird records
-  each of these management actions as an event in your workspace's own activity stream. You read it with the same
-  explorer.
-  <!-- source: docs/SPEC.md §1.5, §8 journey 9 -->
+- **heading:** Logbird records its own management actions.
+- **body:** Logbird records management actions (projects, keys, retention, invitations) in workspace activity. You read
+  it with the same explorer.
+  <!-- source: docs/SPEC.md §1.5, §8 journey 9. Don't say "each" or imply guaranteed or atomic capture until #73
+  (atomic audit rows for management mutations) merges; strengthen in a follow-up then. -->
 - **visual:** none (a compact card on the page).
 
 ## team

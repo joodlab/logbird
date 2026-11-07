@@ -251,9 +251,8 @@ function ProductPage() {
             Save a query, its time range and its columns as a view, in query or SQL mode. Views appear in the sidebar and in the search bar's
             suggestions. Anyone in the workspace can open them; members can delete their own.
           </MiniFeature>
-          <MiniFeature eyebrow="Workspace activity" id="workspace-activity" title="Logbird keeps an audit log of itself.">
-            Creating a project, creating or revoking a key, changing retention, inviting a member: each of these management actions is an event in
-            your workspace's own activity stream, read with the same explorer.
+          <MiniFeature eyebrow="Workspace activity" id="workspace-activity" title="Logbird records its own management actions.">
+            Logbird records management actions (projects, keys, retention, invitations) in workspace activity. You read it with the same explorer.
           </MiniFeature>
           <MiniFeature
             eyebrow="Workspaces and roles"
