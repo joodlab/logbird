@@ -1,6 +1,7 @@
 import { cn } from '@logbird/ui/lib/utils';
 import { createFileRoute, Link, Outlet, useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
+import { logicalScroll, logicalTabSpan, physicalScroll, revealScroll, stripEdges, stripMask } from '@/lib/tab-strip';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings')({
   staticData: { crumb: 'Settings' },
@@ -13,19 +14,18 @@ const FADE = 28;
 
 /**
  * Keeps the active section visible in a horizontally scrolling tab strip (phones), and fades the edge that has more
- * tabs behind it.
+ * tabs behind it. Works in logical coordinates, so an RTL strip scrolls and fades from its right-hand start.
  */
 function useTabStrip(activeKey: string) {
   const ref = useRef<HTMLElement>(null);
-  const [edges, setEdges] = useState({ start: false, end: false });
+  const [state, setState] = useState({ start: false, end: false, rtl: false });
   useEffect(() => {
     const nav = ref.current;
     if (!nav) return;
     const update = () => {
-      // scrollLeft is negative in RTL: compare magnitudes.
-      const left = Math.abs(nav.scrollLeft);
-      const max = nav.scrollWidth - nav.clientWidth;
-      setEdges({ start: left > 1, end: max - left > 1 });
+      const rtl = getComputedStyle(nav).direction === 'rtl';
+      const edges = stripEdges({ scroll: logicalScroll(nav.scrollLeft), width: nav.clientWidth, scrollWidth: nav.scrollWidth });
+      setState((prev) => (prev.start === edges.start && prev.end === edges.end && prev.rtl === rtl ? prev : { ...edges, rtl }));
     };
     update();
     nav.addEventListener('scroll', update, { passive: true });
@@ -43,15 +43,13 @@ function useTabStrip(activeKey: string) {
     if (!nav || !active) return;
     // Scroll only the strip (scrollIntoView would also scroll the page): bring the active tab fully into view, clear of
     // the fades.
-    const start = active.offsetLeft - nav.offsetLeft;
-    const end = start + active.offsetWidth;
-    if (start - FADE < nav.scrollLeft) nav.scrollLeft = Math.max(0, start - FADE);
-    else if (end + FADE > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = end + FADE - nav.clientWidth;
+    const rtl = getComputedStyle(nav).direction === 'rtl';
+    const scroll = logicalScroll(nav.scrollLeft);
+    const tab = logicalTabSpan(nav.getBoundingClientRect(), active.getBoundingClientRect(), scroll, rtl);
+    const target = revealScroll(tab, { scroll, width: nav.clientWidth, scrollWidth: nav.scrollWidth }, FADE);
+    if (target !== null) nav.scrollLeft = physicalScroll(target, rtl);
   }, [activeKey]);
-  const mask =
-    edges.start || edges.end
-      ? `linear-gradient(to right, ${edges.start ? 'transparent' : '#000'}, #000 ${FADE}px, #000 calc(100% - ${FADE}px), ${edges.end ? 'transparent' : '#000'})`
-      : undefined;
+  const mask = stripMask(state, FADE, state.rtl);
   return { ref, style: mask ? { maskImage: mask, WebkitMaskImage: mask } : undefined };
 }
 

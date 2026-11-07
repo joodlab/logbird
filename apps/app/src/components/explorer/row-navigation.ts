@@ -43,3 +43,34 @@ export function nextRowIndex(key: string, current: number, count: number, page: 
       return null;
   }
 }
+
+/**
+ * Where the grid's cursor (its roving tab stop) is in `rows`. The cursor is an event id, so it follows its event when
+ * live tail prepends rows or a refetch reorders them. When that event is gone (a filter removed it), the cursor falls
+ * back to the row now at the last index it had, clamped to the list: `fallback` is then true and the caller moves the
+ * cursor there for real. -1 when there are no rows.
+ */
+export function resolveCursor(
+  rows: readonly { id: string }[],
+  cursorId: string | null | undefined,
+  lastIndex: number,
+): { index: number; fallback: boolean } {
+  if (rows.length === 0) return { index: -1, fallback: false };
+  if (cursorId) {
+    const index = rows.findIndex((r) => r.id === cursorId);
+    if (index >= 0) return { index, fallback: false };
+  }
+  return { index: Math.min(Math.max(lastIndex, 0), rows.length - 1), fallback: Boolean(cursorId) };
+}
+
+/**
+ * How many rows were prepended above what used to be the first row (a live-tail batch): its new index. 0 when nothing
+ * was prepended or the list was replaced (the old first row is gone).
+ */
+export function prependedCount(previousFirstId: string | undefined, rows: readonly { id: string }[]): number {
+  if (!previousFirstId || rows[0]?.id === previousFirstId) return 0;
+  return Math.max(
+    0,
+    rows.findIndex((r) => r.id === previousFirstId),
+  );
+}

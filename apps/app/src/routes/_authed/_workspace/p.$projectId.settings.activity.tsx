@@ -6,10 +6,10 @@ import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { ActivityIcon, SearchIcon } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { EventSheet } from '@/components/explorer/event-sheet';
-import { EventsTable } from '@/components/explorer/events-table';
+import { EventsTable, type EventsTableHandle } from '@/components/explorer/events-table';
 import { workspaceActivityQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
 import { includeTerm, removeTerm } from '@/lib/query-language';
@@ -52,6 +52,8 @@ function WorkspaceActivity() {
   const rows = useMemo(() => activity.data?.pages.flatMap((p) => p.data) ?? [], [activity.data]);
   const selectedIndex = search.ev ? rows.findIndex((e) => e.id === search.ev) : -1;
   const select = (e: AuditEvent | null | undefined) => navigate({ search: (prev) => ({ ...prev, ev: e?.id }), replace: true });
+  // The table tracks its own keyboard cursor (by event id, following the open event); closing the sheet returns to it.
+  const table = useRef<EventsTableHandle>(null);
 
   return (
     <div className="flex min-h-[28rem] flex-1 flex-col">
@@ -103,7 +105,6 @@ function WorkspaceActivity() {
         ) : (
           <EventsTable
             columns={COLUMNS}
-            cursorIndex={selectedIndex}
             empty={
               <EmptyState
                 description="Management actions in this workspace show up here as they happen."
@@ -116,6 +117,7 @@ function WorkspaceActivity() {
             loadMore={() => activity.fetchNextPage()}
             loading={activity.isPending}
             onSelect={select}
+            ref={table}
             rows={rows}
             selectedId={search.ev}
           />
@@ -124,6 +126,8 @@ function WorkspaceActivity() {
       <EventSheet
         event={selectedIndex >= 0 ? (rows[selectedIndex] ?? null) : null}
         fetchDetail={false}
+        // Back to the row the sheet showed last (it may differ from the one opened, after prev/next): never to <body>.
+        finalFocus={() => table.current?.cursorElement() ?? true}
         onNext={selectedIndex >= 0 && selectedIndex < rows.length - 1 ? () => select(rows[selectedIndex + 1]) : undefined}
         onOpenChange={(open) => {
           if (!open) select(null);

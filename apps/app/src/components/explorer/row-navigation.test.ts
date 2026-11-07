@@ -1,6 +1,6 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { eventRowLabel, nextRowIndex } from './row-navigation';
+import { eventRowLabel, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
 
 function event(patch: Partial<AuditEvent>): AuditEvent {
   return {
@@ -78,5 +78,42 @@ describe('nextRowIndex', () => {
   it('ignores other keys and empty lists', () => {
     expect(nextRowIndex('a', 2, 10, 5)).toBeNull();
     expect(nextRowIndex('ArrowDown', 0, 0, 5)).toBeNull();
+  });
+});
+
+describe('resolveCursor', () => {
+  const rows = ['a', 'b', 'c', 'd'].map((id) => ({ id }));
+
+  it('finds the cursor event wherever it moved', () => {
+    expect(resolveCursor(rows, 'c', 0)).toEqual({ index: 2, fallback: false });
+    // Live tail prepended two rows: same event, new index.
+    expect(resolveCursor([{ id: 'x' }, { id: 'y' }, ...rows], 'c', 2)).toEqual({ index: 4, fallback: false });
+  });
+
+  it('uses the first row while there is no cursor', () => {
+    expect(resolveCursor(rows, null, 0)).toEqual({ index: 0, fallback: false });
+    expect(resolveCursor(rows, undefined, 3)).toEqual({ index: 3, fallback: false });
+  });
+
+  it('falls back to the row now at its last index when its event is gone, clamped to the list', () => {
+    expect(resolveCursor(rows, 'gone', 1)).toEqual({ index: 1, fallback: true });
+    expect(resolveCursor(rows, 'gone', 9)).toEqual({ index: 3, fallback: true });
+  });
+
+  it('has no tab stop without rows', () => {
+    expect(resolveCursor([], 'a', 2)).toEqual({ index: -1, fallback: false });
+  });
+});
+
+describe('prependedCount', () => {
+  const rows = ['a', 'b', 'c'].map((id) => ({ id }));
+  it('counts the rows a live batch put above the old first row', () => {
+    expect(prependedCount('a', [{ id: 'n1' }, { id: 'n2' }, ...rows])).toBe(2);
+  });
+  it('is 0 when nothing was prepended, the list was replaced, or there was no list', () => {
+    expect(prependedCount('a', rows)).toBe(0);
+    expect(prependedCount('a', [...rows, { id: 'more' }])).toBe(0);
+    expect(prependedCount('gone', rows)).toBe(0);
+    expect(prependedCount(undefined, rows)).toBe(0);
   });
 });

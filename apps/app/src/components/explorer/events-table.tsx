@@ -9,14 +9,25 @@ import { cn } from '@logbird/ui/lib/utils';
 import { type ColumnDef, columnVisibilityFeature, createColumnHelper, tableFeatures, useTable } from '@tanstack/react-table';
 import { defaultRangeExtractor, type Range, useVirtualizer } from '@tanstack/react-virtual';
 import { Loader2Icon } from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, type Ref, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  type Ref,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ActionName } from '@/components/action-name';
 import { Timestamp } from '@/components/timestamp';
 import { eventSentence } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { EVENT_COLUMNS } from './columns';
-import { eventRowLabel, nextRowIndex } from './row-navigation';
+import { eventRowLabel, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
 
 const features = tableFeatures({ columnVisibilityFeature });
 const helper = createColumnHelper<typeof features, AuditEvent>();
@@ -35,10 +46,15 @@ const WIDTH = new Map(EVENT_COLUMNS.map((c) => [c.id, c.width]));
 const HEADER_HEIGHT = 32;
 
 export interface EventsTableHandle {
-  /** Move the roving focus to a row, scrolling it into view; false when there is no such row. */
+  /** Move the roving focus to the row at `index`, scrolling it into view; false when there is no such row. */
   focusRow: (index: number) => boolean;
-  /** The mounted row element at `index`, if any (to return focus to when a dialog closes). */
-  rowElement: (index: number) => HTMLElement | null;
+  /** Focus the cursor row (the grid's tab stop), e.g. from a skip link; false when there are no rows. */
+  focusCursor: () => boolean;
+  /**
+   * The mounted cursor row, to return focus to when a dialog closes. When the cursor's event left the list, the row now
+   * in its place; null when there are no rows.
+   */
+  cursorElement: () => HTMLElement | null;
 }
 
 interface EventsTableProps {
@@ -55,10 +71,19 @@ interface EventsTableProps {
   empty?: ReactNode;
   total?: number;
   className?: string;
-  /** Index the keyboard cursor sits on (for j/k). It is also the grid's roving tab stop. */
-  cursorIndex?: number;
-  /** The roving focus moved to another row (arrow keys, click, Tab into the grid). */
-  onCursorChange?: (index: number) => void;
+  /**
+   * The keyboard cursor, as an event id: the grid's roving tab stop and the row j/k move from. Pass it with
+   * `onCursorChange` to control it; omit it and the table tracks the cursor itself. `null` = no cursor yet (Tab enters on
+   * the first row). It follows `selectedId` whenever the selected event is in `rows`.
+   */
+  cursorId?: string | null;
+  /** The cursor moved to another event: arrow keys, a click, focus, the selection, or a fallback when its event left. */
+  onCursorChange?: (id: string) => void;
+  /**
+   * The row's accessible name. Focus lands on the row (not a cell), so screen readers announce this name rather than the
+   * cells: anything meaningful a caller adds to a cell (a marker, a job hint) belongs here too. Defaults to `eventRowLabel`.
+   */
+  rowLabel?: (event: AuditEvent) => string;
   ref?: Ref<EventsTableHandle>;
 }
 
@@ -66,8 +91,10 @@ interface EventsTableProps {
  * Virtualized, infinite event table. TanStack Table owns the column model; TanStack Virtual the rows.
  *
  * Accessibility: an ARIA grid with a roving tab stop on the rows. Tab enters the grid on the cursor row; ↑/↓,
- * PageUp/PageDown and Home/End move focus between rows; Enter or Space opens the row. The focused row stays mounted
- * even when it is scrolled away, so focus never falls back to <body>.
+ * PageUp/PageDown and Home/End move focus between rows; Enter or Space opens the row. The cursor is an event id, so it
+ * stays on its event when live tail prepends rows, and its row stays mounted even when scrolled away: focus never falls
+ * back to <body>. Cells may hold their own controls (links): their keys stay with them, and focusing one moves the cursor
+ * to — and so keeps mounted — the row that owns it.
  */
 export function EventsTable({
   rows,
@@ -82,8 +109,9 @@ export function EventsTable({
   empty,
   total,
   className,
-  cursorIndex,
+  cursorId,
   onCursorChange,
+  rowLabel = eventRowLabel,
   ref,
 }: EventsTableProps) {
   const isMobile = useIsMobile();
@@ -105,9 +133,46 @@ export function EventsTable({
   const rowHeight = isMobile ? 64 : 36;
   const headerHeight = isMobile ? 0 : HEADER_HEIGHT;
   const count = tableRows.length;
-  const tabStop = count ? Math.min(Math.max(cursorIndex ?? 0, 0), count - 1) : -1;
-  // Keep the tab stop rendered while it is scrolled out of view: Tab can always reach the grid, and the row a dialog
-  // returns focus to exists.
+
+  /* ---------------- the cursor (an event id) ---------------- */
+  const [ownCursor, setOwnCursor] = useState<string | null>(null);
+  const controlled = cursorId !== undefined;
+  const cursorKey = controlled ? cursorId : ownCursor;
+  const onCursorChangeRef = useRef(onCursorChange);
+  onCursorChangeRef.current = onCursorChange;
+  const cursorKeyRef = useRef(cursorKey);
+  cursorKeyRef.current = cursorKey;
+  const setCursor = useCallback(
+    (id: string) => {
+      if (id === cursorKeyRef.current) return;
+      cursorKeyRef.current = id;
+      if (!controlled) setOwnCursor(id);
+      onCursorChangeRef.current?.(id);
+    },
+    [controlled],
+  );
+  const lastCursorIndex = useRef(0);
+  // The tab stop: the cursor's row wherever its event is now; the first row while there is no cursor.
+  const { index: tabStop, fallback } = resolveCursor(rows, cursorKey, lastCursorIndex.current);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const tabStopRef = useRef(tabStop);
+  tabStopRef.current = tabStop;
+  useLayoutEffect(() => {
+    if (tabStop >= 0 && !fallback) lastCursorIndex.current = tabStop;
+  }, [tabStop, fallback]);
+  // The cursor's event left the list (a filter, a refetch): move the cursor for real to the row now in its place.
+  const fallbackId = fallback ? rows[tabStop]?.id : undefined;
+  useEffect(() => {
+    if (fallbackId) setCursor(fallbackId);
+  }, [fallbackId, setCursor]);
+  // The cursor follows the open event (clicks, j/k in the sheet, deep links), so closing the sheet returns focus to it.
+  useEffect(() => {
+    if (selectedId && rows.some((r) => r.id === selectedId)) setCursor(selectedId);
+  }, [selectedId, rows, setCursor]);
+
+  // Keep the tab stop rendered while it is scrolled out of view: Tab can always reach the grid, a focused row (or a
+  // control inside it) is never unmounted, and the row a dialog returns focus to exists.
   const rangeExtractor = useCallback(
     (range: Range) => {
       const indexes = defaultRangeExtractor(range);
@@ -126,46 +191,85 @@ export function EventsTable({
     scrollPaddingStart: headerHeight,
   });
   const items = virtualizer.getVirtualItems();
-  const lastIndex = items.at(-1)?.index ?? 0;
+  // The viewport's real end, not the retained tab stop: a cursor row kept far below must not trigger loading more.
+  const endIndex = virtualizer.range?.endIndex ?? 0;
 
   useEffect(() => {
-    if (hasMore && !fetchingMore && lastIndex >= tableRows.length - 15) loadMore?.();
-  }, [hasMore, fetchingMore, lastIndex, tableRows.length, loadMore]);
+    if (hasMore && !fetchingMore && endIndex >= tableRows.length - 15) loadMore?.();
+  }, [hasMore, fetchingMore, endIndex, tableRows.length, loadMore]);
 
+  // Scroll to the cursor when it moves to another event — not when its event merely shifts (a live-tail prepend).
   useEffect(() => {
-    if (cursorIndex !== undefined && cursorIndex >= 0) virtualizer.scrollToIndex(cursorIndex, { align: 'auto' });
-  }, [cursorIndex, virtualizer]);
+    if (cursorKey && tabStopRef.current >= 0) virtualizer.scrollToIndex(tabStopRef.current, { align: 'auto' });
+  }, [cursorKey, virtualizer]);
 
   useEffect(() => {
     if (rowHeight > 0) virtualizer.measure();
   }, [rowHeight, virtualizer]);
 
   /* ---------------- roving focus ---------------- */
-  const pendingFocus = useRef<number | null>(null);
+  // Whether focus is in the grid: if the focused row unmounts (its event was filtered out), the grid takes focus back.
+  const focusInside = useRef(false);
+  // An event to focus as soon as its row mounts (a far jump).
+  const pendingFocus = useRef<string | null>(null);
   const rowElement = useCallback((index: number) => scrollRef.current?.querySelector<HTMLElement>(`[role="row"][data-index="${index}"]`) ?? null, []);
+
+  // Live tail prepends rows. Unless the reader sits at the top watching them arrive (with focus elsewhere), keep what is
+  // on screen — and the focused row — where it is instead of pushing it down.
+  const firstId = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    const added = prependedCount(firstId.current, rows);
+    firstId.current = rows[0]?.id;
+    const el = scrollRef.current;
+    if (el && added > 0 && (el.scrollTop > 0 || focusInside.current)) el.scrollTop += added * rowHeight;
+  }, [rows, rowHeight]);
+
   const focusRow = useCallback(
     (index: number) => {
-      if (index < 0 || index >= count) return false;
-      if (index !== cursorIndex) onCursorChange?.(index);
+      const event = rowsRef.current[index];
+      if (!event) return false;
+      setCursor(event.id);
       virtualizer.scrollToIndex(index, { align: 'auto' });
       const el = rowElement(index);
-      if (el) el.focus({ preventScroll: true });
+      if (el) {
+        pendingFocus.current = null;
+        el.focus({ preventScroll: true });
+      }
       // Not rendered yet (a far jump): focus it as soon as the virtualizer mounts it.
-      else pendingFocus.current = index;
+      else pendingFocus.current = event.id;
       return true;
     },
-    [count, cursorIndex, onCursorChange, virtualizer, rowElement],
+    [setCursor, virtualizer, rowElement],
   );
-  useEffect(() => {
-    const index = pendingFocus.current;
-    if (index === null) return;
-    const el = rowElement(index);
-    if (el) {
-      pendingFocus.current = null;
-      el.focus({ preventScroll: true });
+  useLayoutEffect(() => {
+    const pending = pendingFocus.current;
+    if (pending) {
+      const index = rows.findIndex((r) => r.id === pending);
+      // Its event left the list: drop the request rather than focus whatever row took its index.
+      if (index < 0) pendingFocus.current = null;
+      else {
+        const el = rowElement(index);
+        if (el) {
+          pendingFocus.current = null;
+          el.focus({ preventScroll: true });
+        }
+        return;
+      }
     }
+    // The focused row unmounted (its event was filtered out, the list was replaced) and focus fell to <body>: put it on
+    // the tab stop, the row now in the cursor's place.
+    const active = document.activeElement;
+    if (focusInside.current && tabStop >= 0 && (!active || active === document.body)) rowElement(tabStop)?.focus({ preventScroll: true });
   });
-  useImperativeHandle(ref, () => ({ focusRow, rowElement }), [focusRow, rowElement]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusRow,
+      focusCursor: () => focusRow(Math.max(tabStopRef.current, 0)),
+      cursorElement: () => (tabStopRef.current >= 0 ? rowElement(tabStopRef.current) : null),
+    }),
+    [focusRow, rowElement],
+  );
 
   const onRowKeyDown = (ev: KeyboardEvent<HTMLDivElement>, index: number, e: AuditEvent) => {
     // Keys pressed on a control inside a cell (a link) belong to that control.
@@ -201,6 +305,23 @@ export function EventsTable({
           aria-colcount={isMobile ? 1 : visible.length}
           aria-label="Events"
           aria-rowcount={Math.max(total ?? 0, count) + (isMobile ? 0 : 1)}
+          onBlur={(ev) => {
+            const next = ev.relatedTarget as Node | null;
+            if (next && ev.currentTarget.contains(next)) return;
+            if (next) {
+              focusInside.current = false;
+              return;
+            }
+            // No new target: the user left the page, clicked nothing focusable — or the focused row was unmounted, in
+            // which case focus is the grid's to restore.
+            const lost = ev.target;
+            queueMicrotask(() => {
+              if (lost.isConnected) focusInside.current = false;
+            });
+          }}
+          onFocus={() => {
+            focusInside.current = true;
+          }}
           role="grid"
         >
           {isMobile ? null : (
@@ -225,10 +346,10 @@ export function EventsTable({
               if (!row) return null;
               const e = row.original;
               const selected = e.id === selectedId;
-              const isCursor = item.index === cursorIndex;
+              const isCursor = Boolean(cursorKey) && item.index === tabStop;
               return (
                 <div
-                  aria-label={eventRowLabel(e)}
+                  aria-label={rowLabel(e)}
                   aria-rowindex={item.index + (isMobile ? 1 : 2)}
                   aria-selected={selected}
                   className={cn(
@@ -238,12 +359,12 @@ export function EventsTable({
                     freshIds?.has(e.id) && 'tm-row-new',
                     isMobile ? 'flex flex-col justify-center gap-1 py-2' : 'grid items-center',
                   )}
+                  data-event-id={e.id}
                   data-index={item.index}
                   key={row.id}
                   onClick={() => onSelect(e)}
-                  onFocus={(ev) => {
-                    if (ev.target === ev.currentTarget && item.index !== cursorIndex) onCursorChange?.(item.index);
-                  }}
+                  // Also when a control inside the row takes focus: the row then stays mounted with it.
+                  onFocus={() => setCursor(e.id)}
                   onKeyDown={(ev) => onRowKeyDown(ev, item.index, e)}
                   role="row"
                   style={{

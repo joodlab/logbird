@@ -20,9 +20,7 @@
           "impact": "moderate",
           "nodes": 1,
           "help": "Page should contain a level-one heading",
-          "sample": [
-            "html :: Page must have a level-one heading"
-          ]
+          "sample": ["html :: Page must have a level-one heading"]
         },
         {
           "id": "region",
@@ -99,9 +97,7 @@
           "impact": "moderate",
           "nodes": 1,
           "help": "Page should contain a level-one heading",
-          "sample": [
-            "html :: Page must have a level-one heading"
-          ]
+          "sample": ["html :: Page must have a level-one heading"]
         },
         {
           "id": "region",
@@ -178,9 +174,7 @@
           "impact": "moderate",
           "nodes": 1,
           "help": "Page should contain a level-one heading",
-          "sample": [
-            "html :: Page must have a level-one heading"
-          ]
+          "sample": ["html :: Page must have a level-one heading"]
         }
       ]
     },
@@ -222,9 +216,7 @@
           "impact": "moderate",
           "nodes": 1,
           "help": "Page should contain a level-one heading",
-          "sample": [
-            "html :: Page must have a level-one heading"
-          ]
+          "sample": ["html :: Page must have a level-one heading"]
         }
       ]
     },
