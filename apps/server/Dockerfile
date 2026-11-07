@@ -25,7 +25,7 @@ RUN pnpm --child-concurrency="$BUILD_CONCURRENCY" --network-concurrency="$DOWNLO
 FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS migrate
 WORKDIR /workspace
 ENV NODE_ENV=production
-RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends openssl tini && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/lib/node_modules/pnpm /usr/local/lib/node_modules/pnpm
 RUN ln -s /usr/local/lib/node_modules/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm
 COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
@@ -34,7 +34,8 @@ COPY --from=build --chown=node:node /workspace/apps ./apps
 COPY --from=build /workspace/package.json /workspace/pnpm-workspace.yaml ./
 LABEL org.opencontainers.image.source="https://github.com/joodlab/logbird" org.opencontainers.image.licenses="MIT" org.opencontainers.image.title="Logbird migrations"
 USER node
-CMD ["sh", "-c", "pnpm --filter @logbird/database migrate:deploy && pnpm --filter @logbird/clickhouse migrate && cd packages/clickhouse && node --import tsx scripts/create-query-user.ts"]
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+CMD ["sh", "-c", "pnpm --filter @logbird/database migrate:deploy && pnpm --filter @logbird/clickhouse migrate && cd packages/clickhouse && exec node --import tsx scripts/create-query-user.ts"]
 
 FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS runtime
 WORKDIR /workspace

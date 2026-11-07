@@ -177,6 +177,60 @@ unapplied migrations; query credentials stay unchanged. Initialization variables
 do not rotate stored database passwords. Preserve the original env securely with
 backups. Follow the separate namespace migration below when upgrading Trailmark.
 
+### Migration cancellation check
+
+The migrate image uses `tini -g` as PID 1 to forward termination to the active
+shell, pnpm and migration process group. Live cancellation/retry verification is
+still pending in [#77](https://github.com/joodlab/logbird/issues/77).
+
+Test only in a fresh disposable stack, with no shared or customer database:
+
+1. Build the new migrate image. Start only its disposable data services, using
+   the resource/lock rules for the machine. Keep app/server/worker stopped.
+2. Create `.tmp/migration-cancel/migration.sql` containing only
+   `SELECT pg_sleep(60);`. In a temporary Compose override, mount that directory
+   read-only into the migrate service at
+   `/workspace/packages/database/prisma/migrations/20991231000000_qa_cancel`.
+   This supplies a deliberately slow, schema-free QA migration without changing
+   the image or committing a test migration. Save the override as
+   `.tmp/compose.migration-cancel.yml`:
+
+   ```yaml
+   services:
+     migrate:
+       volumes:
+         - ./.tmp/migration-cancel:/workspace/packages/database/prisma/migrations/20991231000000_qa_cancel:ro
+   ```
+
+3. With that override, run the real migration command in the background:
+   `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run -d --no-deps --name logbird-migration-cancel-probe migrate`.
+   Confirm the sleep query is active in `pg_stat_activity` before cancelling;
+   an already completed migration does not test signal forwarding.
+
+   ```sql
+   SELECT pid, state, query FROM pg_stat_activity
+   WHERE datname = current_database() AND pid <> pg_backend_pid()
+     AND state = 'active' AND query LIKE '%pg_sleep(60)%';
+   ```
+
+4. Run `docker top logbird-migration-cancel-probe` to record the child processes,
+   then `docker stop --time 20 logbird-migration-cancel-probe`. Record elapsed
+   time, `docker inspect --format '{{json .State}}' logbird-migration-cancel-probe`
+   and migration logs. Require exit before forced SIGKILL, exit code other than
+   137, no OOM, no surviving migration children and no active QA sleep query.
+   Do not count a completed command or a forced kill as a passing cancellation.
+5. Inspect `_prisma_migrations` and database state. If the QA migration is marked
+   failed, verify its sole sleep statement made no schema/data changes, then
+   use a one-shot migrate container with the same override:
+   `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run --rm --no-deps migrate pnpm --filter @logbird/database exec prisma migrate resolve --rolled-back 20991231000000_qa_cancel`.
+   This resolution is only for the schema-free QA fixture. Real failed migrations
+   require inspection and an appropriate recovery decision before retry.
+6. Run the default migrate command again with the override and let it finish.
+   Require PostgreSQL/ClickHouse migration and query-user provisioning success;
+   run it once more to verify no pending migrations. Remove the stopped probe
+   container, stop/remove the disposable stack and volumes, and remove only the
+   temporary fixture/override. Preserve the logs and exit-state evidence.
+
 ### Native backup and fresh-storage restore
 
 Use the same stopped-writer boundary for both stores. The optional override enables
@@ -185,12 +239,12 @@ ClickHouse loads the configuration; keep API/worker/app stopped:
 
 ```sh
 docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d clickhouse
-mkdir -p backups
+mkdir -p .tmp/backups
 docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f /tmp/logbird.pg.dump'
-docker compose cp postgres:/tmp/logbird.pg.dump backups/logbird.pg.dump
+docker compose cp postgres:/tmp/logbird.pg.dump .tmp/backups/logbird.pg.dump
 ```
 
-Create `backups/backup.sql` containing the following SQL. Use a unique archive name
+Create `.tmp/backups/backup.sql` containing the following SQL. Use a unique archive name
 for every backup; ClickHouse refuses to overwrite an existing backup.
 
 ```sql
@@ -198,19 +252,21 @@ BACKUP DATABASE logbird TO Disk('backups', 'logbird.zip');
 ```
 
 ```sh
-docker compose cp backups/backup.sql clickhouse:/tmp/logbird-backup.sql
+docker compose cp .tmp/backups/backup.sql clickhouse:/tmp/logbird-backup.sql
 docker compose exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --queries-file /tmp/logbird-backup.sql'
-docker compose cp clickhouse:/var/lib/clickhouse/backups/logbird.zip backups/logbird.zip
+docker compose cp clickhouse:/var/lib/clickhouse/backups/logbird.zip .tmp/backups/logbird.zip
 ```
 
 Check that the synchronous command returns `BACKUP_CREATED`, record checksums, Git
 revision, database versions and logical totals: `count()` for `events`, `sum(events)`
 for `events_by_minute` and `entities`, and `sum(count)` for `attribute_keys`.
 Physical rollup row counts can change during background merges. Copy the archives and original `.env` to secure
-off-host storage. Archives inside a data volume alone are not a recoverable backup.
+off-host storage. Host archives stay under `.tmp/backups/`, excluded from Git and
+Docker build contexts; legacy `/backups/` and dump/zip files are also excluded.
+Archives inside a data volume alone are not a recoverable backup.
 `docker compose cp` avoids binary redirection corruption in Windows PowerShell 5.
 The `mkdir -p` example uses POSIX sh; on PowerShell use `New-Item -ItemType Directory
--Force backups`. Never print the env file or authentication material.
+-Force .tmp/backups`. Never print the env file or authentication material.
 
 Restore into a **different, empty Compose project**, keeping the original stopped
 as recovery. Copy the original configuration privately to `.env.restore`; retain
@@ -219,19 +275,19 @@ migrations before restoring. Start only the three fresh data services:
 
 ```sh
 docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml up -d --wait postgres clickhouse redis
-docker compose --env-file .env.restore -p logbird-restore cp backups/logbird.pg.dump postgres:/tmp/logbird.pg.dump
+docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/logbird.pg.dump postgres:/tmp/logbird.pg.dump
 docker compose --env-file .env.restore -p logbird-restore exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error /tmp/logbird.pg.dump'
-docker compose --env-file .env.restore -p logbird-restore cp backups/logbird.zip clickhouse:/var/lib/clickhouse/backups/logbird.zip
+docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/logbird.zip clickhouse:/var/lib/clickhouse/backups/logbird.zip
 ```
 
-Create `backups/restore.sql`:
+Create `.tmp/backups/restore.sql`:
 
 ```sql
 RESTORE DATABASE logbird FROM Disk('backups', 'logbird.zip');
 ```
 
 ```sh
-docker compose --env-file .env.restore -p logbird-restore cp backups/restore.sql clickhouse:/tmp/logbird-restore.sql
+docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/restore.sql clickhouse:/tmp/logbird-restore.sql
 docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --queries-file /tmp/logbird-restore.sql'
 ```
 

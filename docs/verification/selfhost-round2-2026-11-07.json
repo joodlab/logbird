@@ -1,0 +1,66 @@
+{
+  "date": "2026-11-07",
+  "probe": {
+    "dockerfile": [
+      "FROM scratch",
+      "COPY . /context/"
+    ],
+    "command": "docker buildx build --no-cache --progress=plain --output=type=tar,dest=.tmp/round2-context.tar -f .tmp/round2-context.Dockerfile .",
+    "buildRef": "qbztc3bm7oousfg1grfrr3al2",
+    "transferredContext": "3.12MB",
+    "tarBytes": 3542528,
+    "tarMemberCount": 649,
+    "positiveControl": "context/package.json",
+    "forbiddenMemberCount": 0,
+    "fixturePaths": [
+      "backups/round2-private.txt",
+      "backups/round2.pg.dump",
+      "backups/round2.zip",
+      "round2-context.dump",
+      "round2-context.zip",
+      "scripts/round2-context.dump",
+      "scripts/round2-context.zip"
+    ],
+    "fixturesRemoved": true,
+    "realPrivateArchivesUnderTmpExcluded": true,
+    "gitIgnoreCheck": "all seven fixtures ignored by expected backup/dump/zip patterns",
+    "createdApplicationImages": 0,
+    "startedServiceContainers": 0,
+    "sourceBase": "6b6a30c4fca399fd34b2ce018926053ab4706dda",
+    "ignoreFileSha256": {
+      ".dockerignore": "9a0b9112da28fc583dc921246b4a712d61cc600b26cb01220fea843b8f541fe5",
+      ".gitignore": "05e21ba5876f0fb18fb1fdf9609cedc552971c9e39e87fece53778fcb038637f"
+    }
+  },
+  "resources": {
+    "finishedUtc": "2026-11-07T14:32:16.4527976+00:00",
+    "startedUtc": "2026-11-07T14:32:12.3116475Z",
+    "endFreeRamGiB": 14.598724365234375,
+    "minimumSampledFreeRamGiB": 14.500053405761719,
+    "startFreeRamGiB": 14.545520782470703,
+    "freeDiskGiB": 110.13987731933594
+  },
+  "migrateInit": {
+    "entrypoint": [
+      "/usr/bin/tini",
+      "-g",
+      "--"
+    ],
+    "finalProvisioningCommandExec": true,
+    "liveCancellationCheck": "pending #77; no migrate image rebuild or service run",
+    "staticStageAssertions": "PASS tini installation, exec-form group-forwarding entrypoint, USER node and final exec"
+  },
+  "cleanup": {
+    "newCacheIds": [
+      "z0ntaaoft398jdtc2307581yj",
+      "z74igzfuzqobigm2jfuuathnb",
+      "a2y6f5g3lk5tuce76gtptrtd7",
+      "juqondhlja4sz3tbuqpwg4jrm"
+    ],
+    "removedProbeHistory": true,
+    "remainingProbeCacheIds": [],
+    "unrelatedCacheIdsRemoved": 0,
+    "heavyLockReleased": true,
+    "exportTarRemoved": true
+  }
+}

@@ -7,6 +7,10 @@ node_modules
 AGENTS.local.md
 CLAUDE.local.md
 .tmp
+# Local database archives must never reach build layers or remote builders.
+/backups/
+**/*.dump
+**/*.zip
 **/dist
 **/.output
 **/.nitro

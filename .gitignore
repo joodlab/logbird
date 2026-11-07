@@ -34,6 +34,11 @@ Thumbs.db
 # docker volumes
 .docker-data
 
+# Private database backups (also excluded from Docker build contexts)
+/backups/
+*.dump
+*.zip
+
 # test artifacts
 coverage
 .playwright/
