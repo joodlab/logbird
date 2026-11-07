@@ -7,8 +7,8 @@ const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclud
   .split('\0')
   .filter(Boolean);
 const signatures = ['efbbbf', 'fffe', 'feff', '0000feff'].map((hex) => Buffer.from(hex, 'hex'));
-// Narrow patterns for common UTF-8-as-Windows-1252 corruption, including double encoding.
-const mojibake = /\u00e2(?:\u20ac|\u2020)|\u00c2\u00a7|\u00c3(?:\u00a2|\u201a)/u;
+// Common UTF-8-as-Windows-1252 corruption across Latin-1 and punctuation/box glyphs.
+const mojibake = /[\u00c2\u00c3\u00e2][\^@-\u00bf\u0152\u0153\u0160\u0161\u0178\u017d\u017e\u0192\u02c6\u02dc\u2013-\u2122]/u;
 const failures = files.flatMap((file) => {
   if (!existsSync(file)) return [];
   const bytes = readFileSync(file);

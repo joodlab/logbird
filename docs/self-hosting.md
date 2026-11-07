@@ -102,7 +102,7 @@ Engine does not universally provide the Docker Desktop hostname.
 
 ## Caddy TLS
 
-Point DNS to the host and allow 80/443. Set APP_URL=https://audit.example.com, LOGBIRD_DOMAIN=audit.example.com, optional ACME_EMAIL, and TRUST_PROXY=2 (Caddy plus the console). Run `docker compose --profile tls up -d`. Pinned Caddy 2 uses the committed Caddyfile, automatic HTTPS and persistent caddy_data/caddy_config volumes.
+Point DNS to the host and allow 80/443. Set APP_URL=https://audit.example.com, LOGBIRD_DOMAIN=audit.example.com, optional ACME_EMAIL, and TRUST_PROXY=2 (Caddy plus the console). Run `docker compose --profile tls up -d --no-build` with the previously built or verified release images. Pinned Caddy 2 uses the committed Caddyfile, automatic HTTPS and persistent caddy_data/caddy_config volumes.
 
 Set TRUST_PROXY explicitly: profiles cannot change another service's environment. Local TLS tests can mount a Caddyfile with `tls internal`, choose LOGBIRD_TLS_HTTP_PORT / LOGBIRD_TLS_HTTPS_PORT, and run `curl -k --resolve hostname:port:127.0.0.1 https://hostname:port/readyz`. Internal test certificates are not publicly trusted.
 
@@ -128,7 +128,7 @@ services:
 ```
 
 ```sh
-docker compose -f docker-compose.yml -f .tmp/compose.tls-local.yml --profile tls up -d
+docker compose -f docker-compose.yml -f .tmp/compose.tls-local.yml --profile tls up -d --no-build
 curl --insecure --resolve audit.logbird.test:4743:127.0.0.1 https://audit.logbird.test:4743/readyz
 ```
 
@@ -173,7 +173,7 @@ Keep forwardedHeaders.insecure disabled; trust only known upstreams. Live tail p
 
 ## External services
 
-Set DATABASE_URL, CLICKHOUSE_URL, REDIS_URL and ClickHouse admin/query credentials, then run `docker compose -f docker-compose.yml -f docker-compose.external.yml up -d`. The override uses !reset to remove bundled services and migration dependencies; use Compose >=2.24.4 ([Docker merge reference](https://docs.docker.com/reference/compose-file/merge/)). Base secret validation still applies, including POSTGRES_PASSWORD (unused with DATABASE_URL). External services must already be reachable/ready. Create the logbird ClickHouse database first.
+Set DATABASE_URL, CLICKHOUSE_URL, REDIS_URL and ClickHouse admin/query credentials, build the four roles sequentially as in the quickstart (or select verified release images), then run `docker compose -f docker-compose.yml -f docker-compose.external.yml up -d --no-build`. The override uses !reset to remove bundled services and migration dependencies; use Compose >=2.24.4 ([Docker merge reference](https://docs.docker.com/reference/compose-file/merge/)). Base secret validation still applies, including POSTGRES_PASSWORD (unused with DATABASE_URL). External services must already be reachable/ready. Create the logbird ClickHouse database first.
 
 Postgres needs schema migration rights. ClickHouse needs logbird schema/table/view DDL and read/write, CREATE/ALTER USER, CREATE/ALTER SETTINGS PROFILE, CREATE/ALTER ROW POLICY, SELECT WITH GRANT OPTION on the four Logbird tables, SHOW ACCESS/GRANTS and system.users/settings visibility. Use ClickHouse 26.9 with SQL_ settings. Provisioning checks credentials, four SELECT grants, effective limits and unchanged main-user row counts. Stop writes during upgrades; concurrent ingest can fail that safety check.
 
@@ -264,8 +264,19 @@ matching temporary `APP_URL`. Keep ingress blocked and app/Caddy stopped. Select
 the saved BACKUP_ID; do not generate a new timestamp. Verify the saved hashes.
 Start only data services; do not run migrations yet.
 
+On **any host**, confirm `git rev-parse HEAD` equals the recorded revision and
+`docker compose images` (with the original installation's env/project flags)
+matches the backup receipt's image IDs. The `:local` role tags are shared with the
+stopped original project, not scoped by Compose project name; also confirm their
+current IDs with `docker image inspect --format '{{.Id}}' logbird/migrate:local logbird/server:local logbird/worker:local logbird/app:local`
+(substitute the recorded registry/version). If the revision or image identity
+does not match or cannot be verified, for example after a failed upgrade, run
+`git switch --detach <recorded-git-sha>` and rebuild all four roles sequentially
+with the restored env/project flags shown below, before any `up --no-build`.
+
 On a replacement host, first make an authorized checkout at the recorded Git
-revision. Place the preserved private configuration in `.env.restore` there and
+revision. Place the preserved private configuration in `.env.restore` there, copy
+the matched `.pg.dump`, `.zip` and `.sha256` into `.tmp/backups/` (create it first), and
 build all four roles before the gate's `up --no-build`. Do not run the quickstart's
 startup command against the empty target:
 
@@ -273,7 +284,7 @@ startup command against the empty target:
 git clone https://github.com/joodlab/logbird.git
 cd logbird
 git switch --detach <recorded-git-sha>
-# Place the preserved .env.restore here, then:
+# Place .env.restore here and the matched archives/checksum in .tmp/backups/, then:
 docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml build migrate
 docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml build server
 docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml build worker

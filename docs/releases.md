@@ -129,12 +129,18 @@ Test only in a fresh disposable stack, with no shared or customer database:
    ```yaml
    services:
      migrate:
+       build: !reset null
+       pull_policy: never
        volumes:
          - ./.tmp/migration-cancel:/workspace/packages/database/prisma/migrations/20991231000000_qa_cancel:ro
    ```
 
+   This override removes the build definition and requires the image already
+   built in step 1. Compose `run` has no `--no-build` flag; removing `build` and
+   setting `pull_policy: never` prevents an implicit rebuild or registry pull.
+
 3. With that override, run the real migration command in the background:
-   `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run -d --no-deps --name logbird-migration-cancel-probe migrate`.
+   `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run --pull never -d --no-deps --name logbird-migration-cancel-probe migrate`.
    Confirm the sleep query is active in `pg_stat_activity` before cancelling;
    an already completed migration does not test signal forwarding.
 
@@ -153,7 +159,7 @@ Test only in a fresh disposable stack, with no shared or customer database:
 5. Inspect `_prisma_migrations` and database state. If the QA migration is marked
    failed, verify its sole sleep statement made no schema/data changes, then
    use a one-shot migrate container with the same override:
-   `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run --rm --no-deps migrate pnpm --filter @logbird/database exec prisma migrate resolve --rolled-back 20991231000000_qa_cancel`.
+   `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run --pull never --rm --no-deps migrate pnpm --filter @logbird/database exec prisma migrate resolve --rolled-back 20991231000000_qa_cancel`.
    This resolution is only for the schema-free QA fixture. Real failed migrations
    require inspection and an appropriate recovery decision before retry.
 6. Run the default migrate command again with the override and let it finish.
