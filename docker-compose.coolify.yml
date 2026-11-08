@@ -40,9 +40,12 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+  # Role images are named <namespace>/logbird-<role>:<version>, default ghcr.io/joodlab (nothing is published yet).
+  # pull_policy: build keeps source installs on locally built images: bare `up` builds, `up --no-build` never pulls.
+  # Only the documented release flow pulls, explicitly (`up --no-build --pull always` with an accepted version).
   migrate:
     pull_policy: build
-    image: ${LOGBIRD_IMAGE_REGISTRY:-logbird}/migrate:${LOGBIRD_VERSION:-local}
+    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-migrate:${LOGBIRD_VERSION:-local}
     build: {context: ., dockerfile: apps/server/Dockerfile, target: migrate}
     environment: &runtime
       NODE_ENV: production
@@ -67,6 +70,7 @@ services:
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-false}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-Logbird <hello@example.com>}
@@ -77,7 +81,7 @@ services:
     restart: 'no'
   server:
     pull_policy: build
-    image: ${LOGBIRD_IMAGE_REGISTRY:-logbird}/server:${LOGBIRD_VERSION:-local}
+    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-server:${LOGBIRD_VERSION:-local}
     build: {context: ., dockerfile: apps/server/Dockerfile}
     environment:
       <<: *runtime
@@ -88,7 +92,7 @@ services:
     stop_grace_period: 45s
   worker:
     pull_policy: build
-    image: ${LOGBIRD_IMAGE_REGISTRY:-logbird}/worker:${LOGBIRD_VERSION:-local}
+    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-worker:${LOGBIRD_VERSION:-local}
     build: {context: ., dockerfile: apps/worker/Dockerfile}
     environment: *runtime
     depends_on:
@@ -98,7 +102,7 @@ services:
     stop_grace_period: 5m
   app:
     pull_policy: build
-    image: ${LOGBIRD_IMAGE_REGISTRY:-logbird}/app:${LOGBIRD_VERSION:-local}
+    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-app:${LOGBIRD_VERSION:-local}
     build: {context: ., dockerfile: apps/app/Dockerfile}
     environment:
       PORT: '4600'

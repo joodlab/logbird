@@ -35,6 +35,7 @@ import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import {
   ActivityIcon,
   BookOpenIcon,
+  BracesIcon,
   CheckIcon,
   ChevronsUpDownIcon,
   FolderPlusIcon,
@@ -307,6 +308,10 @@ function UserMenu() {
           <DropdownMenuItem render={<a href="https://github.com/joodlab/logbird/blob/master/docs/SPEC.md" rel="noreferrer" target="_blank" />}>
             <BookOpenIcon />
             Product spec
+          </DropdownMenuItem>
+          <DropdownMenuItem render={<a href="/docs" rel="noreferrer" target="_blank" />}>
+            <BracesIcon />
+            API reference
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => signOutFromConsole(queryClient, () => navigate({ to: '/login' }))}>
             <LogOutIcon />

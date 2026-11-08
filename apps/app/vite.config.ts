@@ -3,11 +3,13 @@ import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
 import { defineConfig, loadEnv } from 'vite';
+import { apiReferenceContentSecurityPolicy } from './server/proxy-paths';
 
 /**
- * The console talks to exactly one origin. In dev, Vite proxies `/api` (better-auth + internal API)
- * and `/v1` (public API) to the Hono server so the better-auth session cookie stays first-party.
- * The production Nitro middleware reads its target at runtime.
+ * The console talks to exactly one origin. The Nitro middleware (server/proxy.ts) forwards `/api` (better-auth +
+ * internal API), `/v1` (public API), health checks and the read-only `/docs` + `/openapi.json` reference to the Hono
+ * server, so the better-auth session cookie stays first-party; it reads its target at runtime in production.
+ * The Vite proxy below mirrors that allowlist for any request Nitro does not see first.
  */
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -61,6 +63,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/api': { target: serverTarget, changeOrigin: false },
         '/v1': { target: serverTarget, changeOrigin: false },
+        '^/(docs|openapi\\.json)$': { target: serverTarget, changeOrigin: false },
       },
     },
     plugins: [
@@ -76,6 +79,8 @@ export default defineConfig(({ mode }) => {
               'Referrer-Policy': 'strict-origin-when-cross-origin',
             },
           },
+          // The proxied API reference loads its pinned UI script from jsDelivr; only this page allows it.
+          '/docs': { headers: { 'Content-Security-Policy': apiReferenceContentSecurityPolicy } },
         },
       }),
       tanstackStart({
