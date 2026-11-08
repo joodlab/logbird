@@ -33,7 +33,7 @@ export LOGBIRD_INGEST_KEY=lb_ingest_...
 curl http://localhost:4600/v1/events -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" -H 'Content-Type: application/json' -d '{"action":"document.updated"}'
 ```
 
-Only action is required. Never send passwords or tokens. See [self-hosting](docs/self-hosting.md) for TLS, proxies, upgrades and backups; [Coolify](docs/coolify.md) for Compose builds; [CONTRIBUTING.md](CONTRIBUTING.md) for source development; the [SDK](packages/sdk/README.md), [concepts](docs/concepts.md), [query language](docs/query-language.md), [integrations](docs/integrations.md), [examples](examples), and the API reference at your Logbird origin's `/docs` (http://localhost:4600/docs locally; OpenAPI at `/openapi.json`).
+Only action is required. Never send passwords or tokens. See [self-hosting](docs/self-hosting.md) for TLS, proxies, upgrades and backups; [Coolify](docs/coolify.md) for Compose builds; [CONTRIBUTING.md](CONTRIBUTING.md) for source development; the [SDK](packages/sdk/README.md), [concepts](docs/concepts.md), [query language](docs/query-language.md), [backend integration guide](docs/integrating-a-backend.md), [framework integrations](docs/integrations.md), [examples](examples), and the API reference at your Logbird origin's `/docs` (http://localhost:4600/docs locally; OpenAPI at `/openapi.json`).
 
 ## Architecture
 

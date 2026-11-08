@@ -111,11 +111,11 @@ describe('source-state matching', () => {
   });
 
   it('catches claims whose key word is an inline link (the joined pass)', () => {
-    // Sol's examples.
+    // Inline-link examples.
     expect(open('<p><a href="/self-hosting">Self-host</a> it</p>')).toEqual(['Self-host it']);
     expect(open('<p>We have <a href="/changelog">released</a> Logbird under MIT.</p>')).toEqual(['released (the source)']);
     expect(closed('<p>Logbird is coming <a href="/roadmap">soon</a>.</p>')).toEqual(['coming soon']);
-    // Claude's examples.
+    // Additional inline-link examples.
     expect(open('<p><a href="/self-hosting">Self-host</a> it today.</p>')).toEqual(['Self-host it']);
     expect(open('<p>We have <a href="/open-source">released</a> the source under MIT.</p>')).toEqual(['released (the source)']);
     // Markup-split, with a button and nested inline markup.

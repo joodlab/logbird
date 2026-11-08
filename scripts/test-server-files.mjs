@@ -1,4 +1,4 @@
-// One Vitest process per file, with durable verdicts. Run under the owner's resource guard.
+// Run one Vitest process per file and record its verdict; size available resources before execution.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';

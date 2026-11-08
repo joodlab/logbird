@@ -1,138 +1,62 @@
-# Cloud operations preparation
+# Cloud operations
 
-Status: proposed operating design, reviewed against source and primary documentation on
-2026-11-07. No infrastructure, DNS, certificates, mail account or monitoring service is provisioned
-by these files. No production, failover, restore or capacity acceptance is claimed.
-
-## Decision summary
-
-- **Recommend k3s on Hetzner:** reuse the team's StayDesk Kubernetes practice, keep
-  migrations separate from running apps, and replace each role independently.
-  Coolify is simpler to set up, but its Compose deployment path has an interruption
-  window and does not remove the database/recovery work.
-- **Budget:** roughly **EUR 230–300/month for phase 1**, excluding VAT, labor,
-  transactional mail, domain, private registry, transfer overage and independent
-  monitoring; see the dated bill below.
-- **Effort estimate:** 3–5 engineer-days for platform setup and rehearsals, plus
-  4–8 hours/month for patching, restore drills and alert checks **only after OPS-03's
-  nightly fence/capture/verify/reopen automation is implemented and rehearsed**.
-  That automation is launch-blocking; its implementation is additional, **unestimated**
-  setup work outside the 3–5 engineer-days. A named primary/backup night on-call
-  or paging rota is required **even with automation**; it removes routine attended
-  hours, not incident response. Default policy (owner may explicitly override):
-  dump/encrypt/upload/readback failure before writer restart reopens traffic with
-  the previous good backup still current and a P1 **nightly backup missing** alert;
-  readiness/canary failure after restart stays fenced and pages the rota. That
-  latter failure remains an ingest outage until recovery. Record the decision in
-  [OPS-03](cloud-operations-gaps.md#ops-03-recovery).
-  Without automation, an illustrative 0.5–0.75 attended hours/night × 30 adds **15–22.5 hours
-  of night work/month**, or 19–30.5 hours including routine work, plus an explicit
-  primary/backup night rota. Measure the actual run duration; these are estimates,
-  not measured staffing costs. Do not approve the smaller effort figure for manual nights.
-- **Data ownership is an open owner decision:** this budget assumes self-run
-  Postgres, ClickHouse and Redis/Dragonfly on three separate data VMs. Approve that
-  operational responsibility or obtain managed-service quotes before provisioning.
-- **Stages:** phase 1 is one k3s server plus the data VMs; two app replicas on that
-  server do not survive its loss. Phase 2 adds two k3s servers for a three-member
-  HA control plane and tests node placement/capacity; data HA is a separate decision.
-- **Top three risks:** unproven restored-data recovery (#75/#77); single-node/data-VM
-  outages and nightly backup downtime; login failure from SMTP blocks or collapsed
-  client-IP limits. Each is a launch gate below, not an accepted customer risk.
-- **Reconsider** if nobody can own data/on-call, the owner rejects maintenance
-  outages, managed-service quotes are cheaper than staff time, CX capacity is
-  unavailable, or the measured workload/SLO requires dedicated compute or data HA.
-- **Nightly ingest outage:** the current matched backup stops API/worker writes.
-  Its duration is unmeasured. Time dumps, queue capture and readiness at representative
-  size, then extrapolate by bytes/throughput and add drain/verification time before
-  offering a maintenance window. OPS-03's longer-term **online backups (Postgres
-  PITR + ClickHouse incremental, no nightly fence)** require a verified cross-store
-  boundary; that is the alternative that removes the nightly outage.
-
-### Dated cost worksheet
-
-Planning date **2026-11-07**, Nuremberg/Helsinki, EUR excluding VAT. VM figures use
-Hetzner's [public website price data](https://www.hetzner.com/_resources/app/data/bench/cloud_data.json),
-fetched on that date; the [small source-hashed receipt](verification/cloud-prices-2026-11-07.json)
-records each SKU/region. Confirm the Console quote and capacity before approval.
-The website currently flags cost-optimized capacity as unavailable, so this worksheet
-uses regular-performance CPX plans rather than assuming the cheaper CX tier is orderable.
-
-| Phase-1 item | Monthly basis | EUR/month |
-| --- | --- | --- |
-| k3s server, CPX32 | 1 × 35.49 | 35.49 |
-| Postgres VM, CPX32 | 1 × 35.49 | 35.49 |
-| ClickHouse VM, CPX42 | 1 × 69.49 | 69.49 |
-| Queue VM, CPX22 | 1 × 19.49 | 19.49 |
-| Public IPv4 for four VMs (data ports firewalled) | 4 × 0.50 | 2.00 |
-| Optional server backups on all four VMs | 20% × 159.96 | 31.99 |
-| Extra volumes + encrypted off-host object storage | Planning allowance; quote the required GB, retention and transfer separately | 30–50 |
-| Hetzner LB / extra k3s workers | None in phase 1's direct-node path | 0 |
-| **Subtotal / contingency budget** | **224–244 before contingency** | **230–300** |
-
-[IPv4 pricing](https://docs.hetzner.com/cloud/servers/primary-ips/overview/#pricing)
-and [server backup billing](https://docs.hetzner.com/cloud/billing/faq/) support those
-add-ons. The storage row is an explicit estimate, not an asserted list price: quote
-[Volumes](https://www.hetzner.com/cloud/block-storage/) and
-[Object Storage](https://www.hetzner.com/storage/object-storage/) after measuring
-compressed growth and backup size. Server snapshots exclude attached Volumes and
-never replace matched application backups. Reserve staging space and deletion-protected
-off-host copies. Included local disks are not evidence that the data fits.
-
-Phase 2's two additional CPX32 servers, IPv4 and optional backups add about EUR 86;
-budget roughly EUR 320–420 total with contingency, **before data replicas**. Any
-extra workload nodes add their quoted VM/storage costs. An optional later Hetzner
-LB needs a fresh quote and the client-IP design in [ingress](cloud-ingress.md);
-it is not included or required by the direct-node plan. Dedicated CPU, managed
-databases, extra transfer and separate-provider recovery copies can change this bill
-substantially. Obtain those quotes if the load test or recovery objectives require them.
-
-### Switching later
-
-The OCI images and Kubernetes resources can move, but data cannot move merely by
-redeploying them. Change providers or orchestration only by restoring a complete
-matched recovery set into new targets, preserving credentials and reconciling
-deletions, then passing acceptance before DNS cutover. **That migration path remains
-fenced by [#75](https://github.com/joodlab/logbird/issues/75) and live tracker
-[#77](https://github.com/joodlab/logbird/issues/77)**, including packaged restored-part
-guards, normalized retry and conditional event-ID receipt checks. There is no
-accepted switching guarantee until those gates and a timed restore drill pass.
+This document describes operator requirements, not a production acceptance receipt.
+No provisioning, deployment, failover, restore or capacity result is established by
+these procedures alone.
 
 ## Hosting decision
 
-Keep [Coolify](coolify.md) for a bounded private evaluation whose maintenance
-interruptions are acceptable. Data operations and recovery gates apply to both choices.
+The hosted instance is planned on Coolify behind Cloudflare at `logbird.joodlab.com` after the repository is open-sourced. Provisioning and deployment remain separate steps.
 
-| Consideration | k3s on Hetzner | Coolify |
-| --- | --- | --- |
-| Existing fit | Reuses StayDesk Kubernetes and migration-Job operating practice | Uses the supplied Compose path, adding a separate control panel to operate |
-| Releases | Gate one migration Job, then replace app/API/worker independently | Compose replacement has an interruption window; separate Docker Image apps would be another design |
-| State | Separate data VMs or approved managed stores; matched backups and restore ownership stay with the team | Same data responsibility; the panel's own backup/encryption key is additional state |
-| Operator burden | Team owns K3s/CNI/ingress/cert-manager upgrades plus the data services | Team owns host/panel upgrades plus the same data services |
-| Growth path | One server first; three-member control plane/placement when justified | Keep one-host Compose evaluation until a separately qualified deployment model is selected |
+Follow the recorded [architecture decision](decisions.md) and the [Coolify deployment
+guide](coolify.md) for that path. The [deployment checklist](deployment.md),
+[backup and recovery procedures](backup-disaster-recovery.md) and
+[operator gaps](cloud-operations-gaps.md) apply to the chosen deployment.
 
-[Coolify's rolling-update documentation](https://coolify.io/docs/applications/deployments/rolling-updates)
-excludes Docker Compose applications and describes the health, shutdown and compatibility
-requirements for eligible applications. Moving to separate image applications would be a
-separate release design; do not describe the existing Compose path as zero downtime.
+Qualify releases using exact source revisions, built artifacts, running identities
+and isolated fictional acceptance fixtures. Measure ingest, search, retention,
+backup duration and recovery before making capacity or availability claims.
+A single host remains one failure domain even when it runs multiple app replicas.
+Keep database listeners private, preserve existing credentials and test encrypted
+transport, retention and matched recovery.
 
-Read-only source comparisons used here: StayDesk `k8s/README.md`,
-`k8s/templates/api/{deployment,migration-job}.yaml` and `infra/terraform/README.md` separate
-workloads, migrations and state ownership; our reference app `operations/deployment-reliability.md` and
-`docs/self-hosting/backups-upgrades.mdx` require exact artifacts and isolated restore evidence.
-No credentials, addresses, state or deployment scripts were copied from either project.
+### Maintenance and recovery
+
+The matched offline backup procedure stops API/worker writes. Measure its duration
+with representative data and document the maintenance window. Test failure handling
+before and after writer restart; a partial capture is not a valid recovery set.
+Online Postgres PITR and incremental ClickHouse backups require a verified cross-store
+boundary before they can replace that procedure. See [OPS-03](cloud-operations-gaps.md#ops-03-recovery).
+
+Changing providers or orchestration requires restoring a complete matched recovery
+set into new targets, preserving credentials, reconciling deletions and passing
+acceptance before DNS cutover. The restore/repair gates tracked in
+[#75](https://github.com/joodlab/logbird/issues/75) and
+[#77](https://github.com/joodlab/logbird/issues/77) apply to that path.
+
+## Kubernetes alternative
+
+[`deploy/k3s`](../deploy/k3s) remains a documented alternative, including deployment
+on Hetzner. It is not the selected hosted launch path. The Kubernetes topology,
+artifact, release and static-validation sections below apply only when operators
+choose that alternative. They do not provision or qualify a cluster.
+
+Keep application roles, migration jobs and data-service responsibilities separate.
+The Coolify Compose path has its own release procedure; do not use the Kubernetes
+commands below for it or infer zero downtime from replica counts.
 
 ## Topology and capacity gates
 
-Phase 1 intentionally accepts one k3s failure domain while launch gates are proved;
-owner approval of that maintenance/outage model is required. Phase 2 uses three
+A single-node k3s installation has one failure domain. Document its maintenance
+and outage model before deployment. A highly available control plane uses three
 control-plane nodes with fast durable disks, a private registration address and
 workload placement across nodes. K3s's
 [embedded-etcd HA design](https://docs.k3s.io/datastore/ha-embedded) needs at least three server
 nodes and an odd quorum. It does not replicate application databases. A single-node evaluation
 remains a single failure domain even with two app Pods.
 
-Choose the region, data residency, budget and capacity only after fictional representative
-benchmarks. [K3s resource profiling](https://docs.k3s.io/reference/resource-profiling) describes
+Choose region, data residency and capacity using representative synthetic
+benchmarks and the deployment requirements. [K3s resource profiling](https://docs.k3s.io/reference/resource-profiling) describes
 control-plane overhead; it is not a Logbird sizing result. The supplied app/API/worker requests
 total 1.25 CPU and 2 GiB RAM before the migration Job, rolling surge, ingress, control plane,
 data services, exporters or filesystem cache. Limits and replicas are trial allocations, not
@@ -141,15 +65,15 @@ headroom; derive disk forecasts from observed compressed growth, retention and r
 
 ### ClickHouse background maintenance
 
-Use a dedicated cloud ClickHouse maintenance budget. The shared development server's
-two-thread pool is a constrained test environment, not a cloud sizing result. For an
+Size ClickHouse maintenance for the measured workload and available CPU/I/O.
+Development settings do not establish production capacity. For an
 initial dedicated 8-vCPU/16-GiB-or-larger trial, propose `background_pool_size=8`,
 `background_merges_mutations_concurrency_ratio=2`, and
 `number_of_free_entries_in_pool_to_execute_mutation=2`. These are unmeasured starting
 values; retain one Logbird retention consumer and serialize its project purges.
 Check CPU, disk latency, free space, part growth and request tails during mixed
 ingest/search/export/retention traffic before increasing maintenance concurrency.
-Do not apply these values to the owner's shared server as part of a benchmark.
+Do not apply these values to a shared development server as part of a benchmark.
 
 The pool controls merge/mutation threads; a larger pool consumes more CPU/I/O, and
 reducing it requires restart. See [server pool settings](https://clickhouse.com/docs/reference/settings/server-settings/settings/background#background_pool_size).
@@ -187,7 +111,7 @@ Job. It installs **no database, volume, cluster, load balancer, cert-manager or 
 All images use a deliberately unusable `registry.invalid` reference; replace each with a real
 immutable digest from a manual build of one recorded Git SHA. No published image digest is supplied here.
 The server Dockerfile's `migrate` target is the migration image; API runtime images omit tooling.
-Build/publish manually through the owner's release process. Do not add automatic PR Docker builds
+Build/publish manually through the documented release process. Do not add automatic PR Docker builds
 or CI workflows. No build, push or deployment is performed by Kustomize.
 
 **Artifact qualification is a release and recovery prerequisite.** The chosen source
@@ -256,11 +180,10 @@ that copy's `deploy/k3s` directory:
    with the matched set. Restore/recreate each scoped Secret with its preserved credentials;
    changed restore endpoints follow the [ordered cutover](backup-disaster-recovery.md#cut-over-to-restored-targets).
    Do not replace the worker Secret with the API file. ConfigMap defaults supply the
-   non-secret settings. **Hetzner blocks outbound 25/465 by default**; request
-   unblocking after account eligibility (one month and first invoice paid), and retain
-   approval plus actual connection/OTP proof. Port 587 is reachable, but requires
-   OPS-06's fail-closed `requireTLS` implementation and downgrade test before launch.
-   Do not simply flip the baseline's 465/TLS settings. See [mail prerequisites](transactional-email.md#hetzner-launch-prerequisite).
+   non-secret settings. Verify outbound SMTP connectivity from the deployment host.
+   Configure the provider's supported port and TLS mode, require fail-closed STARTTLS
+   on port 587, and test downgrade rejection and real OTP delivery before launch.
+   Do not change the baseline's 465/TLS settings without validating the new transport. See [mail prerequisites](transactional-email.md#hetzner-launch-prerequisite).
    Keep `CLICKHOUSE_QUERY_USER=logbird_query`
    consistent for API/migration. Review overrides against [.env.example](../.env.example).
 5. Give the migration identity Postgres DDL and the ClickHouse schema/access-management grants
@@ -280,6 +203,9 @@ increasing retention concurrency. Pod distribution, disruption budgets and node-
 are an explicit pre-launch topology task. These manifests alone make no HA claim.
 
 ## Manual release sequence
+
+Kubernetes alternative only: use the [Coolify guide](coolify.md) for the selected
+hosted path. The common acceptance and recovery requirements still apply.
 
 ### Runtime write boundaries and migration exception
 
@@ -437,8 +363,8 @@ fenced when either prerequisite or any logical comparison is missing or mismatch
 Test node/process restarts, a failed migration, dependency outages, recovery and a rejected
 unhealthy rollout before launch. Measure any request interruption continuously; RollingUpdate
 settings do not establish zero downtime. Proposed telemetry is in [alerts and status](alerts-status.md).
-The cloud/backend owner owns signup, quotas and workspace lifecycle; the release
-owner approves launch after the linked issues have executed acceptance evidence.
+Assign operators for signup, quotas and workspace lifecycle. Launch only after
+the linked acceptance gates have passing evidence for the serving revision.
 
 If no incompatible migration ran, restore the previous image digests and configuration under
 the release lock, then repeat acceptance before reopening traffic. For an incompatible schema
@@ -473,30 +399,29 @@ It requires localhost and the existing `logbird` database, creates only UUID-own
 QA tables plus session-private Memory expectations, validates native 006/007 engines
 and checked-in SQL with QA object names substituted, then verifies cleanup. It
 creates no database/user/settings
-and changes no application table. Follow current RAM/lock rules before execution.
-The dated [Round 5 receipt](verification/cloud-operations-round5-2026-11-07.md)
-records both native engine variants, raw namespace assertions and cleanup.
+and changes no application table. Check available memory and isolate concurrent test runs before execution.
+Validate both native engine variants, raw namespace assertions and cleanup.
 
 The baseline retains v1.34 restricted Pod Security rules and is schema-checked
 against Kubernetes 1.35 for the proposed pinned K3s release. Repeat against the
 actual chosen controller/chart/engine versions before installation.
 Schema checks cannot verify image availability, Secret values, CNI behavior, SMTP, migration
-privileges, probes against running images, backups or real traffic. The release owner must complete the
+privileges, probes against running images, backups or real traffic. Operators must complete the
 [issue-ready launch gates](cloud-operations-gaps.md) under an authorized test environment.
 
 ## Launch checklist
 
-- [ ] Owner approves region, spend, self-run versus managed data services, on-call and
-  phase-1 single-node/nightly-outage model; representative load/sizing receipt exists.
+- [ ] Document the chosen platform, region, data residency, data-service model and
+  maintenance/outage behavior; representative load and sizing evidence exists.
 - [ ] #51 embedding is present in the accepted SHA; exact image retention/repair passes.
 - [ ] #75/#77 packaged restore/guard/normalization/retry and conditional event_ids checks pass.
 - [ ] Bootstrap, DNS, renewed production TLS, CNI/data isolation and both-IP buckets pass.
-- [ ] Hetzner 25/465 unblock request is approved **and tested**, or port 587 has
-  shipped fail-closed `requireTLS` with downgrade rejection and real OTP proof.
+- [ ] Outbound SMTP connectivity, the configured TLS mode, downgrade rejection
+  and real OTP delivery pass from the deployment host.
 - [ ] Scoped Secrets, readonly runtimes, migration exception audit, image pull and
   failed-Job handling pass against qualified images.
 - [ ] Matched off-host recovery, deletion reconciliation, measured outage/RPO/RTO,
   automated nightly fence/capture/verify/reopen, alert delivery/runbooks and
   independent status access pass.
-- [ ] Functional tunnel and operator-only edge acceptance pass; release owner signs
-  the receipt before unfencing. Remaining gates are listed in [operations gaps](cloud-operations-gaps.md).
+- [ ] Functional tunnel and operator-only edge acceptance pass; record the
+  acceptance evidence before unfencing. Remaining gates are listed in [operations gaps](cloud-operations-gaps.md).

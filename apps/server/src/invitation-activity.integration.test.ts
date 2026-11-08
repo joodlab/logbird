@@ -6,7 +6,7 @@ import { app } from './app';
 import { clickhouse } from './clickhouse';
 import { drainTestAudit } from './test-audit';
 
-it('R2-3/9: accepted, rejected, canceled and resent invitations audit exactly once with actor/target', async () => {
+it('accepted, rejected, canceled and resent invitations audit exactly once with actor/target', async () => {
   const users: string[] = [];
   let organizationId = '';
   const request = (cookie: string, path: string, method = 'GET', body?: unknown) => {
@@ -106,7 +106,7 @@ it('R2-3/9: accepted, rejected, canceled and resent invitations audit exactly on
       ).changes,
     ).toEqual([{ field: 'name', before: 'Original', after: 'Renamed' }]);
     console.log(
-      'R2-3 four lifecycle actions exactly once, correct actors/targets; R2-9 view name and project before/after verified; R2-2 retention increase creates no purge run',
+      'four lifecycle actions exactly once, correct actors/targets; view name and project before/after verified; retention increase creates no purge run',
     );
   } finally {
     if (organizationId) {

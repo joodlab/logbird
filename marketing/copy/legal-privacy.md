@@ -38,7 +38,7 @@ path: /legal/privacy
     (Cloudflare) may log them with each request. The owner confirms the host's log retention.
   - **Purpose and legal basis:** contacting the person about Logbird; whether consent or legitimate interest applies
     in each jurisdiction where we sell (Saudi Arabia, the UAE and other GCC states, Egypt, Tunisia) and where
-    visitors are (EU, UK, US). <!-- jurisdictions from docs/brand.md §8 -->
+    visitors are (EU, UK, US).
   - **No trackers:** the statement that the site sets no tracking cookies and loads no analytics or ad scripts. The
     engineer must confirm this matches the build, including fonts and embeds.
   - **Processors:** where form submissions are stored and which email provider sends replies (owner to decide).

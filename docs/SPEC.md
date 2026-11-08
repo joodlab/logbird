@@ -6,7 +6,7 @@ API; Logbird stores them in ClickHouse, keeps them for a per-project retention w
 team a fast console to search, follow and understand *who did what, to which record, through which worker, and
 what changed*.
 
-> Audience: developers / operators of the product that sends events (e.g. the StayDesk team). It is **not** an
+> Audience: developers / operators of the product that sends events (for example, a hospitality software team). It is **not** an
 > end-customer portal. Products that want to show history to their own users consume the read API.
 
 ## 1. Principles
@@ -37,17 +37,18 @@ packages/auth        better-auth server/client config (email OTP, organization p
 packages/email       react-email templates (OTP sign-in, invitation) + SMTP sender (Mailpit locally)
 packages/ui          shadcn design system (Base UI variant like our reference app), tokens, charts, shared components
 packages/sdk         `@logbird/sdk` TypeScript client: batching, retries, idempotent ids, flush on exit
-packages/seed        StayDesk-shaped synthetic data generator that sends through the public ingest API
+packages/seed        Fictional hospitality data generator that sends through the public ingest API
 ```
 
 Development dependencies and production deployment are documented in [self-hosting.md](self-hosting.md). Configuration comes from environment variables; see the root .env.example.
 
-**Owner decisions** that shape self-hosting, releases and hosting are recorded in [decisions.md](decisions.md). As of
+**Architecture decisions** that shape self-hosting, releases and hosting are recorded in [decisions.md](decisions.md). As of
 2026-11-08: the public origin proxies the read-only `/docs` and `/openapi.json` reference (and no other new server
 path); role images are named `ghcr.io/joodlab/logbird-<role>` but nothing is published until the repository is
 open-sourced; the hosted instance's transactional email will use Postmark SMTP with required STARTTLS (self-hosters
-choose their own SMTP provider); the hosted instance will run on Coolify
-behind Cloudflare at `logbird.joodlab.com` after open-sourcing.
+choose their own SMTP provider).
+
+The hosted instance is planned on Coolify behind Cloudflare at `logbird.joodlab.com` after the repository is open-sourced. Provisioning and deployment remain separate steps.
 
 Ingestion path (v0): `POST /v1/events` → validate/normalize → ClickHouse `INSERT` with
 `async_insert=1, wait_for_async_insert=1` (ack only after ClickHouse has the rows) → 202. Large batches are
@@ -279,7 +280,7 @@ The **route table and every request/response schema live in `packages/contracts`
   may only read). Keys are stored as SHA-256 hash + display prefix; full secret shown once.
 - Errors: `{ error: { code, message, details? } }` with proper HTTP status.
 - `GET /openapi.json` (hono-openapi) + Scalar reference at `/docs`. Both are read-only, unauthenticated and proxied
-  by the console on the public origin (owner decision, [decisions.md](decisions.md)).
+  by the console on the public origin ([architecture decision](decisions.md)).
 - Size limits on ingest: 1000 events or 5 MB per request.
 - Public fixed-window limits are shared in Redis across replicas: 3000 ingest requests/minute
   and 1200 read requests/minute per project (all keys of the same kind share a bucket).
@@ -573,16 +574,19 @@ Tenants, Workers, Records, Fields, Saved views, Settings; footer: theme toggle, 
 breadcrumb + time range + ⌘K. Use TanStack Query for all data (query keys per project/range/q, prefetch in route
 loaders, `placeholderData: keepPreviousData` for filters), TanStack Form for forms, sonner for toasts.
 
-## 9. Synthetic StayDesk data (`packages/seed`)
+## 9. Synthetic hospitality data (`packages/seed`)
 
-Generate a fictional hospitality domain; do not connect to customer systems. Generate via the
-public ingest API with the SDK (dogfooding): workspace "Acme", project "StayDesk" (~300k events over 60 days,
-weekday/hour seasonality) + small project "Ledger demo" (a fictional accounting app, ~5k events, different
-vocabulary) to prove "accept anything". Include: ~30 businesses as tenants with websites, ~150 users across
-roles + platform admins (impersonation), API-key actors, scheduler/system actors; executors api-server, workers
-(crm, content, bookings, media, email, ads), schedulers, webhooks (StayBook, Meta WhatsApp, Stripe-like
-payment provider); actions derived from real models (hotel/room/rate/booking/guest/campaign/article/page/
-website/member/role/integration/media/export/auth.*/crm.sync.*/catalog.sync.*); operation trees (request →
-job → child record changes), retries (attempt 2/3), failures/denied/unknown outcomes at realistic low rates,
-some events deliberately off-standard (missing actor, custom top-level keys) to exercise conformance. Seed also
-creates a dev login user `demo@logbird.local` as owner of "Acme" (OTP arrives in Mailpit).
+Generate synthetic hospitality and accounting records without connecting to customer
+systems. The maintainers dogfood through their own Acme demo workspace: project
+`StayDesk` contains approximately 300k hospitality events over 60 days with weekday
+and hourly seasonality; `Ledger demo` contains approximately 5k accounting events.
+The neutral seed profile supplies generic names for screenshots.
+
+The dataset includes 30 hospitality businesses, their websites, 150 staff members,
+support impersonation, API-key actors and scheduled activity. Workers use the seed's
+queues `guest-sync`, `catalog`, `localization`, `site-preview` and `ledger-posting`.
+Actions illustrate hospitality, content, access and accounting changes. Operation
+trees connect requests, jobs and record changes; retries, failures, denied and unknown
+outcomes exercise the envelope. Some events intentionally omit recommended fields
+or include custom fields to exercise conformance. The demo command creates the
+`demo@logbird.local` login as owner of Acme; development OTPs arrive in Mailpit.

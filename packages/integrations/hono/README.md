@@ -18,7 +18,7 @@ Use authenticated context for resolvers. Headers only supply correlation, never 
 Workers executionCtx.waitUntil flushes queued events after responses; Node/Bun own their shutdown lifecycle.
 See [design](../../../docs/integrations.md) and [example](../../../examples/hono).
 
-## Per-route authentication (StayDesk pattern)
+## Per-route authentication
 
 ```ts
 const app = new Hono<{ Variables: AuditVariables & {

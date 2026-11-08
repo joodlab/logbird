@@ -59,8 +59,7 @@ can cover supported database engines, but Redis/Dragonfly need their engine-spec
   A successful migration image/Job cannot establish API/worker runtime packaging.
 - **Native-restore mutation versions:** [issue #75](https://github.com/joodlab/logbird/issues/75)
   records correct totals immediately after native restore, followed by doubled
-  rollups after failed-retention repair. The self-host investigation and owner's
-  2026-11-07 root-cause update identify a restore-specific mismatch between preserved
+  rollups after failed-retention repair. The restore investigation identified a restore-specific mismatch between preserved
   part mutation versions and newly allocated mutation IDs. Ordinary failed-run retry
   without restore was exact; this is a distinct restore gate, not proof that every
   retry doubles aggregates. [Live tracker #77](https://github.com/joodlab/logbird/issues/77)
@@ -365,9 +364,8 @@ expected nonzero raw/survivor counts, query count, exit status and checkpoint.
 SimpleAggregateFunction counts use `sum`; attribute `samples` uses `groupUniqArrayMerge`.
 
 Use only the small version-pinned QA fixture on isolated targets. The existing
-[merged self-host harness](../scripts/selfhost-smoke.mjs)
-and [dated self-host evidence](verification/selfhost-2026-11-07.json)
-are reference inputs, not a cloud PASS. Follow #77 for the accepted built-image
+[self-host harness](../scripts/selfhost-smoke.mjs)
+is a reference input, not cloud acceptance evidence. Follow #77 for the accepted built-image
 guard/repair scenario. Keep constant labels per entity and at most five distinct
 values per attribute key so the reference sample set is deterministic.
 

@@ -2,8 +2,8 @@ import type { EventInput } from '@logbird/sdk';
 import { type Action, businesses, hospitalityActions, ledgerActions, support, users } from './catalog';
 
 /**
- * Source and integration names. `neutral` (the default) uses fictional names that are safe for public screenshots;
- * `staydesk` keeps the original names for the StayDesk demo (`pnpm demo` passes it, so its output is unchanged).
+ * `neutral` (the default) uses generic source and integration names for screenshots.
+ * `staydesk` selects the maintainers' own hospitality demo (Acme) for `pnpm demo`.
  */
 export const SEED_PROFILES = {
   neutral: { source: 'booking-engine', bookingChannel: 'channel-manager' },
@@ -224,39 +224,39 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
         ? { queue: 'ledger-posting', job: 'journal:post', root: 'invoice.approval.requested', done: 'journal.posted', record: 'invoice.approved' }
         : resource === 'guests' || resource === 'bookings'
           ? {
-              queue: 'business-crm',
-              job: `crm:sync:${resource}`,
+              queue: 'guest-sync',
+              job: `hospitality:sync:${resource}`,
               root: 'crm.sync.requested',
               done: `crm.${resource}.sync.completed`,
               record: resource === 'guests' ? 'guest.updated' : 'booking.modified',
             }
           : resource === 'catalog'
             ? {
-                queue: 'content',
-                job: 'sync:business-hotels',
+                queue: 'catalog',
+                job: 'catalog:refresh',
                 root: 'catalog.sync.requested',
                 done: 'catalog.sync.completed',
                 record: 'catalog.hotel.synced',
               }
             : resource === 'translation'
               ? {
-                  queue: 'content',
-                  job: 'translation:article',
+                  queue: 'localization',
+                  job: 'article:localize',
                   root: 'article.translation.requested',
                   done: 'article.translation.completed',
                   record: 'article.translated',
                 }
               : resource === 'campaign'
                 ? {
-                    queue: 'business-crm',
-                    job: 'crm:campaign:send',
+                    queue: 'guest-sync',
+                    job: 'campaign:deliver',
                     root: 'campaign.send.requested',
                     done: 'campaign.sent',
                     record: 'campaign.recipient.delivered',
                   }
                 : {
-                    queue: 'website',
-                    job: 'website:screenshot',
+                    queue: 'site-preview',
+                    job: 'site:preview',
                     root: 'website.screenshot.requested',
                     done: 'website.screenshot.completed',
                     record: 'website.screenshot.captured',

@@ -111,7 +111,7 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       const ok = rows.flatMap((r) => (r.ok ? [r.row] : []));
       for (let i = 0; i < ok.length; i += 10_000) await insertEvents(ch, ok.slice(i, i + 10_000));
 
-      // M2: the agent lookup sees agents behind 50k newer rows.
+      // the agent lookup sees agents behind 50k newer rows.
       const suggestions = suggestResponseSchema.parse(await suggestValues(ch, p, { field: 'impersonator', prefix: 'agent 21', limit: 5, from, to }));
       expect(suggestions.values.map((v) => v.value)).toEqual(['support_21']);
       const all = await suggestValues(ch, p, { field: 'impersonator', limit: 50, from, to });
@@ -124,7 +124,7 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       expect(facet.values.some((v) => v.value === '')).toBe(false);
       expect(facet.values.reduce((n, v) => n + v.count, 0) + facet.otherCount).toBe(67);
 
-      // m1: the customer's split. Without the presence predicate the empty bucket (1 event) would be outside the top 20.
+      // the customer's split. Without the presence predicate the empty bucket (1 event) would be outside the top 20.
       const asCustomer = facetResponseSchema.parse(
         await facets(ch, p, { from, to, q: 'actor:cust_rania impersonator:*', field: 'impersonator', limit: 20 }),
       );

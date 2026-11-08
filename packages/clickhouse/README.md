@@ -95,8 +95,7 @@ cleaned up in finally. No other databases are touched.
 Run `pnpm --filter @logbird/clickhouse create-query-user` from an environment with CREATE USER,
 CREATE SETTINGS PROFILE and SELECT grant option on the Logbird tables. The script is idempotent,
 does not rotate existing credentials, and appends CLICKHOUSE_QUERY_USER / CLICKHOUSE_QUERY_PASSWORD
-to the root .env. For an isolated worktree, set LOGBIRD_PRIMARY_ENV to the primary checkout's .env
-path to append the same generated credentials there too. Never commit these files.
+to the root .env. Keep all environment files private and never commit generated credentials.
 
 The SQL console stays unavailable until both credentials are present. Restart the server after provisioning.
 The profile and security boundaries, including the shared-server system-metadata exception, are described in

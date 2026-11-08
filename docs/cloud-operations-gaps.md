@@ -2,18 +2,20 @@
 
 Status: launch checklist, 2026-11-07. Checkboxes require dated source/image and
 executed evidence; a written procedure or closed PR alone does not close a gate.
-The release owner assigns a person to each named role before provisioning.
+Operators record responsibilities and evidence for the chosen deployment.
+Coolify is the [selected hosted path](decisions.md); Kubernetes-specific checks
+apply only to the documented alternative in [cloud operations](cloud-operations.md).
 
-| ID / tracker | Owner role | Priority | Blocks launch? | Depends on |
+| ID / tracker | Responsible role | Priority | Blocks launch? | Depends on |
 | --- | --- | --- | --- | --- |
 | [OPS-01 telemetry / #54](https://github.com/joodlab/logbird/issues/54) | Backend maintainer + SRE | P1 | Yes | Collection access policy and alert receiver |
 | [OPS-02 worker progress / #55](https://github.com/joodlab/logbird/issues/55) | Worker maintainer + SRE | P1 | Yes | OPS-01, qualified worker image |
-| [OPS-03 recovery / #56](https://github.com/joodlab/logbird/issues/56) | Data operator + release owner | P0 | Yes, including provider switching | #75/#77, OPS-08, deletion inventory |
+| [OPS-03 recovery / #56](https://github.com/joodlab/logbird/issues/56) | Data operator + release engineer | P0 | Yes, including provider switching | #75/#77, OPS-08, deletion inventory |
 | [OPS-04 artifacts / #57](https://github.com/joodlab/logbird/issues/57) | Release engineer | P0 | Yes | #51 embedding, registry, OPS-03 |
-| [OPS-05 platform / #58](https://github.com/joodlab/logbird/issues/58) | Platform operator | P0 | Yes | OPS-08, region/DNS approval |
+| [OPS-05 platform / #58](https://github.com/joodlab/logbird/issues/58) | Platform operator | P0 | Yes | OPS-08, region/DNS configuration |
 | [OPS-06 email / #59](https://github.com/joodlab/logbird/issues/59) | Email/backend maintainer | P0 | Yes | SMTP unblock or shipped mandatory TLS on 587 |
 | [OPS-07 deletion / #60](https://github.com/joodlab/logbird/issues/60) | Cloud/backend maintainer | P0 | Yes | Queued workspace purge, OPS-03 |
-| [OPS-08 data hosting / #87](https://github.com/joodlab/logbird/issues/87) | Product owner + data operator | P0 | Yes; owner decision open | Budget, residency, on-call, measured sizing |
+| [OPS-08 data hosting / #87](https://github.com/joodlab/logbird/issues/87) | Platform + data operator | P0 | Yes | Data residency, operating model, measured sizing |
 | [OPS-09 client-IP guard / #86](https://github.com/joodlab/logbird/issues/86) | Backend/security maintainer | P1 | Two-IP proof blocks launch; warning is follow-up defense | OPS-05, bounded sampling design |
 
 ## OPS-01 telemetry
@@ -35,26 +37,15 @@ The release owner assigns a person to each named role before provisioning.
 
 ## OPS-03 recovery
 
-- [ ] **Launch-blocking nightly automation:** implement/rehearse fence, drain,
+- [ ] Automate and rehearse the offline backup sequence: fence, drain, matched
   three-store capture, encryption/upload/readback verification, writer restart,
-  one-host operator-window readiness/canary and unfence. Implement the default
-  owner-overridable failure policy below as explicit phase transitions, persist
-  whether writer restart began, and rehearse failure at each interrupted phase.
-  Before restart: dump/encrypt/upload/readback failure runs the reduced reopen
-  checks against unchanged live stores, retains the previous good backup as current,
-  and raises P1 **nightly backup missing**. After restart: readiness/canary failure
-  refences and pages. Withhold the backup-success heartbeat on either failure;
-  never publish a partial set or retry blindly. Night on-call remains required
-  even after automation; its implementation effort is **unestimated**.
-  The 4–8-hour monthly routine estimate assumes this exists, not manual night work.
-- [ ] **Owner decision: nightly failure policy.** Default is reopen on a capture/
-  encrypt/upload/readback failure before writers restart, keeping the previous
-  good set current and paging P1 **nightly backup missing**; a readiness/canary
-  failure after restart stays fenced and pages. Owner may override explicitly;
-  record the chosen policy, phase, accepted outage/RPO tradeoff, and named primary/
-  backup night rota before launch. An attempted reopen that fails readiness or
-  canary is an after-restart failure and stays fenced. No response deadline is
-  promised by the routine effort estimate.
+  readiness/canary and unfence. Persist phase transitions and test interruption
+  before and after writer restart; never publish a partial set or retry blindly.
+- [ ] Document the recovery failure policy. Before writer restart, a failed capture
+  may reopen unchanged live stores only after reduced readiness/canary checks,
+  retaining the previous good backup and raising a missing-backup alert. A failed
+  readiness/canary check after restart stays fenced and raises an incident alert.
+  Test alert delivery and withhold the backup-success heartbeat on either failure.
 - [ ] #75 is the restore-specific mutation-version defect; [#77](https://github.com/joodlab/logbird/issues/77)
   is the live acceptance tracker. Record accepted guard/procedure revisions and exact image IDs.
 - [ ] Prove logical raw/minute/entity/attribute values after restore, failed-run repair and
@@ -66,10 +57,9 @@ The release owner assigns a person to each named role before provisioning.
   offline prerequisites; no automatic data repair or speculative workaround.
 - [ ] Capture a matched encrypted three-store/config set, fetch it from off-host and
   verify checksums/decryption; prove deletion reconciliation and measured RPO/RTO.
-- [ ] Measure nightly ingest downtime at representative size and get owner acceptance.
-  Longer-term alternative: **online backups (Postgres PITR + ClickHouse incremental,
-  no nightly fence)** with a proved cross-store boundary. This removes the nightly
-  outage; scheduling the fenced procedure merely removes attended work.
+- [ ] Measure offline-backup ingest downtime at representative size and document
+  the maintenance window. Online Postgres PITR and incremental ClickHouse backups
+  require a verified cross-store boundary before replacing the offline procedure.
 - [ ] Prove missing-artifact/decrypt/overdue alerts and independent recovery credentials.
 
 ## OPS-04 artifacts
@@ -88,23 +78,26 @@ The release owner assigns a person to each named role before provisioning.
 
 ## OPS-05 platform
 
-- [ ] Provision the approved pinned K3s/OS/private network and data services from OPS-08;
-  record topology, firewall paths, DNS A/AAAA and supported version inventory.
-- [ ] Execute [Local ingress/DNS/cert-manager procedure](cloud-ingress.md), prove real
+- [ ] Configure the selected Coolify/Cloudflare deployment and data services from
+  OPS-08. For the Kubernetes alternative, configure the pinned K3s/OS/private network.
+  Record topology, firewall paths, DNS A/AAAA and supported version inventory.
+- [ ] For Kubernetes, execute the [ingress/DNS/cert-manager procedure](cloud-ingress.md);
+  for Coolify, use its domain and proxy configuration. Prove real
   certificate issuance/renewal, SNI/chain, HTTP rejection and expiry alert delivery.
 - [ ] Two source IPs must produce two auth buckets; reject forged forwarding headers.
-- [ ] Prove CNI ingress isolation, reviewed DNS/data/SMTP egress, verified encrypted
+- [ ] Prove ingress isolation (including CNI rules when using Kubernetes), reviewed
+  DNS/data/SMTP egress, verified encrypted
   database transport and no public database/API/dashboard bypass route.
 - [ ] Prove fence, tunnel, operator-only window, unfence/refence and failed-release behavior.
-- [ ] Test phase-1 node outage and document accepted impact; phase-2 HA/node-loss capacity
-  needs separate measured proof, placement and disruption policy.
+- [ ] Test host/node outage and document the observed impact. Any HA/node-loss
+  claim needs measured proof, placement and disruption policy.
 - [ ] Write/rehearse **disk-pressure and OOM runbooks (TBD)** before those alerts activate.
 
 ## OPS-06 email
 
-- [ ] Hetzner blocks outbound 25/465 by default. Retain unblock request/approval and
-  actual 465 connectivity proof, or ship/test fail-closed `requireTLS` for 587.
-  A reachable port or optional STARTTLS does not meet the gate.
+- [ ] Verify outbound SMTP connectivity from the chosen host and require the
+  configured TLS mode. Test fail-closed STARTTLS on port 587; a reachable port or
+  opportunistic TLS alone does not establish secure delivery.
 - [ ] Verify SPF/DKIM/DMARC alignment and real OTP/invitation/notification receipt.
 - [ ] Keep code logging off; exercise TLS/downgrade, timeout, provider quota, bounce
   and suppression failures without leaking codes or addresses.
@@ -119,15 +112,13 @@ The release owner assigns a person to each named role before provisioning.
 
 ## OPS-08 data hosting decision
 
-- [ ] Owner chooses **self-run data VMs or managed services**, region, residency and
-  provider/access/backup contracts. [Cost worksheet](cloud-operations.md#dated-cost-worksheet)
-  currently assumes one VM per Postgres/ClickHouse/queue, without data HA.
-- [ ] Obtain current quotes for selected SKUs, GB, transfer, backups, registry, mail
-  and monitoring; approve budget plus setup/on-call responsibility by name.
-- [ ] Provision/configure each store privately with version-pinned persistence,
-  encrypted transport, tested grants and no shared/local development substitutions.
-- [ ] Use measured ingest/storage/search/purge data to approve disk/memory/headroom,
-  maintenance capacity and backup outage; choose data replication/HA if the SLO needs it.
+- [ ] Document self-run or managed data services, region, residency, access and
+  backup requirements, and the selected deployment's failure domains.
+- [ ] Configure each store privately with version-pinned persistence, encrypted
+  transport and tested grants. Keep development data and services isolated.
+- [ ] Use measured ingest/storage/search/purge results to establish disk, memory,
+  maintenance and backup headroom. Validate replication or HA against the SLO
+  before claiming availability or recovery guarantees.
 
 ## OPS-09 client-IP guard
 

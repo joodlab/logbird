@@ -15,7 +15,7 @@ pnpm dev
 ```
 
 App: localhost:4600; API: localhost:4601; email preview (`apps/email`): localhost:4602; Mailpit: localhost:8025.
-Existing shared development services may be used instead of Compose. Never reset shared data. Keep machine instructions in gitignored AGENTS.local.md.
+You may use existing development services instead of Compose. Use an isolated project namespace and preserve other users' data.
 
 ClickHouse tests expect a migrated database. They do not apply migrations implicitly.
 Run `pnpm ch:migrate` separately; `CLICKHOUSE_TEST_MIGRATE=1` explicitly opts the

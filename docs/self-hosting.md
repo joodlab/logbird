@@ -5,7 +5,7 @@
 Install Docker Engine and Compose >=2.24.4 (Linux containers). First builds can take longer depending on CPU/network. No images are published yet.
 
 ```sh
-git clone https://github.com/joodlab/logbird.git # private repository: use authorized GitHub access
+git clone https://github.com/joodlab/logbird.git
 cd logbird
 sh scripts/selfhost-init.sh
 # Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
@@ -21,17 +21,15 @@ Runtime sizing below does not include peak source-build memory or build-cache
 storage.
 
 Role images are named `ghcr.io/joodlab/logbird-<role>:local` (`LOGBIRD_IMAGE_REGISTRY`
-defaults to `ghcr.io/joodlab`; [owner decision](decisions.md)). **Nothing is published
+defaults to `ghcr.io/joodlab`; [architecture decision](decisions.md)). **Nothing is published
 there yet**; the names only label your local builds. The four buildable roles use
 `pull_policy: build`, so a source install never pulls a runnable role: bare `up`
 builds from the checkout (and rebuilds even when images exist), and `up --no-build`
 with a missing local role image fails with `No such image` instead of pulling.
 Build all four sequentially, then use `up --no-build` with the local images you
-just built. On a replacement host those images must be built first. Verified on
-Compose v5.5.1 and v2.24.4 in the local runtime matrix,
-[Compose pull policy, 2026-11-08](verification/compose-pull-policy-2026-11-08.md)
-(on Windows Docker Desktop, Compose v2.24.4 cannot load this repository's build
-context; use a current Compose there);
+just built. On a replacement host those images must be built first.
+On Windows Docker Desktop, use a current Compose version; v2.24.4 cannot load
+this repository's build context;
 live upgrade/restore on a real host remains pending in [#77](https://github.com/joodlab/logbird/issues/77)
 and [#88](https://github.com/joodlab/logbird/issues/88).
 The manual release flow retains its explicit
@@ -111,7 +109,7 @@ neither, STARTTLS is opportunistic and a downgraded connection can expose creden
 `email.smtp_tls_not_required` at boot for a non-loopback host. Certificate verification is never
 disabled.
 
-Postmark (the hosted instance's provider, [owner decision](decisions.md)):
+Postmark (the hosted instance's provider, [architecture decision](decisions.md)):
 
 ```sh
 SMTP_HOST=smtp.postmarkapp.com
@@ -216,7 +214,7 @@ Keep forwardedHeaders.insecure disabled; trust only known upstreams. Live tail p
 The console (public origin) forwards exactly these API-listener paths: `/api/*`, `/v1/*`, `/health`, `/livez`,
 `/readyz`, and the read-only, unauthenticated `GET /docs` (interactive Scalar reference) and `GET /openapi.json`
 (OpenAPI document). Every other path is served by the console itself, so no other server route becomes public
-([owner decision](decisions.md), #61). The allowlist lives in `apps/app/server/proxy-paths.ts`. The two reference
+([architecture decision](decisions.md), #61). The allowlist lives in `apps/app/server/proxy-paths.ts`. The two reference
 paths accept only GET and HEAD (the console answers other methods with `405`, `Allow: GET, HEAD`) and are forwarded
 without `Cookie`, `Authorization` or `Proxy-Authorization`, so a signed-in browser's session never reaches the API
 through them. `/api` and `/v1` keep their normal authenticated forwarding.
@@ -740,7 +738,7 @@ user. A database rename requires every other connection to be closed; the script
 lists blockers and refuses rather than terminating them.
 
 1. Stop ingress, console, server, workers and every other database client, including
-   development worktrees. Drain in-flight jobs. Take PostgreSQL `pg_dump` plus globals,
+   development instances. Drain in-flight jobs. Take PostgreSQL `pg_dump` plus globals,
    a ClickHouse backup including access metadata, and a Redis snapshot; verify restore
    into a separate instance. Preserve `.env`, passwords and the migration journal.
 2. From the repository root with the old `.env` still in place:

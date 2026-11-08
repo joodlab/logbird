@@ -4,7 +4,7 @@
  *
  * - `/api/*` and `/v1/*`: the internal and public APIs (all methods, with credentials).
  * - `/health`, `/livez`, `/readyz`: operational checks.
- * - `/docs` and `/openapi.json`: the read-only API reference and its document (owner decision 2026-11-08, #61). Only
+ * - `/docs` and `/openapi.json`: the read-only API reference and its document (architecture decision 2026-11-08, #61). Only
  *   GET and HEAD, and without credentials: the console answers other methods itself with 405.
  */
 const apiPrefix = /^\/(api|v1)(\/|$)/;

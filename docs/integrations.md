@@ -4,6 +4,8 @@ We maintain integrations for the stacks we use first: Hono, TanStack Start, Vue 
 Express, Next.js, Laravel and Django follow when we use them. Generated clients remain deferred;
 these adapters use the hand-maintained TypeScript SDK.
 
+For an existing Node service, start with [Integrating an existing backend](integrating-a-backend.md).
+
 ## Design
 
 Ingest runs only on servers. Never put an ingest or read key in public runtime config, client
@@ -47,8 +49,8 @@ lives in these package READMEs, so integrations do not change the console or cop
 The SDK's structural read types are compile-checked against packages/contracts in read.test.ts.
 Run `node --env-file=.env --import tsx scripts/verify-integrations.ts` to provision only a disposable
 project, run all examples, assert real readback and remove its keys/events/project in finally.
-The runner must have ports 4872/4871 free and uses existing shared services. Private diagnostics
-stay in .tmp; the credential-free receipt is docs/verification/sdk-integrations/runtime-results.json.
+The runner must have ports 4872/4871 free and uses configured development services. Diagnostics
+and runtime results stay in the gitignored `.tmp` directory.
 
 ## Outage backpressure
 

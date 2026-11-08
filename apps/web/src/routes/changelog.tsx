@@ -7,7 +7,7 @@ import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/changelog')({ head: () => pageHead('/changelog'), component: ChangelogPage });
 
-// Copy: marketing/copy/changelog.md. Entries come from publications.ts, added only once the owner approves them.
+// Copy: marketing/copy/changelog.md. Maintainers add published entries to publications.ts.
 const releaseGroups: { key: keyof Omit<Release, 'version' | 'date'>; title: string }[] = [
   { key: 'upgrade', title: 'Upgrade notes' },
   { key: 'security', title: 'Security' },
