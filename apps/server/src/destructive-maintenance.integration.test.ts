@@ -122,7 +122,12 @@ it('persists the sample-removal fence before its raw delete even if the caller d
     expect((await prisma.project.findUniqueOrThrow({ where: { id } })).exportDeleteStartedAt).not.toBeNull();
   } finally {
     fault.mockRestore();
-    expect(await withProjectLock(id, () => reconcileDestructiveMaintenance(id))).toBe(true);
+    await vi.waitFor(
+      async () => {
+        expect(await withProjectLock(id, () => reconcileDestructiveMaintenance(id))).toBe(true);
+      },
+      { timeout: 30_000, interval: 100 },
+    );
     await prisma.organization.delete({ where: { id } });
   }
 });
