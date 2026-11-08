@@ -47,7 +47,7 @@ async function leaseClock(tx: Prisma.TransactionClient, override?: Date) {
 }
 
 /** Caller holds the exclusive project boundary lock; never hold it over a download. */
-async function readMembership(db: Prisma.TransactionClient, projectId: string) {
+async function readMembership(db: Prisma.TransactionClient, projectId: string, receivedBefore: Date) {
   const project = await db.project.findUnique({
     where: { id: projectId },
     select: { id: true, exportDeleteStartedAt: true, exportGeneration: true, maintenanceGeneration: true },
@@ -58,6 +58,13 @@ async function readMembership(db: Prisma.TransactionClient, projectId: string) {
   const run = await db.retentionRun.findFirst({ where: { projectId }, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }] });
   if (!project || run?.status === 'running' || run?.status === 'failed')
     throw new ApiError(503, 'export_project_unreadable', 'Retention or deletion is incomplete for this project. Retry after maintenance finishes.');
+  // An ambiguous INSERT can outlive its ingest caller's shared lock. Its first receipt clock is inside the fence,
+  // so wait for confirmation/recovery rather than letting a queued pre-fence row appear behind the export cursor.
+  const pending = await db.ingestReceipt.findFirst({
+    where: { projectId, confirmedAt: null, claimedAt: { not: null }, receivedAt: { lte: receivedBefore } },
+    select: { eventId: true },
+  });
+  if (pending) throw new ApiError(503, 'export_project_busy', 'Recent writes to this project are still settling. Retry the export.', undefined, 1);
   return `${project.exportGeneration}:${project.maintenanceGeneration}:${run?.id ?? ''}`;
 }
 
@@ -68,7 +75,7 @@ export async function validateExportMembership(projectId: string, initial: strin
         const lease = await db.exportLease.findUnique({ where: { id } });
         const now = await leaseClock(db);
         if (lease && lease.expiresAt <= now) throw new ApiError(503, 'export_lease_expired', 'The export expired. Retry the download.');
-        if (!lease || lease.invalidated || (await readMembership(db, projectId)) !== initial) throw unavailable();
+        if (!lease || lease.invalidated || (await readMembership(db, projectId, lease.receivedBefore)) !== initial) throw unavailable();
       }),
     signal,
   ).catch((error) => {
@@ -106,7 +113,7 @@ export async function stageExport(
         const now = await leaseClock(tx, at);
         let membership: string | null;
         try {
-          membership = await readMembership(tx, input.projectId);
+          membership = await readMembership(tx, input.projectId, input.receivedBefore ?? now);
         } catch (error) {
           if (!(error instanceof ApiError && error.code === 'export_project_unreadable')) throw error;
           membership = null;

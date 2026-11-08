@@ -5,7 +5,9 @@ import { prisma, storeAuditEvent } from '@logbird/database';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { expect, it, vi } from 'vitest';
 import { app } from './app';
+import * as projectStorage from './clickhouse';
 import { clickhouse } from './clickhouse';
+import { ApiError } from './errors';
 import { drainExportAudits } from './export-stream';
 import * as ingestion from './ingest';
 import { drainTestAudit } from './test-audit';
@@ -282,6 +284,37 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     });
     expect(Number((await afterPurge.json<{ n: number }>())[0]?.n)).toBe(0);
 
+    for (const [method, code, retryAfter] of [
+      ['stopMaintenance', 'maintenance_pending', 10],
+      ['settleProjectInserts', 'ingest_pending', 3],
+    ] as const) {
+      const concurrent = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
+      if (!concurrent.body) throw new Error('Export body missing');
+      const reader = concurrent.body.getReader();
+      await reader.read();
+      const fault = vi
+        .spyOn(projectStorage, method)
+        .mockRejectedValueOnce(new ApiError(503, code, 'Fictional unsettled write', undefined, retryAfter));
+      try {
+        const deletion = await request(owner.cookie, `/api/projects/${projectId}?confirm=${project.slug}`, 'DELETE');
+        expect(deletion.status).toBe(503);
+        expect((await deletion.json()).error.code).toBe(code);
+        expect(deletion.headers.get('Retry-After')).toBe(String(retryAfter));
+      } finally {
+        fault.mockRestore();
+      }
+      expect((await prisma.project.findUniqueOrThrow({ where: { id: projectId } })).exportDeleteStartedAt).toBeNull();
+      await expect(
+        (async () => {
+          while (!(await reader.read()).done) {
+            /* drain */
+          }
+        })(),
+      ).rejects.toThrow();
+      expect(
+        (await receipts(concurrent.headers.get('x-request-id') ?? '')).find((row) => row.action === 'export.failed').metadata.export.reason,
+      ).toBe('membership_changed');
+    }
     const deletionExport = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
     if (!deletionExport.body) throw new Error('Export body missing');
     const deletionReader = deletionExport.body.getReader();

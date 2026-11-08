@@ -204,6 +204,7 @@ it('keeps ready replay clocks and invalidates a fence before inserting a previou
         claimedAt: null,
       },
     });
+
     const download = await f.stage();
     expect((await download.rows.next()).done).toBe(true);
     expect((await ingest(f.project, input)).accepted).toBe(1);
@@ -225,3 +226,75 @@ it('keeps ready replay clocks and invalidates a fence before inserting a previou
     await f.cleanup();
   }
 }, 90_000);
+
+it('defers admission while an ambiguous pre-fence INSERT is queued after its shared writer released', async () => {
+  const f = await fixture();
+  const event = { id: 'queued-export-boundary', action: 'qa.export.queued', occurredAt: new Date().toISOString() };
+  const execute = clickhouse.exec.bind(clickhouse);
+  const queued = vi.spyOn(clickhouse, 'exec').mockImplementationOnce((params) =>
+    execute({
+      ...params,
+      clickhouse_settings: {
+        ...params.clickhouse_settings,
+        async_insert: 1,
+        wait_for_async_insert: 1,
+        async_insert_use_adaptive_busy_timeout: 0,
+        async_insert_busy_timeout_min_ms: 10_000,
+        async_insert_busy_timeout_max_ms: 10_000,
+        wait_for_async_insert_timeout: 1,
+      },
+    }),
+  );
+  try {
+    await expect(ingest(f.project, event)).rejects.toMatchObject({ code: 'ingest_pending' });
+    queued.mockRestore();
+    const first = await prisma.ingestReceipt.findUniqueOrThrow({ where: { projectId_eventId: { projectId: f.project, eventId: event.id } } });
+    expect(first.confirmedAt).toBeNull();
+    expect(Number((await read<{ n: number }>(clickhouse, 'SELECT count() n FROM events WHERE project_id={p:String}', { p: f.project }))[0]?.n)).toBe(
+      0,
+    );
+    const id = randomUUID(),
+      abort = new AbortController();
+    const admission = stageExport({
+      id,
+      projectId: f.project,
+      userId: id,
+      workspaceId: f.org,
+      stream: `ws:${f.org}`,
+      requested: { id: `${id}-requested`, action: 'export.requested' },
+      unknown: { id: `${id}-outcome`, action: 'export.outcome_unknown' },
+      receivedBefore: new Date(),
+      signal: abort.signal,
+    });
+    const timer = setTimeout(() => abort.abort(), 200);
+    try {
+      await expect(admission).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      clearTimeout(timer);
+    }
+    expect(await prisma.exportLease.count({ where: { projectId: f.project } })).toBe(0);
+    expect(await prisma.auditOutbox.count({ where: { stream: `ws:${f.org}` } })).toBe(0);
+
+    // The same explicit async-queue settlement used by project deletion, outside any export lock.
+    await clickhouse.command({ query: 'SYSTEM FLUSH ASYNC INSERT QUEUE' });
+    await prisma.ingestReceipt.update({
+      where: { projectId_eventId: { projectId: f.project, eventId: event.id } },
+      data: { claimedAt: new Date(Date.now() - 80_000) },
+    });
+    expect((await ingest(f.project, event)).accepted).toBe(1);
+    const confirmed = await prisma.ingestReceipt.findUniqueOrThrow({ where: { projectId_eventId: { projectId: f.project, eventId: event.id } } });
+    expect(confirmed.confirmedAt).not.toBeNull();
+    expect(confirmed.receivedAt).toEqual(first.receivedAt);
+    expect(confirmed.fingerprint).toBe(first.fingerprint);
+    const exported = await f.stage(),
+      rows: { id: string }[] = [];
+    for await (const line of exported.rows) rows.push(JSON.parse(line));
+    expect(rows.map((row) => row.id)).toEqual([event.id]);
+    await expect(validateExportMembership(f.project, exported.membership, exported.id)).resolves.toBeUndefined();
+  } finally {
+    vi.restoreAllMocks();
+    // A failed assertion must not leave this fixture's queued insert landing after its cleanup purge.
+    await clickhouse.command({ query: 'SYSTEM FLUSH ASYNC INSERT QUEUE' });
+    await f.cleanup();
+  }
+}, 120_000);

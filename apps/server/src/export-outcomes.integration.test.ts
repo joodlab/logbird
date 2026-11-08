@@ -391,3 +391,56 @@ it('makes bounded export progress alongside a continuous serial writer without h
     }
   }
 }, 90_000);
+
+it('waits for pre-fence ambiguous claims, ignores fresh claims, and validates after confirmation', async () => {
+  const id = randomUUID(),
+    org = `qa-export-pending-${id}`,
+    fence = new Date();
+  await prisma.organization.create({ data: { id: org, name: 'QA Export pending writes', slug: org, createdAt: new Date() } });
+  const project = await prisma.project.create({ data: { organizationId: org, name: 'QA Export pending writes', slug: 'pending' } });
+  const input = {
+    id,
+    userId: id,
+    workspaceId: org,
+    projectId: project.id,
+    stream: `ws:${org}`,
+    receivedBefore: fence,
+    requested: { id: `${id}-requested`, action: 'export.requested' },
+    unknown: { id: `${id}-outcome`, action: 'export.outcome_unknown' },
+  };
+  try {
+    await prisma.ingestReceipt.create({
+      data: { projectId: project.id, organizationId: org, eventId: 'pending', fingerprint: 'fictional', eventAt: fence, receivedAt: fence },
+    });
+    const abort = new AbortController();
+    const waiting = stageExport({ ...input, signal: abort.signal });
+    const timer = setTimeout(() => abort.abort(), 200);
+    try {
+      await expect(waiting).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      clearTimeout(timer);
+    }
+    expect(await prisma.exportLease.count({ where: { id } })).toBe(0);
+    expect(await prisma.auditOutbox.count({ where: { stream: input.stream } })).toBe(0);
+    await prisma.ingestReceipt.update({
+      where: { projectId_eventId: { projectId: project.id, eventId: 'pending' } },
+      data: { confirmedAt: new Date() },
+    });
+    const staged = await stageExport(input);
+    await prisma.ingestReceipt.create({
+      data: {
+        projectId: project.id,
+        organizationId: org,
+        eventId: 'fresh',
+        fingerprint: 'fictional',
+        eventAt: fence,
+        receivedAt: new Date(+fence + 1),
+      },
+    });
+    await expect(validateExportMembership(project.id, staged.membership, id)).resolves.toBeUndefined();
+  } finally {
+    await prisma.exportLease.deleteMany({ where: { projectId: project.id } });
+    await prisma.auditOutbox.deleteMany({ where: { stream: input.stream } });
+    await prisma.organization.delete({ where: { id: org } });
+  }
+});
