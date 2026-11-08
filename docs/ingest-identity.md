@@ -36,17 +36,29 @@ authoritative past its ten-minute window. Fresh claims
 reuse their RETURNING receipts; bulk confirmation uses four typed arrays instead
 of four bind parameters per event. UTC strings keep session timezone independent.
 Only competing identities and pause rechecks need a subsequent receipt read.
-Receipt reads and confirmation use sorted unique-key point probes. LATERAL with
-OFFSET 0 keeps a new busy project's stale statistics from choosing a full-project
-scan; confirmation locks those rows in key order and updates their statement-local
-tuple ids with the same project/id predicates. A 600000-row fictional cache without
-ANALYZE exposed the old plan: first batch 738 ms, warm expired-cache median/p95
-468/555 ms, prior lookup 46 ms and confirmation 181 ms. Point probes reduced these
-to 428 ms first batch, 278/300 ms warm, 4 ms lookup and 26 ms confirmation. These
-are separate in-process diagnostics on shared services, not matched HTTP acceptance
-numbers. Fresh batches issued zero cleanup DELETEs; 1000 requested expired ids
-used one guarded DELETE. A similarly sized live-cache control exposed the same
-planning cost before expiry, so it was not attributed to cleanup.
+Receipt reads seek to `("projectId","eventId") >= (project,id)` in primary-key
+order with `LIMIT 1`, then check the exact project and event id outside the limit.
+The limit keeps the equality filter from being pushed into the seek. Confirmation
+and expiry lock the matching tuple only after checking its exact key; a missing
+key's successor, including another project's row, must never be locked or changed.
+Confirmation retains key order and the original project/id ownership conditions.
+
+An equality-only LATERAL probe was insufficient: a fresh project's stale statistics
+could choose the project/confirmedAt index once per event, filtering the entire
+project repeatedly. A real HTTP reproduction at 33a0553 took 3.06 seconds for one
+batch, including 1.37 seconds in prior lookup and 1.49 seconds in confirmation;
+ClickHouse used about 90 ms. Captured plans showed the secondary index until
+auto-ANALYZE refreshed statistics. Queries were unnamed, pool waits negligible,
+and the slow statements were active without lock waits. A passing short diagnostic
+had missed that plan transition.
+
+On an owned 20000-row stale-statistics fixture, the equality probe filtered 19999
+rows per id and took 1.256 seconds for 1000 hits; the ordered seek took 4.2 ms.
+Plans for prior lookup, confirmation and targeted expiry all used the primary key
+both before and after ANALYZE. Actual helper timings were about 8/23/10 ms before
+and 9/22/11 ms after. These are shared-service diagnostics, not production latency
+guarantees. Earlier cold-cache and interrupted attempts remain in the evidence
+record; they do not establish a statistics-independent plan.
 Fresh claims retain the same CAS/skipDuplicates arbitration. Ordinary
 pruning and retention never remove unresolved receipts. Only exclusive recovery
 can settle or remove an unresolved receipt.

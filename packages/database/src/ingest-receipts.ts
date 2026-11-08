@@ -1,14 +1,17 @@
 import { setTimeout as pause } from 'node:timers/promises';
 import { Prisma, prisma } from './index';
 
-/** Point probes avoid a project-wide scan before statistics catch up with a busy new project. */
+/** Ordered key seeks avoid project-range scans before statistics catch up with a busy new project. */
 export async function findIngestReceipts(projectId: string, eventIds: string[]) {
   if (!eventIds.length) return [];
+  // Equality alone can choose the project/confirmedAt index once per id. Seek in full PK order,
+  // then check equality outside LIMIT so neither the filter nor stale project estimates undo the seek.
   return prisma.$queryRaw<import('./generated/client').IngestReceipt[]>(Prisma.sql`
     SELECT r.* FROM (SELECT id FROM unnest(${eventIds}::text[]) AS ids(id) ORDER BY id) AS requested
     CROSS JOIN LATERAL (
-      SELECT * FROM "IngestReceipt" WHERE "projectId"=${projectId} AND "eventId"=requested.id OFFSET 0
-    ) AS r`);
+      SELECT * FROM "IngestReceipt" WHERE ("projectId","eventId")>=(${projectId},requested.id)
+      ORDER BY "projectId","eventId" LIMIT 1
+    ) AS r WHERE r."projectId"=${projectId} AND r."eventId"=requested.id`);
 }
 
 /** Sorted, typed-array claims preserve ON CONFLICT ownership without a bind parameter per cell. */
@@ -37,14 +40,18 @@ export async function confirmIngestReceipts(
 ) {
   if (!identities.length) return;
   // Four array parameters avoid parsing/encoding four bind parameters per event.
+  // Seek without locking, then lock the checked tuple: a missing id must not lock its successor.
   await prisma.$executeRaw(Prisma.sql`WITH targets AS MATERIALIZED (
     SELECT v.*, r.ctid FROM (
       SELECT * FROM unnest(${identities.map((r) => r.eventId)}::text[], ${identities.map((r) => r.fingerprint)}::text[],
         ${identities.map((r) => r.receivedAt.toISOString())}::timestamp[], ${identities.map((r) => r.eventAt.toISOString())}::timestamp[])
         AS input(id,fingerprint,received,event) ORDER BY id
     ) AS v CROSS JOIN LATERAL (
-      SELECT ctid FROM "IngestReceipt" WHERE "projectId"=${projectId} AND "eventId"=v.id OFFSET 0 FOR UPDATE
-    ) AS r)
+      SELECT ctid,"projectId","eventId" FROM "IngestReceipt" WHERE ("projectId","eventId")>=(${projectId},v.id)
+      ORDER BY "projectId","eventId" LIMIT 1
+    ) AS hit CROSS JOIN LATERAL (
+      SELECT ctid FROM "IngestReceipt" WHERE ctid=hit.ctid AND "projectId"=${projectId} AND "eventId"=v.id OFFSET 0 FOR UPDATE
+    ) AS r WHERE hit."projectId"=${projectId} AND hit."eventId"=v.id)
     UPDATE "IngestReceipt" AS r
     SET "fingerprint"=v.fingerprint, "receivedAt"=v.received, "eventAt"=v.event, "confirmedAt"=${new Date().toISOString()}::timestamp
     FROM targets AS v WHERE r.ctid=v.ctid`);
@@ -59,13 +66,16 @@ export const INGEST_RECEIPT_SWEEP_BUDGET_MS = 20_000;
 export async function expireIngestReceipts(projectId: string, eventIds: string[], cutoff: Date) {
   if (!eventIds.length) return;
   if (eventIds.length > INGEST_RECEIPT_PRUNE_BATCH_SIZE) throw new RangeError('Receipt expiry exceeds one bounded batch');
-  // Keep point probes even with stale project statistics; lock in key order before deleting.
+  // Check the exact key before locking: a missing key's successor may belong to another project.
   await prisma.$executeRaw(Prisma.sql`WITH expired AS MATERIALIZED (
     SELECT r.ctid FROM (SELECT id FROM unnest(${eventIds}::text[]) AS ids(id) ORDER BY id) AS requested
     CROSS JOIN LATERAL (
-      SELECT ctid FROM "IngestReceipt" WHERE "projectId"=${projectId} AND "eventId"=requested.id
+      SELECT ctid,"projectId","eventId" FROM "IngestReceipt" WHERE ("projectId","eventId")>=(${projectId},requested.id)
+      ORDER BY "projectId","eventId" LIMIT 1
+    ) AS hit CROSS JOIN LATERAL (
+      SELECT ctid FROM "IngestReceipt" WHERE ctid=hit.ctid AND "projectId"=${projectId} AND "eventId"=requested.id
         AND "confirmedAt"<${cutoff.toISOString()}::timestamp OFFSET 0 FOR UPDATE
-    ) AS r)
+    ) AS r WHERE hit."projectId"=${projectId} AND hit."eventId"=requested.id)
     DELETE FROM "IngestReceipt" AS target USING expired WHERE target.ctid=expired.ctid`);
 }
 

@@ -1,6 +1,7 @@
 import { eventFingerprint, exportEvents, getEvent, insertEvents, read, searchEvents } from '@logbird/clickhouse';
 import {
   claimIngestReceipts,
+  confirmIngestReceipts,
   expireIngestReceipts,
   findIngestReceipts,
   prisma,
@@ -30,6 +31,57 @@ afterEach(async () => {
   await f.cleanup();
 });
 const original = { id: 'original', action: 'evidence.original', actor: { id: 'actor' }, metadata: { status: 'pending' } };
+
+it('missing receipt keys neither match nor lock their successors, including another project', async () => {
+  const neighbor = `${f.project}-next`;
+  await prisma.project.create({ data: { id: neighbor, organizationId: f.org, name: 'QA Receipt neighbor', slug: neighbor } });
+  await prisma.ingestReceipt.createMany({
+    data: [
+      { projectId: f.project, eventId: 'z' },
+      { projectId: neighbor, eventId: 'a' },
+    ].map((r) => ({
+      ...r,
+      organizationId: f.org,
+      fingerprint: 'v1:fixture',
+      receivedAt: new Date(0),
+      eventAt: new Date(0),
+      confirmedAt: new Date(0),
+    })),
+  });
+  let release: () => void = () => undefined;
+  let entered: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const locked = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const holder = prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "eventId" FROM "IngestReceipt" WHERE "projectId" IN (${f.project},${neighbor}) FOR UPDATE`;
+    entered();
+    await held;
+  });
+  void holder.catch(() => entered()); // The finally block propagates a lock-setup failure.
+  let work: Promise<unknown[]> | undefined;
+  try {
+    await locked;
+    work = Promise.all([
+      findIngestReceipts(f.project, ['y', 'zz']),
+      expireIngestReceipts(f.project, ['y', 'zz'], new Date()),
+      confirmIngestReceipts(
+        f.project,
+        ['y', 'zz'].map((eventId) => ({ eventId, fingerprint: 'must-not-write', receivedAt: new Date(), eventAt: new Date() })),
+      ),
+    ]);
+    expect(await Promise.race([work.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 1000))])).toBe(true);
+    expect((await work)[0]).toEqual([]);
+  } finally {
+    release();
+    await holder;
+    await work;
+  }
+  expect(await prisma.ingestReceipt.count({ where: { organizationId: f.org, fingerprint: 'v1:fixture', confirmedAt: new Date(0) } })).toBe(2);
+});
 
 it('targeted expiry preserves a concurrently renewed receipt after waiting for its row lock', async () => {
   expect((await f.post(original)).status).toBe(202);
