@@ -59,6 +59,24 @@ both before and after ANALYZE. Actual helper timings were about 8/23/10 ms befor
 and 9/22/11 ms after. These are shared-service diagnostics, not production latency
 guarantees. Earlier cold-cache and interrupted attempts remain in the evidence
 record; they do not establish a statistics-independent plan.
+
+A bloated, nearly empty table defeats the ordered seek without a guard. After a large
+backlog is deleted or rolled back, autovacuum records few live rows while the heap
+and index pages remain. On the shared development database (about 30 live rows in a
+14364-page heap), the planner priced one sequential scan plus sort per id below the
+primary-key seek. One lookup of 1000 fresh ids touched 14,364,000 buffers (2.4 s),
+and its inflated cost also enabled JIT. Prior lookup, confirmation and targeted
+expiry therefore run in a short transaction that first sets `enable_seqscan`,
+`enable_bitmapscan`, `enable_sort`, `enable_incremental_sort` and `jit` off with
+transaction-local `set_config(..., true)`. Every alternative plan (a sequential,
+bitmap or secondary-index scan plus a sort or incremental sort per id) then
+contains a disabled node, and the primary-key seek is the only one without. The settings revert at commit and cost one extra round trip.
+Minute-sweep batches use the same guard plus their five-second timeout, so they walk
+a `confirmedAt`-ordered index. The `receipt-plan-guard` real-PG test plans the
+shipped SQL against an owned temp table that shadows `IngestReceipt` with fresh,
+large, stale and bloated (800k deleted, 5 kept) statistics. It also proves the bloated
+fixture abandons the seek when unguarded. The replacement depends on exact page
+counts: a secondary-index, bitmap or sequential scan plus a sort for every id.
 Fresh claims retain the same CAS/skipDuplicates arbitration. Ordinary
 pruning and retention never remove unresolved receipts. Only exclusive recovery
 can settle or remove an unresolved receipt.
