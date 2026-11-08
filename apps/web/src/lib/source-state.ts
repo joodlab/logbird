@@ -11,8 +11,8 @@
  * component explicitly marks as a third-party quotation with `data-third-party-quote`: comparison pages mark what they
  * quote from another product's docs (the Retraced comparison quotes its Kubernetes page: "Coming soon").
  *
- * Labels aren't the only way a repository link leaks: repositoryLinks() finds any `href` to WEB_GITHUB_URL, which a
- * private build must not contain.
+ * Labels aren't the only way a repository link leaks: repositoryReferences() finds any reference to WEB_GITHUB_URL (a link
+ * with any label, src, action, JSON-LD, code or text, in any URL form), which a private build must not contain.
  */
 export interface SourcePhrase {
   /** What the build report prints. */
@@ -135,46 +135,75 @@ const INLINE = new Set([
 ]);
 const BREAK = '\u001F';
 
+/** Interactive elements that may sit inside a sentence: separate units in the bounded pass, joined in the joined pass. */
+const LINKS = new Set(['a', 'button']);
+
 /**
  * The text units a reader sees in `html`: marked third-party quotations removed; each run of text between non-inline
  * tags, then each text-bearing attribute value. Script contents (JSON-LD) are units of their own. Plain text is one unit.
+ *
+ * `joinLinks: false` (default) ends a unit at every link or button, so a link label is its own unit. `joinLinks: true`
+ * keeps an inline link inside its sentence (`<a>Self-host</a> it`). Blocks, list items, cells and attributes are
+ * separate units either way.
  */
-export function textSegments(html: string): string[] {
+export function textSegments(html: string, { joinLinks = false }: { joinLinks?: boolean } = {}): string[] {
   const unquoted = html.replace(THIRD_PARTY_QUOTE, BREAK);
   const attributes = [...unquoted.matchAll(TEXT_ATTRIBUTES)].map((match) => normalize(match[1] ?? ''));
   const text = unquoted
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<![^>]*>/g, BREAK)
-    .replace(/<\/?([a-z][\w-]*)\b[^>]*>/gi, (_tag, name: string) => (INLINE.has(name.toLowerCase()) ? ' ' : BREAK));
+    .replace(/<\/?([a-z][\w-]*)\b[^>]*>/gi, (_tag, name: string) => {
+      const tag = name.toLowerCase();
+      return INLINE.has(tag) || (joinLinks && LINKS.has(tag)) ? ' ' : BREAK;
+    });
   return [...text.split(BREAK).map(normalize), ...attributes].filter(Boolean);
 }
 
-/** Every phrase from `phrases` that occurs in a text unit of `html` (markup or plain text), with its count. */
+/**
+ * Every phrase from `phrases` that occurs in `html` (markup or plain text), with its count. The text is matched twice
+ * and a phrase counts if either pass finds it (the higher count is reported):
+ *
+ * - links and buttons as unit boundaries: a leaked "Source on GitHub" link label is caught even when unrelated text
+ *   after the link happens to read "— coming soon";
+ * - inline links joined into their sentence: a claim whose key word is a link (`<a>Self-host</a> it`,
+ *   `We have <a>released</a> the source`, `coming <a>soon</a>`) is caught.
+ *
+ * Paragraphs, list items, cells and attributes stay separate in both passes, so neither creates a match across them.
+ */
 export function findSourcePhrases(html: string, phrases: readonly SourcePhrase[]): { label: string; count: number }[] {
-  const segments = textSegments(html);
+  const passes = [textSegments(html), textSegments(html, { joinLinks: true })];
   return phrases.flatMap(({ label, pattern }) => {
-    const count = segments.reduce((sum, segment) => sum + [...segment.matchAll(new RegExp(pattern.source, pattern.flags))].length, 0);
+    const count = Math.max(
+      ...passes.map((segments) =>
+        segments.reduce((sum, segment) => sum + [...segment.matchAll(new RegExp(pattern.source, pattern.flags))].length, 0),
+      ),
+    );
     return count ? [{ label, count }] : [];
   });
 }
 
-/** Repository URL in a comparable form: lowercase, no trailing slash or `.git`. */
-const canonicalUrl = (url: string) =>
-  url
-    .trim()
-    .toLowerCase()
-    .replace(/\.git$/, '')
-    .replace(/\/+$/, '');
+const escapeForRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /**
- * Every `href` in `html` that points at the repository (the URL itself, or anything beneath it), whatever its label.
- * A private build must have none (scripts/check-source-state.ts).
+ * A pattern for every way a page can reference the repository: any scheme (`https:`, `http:`) or none (`//host`, a bare
+ * `host/owner/repo`), with or without `www.`, any case, optionally `.git`, followed by nothing or a path, query or
+ * fragment, but not a longer repository name (`…/logbird-other`).
  */
-export function repositoryLinks(html: string, repositoryUrl: string): string[] {
-  const repository = canonicalUrl(repositoryUrl);
-  return [...html.matchAll(/\shref\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)]
-    .map((match) => decodeEntities(match[1] ?? match[2] ?? ''))
-    .filter((href) => {
-      const target = canonicalUrl(href.replace(/[?#].*$/, ''));
-      return target === repository || target.startsWith(`${repository}/`);
-    });
+function repositoryPattern(repositoryUrl: string) {
+  const url = new URL(repositoryUrl.trim());
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  const path = url.pathname.replace(/\.git$/i, '').replace(/\/+$/, '');
+  return new RegExp(
+    String.raw`(?<![\w.-])(?:(?:https?:)?\/\/)?(?:www\.)?${escapeForRegExp(host)}${escapeForRegExp(path)}(?:\.git)?(?=$|[\/?#"'\s<>)\]&,;:]|\\)`,
+    'gi',
+  );
+}
+
+/**
+ * Every reference to the repository in `html`, whatever form or place: link `href`s with any label, `src`, `action`,
+ * meta and JSON-LD values (`sameAs`), code blocks (`git clone …`) and plain text. A private build must have none
+ * (scripts/check-source-state.ts). Entities are decoded first, and JSON's `\/` is read as `/`.
+ */
+export function repositoryReferences(html: string, repositoryUrl: string): string[] {
+  const text = decodeEntities(html).replaceAll('\\/', '/');
+  return [...text.matchAll(repositoryPattern(repositoryUrl))].map((match) => match[0]);
 }

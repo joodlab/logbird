@@ -119,6 +119,17 @@ describe('Node server pages', () => {
       '/_headers',
       '/about/index.html.br',
       '/sitemap.xml.gz',
+      // Case variants: Windows and macOS file systems would find these files, Nitro's case-exact asset table doesn't.
+      '/ASSETS/app.js',
+      '/assets/APP.JS',
+      '/Assets/App.js',
+      '/ROBOTS.TXT',
+      '/About/index.html',
+      '/ABOUT/INDEX.HTML',
+      '/About',
+      '/_HEADERS',
+      '/About/Index.Html.Br',
+      '/INDEX.HTML',
     ]) {
       await expectPage(path, '404.html', 404);
     }
@@ -160,24 +171,45 @@ describe('Node server pages', () => {
 describe('decidePage', () => {
   const manifest = {
     pages: { '/': { file: 'index.html', scriptHashes: ['sha256-a='] }, '/404': { file: '404.html', scriptHashes: ['sha256-b='] } },
+    publicFiles: ['/assets/app.js', '/robots.txt'],
   };
-  const none = () => false;
-  const all = () => true;
-  it('passes only canonical public files and the raw /api/ prefix', () => {
-    expect(decidePage({ method: 'GET', pathname: '/x.y', manifest, isPublicFile: none })).toMatchObject({
-      kind: 'page',
-      status: 404,
-      file: '404.html',
-    });
-    expect(decidePage({ method: 'GET', pathname: '/x.y', manifest, isPublicFile: all })).toEqual({ kind: 'pass' });
-    expect(decidePage({ method: 'GET', pathname: '/x%2Fy.js', manifest, isPublicFile: all })).toMatchObject({ status: 404 });
-    expect(decidePage({ method: 'GET', pathname: '/x/./y.js', manifest, isPublicFile: all })).toMatchObject({ status: 404 });
-    expect(decidePage({ method: 'GET', pathname: '/x.js.br', manifest, isPublicFile: all })).toMatchObject({ status: 404 });
-    expect(decidePage({ method: 'GET', pathname: '/api/x', manifest, isPublicFile: none })).toEqual({ kind: 'pass' });
-    expect(decidePage({ method: 'GET', pathname: '/api', manifest, isPublicFile: none })).toMatchObject({ status: 404 });
-    expect(decidePage({ method: 'GET', pathname: '/apix', manifest, isPublicFile: none })).toMatchObject({ status: 404 });
-    expect(decidePage({ method: 'POST', pathname: '/', manifest, isPublicFile: none })).toEqual({ kind: 'method-not-allowed' });
-    expect(() => decidePage({ method: 'GET', pathname: '/', manifest: { pages: {} }, isPublicFile: none })).toThrow('no /404 page');
+  const decide = (pathname: string, method = 'GET') => decidePage({ method, pathname, manifest });
+  it('passes only case-exact listed public files and the raw /api/ prefix', () => {
+    expect(decide('/assets/app.js')).toEqual({ kind: 'pass' });
+    expect(decide('/assets/app.js/')).toEqual({ kind: 'pass' });
+    expect(decide('/assets/app%2Ejs')).toEqual({ kind: 'pass' });
+    for (const path of ['/ASSETS/app.js', '/assets/App.js', '/Robots.txt', '/x.y', '/x%2Fy.js', '/assets/./app.js', '/api', '/apix', '/INDEX.HTML']) {
+      expect(decide(path), path).toMatchObject({ kind: 'page', status: 404, file: '404.html' });
+    }
+    expect(decide('/api/x')).toEqual({ kind: 'pass' });
+    expect(decide('/', 'POST')).toEqual({ kind: 'method-not-allowed' });
+    expect(() => decidePage({ method: 'GET', pathname: '/', manifest: { pages: {}, publicFiles: [] } })).toThrow('no /404 page');
+  });
+});
+
+describe('build manifest public files', () => {
+  it('lists every build-time file with its exact case, and nothing written after Nitro listed its assets', async () => {
+    const manifest = JSON.parse(await readFile(join(output, 'csp.json'), 'utf8'));
+    expect(manifest.publicFiles).toEqual(['/assets/app.js', '/robots.txt']);
+  });
+});
+
+describe('method guard (every preset)', () => {
+  it('answers 405 for other methods outside /api/, and lets GET, HEAD and /api/* through', async () => {
+    const guard = handlerOf((await import('../../server/method-guard')) as unknown as { default: Handler | { handler: Handler } });
+    const call = (path: string, method: string) => {
+      const url = new URL(path, 'http://127.0.0.1:4621');
+      return guard({ req: new Request(url, { method }), url }) as Promise<Response | undefined> | Response | undefined;
+    };
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
+      const response = (await call('/about/', method)) as Response;
+      expect(response.status, method).toBe(405);
+      expect(response.headers.get('allow')).toBe('GET, HEAD');
+      expect(response.headers.get('strict-transport-security')).toBe('max-age=31536000');
+    }
+    expect(await call('/about/', 'GET')).toBeUndefined();
+    expect(await call('/about/', 'HEAD')).toBeUndefined();
+    expect(await call('/api/waitlist', 'POST')).toBeUndefined();
   });
 });
 

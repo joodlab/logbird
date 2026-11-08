@@ -1,13 +1,13 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { siteConfigFrom } from '../src/env';
-import { findSourcePhrases, repositoryLinks, SOURCE_OPEN_PHRASES, SOURCE_STATE_PHRASES } from '../src/lib/source-state';
+import { findSourcePhrases, repositoryReferences, SOURCE_OPEN_PHRASES, SOURCE_STATE_PHRASES } from '../src/lib/source-state';
 import { loadPublicEnv } from './public-env';
 
 /**
  * Checks the prerendered HTML against the repository's availability state (WEB_GITHUB_PUBLIC), resolved the same way
  * as the build. A public build must not say the source is still closed. A private build must say so somewhere, and must
- * not say it's already open ("we released it", "Self-host it"), nor link to WEB_GITHUB_URL under any label.
+ * not say it's already open ("we released it", "Self-host it"), nor reference WEB_GITHUB_URL anywhere (links, src, JSON-LD, code, text; any URL form).
  *
  *   pnpm build && pnpm check:source-state
  */
@@ -29,7 +29,7 @@ for (const page of pages) {
   closed.push(...mentions(html, where, SOURCE_STATE_PHRASES));
   open.push(...mentions(html, where, SOURCE_OPEN_PHRASES));
   if (GITHUB_URL) {
-    links.push(...repositoryLinks(html, GITHUB_URL).map((href) => `${where}: href="${href}"`));
+    links.push(...repositoryReferences(html, GITHUB_URL).map((reference) => `${where}: ${reference}`));
   }
 }
 if (GITHUB_PUBLIC && closed.length) {
@@ -39,11 +39,11 @@ if (!GITHUB_PUBLIC && open.length) {
   throw new Error(`The repository is private, but pages say the source is already open:\n${open.join('\n')}`);
 }
 if (!GITHUB_PUBLIC && links.length) {
-  throw new Error(`The repository is private, but pages link to it (WEB_GITHUB_URL):\n${links.join('\n')}`);
+  throw new Error(`The repository is private, but pages reference it (WEB_GITHUB_URL):\n${links.join('\n')}`);
 }
 if (!(GITHUB_PUBLIC || closed.length)) {
   throw new Error('The repository is private, but no page says so. Check the GITHUB_PUBLIC gates.');
 }
 console.log(
-  `source-state: ${GITHUB_PUBLIC ? 'public' : 'private'} build, ${pages.length} pages, ${closed.length} source-closed and ${open.length} source-open mentions, ${GITHUB_URL ? `${links.length} repository links` : 'no WEB_GITHUB_URL to check links against'}.`,
+  `source-state: ${GITHUB_PUBLIC ? 'public' : 'private'} build, ${pages.length} pages, ${closed.length} source-closed and ${open.length} source-open mentions, ${GITHUB_URL ? `${links.length} repository references` : 'no WEB_GITHUB_URL to check links against'}.`,
 );

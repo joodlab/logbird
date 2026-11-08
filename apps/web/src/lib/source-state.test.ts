@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { quietHrefWarnings, renderPages } from '../test/render-pages';
-import { findSourcePhrases, repositoryLinks, SOURCE_OPEN_PHRASES, SOURCE_STATE_PHRASES } from './source-state';
+import { findSourcePhrases, repositoryReferences, SOURCE_OPEN_PHRASES, SOURCE_STATE_PHRASES } from './source-state';
 
 const PUBLIC_ENV = { WEB_GITHUB_PUBLIC: 'true', WEB_GITHUB_URL: 'https://github.example.test/acme/logbird' };
 const open = (html: string) => findSourcePhrases(html, SOURCE_OPEN_PHRASES).map((match) => match.label);
@@ -78,6 +78,8 @@ describe('source-state matching', () => {
     expect(open('<p>The code is <em>released</em> <strong>under MIT</strong>.</p>')).toEqual(['released (the source)']);
     expect(open('<p>Logbird is released <strong>under MIT</strong>.</p>')).toEqual(['released (the source)']);
     expect(open('<p><em>Self-host</em>\n  <span>it</span></p>')).toEqual(['Self-host it']);
+    // Restored round-2 regression: the key word is a link.
+    expect(open('<p><a href="/self-hosting">Self-host</a>\n  <span>it</span></p>')).toEqual(['Self-host it']);
     expect(closed('<p>The repository <!-- note --> <b>is public</b> soon? No: it <i>isn&#39;t public</i>.</p>')).toEqual([
       'repository is public',
       "isn't public",
@@ -108,6 +110,32 @@ describe('source-state matching', () => {
     expect(open('<span class="x"><svg aria-hidden="true"><path d="M0"/></svg>Source on <b>GitHub</b> — coming soon</span>')).toEqual([]);
   });
 
+  it('catches claims whose key word is an inline link (the joined pass)', () => {
+    // Sol's examples.
+    expect(open('<p><a href="/self-hosting">Self-host</a> it</p>')).toEqual(['Self-host it']);
+    expect(open('<p>We have <a href="/changelog">released</a> Logbird under MIT.</p>')).toEqual(['released (the source)']);
+    expect(closed('<p>Logbird is coming <a href="/roadmap">soon</a>.</p>')).toEqual(['coming soon']);
+    // Claude's examples.
+    expect(open('<p><a href="/self-hosting">Self-host</a> it today.</p>')).toEqual(['Self-host it']);
+    expect(open('<p>We have <a href="/open-source">released</a> the source under MIT.</p>')).toEqual(['released (the source)']);
+    // Markup-split, with a button and nested inline markup.
+    expect(open('<p>The source is <button type="button"><b>released</b></button> under MIT.</p>')).toEqual(['released (the source)']);
+    expect(closed('<p>The <a href="/x"><em>repository</em> opens</a> next month.</p>')).toEqual(['repository opens']);
+    // Either pass is enough; the reported count is the larger one, not the sum.
+    expect(findSourcePhrases('<p><a href="/s">Self-host</a> it, or Self-host it.</p>', SOURCE_OPEN_PHRASES)).toEqual([
+      { label: 'Self-host it', count: 2 },
+    ]);
+  });
+
+  it('never joins across paragraphs, list items, cells or attributes, in either pass', () => {
+    expect(closed('<p>Logbird is coming</p><p><a href="/x">Soon</a> after launch, regions.</p>')).toEqual([]);
+    expect(closed('<li><a href="/a">Webhooks are coming</a></li><li><a href="/b">soon: none</a></li>')).toEqual([]);
+    expect(open('<p>Read how to <a href="/self-hosting">Self-host</a></p><p>it is a guide.</p>')).toEqual([]);
+    expect(closed('<td><a href="/a">coming</a></td><td>soon</td>')).toEqual([]);
+    // The placeholder stays legitimate in both passes when the label isn't a link.
+    expect(open('<p>Source on GitHub — coming soon.</p>')).toEqual([]);
+  });
+
   it('normalizes typographic apostrophes and quotes', () => {
     expect(closed('The code isn’t public yet.')).toEqual(["isn't public"]);
     expect(closed('The code isn&rsquo;t public yet.')).toEqual(["isn't public"]);
@@ -118,9 +146,9 @@ describe('source-state matching', () => {
   });
 });
 
-describe('repository links', () => {
+describe('repository references', () => {
   const repository = 'https://github.example.test/acme/logbird';
-  it('finds every href to the repository, whatever its label', () => {
+  it('finds every reference to the repository, in any URL form and any place', () => {
     const html = [
       `<a href="${repository}">Code</a>`,
       `<a href="${repository}/">Code</a>`,
@@ -129,13 +157,35 @@ describe('repository links', () => {
       `<a href="HTTPS://GITHUB.EXAMPLE.TEST/acme/logbird?tab=readme">Readme</a>`,
       `<a href="${repository}#readme">Readme</a>`,
       `<a href="${repository}/issues?q=a&amp;b">Issues</a>`,
+      // Other schemes and forms.
+      '<a href="http://github.example.test/acme/logbird">http</a>',
+      '<a href="//github.example.test/acme/logbird">protocol-relative</a>',
+      '<a href="https://www.github.example.test/acme/logbird">www</a>',
+      // Other places: src, action, meta, JSON-LD, code and plain text.
+      '<img src="https://github.example.test/acme/logbird/raw/main/logo.png"/>',
+      '<form action="https://github.example.test/acme/logbird/issues/new"></form>',
+      '<meta property="og:see_also" content="https://github.example.test/acme/logbird"/>',
+      '<script type="application/ld+json">{"sameAs":["https:\\/\\/github.example.test\\/acme\\/logbird"]}</script>',
+      '<pre><code>git clone https://github.example.test/acme/logbird.git</code></pre>',
+      '<p>Clone github.example.test/acme/logbird and run it.</p>',
     ].join('');
-    expect(repositoryLinks(html, repository)).toHaveLength(7);
-    expect(repositoryLinks(html, `${repository}/`)).toHaveLength(7);
+    expect(repositoryReferences(html, repository)).toHaveLength(16);
+    expect(repositoryReferences(html, `${repository}/`)).toHaveLength(16);
+    expect(repositoryReferences(html, 'http://www.github.example.test/acme/logbird.git')).toHaveLength(16);
   });
-  it('ignores other repositories and non-link mentions', () => {
-    expect(repositoryLinks(`<a href="${repository}-other">x</a><a href="https://github.example.test/acme">x</a>`, repository)).toEqual([]);
-    expect(repositoryLinks(`<p>${repository}</p><meta content="${repository}"/>`, repository)).toEqual([]);
+  it('ignores other repositories, owners and hosts', () => {
+    expect(
+      repositoryReferences(
+        [
+          `<a href="${repository}-other">x</a>`,
+          '<a href="https://github.example.test/acme">owner</a>',
+          '<a href="https://github.example.test/acme/logbirds">longer</a>',
+          '<a href="https://notgithub.example.test/acme/logbird">other host</a>',
+          '<p>acme/logbird on its own</p>',
+        ].join(''),
+        repository,
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -165,7 +215,7 @@ describe('rendered pages', () => {
       { WEB_GITHUB_URL: PUBLIC_ENV.WEB_GITHUB_URL },
     );
     expect(pages.flatMap(({ path, html }) => open(html).map((label) => `${path}: ${label}`))).toEqual([]);
-    expect(pages.flatMap(({ path, html }) => repositoryLinks(html, PUBLIC_ENV.WEB_GITHUB_URL).map((href) => `${path}: ${href}`))).toEqual([]);
+    expect(pages.flatMap(({ path, html }) => repositoryReferences(html, PUBLIC_ENV.WEB_GITHUB_URL).map((href) => `${path}: ${href}`))).toEqual([]);
     expect(pages.filter(({ html }) => closed(html).length).length).toBeGreaterThan(0);
     // Third-party quotation markers appear only on comparison pages, and only around double-quoted passages.
     const marked = pages.flatMap(({ path, html }) =>
@@ -185,6 +235,6 @@ describe('rendered pages', () => {
     );
     expect(pages.flatMap(({ path, html }) => closed(html).map((label) => `${path}: ${label}`))).toEqual([]);
     // Positive control for the link check: every page's footer links the repository once it's public.
-    expect(pages.every(({ html }) => repositoryLinks(html, PUBLIC_ENV.WEB_GITHUB_URL).length > 0)).toBe(true);
+    expect(pages.every(({ html }) => repositoryReferences(html, PUBLIC_ENV.WEB_GITHUB_URL).length > 0)).toBe(true);
   });
 });

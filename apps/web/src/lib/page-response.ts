@@ -3,6 +3,8 @@ import { contentSecurityPolicy } from './security-headers';
 /** The parts of `.output/csp.json` (src/lib/csp.ts) the Node server reads. */
 export interface PageManifest {
   pages: Record<string, { file: string; scriptHashes: string[] }>;
+  /** Exact, case-sensitive URL paths of the files Nitro's static handler serves (src/lib/csp.ts). */
+  publicFiles: string[];
 }
 
 export type PageDecision =
@@ -13,12 +15,16 @@ export type PageDecision =
   /** A method other than GET/HEAD outside /api/: 405, as static files can't take it (and the renderer mustn't). */
   | { kind: 'method-not-allowed' };
 
-/**
- * Files written into `.output/public` after Nitro listed its static assets: Nitro doesn't know them, so a request for
- * one would reach the on-demand renderer. Browsers never ask for them directly; they are 404s here as on Cloudflare,
- * which never serves `_headers`.
- */
-const POST_BUILD_FILE = /(?:^|\/)_(?:headers|redirects)$|\.(?:br|gz)$/;
+// The manifest's public files as a Set, built once per manifest object.
+const publicSets = new WeakMap<PageManifest, ReadonlySet<string>>();
+const publicSet = (manifest: PageManifest) => {
+  let set = publicSets.get(manifest);
+  if (!set) {
+    set = new Set(manifest.publicFiles);
+    publicSets.set(manifest, set);
+  }
+  return set;
+};
 
 /**
  * How the Node server answers a request, mirroring Cloudflare's static assets (wrangler.jsonc):
@@ -26,23 +32,22 @@ const POST_BUILD_FILE = /(?:^|\/)_(?:headers|redirects)$|\.(?:br|gz)$/;
  * - `/api/…` (the raw path, exactly as Nitro routes it) goes to Nitro, whose `/api/**` routes answer JSON only
  *   (server/waitlist.ts, server/api-not-found.ts);
  * - a prerendered page, by its URL or its file name, is served with its own hashed policy;
- * - an existing build-time public file goes to Nitro's static handler, but only for a canonical path, the one key that
- *   handler looks up (no `%2F`/`%5C`, `.`/`..` segments, `//` or backslashes);
- * - everything else (unknown, dotted, escaped, traversing or post-build paths) is 404.html with status 404 and the 404
- *   page's policy. Nothing reaches the on-demand renderer, whose inline scripts no build-time hash covers.
+ * - a build-time public file goes to Nitro's static handler, but only when the canonical path (no `%2F`/`%5C`,
+ *   `.`/`..` segments, `//` or backslashes) is in the manifest's case-exact list: the key that handler looks up.
+ *   Filesystem existence is never consulted, since Windows and macOS ignore case (`/ASSETS/app.js`);
+ * - everything else (unknown, dotted, escaped, traversing, case-variant or post-build paths) is 404.html with status
+ *   404 and the 404 page's policy. Nothing reaches the on-demand renderer, whose inline scripts no build-time hash
+ *   covers.
  */
 export function decidePage({
   method,
   pathname,
   manifest,
-  isPublicFile,
 }: {
   method: string;
   /** The raw request path, still percent-encoded. */
   pathname: string;
   manifest: PageManifest;
-  /** True when `.output/public` has a regular file at this decoded, canonical path. */
-  isPublicFile: (decodedPath: string) => boolean;
 }): PageDecision {
   const notFound = manifest.pages['/404'];
   if (!notFound) {
@@ -89,7 +94,7 @@ export function decidePage({
   if (byFile) {
     return page(byFile, 200);
   }
-  if (!POST_BUILD_FILE.test(path) && isPublicFile(path)) {
+  if (publicSet(manifest).has(path)) {
     return { kind: 'pass' };
   }
   return page(notFound, 404);

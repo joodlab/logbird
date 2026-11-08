@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 import { ASSET_CACHE, contentSecurityPolicy, MEDIA_CACHE, securityHeaders } from './security-headers';
 
 /**
@@ -19,7 +19,16 @@ import { ASSET_CACHE, contentSecurityPolicy, MEDIA_CACHE, securityHeaders } from
 export interface CspManifest {
   /** URL path (no trailing slash; `/` for the home page, `/404` for the not-found page) → its HTML file and hashes. */
   pages: Record<string, { file: string; scriptHashes: string[] }>;
+  /**
+   * Every other file a request may fetch, as exact, case-sensitive URL paths (`/assets/index-abc.js`): what Nitro's
+   * static handler serves. The Node server and serve-static admit a public file only by this list, never by filesystem
+   * existence, which ignores case on Windows and macOS (`/ASSETS/app.js` would otherwise reach Nitro's renderer).
+   */
+  publicFiles: string[];
 }
+
+/** Written after Nitro listed its assets (prerendered HTML, compress-html, this module), or never served (`_headers`). */
+export const NOT_A_PUBLIC_FILE = /\.html$|\.(?:br|gz)$|(?:^|\/)_(?:headers|redirects)$/;
 
 export const CSP_MANIFEST_FILE = 'csp.json';
 export const NOT_FOUND_PAGE = '/404';
@@ -74,7 +83,12 @@ export async function buildCspManifest(publicDir: string): Promise<CspManifest> 
   if (!pages[NOT_FOUND_PAGE]) {
     throw new Error(`csp: no ${NOT_FOUND_PAGE}.html in ${publicDir}. Run the build first.`);
   }
-  return { pages };
+  const publicFiles = (await readdir(publicDir, { recursive: true, withFileTypes: true }))
+    .filter((entry) => entry.isFile())
+    .map((entry) => `/${relative(publicDir, resolve(entry.parentPath, entry.name)).replaceAll('\\', '/')}`)
+    .filter((path) => !NOT_A_PUBLIC_FILE.test(path))
+    .sort();
+  return { pages, publicFiles };
 }
 
 /** The policy one page is served with. */

@@ -7,16 +7,19 @@
  *
  *   PORT=4620 tsx scripts/serve-static.ts
  */
-import { createReadStream, statSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { extname, resolve, sep } from 'node:path';
+import { extname, resolve } from 'node:path';
 import { CSP_MANIFEST_FILE, type CspManifest } from '../src/lib/csp';
 import { decidePage } from '../src/lib/page-response';
 import { ASSET_CACHE, MEDIA_CACHE, PAGE_CACHE, securityHeaders } from '../src/lib/security-headers';
 
 const root = resolve('.output/public');
 const manifest = JSON.parse(await readFile(resolve('.output', CSP_MANIFEST_FILE), 'utf8')) as CspManifest;
+if (!Array.isArray(manifest.publicFiles)) {
+  throw new Error('.output/csp.json predates the public-file list: rebuild (pnpm build ends with scripts/csp.ts).');
+}
 const port = Number(process.env.PORT ?? 4620);
 const types: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -37,19 +40,14 @@ const types: Record<string, string> = {
 async function isFile(path: string) {
   return (await stat(path).catch(() => null))?.isFile() ?? false;
 }
-function isPublicFile(decodedPath: string) {
-  const file = resolve(root, `.${decodedPath}`);
-  return file.startsWith(root + sep) && (statSync(file, { throwIfNoEntry: false })?.isFile() ?? false);
-}
-
 createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost');
-  const decision = decidePage({ method: request.method ?? 'GET', pathname: url.pathname, manifest, isPublicFile });
+  const decision = decidePage({ method: request.method ?? 'GET', pathname: url.pathname, manifest });
   if (decision.kind === 'method-not-allowed') {
     response.writeHead(405, { ...securityHeaders, Allow: 'GET, HEAD' }).end();
     return;
   }
-  const notFound = decidePage({ method: 'GET', pathname: '/no-such-page', manifest, isPublicFile: () => false });
+  const notFound = decidePage({ method: 'GET', pathname: '/__no-such-page__', manifest });
   // `pass` is a canonical public file or /api/*; there is no /api here, so that's the 404 page.
   const page = decision.kind === 'page' ? decision : url.pathname.startsWith('/api/') ? notFound : null;
   const found = page && page.kind === 'page' ? { file: resolve(root, page.file), status: page.status, policy: page.policy } : null;

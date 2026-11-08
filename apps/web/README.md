@@ -90,18 +90,23 @@ OG cards (`scripts/og.ts`, Satori + Resvg, local fonts) render one 1200×630 PNG
   ready pages and published posts are held to the full SEO score, `is-crawlable` included, so an accidental `noindex`
   fails; pages that stay noindex (unready pages, 404) keep `seo-content` (`src/lib/lighthouse-score.ts`).
 - `check:source-state` matches its phrase lists (`src/lib/source-state.ts`) case-insensitively, one text unit at a
-  time: a paragraph, list item, heading, cell, link, button or attribute value is its own unit, so a match can't run
-  from one into the next, while inline markup inside a sentence (`<b>`, `<em>`, `<span>`…) doesn't split it. Entities
-  are decoded and typographic apostrophes and quotes normalized. The public link label "Source on GitHub" counts as
-  "open" unless the placeholder's "— coming soon" follows it in the same unit. Quotation marks exempt nothing; only
-  text marked `data-third-party-quote` is left out, and only comparison pages set it (`<Rich thirdPartyQuotes>` on the
-  competitor column and sources, for quotes from that product's docs). With `WEB_GITHUB_URL` set, a private build
-  also fails on any `href` to the repository, whatever its label.
+  time, in two passes; a phrase counts if either pass finds it. Paragraphs, list items, headings, cells and attribute
+  values are always separate units, so no match runs from one into the next, and inline markup (`<b>`, `<em>`,
+  `<span>`…) never splits a sentence. The first pass also ends a unit at every link or button, so a leaked "Source on
+  GitHub" link label is caught even when unrelated text after it reads "— coming soon"; the second joins inline links
+  into their sentence, so a claim whose key word is a link (`<a>Self-host</a> it`, `We have <a>released</a> the
+  source`, `coming <a>soon</a>`) is caught. Entities are decoded and typographic apostrophes and quotes normalized.
+  Quotation marks exempt nothing; only text marked `data-third-party-quote` is left out, and only comparison pages set
+  it (`<Rich thirdPartyQuotes>` on the competitor column and sources, for quotes from that product's docs). With
+  `WEB_GITHUB_URL` set, a private build also fails on any reference to the repository: a link under any label, `src`,
+  `action`, meta and JSON-LD values, code blocks and plain text, in any form (`https:`, `http:`, `//`, `www.`, bare
+  host, `.git`, any case).
 - `check:live` fetches every page and a set of unknown, dotted, escaped and API paths from `BASE_URL`, and fails unless
   each HTML response carries one CSP without `'unsafe-inline'` that covers that body's inline scripts, plus nosniff,
-  HSTS, referrer and permissions policies; unknown paths must be the 404 page (or redirect to a prerendered page), and
-  unknown `/api/*` paths a JSON 404 (`NO_API=1` for `serve:static`). Run it against `pnpm start`, `pnpm serve:static`,
-  `wrangler dev` and a deploy.
+  HSTS, referrer and permissions policies. Unknown paths, including case variants of real files and pages
+  (`/ROBOTS.TXT`, `/About/index.html`), must be the 404 page; the only redirect allowed is the documented Cloudflare
+  one below, and only to `/about/`. Unknown `/api/*` paths must be a JSON 404 (`NO_API=1` for `serve:static`), and a
+  POST to a page path an empty 405. Run it against `pnpm start`, `pnpm serve:static`, `wrangler dev` and a deploy.
 - `scripts/capture.mjs` takes 1440×900 and 390×844 stills in both themes (`PATHS`, `OUT_DIR`, `VIDEO=1` for scroll clips)
   with Playwright's bundled Chromium only, and fails on console errors or failed requests.
 
@@ -130,18 +135,23 @@ changes with every build) and writes:
 - `.output/csp.json`: the same hashes for `pnpm start` and `pnpm serve:static`, which route requests by the same rules
   (`src/lib/page-response.ts`). `server/static-pages.ts` serves each prerendered page with its policy and the other
   security headers; `/api/*` goes to Nitro, where every route answers JSON (`/api/waitlist`, and a JSON 404 for the
-  rest); a build-time public file goes to Nitro's static handler, but only for a canonical path, the one key that
-  handler looks up. Every other GET/HEAD is 404.html with status 404 and the 404 policy: unknown and dotted paths,
-  escaped separators (`%2F`, `%5C`), `.`/`..` segments, `//`, and files written after Nitro listed its assets
-  (`*.br`, `*.gz`, `_headers`). Other methods outside `/api/` get 405. So no page or 404 is rendered on demand.
+  rest); a build-time public file goes to Nitro's static handler, but only when its canonical path is in the manifest's
+  case-exact list of public files (`publicFiles`), the key that handler looks up. The file system is never asked:
+  Windows and macOS ignore case, so `/ASSETS/app.js` would exist there while Nitro has no such asset. Every other
+  GET/HEAD is 404.html with status 404 and the 404 policy: unknown and dotted paths, case variants, escaped separators
+  (`%2F`, `%5C`), `.`/`..` segments, `//`, and files written after Nitro listed its assets (`*.br`, `*.gz`, `_headers`).
+  Other methods outside `/api/` get 405 (`server/method-guard.ts`, on every preset). So no page or 404 is rendered on
+  demand.
 
 On Cloudflare, `run_worker_first` sends only `/api/*` to the Worker; the static asset router answers everything else,
 with `not_found_handling: "404-page"` serving 404.html under the `/*` rule. Checked locally with
 `npx wrangler@4.152.0 dev --config wrangler.jsonc --local --port 4621` on a `build:cloudflare` output (2026-11-08):
-`check:live` passes for all 30 responses. Unknown, dotted and escaped paths get the static 404 with its hashed policy,
-none reaches the Worker, and unknown `/api/*` paths get the JSON 404. One difference from the Node server: Cloudflare
-decodes `%2F` and redirects `/x%2f..%2fabout%2findex.html` to `/about/`, the static About page with its own policy.
-Run `check:live` against the real deployment before indexing.
+`check:live` passes for all 37 responses. Unknown, dotted, escaped and case-variant paths get the static 404 with its
+hashed policy (the asset router is case-sensitive), none reaches the Worker, and unknown `/api/*` paths get the JSON
+404. A POST, PUT or DELETE to a page path gets an empty 405 from the asset router itself, before the Worker;
+`server/method-guard.ts` is the Worker's own guard should that routing change. One difference from the Node server:
+Cloudflare decodes `%2F` and redirects `/x%2f..%2fabout%2findex.html` to `/about/`, the static About page with its own
+policy. Run `check:live` against the real deployment before indexing.
 
 One file serves many URLs (contact/index.html for `?status=` and `?interest=`, 404.html for every unknown path), so
 the page rendered at each of those URLs must equal the file the browser hydrates. The waitlist form applies `status`

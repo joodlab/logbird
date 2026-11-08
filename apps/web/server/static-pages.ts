@@ -1,6 +1,5 @@
-import { statSync } from 'node:fs';
 import { access, readFile } from 'node:fs/promises';
-import { dirname, resolve, sep } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineEventHandler } from 'nitro/h3';
 import { decidePage, type PageManifest } from '../src/lib/page-response';
@@ -24,7 +23,13 @@ const publicDir = resolve(outputDir, 'public');
 let manifest: Promise<PageManifest> | undefined;
 function loadManifest() {
   manifest ??= readFile(resolve(outputDir, 'csp.json'), 'utf8')
-    .then((text) => JSON.parse(text) as PageManifest)
+    .then((text) => {
+      const parsed = JSON.parse(text) as PageManifest;
+      if (!Array.isArray(parsed.publicFiles)) {
+        throw new Error('csp.json predates the public-file list');
+      }
+      return parsed;
+    })
     .catch((error: unknown) => {
       manifest = undefined;
       throw new Error(`Missing ${resolve(outputDir, 'csp.json')}: run pnpm build (it ends with scripts/csp.ts) before pnpm start.`, {
@@ -32,19 +37,6 @@ function loadManifest() {
       });
     });
   return manifest;
-}
-
-/** A regular file inside .output/public at this decoded URL path (never outside it). */
-function isPublicFile(decodedPath: string) {
-  const file = resolve(publicDir, `.${decodedPath}`);
-  if (!file.startsWith(publicDir + sep)) {
-    return false;
-  }
-  try {
-    return statSync(file).isFile();
-  } catch {
-    return false;
-  }
 }
 
 const exists = (file: string) =>
@@ -62,7 +54,6 @@ export default defineEventHandler(async (event) => {
     method: event.req.method,
     pathname: event.url.pathname,
     manifest: await loadManifest(),
-    isPublicFile,
   });
   if (decision.kind === 'pass') {
     return;
