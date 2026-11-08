@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { auditNamespace, prisma, storeAuditEvent, withProjectLock } from '@logbird/database';
 import { expect, it, vi } from 'vitest';
 import { AUTH_AUDIT_GLOBAL_LIMIT, authEmailHash, flushAuthAuditBudgets, flushFailedSignIns, stageFailedSignIn } from './auth-failures';
-import { claimAuditEvents, deliverOutboxEvent, startAuditDrainer } from './outbox-delivery';
+import { auditDrainStatus, claimAuditEvents, deliverOutboxEvent, drainAuditOutbox, startAuditDrainer } from './outbox-delivery';
 
 it('persists across restart, independently retries destinations, and never changes an ambiguous payload', async () => {
   const prefix = `qa-outbox-${randomUUID()}`;
@@ -219,9 +219,13 @@ it('delivers through local ingest against real ClickHouse independently per work
   const { ingest } = await import('./ingest');
   const { clickhouse } = await import('./clickhouse');
   const { purgeProject } = await import('@logbird/clickhouse');
-  const streams = [`ws:qa-drainer-${randomUUID()}`, `ws:qa-drainer-${randomUUID()}`];
+  const orgs = [randomUUID(), randomUUID()];
+  const streams = orgs.map((org) => `ws:${org}`);
   const ids = [randomUUID(), randomUUID()];
   try {
+    await prisma.organization.createMany({
+      data: orgs.map((id) => ({ id, name: 'QA Durable Delivery', slug: id, createdAt: new Date() })),
+    });
     for (let i = 0; i < 2; i++)
       await storeAuditEvent(streams[i] ?? '', { id: ids[i], action: 'auth.signed_out', description: 'QA durable delivery' });
     await Promise.all(
@@ -251,5 +255,63 @@ it('delivers through local ingest against real ClickHouse independently per work
   } finally {
     for (const stream of streams) await purgeProject(clickhouse, stream);
     await prisma.auditOutbox.deleteMany({ where: { id: { in: ids } } });
+    await prisma.organization.deleteMany({ where: { id: { in: orgs } } });
+  }
+});
+
+it('quarantines deleted-workspace evidence after bounded real-ingest failures while healthy workspaces deliver', async () => {
+  const { ingest } = await import('./ingest');
+  const { clickhouse } = await import('./clickhouse');
+  const { purgeProject } = await import('@logbird/clickhouse');
+  const orgs = [randomUUID(), randomUUID()];
+  const streams = orgs.map((org) => `ws:${org}`);
+  const ids = [randomUUID(), randomUUID(), randomUUID()];
+  const secret = 'QA event description must not enter delivery diagnostics';
+  const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    await prisma.organization.createMany({
+      data: orgs.map((id) => ({ id, name: 'QA Deleted Workspace Delivery', slug: id, createdAt: new Date() })),
+    });
+    await storeAuditEvent(streams[0] ?? '', { id: ids[0], action: 'organization.updated', description: secret });
+    await prisma.$transaction(async (tx) => {
+      await tx.organization.delete({ where: { id: orgs[0] } });
+      await storeAuditEvent(streams[0] ?? '', { id: ids[1], action: 'organization.deleted', description: secret }, tx);
+    });
+    await storeAuditEvent(streams[1] ?? '', { id: ids[2], action: 'organization.updated' });
+    const now = new Date(Date.now() + 1000);
+    // Each sweep claims at most two rows; failed destinations cannot monopolize the next sweep.
+    await drainAuditOutbox(ingest, now);
+    await drainAuditOutbox(ingest, now);
+    expect((await prisma.auditOutbox.findUniqueOrThrow({ where: { id: ids[2] } })).deliveredAt).not.toBeNull();
+
+    for (const id of ids.slice(0, 2)) {
+      for (let attempt = 1; attempt < 10; attempt++) await deliverOutboxEvent(id, ingest, new Date(+now + attempt * 7_200_000));
+      expect(await prisma.auditOutbox.findUniqueOrThrow({ where: { id } })).toMatchObject({
+        attempts: 10,
+        deliveredAt: null,
+        lastError: 'audit_storage_unavailable',
+        quarantinedAt: expect.any(Date),
+      });
+      expect(await claimAuditEvents(new Date(+now + 100 * 7_200_000), id)).toHaveLength(0);
+    }
+    expect(await auditDrainStatus()).toMatchObject({ undelivered: 2, quarantined: 2 });
+    expect(await prisma.ingestReceipt.count({ where: { projectId: streams[0] } })).toBe(0);
+    const diagnostics = warnings.mock.calls.map(([line]) => JSON.parse(String(line))).filter((row) => row.event === 'audit.delivery_failed');
+    expect(diagnostics).toHaveLength(20);
+    expect(diagnostics.every((row) => row.lastError === 'audit_storage_unavailable')).toBe(true);
+    expect(JSON.stringify(diagnostics)).not.toContain(secret);
+    const healthyRows = await (
+      await clickhouse.query({
+        query: 'SELECT count() n FROM events WHERE project_id={p:String}',
+        query_params: { p: streams[1] },
+        format: 'JSONEachRow',
+      })
+    ).json<{ n: number }>();
+    expect(Number(healthyRows[0]?.n)).toBe(1);
+  } finally {
+    warnings.mockRestore();
+    for (const stream of streams) await purgeProject(clickhouse, stream);
+    await prisma.auditOutbox.deleteMany({ where: { id: { in: ids } } });
+    await prisma.organization.deleteMany({ where: { id: { in: orgs } } });
   }
 });
