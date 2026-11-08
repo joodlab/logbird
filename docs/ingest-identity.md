@@ -101,11 +101,14 @@ plus confirmation adds six. Confirmation and expiry also hold their row locks fo
 more round trip, until COMMIT. The local timings in #111 do not measure a remote
 database's round-trip time. The transaction is bounded at 60 seconds for both the
 connection wait and execution (`RECEIPT_PROBE_TRANSACTION`), not Prisma's 2 s/5 s
-batch defaults. These were unbounded plain statements before. 60 seconds matches the
-claim lease and ingest ClickHouse socket budget. It also lets a confirmation after an
-acknowledged ClickHouse write wait behind a sweep batch (at most about six seconds)
-instead of being rolled back, which would report a stored write as failed and force
-recovery.
+batch defaults. These were unbounded plain statements before. A confirmation after an
+acknowledged ClickHouse write mostly waits on a saturated connection pool, or runs
+slowly for a large batch. The sweep never locks unconfirmed claims; its row
+contention applies to targeted expiry. Rolling such a confirmation back would report
+a stored write as failed and force recovery, so the bound is generous: 60 seconds,
+the same order as the ingest ClickHouse socket budget. A late confirmation stays
+safe because the request still holds the shared project lock, and recovery needs the
+exclusive one.
 Minute-sweep batches use the same guard plus their five-second timeout, so they walk
 a `confirmedAt`-ordered index. The `receipt-plan-guard` real-PG test plans the
 shipped SQL against an owned temp table that shadows `IngestReceipt` with fresh,

@@ -34,9 +34,12 @@ export const RECEIPT_SEEK_GUARD = Prisma.sql`SELECT set_config('enable_seqscan',
 /**
  * Bounds for the guard's transaction (BEGIN, guard, probe, COMMIT). Prisma's 2 s queue / 5 s execution defaults
  * must not apply: before the guard these were plain statements that queued for a connection and waited on row
- * locks without a deadline. A confirmation after an acknowledged ClickHouse write can wait behind a sweep batch
- * (at most about 6 s per batch); rolling it back would report a stored write as failed and force recovery.
- * 60 s matches the claim lease and the ingest ClickHouse socket budget the request already lives within.
+ * locks without a deadline. A confirmation after an acknowledged ClickHouse write mostly waits on a saturated
+ * pool queue or runs slowly for a large batch (the sweep never locks unconfirmed claims; its row contention
+ * applies to targeted expiry). Rolling such a confirmation back would report a stored write as failed and force
+ * recovery. 60 s is a generous bound of the same order as the ingest ClickHouse socket budget. A late
+ * confirmation stays safe because the request still holds the shared project lock, so recovery, which needs
+ * the exclusive lock, cannot run concurrently.
  */
 export const RECEIPT_PROBE_TRANSACTION = { maxWait: 60_000, timeout: 60_000 } as const;
 async function guarded<T>(statement: Prisma.Sql) {

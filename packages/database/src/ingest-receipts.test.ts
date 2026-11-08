@@ -45,11 +45,15 @@ it('every per-id probe runs right after its transaction-local plan guard, with e
   await confirmIngestReceipts('project', [{ eventId: 'a', fingerprint: 'v1:x', receivedAt: new Date(), eventAt: new Date() }]);
   await expireIngestReceipts('project', ['a'], new Date());
   expect(transaction).toHaveBeenCalledTimes(3);
-  // Batch positions: Prisma executes batch entries sequentially in one transaction, so the guard (first) is
-  // planned before the probe (second). The mock cannot prove that execution order; the real-PG plan test does.
+  // Batch positions (identity, not deep equality): Prisma executes batch entries sequentially in one
+  // transaction, so the guard (first) is planned before the probe (second). The mock proves positions only;
+  // the real-PG plan test covers execution.
   for (const [n, [batch, options]] of transaction.mock.calls.entries()) {
-    expect(batch).toEqual([execute.mock.results[n]?.value, query.mock.results[n]?.value]);
-    expect(options).toEqual(RECEIPT_PROBE_TRANSACTION);
+    expect(batch).toHaveLength(2);
+    expect(batch[0]).toBe(execute.mock.results[n]?.value);
+    expect(batch[1]).toBe(query.mock.results[n]?.value);
+    expect(batch[0]).not.toBe(batch[1]);
+    expect(options).toBe(RECEIPT_PROBE_TRANSACTION);
   }
   expect(execute).toHaveBeenCalledTimes(3);
   for (const [sql] of execute.mock.calls)
