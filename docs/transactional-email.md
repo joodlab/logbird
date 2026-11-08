@@ -47,7 +47,7 @@ the new account's port policy when moving a server between owners.
 
 ## Postmark
 
-Owner decision (2026-11-08, [decisions](decisions.md)): hosted Logbird uses **Postmark over SMTP**. Nothing below
+Architecture decision (2026-11-08, [decisions](decisions.md)): hosted Logbird uses **Postmark over SMTP**. Nothing below
 has been configured yet; the live proof follows with hosting. Provider facts were taken from Postmark's public
 SMTP and sender documentation; re-check them in the account when configuring.
 
