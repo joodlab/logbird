@@ -31,7 +31,7 @@ it('atomically reserves terminal evidence, recovers write failures/crashes, and 
       userId: `qa-export-${id}`,
       workspaceId: `qa-export-${id}`,
       projectId: project.id,
-      stream: `ws:qa-export-${id}`,
+      stream: `ws:${organizationId}`,
       requested: { id: `${id}-requested`, action: 'export.requested' },
       unknown: { id: `${id}-outcome`, action: 'export.outcome_unknown' },
     };
@@ -120,7 +120,7 @@ it('atomically reserves terminal evidence, recovers write failures/crashes, and 
     expect(delivered).toContain('export.completed');
   } finally {
     vi.restoreAllMocks();
-    await prisma.auditOutbox.deleteMany({ where: { namespace, stream: { in: ids.map((id) => `ws:qa-export-${id}`) } } });
+    await prisma.auditOutbox.deleteMany({ where: { namespace, stream: `ws:${organizationId}` } });
     await prisma.exportLease.deleteMany({ where: { namespace, id: { in: ids } } });
     await prisma.organization.delete({ where: { id: organizationId } });
   }
