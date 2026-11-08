@@ -2,8 +2,8 @@ import type { EventInput } from '@logbird/sdk';
 import { type Action, businesses, hospitalityActions, ledgerActions, support, users } from './catalog';
 
 /**
- * Source and integration names. `neutral` (the default) uses fictional names that are safe for public screenshots;
- * `joodcms` keeps the original names for the JoodCMS demo (`pnpm demo` passes it).
+ * Both profiles use fictional demo source and integration names. `neutral` is the default;
+ * `joodcms` selects another fictional naming set for `pnpm demo`.
  */
 export const SEED_PROFILES = {
   neutral: { source: 'booking-engine', bookingChannel: 'channel-manager' },
@@ -232,7 +232,7 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
             }
           : resource === 'catalog'
             ? {
-                queue: 'content',
+                queue: 'catalog',
                 job: 'catalog:refresh',
                 root: 'catalog.sync.requested',
                 done: 'catalog.sync.completed',
@@ -240,7 +240,7 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
               }
             : resource === 'translation'
               ? {
-                  queue: 'content',
+                  queue: 'localization',
                   job: 'article:localize',
                   root: 'article.translation.requested',
                   done: 'article.translation.completed',
@@ -255,7 +255,7 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
                     record: 'campaign.recipient.delivered',
                   }
                 : {
-                    queue: 'website',
+                    queue: 'site-preview',
                     job: 'site:preview',
                     root: 'website.screenshot.requested',
                     done: 'website.screenshot.completed',

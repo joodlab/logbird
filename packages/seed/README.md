@@ -3,7 +3,7 @@
 ```sh
 # SDK dogfood path; the key determines the destination project
 pnpm seed --key <ingest-key> --endpoint http://localhost:4601
-# Local ClickHouse (copy the gitignored root .env into a new worktree first)
+# Local ClickHouse (configure the gitignored root .env first)
 pnpm seed --sink direct --project-id seed-joodcms-dev --events 300000 --days 60 --reset
 pnpm seed --sink direct --project-id seed-ledger-dev --project "Ledger demo" --events 5000 --reset
 # A small fixture for public screenshots: 2,000 events over the last day, ending now, neutral names
@@ -18,11 +18,11 @@ generator accepts an explicit `now` for reproducibility; CLI runs use current ti
 for relative console ranges. IDs depend on project/seed, timestamps also depend on
 `now`. Use `--reset` for replacement rather than appending a second run.
 
-- `--profile neutral` (default) names the emitting app `booking-engine` and the
-  booking channel integration `channel-manager`, so public screenshots name no real
-  product. `--profile joodcms` keeps the original `joodcms` / `joodbooking` names
-  and defaults `--project` to `JoodCMS`; the neutral profile defaults it to
-  `Hotel demo` (the project name is part of every operation ID).
+- Both profiles use fictional demo names. `--profile neutral` (default) names
+  the emitting app `booking-engine` and the booking channel `channel-manager`,
+  with `Hotel demo` as the default project. `--profile joodcms` uses the fictional
+  source names `joodcms` / `joodbooking` and defaults the project to `JoodCMS`.
+  The project name is part of every operation ID.
 - `--until now` (or an ISO date-time) spreads the requested events over the most
   recent `--days`, ending then. Without it, events are a prefix of the full stream:
   a small `--events` lands at the start of the window, holds only scheduler traffic,
@@ -57,7 +57,7 @@ API-key automation, and masked guest labels. Email and URL fixtures use reserved
 `example.com` names; no customer records, phone numbers, credentials or production
 connections are used. Secret changes contain `[redacted]` on both sides.
 
-The default 300k fixture covers 94 action names, including policies, rates,
+The default 300k fixture covers 95 action names, including policies, rates,
 bookings, guests, campaign lifecycle, translations, exports, access, domains,
 media and security. Action-specific changes include SAR prices, roles, dates,
 flags, titles and statuses. These are illustrative events rather than a replay
