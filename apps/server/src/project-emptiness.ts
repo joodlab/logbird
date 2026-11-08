@@ -11,11 +11,12 @@ const quoteIdentifier = (name: string) => `\`${name.replace(/[`\\]/g, '\\$&')}\`
  * without changing this check). Project deletion uses it to skip the synchronous purge mutations for brand-new or
  * never-used projects; a purge of nothing still costs several seconds of `mutations_sync` round trips.
  *
- * Visible rows are not the whole story: an async INSERT can still sit in ClickHouse's queue (#62 inserts with
- * `async_insert`). That is handled by the caller, not here: every write for a project (ingest, test events, sample
- * data) goes through #62's claimed ingest receipts, so the delete path holds the exclusive project lock (no new
- * claims), runs `settleInFlightInserts` (proves every earlier claimed insert has settled) and only allows this
- * shortcut when no unresolved claim exists. `system.asynchronous_inserts` is deliberately not consulted: it cannot be
+ * Visible rows are not the whole story: a write can still be executing or queued in ClickHouse. That is handled by
+ * the caller, not here. Under the exclusive project lock (no new claims or maintenance), the delete path first stops
+ * tagged maintenance statements left running by failed calls (rollup rebuilds, index repair: `stopProjectMaintenance`),
+ * then runs `settleInFlightInserts` for ingest writes (ingest, test events, sample data hold #62's claimed receipts),
+ * and only then allows this shortcut (`{ settled: true }`; callers that do not settle need "no unresolved claim").
+ * Operator tools writing ClickHouse directly (seed `--sink direct`, benchmarks, migrations) are outside this guarantee. `system.asynchronous_inserts` is deliberately not consulted: it cannot be
  * filtered by project, so on a busy server it would almost never be empty and the shortcut would never apply.
  * Any failure answers `false`, which keeps the full purge path.
  */
@@ -79,7 +80,8 @@ export function projectPurger({
  * Proves, under the exclusive project lock, that no INSERT for the project can still land in ClickHouse before the
  * project's data is purged (or skipped as empty).
  *
- * #62 inserts only while holding a claimed ingest receipt; an insert is aborted once its claim lease expires, and
+ * Covers ingest writes (maintenance statements are stopped separately, before this runs). #62 inserts events only
+ * while holding a claimed ingest receipt; an insert is aborted once its claim lease expires, and
  * acknowledged inserts are already visible. A receipt that is still unresolved but claimed may belong to an insert
  * that ended ambiguously (or a crashed process) and is still queued in ClickHouse. Such an insert is settled once a
  * `SYSTEM FLUSH ASYNC INSERT QUEUE` starts after `claimedAt + lease + flush bound` — the same proof #62's recovery uses.

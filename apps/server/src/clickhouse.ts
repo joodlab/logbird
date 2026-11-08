@@ -4,9 +4,12 @@ import {
   createMaintenanceClickHouseClient,
   createQueryClickHouseClient,
   INGEST_CLAIM_LEASE_MS,
+  projectMaintenance,
   purgeProject,
+  stopProjectMaintenance,
 } from '@logbird/clickhouse';
 import { prisma, purgeIngestReceipts } from '@logbird/database';
+import { ApiError } from './errors';
 import { projectHasNoStoredRows, projectPurger, settleInFlightInserts } from './project-emptiness';
 export const clickhouse = createClickHouseClient();
 export const maintenanceClickhouse = createMaintenanceClickHouseClient();
@@ -20,6 +23,26 @@ const newestUnresolvedClaim = async (projectId: string) =>
       select: { claimedAt: true },
     })
   )?.claimedAt ?? null;
+
+/**
+ * Run first under the exclusive project lock when deleting a project: stops every tagged maintenance statement of the
+ * project that ClickHouse is still executing (a rollup rebuild or index repair whose call failed keeps running
+ * server-side and could commit after the purge). 503 `maintenance_pending` (retryable) when one cannot be confirmed
+ * stopped; nothing is deleted then.
+ */
+export async function stopMaintenance(projectId: string) {
+  try {
+    return await stopProjectMaintenance(maintenanceClickhouse, projectId);
+  } catch {
+    throw new ApiError(
+      503,
+      'maintenance_pending',
+      'A maintenance job for this project is still stopping. Try deleting it again shortly.',
+      undefined,
+      10,
+    );
+  }
+}
 
 /**
  * Run under the exclusive project lock before `purgeProjectEvents` when deleting a project: proves no claimed insert
@@ -44,7 +67,7 @@ export const settleProjectInserts = (projectId: string) =>
 export const purgeProjectEvents = projectPurger({
   hasNoStoredRows: async (projectId, settled) =>
     (settled || (await newestUnresolvedClaim(projectId)) === null) && (await projectHasNoStoredRows(maintenanceClickhouse, projectId)),
-  purgeClickhouse: (projectId) => purgeProject(maintenanceClickhouse, projectId),
+  purgeClickhouse: (projectId) => purgeProject(projectMaintenance(maintenanceClickhouse, projectId), projectId),
   alwaysRun: [purgeIngestReceipts],
 });
 export const queryClickhouse = createQueryClickHouseClient();

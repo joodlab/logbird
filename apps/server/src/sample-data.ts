@@ -1,14 +1,24 @@
 import { randomUUID } from 'node:crypto';
-import { ASYNC_INSERT_FLUSH_BOUND_MS, INGEST_CLAIM_LEASE_MS, normalizeEvent, rawEventIdentities, read, repairEventIndex } from '@logbird/clickhouse';
+import {
+  ASYNC_INSERT_FLUSH_BOUND_MS,
+  INGEST_CLAIM_LEASE_MS,
+  normalizeEvent,
+  projectMaintenance,
+  rawEventIdentities,
+  read,
+  repairEventIndex,
+} from '@logbird/clickhouse';
 import { SAMPLE_DATA_EVENTS, SAMPLE_DATA_SOURCE, SAMPLE_DATA_SOURCES } from '@logbird/contracts';
 import { confirmIngestReceipts, prisma } from '@logbird/database';
 import { rebuildProjectReadModel } from '@logbird/worker/project-repair';
-import { maintenanceClickhouse as clickhouse } from './clickhouse';
+import { maintenanceClickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { insertImmutableEvents } from './immutable-ingest';
 
 /** Caller holds the same cross-process project lock as ingestion and retention. */
 export async function removeSampleData(projectId: string) {
+  // Tagged: project deletion stops these statements if a failed call left them running in ClickHouse.
+  const clickhouse = projectMaintenance(maintenanceClickhouse, projectId);
   const expired = new Date(Date.now() - INGEST_CLAIM_LEASE_MS - ASYNC_INSERT_FLUSH_BOUND_MS);
   if (await prisma.ingestReceipt.findFirst({ where: { projectId, confirmedAt: null, claimedAt: { gte: expired } } }))
     throw new ApiError(503, 'ingest_pending', 'An event write must settle before replacing sample data. Retry shortly.');

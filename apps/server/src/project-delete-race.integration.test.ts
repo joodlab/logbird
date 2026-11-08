@@ -1,4 +1,5 @@
-import { read } from '@logbird/clickhouse';
+import { createClient } from '@clickhouse/client';
+import { maintenanceQueryPrefix, projectMaintenance, read, stopProjectMaintenance } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
 import { afterEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
@@ -14,6 +15,12 @@ let f: ImmutableFixture | undefined;
 afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  // If a case failed midway, nothing of the fixture may land after its cleanup: stop its tagged statements and
+  // settle queued inserts first (the cleanup purge itself does not settle).
+  if (f) {
+    await stopProjectMaintenance(clickhouse, f.project).catch(() => undefined);
+    await clickhouse.command({ query: 'SYSTEM FLUSH ASYNC INSERT QUEUE' }).catch(() => undefined);
+  }
   await f?.cleanup();
   f = undefined;
 });
@@ -114,3 +121,67 @@ it('real services: a never-used project still takes the fast path', async () => 
   expect(performance.now() - started).toBeLessThan(1000);
   expect(Object.values(await storedRows(fixture.project)).reduce((a, b) => a + b, 0)).toBe(0);
 });
+
+const runningMaintenance = async (projectId: string) =>
+  Number(
+    (
+      await read<{ n: number }>(clickhouse, 'SELECT count() n FROM system.processes WHERE startsWith(query_id, {prefix:String})', {
+        prefix: maintenanceQueryPrefix(projectId),
+      })
+    )[0]?.n ?? 0,
+  );
+
+it('real services: a maintenance INSERT left running by a failed call never commits after the project is deleted', async () => {
+  f = await immutableFixture();
+  await f.authorize();
+  const fixture = f;
+  const stored = await fixture.post({ id: 'maint-1', action: 'maintenance.fixture', actor: { id: 'qa-maint', type: 'user' } });
+  expect(stored.status).toBe(202);
+  expect((await storedRows(fixture.project)).events_by_minute).toBeGreaterThan(0);
+
+  // A rollup-style INSERT … SELECT that takes ~10 s server-side, issued through the maintenance tagging with a client
+  // that gives up after 300 ms — exactly what a failed sample-removal / retention rebuild leaves behind.
+  const impatient = createClient({
+    url: process.env.CLICKHOUSE_URL,
+    database: process.env.CLICKHOUSE_DATABASE,
+    username: process.env.CLICKHOUSE_USER,
+    password: process.env.CLICKHOUSE_PASSWORD,
+  });
+  const startedAt = Date.now();
+  try {
+    await expect(
+      projectMaintenance(impatient, fixture.project).command({
+        // Rows the rebuild has already computed (as a rollup INSERT … SELECT has once its SELECT ran), emitted over
+        // ~60 s — longer than the delete's full purge — and committed at the end. Without the kill they land after
+        // the purge as orphan rollup rows (verified by disabling the kill: the orphan check below fails).
+        query: `INSERT INTO events_by_minute (project_id, environment, bucket, action, outcome, actor_type, executor_type, events)
+          SELECT {p:String}, 'production', toStartOfMinute(now()), 'maintenance.rebuild', 'success', 'user', 'api', 1
+          FROM numbers(1200) WHERE sleepEachRow(0.05) = 0
+          SETTINGS max_block_size = 20`,
+        query_params: { p: fixture.project },
+        // The shared test setup raises request_timeout, so the caller gives up by aborting the HTTP request instead.
+        abort_signal: AbortSignal.timeout(300),
+      }),
+    ).rejects.toThrow();
+  } finally {
+    await impatient.close();
+  }
+  // The call failed, but ClickHouse is still executing the INSERT.
+  expect(await runningMaintenance(fixture.project)).toBeGreaterThan(0);
+
+  const removed = await fixture.management(
+    `/api/projects/${encodeURIComponent(fixture.project)}?confirm=${encodeURIComponent(fixture.project)}`,
+    'DELETE',
+  );
+  expect(removed.status, await removed.clone().text()).toBe(204);
+
+  // Wait past the moment the INSERT would have committed, then check every destination.
+  await new Promise((resolve) => setTimeout(resolve, Math.max(0, startedAt + 66_000 - Date.now())));
+  await clickhouse.command({ query: 'SYSTEM FLUSH ASYNC INSERT QUEUE' });
+  const left = await storedRows(fixture.project);
+  expect(
+    Object.values(left).reduce((a, b) => a + b, 0),
+    JSON.stringify(left),
+  ).toBe(0);
+  expect(await runningMaintenance(fixture.project)).toBe(0);
+}, 240_000);
