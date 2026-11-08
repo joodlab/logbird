@@ -35,6 +35,30 @@ export const rangeQuerySchema = z.object({
 });
 export type RangeQuery = z.infer<typeof rangeQuerySchema>;
 
+export const EXPORT_SCHEMA_VERSION = 1 as const;
+export const EXPORT_ID_HEADER = 'X-Logbird-Export-Id';
+export const EXPORT_SCHEMA_HEADER = 'X-Logbird-Export-Schema';
+export const exportFormatSchema = z.enum(['csv', 'jsonl', 'jsonl-evidence']);
+export type ExportFormat = z.infer<typeof exportFormatSchema>;
+export const EXPORT_FORMAT_LABELS: Record<ExportFormat, string> = {
+  'jsonl-evidence': 'Complete (original payloads)',
+  csv: 'Spreadsheet (CSV)',
+  jsonl: 'JSON Lines (all fields)',
+};
+export const exportQuerySchema = rangeQuerySchema.extend({ format: exportFormatSchema });
+export type ExportQuery = z.infer<typeof exportQuerySchema>;
+export const exportEvidenceRowSchema = z.object({ exportSchemaVersion: z.literal(EXPORT_SCHEMA_VERSION), event: eventSchema, payload: z.unknown() });
+export const exportNormalizedRowSchema = eventSchema.extend({ exportSchemaVersion: z.literal(EXPORT_SCHEMA_VERSION) });
+export type ExportNormalizedRow = z.infer<typeof exportNormalizedRowSchema>;
+export type ExportEvidenceRow = z.infer<typeof exportEvidenceRowSchema>;
+export const exportStatusSchema = z.object({
+  exportId: z.uuid(),
+  state: z.enum(['pending', 'completed', 'failed', 'unknown']),
+  reason: z.string().max(64).nullable(),
+  description: z.string().nullable(),
+});
+export type ExportStatus = z.infer<typeof exportStatusSchema>;
+
 export const searchQuerySchema = rangeQuerySchema.extend({
   cursor: z.string().optional(), // opaque, returned as nextCursor
   limit: z.coerce.number().int().min(1).max(200).default(50),

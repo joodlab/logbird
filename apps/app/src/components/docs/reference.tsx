@@ -162,6 +162,13 @@ export function EnvelopeSemantics() {
 export function QueryCheatsheet({ projectId }: { projectId: string }) {
   return (
     <div className="overflow-hidden rounded-xl border bg-card shadow-xs" data-testid="query-cheatsheet">
+      <p className="border-b px-4 py-3 text-muted-foreground text-sm">
+        <a className="underline" href="https://github.com/joodlab/logbird/blob/master/docs/exports.md" rel="noreferrer" target="_blank">
+          Export formats and verification
+        </a>
+        : complete original payloads, spreadsheet CSV and all-field JSON Lines, with linked activity records.
+      </p>
+
       <table className="w-full text-sm max-sm:block">
         <tbody className="divide-y max-sm:block">
           {QUERY_SYNTAX.map(([q, meaning]) => (

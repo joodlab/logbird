@@ -45,7 +45,15 @@ app.use(
   cors({
     origin: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)],
     credentials: true,
-    exposeHeaders: ['X-Request-Id', 'RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset', 'Retry-After'],
+    exposeHeaders: [
+      'X-Logbird-Export-Id',
+      'X-Logbird-Export-Schema',
+      'X-Request-Id',
+      'RateLimit-Limit',
+      'RateLimit-Remaining',
+      'RateLimit-Reset',
+      'Retry-After',
+    ],
   }),
 );
 app.use('*', async (c, next) => {

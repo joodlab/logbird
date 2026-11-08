@@ -1,4 +1,5 @@
 import { type AuditOutbox, type AuditPayload, auditNamespace, Prisma, prisma } from '@logbird/database';
+import { sweepExportOutcomes } from './export-outcomes';
 
 export type DeliverAuditEvent = (stream: string, event: AuditPayload) => Promise<{ accepted: number; rejected: { reason: string }[] }>;
 
@@ -64,6 +65,16 @@ async function deliverClaimed(row: AuditOutbox, deliverAuditEvent: DeliverAuditE
 export async function deliverOutboxEvent(id: string, deliverAuditEvent: DeliverAuditEvent, now = new Date()) {
   for (const row of await claimAuditEvents(now, id)) await deliverClaimed(row, deliverAuditEvent, now);
 }
+/** A requested export can race another replica's claim; await acknowledgement before sending bytes. */
+export async function waitForAuditDelivery(id: string, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const row = await prisma.auditOutbox.findUnique({ where: { id } });
+    if (row?.deliveredAt) return true;
+    if (!row || row.lastError || Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
 export async function drainAuditOutbox(deliverAuditEvent: DeliverAuditEvent, now = new Date()) {
   const rows = await claimAuditEvents(now);
   const results = await Promise.allSettled(rows.map((row) => deliverClaimed(row, deliverAuditEvent, now)));
@@ -79,7 +90,7 @@ export function startAuditDrainer(deliverAuditEvent: DeliverAuditEvent, prepare?
   const wake = () => {
     if (stopped || running) return;
     running = (async () => {
-      const results = await Promise.allSettled([prepare?.(), drainAuditOutbox(deliverAuditEvent)]);
+      const results = await Promise.allSettled([prepare?.(), sweepExportOutcomes(), drainAuditOutbox(deliverAuditEvent)]);
       if (results.some((result) => result.status === 'rejected'))
         console.error(JSON.stringify({ event: 'audit.drainer_failed', lastError: 'audit_storage_unavailable' }));
       if (!stopped && Date.now() - lastMaintenance >= 60_000) {

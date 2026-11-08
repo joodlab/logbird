@@ -25,6 +25,7 @@ import { Hono } from 'hono';
 import { validator } from 'hono-openapi';
 import { z } from 'zod';
 import { clickhouse, purgeProjectEvents, queryClickhouse, settleProjectInserts, stopMaintenance } from './clickhouse';
+import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './destructive-maintenance';
 import { ApiError } from './errors';
 import { audit } from './ingest';
 import { generateApiKey } from './keys';
@@ -270,13 +271,12 @@ export const managementRoutes = new Hono<AppEnv>()
       const projectId = c.get('project').id;
       // Exclusive project lock: ingest (shared lock) cannot claim or insert for this project until it is gone.
       await withProjectLock(projectId, async () => {
-        // Nothing may land in ClickHouse after the purge: first stop maintenance statements a failed call left running
-        // (503 maintenance_pending if one won't stop), then prove no claimed insert is still in flight (503
-        // ingest_pending + Retry-After while one may be; otherwise flush the async queue), then purge. The purge skips
-        // only the ClickHouse mutations for a provably empty project; non-ClickHouse cleanup (receipts) always runs.
+        await beginDestructiveMaintenance(projectId);
+        // Any failure leaves the fence: an ambiguous CH response can outlive this lock.
         await stopMaintenance(projectId);
         await settleProjectInserts(projectId);
         await purgeProjectEvents(projectId, { settled: true });
+        await reconcileDestructiveMaintenance(projectId);
         await prisma.$transaction(async (tx) => {
           const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
           for (const key of revoked) await auditApiKey(c, 'api_key.revoked', key, c.get('project'), 'project_deleted', tx);

@@ -1,18 +1,30 @@
+import { randomUUID } from 'node:crypto';
 import * as ch from '@logbird/clickhouse';
 import * as s from '@logbird/contracts';
-import { prisma } from '@logbird/database';
-import { Hono } from 'hono';
+import { type AuditPayload, type Prisma, prisma } from '@logbird/database';
+import { type Context, Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
-import { stream } from 'hono/streaming';
 import { resolver, validator } from 'hono-openapi';
 import { z } from 'zod';
-import { clickhouse, queryClickhouse } from './clickhouse';
+import { cancelExportQuery, clickhouse, queryClickhouse } from './clickhouse';
 import { ApiError } from './errors';
+import { startExportHeartbeat } from './export-lifecycle';
+import {
+  confirmExportOutcome,
+  finishExport,
+  getExportStatus,
+  releaseExportAdmission,
+  renewExport,
+  stageExport,
+  validateExportMembership,
+} from './export-outcomes';
+import { auditedExport } from './export-stream';
 import { ingest, readIngestBody, requireProjectReadable } from './ingest';
 import { requireApiKey, requireProjectAccess, requireSession } from './middlewares';
 import { doc as responseDoc, routeDoc } from './openapi';
+import { deliverOutboxEvent, waitForAuditDelivery } from './outbox-delivery';
 import { beginRollupRead, finishRollupRead } from './project-read';
-import { publicRateLimits } from './rate-limit';
+import { clientAddress, publicRateLimits } from './rate-limit';
 import type { AppEnv } from './types';
 
 const ingestRequestSchema = (await resolver(s.ingestBodySchema).toOpenAPISchema()).schema;
@@ -55,7 +67,7 @@ const found = <T>(value: T | null) => {
   return value;
 };
 const projectRead = createMiddleware<AppEnv>(async (c, next) => {
-  if (c.req.method !== 'GET') return next();
+  if (c.req.method !== 'GET' || /\/projects\/[^/]+\/export$/.test(c.req.path)) return next();
   const projectId = c.get('project').id;
   // These non-streaming responses use derived destinations (fields is guarded for compatibility).
   const rollup = /^\/api\/projects\/[^/]+\/(?:entities(?:\/.*)?|overview|fields|suggest)$/.test(c.req.path);
@@ -108,13 +120,23 @@ export const publicRoutes = new Hono<AppEnv>()
     doc('Event detail', s.eventDetailSchema, 200, 'readKey'),
     async (c) => c.json(s.eventDetailSchema.parse(found(await ch.getEvent(clickhouse, c.get('project').id, c.req.param('eventId'))))),
   );
+async function activeWorkspace(c: Context<AppEnv>) {
+  const id = c.get('activeOrganizationId');
+  if (!id || !(await prisma.member.findFirst({ where: { organizationId: id, userId: c.get('user').id } })))
+    throw new ApiError(403, 'organization_required', 'Select a workspace.');
+  return id;
+}
 export const dataRoutes = new Hono<AppEnv>()
   .use('*', requireSession)
   .get('/workspace/activity', doc('Workspace activity', s.searchResponseSchema), query(s.searchQuerySchema), async (c) => {
-    const id = c.get('activeOrganizationId');
-    if (!id || !(await prisma.member.findFirst({ where: { organizationId: id, userId: c.get('user').id } })))
-      throw new ApiError(403, 'organization_required', 'Select a workspace.');
+    const id = await activeWorkspace(c);
     return c.json(s.searchResponseSchema.parse(await ch.searchEvents(queryClient(c.req.valid('query')), `ws:${id}`, c.req.valid('query'))));
+  })
+  .get('/workspace/exports/:exportId', doc('Export outcome', s.exportStatusSchema), async (c) => {
+    const workspace = await activeWorkspace(c);
+    const id = z.uuid().safeParse(c.req.param('exportId'));
+    if (!id.success) throw new ApiError(404, 'not_found', 'Export record not found.');
+    return c.json(s.exportStatusSchema.parse(await getExportStatus(id.data, `ws:${workspace}`)));
   })
   .use('/projects/:projectId/*', requireProjectAccess)
   .use('/projects/:projectId/*', projectRead)
@@ -182,26 +204,166 @@ export const dataRoutes = new Hono<AppEnv>()
     '/projects/:projectId/export',
     routeDoc('Stream CSV or JSONL', {
       responses: {
+        429: { description: 'Export capacity is in use. Finish or cancel an export, then retry.' },
         200: {
-          description: 'Event export',
+          description:
+            'Versioned CSV/JSONL or complete original-payload JSONL, linked to workspace receipts by export id and SHA-256. See docs/exports.md.',
+          headers: {
+            [s.EXPORT_ID_HEADER]: { description: 'Stable export id in filename and workspace records.', schema: { type: 'string', format: 'uuid' } },
+            [s.EXPORT_SCHEMA_HEADER]: {
+              description: 'Export format and schema version.',
+              schema: { type: 'string' },
+            },
+          },
           content: { 'text/csv': { schema: { type: 'string' } }, 'application/x-ndjson': { schema: { type: 'string' } } },
         },
       },
     }),
-    query(s.rangeQuerySchema.extend({ format: z.enum(['csv', 'jsonl']) })),
+    query(s.exportQuerySchema),
     async (c) => {
-      const q = c.req.valid('query');
-      const iterator = ch.exportEvents(queryClient(q), c.get('project').id, q);
-      const first = await iterator.next();
-      c.header('Content-Type', q.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/x-ndjson');
-      c.header('Content-Disposition', `attachment; filename="events.${q.format}"`);
-      return stream(c, async (out) => {
-        try {
-          if (!first.done) await out.write(first.value);
-          for await (const chunk of iterator) await out.write(chunk);
-        } finally {
-          await iterator.return();
-        }
-      });
+      const input = c.req.valid('query');
+      const clock = Date.now();
+      const project = c.get('project');
+      const exportId = randomUUID();
+      const stream = `ws:${project.organizationId}`;
+      let resolved: ch.ExportPlan | undefined;
+      let membership: string | null = null;
+      let stopHeartbeat: (() => void) | undefined;
+      const expired = new AbortController();
+      const formatName = s.EXPORT_FORMAT_LABELS[input.format];
+      c.header(s.EXPORT_ID_HEADER, exportId);
+      c.header(s.EXPORT_SCHEMA_HEADER, `${input.format}/${s.EXPORT_SCHEMA_VERSION}`);
+      const body = await auditedExport(
+        async (signal) => {
+          const client = queryClient(input);
+          resolved = await ch.prepareExport(client, input, clock);
+          return ch.exportEvents(client, project.id, input, resolved, { signal, cancelQuery: cancelExportQuery });
+        },
+        input.format === 'csv',
+        async (action, counts) => {
+          const noun = counts.rows === 1 ? 'event' : 'events';
+          const reasons = {
+            client_aborted: 'download canceled',
+            invalid_query: 'invalid query',
+            audit_unavailable: 'audit record not confirmed',
+            sql_unavailable: 'SQL mode unavailable',
+            membership_changed: 'stored events changed; retry the export',
+            project_unreadable: 'data maintenance is incomplete; retry after maintenance',
+            storage_unavailable: 'export validation storage unavailable; retry the export',
+            project_busy: 'project busy; retry the export',
+            idle_timeout: 'download inactive',
+            lease_expired: 'export expired',
+            resource_limit: 'query resource limit',
+            export_error: 'export error',
+          };
+          const description =
+            action === 'export.requested'
+              ? `Started a ${formatName} export of ${project.name}`
+              : action === 'export.completed'
+                ? `Exported ${counts.rows} ${noun} from ${project.name} as ${formatName}`
+                : `${counts.reason === 'client_aborted' ? 'Canceled' : 'Failed'} after ${counts.rows} ${noun}: ${reasons[counts.reason ?? 'export_error']}. ${formatName} export of ${project.name}`;
+          const event: AuditPayload = {
+            id: `${exportId}-${action.split('.')[1]}`,
+            occurredAt: new Date().toISOString(),
+            action,
+            description: `Export ${exportId.slice(0, 8)}: ${description}`,
+            outcome: action === 'export.failed' ? 'failure' : 'success',
+            actor: { type: 'user', id: c.get('user').id, name: c.get('user').name || c.get('user').email },
+            executor: { type: 'api', id: 'api-server' },
+            targets: [
+              { type: 'project', id: project.id, name: project.name },
+              { type: 'export', id: exportId },
+            ],
+            context: {
+              operationId: exportId,
+              requestId: c.get('requestId'),
+              ip: clientAddress(c) ?? '',
+              userAgent: c.req.header('user-agent') ?? '',
+            },
+            metadata: {
+              export: {
+                exportId,
+                projectId: project.id,
+                format: input.format,
+                formatLabel: formatName,
+                schemaVersion: s.EXPORT_SCHEMA_VERSION,
+                query: input.q?.trim() ?? '',
+                lang: input.lang ?? 'query',
+                clock: new Date(clock).toISOString(),
+                receivedBefore: new Date(clock).toISOString(),
+                from: resolved?.range.from ?? input.from?.slice(0, 128) ?? null,
+                to: resolved?.range.to ?? input.to?.slice(0, 128) ?? null,
+                resolvedQuery: resolved ? JSON.parse(JSON.stringify(resolved.compiled)) : null,
+                ...counts,
+              },
+            },
+          };
+          if (action !== 'export.requested') return finishExport(exportId, stream, event);
+          try {
+            const unknown: AuditPayload = {
+              ...event,
+              id: `${exportId}-outcome`,
+              action: 'export.outcome_unknown',
+              outcome: 'unknown',
+              description: `Export ${exportId.slice(0, 8)}: Outcome unknown for ${formatName} export of ${project.name} (producer outcome not confirmed)`,
+              metadata: {
+                export: {
+                  ...(event.metadata as { export: Prisma.InputJsonObject }).export,
+                  rows: null,
+                  bytes: null,
+                  reason: 'outcome_not_confirmed',
+                },
+              },
+            };
+            const stageStarted = performance.now();
+            const requested = await stageExport({
+              id: exportId,
+              userId: c.get('user').id,
+              workspaceId: project.organizationId,
+              projectId: project.id,
+              stream,
+              requested: event,
+              unknown,
+              sql: input.lang === 'sql',
+              receivedBefore: new Date(clock),
+              signal: c.req.raw.signal,
+            });
+            membership = requested.membership;
+            if (membership)
+              stopHeartbeat = startExportHeartbeat(
+                () => renewExport(exportId),
+                requested.leaseMs - (performance.now() - stageStarted),
+                () => expired.abort(new ApiError(503, 'export_lease_expired', 'The export lease could not be renewed safely. Retry.')),
+              );
+            await deliverOutboxEvent(requested.id, ingest);
+            if (!(await waitForAuditDelivery(requested.id))) throw new Error('Export request not acknowledged');
+            if (!membership)
+              throw new ApiError(
+                503,
+                'export_project_unreadable',
+                'Data maintenance is incomplete for this project. Retry after maintenance finishes.',
+              );
+          } catch (error) {
+            if (error instanceof ApiError && ['export_busy', 'export_project_busy', 'export_project_unreadable'].includes(error.code)) throw error;
+            throw new ApiError(503, 'export_audit_unavailable', 'The export request could not be recorded. Retry the export before downloading.');
+          }
+        },
+        AbortSignal.any([c.req.raw.signal, expired.signal]),
+        exportId,
+        {
+          beforeComplete: (signal) => validateExportMembership(project.id, membership, exportId, signal),
+          onTerminal: (action) => confirmExportOutcome(exportId, action),
+          onSettled: async () => {
+            stopHeartbeat?.();
+            await releaseExportAdmission(exportId);
+          },
+        },
+      );
+      c.header('Content-Type', input.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/x-ndjson');
+      c.header(
+        'Content-Disposition',
+        `attachment; filename="events-${exportId}${input.format === 'jsonl-evidence' ? '-evidence' : ''}.${input.format === 'csv' ? 'csv' : 'jsonl'}"`,
+      );
+      return c.body(body);
     },
   );

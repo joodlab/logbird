@@ -50,14 +50,33 @@ export async function claimIngestReceipts(
 ) {
   if (!claims.length) return [];
   return db.$queryRaw<import('./generated/client').IngestReceipt[]>(Prisma.sql`
-    INSERT INTO "IngestReceipt" ("projectId","organizationId","eventId","fingerprint","receivedAt","eventAt","confirmedAt","claimedAt")
+    WITH claimed AS (INSERT INTO "IngestReceipt" ("projectId","organizationId","eventId","fingerprint","receivedAt","eventAt","confirmedAt","claimedAt")
     SELECT ${projectId},${organizationId},v.id,v.fingerprint,v.received,v.event,v.confirmed,v.claimed
     FROM unnest(${claims.map((r) => r.eventId)}::text[], ${claims.map((r) => r.fingerprint)}::text[],
       ${claims.map((r) => r.receivedAt.toISOString())}::timestamp[], ${claims.map((r) => r.eventAt.toISOString())}::timestamp[],
       ${claims.map((r) => r.confirmedAt?.toISOString() ?? null)}::timestamp[], ${claims.map((r) => r.claimedAt.toISOString())}::timestamp[])
       AS v(id,fingerprint,received,event,confirmed,claimed)
     ORDER BY v.id
-    ON CONFLICT ("projectId","eventId") DO NOTHING RETURNING *`);
+    ON CONFLICT ("projectId","eventId") DO NOTHING RETURNING *),
+    fenced AS (UPDATE "ExportLease" SET invalidated=true
+      WHERE "projectId"=${projectId} AND NOT invalidated AND "expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
+        AND "receivedBefore">=(SELECT min("receivedAt") FROM claimed WHERE "confirmedAt" IS NULL)
+      RETURNING id)
+    SELECT * FROM claimed`);
+}
+
+/** Ready replays retain the first receipt clock. Fence only rows actually claimed for an INSERT.
+ * This replaces the existing takeover UPDATE; it adds no per-batch database round trip.
+ */
+export async function takeOverIngestReceipts(projectId: string, eventIds: string[]) {
+  return prisma.$queryRaw<import('./generated/client').IngestReceipt[]>(Prisma.sql`
+    WITH claimed AS (UPDATE "IngestReceipt" SET "claimedAt"=${new Date().toISOString()}::timestamp
+      WHERE "projectId"=${projectId} AND "eventId"=ANY(${eventIds}::text[])
+        AND "confirmedAt" IS NULL AND "claimedAt" IS NULL RETURNING *),
+    fenced AS (UPDATE "ExportLease" SET invalidated=true
+      WHERE "projectId"=${projectId} AND NOT invalidated AND "expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
+        AND "receivedBefore">=(SELECT min("receivedAt") FROM claimed) RETURNING id)
+    SELECT * FROM claimed`);
 }
 
 /** Bulk confirmation avoids a sequential round trip per recovered id. UTC strings avoid session-TZ casts. Exposed for plan tests. */

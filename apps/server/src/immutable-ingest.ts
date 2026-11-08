@@ -20,6 +20,7 @@ import {
   INGEST_RECEIPT_WINDOW_MS,
   type IngestReceipt,
   prisma,
+  takeOverIngestReceipts,
 } from '@logbird/database';
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { clickhouse } from './clickhouse';
@@ -68,11 +69,7 @@ async function takeOverReadyClaims(projectId: string, prior: IngestReceipt[], ca
     )
     .map((r) => r.eventId);
   if (!readyIds.length) return;
-  for (const receipt of await prisma.ingestReceipt.updateManyAndReturn({
-    where: { projectId, eventId: { in: readyIds }, confirmedAt: null, claimedAt: null },
-    data: { claimedAt: new Date() },
-  }))
-    owned.set(receipt.eventId, receipt);
+  for (const receipt of await takeOverIngestReceipts(projectId, readyIds)) owned.set(receipt.eventId, receipt);
 }
 
 async function recheckAfterPause(projectId: string, owned: Map<string, IngestReceipt>, stored: Awaited<ReturnType<typeof lookup>>, lookupAt: number) {
