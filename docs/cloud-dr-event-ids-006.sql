@@ -3,7 +3,7 @@ SELECT throwIf(countIf(name = '006_event_ids.sql') != 1 OR countIf(name = '007_e
 FROM logbird.migrations FORMAT Null;
 SELECT throwIf(countIf(name = 'event_ids') != 1 OR anyIf(engine,name = 'event_ids') != 'ReplacingMergeTree'
                OR countIf(name != 'event_ids') != 0, '006 receipt engine or interrupted migration mismatch')
-FROM system.tables WHERE database = 'logbird' AND name IN ('event_ids','event_ids_v2','event_ids_v2_mv') FORMAT Null;
+FROM system.tables WHERE database = 'logbird' AND name IN ('event_ids','event_ids_v2','event_ids_v2_mv','event_ids_v3','event_ids_v3_mv') FORMAT Null;
 -- This release's retention also purges expired receipts: load checkpoint A's
 -- original IDs, then the independently filtered survivor IDs for B and C.
 -- Load expected_receipts as documented; both result sets must be empty.

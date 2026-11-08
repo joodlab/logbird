@@ -268,6 +268,35 @@ below for older Trailmark installations.
 See the [maintainer migration-cancellation check](releases.md#migration-cancellation-check)
 for signal handling; its live acceptance is pending in #77.
 
+### Upgrading to immutable ids
+
+Back up Postgres and ClickHouse, preserve the private environment file and stop
+server/worker writers; build and start as in step 5 above. The migrate gate applies
+006–009, the receipt/UTC migrations and the additive maintenance-kind and generation migrations.
+008 makes a temporary derived-index copy: allow disk space for both copies and
+time proportional to retained history. Migration/maintenance clients use a
+15-minute socket-idle timeout, progress headers and a ten-minute server query
+budget. A failed pre-swap copy is discarded and copied again on retry; after the
+atomic swap, retries resume forward without swapping back. Do not start the new
+server until the migration gate completes. Restore checks must reject leftover
+`event_ids_v2`/`event_ids_v3` tables or temporary MVs, even if the stable table exists.
+009 adds an online pointer bloom index and materializes index files; it preserves
+logical rows and existing binaries. `MATERIALIZE INDEX` is a mutation proportional
+to `event_ids` size (604 ms in the isolated 10M online proof); budget more time for
+larger/busy installations. The maintenance migrate client's long timeout covers
+this wait. Confirm completion in `system.mutations`; materialization can be repeated safely.
+Lightweight runtime purges reuse Wide history bloom files. Physical rewrites and
+merges pay the index-build cost: a controlled 10M physical DELETE measured
+2.283 seconds without bloom versus 2.741 seconds with it (+458 ms, about 20%),
+including 324 ms of bloom calculation. This is a measured example, not a duration
+bound; see the [maintenance comparison](ingest-identity.md#multiple-active-parts-009).
+External ClickHouse writers need SELECT/INSERT/DELETE on `event_ids` and
+`GRANT SYSTEM FLUSH ASYNC INSERT QUEUE ON *.* TO <writer>` in addition to existing
+grants. Recovery currently supports one ClickHouse node; a load-balanced cluster
+needs a coordinated per-node drain. The worker probes the flush grant at startup.
+See the [targeted rollback](ingest-identity.md#deployment-rollback-and-proof-limits).
+Replace `logbird` in example SQL with your configured `CLICKHOUSE_DATABASE`.
+
 ### Native backup and fresh-storage restore
 
 These shell blocks use POSIX sh (Linux/macOS or Git Bash on Windows). Use
@@ -646,6 +675,35 @@ pool: a larger pool consumes resources, and incompatible mutation thresholds can
 prevent progress. Benchmark representative retention alongside ingestion rather
 than copying a shared development server's settings or extrapolating its purge
 latency to production. See the [ClickHouse background-pool reference](https://clickhouse.com/docs/reference/settings/server-settings/settings/background#background_pool_size).
+
+With 009, distinguish lightweight deletes from physical rewrites. The runtime's
+lightweight retention reused its Wide history bloom files (538 ms versus 503 ms
+of part work without/with bloom on a controlled 10M fixture, no bloom calculation).
+Tiny affected Compact parts may rebuild their small index. Physical ALTER DELETE
+and merges rebuild index files as they rewrite data; the same fixture's physical
+delete took 2.283 versus 2.741 seconds, including 324 ms of bloom calculation.
+Budget and monitor that index cost alongside disk and merge work rather than
+attributing all synchronous DELETE latency to index calculation.
+
+Receipt expiry has its own `ingest-receipts` queue, separate from ClickHouse
+retention. Keep the worker running: it schedules a globally single-flight sweep
+every minute, in 5000-row batches with 10 ms yields and a 20-second work budget.
+The last batch is additionally bounded by a five-second SQL timeout and a
+six-second transaction/one-second connection wait. Its timeout and
+`enable_bitmapscan=off` are transaction-local (SET LOCAL semantics), not shared
+Postgres settings; the planner setting keeps ordered expiry scans on the existing
+indexes when statistics are stale. The hourly sweep remains a backstop.
+
+At an aggregate 5000 receipts/second, sustained cleanup must exceed 300000/minute
+(more than 15000/second while the 20-second worker budget runs). With healthy
+on-time scheduling, budget roughly three million live-cache rows plus at most
+450000 expired rows. This does not cap physical disk usage; watch autovacuum,
+dead tuples, WAL, queue lag and `ingest.receipts_pruned` logs, especially repeated
+`limited` results or `ingest.receipt_sweep_failed`. A worker outage adds roughly
+300000 expired rows per minute at that rate, without a hard bound. An hourly-only
+backstop can accumulate about 18 million between successful sweeps. Requests
+expire only their own requested ids in a bounded statement; fresh batches never
+drain unrelated backlog. See [receipt coordination](ingest-identity.md#coordination-and-identity).
 
 ## Disposable acceptance fixture
 

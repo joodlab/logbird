@@ -1,7 +1,7 @@
-import { createClickHouseClient } from '../src/client';
+import { createMaintenanceClickHouseClient } from '../src/client';
 import { migrate } from '../src/migrations';
 
-const ch = createClickHouseClient();
+const ch = createMaintenanceClickHouseClient();
 try {
   await migrate(ch);
   console.log('ClickHouse migrations current');

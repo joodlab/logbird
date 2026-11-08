@@ -11,6 +11,7 @@ it('a poison window and a preparation failure cannot stop healthy queued deliver
     stream = `ws:qa-poison-${id}`;
   let drainer: ReturnType<typeof startAuditDrainer> | undefined;
   try {
+    await prisma.organization.create({ data: { id: `qa-poison-${id}`, name: 'QA Poison Window', slug: `qa-poison-${id}`, createdAt: new Date() } });
     await prisma.authAuditWindow.create({
       data: {
         id,
@@ -38,12 +39,16 @@ it('a poison window and a preparation failure cannot stop healthy queued deliver
     await drainer?.stop();
     await prisma.auditOutbox.deleteMany({ where: { stream } });
     await prisma.authAuditWindow.deleteMany({ where: { id } });
+    await prisma.organization.deleteMany({ where: { id: `qa-poison-${id}` } });
   }
 });
 
 it('quarantines permanent delivery failures, preserves safe codes, and reports non-failing readiness lag', async () => {
   const id = randomUUID();
   try {
+    await prisma.organization.create({
+      data: { id: `qa-invalid-${id}`, name: 'QA Invalid Delivery', slug: `qa-invalid-${id}`, createdAt: new Date() },
+    });
     await storeAuditEvent(`ws:qa-invalid-${id}`, { id, action: 'project.created' });
     const before = (await auditDrainStatus()).undelivered;
     for (let n = 0; n < 10; n++)
@@ -69,6 +74,7 @@ it('quarantines permanent delivery failures, preserves safe codes, and reports n
     expect((await prisma.auditOutbox.findUniqueOrThrow({ where: { id } })).lastError).toBe('audit_rejected');
   } finally {
     await prisma.auditOutbox.deleteMany({ where: { id } });
+    await prisma.organization.deleteMany({ where: { id: `qa-invalid-${id}` } });
   }
 });
 
