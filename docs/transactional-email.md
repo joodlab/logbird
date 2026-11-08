@@ -1,8 +1,8 @@
 # Transactional email setup and acceptance
 
-Status: provider-neutral guidance checked on 2026-11-07. No provider/domain purchase, account,
-DNS record, sender key or live email delivery was created or changed. Owner chooses the sending
-domain, provider, sender and abuse/security contacts before launch.
+Status: provider-neutral guidance checked on 2026-11-07; provider chosen 2026-11-08 (Postmark SMTP, see
+[Postmark](#postmark)). No provider/domain purchase, account, DNS record, sender key or live email delivery was
+created or changed. Owner chooses the sending domain, sender and abuse/security contacts before launch.
 
 ## Sender identity and application settings
 
@@ -13,11 +13,12 @@ and DKIM settings. Logbird sends OTP, invitations and membership/role notificati
 `packages/email/src/send.ts`; supplying SMTP does not by itself verify domain authentication.
 
 Store `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` privately, with minimum send-only scope.
-For a provider supporting implicit TLS, set `SMTP_PORT=465`, `SMTP_SECURE=true`; validate the
-certificate/hostname and provider requirements in staging. Port 587 with `SMTP_SECURE=false`
-permits STARTTLS negotiation but the current transport does not set `requireTLS`.
-Do not disable certificate verification or deploy 587 as a mandatory-TLS path until
-the launch prerequisite below is shipped and verified.
+For a provider supporting implicit TLS, set `SMTP_PORT=465`, `SMTP_SECURE=true`. For port 587 set
+`SMTP_SECURE=false` and `SMTP_REQUIRE_TLS=true`: Nodemailer then requires STARTTLS before AUTH or message data
+and fails closed (`ETLS`, nothing sent) when the server does not offer it or the upgrade fails. Without
+`SMTP_REQUIRE_TLS`, 587 is opportunistic STARTTLS and the server logs `email.smtp_tls_not_required` at boot.
+Certificates are always verified; never disable that. Validate the certificate/hostname and provider requirements
+in staging.
 Keep `AUTH_LOG_SIGN_IN_CODES=false` in cloud; log readers must never receive usable login codes.
 Preserve existing SMTP credentials unless the owner explicitly authorizes rotation.
 
@@ -30,18 +31,47 @@ the transactional use case; approval is case-by-case, not guaranteed. Record the
 ticket/approval and test connectivity from the actual data-center/account before
 choosing 465. The example cloud ConfigMap requires that approval.
 
-Port **587 is not blocked**, but launch on that path requires [OPS-06 / #59](https://github.com/joodlab/logbird/issues/59):
-implement configurable fail-closed Nodemailer `requireTLS`, verify certificate/host,
-reject a server that does not offer STARTTLS, and prove actual OTP receipt through
-the exact runtime image. Until then, simply setting `SMTP_SECURE=false` is insufficient.
+Port **587 is not blocked**. Launch on that path uses `SMTP_REQUIRE_TLS=true`
+([OPS-06 / #59](https://github.com/joodlab/logbird/issues/59)). Its fail-closed behaviour is tested
+against a server without STARTTLS (Mailpit, `packages/email/src/send.integration.test.ts`); the
+certificate/host check and actual OTP receipt through the exact runtime image against the real
+provider remain launch proof. `SMTP_SECURE=false` alone is insufficient.
 An HTTPS mail-provider API would require a separately implemented/tested transport;
 there is no such adapter to configure in the current source.
 
-Retain 465 unblock + TLS/receipt proof **or** shipped 587 requireTLS + downgrade/receipt
+Retain 465 unblock + TLS/receipt proof **or** 587 `SMTP_REQUIRE_TLS=true` + downgrade/receipt
 proof in the [launch checklist](cloud-operations.md#launch-checklist). SMTP connect
 timeouts are an expected first symptom of the Hetzner block: alert before users
 repeatedly retry OTP. Never enable sign-in-code logging as a workaround. Recheck
 the new account's port policy when moving a server between owners.
+
+## Postmark
+
+Owner decision (2026-11-08, [decisions](decisions.md)): hosted Logbird uses **Postmark over SMTP**. Nothing below
+has been configured yet; the live proof follows with hosting. Provider facts were taken from Postmark's public
+SMTP and sender documentation; re-check them in the account when configuring.
+
+- **Transport.** `SMTP_HOST=smtp.postmarkapp.com`, `SMTP_PORT=587` (2525 is the alternative where 587 is blocked),
+  `SMTP_SECURE=false`, `SMTP_REQUIRE_TLS=true`. Postmark offers STARTTLS on these ports; with the setting a
+  connection that is not upgraded sends nothing.
+- **Credentials.** Use the Postmark **server API token** as both `SMTP_USER` and `SMTP_PASSWORD` (or a stream's
+  SMTP token pair, if the owner prefers per-stream credentials). Store it only in the deployment's secret store;
+  never print it. The token sends as any verified sender of that server, so give Logbird its own Postmark server.
+- **Sender.** `MAIL_FROM` must be a verified sender signature or a verified domain. Prefer a transactional
+  subdomain such as `notify.example.test`.
+- **SPF / DKIM / DMARC alignment.** Publish the DKIM TXT record Postmark generates for the domain. Set a custom
+  **Return-Path** domain (a CNAME on a subdomain of the From domain, pointing to Postmark's bounce host as shown in
+  the account) so the envelope sender, and therefore SPF, aligns with the visible From domain; Postmark's default
+  return-path does not align. Then publish DMARC as in the checklist below, starting at `p=none`.
+- **Message streams.** Logbird's messages (sign-in codes, invitations, membership/role notifications) are
+  transactional and use the server's default **transactional** stream; Logbird sets no `X-PM-Message-Stream`
+  header. Never route them through a broadcast stream, and keep any later marketing mail on its own stream.
+- **Bounces and suppressions.** Postmark deactivates recipients after hard bounces and spam complaints and does not
+  deliver to suppressed addresses. Logbird has no webhook pipeline and is not told: a suppressed user simply does
+  not receive codes. Operators review bounces and the suppression list in Postmark's activity view and reactivate
+  an address only after the cause is fixed. Watch sending limits and account status from an operator login that
+  does not depend on Logbird's own sign-in email.
+- **Logging.** Keep `AUTH_LOG_SIGN_IN_CODES=false`; code logging is never a fallback for Postmark problems.
 
 ## DNS checklist
 

@@ -1,5 +1,7 @@
 # Logbird on Coolify
 
+The hosted instance is planned on Coolify behind Cloudflare at `logbird.joodlab.com`, after the repository is open-sourced ([owner decision](decisions.md)); nothing has been deployed there yet.
+
 Use the Git repository Docker Compose build pack. No images are published yet; Coolify builds from source. The committed file publishes no host ports. Only app:4600 should receive a public domain.
 
 1. Open Projects, choose the project/environment, then New Resource (some versions show + New).
@@ -7,10 +9,10 @@ Use the Git repository Docker Compose build pack. No images are published yet; C
 3. Select Docker Compose build pack / Compose build strategy. Set Base Directory `/` and Docker Compose Location `/docker-compose.coolify.yml`. Save, load and review Compose content.
 4. Under Domains, assign app `https://audit.example.com:4600`. The suffix selects the internal listener; visitors use ordinary HTTPS. Do not assign domains to data services, server, migrate or worker.
 5. In Environment Variables, confirm SERVICE_URL_APP_4600 represents the public console URL with scheme. Set APP_URL explicitly to `https://audit.example.com` if necessary; the definition defaults it to SERVICE_URL_APP_4600. SERVICE_FQDN_APP_4600 contains a hostname without scheme and cannot be APP_URL.
-6. Confirm generated SERVICE_PASSWORD_64_POSTGRES, SERVICE_PASSWORD_64_CLICKHOUSE, SERVICE_HEX_64_QUERY and SERVICE_PASSWORD_64_AUTH. Reuse identical names across services; never regenerate on redeploy. Query password must be exactly 64 lowercase hex characters. Configure SMTP_* and MAIL_FROM, or explicitly enable AUTH_LOG_SIGN_IN_CODES=true temporarily. Keep the default TRUST_PROXY=2 (Coolify's proxy plus the console) while the API stays private. Leave database URL overrides empty for bundled services.
+6. Confirm generated SERVICE_PASSWORD_64_POSTGRES, SERVICE_PASSWORD_64_CLICKHOUSE, SERVICE_HEX_64_QUERY and SERVICE_PASSWORD_64_AUTH. Reuse identical names across services; never regenerate on redeploy. Query password must be exactly 64 lowercase hex characters. Configure SMTP_* and MAIL_FROM (for Postmark on 587 set SMTP_REQUIRE_TLS=true; see [SMTP](self-hosting.md#smtp-and-first-login)), or explicitly enable AUTH_LOG_SIGN_IN_CODES=true temporarily. Keep the default TRUST_PROXY=2 (Coolify's proxy plus the console) while the API stays private. Leave database URL overrides empty for bundled services.
 7. Deploy and inspect Deployment Logs: data services become healthy, migrate exits successfully, API becomes healthy, then worker/app start. Correct migration failures before continuing. Check Runtime Logs for unhealthy services.
 8. Open the console, request the code, sign in, create workspace/project, and send the [quickstart curl](self-hosting.md). Check /readyz publicly. Disable code logging and redeploy once SMTP works.
-9. Upgrades: block ingress and stop writers, take matched backups, pin a tested revision, redeploy, then verify login, event readback, readiness and worker receipts before reopening ingress. Preserve volumes and generated credentials; do not delete storage to fix an upgrade.
+9. Upgrades: block ingress and stop writers, take matched backups, pin a tested revision, redeploy, then verify login, event readback, readiness and worker receipts before reopening ingress. Preserve volumes and generated credentials; do not delete storage to fix an upgrade. Coolify does not run `selfhost-init.sh`: if Environment Variables contains `LOGBIRD_IMAGE_REGISTRY=logbird` (the pre-2026-11-08 default), delete it so the default `ghcr.io/joodlab` names apply. Builds stay local either way.
 
 The dependency images are pinned by multi-platform digest, matching the ordinary
 Compose stack. Keep both files aligned when updating those pins. Use the native

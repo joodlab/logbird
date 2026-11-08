@@ -7,7 +7,8 @@ require a private workspace package. Keep envelope additions synchronized with c
 ```ts
 import { Logbird } from '@logbird/sdk';
 const audit = new Logbird({
-  endpoint: 'http://localhost:4601', apiKey: (process.env.LOGBIRD_INGEST_KEY)!,
+  // Your Logbird public origin, e.g. https://audit.example.com (http://localhost:4600 for a local stack).
+  endpoint: (process.env.LOGBIRD_ENDPOINT)!, apiKey: (process.env.LOGBIRD_INGEST_KEY)!,
   onError: error => console.error(error.message),
 });
 audit.track({ action: 'hotel.updated', actor: { type: 'user', id: 'user_42' } });
@@ -23,6 +24,10 @@ capture and drains. Defaults: 100 rows, 1000 ms, 5 retries. Events over 256 KB a
 reported through `onError`; requests stay below 5 MB and 1000 rows. Timers are
 unreferenced on Node; applications must call shutdown to ensure exit delivery.
 Do not ship private ingest keys in a public browser bundle.
+
+`endpoint` is the public origin that serves the console, the same value as the server's `APP_URL`.
+It forwards `/v1` to the API, which stays on a private listener (never expose `:4601`). The API
+reference is at `<origin>/docs` and the OpenAPI document at `<origin>/openapi.json`.
 
 429, 5xx and network failures retry the same serialized batch with exponential
 backoff and jitter (numeric Retry-After supported). A terminal failure leaves the
