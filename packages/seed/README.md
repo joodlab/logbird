@@ -6,15 +6,40 @@ pnpm seed --key <ingest-key> --endpoint http://localhost:4601
 # Local ClickHouse (copy the gitignored root .env into a new worktree first)
 pnpm seed --sink direct --project-id seed-staydesk-dev --events 300000 --days 60 --reset
 pnpm seed --sink direct --project-id seed-ledger-dev --project "Ledger demo" --events 5000 --reset
+# A small fixture for public screenshots: 2,000 events over the last day, ending now, neutral names
+pnpm seed --sink direct --project-id seed-capture-dev --events 2000 --days 1 --until now --reset
 # Read back overview, vocabulary, samples, operation tree and tenant profile
 node --env-file=.env --import tsx packages/seed/src/inspect.ts
 ```
 
 Options: `sink` (api/direct), `endpoint`, `key`, `project-id`, `project`, `events`,
-`days`, `seed` (integer, default 42), `reset`, `benchmark`. The generator accepts
-an explicit `now` for reproducibility; CLI runs use current time for relative
-console ranges. IDs depend on project/seed, timestamps also depend on `now`.
-Use `--reset` for replacement rather than appending a second run.
+`days`, `seed` (integer, default 42), `profile`, `until`, `reset`, `benchmark`. The
+generator accepts an explicit `now` for reproducibility; CLI runs use current time
+for relative console ranges. IDs depend on project/seed, timestamps also depend on
+`now`. Use `--reset` for replacement rather than appending a second run.
+
+- `--profile neutral` (default) names the emitting app `booking-engine` and the
+  booking channel integration `channel-manager`, so public screenshots name no real
+  product. `--profile staydesk` keeps the original `staydesk` / `staybook` names
+  and defaults `--project` to `StayDesk`; the neutral profile defaults it to
+  `Hotel demo` (the project name is part of every operation ID).
+- `--until now` (or an ISO date-time) spreads the requested events over the most
+  recent `--days`, ending then. Without it, events are a prefix of the full stream:
+  a small `--events` lands at the start of the window, holds only scheduler traffic,
+  and leaves the console's default "Last 24 hours" empty. Spread mode keeps the full
+  fixture's mix: about 48% scheduler events, impersonation on 2% of user operations,
+  a retry on 3.5% of jobs, and multi-target events. Rare features are placed by error
+  diffusion rather than chance, so even a few hundred events contain each of them.
+  The import spike and provider outage last one day, or 5% of a shorter window.
+
+`pnpm demo` passes `--profile staydesk` and no `--until`, so its output is unchanged.
+`pnpm demo --profile neutral --until now` changes only the events: neutral source and
+integration names, spread over the recent window. The demo still creates the `Acme`
+organisation and the `StayDesk` and `Ledger demo` projects, and the project name is part
+of every operation ID (`StayDesk-s42-op…`), so the console's project switcher and
+operation IDs still say StayDesk. For public screenshots, seed a project with a neutral
+name instead (`pnpm seed --sink direct --project-id <id> --until now`, which defaults
+to `Hotel demo`).
 
 Reset calls the existing `purgeProject` with exactly the supplied project ID,
 awaits deletion of events and its derived aggregates, then inserts bounded
@@ -26,7 +51,7 @@ API errors/rejections fail the command; direct mode bypasses HTTP by design.
 
 ## Dataset
 
-StayDesk has 30 invented hospitality businesses, 1-3 websites each, 150 fictional
+The hospitality fixture (the StayDesk demo project) has 30 invented hospitality businesses, 1-3 websites each, 150 fictional
 staff across owner/admin/editor/marketer/revenue roles, three support identities,
 API-key automation, and masked guest labels. Email and URL fixtures use reserved
 `example.com` names; no customer records, phone numbers, credentials or production
@@ -44,7 +69,8 @@ The remaining traffic favors busy staff/businesses, Sunday-Thursday office hours
 in Asia/Riyadh, and the later part of the window. Import volume spikes at 55% of
 the window; a WhatsApp outage at 80% increases failed receipts and send retries.
 These incidents are relative to the requested window, not historical claims.
-Small requested counts are prefixes and may contain only scheduled traffic.
+Small requested counts are prefixes and may contain only scheduled traffic, unless
+`--until` spreads them (see Options).
 
 Scheduler actors retain their business/resource-scoped IDs; names include the
 business so directory and overview labels distinguish them. The scheduler executor
@@ -98,7 +124,10 @@ pnpm --filter @logbird/seed test
 Tests stream all 300k fixtures and verify exact counts, determinism, time bounds,
 parent existence/order, inherited actors, worker attempts, scheduler identity,
 vocabulary, outcome coverage, 150 users/30 tenants, reserved addresses, and 2.5%
-legacy coverage. They also exercise independent Ledger vocabulary. Generation is
+legacy coverage. They also exercise independent Ledger vocabulary, neutral default
+names, a byte-for-byte digest of the `staydesk` profile against the original generator
+(so `pnpm demo` output is unchanged), and the time span and mix of a 400-event, one-day
+spread fixture. Generation is
 streaming: only a tree and the sink batch are retained; tests retain IDs to check
 references. A fixed `now` is necessary for byte-for-byte replay.
 

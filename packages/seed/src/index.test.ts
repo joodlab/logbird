@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
+import type { EventInput } from '@logbird/sdk';
 import { describe, expect, it } from 'vitest';
-import { generateEvents } from './index';
+import { generateEvents, type SeedOptions } from './index';
 
 const options = { events: 300_000, days: 60, project: 'StayDesk', now: new Date('2026-11-04T12:00:00Z'), seed: 42 };
+const DAY = 86_400_000;
 describe('fictional hospitality fixtures', () => {
   it('is reproducible and changes with the seed', () => {
     const small = { ...options, events: 80 };
@@ -103,4 +106,99 @@ it('gives business-scoped scheduler and partner identities distinct names', () =
     }
   }
   expect(names.size).toBeGreaterThan(24);
+});
+
+describe('profiles', () => {
+  const fingerprint = (input: SeedOptions) => {
+    const hash = createHash('sha256');
+    for (const event of generateEvents(input)) hash.update(`${JSON.stringify(event)}\n`);
+    return hash.digest('hex');
+  };
+  it('keeps the StayDesk profile byte-identical to the original generator, so pnpm demo output is unchanged', () => {
+    // Digests of the generator on master 8ba30e0 (before profiles), with the demo's windows: min(60, retention - 1)
+    // days, so 59 for StayDesk (90-day retention) and 29 for Ledger demo (30-day retention).
+    const demo = { seed: 42, now: options.now, profile: 'staydesk' } as const;
+    expect(fingerprint({ ...demo, days: 59, events: 300_000, project: 'StayDesk' })).toBe(
+      '45bed05172850688eb56d013dd84c1c87bd260206c3433f542611874d2b61540',
+    );
+    expect(fingerprint({ ...demo, days: 29, events: 5000, project: 'Ledger demo' })).toBe(
+      '410e1f93728ab9eb7b0e23c9f19b6a08589ff48ab12723a41aefc954dc94b6dd',
+    );
+  }, 60_000);
+  it('uses neutral, fictional source and integration names by default', () => {
+    const sources = new Set<string>();
+    const integrations = new Set<string>();
+    for (const event of generateEvents({ ...options, events: 20_000, project: 'Hotel demo', spread: true })) {
+      expect(JSON.stringify(event)).not.toMatch(/acme/i);
+      sources.add(event.source as string);
+      if (event.actor?.type === 'integration') integrations.add(event.actor.id as string);
+    }
+    expect([...sources].sort()).toEqual(['booking-engine', 'channel-manager', 'meta-whatsapp', 'payment-provider']);
+    expect([...integrations].sort()).toEqual(['channel-manager', 'meta-whatsapp', 'payment-provider']);
+    const legacy = [...generateEvents({ ...options, events: 20_000, profile: 'staydesk', spread: true })];
+    expect(new Set(legacy.map((event) => event.source))).toEqual(new Set(['staydesk', 'staybook', 'meta-whatsapp', 'payment-provider']));
+  });
+  it('rejects an unknown profile', () => {
+    expect(() => [...generateEvents({ ...options, events: 1, profile: 'other' as never })]).toThrow('Invalid seed options');
+  });
+});
+
+describe('spread over a recent window', () => {
+  type Mix = { scheduled: number; impersonated: number; retried: number; multiTarget: number; interactive: number };
+  const mix = (events: EventInput[]): Mix => ({
+    scheduled: events.filter((e) => e.metadata?.schedulerId).length / events.length,
+    impersonated: events.filter((e) => e.impersonator).length / events.length,
+    retried: events.filter((e) => (e.executor?.attempt ?? 0) > 1).length / events.length,
+    multiTarget: events.filter((e) => (e.targets?.length ?? 0) > 1).length / events.length,
+    interactive: events.filter((e) => e.context?.requestId).length / events.length,
+  });
+  // The full fixture's mix (the default 300k, 60-day prefix stream) is the reference.
+  const reference = mix([...generateEvents(options)]);
+
+  it('spreads a small count over the most recent day, ending now, with the full fixture mix', () => {
+    const end = options.now.getTime();
+    const events = [...generateEvents({ ...options, events: 400, days: 1, spread: true })];
+    expect(events).toHaveLength(400);
+    const times = events.map((e) => Date.parse(e.occurredAt as string)).sort((a, b) => a - b);
+    // Every event is inside the last day, and they cover it: no gap longer than a fifth of the window at either end.
+    expect(times[0]).toBeGreaterThanOrEqual(end - DAY);
+    expect(times.at(-1)).toBeLessThan(end);
+    expect(times[0]).toBeLessThan(end - 0.8 * DAY);
+    expect(times.at(-1)).toBeGreaterThan(end - 0.2 * DAY);
+    // The console's default "Last 24 hours" has recent traffic: something in the last hour.
+    expect(times.filter((time) => time > end - 3_600_000).length).toBeGreaterThan(0);
+    const small = mix(events);
+    expect(small.impersonated).toBeGreaterThan(0);
+    expect(small.retried).toBeGreaterThan(0);
+    expect(small.multiTarget).toBeGreaterThan(0);
+    expect(small.interactive).toBeGreaterThan(0);
+    // Proportional to the full fixture, within sampling noise for 400 events.
+    expect(Math.abs(small.scheduled - reference.scheduled)).toBeLessThan(0.05);
+    expect(Math.abs(small.multiTarget - reference.multiTarget)).toBeLessThan(0.12);
+    expect(small.impersonated / reference.impersonated).toBeGreaterThan(0.3);
+    expect(small.impersonated / reference.impersonated).toBeLessThan(3);
+    expect(small.retried / reference.retried).toBeGreaterThan(0.3);
+    expect(small.retried / reference.retried).toBeLessThan(3);
+  });
+
+  it('keeps trees, actors and attempts valid, and is reproducible', () => {
+    const input = { ...options, events: 2000, days: 7, spread: true };
+    const events = [...generateEvents(input)];
+    expect(JSON.stringify(events)).toBe(JSON.stringify([...generateEvents(input)]));
+    const seen = new Map(events.map((event) => [event.id, event]));
+    for (const event of events) {
+      const parent = event.context?.parentEventId;
+      if (!parent) continue;
+      const ancestor = seen.get(parent);
+      expect(ancestor?.context?.operationId).toBe(event.context?.operationId);
+      expect(Date.parse(ancestor?.occurredAt as string)).toBeLessThanOrEqual(Date.parse(event.occurredAt as string));
+      if (event.actor && ancestor?.actor) expect(event.actor.id).toBe(ancestor.actor.id);
+    }
+    for (const event of events.filter((e) => e.metadata?.schedulerId)) expect(event.occurredAt).toMatch(/T\d\d:(0[5-9]|3[5-9]):/);
+    expect(mix(events).scheduled).toBeGreaterThan(0.4);
+  });
+
+  it('needs a window with at least one scheduler slot', () => {
+    expect(() => [...generateEvents({ ...options, events: 10, days: 1 / 48, spread: true })]).toThrow('Invalid seed options');
+  });
 });

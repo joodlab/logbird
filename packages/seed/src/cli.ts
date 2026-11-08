@@ -12,7 +12,7 @@ import {
   searchEvents,
 } from '@logbird/clickhouse';
 import { Logbird } from '@logbird/sdk';
-import { generateEvents } from './index';
+import { generateEvents, SEED_PROFILES, type SeedProfile } from './index';
 
 const { values } = parseArgs({
   options: {
@@ -20,7 +20,9 @@ const { values } = parseArgs({
     endpoint: { type: 'string', default: 'http://localhost:4601' },
     key: { type: 'string' },
     'project-id': { type: 'string' },
-    project: { type: 'string', default: 'StayDesk' },
+    project: { type: 'string' },
+    profile: { type: 'string', default: 'neutral' },
+    until: { type: 'string' },
     events: { type: 'string' },
     days: { type: 'string', default: '60' },
     seed: { type: 'string', default: '42' },
@@ -28,7 +30,14 @@ const { values } = parseArgs({
     benchmark: { type: 'boolean', default: false },
   },
 });
-const events = Number(values.events ?? (values.project.toLowerCase().includes('ledger') ? 5000 : 300_000)),
+if (!(values.profile in SEED_PROFILES)) throw new Error(`profile must be one of ${Object.keys(SEED_PROFILES).join(', ')}`);
+const profile = values.profile as SeedProfile;
+// The project name ends up in every operation ID, so the neutral profile doesn't default to the StayDesk name.
+const project = values.project ?? (profile === 'staydesk' ? 'StayDesk' : 'Hotel demo');
+// --until now (or an ISO time) spreads the events over the most recent --days, ending then, with the full mix.
+const until = values.until === undefined ? undefined : values.until === 'now' ? new Date() : new Date(values.until);
+if (until && Number.isNaN(until.getTime())) throw new Error('--until must be "now" or an ISO date-time');
+const events = Number(values.events ?? (project.toLowerCase().includes('ledger') ? 5000 : 300_000)),
   days = Number(values.days);
 if (!Number.isInteger(events) || events < 1 || !Number.isFinite(days) || days <= 0) throw new Error('Invalid events/days');
 if (!Number.isInteger(Number(values.seed))) throw new Error('Invalid seed');
@@ -45,7 +54,14 @@ if (values.reset) {
     await ch.close();
   }
 }
-const generator = generateEvents({ events, days, project: values.project, seed: Number(values.seed) });
+const generator = generateEvents({
+  events,
+  days,
+  project,
+  seed: Number(values.seed),
+  profile,
+  ...(until ? { now: until, spread: true } : {}),
+});
 if (values.sink === 'api') {
   if (!values.key) throw new Error('--key is required for the api sink');
   let ingestError: Error | undefined;
@@ -85,7 +101,8 @@ if (values.sink === 'api') {
     await insertEvents(ch, batch);
     console.log(`Inserted ${n} fictional events into project ${p}`);
     if (values.benchmark) {
-      const range = { from: new Date(Date.now() - days * 86_400_000).toISOString(), to: new Date().toISOString() };
+      const to = until ?? new Date();
+      const range = { from: new Date(to.getTime() - days * 86_400_000).toISOString(), to: to.toISOString() };
       for (const [name, run] of [
         ['search', () => searchEvents(ch, p, { ...range, limit: 50, order: 'desc' })],
         ['overview', () => overview(ch, p, range)],
