@@ -123,10 +123,11 @@ at most 5000 rows with `FOR UPDATE SKIP LOCKED`, yields 10 ms, and stops after a
 timeout inside a six-second transaction with a one-second connection-wait limit,
 so the last in-flight batch can extend the work budget. Tuple ids are used only inside the
 row-locked DELETE statement, never as persistent event identity. Worker batches
-use transaction-local `set_config(..., true)` (SET LOCAL semantics) to disable
-bitmap scans: stale estimates must not turn ordered LIMIT into a history-sized
-bitmap and sort. The existing `(projectId, confirmedAt)` and global `confirmedAt`
-indexes serve the expiry scans; settings revert at commit. JIT is also disabled for these batches. The hourly
+use the same transaction-local `set_config(..., true)` guard as the probes
+(`SWEEP_GUARD`: sequential scans, bitmaps, sorts, incremental sorts and JIT off).
+Stale or bloated estimates must not turn the ordered LIMIT into a scan of the whole
+history plus a sort. The existing `(projectId, confirmedAt)` and global
+`confirmedAt` indexes serve the expiry scans; settings revert at commit. The hourly
 global and per-project retention backstop runs the same guarded batches with a
 60-second budget instead of an unguarded loop. A stale estimate during a minute-queue
 outage can no longer stall retention behind it. A backstop that removes rows logs

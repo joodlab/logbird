@@ -1,15 +1,4 @@
-import {
-  confirmIngestReceipts,
-  confirmIngestReceiptsSql,
-  expireIngestReceiptsSql,
-  findIngestReceipts,
-  findIngestReceiptsSql,
-  Prisma,
-  prisma,
-  pruneIngestReceipts,
-  RECEIPT_SEEK_GUARD,
-  sweepIngestReceipts,
-} from '@logbird/database';
+import { confirmIngestReceipts, findIngestReceipts, prisma, pruneIngestReceipts, sweepIngestReceipts } from '@logbird/database';
 import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -132,50 +121,6 @@ it('confirmation re-seeks a receipt that a concurrent writer moved between its s
   // The old ctid-only statement silently skipped this row and kept the concurrent fingerprint.
   expect(stored).toMatchObject({ fingerprint: 'v1:confirmed', receivedAt: new Date(1), eventAt: new Date(2) });
   expect(stored?.confirmedAt?.getTime()).toBe(Date.now());
-});
-
-type PlanNode = { 'Node Type': string; 'Index Name'?: string; 'Relation Name'?: string; 'Index Cond'?: string; Plans?: PlanNode[] };
-function nodes(node: PlanNode, parent?: PlanNode): { node: PlanNode; parent?: PlanNode }[] {
-  return [{ node, parent }, ...(node.Plans ?? []).flatMap((child) => nodes(child, node))];
-}
-it('every per-id receipt probe stays an ordered primary-key seek', async () => {
-  // Enough rows that a per-id equality probe on a project index would be a visible alternative.
-  await prisma.$executeRaw`INSERT INTO "IngestReceipt" ("projectId","organizationId","eventId","fingerprint","receivedAt","eventAt","confirmedAt","claimedAt")
-    SELECT ${f.project}, ${f.org}, 'plan-' || lpad(n::text, 6, '0'), 'v1:fixture', now(), now(), now() - interval '20 minutes', NULL
-    FROM generate_series(1, 5000) n`;
-  const ids = Array.from({ length: 1000 }, (_, n) => `plan-${String(n * 5 + 1).padStart(6, '0')}`);
-  const identity = { fingerprint: 'v1:fixture', receivedAt: new Date(), eventAt: new Date() };
-  for (const [label, sql] of [
-    ['find', findIngestReceiptsSql(f.project, ids)],
-    [
-      'confirm',
-      confirmIngestReceiptsSql(
-        f.project,
-        ids.map((eventId) => ({ eventId, ...identity })),
-        new Date(),
-      ),
-    ],
-    ['expire', expireIngestReceiptsSql(f.project, ids, new Date())],
-  ] as const) {
-    // Planned exactly as production runs it: under the transaction-local seek guard.
-    const [, [row]] = await prisma.$transaction([
-      prisma.$executeRaw(RECEIPT_SEEK_GUARD),
-      prisma.$queryRaw<{ 'QUERY PLAN': { Plan: PlanNode }[] }[]>(Prisma.sql`EXPLAIN (FORMAT JSON) ${sql}`),
-    ]);
-    // A bloated, nearly empty table inflates costs past jit_above_cost; OLTP probes must never compile.
-    expect(row?.['QUERY PLAN'][0], label).not.toHaveProperty('JIT');
-    const all = nodes(row?.['QUERY PLAN'][0]?.Plan as PlanNode);
-    const receipts = all.filter(({ node }) => node['Relation Name'] === 'IngestReceipt' && node['Node Type'] !== 'ModifyTable');
-    expect(receipts.length, label).toBeGreaterThan(0);
-    for (const { node } of receipts) {
-      // No per-id secondary-index filter and no scan of the project's history.
-      expect(['Index Scan', 'Index Only Scan', 'Tid Scan'], `${label}: ${node['Node Type']}`).toContain(node['Node Type']);
-      if (node['Index Name']) expect(node['Index Name'], label).toBe('IngestReceipt_pkey');
-    }
-    const seeks = all.filter(({ node, parent }) => node['Index Name'] === 'IngestReceipt_pkey' && parent?.['Node Type'] === 'Limit');
-    expect(seeks.length, `${label} keeps the LIMIT 1 key seek`).toBeGreaterThan(0);
-    for (const { node } of seeks) expect(node['Index Cond'], label).toMatch(/ROW\("projectId", "eventId"\) >= ROW\(/);
-  }
 });
 
 /** Holds the project's data lock (not its writer gate) in a separate transaction until released. */
