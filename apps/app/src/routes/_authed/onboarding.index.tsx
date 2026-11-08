@@ -8,7 +8,6 @@ import { ArrowRightIcon, Loader2Icon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { api } from '@/lib/api/client';
-import { meQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
 import { fieldErrorMessage } from '@/lib/forms';
 import { hasName } from '@/lib/user';
@@ -62,7 +61,9 @@ function WorkspaceStep() {
         if (org && typeof org === 'object' && 'id' in org) {
           await authCall(authClient.organization.setActive({ organizationId: String((org as { id: string }).id) }));
         }
-        await queryClient.invalidateQueries({ queryKey: meQuery().queryKey });
+        // A new active workspace: drop everything cached for the previous one (project list, setup, views), like the
+        // workspace switcher does, so the first-project step sees this workspace's (empty) project list.
+        queryClient.clear();
         // `/` resumes at whatever is missing next (normally the project step).
         await navigate({ to: '/' });
       } catch (error) {

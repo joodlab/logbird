@@ -25,6 +25,37 @@ describe('OPS-21 query problems in plain language', () => {
     expect(text).not.toContain('Unterminated');
   });
 
+  it('keeps every letter of the quoted text, including lowercase "s", and collapses whitespace only', () => {
+    for (const [q, after] of [
+      ['tenant.name:"Hassan Suites', 'Hassan Suites'],
+      ['action:"booking.status', 'booking.status'],
+      ['tenant.name:"Sara   Hassan\tsuites', 'Sara Hassan suites'],
+    ] as const) {
+      const problem = syntax(q, 'Unterminated quoted query', q.indexOf('"'));
+      if (!problem) throw new Error('expected a problem');
+      expect(queryProblemText(problem, q)).toBe(`A quote mark is missing its partner — add a closing " after ${after}.`);
+    }
+    const regex = 'action:/bookings?';
+    const problem = syntax(regex, 'Unterminated regex', regex.indexOf('/'));
+    if (!problem) throw new Error('expected a problem');
+    expect(queryProblemText(problem, regex)).toBe('A /pattern/ is missing its closing slash — add / after bookings?.');
+  });
+
+  it('strips the parser prefix even without a space and keeps lowercase "s" in the message', () => {
+    const problem = queryProblem(
+      new ApiRequestError(422, 'invalid_query', 'Invalid query syntax:status is not a field', {
+        lang: 'query',
+        reason: 'syntax',
+        start: 0,
+        end: 6,
+        hint: 'status is not a field',
+      }),
+      'query',
+    );
+    if (!problem) throw new Error('expected a problem');
+    expect(queryProblemText(problem, 'status:x')).toBe('status is not a field');
+  });
+
   it('never repeats the hint, and drops the parser prefix', () => {
     const q = 'action:(a OR';
     const problem = syntax(q, 'Expected )', 7);

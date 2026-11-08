@@ -62,12 +62,23 @@ export function SaveEntityViewButton({
       }),
     onSuccess: async (view) => {
       await queryClient.invalidateQueries({ queryKey: [...keys.project(projectId), 'views'] });
+      // A one-click save lands in everyone's sidebar, so it can be taken back right here.
       toast.success(`Saved “${view.name}”`, {
         description: 'It is in Saved views and the sidebar for everyone in the workspace.',
         action: { label: 'Copy link', onClick: () => copyLink(projectId, view) },
+        cancel: { label: 'Undo', onClick: () => undo.mutate(view) },
+        duration: 10_000,
       });
     },
     onError: (error) => toast.error('Could not save the view', { description: errorMessage(error) }),
+  });
+  const undo = useMutation({
+    mutationFn: (view: { id: string; name: string }) => api.views.remove(projectId, view.id),
+    onSuccess: async (_, view) => {
+      await queryClient.invalidateQueries({ queryKey: [...keys.project(projectId), 'views'] });
+      toast.success(`Removed “${view.name}”`, { description: 'Nobody else will see it in their sidebar.' });
+    },
+    onError: (error) => toast.error('Could not remove the view', { description: errorMessage(error) }),
   });
 
   if (existing) {

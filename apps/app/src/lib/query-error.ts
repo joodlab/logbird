@@ -23,7 +23,7 @@ export function reasonTitle(details: QueryErrorDetails | null, code: QueryProble
 }
 
 const excerpt = (text: string, max = 40) => {
-  const clean = text.replace(/s+/g, ' ').trim();
+  const clean = text.replace(/\s+/g, ' ').trim();
   return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
 };
 
@@ -46,7 +46,7 @@ export function queryProblemText(problem: QueryProblem, q: string): string {
         ? `A /pattern/ is missing its closing slash — add / after ${after}.`
         : 'A /pattern/ is missing its closing slash — add a closing /.';
   }
-  const message = problem.message.replace(/^Invalid query syntax:s*/i, '').trim();
+  const message = problem.message.replace(/^Invalid query syntax:\s*/i, '').trim();
   if (!hint || hint === message) return message || hint;
   if (!message || message.endsWith(hint)) return hint;
   return `${message} — ${hint}`;

@@ -418,11 +418,12 @@ export function Explorer({
           )}
         </div>
         <div className="flex items-center justify-between gap-3 text-muted-foreground text-xs">
-          <span className={cn('min-w-0 tabular-nums', problem && 'flex items-center gap-1.5 text-destructive')} aria-live="polite">
+          <span className={cn('min-w-0 tabular-nums', problem && 'flex items-start gap-1.5 text-destructive sm:items-center')} aria-live="polite">
             {problem ? (
               <>
-                <CircleAlertIcon className="size-3.5 shrink-0" />
-                <span className="min-w-0 truncate" data-testid="query-problem" title={queryProblemText(problem, q)}>
+                <CircleAlertIcon className="mt-px size-3.5 shrink-0 sm:mt-0" />
+                {/* Phones wrap: the actionable half of the sentence must not hide behind a hover-only title. */}
+                <span className="min-w-0 sm:truncate" data-testid="query-problem" title={queryProblemText(problem, q)}>
                   <span className="font-medium">{reasonTitle(problem.details, problem.code)}</span>
                   {' · '}
                   {queryProblemText(problem, q)}

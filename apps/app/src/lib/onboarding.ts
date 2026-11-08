@@ -63,3 +63,18 @@ export async function resolveOnboarding(queryClient: QueryClient) {
       return overviewOf(setup, projectId);
   }
 }
+
+/**
+ * Whether the active workspace already has a project — the full-screen wizard is only for the first one. Always asks
+ * the server: the cached project list is keyed without the workspace, so right after creating or switching to a
+ * workspace it can still hold the previous workspace's projects.
+ */
+export async function activeWorkspaceHasProjects(queryClient: QueryClient): Promise<boolean> {
+  try {
+    const projects = await queryClient.fetchQuery({ ...projectsQuery(), staleTime: 0 });
+    return projects.length > 0;
+  } catch {
+    // Unknown: keep the wizard reachable rather than bouncing to a list that may not load either.
+    return false;
+  }
+}

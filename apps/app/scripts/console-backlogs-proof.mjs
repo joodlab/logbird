@@ -123,13 +123,47 @@ function fixtureEvents() {
   return { events: [...events, parent, child, bare], parent, child, bare };
 }
 
+/**
+ * Media never shows a usable secret: every `lb_ingest_…` / `lb_read_…` secret rendered in the page is masked to its
+ * display prefix (screenshots and videos). Only the DOM text changes — copy buttons still copy the real value from React
+ * state, which is what the checks below read back through the clipboard.
+ */
+function maskSecretsInPage() {
+  const SECRET = /\b((?:lb|tm)_(?:ingest|read)_[A-Za-z0-9]{4})[A-Za-z0-9]{28}\b/g;
+  const mask = (root) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (SECRET.test(node.data)) node.data = node.data.replace(SECRET, '$1••••••••••••••••••••••••••••');
+      SECRET.lastIndex = 0;
+    }
+  };
+  const start = () => {
+    mask(document.body);
+    new MutationObserver((records) => {
+      for (const r of records) {
+        if (r.type === 'characterData' && r.target.parentNode) mask(r.target.parentNode);
+        for (const n of r.addedNodes) mask(n.nodeType === Node.TEXT_NODE ? (n.parentNode ?? document.body) : n);
+      }
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  };
+  if (document.body) start();
+  else document.addEventListener('DOMContentLoaded', start);
+}
+
 const browser = await chromium.launch();
 const contexts = [];
 const newContext = async (options) => {
   const context = await browser.newContext({ ...options, permissions: ['clipboard-read', 'clipboard-write'] });
+  await context.addInitScript(maskSecretsInPage);
   contexts.push(context);
   return context;
 };
+/** True when nothing inside `selector` (or the page) is wider than its box — no sideways scroll. */
+const noHorizontalOverflow = (page, selector) =>
+  page.evaluate((sel) => {
+    const els = sel ? [...document.querySelectorAll(sel)] : [document.documentElement];
+    return els.length > 0 && els.every((el) => el.scrollWidth <= el.clientWidth + 1);
+  }, selector);
 const created = [];
 try {
   await mkdir(OUT, { recursive: true });
@@ -198,6 +232,9 @@ try {
   check('OPS-20 members see no "Finish setup" in the sidebar', !(await memberPage.getByTestId('sidebar-setup-progress').count()));
   check('OPS-20 members see no setup checklist on the overview', !(await memberPage.getByTestId('setup-checklist').count()));
   await memberContext.storageState({ path: path.join(OUT, '.member-state.json') });
+  proof.problems.push(...memberProblems);
+  await memberContext.close();
+  contexts.splice(contexts.indexOf(memberContext), 1);
 
   // ── Owner flows (recorded) ──
   await page.goto(`${BASE}/p/${pms}`);
@@ -207,9 +244,20 @@ try {
   // OPS-17: one click from a tenant page.
   await page.goto(`${BASE}/p/${pms}/tenants/biz_lantern?range=7d`);
   await settle(page);
+  await page.getByTestId('save-entity-view').hover();
+  await page.screenshot({ path: path.join(OUT, 'after-ops17-1-before-click-desktop-light.png') });
   await page.getByTestId('save-entity-view').click();
   await page.getByText('Saved “Lantern Bay Hotel — last 7 days”').waitFor();
-  await page.screenshot({ path: path.join(OUT, 'after-ops17-save-from-tenant-desktop-light.png') });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: path.join(OUT, 'after-ops17-2-saved-toast-with-undo-desktop-light.png') });
+  check('OPS-17 one click saves; the toast offers Undo', (await page.getByRole('button', { name: 'Undo' }).count()) === 1);
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await page.getByText('Removed “Lantern Bay Hotel — last 7 days”').waitFor();
+  const afterUndo = await api(page, 'GET', `/api/projects/${pms}/views`);
+  check('OPS-17 Undo removes the view again', !afterUndo.data.some((v) => v.name === 'Lantern Bay Hotel — last 7 days'));
+  await page.getByTestId('save-entity-view').waitFor();
+  await page.getByTestId('save-entity-view').click();
+  await page.getByText('Saved “Lantern Bay Hotel — last 7 days”').waitFor();
   const views = await api(page, 'GET', `/api/projects/${pms}/views`);
   const view = views.data.find((v) => v.name === 'Lantern Bay Hotel — last 7 days');
   check(
@@ -264,17 +312,25 @@ try {
   await readerRow.getByTestId('roll-key').click();
   await page.getByRole('button', { name: 'Roll key' }).click();
   await page.getByTestId('one-time-secret').waitFor();
-  const newSecret = (await page.getByTestId('one-time-secret').innerText()).trim();
   await page.keyboard.press('Escape');
   await page.getByTestId('secret-close-confirm').waitFor();
+  await page.waitForTimeout(600);
   check('OWNER-10 Escape asks "Close without copying?" and keeps the secret', (await page.getByTestId('one-time-secret').count()) === 1);
+  check('OWNER-10 the secret dialog does not scroll sideways (desktop)', await noHorizontalOverflow(page, '[data-slot="dialog-content"]'));
+  check('OWNER-10 the secret is masked in media', /••••/.test(await page.getByTestId('one-time-secret').innerText()));
   await page.screenshot({ path: path.join(OUT, 'after-owner10-escape-guard-desktop-light.png') });
   await page.getByRole('button', { name: 'Keep it open' }).click();
   await page.getByRole('button', { name: 'Copy key' }).click();
   await page.getByRole('button', { name: 'Copied' }).waitFor();
+  const newSecret = (await page.evaluate(() => navigator.clipboard.readText())).trim();
   await page.keyboard.press('Escape');
   await page.getByTestId('one-time-secret').waitFor({ state: 'detached' });
   check('OWNER-10 after copying, Escape closes normally', true);
+  await page.waitForTimeout(400);
+  check(
+    'OWNER-11 after a roll, focus lands on the old key "Revoke old key" button',
+    (await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))) === 'revoke-old-key',
+  );
   const oldStill = await fetch(`${SERVER}/v1/events?limit=1`, { headers: { authorization: `Bearer ${reader.secret}`, 'user-agent': 'curl/8.4.0' } });
   const fresh = await fetch(`${SERVER}/v1/events?limit=1`, {
     headers: { authorization: `Bearer ${newSecret}`, 'user-agent': 'qa-billing-export/2.1' },
@@ -386,6 +442,8 @@ try {
             .locator('[data-slot="sheet-content"]')
             .waitFor({ timeout: 15_000 })
             .catch(() => undefined);
+        if (variant.width < 600 && (name === 'ops17-18-views' || name === 'owner11-keys'))
+          check(`${name} ${variant.id}: no sideways overflow`, (await noHorizontalOverflow(shot)) && (await noHorizontalOverflow(shot, 'main li')));
         await shot.screenshot({ path: path.join(OUT, `after-${name}-${variant.id}.png`) });
       }
       proof.problems.push(...shotProblems);
@@ -412,6 +470,16 @@ try {
   await phonePage.getByTestId('one-time-secret').waitFor();
   await phonePage.keyboard.press('Escape');
   await phonePage.getByTestId('secret-close-confirm').waitFor();
+  await phonePage.waitForTimeout(600);
+  check('OWNER-10 the secret dialog does not scroll sideways (390 px)', await noHorizontalOverflow(phonePage, '[data-slot="dialog-content"]'));
+  check(
+    'OWNER-10 "Close anyway" is reachable on a phone',
+    await phonePage.getByRole('button', { name: 'Close anyway' }).evaluate((el) => {
+      el.scrollIntoView({ block: 'nearest' });
+      const r = el.getBoundingClientRect();
+      return r.left >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight;
+    }),
+  );
   await phonePage.screenshot({ path: path.join(OUT, 'after-owner10-escape-guard-phone-dark.png') });
   await phonePage.getByRole('button', { name: 'Close anyway' }).click();
   await phonePage.goto(`${BASE}/projects`);
@@ -420,6 +488,11 @@ try {
   await phonePage.getByTestId('new-project-dialog').waitFor();
   await phonePage.screenshot({ path: path.join(OUT, 'after-owner16-new-project-dialog-phone-dark.png') });
   await phonePage.keyboard.press('Escape');
+  await phonePage.waitForTimeout(500);
+  check(
+    'OWNER-16 closing the dialog returns focus to "New project"',
+    (await phonePage.evaluate(() => document.activeElement?.textContent?.trim())) === 'New project',
+  );
   await phonePage.waitForTimeout(600);
   proof.problems.push(...phoneProblems);
   const phoneVideo = phonePage.video();
@@ -458,7 +531,7 @@ try {
     created.splice(created.indexOf(projectId), 1);
   }
   check('cleanup: QA projects deleted', created.length === 0);
-  proof.problems.push(...problems, ...memberProblems);
+  proof.problems.push(...problems);
 } finally {
   for (const context of contexts) await context.close().catch(() => undefined);
   await browser.close();

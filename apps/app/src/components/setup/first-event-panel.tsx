@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { ActionName } from '@/components/action-name';
 import { AdminOnly } from '@/components/admin-gate';
 import { EventSheet } from '@/components/explorer/event-sheet';
+import { PendingHint } from '@/components/pending-hint';
 import { Timestamp } from '@/components/timestamp';
 import { projectSetupQuery } from '@/lib/api/queries';
 import { eventSentence, personLabel } from '@/lib/events';
@@ -212,6 +213,16 @@ export function SampleDataControl({ projectId, setup }: { projectId: string; set
             {formatNumber(SAMPLE_DATA_EVENTS)} fictional hotel-booking events over 7 days, tagged{' '}
             <span className="font-mono text-foreground">source:{SAMPLE_DATA_SOURCE}</span>. They fill the dashboards but never count toward setup.
           </p>
+          <PendingHint
+            className="mt-1"
+            pending={load.isPending || remove.isPending}
+            slow={
+              remove.isPending
+                ? 'Removing the sample events and rebuilding the dashboards…'
+                : `Writing ${formatNumber(SAMPLE_DATA_EVENTS)} sample events and rebuilding the dashboards…`
+            }
+            slower="This can take a little longer on a busy project; this panel updates when it is done."
+          />
         </div>
       </div>
       <div className="flex shrink-0 flex-wrap gap-2">

@@ -3,6 +3,7 @@ import { Button } from '@logbird/ui/components/ui/button';
 import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { DatabaseIcon, Loader2Icon, Trash2Icon } from 'lucide-react';
+import { PendingHint } from '@/components/pending-hint';
 import { projectSetupQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
 import { useCan } from '@/lib/permissions';
@@ -53,6 +54,7 @@ export function SampleDataBanner({ projectId, className }: { projectId: string; 
       ) : (
         <span className="text-muted-foreground text-xs">An owner or admin can remove them</span>
       )}
+      <PendingHint className="basis-full" pending={remove.isPending} slow="Removing the sample events and rebuilding the dashboards…" />
     </div>
   );
 }

@@ -69,13 +69,13 @@ export function NewProjectDialog({
   return (
     <Dialog onOpenChange={(next) => (create.isPending ? undefined : close(next))} open={open}>
       <DialogContent
-        className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
+        className="max-h-[calc(100dvh-2rem)] grid-cols-[minmax(0,1fr)] overflow-y-auto overflow-x-hidden sm:max-w-lg"
         data-testid="new-project-dialog"
         finalFocus={finalFocus}
         initialFocus={nameInput}
       >
         <form
-          className="flex flex-col gap-4"
+          className="flex min-w-0 flex-col gap-4"
           noValidate
           onSubmit={(event) => {
             event.preventDefault();

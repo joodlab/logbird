@@ -1,6 +1,6 @@
 import { Button } from '@logbird/ui/components/ui/button';
 import { TriangleAlertIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 
 /** Close reasons that are one stray key press or click away (Escape, a tap on the backdrop, the corner ×). */
 const STRAY_CLOSE_REASONS = new Set(['escape-key', 'outside-press', 'close-press', 'focus-out']);
@@ -44,14 +44,16 @@ export function useSecretCloseGuard(showingSecret: boolean) {
 
 /** Inline "Close without copying?" step shown in place of the footer when a stray close was caught. */
 export function CloseWithoutCopying({ onKeep, onClose }: { onKeep: () => void; onClose: () => void }) {
+  const titleId = useId();
+  // Part of the open dialog (its focus scope), announced as an alert — not a nested dialog of its own.
   return (
     <div
-      className="flex flex-col gap-3 rounded-lg border border-outcome-denied/30 bg-outcome-denied/[0.07] p-3"
+      aria-labelledby={titleId}
+      className="flex min-w-0 flex-col gap-3 rounded-lg border border-outcome-denied/30 bg-outcome-denied/[0.07] p-3"
       data-testid="secret-close-confirm"
-      role="alertdialog"
-      aria-labelledby="secret-close-title"
+      role="alert"
     >
-      <p className="flex items-start gap-2 text-sm" id="secret-close-title">
+      <p className="flex items-start gap-2 text-sm" id={titleId}>
         <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-outcome-denied" />
         <span>
           <span className="font-medium">Close without copying?</span> You won’t see this key again — you would have to roll or revoke it and create

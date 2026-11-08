@@ -16,7 +16,7 @@ import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { CheckCircle2Icon, KeyRoundIcon, Loader2Icon, PlusIcon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-react';
-import { type RefObject, useId, useRef, useState } from 'react';
+import { type ComponentProps, useId, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { AdminNote, AdminOnly } from '@/components/admin-gate';
@@ -113,6 +113,7 @@ function KeysSettings() {
               return (
                 <li
                   className={cn('flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-4', k.revokedAt && 'bg-muted/30')}
+                  data-key-id={k.id}
                   data-testid="api-key-row"
                   key={k.id}
                 >
@@ -177,7 +178,7 @@ function KeysSettings() {
                       )}
                     </span>
                     {k.revokedAt || !manage ? null : (
-                      <span className="flex items-center gap-1">
+                      <span className="ms-auto flex items-center gap-1">
                         {replacement ? null : (
                           <Button
                             data-testid="roll-key"
@@ -229,7 +230,12 @@ function KeysSettings() {
       </SettingsSection>
       {manage ? (
         <CreateKeyDialog
-          finalFocus={createButton}
+          finalFocus={() =>
+            // After a roll the next step is revoking the old key once nothing uses it: land on that button.
+            (rolled?.key.replacesKeyId
+              ? document.querySelector<HTMLElement>(`[data-key-id="${rolled.key.replacesKeyId}"] [data-testid="revoke-old-key"]`)
+              : null) ?? createButton.current
+          }
           onClosed={() => setRolled(null)}
           onOpenChange={setCreateOpen}
           open={createOpen}
@@ -255,7 +261,7 @@ function CreateKeyDialog({
   onOpenChange: (open: boolean) => void;
   projectId: string;
   /** The "Create key" button: the dialog opens from state, so it returns focus there explicitly. */
-  finalFocus: RefObject<HTMLButtonElement | null>;
+  finalFocus: ComponentProps<typeof DialogContent>['finalFocus'];
   /** Set when the dialog opens to show a rolled key's replacement secret instead of the create form. */
   rolled: { key: ApiKey; secret: string } | null;
   onClosed: () => void;
@@ -296,13 +302,14 @@ function CreateKeyDialog({
     // Escape, a backdrop tap or the corner × never discard an uncopied secret: the dialog asks first (OWNER-10).
     <Dialog onOpenChange={(next, details) => secretGuard.guard(next, details) && close(next)} open={open}>
       <DialogContent
-        // Phones: the secret, its snippet and the close confirmation can be taller than the screen — scroll inside.
-        className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
+        // Phones: the secret, its snippet and the close confirmation can be taller than the screen — scroll inside,
+        // vertically only (min-w-0 columns keep the wide snippet from pushing the dialog sideways).
+        className="max-h-[calc(100dvh-2rem)] grid-cols-[minmax(0,1fr)] overflow-y-auto overflow-x-hidden sm:max-w-lg"
         finalFocus={finalFocus}
         initialFocus={created ? undefined : nameInput}
       >
         {created ? (
-          <div className="flex flex-col gap-4">
+          <div className="flex min-w-0 flex-col gap-4">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <CheckCircle2Icon className="size-5 text-outcome-success" />
@@ -339,7 +346,7 @@ function CreateKeyDialog({
           </div>
         ) : (
           <form
-            className="flex flex-col gap-4"
+            className="flex min-w-0 flex-col gap-4"
             onSubmit={(event) => {
               event.preventDefault();
               form.handleSubmit();

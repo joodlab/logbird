@@ -11,9 +11,10 @@ import { z } from 'zod';
 import { RetentionPicker } from '@/components/retention-picker';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
-import { keys, projectsQuery } from '@/lib/api/queries';
+import { keys } from '@/lib/api/queries';
 import { formatRetention } from '@/lib/format';
 import { fieldErrorMessage } from '@/lib/forms';
+import { activeWorkspaceHasProjects } from '@/lib/onboarding';
 import { stashSecret } from '@/lib/one-time-secrets';
 import { activeRole, canDo } from '@/lib/permissions';
 import { ensureActiveWorkspace } from '@/lib/session';
@@ -25,8 +26,7 @@ export const Route = createFileRoute('/_authed/onboarding/project')({
     const me = await ensureActiveWorkspace(context.queryClient, context.me);
     // The full-screen wizard is for a workspace's first project. Later projects are created from a dialog inside the
     // app shell (Projects page / switcher), which lands on the new project's Setup page.
-    const existing = await context.queryClient.fetchQuery(projectsQuery()).catch(() => []);
-    if (existing.length > 0) throw redirect({ to: '/projects', search: { new: true } });
+    if (await activeWorkspaceHasProjects(context.queryClient)) throw redirect({ to: '/projects', search: { new: true } });
     return { me };
   },
   component: ProjectStep,

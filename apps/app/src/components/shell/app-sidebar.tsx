@@ -46,7 +46,7 @@ import {
   SunIcon,
   UserIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { UserAvatar } from '@/components/account/user-avatar';
 import { BrandMark } from '@/components/brand';
@@ -178,6 +178,8 @@ function WorkspaceSwitcher({ projectId }: { projectId?: string }) {
   const project = projects.data?.find((p) => p.id === projectId);
   const canCreateProject = canDo(workspace?.role, 'project.create');
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  /** The dialog opens from a menu item that unmounts: return focus to the switcher itself. */
+  const switcherButton = useRef<HTMLButtonElement>(null);
 
   const switchWorkspace = async (organizationId: string) => {
     try {
@@ -194,6 +196,7 @@ function WorkspaceSwitcher({ projectId }: { projectId?: string }) {
       <SidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger
+            ref={switcherButton}
             render={
               <SidebarMenuButton className="h-11 data-popup-open:bg-sidebar-accent" size="lg">
                 <BrandMark className="size-7 shrink-0" />
@@ -249,7 +252,9 @@ function WorkspaceSwitcher({ projectId }: { projectId?: string }) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        {canCreateProject ? <NewProjectDialog onOpenChange={setNewProjectOpen} open={newProjectOpen} workspaceName={workspace?.name} /> : null}
+        {canCreateProject ? (
+          <NewProjectDialog finalFocus={switcherButton} onOpenChange={setNewProjectOpen} open={newProjectOpen} workspaceName={workspace?.name} />
+        ) : null}
       </SidebarMenuItem>
     </SidebarMenu>
   );

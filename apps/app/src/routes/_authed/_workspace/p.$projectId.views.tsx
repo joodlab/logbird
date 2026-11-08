@@ -72,20 +72,20 @@ function ViewsPage() {
           </EmptyState>
         </div>
       ) : (
-        <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <ul className="grid grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-2 xl:grid-cols-3">
           {views.data.map((view) => (
             <li
-              className="group flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-xs transition-colors hover:border-foreground/20"
+              className="group flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 shadow-xs transition-colors hover:border-foreground/20"
               key={view.id}
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex min-w-0 items-start justify-between gap-2">
                 <Link
-                  className="flex min-w-0 flex-col gap-0.5 outline-none"
+                  className="flex min-w-0 flex-1 flex-col gap-0.5 outline-none"
                   params={{ projectId }}
                   search={viewSearch(view)}
                   to="/p/$projectId/events"
                 >
-                  <span className="flex items-center gap-2 font-medium">
+                  <span className="flex min-w-0 items-center gap-2 font-medium">
                     <BookmarkIcon className="size-4 shrink-0 text-brand" />
                     <span className="truncate group-hover:underline group-hover:underline-offset-2">{view.name}</span>
                     {view.state.lang === 'sql' ? <SqlBadge /> : null}
@@ -124,7 +124,7 @@ function ViewsPage() {
                 </div>
               </div>
               <ViewLabelChips labels={view.state.labels} lang={view.state.lang ?? 'query'} q={view.state.q} />
-              <pre className="overflow-hidden rounded-md bg-muted/50 px-2.5 py-1.5 font-mono text-[12px]">
+              <pre className="min-w-0 overflow-hidden rounded-md bg-muted/50 px-2.5 py-1.5 font-mono text-[12px]">
                 <code className="block truncate">
                   {view.state.q ? (
                     <HighlightedText lang={view.state.lang ?? 'query'} value={view.state.q} />
@@ -133,7 +133,7 @@ function ViewsPage() {
                   )}
                 </code>
               </pre>
-              <div className="mt-auto flex items-center justify-between gap-2 text-muted-foreground text-xs">
+              <div className="mt-auto flex min-w-0 items-center justify-between gap-2 text-muted-foreground text-xs">
                 <span>{rangeLabel(view.state.range ?? '24h')}</span>
                 <span className="flex min-w-0 items-center gap-1.5">
                   {view.createdBy && creatorLabel(view.createdBy) ? (
