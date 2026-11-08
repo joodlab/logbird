@@ -6,7 +6,7 @@ import { useForm } from '@tanstack/react-form';
 import { useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router';
 import { ArrowRightIcon, Loader2Icon, LockIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { z } from 'zod';
 import { RetentionPicker } from '@/components/retention-picker';
 import { api } from '@/lib/api/client';
@@ -34,6 +34,7 @@ function ProjectStep() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [serverError, setServerError] = useState<string | null>(null);
+  const retentionLabel = useId();
   const workspace = me.organizations.find((o) => o.id === me.activeOrganizationId) ?? me.organizations[0];
   const form = useForm({
     defaultValues: { name: '', description: '', retentionDays: 90 },
@@ -146,12 +147,12 @@ function ProjectStep() {
           {(field) => (
             <div className="flex flex-col gap-2">
               <div className="flex flex-col gap-0.5">
-                <Label>Retention</Label>
+                <Label id={retentionLabel}>Retention</Label>
                 <p className="text-muted-foreground text-xs">
                   Events older than {formatRetention(field.state.value)} are permanently deleted. You can change this later in Settings.
                 </p>
               </div>
-              <RetentionPicker onChange={field.handleChange} value={field.state.value} />
+              <RetentionPicker aria-labelledby={retentionLabel} onChange={field.handleChange} value={field.state.value} />
             </div>
           )}
         </form.Field>

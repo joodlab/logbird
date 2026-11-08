@@ -1,10 +1,10 @@
 import { Button } from '@logbird/ui/components/ui/button';
-import { cn } from '@logbird/ui/lib/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
-import { CheckIcon, LogOutIcon } from 'lucide-react';
+import { LogOutIcon } from 'lucide-react';
 import { useEffect } from 'react';
 import { BrandLockup } from '@/components/brand';
+import { SetupSteps } from '@/components/onboarding/setup-steps';
 import { workspaceSetupQuery } from '@/lib/api/queries';
 import { signOutFromConsole } from '@/lib/sign-out';
 import { hasName } from '@/lib/user';
@@ -61,30 +61,7 @@ function OnboardingLayout() {
         </div>
       </header>
       <main className="relative mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-4 pt-6 pb-16 sm:pt-10">
-        <ol aria-label="Setup progress" className="flex items-center gap-2 text-sm">
-          {STEPS.map((step, i) => {
-            const isCurrent = i === current;
-            const isDone = done[step.id] && !isCurrent;
-            return (
-              <li className="flex items-center gap-2" data-done={done[step.id] || undefined} key={step.id}>
-                <span
-                  aria-current={isCurrent ? 'step' : undefined}
-                  className={cn(
-                    'flex size-6 items-center justify-center rounded-full border font-medium text-xs tabular-nums transition-colors',
-                    isDone && 'border-transparent bg-foreground text-background',
-                    isCurrent && 'border-brand bg-brand/10 text-brand',
-                    !isDone && !isCurrent && 'text-muted-foreground',
-                  )}
-                >
-                  {isDone ? <CheckIcon className="size-3.5" /> : i + 1}
-                </span>
-                <span className={cn('hidden sm:inline', isCurrent ? 'font-medium text-foreground' : 'text-muted-foreground')}>{step.label}</span>
-                {isCurrent ? <span className="font-medium text-foreground sm:hidden">{step.label}</span> : null}
-                {i < STEPS.length - 1 ? <span aria-hidden className="mx-1 h-px w-4 bg-border sm:w-10" /> : null}
-              </li>
-            );
-          })}
-        </ol>
+        <SetupSteps current={current} steps={STEPS.map((step) => ({ id: step.id, label: step.label, done: done[step.id] }))} />
         <div className="tm-fade-in">
           <Outlet />
         </div>
