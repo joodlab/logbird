@@ -15,6 +15,8 @@ export const serializeKey = (key: ApiKey & Creator) =>
     createdBy: key.createdBy ? { ...key.createdBy, name: key.createdBy.name || key.createdBy.email } : null,
     createdAt: key.createdAt.toISOString(),
     lastUsedAt: key.lastUsedAt?.toISOString() ?? null,
+    lastUsedUserAgent: key.lastUsedUserAgent ?? null,
+    replacesKeyId: key.replacesKeyId ?? null,
     revokedAt: key.revokedAt?.toISOString() ?? null,
   });
 export const serializeView = (view: SavedView & Creator) =>

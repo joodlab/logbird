@@ -17,6 +17,7 @@ export const mutationPermissions = [
   { method: 'DELETE', path: /^\/api\/projects\/[^/]+$/, roles: admins },
   { method: 'POST', path: /^\/api\/projects\/[^/]+\/keys$/, roles: admins },
   { method: 'DELETE', path: /^\/api\/projects\/[^/]+\/keys\/[^/]+$/, roles: admins },
+  { method: 'POST', path: /^\/api\/projects\/[^/]+\/keys\/[^/]+\/roll$/, roles: admins },
   { method: 'POST', path: /^\/api\/projects\/[^/]+\/views$/, roles: all },
   { method: 'DELETE', path: /^\/api\/projects\/[^/]+\/views\/[^/]+$/, roles: all },
   { method: 'POST', path: /^\/api\/projects\/[^/]+\/sample-data$/, roles: admins },

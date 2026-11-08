@@ -199,7 +199,7 @@ user-agent context where available. Keys and session tokens are never recorded. 
 | `project.retention.reviewed` | project | user / project | review occurrence |
 | `project.setup.dismissed` | project | user / project | setupDismissed |
 | `project.sample_data.loaded`, `project.sample_data.removed` | project | user / project | sample operation |
-| `api_key.created`, `api_key.revoked` | api_key | user / key **and project** | kind, scope, safe prefix, state; `reason: project_deleted` for active keys revoked during deletion |
+| `api_key.created`, `api_key.revoked` | api_key | user / key **and project** | kind, scope, safe prefix, state; `reason: project_deleted` for active keys revoked during deletion; a rolled key is `api_key.created` with `reason: rotation`, `replaces {id, prefix}` and the replaced key as an extra target (the old key stays valid until its own `api_key.revoked`) |
 | `saved_view.created`, `saved_view.deleted` | saved_view | user / saved view | saved view display name |
 | `organization.created` | organization | user / workspace | workspace display name |
 | `organization.updated` | organization | user / workspace | actual name/slug before → after, plain old → new description |

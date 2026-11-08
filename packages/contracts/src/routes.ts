@@ -40,6 +40,11 @@ export const routes = {
     list: { method: 'GET', path: '/api/projects/:projectId/keys', auth: 'session' },
     create: { method: 'POST', path: '/api/projects/:projectId/keys', auth: 'session' },
     revoke: { method: 'DELETE', path: '/api/projects/:projectId/keys/:keyId', auth: 'session' },
+    /**
+     * Roll a key (→ 201 CreateApiKeyResponse): creates a replacement with the same name and kind and returns its secret
+     * once. The old key keeps working until it is revoked, so the new one can be deployed first.
+     */
+    roll: { method: 'POST', path: '/api/projects/:projectId/keys/:keyId/roll', auth: 'session' },
   },
   events: {
     search: { method: 'GET', path: '/api/projects/:projectId/events', auth: 'session' },
@@ -68,6 +73,8 @@ export const routes = {
   workspaceActivity: { method: 'GET', path: '/api/workspace/activity', auth: 'session' },
   /** Workspace setup summary + resumable onboarding target (WorkspaceSetup, ./setup.ts). */
   workspaceSetup: { method: 'GET', path: '/api/workspace/setup', auth: 'session' },
+  /** Onboarding workspace-name pre-fill (WorkspaceNameSuggestion, ./api.ts). */
+  workspaceNameSuggestion: { method: 'GET', path: '/api/onboarding/workspace-name', auth: 'session' },
   /**
    * Members & invitations use better-auth's organization endpoints under /api/auth/organization/*
    * (invite-member, list-invitations, get-invitation, accept-invitation, reject-invitation, cancel-invitation,

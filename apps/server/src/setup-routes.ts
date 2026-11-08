@@ -1,9 +1,11 @@
-import { projectSetupSchema, SETUP_STEPS, sampleDataResponseSchema, workspaceSetupSchema } from '@logbird/contracts';
+import { projectStats } from '@logbird/clickhouse';
+import { projectSetupSchema, SETUP_STEPS, sampleDataResponseSchema, workspaceNameSuggestionSchema, workspaceSetupSchema } from '@logbird/contracts';
 import { prisma, withProjectLock } from '@logbird/database';
 import { Hono } from 'hono';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { audit, requireProjectReadable, requireRetentionReady } from './ingest';
+import { companyFromEmail, pickLandingProject } from './landing';
 import { requireProjectAccess, requireSession } from './middlewares';
 import { doc, routeDoc } from './openapi';
 import { loadSampleData, removeSampleData } from './sample-data';
@@ -55,7 +57,6 @@ export const setupRoutes = new Hono<AppEnv>()
       ? await prisma.project.findMany({ where: { organizationId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] })
       : [];
     const statuses = await Promise.all(projects.map((p) => projectSetup(p.id, team, true)));
-    const active = [...statuses].sort((a, b) => (b.ingest.lastEventAt ?? '').localeCompare(a.ingest.lastEventAt ?? ''))[0];
     const next = !c.get('user').name?.trim()
       ? 'profile'
       : !organizationId
@@ -65,14 +66,36 @@ export const setupRoutes = new Hono<AppEnv>()
           : !statuses.some((s) => s.ingest.firstEventAt)
             ? 'first_event'
             : null;
+    // Landing: the most active project, not whichever received a single (test) event last.
+    const landing =
+      next === null
+        ? pickLandingProject(
+            projects,
+            await projectStats(
+              clickhouse,
+              projects.map((p) => p.id),
+            ),
+          )
+        : (projects[0]?.id ?? null);
     return c.json(
       workspaceSetupSchema.parse({
         organizationId,
         team,
-        onboarding: { next, projectId: next === null ? (active?.projectId ?? null) : (projects[0]?.id ?? null) },
+        onboarding: { next, projectId: landing },
         projects: statuses.map((s, i) => ({ ...s, name: projects[i]?.name, slug: projects[i]?.slug, firstEventAt: s.ingest.firstEventAt })),
       }),
     );
+  })
+  .get('/onboarding/workspace-name', doc('Onboarding workspace-name pre-fill', workspaceNameSuggestionSchema), async (c) => {
+    const company = companyFromEmail(c.get('user').email);
+    if (!company) return c.json(workspaceNameSuggestionSchema.parse({ name: null }));
+    // A teammate at the same domain should join the existing workspace, not create a look-alike "Acme".
+    const sameDomain = { endsWith: `@${company.domain}`, mode: 'insensitive' as const };
+    const [member, invitation] = await Promise.all([
+      prisma.member.findFirst({ where: { user: { email: sameDomain } }, select: { id: true } }),
+      prisma.invitation.findFirst({ where: { email: sameDomain, status: 'pending', expiresAt: { gt: new Date() } }, select: { id: true } }),
+    ]);
+    return c.json(workspaceNameSuggestionSchema.parse({ name: member || invitation ? null : company.name }));
   })
   .use('/projects/:projectId/*', requireProjectAccess)
   .get('/projects/:projectId/setup', doc('Project setup', projectSetupSchema), async (c) =>
