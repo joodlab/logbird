@@ -1,13 +1,37 @@
 import type { EventInput } from '@logbird/sdk';
 import { type Action, businesses, hospitalityActions, ledgerActions, support, users } from './catalog';
 
+/**
+ * Source and integration names. `neutral` (the default) uses fictional names that are safe for public screenshots;
+ * `joodcms` keeps the original names for the JoodCMS demo (`pnpm demo` passes it, so its output is unchanged).
+ */
+export const SEED_PROFILES = {
+  neutral: { source: 'booking-engine', bookingChannel: 'channel-manager' },
+  joodcms: { source: 'joodcms', bookingChannel: 'joodbooking' },
+} as const;
+export type SeedProfile = keyof typeof SEED_PROFILES;
+
 export interface SeedOptions {
   events: number;
+  /** Length of the window that ends at `now`. */
   days: number;
   project: string;
   seed?: number;
   now?: Date;
+  /** Default `neutral`. */
+  profile?: SeedProfile;
+  /**
+   * Spread the requested events over the whole window, ending at `now`, with the same mix as the full fixture
+   * (scheduled vs. interactive traffic, impersonation, retried jobs, multi-target events). Without it, events are a
+   * prefix of the full 60-day stream: a small count lands at the start of the window and holds only scheduled traffic.
+   */
+  spread?: boolean;
 }
+/** Share of events that come from the hourly schedulers in the full hospitality fixture (143,445 of 300,000). */
+const SCHEDULED_SHARE = 0.48;
+/** Per-operation rates in the full fixture, applied by error diffusion in spread mode so small counts keep them. */
+const IMPERSONATION_RATE = 0.02;
+const RETRY_RATE = 0.035;
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 const cities = ['Makkah', 'Madinah', 'Riyadh', 'Jeddah', 'Al Khobar', 'Doha'];
@@ -26,7 +50,10 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
     !Number.isFinite(options.days) ||
     options.days <= 0 ||
     !Number.isFinite(end) ||
-    !Number.isInteger(options.seed ?? 42)
+    !Number.isInteger(options.seed ?? 42) ||
+    !((options.profile ?? 'neutral') in SEED_PROFILES) ||
+    // A scheduled run needs at least one :05/:35 slot inside the window.
+    (options.spread && options.days < 2 / 24)
   )
     throw new Error('Invalid seed options');
   let state = (options.seed ?? 42) >>> 0;
@@ -35,7 +62,26 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
     return state / 4_294_967_296;
   };
   const pick = <T>(items: T[]): T => items[Math.floor(random() * items.length)] as T;
+  const names = SEED_PROFILES[options.profile ?? 'neutral'];
+  const spread = options.spread === true;
+  // Error-diffusion accumulators (spread mode only). Starting at one half rounds the first occurrence to the nearest
+  // expected position, so even a small count gets its proportional share.
+  const quota = { impersonation: 0.5, retry: 0.5 };
+  const take = (key: keyof typeof quota, rate: number) => {
+    quota[key] += rate;
+    if (quota[key] < 1) return false;
+    quota[key] -= 1;
+    return true;
+  };
+  let scheduledEvents = 0;
   const start = end - options.days * DAY;
+  // Incident days (import spike at 55%, provider outage at 80% of the window). Spread mode keeps them to one day, or
+  // 5% of a shorter window, so a one-day window isn't one long incident.
+  const band = Math.min(1 / options.days, 0.05);
+  const incidentAt = (timestamp: number, at: number) =>
+    spread
+      ? (timestamp - start) / (end - start) >= at && (timestamp - start) / (end - start) < at + band
+      : Math.floor((timestamp - start) / DAY) === Math.floor(options.days * at);
   const ledger = options.project.toLowerCase().includes('ledger');
   const vocabulary = ledger ? ledgerActions : hospitalityActions;
   let emitted = 0;
@@ -46,7 +92,7 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
   let scheduledBusiness = 0;
   let scheduledResource = 0;
   while (emitted < options.events) {
-    const scheduled = !ledger && tick + 35 * 60_000 < end;
+    const scheduled = !ledger && (spread ? scheduledEvents <= SCHEDULED_SHARE * emitted : tick + 35 * 60_000 < end);
     const biz = scheduled ? scheduledBusiness : Math.floor(random() ** 2.1 * 30);
     const tenantName = ledger
       ? `${['Cedar Quill', 'Copper Fern', 'Amber Folio', 'Juniper Loom', 'Moonstone Desk'][biz % 5]} Trading`
@@ -60,6 +106,13 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
       name: `${tenantName.toLowerCase().replaceAll(' ', '-')}${websiteIndex ? `-${websiteIndex + 1}` : ''}.example.com`,
     };
     const op = `${options.project}-s${options.seed ?? 42}-op${operation++}`;
+    if (scheduled && spread) {
+      // Walk the hourly slots through the window in step with the share of events emitted so far.
+      const minute = (scheduledResource ? 35 : 5) * 60_000;
+      tick = Math.floor((start + (emitted / options.events) * (end - start)) / HOUR) * HOUR;
+      if (tick + minute < start) tick += HOUR;
+      if (tick + minute >= end) tick = Math.floor((end - 1 - minute) / HOUR) * HOUR;
+    }
     let timestamp = scheduled ? tick + (scheduledResource ? 35 : 5) * 60_000 : 0;
     if (!scheduled) {
       // Friday/Saturday weekend; office hours are interpreted in Asia/Riyadh.
@@ -68,8 +121,7 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
         timestamp = start + random() * Math.max(1, end - start - 10_000);
         const local = new Date(timestamp + 3 * HOUR);
         const age = (timestamp - start) / (end - start);
-        const day = Math.floor((timestamp - start) / DAY);
-        const spike = day === Math.floor(options.days * 0.55) || day === Math.floor(options.days * 0.8);
+        const spike = incidentAt(timestamp, 0.55) || incidentAt(timestamp, 0.8);
         const weight =
           ([5, 6].includes(local.getUTCDay()) ? 0.45 : 1) *
           (local.getUTCHours() >= 8 && local.getUTCHours() < 19 ? 1 : 0.18) *
@@ -78,9 +130,8 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
         accepted = random() < weight;
       }
     }
-    const day = Math.floor((timestamp - start) / DAY);
-    const outage = day === Math.floor(options.days * 0.8);
-    const importing = day === Math.floor(options.days * 0.55);
+    const outage = incidentAt(timestamp, 0.8);
+    const importing = incidentAt(timestamp, 0.55);
     const workflow = scheduled || random() < (ledger ? 0.15 : importing ? 0.65 : 0.23);
     const resource = ledger
       ? 'invoice approval'
@@ -89,7 +140,7 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
           ? 'bookings'
           : 'guests'
         : pick(['guests', 'bookings', 'catalog', 'translation', 'campaign', 'screenshot']);
-    const provider = !ledger && !workflow && random() < 0.12 ? pick(['joodbooking', 'meta-whatsapp', 'payment-provider']) : undefined;
+    const provider = !ledger && !workflow && random() < 0.12 ? pick<string>([names.bookingChannel, 'meta-whatsapp', 'payment-provider']) : undefined;
     const apiKey = !scheduled && !provider && random() < 0.04;
     const actor = scheduled
       ? { type: 'system', id: `crm-hourly-biz_${biz + 1}-${resource}`, name: `Hourly CRM ${resource} scheduler - ${tenantName}` }
@@ -98,14 +149,14 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
         : apiKey
           ? { type: 'api_key', id: `key_${biz + 1}`, name: `Catalog partner automation - ${tenantName}` }
           : user;
-    const impersonated = actor.type === 'user' && random() < 0.02;
+    const impersonated = actor.type === 'user' && (spread ? take('impersonation', IMPERSONATION_RATE) : random() < IMPERSONATION_RATE);
     const base: EventInput = {
       action: '',
       environment: 'production',
       schemaVersion: '1',
       actor,
       tenant: { id: `biz_${ledger ? (biz % 5) + 1 : biz + 1}`, name: tenantName },
-      source: provider ?? (ledger ? 'ledger' : 'joodcms'),
+      source: provider ?? (ledger ? 'ledger' : names.source),
       ...(impersonated ? { impersonator: { type: 'user', id: `support_${(biz % 3) + 1}`, name: support[biz % 3] } } : {}),
       metadata: {
         fictional: true,
@@ -139,6 +190,7 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
       targets: EventInput['targets'] = [website],
     ): EventInput => {
       const index = emitted++;
+      if (scheduled) scheduledEvents++;
       const id = `${op}-${index}`;
       const result: EventInput = {
         ...base,
@@ -222,7 +274,7 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
       });
       yield root;
       let parent = root.id;
-      const fails = random() < (outage && resource === 'campaign' ? 0.8 : 0.035);
+      const fails = outage && resource === 'campaign' ? random() < 0.8 : spread ? take('retry', RETRY_RATE) : random() < RETRY_RATE;
       const attempts = fails ? (random() < 0.5 ? 2 : 3) : 1;
       for (let attempt = 1; attempt <= attempts && emitted < options.events; attempt++) {
         const failed = attempt < attempts;
@@ -341,7 +393,7 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
       const spec: Action = provider
         ? provider === 'meta-whatsapp'
           ? (hospitalityActions.find((a) => a.action === (outage ? 'whatsapp.message.failed' : 'whatsapp.message.delivered')) as Action)
-          : provider === 'joodbooking'
+          : provider === names.bookingChannel
             ? (hospitalityActions.find((a) => a.action === 'booking.created') as Action)
             : {
                 action: 'webhook.received',
