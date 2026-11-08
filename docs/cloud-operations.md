@@ -315,6 +315,15 @@ If the Job fails or times out, stop: preserve its status/logs, investigate appli
 use the recovery decision below. Do not automatically rerun, delete evidence or unblock traffic.
 The Job has no automatic retries and a 20-minute deadline. It uses the image CMD to deploy
 Postgres migrations, ClickHouse migrations and query-user grants in that order.
+The immutable-id upgrade (ClickHouse 006–009) is the exception to that deadline on
+large histories. Each copy statement has its own 600-second server budget
+(`CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS`, which may be set in the migration
+Secret). Its final coverage pass grows roughly with the square of retained events:
+measured at about 62 seconds for 10M and extrapolated to about 80 minutes at
+100M. See the [upgrade copy limits](self-hosting.md#upgrade-copy-limits). Time a
+restored production copy first, and when the estimate exceeds the Job's 20-minute
+`activeDeadlineSeconds`, raise it for that one release's Job. A deadline kill
+mid-copy is safe to rerun, but it repeats a pre-swap copy from the start.
 If nothing starts within about one minute, inspect
 `kubectl -n logbird get pods -l job-name="$MIGRATION_JOB"` for ImagePullBackOff or
 unschedulable Pods rather than waiting silently for the deadline.

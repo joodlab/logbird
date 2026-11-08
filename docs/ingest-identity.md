@@ -26,7 +26,14 @@ retain the old normalized-column comparison until stored evidence or reinsertion
 upgrades them. Frozen legacy fixtures and literal legacy/v1 digest vectors protect
 this compatibility path.
 
-Confirmed receipts are authoritative for ten minutes. After reading the requested
+Confirmed receipts are authoritative for ten minutes. The window is measured on
+each process's own clock: the API compares `confirmedAt` with its clock, and the
+worker sweep with the worker's. Clock skew between them makes receipts expire
+early (or late) by the skew. That is harmless: an expired receipt is never
+authoritative, so the request falls back to the ClickHouse identity lookup. A
+request that pauses for more than half the window rechecks storage and re-applies
+the window when it reloads receipts. A receipt that expired during the pause is not
+trusted; its id is reported pending and an exact retry resolves it. After reading the requested
 ids, ingest expires only those with an old non-null `confirmedAt`, in one guarded
 DELETE. Public batches contain at most 1000 ids; the helper rejects more than
 5000 rather than looping. Fresh ids execute no cleanup SQL, even when unrelated
@@ -38,16 +45,45 @@ of four bind parameters per event. UTC strings keep session timezone independent
 Only competing identities and pause rechecks need a subsequent receipt read.
 Receipt reads seek to `("projectId","eventId") >= (project,id)` in primary-key
 order with `LIMIT 1`, then check the exact project and event id outside the limit.
-The limit keeps the equality filter from being pushed into the seek. Confirmation
-and expiry lock the matching tuple only after checking its exact key; a missing
-key's successor, including another project's row, must never be locked or changed.
-Confirmation retains key order and the original project/id ownership conditions.
+The limit keeps the equality filter from being pushed into the seek.
 
-An equality-only LATERAL probe can choose the project/confirmedAt secondary index
-once per event when project statistics are stale, filtering the entire project
-repeatedly. The ordered primary-key seek avoids that scan pattern. Verify plans
-for prior lookup, confirmation and targeted expiry with both stale and refreshed
-statistics; a short diagnostic with fresh statistics can miss the transition.
+Confirmation and expiry are compare-and-set statements. An unlocked seek first finds
+the exact key and its tuple id (`ctid`); a missing key's successor, including
+another project's row, is never locked or changed. The statement then locks that
+tuple with `FOR UPDATE`, re-checking the ctid and exact key (and, for expiry, the
+cutoff). The UPDATE/DELETE itself matches on `ctid` only: it does not repeat the
+project/id predicates, and it cannot miss a tuple the statement holds locked. The
+gap is between seek and lock: a concurrent writer that updated the row moved it
+to a new ctid, so READ COMMITTED's recheck drops it. Each statement therefore
+returns how many keys it found, how many it changed and which ids it lost. Lost
+ids are sought again against the current version, up to three attempts. A renewed
+receipt drops out of the expiry re-seek because it no longer matches the cutoff;
+a concurrently changed receipt is confirmed with the requested identity. Counts
+that do not add up, or a conflict that persists for three attempts, raise
+`IngestReceiptConflictError` (a retryable 503 on the request path). Nothing on
+today's request path writes the same receipt concurrently, so a retry is an
+anomaly, not a normal branch.
+
+Plan choice must not depend on table statistics. Two separate fixtures back this,
+and they test different things:
+
+- **The shipped ordered seek under stale statistics:** the 33a0553 equality probe
+  regressed on a fresh project over real HTTP. An unchanged diagnostic run of 300
+  batches reproduced it (p95 1686.7 ms, max 3067.6 ms; one batch took 1373 ms in
+  prior lookup and 1494 ms in confirmation, against about 90 ms in ClickHouse).
+  Captured plans used the project/confirmedAt index until auto-ANALYZE refreshed
+  statistics. Queries were unnamed, pool waits were negligible, and the slow
+  statements were active without lock waits. The fixed 88f6e29 code repeated the
+  same fresh-project run: 300 × 1000 UUIDv4 events, p50/p95/p99 315/384/425 ms,
+  max 451 ms, every captured plan on the primary key. **This is the evidence for
+  the shipped SQL.**
+- **Before and after ANALYZE:** an owned 20000-row stale fixture showed the old
+  equality probe filtering 19999 rows per id (1.256 s for 1000 hits) against
+  4.2 ms for the ordered seek. On a separate fixture, all three helpers planned on
+  the primary key before and after ANALYZE (lookup/confirm/expiry about 8/23/10 ms
+  before, 9/22/11 ms after). The old query also used the primary key on that
+  fixture, so this proves the helpers are stable across ANALYZE there, not that
+  they survive the stale-statistics regression above.
 
 A bloated, nearly empty table defeats the ordered seek without a guard. After a large
 backlog is deleted or rolled back, autovacuum records few live rows while the heap
@@ -83,15 +119,19 @@ can settle or remove an unresolved receipt.
 A separate `ingest-receipts` BullMQ queue runs every minute with global concurrency
 one, independently of long ClickHouse retention jobs. Each worker batch deletes
 at most 5000 rows with `FOR UPDATE SKIP LOCKED`, yields 10 ms, and stops after a
-20-second work budget. Each batch has a five-second SQL timeout inside a
-six-second transaction with a one-second connection-wait limit, so the last
-in-flight batch can extend the work budget. Tuple ids are used only inside the
+20-second work budget. Each batch has a five-second SQL timeout and a one-second lock
+timeout inside a six-second transaction with a one-second connection-wait limit,
+so the last in-flight batch can extend the work budget. Tuple ids are used only inside the
 row-locked DELETE statement, never as persistent event identity. Worker batches
 use transaction-local `set_config(..., true)` (SET LOCAL semantics) to disable
 bitmap scans: stale estimates must not turn ordered LIMIT into a history-sized
 bitmap and sort. The existing `(projectId, confirmedAt)` and global `confirmedAt`
-indexes serve the expiry scans; settings revert at commit. Hourly/project retention
-keeps a batched, yielding bulk sweep as a backstop.
+indexes serve the expiry scans; settings revert at commit. JIT is also disabled for these batches. The hourly
+global and per-project retention backstop runs the same guarded batches with a
+60-second budget instead of an unguarded loop. A stale estimate during a minute-queue
+outage can no longer stall retention behind it. A backstop that removes rows logs
+`ingest.receipts_pruned` with `scope: backstop`, and at `warn` when its budget left
+expired rows behind.
 
 Capacity depends on aggregate expiry across all projects. At 5000 receipts/second,
 ten live minutes contain about three million confirmed receipts. With on-time
@@ -187,7 +227,10 @@ earlier, and verifies the cutoff invariant. Legacy replacing-index collapse is
 repaired during upgrade, rather than during every exclusive retention lock.
 
 Migration and cold-maintenance clients have a 15-minute socket-idle timeout and
-progress headers, separate from the ten-minute server query budget. The normal
+progress headers (every 30 seconds), separate from the ten-minute per-statement server
+budget. `CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS` can raise that budget for
+very large histories; see [upgrade copy limits](self-hosting.md#upgrade-copy-limits)
+for measured copy and coverage-pass scaling. The normal
 60-second socket-idle timeout applies to all client operations, not just inserts.
 Before the atomic exchange, resuming an interrupted copy synchronously retires
 the temporary MV/table and creates a fresh table UUID before repeating the full
@@ -348,7 +391,29 @@ is rebuilt, before replay. Reads return `503 retention_unavailable` with the neu
 message "Project data is being rebuilt". Failed or abandoned repairs remain read
 fenced until a complete repair or retention rebuild succeeds. The existing abandoned
 run path enqueues retention, whose rebuild completes the outstanding repair records.
-Settings lastRun includes only kind=retention. Sample removal uses the same repair
+That same retention job also settles the abandoned receipts, so one failure costs
+at most one more full rebuild. While it holds the exclusive lock, before rebuilding,
+it proves that the abandoned claims' async writes are flushed. Its rebuild then
+covers them, and it confirms stored ids, readies missing ones for an exact replay
+and deletes obsolete ready receipts, exactly as request recovery does. A retry that
+was waiting for the lock finds nothing abandoned and does not rebuild again. If the
+flush throttle refuses proof, or settlement fails after the read model is
+consistent, the receipts wait for the next retry or hourly sweep, as before.
+Recovery re-checks for a failed repair after acquiring the exclusive lock. A
+repair that fails while another request waits for the lock therefore wins: the
+waiter returns without rebuilding, and retention owns the recovery.
+
+Settings lastRun includes only kind=retention, and the retention status endpoint
+is itself read-fenced. Failed repairs are therefore surfaced in `/readyz` as
+non-failing details: `maintenance.failedIngestRepairs` reports `fencedProjects`
+(projects with a failed `ingest_repair`) and `oldestFailedAt`. Readiness is
+unauthenticated, so it reports counts only and never names a project. It is cached
+for 30 seconds per API process because RetentionRun history is never pruned. A
+non-zero count means some project's reads return `503 retention_unavailable` until
+retention completes the repair. To list those projects, operators query
+`SELECT "projectId", max("startedAt") FROM "RetentionRun" WHERE kind='ingest_repair'
+AND status='failed' GROUP BY 1`. The `RetentionRun (projectId, kind, status)` index
+serves the per-project failed-repair checks, read fences and retention counts. Sample removal uses the same repair
 fence. Workspace activity reads raw rows only, so its unused rollups need no Project
 read fence; its writes remain serialized by the workspace advisory lock.
 
@@ -357,6 +422,15 @@ falls through to shared ingestion: unresolved ids stay pending and healthy sibli
 commit. Writes may continue while an ingest repair's reads are fenced; an active
 exclusive repair still excludes writers. Regular live retention continues to fence
 writes. Worker startup probes the flush grant and logs an actionable error on failure.
+
+Recovery that starts inside an ingest request holds the project's EXCLUSIVE lock for
+its whole duration, using the long-timeout maintenance ClickHouse client. A large
+rebuild can therefore hold the lock for up to the ten-minute server budget (or a
+raised `CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS`) per statement. Meanwhile,
+other ingest and maintenance for that project returns `503` with Retry-After
+(`project_busy`) after its three-second lock wait. Other projects are unaffected.
+Only an exact retry of an expired ambiguous claim, the hourly worker and the
+operator script enter this path.
 
 Global SYSTEM FLUSH attempts, including failures, are throttled to once per minute
 per server/worker process. Successful proof is reused only for leases it covers.
