@@ -126,6 +126,7 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       await ch.close();
     }
   },
+  // Assertions finish before cleanup; shared 2-slot mutation pool takes ~20 s per synchronous events deletion.
   180_000,
 );
 
