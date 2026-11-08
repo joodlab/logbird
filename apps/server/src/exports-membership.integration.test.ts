@@ -68,7 +68,7 @@ it('keeps exact retries and reconstructed receipts in a later export page after 
       (
         await read<{ n: number }>(
           clickhouse,
-          "SELECT count() n FROM system.parts WHERE database=currentDatabase() AND table='events' AND active AND partition={partition:String}",
+          'SELECT count() n FROM events WHERE toYYYYMM(timestamp)=toUInt32({partition:String})',
           { partition },
         )
       )[0]?.n,
