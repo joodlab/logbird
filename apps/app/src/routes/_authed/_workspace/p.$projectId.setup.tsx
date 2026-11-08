@@ -9,7 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, useLocation } from '@tanstack/react-router';
 import { ArrowRightIcon, ArrowUpRightIcon, CheckIcon, ChevronDownIcon, EyeIcon, EyeOffIcon, Loader2Icon, PartyPopperIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { EnvelopeSemantics, QueryCheatsheet, ShortcutList } from '@/components/docs/reference';
+import { EnvelopeSemantics, EventIdsAndRetries, QueryCheatsheet, ShortcutList } from '@/components/docs/reference';
 import { InviteForm } from '@/components/members/invite-form';
 import { ApiKeyStep, useSessionKey } from '@/components/setup/api-key-step';
 import { EnvelopePanel } from '@/components/setup/envelope-panel';
@@ -407,13 +407,22 @@ function Reference({ projectId }: { projectId: string }) {
       <div className="flex flex-col gap-1">
         <h2 className="font-semibold text-lg tracking-tight">Reference</h2>
         <p className="text-muted-foreground text-sm">
-          The full API is described at <span className="font-mono text-foreground">/openapi.json</span>; the product spec lives in the repository.
+          The full API is in the{' '}
+          <a className="text-brand hover:underline" href="/docs" rel="noreferrer" target="_blank">
+            API reference
+          </a>{' '}
+          (OpenAPI document at{' '}
+          <a className="font-mono text-brand hover:underline" href="/openapi.json" rel="noreferrer" target="_blank">
+            /openapi.json
+          </a>
+          ); the product spec lives in the repository.
         </p>
       </div>
       <div className="flex flex-col gap-3" id="semantics">
         <h3 className="font-medium">Actor, executor, operation</h3>
         <EnvelopeSemantics />
       </div>
+      <EventIdsAndRetries />
       <div className="flex flex-col gap-3 scroll-mt-20" id="query">
         <h3 className="font-medium">Query language</h3>
         <p className="text-muted-foreground text-sm">
@@ -450,6 +459,7 @@ function Toc({ setup }: { setup?: ProjectSetup }) {
         <span className="pt-3 pb-1 font-medium text-[11px] text-muted-foreground uppercase tracking-wider">Reference</span>
         {[
           ['semantics', 'Actor, executor, operation'],
+          ['event-ids-and-retries', 'Event ids and retries'],
           ['query', 'Query language'],
           ['shortcuts', 'Keyboard shortcuts'],
         ].map(([id, label]) => (

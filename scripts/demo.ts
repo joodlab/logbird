@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { createClickHouseClient, purgeProject } from '@logbird/clickhouse';
 import { prisma, withProjectLock } from '@logbird/database';
 import { Logbird } from '@logbird/sdk';
-import { generateEvents } from '@logbird/seed';
+import { generateEvents, SEED_PROFILES, type SeedProfile } from '@logbird/seed';
 import { generateApiKey } from '../apps/server/src/keys';
 import { client, endpoint, login } from './http';
 
@@ -12,8 +12,13 @@ const { values } = parseArgs({
     events: { type: 'string', default: '300000' },
     'ledger-events': { type: 'string', default: '5000' },
     sink: { type: 'string', default: 'api' },
+    // The demo keeps the JoodCMS names and the 60-day prefix unless these are passed (packages/seed/README.md).
+    profile: { type: 'string', default: 'joodcms' },
+    until: { type: 'string' },
   },
 });
+if (!(values.profile in SEED_PROFILES)) throw new Error(`--profile must be one of ${Object.keys(SEED_PROFILES).join(', ')}.`);
+if (values.until !== undefined && values.until !== 'now') throw new Error('--until accepts only "now" in the demo.');
 if (values.sink !== 'api') throw new Error('Demo supports --sink api only.');
 const ch = createClickHouseClient();
 try {
@@ -52,7 +57,13 @@ try {
     const sdk = new Logbird({ apiKey: material.secret, endpoint, batchSize: 1000, onError: (e) => errors.push(e) });
     const start = performance.now();
     let sent = 0;
-    for (const event of generateEvents({ events: count, days: Math.min(60, retentionDays - 1), project: name })) {
+    for (const event of generateEvents({
+      events: count,
+      days: Math.min(60, retentionDays - 1),
+      project: name,
+      profile: values.profile as SeedProfile,
+      ...(values.until ? { now: new Date(), spread: true } : {}),
+    })) {
       sdk.track(event);
       if (++sent % 1000 === 0) await sdk.flush();
     }

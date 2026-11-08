@@ -27,6 +27,32 @@ it('refuses selective rollup inserts when a scoped delete leaves visible rows', 
   }));
   const ch = { command, query } as unknown as ClickHouseClient;
   await expect(purgeProject(ch, 'qa-restored', new Date())).rejects.toMatchObject({ code: 'LOGBIRD_DELETE_INCOMPLETE' });
+  expect(command.mock.calls.filter(([args]) => args.query.startsWith('DELETE FROM'))).toHaveLength(3);
+  expect(command.mock.calls.some(([args]) => /^INSERT INTO (events_by_minute|entities|attribute_keys)\b/.test(args.query))).toBe(false);
+});
+
+it('refuses further writes when the identity-index delete leaves visible rows', async () => {
+  const command = vi.fn().mockResolvedValue({});
+  const query = vi
+    .fn()
+    .mockImplementation(async ({ query: sql }: { query: string }) => ({ json: async () => [{ n: sql.includes('FROM event_ids ') ? 1 : 0 }] }));
+  await expect(purgeProject({ command, query } as unknown as ClickHouseClient, 'qa-restored')).rejects.toMatchObject({
+    code: 'LOGBIRD_DELETE_INCOMPLETE',
+  });
   expect(command).toHaveBeenCalledTimes(2);
   expect(command.mock.calls.every(([args]) => args.query.startsWith('DELETE FROM'))).toBe(true);
+});
+
+it('cutoff cleanup preserves narrow affected-key reads without repairing retained identity history', async () => {
+  const command = vi.fn().mockResolvedValue({});
+  const query = vi.fn().mockImplementation(async ({ query: sql }: { query: string }) => ({
+    json: async () => (sql.startsWith('SELECT DISTINCT') ? [] : [{ n: 0 }]),
+  }));
+  await purgeProject({ query, command } as unknown as ClickHouseClient, 'qa-narrow-retention', new Date('2026-11-07T00:00:00.000Z'));
+  expect(command.mock.calls.some(([p]) => p.query.startsWith('DELETE FROM event_ids'))).toBe(true);
+  expect(command.mock.calls.some(([p]) => p.query.startsWith('INSERT INTO event_ids'))).toBe(false);
+  expect(query.mock.calls.some(([p]) => /key_bytes|identityBuckets|NOT IN/.test(p.query))).toBe(false);
+  const affected = query.mock.calls.find(([p]) => p.query.startsWith('SELECT DISTINCT'))?.[0].query as string;
+  expect(affected).toContain('SELECT DISTINCT kind,id');
+  expect(affected).not.toMatch(/payload|search_text|SELECT \*/);
 });

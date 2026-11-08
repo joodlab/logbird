@@ -116,3 +116,49 @@ Useful Explorer queries for this example: `actor:usr_42`, `tenant:biz_7`, `execu
 
 Logbird records its own management and authentication activity in a workspace stream. See the [activity action catalogue](workspace-audit.md) for actor, target, metadata and delivery semantics.
 See [event exports](exports.md) for complete original payloads, normalized CSV/JSONL, versioned schemas, fixed query clocks and file-to-record verification.
+
+## Event ids and retries
+
+An id names one immutable event within a project, across every timestamp. An exact
+retry is accepted without inserting or incrementing rollups again. Object keys may
+be reordered recursively; array order and string contents must stay identical.
+Identity includes the full input, including values outside indexing caps, and the
+resolved timestamp. Omitted or invalid `occurredAt` keeps the first receipt's clock.
+
+The SDK generates ids and timestamps once before queuing. If you use deterministic
+ids across separate `track()` calls, resend identical content, including `occurredAt`
+and `executor.attempt`; a new call otherwise gets a fresh timestamp. A different
+event with the same id is rejected with `duplicate_id_conflict: ...`; the original
+is kept. Send a correction with a new id and `context.parentEventId` pointing to it.
+The SDK calls `onDrop` for that event and `onError` with the reason.
+
+`503 ingest_pending` and `503 ingest_unavailable` mean retry the identical batch,
+honoring `Retry-After`. Healthy siblings commit before a pending response and remain
+idempotent on retry. Pending details include `accepted`, `ids`, `rejected`, `warnings`,
+`indices` and `eventIds`. Every index outside `indices` is settled. Each rejected
+entry has a `code` plus a code-first explanation in `reason`. The SDK retries these
+responses; after its retry budget, the batch stays queued and `flush()` rejects.
+Retry `flush()` later. Unresolved writes recover automatically per project after a
+bounded lease and ClickHouse queue drain. An id containing NUL, a lone surrogate,
+or more than 256 UTF-16 code units after trimming is rejected individually as
+`invalid_event_id`. Earlier releases truncated long ids; this release rejects them.
+Use string ids: numeric ids generate a fresh UUID and a warning, so convert a
+numeric source id with `String(id)` before sending it.
+
+Rejection codes appear in `rejected[].code`; retryable HTTP codes appear in
+`error.code`. Every index outside pending `indices` is settled. Use the full
+`details` response (`accepted`, `ids`, `rejected`, `warnings`, `indices`, `eventIds`).
+
+| Code | Meaning | What to do / expected timing |
+| --- | --- | --- |
+| `invalid_event` | Invalid event fields. | Fix the reported event. A native parse error may return 422 for the batch. |
+| `invalid_event_id` | Unsafe or oversized string id. | Use valid Unicode without NUL, at most 256 UTF-16 units after trimming. |
+| `duplicate_id_conflict` | The id belongs to different content. | Keep the original; send corrections with a new id and context.parentEventId. |
+| `stored_event_unreadable` | Retained evidence cannot be compared. | Keep the evidence. Send a correction with a new id; ask the operator to inspect storage. |
+| `ingest_pending (503)` | Some writes remain unresolved. | Retry the identical batch with Retry-After: about 70 seconds for ambiguity, up to 10 minutes for a ready claim. |
+| `ingest_unavailable (503)` | Identity lookup or storage is unavailable. | Retry the identical batch with Retry-After; the operator may need to restore service. |
+| `project_busy (503)` | A project maintenance lock is held. | Retry with Retry-After after the current operation releases its lock. |
+| `retention_unavailable (503)` | Project data is being rebuilt. | Retry reads with Retry-After. Interrupted repairs resume through the worker; the hourly sweep is the fallback. |
+
+Automatic recovery also runs hourly. Persistent service or permission errors must
+be fixed before recovery can settle the claim; honor the server's Retry-After.

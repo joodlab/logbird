@@ -4,6 +4,7 @@ import { PrismaClient } from './generated/client';
 import { keys } from './keys';
 
 export * from './generated/client';
+export * from './ingest-receipts';
 
 const databaseUrl = keys().DATABASE_URL;
 const poolLimit = Number(new URL(databaseUrl).searchParams.get('connection_limit') ?? 10);
@@ -104,13 +105,15 @@ export async function withProjectLock<T>(
 }
 export const closeProjectLocks = () => projectLocks.end();
 
-/** Replaces the existing ingest project lookup: one statement/round trip, including a delayed-write fence. */
-export async function findIngestProject(db: import('./generated/client').Prisma.TransactionClient, projectId: string, receivedAt: Date | null) {
-  const rows = await db.$queryRaw<{ id: string }[]>`
-    WITH current_project AS MATERIALIZED (SELECT id FROM "Project" WHERE id=${projectId}),
-    fenced AS (UPDATE "ExportLease" SET invalidated=true WHERE "projectId" IN (SELECT id FROM current_project)
-      AND NOT invalidated AND "expiresAt">clock_timestamp() AND "receivedBefore">=${receivedAt} RETURNING id)
-    SELECT id FROM current_project`;
+/** Replaces the existing project lookup: acceptance follows every active fence, with no extra round trip.
+ * The caller holds the shared project lock, so an export cannot register a new fence until INSERT settles.
+ */
+export async function findIngestProject(db: import('./generated/client').Prisma.TransactionClient, projectId: string) {
+  const rows = await db.$queryRaw<{ id: string; organizationId: string; acceptedAt: Date }[]>`
+    SELECT p.id,p."organizationId",greatest(clock_timestamp(),
+      (SELECT (max("receivedBefore") AT TIME ZONE 'UTC') + interval '1 millisecond' FROM "ExportLease"
+       WHERE "projectId"=p.id AND "expiresAt">(clock_timestamp() AT TIME ZONE 'UTC'))) AS "acceptedAt"
+    FROM "Project" p WHERE p.id=${projectId}`;
   return rows[0] ?? null;
 }
 

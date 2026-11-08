@@ -324,10 +324,10 @@ path: /developers
 - **id:** `reference`
 - **eyebrow:** API reference
 - **heading:** Your server documents itself.
-- **body:** Every Logbird API server serves its OpenAPI document at `/openapi.json` and an interactive reference
-  (Scalar) at `/docs`, so the reference always matches the version you run. In the bundled Compose setup the API
-  server listens only on the private network, and the public origin forwards only `/api`, `/v1` and the health
-  checks. Open the reference from inside that network, or at `localhost:4601` when you run from source.
-  <!-- source: docs/SPEC.md §2, §5; apps/server/src/app.ts (/docs, /openapi.json); apps/app/server/proxy.ts (proxies /api, /v1, /health, /livez, /readyz only); CONTRIBUTING.md (API: localhost:4601) -->
+- **body:** Every Logbird server serves its OpenAPI document at `/openapi.json` and an interactive reference
+  (Scalar) at `/docs`, so the reference always matches the version you run. The API listener stays on the private
+  network; your public origin forwards `/api`, `/v1`, the health checks and these two read-only reference paths, and
+  nothing else. Open `https://your-logbird-origin/docs`, or `localhost:4600/docs` when you run locally.
+  <!-- source: docs/SPEC.md §2, §5; docs/decisions.md (2026-11-08); apps/server/src/app.ts (/docs, /openapi.json); apps/app/server/proxy-paths.ts (proxies /api, /v1, /health, /livez, /readyz, /docs, /openapi.json only) -->
 - **cta:** Self-host a server → `/self-hosting`
 - **visual:** none. A capture of `/docs` doesn't exist yet; one is needed if this section gets an image.

@@ -224,9 +224,12 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
         reason === 'sql_unavailable' ? 'SQL mode unavailable' : 'invalid query',
       );
     }
-    const rejected = vi
-      .spyOn(ingestion, 'ingest')
-      .mockResolvedValueOnce({ accepted: 0, ids: [], rejected: [{ index: 0, reason: 'duplicate_id_conflict: fixture' }], warnings: [] });
+    const rejected = vi.spyOn(ingestion, 'ingest').mockResolvedValueOnce({
+      accepted: 0,
+      ids: [],
+      rejected: [{ index: 0, reason: 'duplicate_id_conflict: fixture', code: 'duplicate_id_conflict' }],
+      warnings: [],
+    });
     try {
       const blocked = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
       expect(blocked.status).toBe(503);

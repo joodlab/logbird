@@ -7,6 +7,87 @@ import { modKeyLabel, useIsMac } from '@/lib/platform';
 
 /* Reference material that used to live on the Quickstart page; the Setup page renders it below the checklist. */
 
+const INGEST_CODES: [string, string, string][] = [
+  ['invalid_event', 'Invalid event fields.', 'Fix the reported event. A native parse error may return 422 for the batch.'],
+  ['invalid_event_id', 'Unsafe or oversized string id.', 'Use valid Unicode without NUL, at most 256 UTF-16 units after trimming.'],
+  ['duplicate_id_conflict', 'The id belongs to different content.', 'Keep the original; send corrections with a new id and context.parentEventId.'],
+  [
+    'stored_event_unreadable',
+    'Retained evidence cannot be compared.',
+    'Keep the evidence. Send a correction with a new id; ask the operator to inspect storage.',
+  ],
+  [
+    'ingest_pending (503)',
+    'Some writes remain unresolved.',
+    'Retry the identical batch with Retry-After: about 70 seconds for ambiguity, up to 10 minutes for a ready claim.',
+  ],
+  [
+    'ingest_unavailable (503)',
+    'Identity lookup or storage is unavailable.',
+    'Retry the identical batch with Retry-After; the operator may need to restore service.',
+  ],
+  ['project_busy (503)', 'A project maintenance lock is held.', 'Retry with Retry-After after the current operation releases its lock.'],
+  [
+    'retention_unavailable (503)',
+    'Project data is being rebuilt.',
+    'Retry reads with Retry-After. Interrupted repairs resume through the worker; the hourly sweep is the fallback.',
+  ],
+];
+
+export function EventIdsAndRetries() {
+  return (
+    <div className="flex scroll-mt-20 flex-col gap-3 text-muted-foreground text-sm" id="event-ids-and-retries">
+      <h3 className="font-medium text-foreground">Event ids and retries</h3>
+      <p>
+        Each id names one immutable event in a project. Exact retries are accepted without storing or counting the event again. Object key order may
+        change; array order and string contents must stay identical.
+      </p>
+      <p>
+        The SDK creates an id and timestamp once per queued event. Deterministic ids need identical content across calls, including occurredAt and
+        executor.attempt. Omitted or invalid occurredAt keeps the first receipt clock.
+      </p>
+      <p>
+        <code>duplicate_id_conflict</code> means different content reused an id; the original is kept. Send a correction with a new id and{' '}
+        <code>context.parentEventId</code> pointing to the original.
+      </p>
+      <p>
+        <code>503 ingest_pending</code> or <code>ingest_unavailable</code> means retry the identical batch with Retry-After. Healthy siblings commit
+        before a pending response. Pending details include accepted, ids, rejected, warnings, indices and eventIds. Every index outside indices is
+        settled. Rejected entries include a code and explanation. The SDK retries; if its budget expires, flush rejects and keeps the batch for a
+        later flush.
+      </p>
+      <p>
+        Use string ids. Numeric ids generate a fresh UUID and a warning; convert with String(id) first. Ids over 256 UTF-16 code units after trimming,
+        containing NUL or invalid Unicode are rejected individually as <code>invalid_event_id</code>.
+      </p>
+      <p>
+        Rejection codes appear in rejected[].code; HTTP errors use error.code. Automatic recovery also runs hourly. Persistent service errors need an
+        operator fix.
+      </p>
+      <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
+        <table className="w-full text-left text-sm max-sm:block">
+          <thead className="border-b max-sm:sr-only">
+            <tr>
+              <th className="px-4 py-2 font-medium">Code</th>
+              <th className="px-4 py-2 font-medium">Meaning</th>
+              <th className="px-4 py-2 font-medium">What to do / timing</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y max-sm:block">
+            {INGEST_CODES.map(([code, meaning, action]) => (
+              <tr className="max-sm:flex max-sm:flex-col max-sm:gap-1 max-sm:py-2.5" key={code}>
+                <td className="px-4 py-2 align-top font-mono text-xs [overflow-wrap:anywhere] max-sm:py-0">{code}</td>
+                <td className="px-4 py-2 align-top max-sm:py-0">{meaning}</td>
+                <td className="px-4 py-2 align-top max-sm:py-0">{action}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export const QUERY_SYNTAX: [string, string][] = [
   ['action:hotel.policy.updated', 'Exact action'],
   ['action:hotel.*', 'Prefix wildcard'],

@@ -1,9 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SITE_URL, siteConfigFrom } from '../env';
 import { legalPagesReady, RELEASED_ENV } from '../test/launch-ready';
 import { llmsTxt, robotsTxt, sitemapXml } from './discovery';
+import { LEGAL_PAGES } from './release';
 import { articleLd, breadcrumbLd, faqLd, organizationLd, pageHead, pageMeta, softwareLd, websiteLd } from './seo';
-import { publishedPages, staticPages } from './site-map';
+import { getPage, publishedPages, staticPages } from './site-map';
 
 // Chosen from the manifest so these tests survive each page PR flipping `ready`.
 const unready = staticPages.find((page) => !page.ready && !page.path.startsWith('/legal/'));
@@ -27,8 +28,7 @@ describe('metadata', () => {
       title: 'Logbird — open-source audit logs for your product',
     });
   });
-  it('keeps drafts and pages that are not ready out of search', () => {
-    expect(pageHead('/blog/$slug').meta).toContainEqual({ name: 'robots', content: 'noindex' });
+  it('keeps pages that are not ready out of search', () => {
     if (unready) {
       expect(pageHead(unready.path).meta).toContainEqual({ name: 'robots', content: 'noindex' });
     }
@@ -36,7 +36,8 @@ describe('metadata', () => {
   });
   it('emits real schema types and limits the zero-price offer to self-hosting', () => {
     const parse = (script: { children: string }) => JSON.parse(script.children);
-    // No publisher name is set (WEB_ORG_NAME is pending the owner): no Organization, and the WebSite names no publisher.
+    // No publisher name is set (WEB_ORG_NAME is pinned empty in vitest.config.ts): no Organization, and the WebSite
+    // names no publisher. The set state is covered below.
     expect(organizationLd()).toBeNull();
     expect(parse(websiteLd())).toMatchObject({ '@type': 'WebSite', name: 'Logbird' });
     expect(parse(websiteLd())).not.toHaveProperty('publisher');
@@ -75,26 +76,70 @@ describe('static discovery', () => {
     expect(robotsTxt(config)).toContain('Sitemap: https://site.example.test/sitemap.xml');
     expect(llmsTxt(config)).toContain('(https://site.example.test/contact)');
   });
-  it('lists only ready pages, never drafts or the not-found page', () => {
-    const xml = sitemapXml(siteConfigFrom(RELEASED_ENV));
-    const listed = new Set(publishedPages.map((page) => page.path));
-    expect(xml).toContain('<loc>https://site.example.test/about</loc>');
+  it('lists exactly the pages that are ready when it is built, never drafts or the not-found page', () => {
+    const released = siteConfigFrom(RELEASED_ENV);
+    const loc = (path: string) => `<loc>${new URL(path, 'https://site.example.test').href}</loc>`;
+    const xml = sitemapXml(released);
+    expect(xml).toContain(loc('/about'));
+    // The oracle is each page's own flag, not the list the sitemap is built from.
     for (const page of staticPages) {
-      const loc = `<loc>${new URL(page.path, 'https://site.example.test').href}</loc>`;
-      if (listed.has(page.path)) {
-        expect(xml).toContain(loc);
+      if (page.ready) {
+        expect(xml).toContain(loc(page.path));
       } else {
-        expect(xml).not.toContain(loc);
+        expect(xml).not.toContain(loc(page.path));
       }
     }
-    expect(publishedPages.length).toBeGreaterThan(0);
+    // The launch fixture's legal pages are listed, as they will be once counsel-reviewed text lands.
+    for (const path of LEGAL_PAGES) {
+      expect(xml).toContain(loc(path));
+    }
+    // A page that stops being ready drops out of the next build's sitemap and llms.txt.
+    const about = getPage('/about');
+    about.ready = false;
+    try {
+      expect(publishedPages().map((page) => page.path)).not.toContain('/about');
+      expect(sitemapXml(released)).not.toContain(loc('/about'));
+      expect(llmsTxt(released)).not.toContain('(https://site.example.test/about)');
+    } finally {
+      about.ready = true;
+    }
+    expect(publishedPages().length).toBeGreaterThan(0);
     expect(xml).not.toMatch(/404|\$slug|blog\/draft/);
     expect(xml).toContain('<priority>1</priority>');
-    const released = siteConfigFrom(RELEASED_ENV);
     expect(robotsTxt(released)).toBe('User-agent: *\nAllow: /\nSitemap: https://site.example.test/sitemap.xml\n');
     expect(llmsTxt(released)).toContain('(https://site.example.test/contact)');
     if (unready) {
       expect(llmsTxt(released)).not.toContain(`(${new URL(unready.path, 'https://site.example.test').href})`);
+    }
+  });
+});
+
+describe('publisher and repository state', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+  it('names the publisher and links the repository only once they are configured', async () => {
+    vi.resetModules();
+    vi.stubEnv('WEB_ORG_NAME', 'Example Audit Co');
+    vi.stubEnv('WEB_GITHUB_PUBLIC', 'true');
+    vi.stubEnv('WEB_GITHUB_URL', 'https://github.example.test/acme/logbird');
+    const undo = await legalPagesReady();
+    try {
+      const seo = await import('./seo');
+      const organization = seo.organizationLd();
+      expect(organization).not.toBeNull();
+      expect(JSON.parse(organization?.children ?? '{}')).toMatchObject({
+        '@type': 'Organization',
+        name: 'Example Audit Co',
+        sameAs: ['https://github.example.test/acme/logbird'],
+      });
+      expect(JSON.parse(seo.websiteLd().children)).toHaveProperty('publisher');
+      // With the source public and /self-hosting published, the $0 self-hosted offer appears.
+      expect(JSON.parse(seo.softwareLd().children)).toHaveProperty('offers.price', '0');
+      expect(seo.pageHead('/').scripts).toHaveLength(3);
+    } finally {
+      undo();
     }
   });
 });

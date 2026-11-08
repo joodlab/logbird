@@ -184,7 +184,7 @@ it('denies anonymous and foreign-project requests through every concrete route; 
       await prisma.organization.deleteMany({ where: { id: organization } });
     }
     await prisma.user.deleteMany({ where: { id: { in: users } } });
-    for (const table of ['events', 'events_by_minute', 'entities', 'attribute_keys']) {
+    for (const table of ['events', 'events_by_minute', 'entities', 'attribute_keys', 'event_ids']) {
       const remaining = await (
         await clickhouse.query({
           query: `SELECT count() AS n FROM ${table} WHERE project_id IN {projects:Array(String)}`,

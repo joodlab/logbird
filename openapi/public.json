@@ -573,6 +573,15 @@
                     "rejected": {
                       "items": {
                         "properties": {
+                          "code": {
+                            "enum": [
+                              "invalid_event",
+                              "invalid_event_id",
+                              "duplicate_id_conflict",
+                              "stored_event_unreadable"
+                            ],
+                            "type": "string"
+                          },
                           "index": {
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
@@ -584,7 +593,8 @@
                         },
                         "required": [
                           "index",
-                          "reason"
+                          "reason",
+                          "code"
                         ],
                         "type": "object"
                       },

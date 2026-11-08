@@ -11,27 +11,25 @@ An export includes matching events accepted before it started; for example, yest
 Membership is the matching rows committed at the short admission boundary with `received_at <=` the frozen export start, ordered by occurrence time/id.
 Later received backdated rows are excluded on both sides of the cursor. The receive-time fence is applied to both
 the candidate lookup and the selected physical row. It uses stored receive timestamps, not a cross-replica wall-clock
-or transaction-commit ordering guarantee. **#62's immutable ingest path is a merge dependency:** exact retries must acknowledge the stored fingerprint without reinserting a later physical version; receipt recovery retains its original receive time and participates in the same fence.
+or transaction-commit ordering guarantee. The reconciled #62 immutable ingest path ensures that exact retries must acknowledge the stored fingerprint without reinserting a later physical version; receipt recovery retains its original receive time and participates in the same fence.
 
 Retention/sample replacement advance a Postgres project generation **before** destructive I/O. Deletion persists
 a start marker before purging. A failed delete clears its marker but preserves the generation increment; admission holding the exclusive lock also clears any orphaned marker left by a crash. Export admission drains earlier ingests with the existing short exclusive project lock
-and commits its receive fence before allowing new writers in. Writers whose receive timestamps fall inside an active
-fence mark that export invalid **before** inserting into ClickHouse, covering delayed normalization and replica clock
-skew. Ordinary later-received writes stay excluded. Final validation takes the same short exclusive lock, drains prior
+and commits its receive fence before allowing new writers in. Fresh writes receive their acceptance clock inside the shared project lock, strictly after active fences. Only replays whose original receive timestamps fall inside an active fence mark it invalid **before** inserting into ClickHouse. Ordinary later-received writes stay excluded. Final validation takes the same short exclusive lock, drains prior
 writes and compares the lease invalidation flag and generation/retention-run boundary. A changed boundary, in-progress/failed retention or deletion
 fails the stream with `membership_changed`, rather than recording completion of an incomplete file. An unreadable project at admission still records requested/failed evidence with `project_unreadable` and an honest maintenance message; no query capacity is reserved. A validation storage outage is `storage_unavailable`, not a claim that stored events changed. Discard the
 partial file and retry. No lock or Postgres transaction spans the download. Direct administrative ClickHouse writes
 that bypass these application fences require stopping exports first. This is not a general database snapshot.
 
-The ingest fence piggybacks on the existing project lookup in one SQL statement: **zero additional Postgres round
+The acceptance clock and replay fence piggyback on the existing project lookup and receipt claim/takeover statements: **zero additional Postgres round
 trips per batch**, whether an export is active or not. An indexed lease probe returns no rows when inactive; ordinary
-later-received writes do not update the active lease. Only the first delayed write marks a lease invalid.
+later-received writes do not update the active lease. Only the first late replay marks a lease invalid.
 Both export boundary acquisitions use nonblocking advisory tries with a 100-ms contention budget. Their short
 Postgres transaction has `lock_timeout=100ms`, `statement_timeout=100ms`, a 250-ms transaction deadline and 50-ms
 pool-admission deadline. These are transaction-local settings. Contention returns `503 export_project_busy`
 and releases the writer-preference gate, allowing new ingests to continue behind
 the earlier shared writer. No ClickHouse I/O runs under an exclusive export boundary lock.
-Final validation retries only contention, with 25–75 ms jitter and a 2.5-second retry budget (plus the last bounded attempt); every attempt retains the 100-ms lock-wait bound and releases its gate before waiting. Sustained contention can still fail a fully streamed file with `project_busy`; discard it and retry. Admission contention returns immediately without a download.
+Admission and final validation retry only contention, with 25–75 ms jitter and a 2.5-second retry budget (plus the last bounded attempt); every attempt retains the 100-ms lock-wait bound and releases its gate before waiting. Sustained contention can still fail a fully streamed file with `project_busy`; discard it and retry. Sustained admission contention returns without a download.
 
 ## Which format?
 
@@ -128,4 +126,4 @@ the provisional draft. Use the [outbox requeue procedure](workspace-audit.md) on
 
 After a broken response stream, the console looks up `GET /api/workspace/exports/:exportId` for the durable failure reason and id. This read rechecks current workspace membership, is scoped to that workspace and namespace, and exposes no provisional drafts. If lookup is unavailable, the toast retains the short id and directs the user to Workspace activity. A producer-completed outcome is distinguished from an interrupted download.
 
-#72 must merge after #62. Combined acceptance requires the reconciled ingest hook, exact-retry/replacement-merge export regression and receipt-replay coverage at the final head; the earlier standalone proof does not establish those guarantees.
+The ingest reconciliation includes #62 (merged as `d829ab1`): exact retries acknowledge the original fingerprint without reinserting or replacing its physical row. Fresh acceptance is stamped inside the shared project lock, using Postgres time strictly greater than every active export fence (at least one millisecond). A batch normalized before admission therefore cannot be mistaken for pre-fence membership. Omitted/invalid occurrence times resolve against that first acceptance/receipt clock; retries and recovered receipts retain their original receive time, event time and fingerprint. A previously missing pre-fence replay invalidates an active export before its INSERT. The fence rides the existing project lookup and receipt claim/takeover statements: zero additional PG round trips, with or without an active export. `scripts/benchmark-export-ingest-hook.ts` reproduces the PG-only statement cost comparison against #62; the real-service c1 sample retains batch, receive, fence and CTE telemetry.

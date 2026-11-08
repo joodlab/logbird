@@ -3,7 +3,48 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { purgeProject } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+
+const trace = vi.hoisted(() => ({ project: '', batch: -1, clocks: [] as unknown[], ctes: [] as unknown[] }));
+vi.mock('@logbird/database', async (original) => {
+  const db = await original<typeof import('@logbird/database')>();
+  return {
+    ...db,
+    findIngestProject: async (...args: Parameters<typeof db.findIngestProject>) => {
+      const result = await db.findIngestProject(...args);
+      if (args[1] === trace.project)
+        trace.clocks.push({ batch: trace.batch, acceptedAt: result?.acceptedAt.toISOString(), observedAt: new Date().toISOString() });
+      return result;
+    },
+    claimIngestReceipts: async (...args: Parameters<typeof db.claimIngestReceipts>) => {
+      if (args[0] !== trace.project) return db.claimIngestReceipts(...args);
+      const batch = trace.batch;
+      const before = await db.prisma.exportLease.findMany({
+        where: { projectId: trace.project },
+        select: { id: true, receivedBefore: true, invalidated: true },
+      });
+      const result = await db.claimIngestReceipts(...args);
+      const after = await db.prisma.exportLease.findMany({
+        where: { projectId: trace.project },
+        select: { id: true, receivedBefore: true, invalidated: true },
+      });
+      trace.ctes.push({
+        batch,
+        count: args[2].length,
+        minReceivedAt: args[2].map((row) => row.receivedAt.toISOString()).sort()[0],
+        maxReceivedAt: args[2]
+          .map((row) => row.receivedAt.toISOString())
+          .sort()
+          .at(-1),
+        before,
+        after,
+      });
+      expect(after.some((row) => row.invalidated)).toBe(false);
+      return result;
+    },
+  };
+});
+
 import { app } from './app';
 import { clickhouse } from './clickhouse';
 import { env } from './env';
@@ -17,6 +58,7 @@ it('measures actual export outcomes during bounded c1-like ingestion in one fict
     token = randomUUID(),
     prefix = randomUUID();
   const outcomes: { status: number; state: string; reason: string | null; readComplete: boolean; elapsedMs: number }[] = [];
+  const batchTimings: { batch: number; startedAt: string; completedAt: string; elapsedMs: number }[] = [];
   let projectId = '',
     stop = false,
     batches = 0;
@@ -40,6 +82,7 @@ it('measures actual export outcomes during bounded c1-like ingestion in one fict
     });
     const project = await prisma.project.create({ data: { name: 'QA Export c1-like ingest', slug: 'c1-like-ingest', organizationId: org } });
     projectId = project.id;
+    trace.project = projectId;
     const cookie = `logbird.session_token=${encodeURIComponent(`${token}.${createHmac('sha256', env.BETTER_AUTH_SECRET).update(token).digest('base64')}`)}`;
     expect(
       (
@@ -56,8 +99,12 @@ it('measures actual export outcomes during bounded c1-like ingestion in one fict
     // One serial writer, full 1000-event batches, no artificial think time, at most 50,000 new fixture events.
     writer = (async () => {
       for (; !stop && batches < 50; batches++) {
+        trace.batch = batches;
         const events = Array.from({ length: batchSize }, (_, i) => ({ id: `${prefix}-load-${batches}-${i}`, action: 'qa.export.load' }));
+        const startedAt = new Date().toISOString(),
+          started = performance.now();
         expect((await ingest(projectId, events)).accepted).toBe(batchSize);
+        batchTimings.push({ batch: batches, startedAt, completedAt: new Date().toISOString(), elapsedMs: performance.now() - started });
         warmed();
       }
     })().catch((error) => {
@@ -93,7 +140,7 @@ it('measures actual export outcomes during bounded c1-like ingestion in one fict
       outcomes.push({
         status: response.status,
         state: outcome?.state ?? 'not_admitted',
-        reason: outcome?.reason ?? null,
+        reason: outcome?.reason ?? (response.status !== 200 ? (JSON.parse(text).error?.code ?? null) : null),
         readComplete,
         elapsedMs: performance.now() - started,
       });
@@ -102,7 +149,6 @@ it('measures actual export outcomes during bounded c1-like ingestion in one fict
     await writer;
     if (writerError) throw writerError;
     const completed = outcomes.filter((row) => row.status === 200 && row.state === 'completed' && row.readComplete).length;
-    expect(completed).toBeGreaterThan(0);
     const metrics = {
       event: 'qa.export_busy_project',
       trials,
@@ -112,10 +158,20 @@ it('measures actual export outcomes during bounded c1-like ingestion in one fict
       batchSize,
       batches,
       outcomes,
+      batchTimings,
+      telemetry: {
+        clockSource:
+          'acceptance: Postgres clock_timestamp() inside shared project lock, greater than max active fence by at least 1ms; export: frozen API Date.now()',
+        clocks: trace.clocks,
+        ctes: trace.ctes,
+        instrumentation: 'two test-only lease snapshots per batch; production adds zero PG round trips',
+      },
     };
     console.log(JSON.stringify(metrics));
     if (process.env.LOGBIRD_EXPORT_PROOF_DIR)
       writeFileSync(path.join(process.env.LOGBIRD_EXPORT_PROOF_DIR, 'exports-load-metrics.json'), JSON.stringify(metrics, null, 2));
+    expect(completed).toBeGreaterThan(0);
+    expect(outcomes.some((row) => row.reason === 'membership_changed')).toBe(false);
   } finally {
     stop = true;
     await writer;
@@ -124,7 +180,9 @@ it('measures actual export outcomes during bounded c1-like ingestion in one fict
       await purgeProject(clickhouse, projectId);
       await prisma.exportLease.deleteMany({ where: { projectId } });
     }
+    await prisma.ingestReceipt.deleteMany({ where: { projectId } });
     await purgeProject(clickhouse, `ws:${org}`);
+    await prisma.ingestReceipt.deleteMany({ where: { projectId: `ws:${org}` } });
     await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${org}` } });
     await prisma.organization.deleteMany({ where: { id: org } });
     await prisma.user.deleteMany({ where: { id: user } });

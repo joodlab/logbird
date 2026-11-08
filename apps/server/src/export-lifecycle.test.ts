@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { retryExportValidation, startExportHeartbeat } from './export-lifecycle';
+import { retryExportBoundary, startExportHeartbeat } from './export-lifecycle';
 
 afterEach(() => vi.useRealTimers());
 it('retries only busy final boundaries, releasing each attempt before waiting', async () => {
@@ -8,19 +8,19 @@ it('retries only busy final boundaries, releasing each attempt before waiting', 
     .mockRejectedValueOnce({ code: 'export_project_busy' })
     .mockRejectedValueOnce({ code: 'export_project_busy' })
     .mockResolvedValue(undefined);
-  await retryExportValidation(attempt, new AbortController().signal);
+  await retryExportBoundary(attempt, new AbortController().signal);
   expect(attempt).toHaveBeenCalledTimes(3);
   const failed = vi.fn().mockRejectedValue({ code: 'export_invalidated' });
-  await expect(retryExportValidation(failed, new AbortController().signal)).rejects.toMatchObject({ code: 'export_invalidated' });
+  await expect(retryExportBoundary(failed, new AbortController().signal)).rejects.toMatchObject({ code: 'export_invalidated' });
   expect(failed).toHaveBeenCalledOnce();
 });
 it('bounds final retries and interrupts the backoff on cancellation', async () => {
   const busy = vi.fn().mockRejectedValue({ code: 'export_project_busy' });
   const started = performance.now();
-  await expect(retryExportValidation(busy, new AbortController().signal, 60)).rejects.toMatchObject({ code: 'export_project_busy' });
+  await expect(retryExportBoundary(busy, new AbortController().signal, 60)).rejects.toMatchObject({ code: 'export_project_busy' });
   expect(performance.now() - started).toBeLessThan(200);
   const abort = new AbortController();
-  const waiting = retryExportValidation(async () => {
+  const waiting = retryExportBoundary(async () => {
     abort.abort();
     throw Object.assign(new Error('Project busy'), { code: 'export_project_busy' });
   }, abort.signal);

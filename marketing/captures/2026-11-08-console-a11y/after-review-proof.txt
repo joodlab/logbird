@@ -1,0 +1,16 @@
+stepper aria (project step):
+- list "Setup progress":
+  - listitem: "Step 1 of 4: You, completed"
+  - listitem: "Step 2 of 4: Workspace, completed"
+  - listitem: "Step 3 of 4: Project"
+  - listitem: "Step 4 of 4: First event"
+PASS stepper: one spoken string per step, no stray separator: "- list \"Setup progress\":\n  - listitem: \"Step 1 of 4: You, completed\"\n  - listitem: \"Step 2 of 4: Workspace, completed\"\n  - listitem: \"Step 3 of 4: Project\"\n  - listitem: \"Step 4 of 4: First event\""
+PASS key kind: radios are named "Ingest — …" and "Read — …": "- radiogroup \"Permission\":\n  - radio \"Ingest — Can only send events (POST /v1/events). Use in your services.\" [checked]\n  - radio \"Read — Can only search and read events (GET /v1/events). Use in products that show history.\""
+axe settings-retention desktop-light: 0
+PASS L2 axe Settings → Retention desktop-light: 0 violations: []
+axe settings-retention desktop-dark: 0
+PASS L2 axe Settings → Retention desktop-dark: 0 violations: []
+PASS shortcut card click: value set, focus not on the hidden card: {"focusInShortcuts":false,"focused":"BODY","checked":"30 days, debugging"}
+PASS forced colors: focused retention chip radio paints an outline ≥ 2px: {"style":"solid","width":"2px","offset":"2px"}
+console problems: []
+cleanup: QA project "QA Phone Review" deleted: 204

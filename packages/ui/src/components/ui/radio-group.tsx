@@ -1,6 +1,7 @@
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group";
 import { cn } from "../../lib/utils";
+import { filterChipClassName } from "../filter-chip";
 
 function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props) {
 	return (
@@ -32,4 +33,35 @@ function RadioGroupItem({ className, ...props }: RadioPrimitive.Root.Props) {
 	);
 }
 
-export { RadioGroup, RadioGroupItem };
+const radioCardClassName =
+	"flex cursor-pointer flex-col items-start gap-0.5 rounded-lg border bg-card p-3 text-start outline-none transition-colors hover:border-foreground/25 focus-visible:outline-hidden focus-visible:ring-3 focus-visible:ring-ring/50 data-checked:border-brand data-checked:ring-1 data-checked:ring-brand data-disabled:cursor-not-allowed data-disabled:opacity-60 data-disabled:hover:border-border data-checked:data-disabled:hover:border-brand forced-colors:data-checked:border-[Highlight]";
+
+/**
+ * A whole card or chip as one radio of a `RadioGroup`: one Tab stop per group, arrow keys move the selection
+ * (Base UI roving focus). Use instead of `button role="radio"`. The chip looks exactly like `FilterChip`.
+ */
+function RadioChoice({
+	className,
+	variant = "card",
+	...props
+}: RadioPrimitive.Root.Props & { variant?: "card" | "chip" }) {
+	return (
+		<RadioPrimitive.Root
+			className={(state) =>
+				cn(
+					variant === "chip"
+						? cn(
+								filterChipClassName(state.checked),
+								"data-disabled:pointer-events-none data-disabled:opacity-50",
+							)
+						: radioCardClassName,
+					typeof className === "function" ? className(state) : className,
+				)
+			}
+			data-slot="radio-choice"
+			{...props}
+		/>
+	);
+}
+
+export { RadioChoice, RadioGroup, RadioGroupItem };

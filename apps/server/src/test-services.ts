@@ -1,5 +1,5 @@
 ﻿import { randomUUID } from 'node:crypto';
-import { Prisma, prisma } from '@logbird/database';
+import { prisma } from '@logbird/database';
 import { Queue } from 'bullmq';
 import Redis from 'ioredis';
 import { afterAll, vi } from 'vitest';
@@ -20,7 +20,8 @@ vi.mock('@clickhouse/client', async (original) => {
   const client = await original<typeof import('@clickhouse/client')>();
   return {
     ...client,
-    createClient: (options: Parameters<typeof client.createClient>[0]) => client.createClient({ ...options, request_timeout: 300_000 }),
+    createClient: (options: Parameters<typeof client.createClient>[0]) =>
+      client.createClient({ ...options, request_timeout: Math.max(options?.request_timeout ?? 0, 300_000) }),
   };
 });
 
@@ -35,37 +36,8 @@ afterAll(async () => {
   try {
     // Only this file's disposable queue; never the shared application queue.
     await queue.obliterate({ force: true });
-    // The shared DB may already contain #62's additive index while this branch still has the old purge helper.
-    // Record normal fixture purges without changing runtime assertions; finish optional index cleanup only here.
-    if (fixtureStreams.size) {
-      const { createClickHouseClient } = await import('@logbird/clickhouse');
-      const ch = createClickHouseClient();
-      try {
-        const tables = await (await ch.query({ query: 'EXISTS TABLE event_ids', format: 'JSONEachRow' })).json<{ result: number }>();
-        if (tables[0]?.result)
-          for (const id of fixtureStreams)
-            await ch.command({
-              query: 'ALTER TABLE event_ids DELETE WHERE project_id={p:String}',
-              query_params: { p: id },
-              clickhouse_settings: { mutations_sync: '2' },
-            });
-        if (tables[0]?.result) {
-          const remaining = await (
-            await ch.query({
-              query: 'SELECT count() n FROM event_ids WHERE project_id IN {ids:Array(String)}',
-              query_params: { ids: [...fixtureStreams] },
-              format: 'JSONEachRow',
-            })
-          ).json<{ n: number }>();
-          if (Number(remaining[0]?.n) !== 0) throw new Error('Fixture event-id rows survived cleanup');
-        }
-      } finally {
-        await ch.close();
-      }
-      const tables = await prisma.$queryRaw<{ name: string | null }[]>`SELECT to_regclass('"IngestReceipt"')::text name`;
-      if (tables[0]?.name)
-        await prisma.$executeRaw(Prisma.sql`DELETE FROM "IngestReceipt" WHERE "projectId" IN (${Prisma.join([...fixtureStreams])})`);
-    }
+    // The merged ClickHouse purge covers all five tables; receipts remain a PG concern.
+    if (fixtureStreams.size) await prisma.ingestReceipt.deleteMany({ where: { projectId: { in: [...fixtureStreams] } } });
     await prisma.auditOutbox.deleteMany({ where: { namespace: prefix } });
     await prisma.authAuditWindow.deleteMany({ where: { namespace: prefix } });
     await prisma.authAuditBudget.deleteMany({ where: { namespace: prefix } });

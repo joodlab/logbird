@@ -107,6 +107,12 @@ describe('/blog/$slug route', () => {
 
   it('throws notFound for every slug while nothing is published', async () => {
     const { loader } = await route([]);
-    expect(() => loader({ params: { slug: 'qa-first-post' } })).toThrow();
+    let thrown: unknown;
+    try {
+      loader({ params: { slug: 'qa-first-post' } });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(isNotFound(thrown)).toBe(true);
   });
 });

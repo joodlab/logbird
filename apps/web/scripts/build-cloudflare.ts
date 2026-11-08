@@ -3,6 +3,7 @@ import { access, copyFile, mkdir, mkdtemp, readdir, readFile } from 'node:fs/pro
 import { dirname, resolve } from 'node:path';
 
 import { siteConfigFrom } from '../src/env';
+import { writeCsp } from '../src/lib/csp';
 import { releaseBlockers } from '../src/lib/release';
 import { loadPublicEnv } from './public-env';
 
@@ -71,4 +72,7 @@ for (const page of pages) {
   await mkdir(dirname(target), { recursive: true });
   await copyFile(resolve(snapshot, page), target);
 }
+// The Worker build replaced .output/public; hash the restored HTML and write the per-page _headers last.
+const csp = await writeCsp(resolve('.output'));
 console.log(`Packaged Cloudflare Worker with ${pages.length} Node-prerendered HTML files; all referenced assets verified.`);
+console.log(`csp: ${csp.pages} pages covered by per-page script hashes; _headers ${csp.rules} rules, longest line ${csp.longestLine} chars.`);

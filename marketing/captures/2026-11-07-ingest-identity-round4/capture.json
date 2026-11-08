@@ -1,0 +1,97 @@
+{
+  "sourceHead": "760b90d9a339eb7806491ece6f0ccbcebff5e4ea",
+  "sourceTrees": {
+    "apps/app/src": "726941ef2479ebf999c341d0c9b2075cf358f6d3",
+    "apps/server/src": "6bd8300508dd654cb832d7265beea84317655bb3",
+    "apps/worker/src": "7cc67e9f02f5c0360bc16a8339c2030bb56bb70d",
+    "packages/contracts/src": "e810c8e93731d3b611594ef3095cfaa34618b693",
+    "packages/clickhouse/src": "e49ee9f1e4cbf36d1ebd78733e4e89879d20c1b3"
+  },
+  "beforeCapture": "../2026-11-07-ingest-identity/before-*",
+  "evidence": [
+    {
+      "device": "desktop",
+      "theme": "light",
+      "width": 1440,
+      "height": 900,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round4/after-desktop-light.png",
+      "region": "start"
+    },
+    {
+      "device": "desktop",
+      "theme": "light",
+      "width": 1440,
+      "height": 900,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round4/after-desktop-light-tail.png",
+      "region": "code-table-end"
+    },
+    {
+      "device": "desktop",
+      "theme": "dark",
+      "width": 1440,
+      "height": 900,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round4/after-desktop-dark.png",
+      "region": "start"
+    },
+    {
+      "device": "desktop",
+      "theme": "dark",
+      "width": 1440,
+      "height": 900,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round4/after-desktop-dark-tail.png",
+      "region": "code-table-end"
+    },
+    {
+      "device": "phone",
+      "theme": "light",
+      "width": 390,
+      "height": 844,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round4/after-phone-light.png",
+      "region": "start"
+    },
+    {
+      "device": "phone",
+      "theme": "light",
+      "width": 390,
+      "height": 844,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round4/after-phone-light-codes.png",
+      "region": "code-table-middle"
+    },
+    {
+      "device": "phone",
+      "theme": "light",
+      "width": 390,
+      "height": 844,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round4/after-phone-light-tail.png",
+      "region": "code-table-end"
+    },
+    {
+      "device": "phone",
+      "theme": "dark",
+      "width": 390,
+      "height": 844,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round4/after-phone-dark.png",
+      "region": "start"
+    },
+    {
+      "device": "phone",
+      "theme": "dark",
+      "width": 390,
+      "height": 844,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round4/after-phone-dark-codes.png",
+      "region": "code-table-middle"
+    },
+    {
+      "device": "phone",
+      "theme": "dark",
+      "width": 390,
+      "height": 844,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round4/after-phone-dark-tail.png",
+      "region": "code-table-end"
+    }
+  ],
+  "pageErrors": [],
+  "horizontalOverflow": false,
+  "railNavigates": true,
+  "browser": "bundled Chromium, one isolated context; desktop video"
+}

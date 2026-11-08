@@ -1,7 +1,8 @@
 # @logbird/app — the Logbird console
 
 TanStack Start (React 19) on **:4600**. Every route renders in the browser (`defaultSsr: false` in
-`src/start.ts`); the Start/Nitro server only ships the shell and proxies `/api` + `/v1` to the Hono server
+`src/start.ts`); the Start/Nitro server only ships the shell and proxies `/api` + `/v1` (plus the health checks and the
+read-only `/docs` + `/openapi.json`; see `server/proxy-paths.ts`) to the Hono server, in dev and production alike
 (`http://127.0.0.1:4601`, override with `LOGBIRD_SERVER_URL`), so the better-auth cookie stays first-party.
 The console always talks to a real `apps/server` — run `pnpm dev` at the repo root to start server, worker and app.
 

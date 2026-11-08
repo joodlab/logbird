@@ -4,6 +4,7 @@ import { prisma } from '@logbird/database';
 import { clickhouse, enforceProjectRetention } from '@logbird/worker/retention';
 import { expect, it, vi } from 'vitest';
 
+// Local shared ClickHouse's two mutation slots can queue the five verified lightweight deletes in finally.
 it('records the underlying retention error code without logging query content', async () => {
   const id = randomUUID();
   const organization = await prisma.organization.create({ data: { id, name: 'QA retention failure', slug: id, createdAt: new Date() } });
@@ -21,6 +22,7 @@ it('records the underlying retention error code without logging query content', 
     await expect(enforceProjectRetention(project.id)).rejects.toMatchObject({ code: '241' });
     const receipt = await prisma.retentionRun.findFirstOrThrow({ where: { projectId: project.id }, orderBy: { startedAt: 'desc' } });
     expect(receipt.status).toBe('failed');
+    expect((await prisma.project.findUniqueOrThrow({ where: { id: project.id } })).maintenanceGeneration).toBe(1n);
     expect(receipt.error).toBe('ClickHouse retention failed; retry required.');
     expect(log).toHaveBeenCalledWith(
       JSON.stringify({ level: 'error', event: 'retention.run_failed', runId: receipt.id, projectId: project.id, errorCode: '241' }),
@@ -32,4 +34,4 @@ it('records the underlying retention error code without logging query content', 
     await purgeProject(clickhouse, project.id);
     await prisma.organization.delete({ where: { id: organization.id } });
   }
-});
+}, 60_000);

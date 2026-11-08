@@ -50,6 +50,7 @@ export async function notifyWaitlist(record: WaitlistRecord) {
     host: env.SMTP_HOST,
     port: env.SMTP_PORT,
     secure: env.SMTP_SECURE,
+    requireTLS: !env.SMTP_SECURE && env.SMTP_REQUIRE_TLS,
     ...(env.SMTP_USER ? { auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD } } : {}),
     connectionTimeout: 5000,
     greetingTimeout: 5000,

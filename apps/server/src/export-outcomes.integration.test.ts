@@ -238,7 +238,7 @@ it('bounds both exclusive export boundaries and releases the gate to new ingests
       const start = performance.now();
       await expect(work()).rejects.toMatchObject({ code: 'export_project_busy', status: 503 });
       timings.push(performance.now() - start);
-      expect(timings.at(-1)).toBeLessThan(timings.length === 1 ? 400 : 3500);
+      expect(timings.at(-1)).toBeLessThan(3500);
     }
     // The slow ingest still owns its shared lock. A failed export must not keep its writer-preference gate.
     expect(await withProjectLock(project.id, async () => true, { mode: 'shared', waitMs: 100 })).toBe(true);

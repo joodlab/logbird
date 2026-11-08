@@ -27,7 +27,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   prisma.$transaction.mockImplementation((work) => work(tx));
   tx.$queryRaw.mockResolvedValue([{ now: new Date('2026-11-08T00:00:00Z') }]);
-  tx.project.findUnique.mockResolvedValue({ id: 'project', exportGeneration: 1, exportDeleteStartedAt: null });
+  tx.project.findUnique.mockResolvedValue({ id: 'project', exportGeneration: 1, maintenanceGeneration: 0, exportDeleteStartedAt: null });
   tx.retentionRun.findFirst.mockResolvedValue(null);
   tx.exportLease.findUnique.mockResolvedValue({ id: 'export', expiresAt: new Date('2026-11-08T00:01:00Z'), invalidated: false });
   tx.exportLease.aggregate.mockResolvedValue({ _sum: { weight: 0 } });
@@ -50,15 +50,15 @@ it('stores requested and unknown evidence for a refused unreadable project witho
   expect(tx.exportLease.create).not.toHaveBeenCalled();
 });
 it('recovers an orphaned delete marker under the exclusive boundary while preserving its generation', async () => {
-  tx.project.findUnique.mockResolvedValue({ id: 'project', exportGeneration: 5, exportDeleteStartedAt: new Date() });
-  await expect(validateExportMembership('project', '5:', 'export')).resolves.toBeUndefined();
+  tx.project.findUnique.mockResolvedValue({ id: 'project', exportGeneration: 5, maintenanceGeneration: 0, exportDeleteStartedAt: new Date() });
+  await expect(validateExportMembership('project', '5:0:', 'export')).resolves.toBeUndefined();
   expect(tx.project.update).toHaveBeenCalledWith({ where: { id: 'project' }, data: { exportDeleteStartedAt: null } });
 });
 it('labels storage outages separately from changed membership and rejects expired leases', async () => {
   prisma.$transaction.mockRejectedValueOnce({ code: 'P1001' });
-  await expect(validateExportMembership('project', '1:', 'export')).rejects.toMatchObject({ code: 'export_storage_unavailable' });
+  await expect(validateExportMembership('project', '1:0:', 'export')).rejects.toMatchObject({ code: 'export_storage_unavailable' });
   tx.exportLease.findUnique.mockResolvedValue({ expiresAt: new Date('2026-11-07T00:00:00Z'), invalidated: false });
-  await expect(validateExportMembership('project', '1:', 'export')).rejects.toMatchObject({ code: 'export_lease_expired' });
+  await expect(validateExportMembership('project', '1:0:', 'export')).rejects.toMatchObject({ code: 'export_lease_expired' });
 });
 it('scopes outcome lookup to the active workspace and namespace and never exposes a provisional completion', async () => {
   tx.auditOutbox.findFirst.mockResolvedValue({

@@ -3,7 +3,7 @@ import { closeProjectLocks, prisma } from '@logbird/database';
 import { closeRetentionQueue } from '@logbird/worker/queue';
 import { app } from './app';
 import { backfillAuthEmailHashes, flushFailedSignIns } from './auth-failures';
-import { clickhouse, queryClickhouse } from './clickhouse';
+import { clickhouse, maintenanceClickhouse, queryClickhouse } from './clickhouse';
 import { env } from './env';
 import { drainExportAudits } from './export-stream';
 import { ingest } from './ingest';
@@ -13,7 +13,7 @@ import { rateLimitStore } from './rate-limit';
 const server = serve({ fetch: app.fetch, port: env.PORT }, () =>
   console.log(JSON.stringify({ level: 'info', event: 'server.ready', port: env.PORT })),
 );
-// Keep idle keep-alive sockets open longer than any proxy in front of us (Vite's dev proxy, Caddy, load balancers
+// Keep idle keep-alive sockets open longer than any proxy in front of us (the console's Nitro proxy, Caddy, load balancers
 // typically 60 s). With Node's 5 s default, a proxy can reuse a socket at the moment Node closes it and the user gets an
 // ECONNRESET → 500/502. headersTimeout must stay above keepAliveTimeout.
 if ('keepAliveTimeout' in server) {
@@ -42,6 +42,7 @@ function shutdown() {
       closeProjectLocks(),
       rateLimitStore.quit(),
       clickhouse.close(),
+      maintenanceClickhouse.close(),
       queryClickhouse?.close(),
       prisma.$disconnect(),
     ]);

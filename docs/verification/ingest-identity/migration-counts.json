@@ -1,0 +1,70 @@
+{
+  "before": {
+    "at": "2026-11-07T11:58:29.594Z",
+    "physicalActivePartRows": [
+      {
+        "table": "migrations",
+        "rows": 5
+      },
+      {
+        "table": "entities",
+        "rows": 26880
+      },
+      {
+        "table": "events",
+        "rows": 1060624
+      },
+      {
+        "table": "events_by_minute",
+        "rows": 146943
+      },
+      {
+        "table": "attribute_keys",
+        "rows": 1084
+      }
+    ],
+    "receipts": [],
+    "logicalCounts": "not captured before migration"
+  },
+  "after": {
+    "at": "2026-11-07T11:59:21.899Z",
+    "physicalActivePartRows": [
+      {
+        "table": "event_ids",
+        "rows": 320778
+      },
+      {
+        "table": "migrations",
+        "rows": 6
+      },
+      {
+        "table": "entities",
+        "rows": 26907
+      },
+      {
+        "table": "events",
+        "rows": 1058802
+      },
+      {
+        "table": "events_by_minute",
+        "rows": 146962
+      },
+      {
+        "table": "attribute_keys",
+        "rows": 1124
+      }
+    ],
+    "receipts": 0,
+    "logicalCountsAt": "2026-11-07T12:01:49.504Z",
+    "logicalCounts": [
+      {
+        "events": 320772,
+        "unique_events": 320726,
+        "index_rows": 322802,
+        "unique_index_ids": 322802,
+        "missing_ids": 0
+      }
+    ]
+  },
+  "note": "Physical part rows are not logical event counts. Compare uniqExact((project_id,event_id)) on events against event_ids; the post-backfill missing identity count is zero."
+}

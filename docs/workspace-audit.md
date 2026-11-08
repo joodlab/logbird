@@ -50,6 +50,14 @@ transaction/locks, with at most two concurrent deliveries. Startup and one-secon
 leases. Attempt predicates fence late claimants. Shutdown stops claiming and finishes tracked work before closing
 clients; a killed process leaves durable rows/leases. Delivery is independently retried per destination, without FIFO.
 
+If the destination workspace was deleted before delivery (including between its
+existence check and the ingest receipt write), the row settles as moot with
+`lastError=workspace_deleted` and a safe `audit.delivery_moot` diagnostic. Its
+settled timestamp uses `deliveredAt` for the normal seven-day cleanup; this does
+not assert delivery into a deleted workspace. Moot rows leave pending/quarantine
+counts immediately, and other workspaces continue delivering. Existing raw
+evidence is not removed by this handling.
+
 The same frozen JSON/id is retried after `503 ingest_pending`. No ingest core is copied into the worker. PR #62 adds
 immutable exact-retry arbitration to this local call path; until it lands, ambiguous retries retain existing at-least-once
 ClickHouse/rollup semantics. `duplicate_id_conflict`, `invalid_event` and non-throwing rejections are never acknowledged

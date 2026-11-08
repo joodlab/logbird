@@ -36,10 +36,10 @@ export const TIMEOUT_CODE = 'timeout';
 export const timeoutError = (what = 'Logbird') =>
   new ApiRequestError(504, TIMEOUT_CODE, `${what} did not answer in time. Check your connection, then try again.`);
 
-/** 503s that clear on their own: a retention purge holds the project for a moment. */
+/** 503s that clear on their own: project maintenance holds or rebuilds its data. */
 const BUSY_CODES = new Set(['project_busy', 'retention_unavailable']);
 
-export const BUSY_MESSAGE = 'This project is busy: a retention purge is running. Try again in a moment.';
+export const BUSY_MESSAGE = 'This project is busy. Try again in a moment.';
 
 export function isBusyError(error: unknown): error is ApiRequestError {
   return error instanceof ApiRequestError && error.status === 503 && BUSY_CODES.has(error.code);

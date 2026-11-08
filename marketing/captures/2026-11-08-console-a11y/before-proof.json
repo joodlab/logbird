@@ -1,0 +1,524 @@
+{
+  "mode": "before",
+  "checks": {
+    "PHONE-07 first Enter sends the code after a blur error": {
+      "ok": false,
+      "detail": {
+        "url": "/login",
+        "error": "Enter a valid email address."
+      }
+    },
+    "PHONE-12 every step label is in the accessibility tree at 390": {
+      "ok": false,
+      "detail": "- list \"Setup progress\":\n  - listitem: 1 You\n  - listitem: \"2\"\n  - listitem: \"3\"\n  - listitem: \"4\""
+    },
+    "PHONE-12 aria-current=\"step\" is on the list item": {
+      "ok": false,
+      "detail": [
+        {
+          "current": null,
+          "text": "1 You"
+        },
+        {
+          "current": null,
+          "text": "2"
+        },
+        {
+          "current": null,
+          "text": "3"
+        },
+        {
+          "current": null,
+          "text": "4"
+        }
+      ]
+    },
+    "PHONE-12 done steps say \"completed\"": {
+      "ok": false,
+      "detail": "- list \"Setup progress\":\n  - listitem\n  - listitem: 2 Workspace\n  - listitem: \"3\"\n  - listitem: \"4\""
+    },
+    "PHONE-08 retention is exposed by exactly one radiogroup": {
+      "ok": false,
+      "detail": {
+        "radiogroups": 2,
+        "radios": 13
+      }
+    },
+    "PHONE-08 the retention group is one Tab stop": {
+      "ok": false,
+      "detail": [
+        "radio:30 daysDebugging",
+        "radio:90 daysRecommended",
+        "radio:1 yearCompliance",
+        "radio:7 days",
+        "radio:14 days",
+        "radio:30 days"
+      ]
+    },
+    "PHONE-08 ArrowRight moves the retention selection": {
+      "ok": false,
+      "detail": {
+        "before": {
+          "tag": "BUTTON",
+          "role": "radio",
+          "name": "90 days",
+          "checked": "true",
+          "selected": null
+        },
+        "after": {
+          "tag": "BUTTON",
+          "role": "radio",
+          "name": "90 days",
+          "checked": "true",
+          "selected": null
+        }
+      }
+    },
+    "PHONE-13 after \"Create project\" focus is on the h1, not BODY": {
+      "ok": false,
+      "detail": {
+        "tag": "BODY"
+      }
+    },
+    "PHONE-13 the key name is not truncated at 390": {
+      "ok": false,
+      "detail": {
+        "text": "Initial ingest key",
+        "truncated": true
+      }
+    },
+    "PHONE-08 ArrowRight moves to the next snippet tab and selects it": {
+      "ok": false,
+      "detail": {
+        "focused": {
+          "tag": "BUTTON",
+          "role": "tab",
+          "name": "curl",
+          "checked": null,
+          "selected": "true"
+        },
+        "tablist": "- tablist:\n  - tab \"curl\" [selected]\n  - tab \"TypeScript SDK\"\n  - tab \"fetch\""
+      }
+    },
+    "PHONE-09 the sheet is named \"Navigation\" with a meaningful description": {
+      "ok": false,
+      "detail": {
+        "name": "Sidebar",
+        "description": "Displays the mobile sidebar."
+      }
+    },
+    "PHONE-09 one Escape closes the sheet after tabbing through it": {
+      "ok": false,
+      "detail": {
+        "stillOpen": true
+      }
+    },
+    "#85 forced colors (desktop): focused Button (default) paints an outline ≥ 2px": {
+      "ok": false,
+      "detail": {
+        "el": "button Create key",
+        "style": "none",
+        "width": "1px",
+        "offset": "0px"
+      }
+    },
+    "#85 forced colors (desktop): no unfocused control on Settings → Keys is outlined": {
+      "ok": true,
+      "detail": {
+        "focused": {
+          "el": "button Create key",
+          "style": "none",
+          "width": "1px",
+          "offset": "0px"
+        },
+        "unfocusedOutlined": 0,
+        "outlined": []
+      }
+    },
+    "PHONE-08 key kind: ArrowDown selects \"Read\" (desktop-light)": {
+      "ok": false,
+      "detail": {
+        "focused": {
+          "tag": "BUTTON",
+          "role": "radio",
+          "name": "IngestCan only send events (POST /v1/events). Use in your se",
+          "checked": "true",
+          "selected": null
+        },
+        "radiogroups": 1,
+        "labelledBy": null
+      }
+    },
+    "PHONE-08 settings retention: one radiogroup (desktop-light)": {
+      "ok": false,
+      "detail": {
+        "radiogroups": 2
+      }
+    },
+    "#85 forced colors (desktop): focused ghost icon Button paints an outline ≥ 2px": {
+      "ok": false,
+      "detail": {
+        "el": "button Actions for qa-fix-a11y-phone-",
+        "style": "none",
+        "width": "1px",
+        "offset": "0px"
+      }
+    },
+    "#85 forced colors (desktop): Settings menu — only the highlighted item is outlined": {
+      "ok": true,
+      "detail": {
+        "focused": {
+          "el": "div[role=menuitem] Cancel invitation",
+          "style": "solid",
+          "width": "2px",
+          "offset": "2px"
+        },
+        "unfocusedOutlined": 0,
+        "outlined": []
+      }
+    },
+    "#85 forced colors (desktop): explorer toolbar buttons paint an outline when focused, nothing else is outlined": {
+      "ok": false,
+      "detail": [
+        {
+          "el": "button Open command palette",
+          "style": "none",
+          "width": "1px",
+          "offset": "0px",
+          "unfocusedOutlined": 0,
+          "outlined": []
+        },
+        {
+          "el": "button Save view",
+          "style": "none",
+          "width": "1px",
+          "offset": "0px",
+          "unfocusedOutlined": 0,
+          "outlined": []
+        }
+      ]
+    },
+    "#85 forced colors (desktop): checkbox menu — only the highlighted item is outlined": {
+      "ok": false,
+      "detail": {
+        "focused": {
+          "el": "div[role=menuitemcheckbox] Action",
+          "style": "solid",
+          "width": "2px",
+          "offset": "2px"
+        },
+        "unfocusedOutlined": 15,
+        "outlined": [
+          "div[role=menuitemcheckbox] Time",
+          "div[role=menuitemcheckbox] Outcome",
+          "div[role=menuitemcheckbox] Event",
+          "div[role=menuitemcheckbox] Actor",
+          "div[role=menuitemcheckbox] Support agent",
+          "div[role=menuitemcheckbox] Tenant",
+          "div[role=menuitemcheckbox] Executor",
+          "div[role=menuitemcheckbox] Job · try",
+          "div[role=menuitemcheckbox] Targets",
+          "div[role=menuitemcheckbox] Severity",
+          "div[role=menuitemcheckbox] Environment",
+          "div[role=menuitemcheckbox] Source"
+        ]
+      }
+    },
+    "#85 forced colors (desktop): event sheet \"Next event\" paints an outline ≥ 2px": {
+      "ok": false,
+      "detail": {
+        "el": "button Next event",
+        "style": "none",
+        "width": "1px",
+        "offset": "0px"
+      }
+    },
+    "#85 forced colors (desktop): nothing else in the event sheet is outlined": {
+      "ok": true,
+      "detail": {
+        "focused": {
+          "el": "button Next event",
+          "style": "none",
+          "width": "1px",
+          "offset": "0px"
+        },
+        "unfocusedOutlined": 0,
+        "outlined": []
+      }
+    },
+    "#85 forced colors (desktop): command palette — the input and the active item only": {
+      "ok": false,
+      "detail": {
+        "focused": {
+          "el": "input[role=combobox] ",
+          "style": "solid",
+          "width": "2px",
+          "offset": "2px"
+        },
+        "unfocusedOutlined": 16,
+        "outlined": [
+          "div[role=option] Overview",
+          "div[role=option][selected] Explorer",
+          "div[role=option] Actors",
+          "div[role=option] Tenants",
+          "div[role=option] Executors",
+          "div[role=option] Records",
+          "div[role=option] Saved views",
+          "div[role=option] Fields",
+          "div[role=option] Settings",
+          "div[role=option] API keys",
+          "div[role=option] Retention",
+          "div[role=option] Workspace activity"
+        ]
+      }
+    },
+    "PHONE-08 key kind: ArrowDown selects \"Read\" (desktop-dark)": {
+      "ok": false,
+      "detail": {
+        "focused": {
+          "tag": "BUTTON",
+          "role": "radio",
+          "name": "IngestCan only send events (POST /v1/events). Use in your se",
+          "checked": "true",
+          "selected": null
+        },
+        "radiogroups": 1,
+        "labelledBy": null
+      }
+    },
+    "PHONE-08 settings retention: one radiogroup (desktop-dark)": {
+      "ok": false,
+      "detail": {
+        "radiogroups": 2
+      }
+    },
+    "#85 forced colors (phone): focused Button (default) paints an outline ≥ 2px": {
+      "ok": false,
+      "detail": {
+        "el": "button Create key",
+        "style": "none",
+        "width": "1px",
+        "offset": "0px"
+      }
+    },
+    "#85 forced colors (phone): no unfocused control on Settings → Keys is outlined": {
+      "ok": true,
+      "detail": {
+        "focused": {
+          "el": "button Create key",
+          "style": "none",
+          "width": "1px",
+          "offset": "0px"
+        },
+        "unfocusedOutlined": 0,
+        "outlined": []
+      }
+    },
+    "PHONE-08 key kind: ArrowDown selects \"Read\" (phone-light)": {
+      "ok": false,
+      "detail": {
+        "focused": {
+          "tag": "BUTTON",
+          "role": "radio",
+          "name": "IngestCan only send events (POST /v1/events). Use in your se",
+          "checked": "true",
+          "selected": null
+        },
+        "radiogroups": 1,
+        "labelledBy": null
+      }
+    },
+    "PHONE-08 settings retention: one radiogroup (phone-light)": {
+      "ok": false,
+      "detail": {
+        "radiogroups": 2
+      }
+    },
+    "#85 forced colors (phone): focused ghost icon Button paints an outline ≥ 2px": {
+      "ok": false,
+      "detail": {
+        "el": "button Actions for qa-fix-a11y-phone-",
+        "style": "none",
+        "width": "1px",
+        "offset": "0px"
+      }
+    },
+    "#85 forced colors (phone): Settings menu — only the highlighted item is outlined": {
+      "ok": true,
+      "detail": {
+        "focused": {
+          "el": "div[role=menuitem] Cancel invitation",
+          "style": "solid",
+          "width": "2px",
+          "offset": "2px"
+        },
+        "unfocusedOutlined": 0,
+        "outlined": []
+      }
+    },
+    "#85 forced colors (phone): explorer toolbar buttons paint an outline when focused, nothing else is outlined": {
+      "ok": false,
+      "detail": [
+        {
+          "el": "button Open command palette",
+          "style": "none",
+          "width": "1px",
+          "offset": "0px",
+          "unfocusedOutlined": 0,
+          "outlined": []
+        },
+        {
+          "el": "button Filters",
+          "style": "none",
+          "width": "1px",
+          "offset": "0px",
+          "unfocusedOutlined": 0,
+          "outlined": []
+        }
+      ]
+    },
+    "#85 forced colors (phone): event sheet \"Next event\" paints an outline ≥ 2px": {
+      "ok": false,
+      "detail": {
+        "el": "button Next event",
+        "style": "none",
+        "width": "1px",
+        "offset": "0px"
+      }
+    },
+    "#85 forced colors (phone): nothing else in the event sheet is outlined": {
+      "ok": true,
+      "detail": {
+        "focused": {
+          "el": "button Next event",
+          "style": "none",
+          "width": "1px",
+          "offset": "0px"
+        },
+        "unfocusedOutlined": 0,
+        "outlined": []
+      }
+    },
+    "#85 forced colors (phone): command palette — the input and the active item only": {
+      "ok": false,
+      "detail": {
+        "focused": {
+          "el": "input[role=combobox] ",
+          "style": "solid",
+          "width": "2px",
+          "offset": "2px"
+        },
+        "unfocusedOutlined": 16,
+        "outlined": [
+          "div[role=option] Overview",
+          "div[role=option][selected] Explorer",
+          "div[role=option] Actors",
+          "div[role=option] Tenants",
+          "div[role=option] Executors",
+          "div[role=option] Records",
+          "div[role=option] Saved views",
+          "div[role=option] Fields",
+          "div[role=option] Settings",
+          "div[role=option] API keys",
+          "div[role=option] Retention",
+          "div[role=option] Workspace activity"
+        ]
+      }
+    },
+    "PHONE-08 key kind: ArrowDown selects \"Read\" (phone-dark)": {
+      "ok": false,
+      "detail": {
+        "focused": {
+          "tag": "BUTTON",
+          "role": "radio",
+          "name": "IngestCan only send events (POST /v1/events). Use in your se",
+          "checked": "true",
+          "selected": null
+        },
+        "radiogroups": 1,
+        "labelledBy": null
+      }
+    },
+    "PHONE-08 settings retention: one radiogroup (phone-dark)": {
+      "ok": false,
+      "detail": {
+        "radiogroups": 2
+      }
+    }
+  },
+  "axe": {
+    "first-event phone-dark": [
+      {
+        "id": "scrollable-region-focusable",
+        "impact": "serious",
+        "nodes": 1,
+        "sample": ["pre"]
+      }
+    ],
+    "create-key dialog desktop-light": [],
+    "settings-retention desktop-light": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "nodes": 1,
+        "sample": [".opacity-70"]
+      }
+    ],
+    "members desktop-light": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "nodes": 1,
+        "sample": ["#base-ui-_r_1l_"]
+      }
+    ],
+    "event-sheet desktop-light": [],
+    "explorer desktop-light": [],
+    "create-key dialog desktop-dark": [],
+    "settings-retention desktop-dark": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "nodes": 1,
+        "sample": [".opacity-70"]
+      }
+    ],
+    "members desktop-dark": [],
+    "event-sheet desktop-dark": [],
+    "explorer desktop-dark": []
+  },
+  "crops": {
+    "button-focus-desktop-light": "b3385227c14e1c22e95f25730178cd8e5848df4a2139557a4640c6531abd1fb0",
+    "members-menu-highlight-desktop-light": "0756f4ccda9b466440a24bb22d10396d528c9d9ddffca05c666cb425e4c38872",
+    "columns-menu-highlight-desktop-light": "f7621567185245ac51e222d30082a5351585f2e54c3ab2a2fe5a52ba4686c53b",
+    "sheet-next-focus-desktop-light": "bd6b084f0f90c6daadad2fa31603da4582adc736a583fcad7ae2c24f4f4b6692",
+    "palette-highlight-desktop-light": "58f99439d08813b2bbe747ad4ef2f3eb1bbbd4ea72b83011771e2967aa882527",
+    "button-focus-desktop-dark": "abb47e855bece2a4af12db1fa7ec2d9b1fe0526ab823b970260ad2f705eb7be2",
+    "members-menu-highlight-desktop-dark": "010afdf70b5a61b03967173e17459cc7b27e76c5f1eb0432986ad62479792a48",
+    "columns-menu-highlight-desktop-dark": "6f7c2862f29a05b63e9b8a5c662631b4098ce31b40419f3536e5775444bdbc56",
+    "sheet-next-focus-desktop-dark": "bfb47ea13fbc6610d623db57ae761e5d61357c75a1e551ff548b7c506ef0db43",
+    "palette-highlight-desktop-dark": "1c06e1d63d2cda20fd7d57e67db8087a054bbcd1ec35cc0ea1e5c0b51973d170",
+    "button-focus-phone-light": "5094e90dc5d9391c6f18c742f3979274c0d10b29a00b8569e0aa225b47934313",
+    "members-menu-highlight-phone-light": "2b522e2414419a4ba65d4a113b743fec0ab1457679eea4c0dbedce4410553d6f",
+    "sheet-next-focus-phone-light": "412bf2e6c32d90fc4bb3dfb2c4f26f8e2c3037f60e4178eec8a44f27b558e911",
+    "palette-highlight-phone-light": "868ca8373d44282b1a53cfb03cc50c9fa202881593372a9e422f1fcd7d850834",
+    "button-focus-phone-dark": "627495ccab0ff2dcc6e78ffee9f526fd7f3e3c8c7d3af5891546aee730d82a2a",
+    "members-menu-highlight-phone-dark": "6d9083a676de1bd9f58701f17a46b3e9aeecdf51e32bc8d94dddd8a88fd1df74",
+    "sheet-next-focus-phone-dark": "c9bc96312dc8f29f66bbf9fe03c0a374a4119ad9ecc10b994f3341b4fec83d8b",
+    "palette-highlight-phone-dark": "1b7eb5f85b67bde9ef73f8d9cfe7b0d54bd4f2d497fcd08bec106d2207e8c92e"
+  },
+  "stepper aria (profile step)": "- list \"Setup progress\":\n  - listitem: 1 You\n  - listitem: \"2\"\n  - listitem: \"3\"\n  - listitem: \"4\"",
+  "stepper aria (workspace step)": "- list \"Setup progress\":\n  - listitem\n  - listitem: 2 Workspace\n  - listitem: \"3\"\n  - listitem: \"4\"",
+  "cleanup: onboarding QA project deleted": 204,
+  "phone console problems": [],
+  "shell fixture": {
+    "workspace": "QA Fix a11y phone",
+    "project": "QA Phone Shell",
+    "events": 60,
+    "invitation": "pending (fictional)"
+  },
+  "console problems desktop-light": [],
+  "console problems desktop-dark": [],
+  "console problems phone-light": [],
+  "console problems phone-dark": []
+}

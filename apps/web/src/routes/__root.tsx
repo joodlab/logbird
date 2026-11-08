@@ -1,7 +1,7 @@
 import geistLatin from '@fontsource-variable/geist/files/geist-latin-wght-normal.woff2?url';
 import { getThemeScript, ThemeProvider } from '@logbird/ui/theme';
 import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
-import type { ReactNode } from 'react';
+import { type ReactNode, Suspense } from 'react';
 import { NotFound } from '../components/not-found';
 import { SiteFooter, SiteHeader } from '../components/site-shell';
 import appCss from '../styles.css?url';
@@ -25,8 +25,19 @@ export const Route = createRootRoute({
   }),
   shellComponent: RootDocument,
   component: RootComponent,
-  notFoundComponent: NotFound,
+  notFoundComponent: RootNotFound,
 });
+/**
+ * Unknown paths are answered with the prerendered 404.html, which is the code-split /404 route (rendered inside a
+ * Suspense boundary). The same boundary here keeps the hydrated tree identical to that HTML (src/routes/404.tsx).
+ */
+function RootNotFound() {
+  return (
+    <Suspense>
+      <NotFound />
+    </Suspense>
+  );
+}
 function RootDocument({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>

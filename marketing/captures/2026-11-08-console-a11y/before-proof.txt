@@ -1,0 +1,65 @@
+BUG  PHONE-07 first Enter sends the code after a blur error: {"url":"/login","error":"Enter a valid email address."}
+stepper aria (profile step): - list "Setup progress":
+  - listitem: 1 You
+  - listitem: "2"
+  - listitem: "3"
+  - listitem: "4"
+BUG  PHONE-12 every step label is in the accessibility tree at 390: "- list \"Setup progress\":\n  - listitem: 1 You\n  - listitem: \"2\"\n  - listitem: \"3\"\n  - listitem: \"4\""
+BUG  PHONE-12 aria-current="step" is on the list item: [{"current":null,"text":"1 You"},{"current":null,"text":"2"},{"current":null,"text":"3"},{"current":null,"text":"4"}]
+stepper aria (workspace step): - list "Setup progress":
+  - listitem
+  - listitem: 2 Workspace
+  - listitem: "3"
+  - listitem: "4"
+BUG  PHONE-12 done steps say "completed": "- list \"Setup progress\":\n  - listitem\n  - listitem: 2 Workspace\n  - listitem: \"3\"\n  - listitem: \"4\""
+BUG  PHONE-08 retention is exposed by exactly one radiogroup: {"radiogroups":2,"radios":13}
+BUG  PHONE-08 the retention group is one Tab stop: ["radio:30 daysDebugging","radio:90 daysRecommended","radio:1 yearCompliance","radio:7 days","radio:14 days","radio:30 days"]
+BUG  PHONE-08 ArrowRight moves the retention selection: {"before":{"tag":"BUTTON","role":"radio","name":"90 days","checked":"true","selected":null},"after":{"tag":"BUTTON","role":"radio","name":"90 days","checked":"true","selected":null}}
+BUG  PHONE-13 after "Create project" focus is on the h1, not BODY: {"tag":"BODY"}
+BUG  PHONE-13 the key name is not truncated at 390: {"text":"Initial ingest key","truncated":true}
+BUG  PHONE-08 ArrowRight moves to the next snippet tab and selects it: {"focused":{"tag":"BUTTON","role":"tab","name":"curl","checked":null,"selected":"true"},"tablist":"- tablist:\n  - tab \"curl\" [selected]\n  - tab \"TypeScript SDK\"\n  - tab \"fetch\""}
+axe first-event phone-dark: scrollable-region-focusable(1)
+BUG  PHONE-09 the sheet is named "Navigation" with a meaningful description: {"name":"Sidebar","description":"Displays the mobile sidebar."}
+BUG  PHONE-09 one Escape closes the sheet after tabbing through it: {"stillOpen":true}
+cleanup: onboarding QA project deleted: 204
+phone console problems: []
+shell fixture: {"workspace":"QA Fix a11y phone","project":"QA Phone Shell","events":60,"invitation":"pending (fictional)"}
+BUG  #85 forced colors (desktop): focused Button (default) paints an outline ≥ 2px: {"el":"button Create key","style":"none","width":"1px","offset":"0px"}
+PASS #85 forced colors (desktop): no unfocused control on Settings → Keys is outlined: {"focused":{"el":"button Create key","style":"none","width":"1px","offset":"0px"},"unfocusedOutlined":0,"outlined":[]}
+BUG  PHONE-08 key kind: ArrowDown selects "Read" (desktop-light): {"focused":{"tag":"BUTTON","role":"radio","name":"IngestCan only send events (POST /v1/events). Use in your se","checked":"true","selected":null},"radiogroups":1,"labelledBy":null}
+axe create-key dialog desktop-light: 0
+BUG  PHONE-08 settings retention: one radiogroup (desktop-light): {"radiogroups":2}
+axe settings-retention desktop-light: color-contrast(1)
+BUG  #85 forced colors (desktop): focused ghost icon Button paints an outline ≥ 2px: {"el":"button Actions for qa-fix-a11y-phone-","style":"none","width":"1px","offset":"0px"}
+PASS #85 forced colors (desktop): Settings menu — only the highlighted item is outlined: {"focused":{"el":"div[role=menuitem] Cancel invitation","style":"solid","width":"2px","offset":"2px"},"unfocusedOutlined":0,"outlined":[]}
+axe members desktop-light: color-contrast(1)
+BUG  #85 forced colors (desktop): explorer toolbar buttons paint an outline when focused, nothing else is outlined: [{"el":"button Open command palette","style":"none","width":"1px","offset":"0px","unfocusedOutlined":0,"outlined":[]},{"el":"button Save view","style":"none","width":"1px","offset":"0px","unfocusedOutlined":0,"outlined":[]}]
+BUG  #85 forced colors (desktop): checkbox menu — only the highlighted item is outlined: {"focused":{"el":"div[role=menuitemcheckbox] Action","style":"solid","width":"2px","offset":"2px"},"unfocusedOutlined":15,"outlined":["div[role=menuitemcheckbox] Time","div[role=menuitemcheckbox] Outcome","div[role=menuitemcheckbox] Event","div[role=menuitemcheckbox] Actor","div[role=menuitemcheckbox] Support agent","div[role=menuitemcheckbox] Tenant","div[role=menuitemcheckbox] Executor","div[role=menuitemcheckbox] Job · try","div[role=menuitemcheckbox] Targets","div[role=menuitemcheckbox] Severity","div[role=menuitemcheckbox] Environment","div[role=menuitemcheckbox] Source"]}
+BUG  #85 forced colors (desktop): event sheet "Next event" paints an outline ≥ 2px: {"el":"button Next event","style":"none","width":"1px","offset":"0px"}
+PASS #85 forced colors (desktop): nothing else in the event sheet is outlined: {"focused":{"el":"button Next event","style":"none","width":"1px","offset":"0px"},"unfocusedOutlined":0,"outlined":[]}
+axe event-sheet desktop-light: 0
+axe explorer desktop-light: 0
+BUG  #85 forced colors (desktop): command palette — the input and the active item only: {"focused":{"el":"input[role=combobox] ","style":"solid","width":"2px","offset":"2px"},"unfocusedOutlined":16,"outlined":["div[role=option] Overview","div[role=option][selected] Explorer","div[role=option] Actors","div[role=option] Tenants","div[role=option] Executors","div[role=option] Records","div[role=option] Saved views","div[role=option] Fields","div[role=option] Settings","div[role=option] API keys","div[role=option] Retention","div[role=option] Workspace activity"]}
+console problems desktop-light: []
+BUG  PHONE-08 key kind: ArrowDown selects "Read" (desktop-dark): {"focused":{"tag":"BUTTON","role":"radio","name":"IngestCan only send events (POST /v1/events). Use in your se","checked":"true","selected":null},"radiogroups":1,"labelledBy":null}
+axe create-key dialog desktop-dark: 0
+BUG  PHONE-08 settings retention: one radiogroup (desktop-dark): {"radiogroups":2}
+axe settings-retention desktop-dark: color-contrast(1)
+axe members desktop-dark: 0
+axe event-sheet desktop-dark: 0
+axe explorer desktop-dark: 0
+console problems desktop-dark: []
+BUG  #85 forced colors (phone): focused Button (default) paints an outline ≥ 2px: {"el":"button Create key","style":"none","width":"1px","offset":"0px"}
+PASS #85 forced colors (phone): no unfocused control on Settings → Keys is outlined: {"focused":{"el":"button Create key","style":"none","width":"1px","offset":"0px"},"unfocusedOutlined":0,"outlined":[]}
+BUG  PHONE-08 key kind: ArrowDown selects "Read" (phone-light): {"focused":{"tag":"BUTTON","role":"radio","name":"IngestCan only send events (POST /v1/events). Use in your se","checked":"true","selected":null},"radiogroups":1,"labelledBy":null}
+BUG  PHONE-08 settings retention: one radiogroup (phone-light): {"radiogroups":2}
+BUG  #85 forced colors (phone): focused ghost icon Button paints an outline ≥ 2px: {"el":"button Actions for qa-fix-a11y-phone-","style":"none","width":"1px","offset":"0px"}
+PASS #85 forced colors (phone): Settings menu — only the highlighted item is outlined: {"focused":{"el":"div[role=menuitem] Cancel invitation","style":"solid","width":"2px","offset":"2px"},"unfocusedOutlined":0,"outlined":[]}
+BUG  #85 forced colors (phone): explorer toolbar buttons paint an outline when focused, nothing else is outlined: [{"el":"button Open command palette","style":"none","width":"1px","offset":"0px","unfocusedOutlined":0,"outlined":[]},{"el":"button Filters","style":"none","width":"1px","offset":"0px","unfocusedOutlined":0,"outlined":[]}]
+BUG  #85 forced colors (phone): event sheet "Next event" paints an outline ≥ 2px: {"el":"button Next event","style":"none","width":"1px","offset":"0px"}
+PASS #85 forced colors (phone): nothing else in the event sheet is outlined: {"focused":{"el":"button Next event","style":"none","width":"1px","offset":"0px"},"unfocusedOutlined":0,"outlined":[]}
+BUG  #85 forced colors (phone): command palette — the input and the active item only: {"focused":{"el":"input[role=combobox] ","style":"solid","width":"2px","offset":"2px"},"unfocusedOutlined":16,"outlined":["div[role=option] Overview","div[role=option][selected] Explorer","div[role=option] Actors","div[role=option] Tenants","div[role=option] Executors","div[role=option] Records","div[role=option] Saved views","div[role=option] Fields","div[role=option] Settings","div[role=option] API keys","div[role=option] Retention","div[role=option] Workspace activity"]}
+console problems phone-light: []
+BUG  PHONE-08 key kind: ArrowDown selects "Read" (phone-dark): {"focused":{"tag":"BUTTON","role":"radio","name":"IngestCan only send events (POST /v1/events). Use in your se","checked":"true","selected":null},"radiogroups":1,"labelledBy":null}
+BUG  PHONE-08 settings retention: one radiogroup (phone-dark): {"radiogroups":2}
+console problems phone-dark: []

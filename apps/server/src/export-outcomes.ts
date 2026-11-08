@@ -9,7 +9,7 @@ import {
   withProjectLock,
 } from '@logbird/database';
 import { ApiError } from './errors';
-import { retryExportValidation } from './export-lifecycle';
+import { retryExportBoundary } from './export-lifecycle';
 
 export const EXPORT_LEASE_MS = 60_000;
 export const EXPORT_CONCURRENCY = 2;
@@ -50,7 +50,7 @@ async function leaseClock(tx: Prisma.TransactionClient, override?: Date) {
 async function readMembership(db: Prisma.TransactionClient, projectId: string) {
   const project = await db.project.findUnique({
     where: { id: projectId },
-    select: { id: true, exportDeleteStartedAt: true, exportGeneration: true },
+    select: { id: true, exportDeleteStartedAt: true, exportGeneration: true, maintenanceGeneration: true },
   });
   // Holding the exclusive project lock proves an older delete attempt no longer owns it.
   // Its persisted generation still invalidates earlier exports; its stale marker must not block new ones forever.
@@ -58,11 +58,11 @@ async function readMembership(db: Prisma.TransactionClient, projectId: string) {
   const run = await db.retentionRun.findFirst({ where: { projectId }, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }] });
   if (!project || run?.status === 'running' || run?.status === 'failed')
     throw new ApiError(503, 'export_project_unreadable', 'Retention or deletion is incomplete for this project. Retry after maintenance finishes.');
-  return `${project.exportGeneration}:${run?.id ?? ''}`;
+  return `${project.exportGeneration}:${project.maintenanceGeneration}:${run?.id ?? ''}`;
 }
 
 export async function validateExportMembership(projectId: string, initial: string | null, id: string, signal = new AbortController().signal) {
-  await retryExportValidation(
+  await retryExportBoundary(
     () =>
       exportBoundary(projectId, async (db) => {
         const lease = await db.exportLease.findUnique({ where: { id } });
@@ -93,50 +93,55 @@ export async function stageExport(
     unknown: AuditPayload;
     sql?: boolean;
     receivedBefore?: Date;
+    signal?: AbortSignal;
   },
   at?: Date,
 ) {
   const namespace = auditNamespace();
   // Drain earlier writers, then register the fence before letting new writers enter.
-  return exportBoundary(input.projectId, async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${namespace}:exports`},0))`;
-    const now = await leaseClock(tx, at);
-    let membership: string | null;
-    try {
-      membership = await readMembership(tx, input.projectId);
-    } catch (error) {
-      if (!(error instanceof ApiError && error.code === 'export_project_unreadable')) throw error;
-      membership = null;
-    }
-    const active = { namespace, expiresAt: { gt: now } };
-    const [total, user, workspace] = await Promise.all([
-      tx.exportLease.aggregate({ where: active, _sum: { weight: true } }),
-      tx.exportLease.count({ where: { ...active, userId: input.userId } }),
-      tx.exportLease.count({ where: { ...active, workspaceId: input.workspaceId } }),
-    ]);
-    const weight = input.sql ? 2 : 1;
-    if (membership && ((total._sum.weight ?? 0) + weight > EXPORT_CONCURRENCY || user >= 1 || workspace >= 2))
-      throw new ApiError(429, 'export_busy', 'An export is already running. Finish or cancel it, then retry.');
-    const expiresAt = new Date(+now + EXPORT_LEASE_MS);
-    if (membership)
-      await tx.exportLease.create({
-        data: {
-          id: input.id,
-          namespace,
-          userId: input.userId,
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          expiresAt,
-          weight,
-          receivedBefore: input.receivedBefore ?? now,
-        },
-      });
-    const requested = await storeAuditEvent(input.stream, input.requested, tx);
-    await tx.auditOutbox.create({
-      data: { ...freezeAuditEvent(input.unknown), stream: input.stream, namespace, confirmedAt: null, awaitingUntil: expiresAt },
-    });
-    return { ...requested, membership, leaseMs: EXPORT_LEASE_MS };
-  });
+  return retryExportBoundary(
+    () =>
+      exportBoundary(input.projectId, async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${namespace}:exports`},0))`;
+        const now = await leaseClock(tx, at);
+        let membership: string | null;
+        try {
+          membership = await readMembership(tx, input.projectId);
+        } catch (error) {
+          if (!(error instanceof ApiError && error.code === 'export_project_unreadable')) throw error;
+          membership = null;
+        }
+        const active = { namespace, expiresAt: { gt: now } };
+        const [total, user, workspace] = await Promise.all([
+          tx.exportLease.aggregate({ where: active, _sum: { weight: true } }),
+          tx.exportLease.count({ where: { ...active, userId: input.userId } }),
+          tx.exportLease.count({ where: { ...active, workspaceId: input.workspaceId } }),
+        ]);
+        const weight = input.sql ? 2 : 1;
+        if (membership && ((total._sum.weight ?? 0) + weight > EXPORT_CONCURRENCY || user >= 1 || workspace >= 2))
+          throw new ApiError(429, 'export_busy', 'An export is already running. Finish or cancel it, then retry.');
+        const expiresAt = new Date(+now + EXPORT_LEASE_MS);
+        if (membership)
+          await tx.exportLease.create({
+            data: {
+              id: input.id,
+              namespace,
+              userId: input.userId,
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              expiresAt,
+              weight,
+              receivedBefore: input.receivedBefore ?? now,
+            },
+          });
+        const requested = await storeAuditEvent(input.stream, input.requested, tx);
+        await tx.auditOutbox.create({
+          data: { ...freezeAuditEvent(input.unknown), stream: input.stream, namespace, confirmedAt: null, awaitingUntil: expiresAt },
+        });
+        return { ...requested, membership, leaseMs: EXPORT_LEASE_MS };
+      }),
+    input.signal ?? new AbortController().signal,
+  );
 }
 
 export async function renewExport(id: string, at?: Date) {

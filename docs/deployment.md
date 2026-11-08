@@ -29,7 +29,7 @@ Set APP_URL=https://audit.example.com and TRUST_PROXY=2: Caddy and the console e
 
 ## Acceptance
 
-Record git SHA, image IDs, configuration key names (never values), migration output and backup receipt. Verify /livez (process), /health (legacy storage check), /readyz (Postgres/ClickHouse/Redis) directly inside the API network. Check worker.ready and an actual RetentionRun. The console listener must render login and proxy /api and /v1. Test SMTP receipt, OTP login, workspace/project creation, key creation, ingest/read, Explorer Query/SQL and rejected unauthorized queries with fictional data.
+Record git SHA, image IDs, configuration key names (never values), migration output and backup receipt. Verify /livez (process), /health (legacy storage check), /readyz (Postgres/ClickHouse/Redis) directly inside the API network. Check worker.ready and an actual RetentionRun. The console listener must render login and proxy /api, /v1 and the read-only /docs and /openapi.json reference, and nothing else from the API listener. Test SMTP receipt, OTP login, workspace/project creation, key creation, ingest/read, Explorer Query/SQL and rejected unauthorized queries with fictional data.
 
 ```sh
 BASE_URL=https://audit.example.com pnpm smoke:prod

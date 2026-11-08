@@ -196,7 +196,9 @@ async function searchPage(
   }
   const rows = await read<EventRow>(
     ch,
-    `SELECT * EXCEPT(${includePayload ? 'search_text' : 'payload,search_text'}) FROM events WHERE ${exportClock ? w.sql : 'project_id={project:String}'} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY timestamp,event_id`,
+    // Select pairs in the MergeTree's timestamp/id order; resolve receipt ties only in the bounded fetch.
+    // Legacy versions can share the entire pointer tuple; recheck their filters before outer dedupe.
+    `SELECT * EXCEPT(${includePayload ? 'search_text' : 'payload,search_text'}) FROM events WHERE ${w.sql} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
     params,
     10,
     Boolean(exportClock),
@@ -226,7 +228,10 @@ export async function searchEvents(
 }
 async function eventRow(ch: ClickHouseClient, p: string, id: string) {
   return (
-    await read<EventRow>(ch, 'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at DESC LIMIT 1', { p, id })
+    await read<EventRow>(ch, 'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp LIMIT 1', {
+      p,
+      id,
+    })
   )[0];
 }
 export async function getEvent(ch: ClickHouseClient, projectId: string, eventId: string): Promise<EventDetail | null> {
@@ -602,7 +607,7 @@ export async function projectStats(
 export async function hasExpiredEvents(ch: ClickHouseClient, p: string, before: Date) {
   const rows = await read<{ n: number }>(
     ch,
-    'SELECT count() n FROM (SELECT 1 FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} LIMIT 1)',
+    'SELECT (SELECT count() FROM (SELECT 1 FROM events WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} LIMIT 1)) + (SELECT count() FROM (SELECT 1 FROM event_ids WHERE project_id={p:String} AND timestamp < {before:DateTime64(3)} LIMIT 1)) n',
     { p, before: before.toISOString().replace('T', ' ').slice(0, -1) },
   );
   return Number(rows[0]?.n ?? 0) > 0;
@@ -643,7 +648,13 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
         params,
       )
     : [];
-  await deleteAndVerify(ch, 'events', `project_id={p:String}${before ? ' AND timestamp < {before:DateTime64(3)}' : ''}`, params);
+  const predicate = `project_id={p:String}${before ? ' AND timestamp < {before:DateTime64(3)}' : ''}`;
+  await deleteAndVerify(ch, 'events', predicate, params);
+  await deleteAndVerify(ch, 'event_ids', predicate, params);
+  // The required 007/008 migration repairs collapsed legacy pointers once before rollout.
+  // Its plain MergeTree/MV keeps every raw tuple, so cutoff deletion preserves surviving
+  // versions without scanning retained history under the exclusive project lock.
+
   if (!before) return rebuildProjectRollups(ch, p, false);
   const filters = {
     events_by_minute: 'bucket <= {bucket:DateTime64(3)}',

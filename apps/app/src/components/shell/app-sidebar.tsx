@@ -35,6 +35,7 @@ import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import {
   ActivityIcon,
   BookOpenIcon,
+  BracesIcon,
   CheckIcon,
   ChevronsUpDownIcon,
   FolderPlusIcon,
@@ -61,9 +62,15 @@ export function AppSidebar({ projectId }: { projectId?: string }) {
   const { setOpenMobile, isMobile } = useSidebar();
   const closeMobile = () => isMobile && setOpenMobile(false);
   const views = useQuery({ ...viewsQuery(projectId ?? ''), enabled: Boolean(projectId) });
+  const me = useQuery(meQuery());
+  const projects = useQuery(projectsQuery());
+  const workspaceName = me.data?.organizations.find((o) => o.id === me.data?.activeOrganizationId)?.name;
+  const projectName = projects.data?.find((p) => p.id === projectId)?.name;
+  // The phone sheet is announced as "Navigation, <workspace> · <project>".
+  const where = [workspaceName, projectName].filter(Boolean).join(' · ') || undefined;
 
   return (
-    <Sidebar collapsible="icon" variant="inset">
+    <Sidebar collapsible="icon" mobileDescription={where} mobileTitle="Navigation" variant="inset">
       <SidebarHeader className="gap-1">
         <WorkspaceSwitcher projectId={projectId} />
       </SidebarHeader>
@@ -307,6 +314,10 @@ function UserMenu() {
           <DropdownMenuItem render={<a href="https://github.com/joodlab/logbird/blob/master/docs/SPEC.md" rel="noreferrer" target="_blank" />}>
             <BookOpenIcon />
             Product spec
+          </DropdownMenuItem>
+          <DropdownMenuItem render={<a href="/docs" rel="noreferrer" target="_blank" />}>
+            <BracesIcon />
+            API reference
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => signOutFromConsole(queryClient, () => navigate({ to: '/login' }))}>
             <LogOutIcon />

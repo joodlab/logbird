@@ -519,10 +519,10 @@ function DevelopersPage() {
             Your server documents itself.
           </h2>
           <p className="lead max-w-3xl">
-            Every Logbird API server serves its OpenAPI document at <code>/openapi.json</code> and an interactive reference at <code>/docs</code>, so
-            the reference always matches the version you run. In the bundled Compose setup the API server listens only on the private network, and the
-            public origin forwards only <code>/api</code>, <code>/v1</code> and the health checks. Open the reference from inside that network, or at{' '}
-            <code>localhost:4601</code> when you run from source.
+            Every Logbird server serves its OpenAPI document at <code>/openapi.json</code> and an interactive reference at <code>/docs</code>, so the
+            reference always matches the version you run. The API listener stays on the private network; your public origin forwards <code>/api</code>
+            , <code>/v1</code>, the health checks and these two read-only reference paths, and nothing else. Open{' '}
+            <code>https://your-logbird-origin/docs</code>, or <code>localhost:4600/docs</code> when you run locally.
           </p>
           <div>
             <ButtonLink to="/self-hosting" variant="outline">
