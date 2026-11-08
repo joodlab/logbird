@@ -8,8 +8,33 @@ export function createClickHouseClient(env = process.env): ClickHouseClient {
 }
 export const CLICKHOUSE_MAINTENANCE_TIMEOUT_MS = 15 * 60_000;
 export const CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS = 600;
+const MAINTENANCE_MAX_EXECUTION_CEILING_SECONDS = 86_400;
+/**
+ * Server-side budget for each migration copy and cold-maintenance statement. Large installs can raise it; it can
+ * never drop below the default, which every documented upgrade measurement assumes.
+ */
+export function maintenanceMaxExecutionSeconds(env: NodeJS.ProcessEnv = process.env) {
+  const raw = env.CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS?.trim();
+  if (!raw) return CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS;
+  const seconds = Number(raw);
+  if (!Number.isInteger(seconds) || seconds < CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS || seconds > MAINTENANCE_MAX_EXECUTION_CEILING_SECONDS)
+    throw new Error(
+      `CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS must be an integer from ${CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS} to ${MAINTENANCE_MAX_EXECUTION_CEILING_SECONDS}`,
+    );
+  return seconds;
+}
+/**
+ * Progress headers keep the socket alive during long statements, but Node rejects a response whose headers exceed
+ * 16 KiB. Each progress header is about 250 bytes; at most ~20 per statement keeps the total near 5 KiB.
+ */
+export function progressHeaderIntervalMs(maxExecutionSeconds: number) {
+  return Math.max(30_000, Math.ceil(maxExecutionSeconds / 20) * 1000);
+}
 export function createMaintenanceClickHouseClient(env = process.env): ClickHouseClient {
-  return configuredClient(env, CLICKHOUSE_MAINTENANCE_TIMEOUT_MS, CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS);
+  const maxExecutionSeconds = maintenanceMaxExecutionSeconds(env);
+  // The socket-idle timeout must outlast the server budget, with room for the final response.
+  const requestTimeout = Math.max(CLICKHOUSE_MAINTENANCE_TIMEOUT_MS, (maxExecutionSeconds + 300) * 1000);
+  return configuredClient(env, requestTimeout, maxExecutionSeconds);
 }
 function configuredClient(env: NodeJS.ProcessEnv, requestTimeout: number, maxExecutionTime?: number): ClickHouseClient {
   return createClient({
@@ -24,7 +49,11 @@ function configuredClient(env: NodeJS.ProcessEnv, requestTimeout: number, maxExe
       output_format_json_quote_64bit_integers: 0,
       ...(maxExecutionTime === undefined
         ? {}
-        : { max_execution_time: maxExecutionTime, send_progress_in_http_headers: 1, http_headers_progress_interval_ms: '10000' }),
+        : {
+            max_execution_time: maxExecutionTime,
+            send_progress_in_http_headers: 1,
+            http_headers_progress_interval_ms: String(progressHeaderIntervalMs(maxExecutionTime)),
+          }),
     },
   });
 }

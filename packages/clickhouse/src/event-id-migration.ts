@@ -1,4 +1,4 @@
-import type { ClickHouseClient } from './client';
+import { type ClickHouseClient, maintenanceMaxExecutionSeconds } from './client';
 import { backfillEventIdPointers } from './index-repair';
 
 type IndexTable = { name: string; engine: string; create_table_query: string };
@@ -57,7 +57,7 @@ export async function migrateEventIdIndex(
       min_insert_block_size_rows: '1000000',
       min_insert_block_size_bytes: '0',
       max_insert_block_size: '1000000',
-      max_execution_time: 600,
+      max_execution_time: maintenanceMaxExecutionSeconds(),
     };
     for (const query of [createTable, createView, backfill]) await ch.command({ query, clickhouse_settings: bounded });
     await ch.command({ query: exchange });
