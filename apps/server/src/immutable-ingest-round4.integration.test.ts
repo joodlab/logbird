@@ -6,7 +6,7 @@ import { ProjectBusyError, prisma } from '@logbird/database';
 import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { clickhouse } from './clickhouse';
+import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 import { ingest } from './ingest';
 
@@ -55,7 +55,7 @@ async function consistent(events: number) {
 it('fences readers after all rollup DELETEs, excludes repair from settings, and completes before replay', async () => {
   await populated();
   await f.pending(pending, { expired: true });
-  const command = clickhouse.command.bind(clickhouse),
+  const command = maintenanceClickhouse.command.bind(maintenanceClickhouse),
     insert = clickhouse.exec.bind(clickhouse);
   let release: () => void = () => undefined,
     entered: () => void = () => undefined;
@@ -65,7 +65,7 @@ it('fences readers after all rollup DELETEs, excludes repair from settings, and 
     deleted = new Promise<void>((r) => {
       entered = r;
     });
-  vi.spyOn(clickhouse, 'command').mockImplementation(async (params) => {
+  vi.spyOn(maintenanceClickhouse, 'command').mockImplementation(async (params) => {
     const result = await command(params);
     if (params.query.startsWith('DELETE FROM attribute_keys')) {
       entered();
@@ -103,8 +103,8 @@ it('fences readers after all rollup DELETEs, excludes repair from settings, and 
 it('keeps failed repairs read-fenced while healthy siblings commit, then retention restores every destination', async () => {
   await populated();
   await f.pending(pending, { expired: true });
-  const command = clickhouse.command.bind(clickhouse);
-  const spy = vi.spyOn(clickhouse, 'command').mockImplementation(async (params) => {
+  const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
+  const spy = vi.spyOn(maintenanceClickhouse, 'command').mockImplementation(async (params) => {
     const result = await command(params);
     if (params.query.startsWith('DELETE FROM attribute_keys')) throw Object.assign(new Error('QA rebuild memory limit'), { code: '241' });
     return result;
@@ -173,8 +173,8 @@ it('repairs a process killed after destructive deletes without exposing an empty
 });
 it('ready-only and grace-only recovery perform no rollup DELETE and expose the remaining ready grace', async () => {
   await f.pending(pending, { expired: true });
-  await recoverProjectIngest(clickhouse, f.project);
-  const commands = vi.spyOn(clickhouse, 'command');
+  await recoverProjectIngest(maintenanceClickhouse, f.project);
+  const commands = vi.spyOn(maintenanceClickhouse, 'command');
   const different = { ...pending, action: 'different' };
   const waiting = await f.post(different);
   expect(waiting.status).toBe(503);
@@ -182,7 +182,7 @@ it('ready-only and grace-only recovery perform no rollup DELETE and expose the r
   expect((await f.post(pending)).status).toBe(202);
   expect(commands.mock.calls.some(([p]) => /^DELETE FROM (events_by_minute|entities|attribute_keys)\b/.test(p.query))).toBe(false);
   await f.pending({ id: 'grace', action: 'old' }, { expired: true });
-  await recoverProjectIngest(clickhouse, f.project);
+  await recoverProjectIngest(maintenanceClickhouse, f.project);
   commands.mockClear();
   vi.setSystemTime(Date.now() + 10 * 60_000 + 1);
   expect((await f.post({ id: 'grace', action: 'new' })).status).toBe(202);
@@ -190,9 +190,9 @@ it('ready-only and grace-only recovery perform no rollup DELETE and expose the r
 });
 it('flush failures retain the pending index and store siblings with a throttled Retry-After', async () => {
   await f.pending(pending, { expired: true });
-  const command = clickhouse.command.bind(clickhouse);
+  const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
   const calls = vi
-    .spyOn(clickhouse, 'command')
+    .spyOn(maintenanceClickhouse, 'command')
     .mockImplementation((params) =>
       params.query === 'SYSTEM FLUSH ASYNC INSERT QUEUE'
         ? Promise.reject(Object.assign(new Error('QA flush denied'), { code: '497' }))
@@ -217,7 +217,7 @@ it('flush failures retain the pending index and store siblings with a throttled 
 it('sample removal uses the same durable read fence around its rollup rebuild', async () => {
   await populated();
   expect((await f.post({ id: 'sample', action: 'sample', source: 'logbird-sample' })).status).toBe(202);
-  const command = clickhouse.command.bind(clickhouse);
+  const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
   let release: () => void = () => undefined,
     entered: () => void = () => undefined;
   const gate = new Promise<void>((r) => {
@@ -226,7 +226,7 @@ it('sample removal uses the same durable read fence around its rollup rebuild', 
     deleted = new Promise<void>((r) => {
       entered = r;
     });
-  vi.spyOn(clickhouse, 'command').mockImplementation(async (params) => {
+  vi.spyOn(maintenanceClickhouse, 'command').mockImplementation(async (params) => {
     const result = await command(params);
     if (params.query.startsWith('DELETE FROM attribute_keys')) {
       entered();
@@ -261,9 +261,9 @@ it('uses parsed wire payload identity for internal audit Date and undefined valu
   expect(await f.count()).toBe(1);
 });
 it('probes the flush grant at startup and emits actionable recovery diagnostics', async () => {
-  vi.spyOn(clickhouse, 'command').mockRejectedValueOnce(Object.assign(new Error('QA ACCESS_DENIED'), { code: '497' }));
+  vi.spyOn(maintenanceClickhouse, 'command').mockRejectedValueOnce(Object.assign(new Error('QA ACCESS_DENIED'), { code: '497' }));
   const logs = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-  expect(await probeIngestRecovery(clickhouse)).toBe(false);
+  expect(await probeIngestRecovery(maintenanceClickhouse)).toBe(false);
   expect(logs.mock.calls.some(([line]) => String(line).includes('ingest.recovery_failed') && String(line).includes('497'))).toBe(true);
   expect(logs.mock.calls.some(([line]) => String(line).includes('SYSTEM FLUSH ASYNC INSERT QUEUE'))).toBe(true);
 });

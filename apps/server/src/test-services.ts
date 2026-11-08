@@ -20,7 +20,8 @@ vi.mock('@clickhouse/client', async (original) => {
   const client = await original<typeof import('@clickhouse/client')>();
   return {
     ...client,
-    createClient: (options: Parameters<typeof client.createClient>[0]) => client.createClient({ ...options, request_timeout: 300_000 }),
+    createClient: (options: Parameters<typeof client.createClient>[0]) =>
+      client.createClient({ ...options, request_timeout: Math.max(options?.request_timeout ?? 0, 300_000) }),
   };
 });
 

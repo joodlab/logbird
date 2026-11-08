@@ -207,7 +207,19 @@ for signal handling; its live acceptance is pending in #77.
 
 Back up Postgres and ClickHouse, preserve the private environment file and stop
 server/worker writers; build and start as in step 5 above. The migrate gate applies
-006/007, the receipt/UTC migrations and the additive maintenance-kind and generation migrations.
+006–009, the receipt/UTC migrations and the additive maintenance-kind and generation migrations.
+008 makes a temporary derived-index copy: allow disk space for both copies and
+time proportional to retained history. Migration/maintenance clients use a
+15-minute socket-idle timeout, progress headers and a ten-minute server query
+budget. A failed pre-swap copy is discarded and copied again on retry; after the
+atomic swap, retries resume forward without swapping back. Do not start the new
+server until the migration gate completes. Restore checks must reject leftover
+`event_ids_v2`/`event_ids_v3` tables or temporary MVs, even if the stable table exists.
+009 adds an online pointer bloom index and materializes index files; it preserves
+logical rows and existing binaries. `MATERIALIZE INDEX` is a mutation proportional
+to `event_ids` size (604 ms in the isolated 10M online proof); budget more time for
+larger/busy installations. The maintenance migrate client's long timeout covers
+this wait. Confirm completion in `system.mutations`; materialization can be repeated safely.
 External ClickHouse writers need SELECT/INSERT/DELETE on `event_ids` and
 `GRANT SYSTEM FLUSH ASYNC INSERT QUEUE ON *.* TO <writer>` in addition to existing
 grants. Recovery currently supports one ClickHouse node; a load-balanced cluster

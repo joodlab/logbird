@@ -1,6 +1,10 @@
 import type { ClickHouseClient } from './client';
 
-/** Leave half the 256 MiB ceiling for scan buffers, DISTINCT and allocation overhead. */
+/**
+ * NOT IN and DISTINCT share one 256 MiB query ceiling. Target 128 MiB for the larger
+ * side; DISTINCT normally holds only the missing tuples. The hard cap also covers
+ * both sets, scan buffers and allocation overhead, including unexpected overlap.
+ */
 export function eventIdRepairBuckets(rows: number, keyBytes = rows * 64) {
   if (!Number.isSafeInteger(rows) || rows < 0 || !Number.isFinite(keyBytes) || keyBytes < 0) throw new Error('Invalid identity repair size');
   const required = Math.max(1, Math.ceil(rows / 500_000), Math.ceil((keyBytes * 2 + rows * 128) / (128 * 1024 * 1024)));

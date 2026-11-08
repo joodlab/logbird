@@ -72,7 +72,7 @@ backfill and exchange and one active through retirement, plus interruption after
 each of the seven phases. No events-table mutation or writer drain is needed for
 this schema migration. Retention and project deletion purge the index alongside
 the four existing tables. Retention retries clean index rows even when a prior
-attempt already removed the raw rows, rebuild surviving pointers and verify the
+attempt already removed the raw rows, preserve surviving pointers and verify the
 cutoff invariant before completion.
 
 Migration 008 replaces the derived index online with smaller granules, using
@@ -88,10 +88,23 @@ of estimated set storage per bucket (twice the serialized key bytes plus
 128 bytes/row for hash-table/allocator overhead). Long
 ids and overlapping physical index rows increase the bucket count. The measured
 10M fixture uses 32 buckets; 100M ordinary-width rows require 256, rather than
-reusing a fixed count. The same bounded final pass applies to 007 on fresh upgrades. Retrying any interrupted pass is safe. Runtime cutoff purges
-use the same bounded repair, including when an earlier attempt already deleted
-the expired raw/index rows. Each bucket still scans narrow history columns;
-this trades cold reconciliation time for bounded set memory.
+reusing a fixed count. The same bounded final pass applies to 007 on fresh upgrades.
+These one-time upgrade passes restore every legacy tuple before new server/worker
+startup. Subsequent plain MergeTree pointers are MV-maintained, so runtime cutoff
+purges delete matching raw/index tuples without scanning retained history to
+rebuild pointers. A retry still deletes expired pointers if raw cleanup finished
+earlier, and verifies the cutoff invariant. Legacy replacing-index collapse is
+repaired during upgrade, rather than during every exclusive retention lock.
+
+Migration and cold-maintenance clients have a 15-minute socket-idle timeout and
+progress headers, separate from the ten-minute server query budget. The normal
+60-second socket-idle timeout applies to all client operations, not just inserts.
+Before the atomic exchange, resuming an interrupted copy synchronously retires
+the temporary MV/table and creates a fresh table UUID before repeating the full
+copy. A timed-out server query can still own its old table UUID, but cannot append
+another copy to the new target. After exchange, persisted engine/granularity state
+resumes only the remaining retirement/coverage phases. Allow temporary disk space
+for a second index and enough time to repeat a failed full copy on a large install.
 
 ### Granularity experiment (10M derived pointers)
 
@@ -122,6 +135,77 @@ Caller-chosen random ids amortize to about 0.1 ms/id in this 1,000-id lookup;
 this is a batch cost, not single-id latency or a linear scaling guarantee.
 Matched HTTP re-runs must record the load runner's id shape. Pointer INSERT
 cost above excludes the raw event and other materialized-view destinations.
+
+### Multiple active parts (009)
+
+The single-part figures above understate random-id misses during active ingest:
+each part adds candidate granules. A five-part, 10M UUIDv4 fixture reproduced
+1.21M rows / 47.0 MB / 169 ms for 1,000 fresh misses. Tested bloom granularities
+16, 64 and 256 reduced that to about 0.11M rows / 4.1–4.5 MB and 93, 73 and 67 ms.
+009 adds `idx_event_ids_bloom`, `bloom_filter(0.0001) GRANULARITY 256`, while keeping
+the primary key and 256-row granules. The primary index prunes first; the bloom
+index then avoids decoding absent ids in candidate parts.
+
+A separate same-layout test used five parts, 10M mixed UUIDv4/UUIDv7 pointers,
+two warmups and eight measured fresh 1,000-id batches per case, with condition
+cache disabled. Enabling the bloom index changed UUIDv4 median server time
+128 → 50 ms, rows 1,132,544 → 115,456 and bytes 44.17 → 4.50 MB. UUIDv7 stayed
+at 8 ms (1,280 → typically 0–512 rows). Peak lookup memory stayed below 7 MB.
+The index files used 23.85 MB, about 9.9% of the 241.57 MB unindexed mixed-history
+table. Native 1k four-column source + pointer-MV inserts measured 15.26 → 15.64 ms;
+these exclude full raw events and the other materialized destinations. Part count, id shape and compression
+matter; these diagnostics are not the matched HTTP acceptance benchmark.
+
+009 adds the skip index online and materializes its files on existing parts.
+`MATERIALIZE INDEX` runs as a ClickHouse mutation proportional to `event_ids`
+size; it is not a constant-time metadata operation. The 10M online fixture's
+initial materialization took 604 ms. Larger or busier installations take longer;
+the maintenance migrate client's long timeout and progress headers above cover
+the wait. Inspect `system.mutations` for completion before treating the upgrade
+as finished. A retry may rematerialize the same files without appending rows.
+The shared-development apply over 12,114,298 logical pointers took 2.438 seconds;
+its largest recorded mutation-part peak was 7.89 MB. All 222 projects' raw/pointer
+counts and receipt digests were identical before and after. These measurements
+include that installation's part layout and are not universal duration bounds.
+It does not change table names, columns, MVs, TTL or logical rows; master-era and
+007/008 binaries remain compatible. A 10M fixture accepted 200k concurrent writes
+and a delayed 100-row writer across attach. Repeating materialization preserved
+raw/pointer counts and checksums, and positive lookups remained complete. Query
+cost still grows with many small active parts: the online test intentionally
+disabled merges and ended with 216 parts; its post-write timings must not be
+compared to the five-part baseline. Normal background merging remains important.
+
+To roll back application code, leave 009 in place. To remove only this index,
+first wait for its `MATERIALIZE INDEX` mutations to finish (`system.mutations`),
+then run the following, substituting `CLICKHOUSE_DATABASE` for `logbird`:
+
+```sql
+ALTER TABLE logbird.event_ids DROP INDEX IF EXISTS idx_event_ids_bloom;
+ALTER TABLE logbird.migrations DELETE WHERE name='009_event_ids_bloom.sql'
+SETTINGS mutations_sync=2;
+```
+
+No event or receipt rows are deleted by this rollback. A retry of 009 can
+rematerialize index files; it cannot append duplicate history rows.
+
+### Receipt/CPU and retention diagnostics
+
+A direct-ingest UUIDv7 diagnostic using the load runner's event generator
+(five warmups and 20 fresh 1k batches, separate fictional project) measured
+329 ms median / 369 ms p95 initially. Typed-array claims reduced claim time
+90 → 35 ms; reusing validated fresh rows and per-attempt fingerprints reduced
+the total to 246 ms / 295 ms, CPU median 171 → 62 ms. Retried/legacy rows still
+resolve against the original receipt clock. Confirmation remains after ClickHouse
+acknowledgement; recovery and claim observations remain separate across lock phases.
+
+On an owned 10M narrow-column fixture with response defaults added as metadata,
+the repeated pointer repair held the exclusive retention lock for 74.11 seconds.
+Relying on one-time upgrade coverage reduced it to 1.71 seconds, 660.07M → 16k
+rows read and peak query memory 117.66 → 4.39 MB. Both retained exactly 10M raw
+rows and pointers. Target/tenant page queries using the narrow pair selector
+read the same row counts as baseline; EXPLAIN showed an in-order read with bounded
+receipt tie sorting. These synthetic diagnostics do not replace the final HTTP
+read/ingest matrix against the scheduled retained cohort.
 
 ## Bounded ambiguous writes
 
@@ -238,7 +322,7 @@ DROP TABLE IF EXISTS logbird.event_ids_v3 SYNC;
 DROP TABLE IF EXISTS logbird.event_ids_v2 SYNC;
 DROP TABLE IF EXISTS logbird.event_ids SYNC;
 ALTER TABLE logbird.migrations DELETE WHERE name IN
-  ('006_event_ids.sql','007_event_ids_merge_tree.sql','008_event_ids_granularity.sql') SETTINGS mutations_sync=2;
+  ('006_event_ids.sql','007_event_ids_merge_tree.sql','008_event_ids_granularity.sql','009_event_ids_bloom.sql') SETTINGS mutations_sync=2;
 
 -- Postgres: retain IngestReceipt and its original migration.
 BEGIN;
@@ -271,8 +355,10 @@ The shipped reconciliation command accepts one project id only.
 Search/export return the row that passed the filter; detail chooses the oldest
 surviving receipt. Historical non-canonical rows can still match filters. This
 change cannot restore overwritten originals or globally canonicalize historical
-cursor pages. Search selects a bounded page of narrow (timestamp,event_id,received_at)
-pointers, then fetches only those exact wide rows. ASC/DESC event-time ordering
+cursor pages. Search selects a bounded page of narrow (timestamp,event_id)
+keys in storage order, then fetches only those matching wide rows and reapplies
+the same filters: even a complete legacy pointer tuple need not be unique.
+ASC/DESC event-time ordering
 comes first; the earliest receipt breaks ties at a timestamp. Filters and cursor
 boundaries apply before page-local id deduplication. A legacy id at another
 timestamp can therefore recur on a later page; new immutable writes cannot create

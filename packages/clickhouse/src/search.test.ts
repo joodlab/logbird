@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import type { ClickHouseClient } from './client';
 import { normalizeEvent } from './normalize';
-import { getEvent, hasExpiredEvents, searchEvents } from './queries';
+import { getEvent, hasExpiredEvents, purgeProject, searchEvents } from './queries';
 
 const from = '2026-11-07T10:00:00.000Z',
   to = '2026-11-07T11:00:00.000Z';
@@ -20,7 +20,7 @@ function client(rows: ReturnType<typeof row>[], total = rows.length) {
     .mockResolvedValueOnce({ json: async () => [{ n: total }] });
   return { ch: { query } as unknown as ClickHouseClient, query };
 }
-it.each(['asc', 'desc'] as const)('keeps the %s page selection narrow and fetches its exact receipt pointers', async (order) => {
+it.each(['asc', 'desc'] as const)('keeps the %s selector in sort-key order and resolves receipts only in its bounded page', async (order) => {
   const a = row('first', '2026-11-07T10:01:00.000Z'),
     b = row('second', '2026-11-07T10:02:00.000Z');
   const rows = order === 'asc' ? [a, b] : [b, a];
@@ -28,12 +28,10 @@ it.each(['asc', 'desc'] as const)('keeps the %s page selection narrow and fetche
   const page = await searchEvents(ch, 'qa-narrow-search', { from, to, order, limit: 1, q: 'target:record tenant:tenant' });
   const sql = query.mock.calls[0]?.[0].query as string;
   const inner = sql.slice(sql.indexOf(' IN (') + 5, sql.lastIndexOf(') ORDER BY'));
-  expect(inner).toMatch(/^SELECT timestamp,event_id,received_at FROM events WHERE project_id=/);
-  expect(inner).not.toMatch(/SELECT \*|payload|search_text/);
-  expect(inner).toContain(
-    `ORDER BY timestamp ${order.toUpperCase()},event_id ${order.toUpperCase()},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
-  );
-  expect(sql).toContain('(timestamp,event_id,received_at) IN (');
+  expect(inner).toMatch(/^SELECT timestamp,event_id FROM events WHERE project_id=/);
+  expect(inner).not.toMatch(/received_at|SELECT \*|payload|search_text/);
+  expect(inner).toContain(`ORDER BY timestamp ${order.toUpperCase()},event_id ${order.toUpperCase()} LIMIT 1 BY event_id LIMIT {limit:UInt32}`);
+  expect(sql).toContain('(timestamp,event_id) IN (');
   expect(sql).toMatch(/ORDER BY timestamp (?:ASC|DESC),event_id (?:ASC|DESC),received_at ASC LIMIT 1 BY event_id LIMIT \{limit:UInt32\}$/);
   expect(query.mock.calls[0]?.[0].query_params).toMatchObject({ project: 'qa-narrow-search', limit: 2 });
   expect(page.data.map((e) => e.id)).toEqual([rows[0]?.event_id]);
@@ -57,6 +55,22 @@ it.each(['asc', 'desc'] as const)('applies the %s cursor inside the narrow selec
   expect(countSql).not.toContain('cursorTs');
   expect(countSql).toContain('SELECT DISTINCT event_id');
 });
+it.each(['asc', 'desc'] as const)('rechecks %s filters before deduping legacy rows that share the entire pointer', async (order) => {
+  for (const [q, predicate] of [
+    ['action:wanted', 'action = {q0:String}'],
+    ['tenant:wanted', 'tenant_id = {q0:String}'],
+    ['target:wanted', 'arrayExists(x -> x = {q0:String}, target_ids)'],
+  ] as const) {
+    const { ch, query } = client([]);
+    await searchEvents(ch, 'qa-narrow-search', { from, to, order, limit: 1, q });
+    const sql = query.mock.calls[0]?.[0].query as string;
+    const outer = sql.slice(0, sql.indexOf(' IN (SELECT'));
+    expect(outer).toContain(predicate);
+    expect(sql.split(predicate)).toHaveLength(3);
+    expect(sql).toContain('(timestamp,event_id) IN (SELECT timestamp,event_id');
+    expect(query.mock.calls[0]?.[0].query_params).toMatchObject({ q0: 'wanted', limit: 2 });
+  }
+});
 it('returns no cursor for an empty page', async () => {
   const { ch } = client([], 0);
   expect(await searchEvents(ch, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 })).toMatchObject({ data: [], total: 0, nextCursor: null });
@@ -78,4 +92,14 @@ it('expiration probes stay narrow and bounded in both raw rows and the identity 
   expect(sql.match(/SELECT 1 FROM/g)).toHaveLength(2);
   expect(sql.match(/LIMIT 1/g)).toHaveLength(2);
   expect(sql).not.toContain('SELECT *');
+});
+it('cutoff purge deletes matching pointers without a full-history identity repair under the project lock', async () => {
+  const query = vi.fn(async ({ query: sql }: { query: string }) => ({
+    json: async () => (sql.startsWith('SELECT DISTINCT kind,id') ? [] : [{ n: 0 }]),
+  }));
+  const command = vi.fn().mockResolvedValue({});
+  await purgeProject({ query, command } as unknown as ClickHouseClient, 'qa-narrow-search', new Date(from));
+  expect(command.mock.calls.some(([params]) => params.query.startsWith('DELETE FROM event_ids'))).toBe(true);
+  expect(command.mock.calls.some(([params]) => params.query.startsWith('INSERT INTO event_ids'))).toBe(false);
+  expect(query.mock.calls.some(([params]) => /key_bytes|identityBuckets|NOT IN/.test(params.query))).toBe(false);
 });

@@ -1,6 +1,6 @@
 import { prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { clickhouse } from './clickhouse';
+import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 
 let f: ImmutableFixture;
@@ -48,7 +48,7 @@ it.each(['entities?kind=actor', 'entities/actor/person', 'overview', 'fields', '
       deleted = latch(),
       resumeRepair = latch();
     const query = clickhouse.query.bind(clickhouse),
-      command = clickhouse.command.bind(clickhouse);
+      command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
     let first = true;
     vi.spyOn(clickhouse, 'query').mockImplementation(async (params) => {
       if (first) {
@@ -58,7 +58,7 @@ it.each(['entities?kind=actor', 'entities/actor/person', 'overview', 'fields', '
       }
       return query(params);
     });
-    vi.spyOn(clickhouse, 'command').mockImplementation(async (params) => {
+    vi.spyOn(maintenanceClickhouse, 'command').mockImplementation(async (params) => {
       const result = await command(params);
       if (params.query.startsWith('DELETE FROM attribute_keys')) {
         deleted.release();

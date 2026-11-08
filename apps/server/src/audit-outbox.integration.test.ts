@@ -9,6 +9,7 @@ it('persists across restart, independently retries destinations, and never chang
   const ids: [string, string] = [`${prefix}-a`, `${prefix}-b`];
   const clock = new Date();
   try {
+    await prisma.organization.createMany({ data: ids.map((id) => ({ id, name: 'QA Outbox', slug: id, createdAt: new Date() })) });
     await storeAuditEvent(`ws:${prefix}-a`, { id: ids[0], action: 'auth.signed_out', targets: [{ type: 'session', id: 'non-secret' }] });
     await storeAuditEvent(`ws:${prefix}-b`, { id: ids[1], action: 'auth.signed_out' });
     // No in-memory promise/job survives this boundary; reconciliation rediscovers both stored rows.
@@ -45,12 +46,15 @@ it('persists across restart, independently retries destinations, and never chang
     expect((await prisma.auditOutbox.findUniqueOrThrow({ where: { id: ids[0] } })).deliveredAt).not.toBeNull();
   } finally {
     await prisma.auditOutbox.deleteMany({ where: { id: { in: ids } } });
+    await prisma.organization.deleteMany({ where: { id: { in: ids } } });
   }
 });
 
 it('retains conflicts and non-throwing rejection as undelivered with safe errors', async () => {
   const id = randomUUID();
+  const org = `qa-${id}`;
   try {
+    await prisma.organization.create({ data: { id: org, name: 'QA Rejected Delivery', slug: org, createdAt: new Date() } });
     await storeAuditEvent(`ws:qa-${id}`, { id, action: 'auth.session.revoked' });
     await deliverOutboxEvent(id, async () => ({
       accepted: 0,
@@ -71,6 +75,7 @@ it('retains conflicts and non-throwing rejection as undelivered with safe errors
     expect((await prisma.auditOutbox.findUniqueOrThrow({ where: { id } })).lastError).toBe('audit_storage_unavailable');
   } finally {
     await prisma.auditOutbox.deleteMany({ where: { id } });
+    await prisma.organization.deleteMany({ where: { id: org } });
   }
 });
 
@@ -173,8 +178,11 @@ it('stops claiming, drains in-flight server delivery, and restarts pending work'
   });
   let drainer: ReturnType<typeof startAuditDrainer> | undefined;
   let restarted: ReturnType<typeof startAuditDrainer> | undefined;
+  const organizationId = `qa-shutdown-${first}`;
+  const stream = `ws:${organizationId}`;
   try {
-    await storeAuditEvent('ws:qa-shutdown', { id: first, action: 'auth.signed_out' });
+    await prisma.organization.create({ data: { id: organizationId, name: 'QA Shutdown Delivery', slug: organizationId, createdAt: new Date() } });
+    await storeAuditEvent(stream, { id: first, action: 'auth.signed_out' });
     drainer = startAuditDrainer(async () => {
       started();
       await blocked;
@@ -185,7 +193,7 @@ it('stops claiming, drains in-flight server delivery, and restarts pending work'
     const closing = drainer.stop().then(() => {
       closed = true;
     });
-    await storeAuditEvent('ws:qa-shutdown', { id: second, action: 'auth.session.revoked' });
+    await storeAuditEvent(stream, { id: second, action: 'auth.session.revoked' });
     expect(closed).toBe(false);
     release();
     await closing;
@@ -198,6 +206,7 @@ it('stops claiming, drains in-flight server delivery, and restarts pending work'
     await drainer?.stop();
     await restarted?.stop();
     await prisma.auditOutbox.deleteMany({ where: { id: { in: [first, second] } } });
+    await prisma.organization.deleteMany({ where: { id: organizationId } });
   }
 });
 
@@ -259,15 +268,16 @@ it('delivers through local ingest against real ClickHouse independently per work
   }
 });
 
-it('quarantines deleted-workspace evidence after bounded real-ingest failures while healthy workspaces deliver', async () => {
+it('settles deleted-workspace evidence as moot, including deletion during delivery, while healthy workspaces deliver', async () => {
   const { ingest } = await import('./ingest');
   const { clickhouse } = await import('./clickhouse');
   const { purgeProject } = await import('@logbird/clickhouse');
-  const orgs = [randomUUID(), randomUUID()];
+  const orgs = [randomUUID(), randomUUID(), randomUUID()];
   const streams = orgs.map((org) => `ws:${org}`);
-  const ids = [randomUUID(), randomUUID(), randomUUID()];
+  const ids = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
   const secret = 'QA event description must not enter delivery diagnostics';
   const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
   try {
     await prisma.organization.createMany({
       data: orgs.map((id) => ({ id, name: 'QA Deleted Workspace Delivery', slug: id, createdAt: new Date() })),
@@ -278,27 +288,33 @@ it('quarantines deleted-workspace evidence after bounded real-ingest failures wh
       await storeAuditEvent(streams[0] ?? '', { id: ids[1], action: 'organization.deleted', description: secret }, tx);
     });
     await storeAuditEvent(streams[1] ?? '', { id: ids[2], action: 'organization.updated' });
+    await storeAuditEvent(streams[2] ?? '', { id: ids[3], action: 'organization.updated', description: secret });
+    const deliver = vi.fn(async (stream: string, payload: unknown) => {
+      if (stream === streams[2]) await prisma.organization.delete({ where: { id: orgs[2] } });
+      return ingest(stream, payload);
+    });
     const now = new Date(Date.now() + 1000);
     // Each sweep claims at most two rows; failed destinations cannot monopolize the next sweep.
-    await drainAuditOutbox(ingest, now);
-    await drainAuditOutbox(ingest, now);
+    await drainAuditOutbox(deliver, now);
+    await drainAuditOutbox(deliver, now);
+    expect(deliver).toHaveBeenCalledTimes(2);
     expect((await prisma.auditOutbox.findUniqueOrThrow({ where: { id: ids[2] } })).deliveredAt).not.toBeNull();
 
-    for (const id of ids.slice(0, 2)) {
-      for (let attempt = 1; attempt < 10; attempt++) await deliverOutboxEvent(id, ingest, new Date(+now + attempt * 7_200_000));
+    for (const id of [ids[0], ids[1], ids[3]]) {
       expect(await prisma.auditOutbox.findUniqueOrThrow({ where: { id } })).toMatchObject({
-        attempts: 10,
-        deliveredAt: null,
-        lastError: 'audit_storage_unavailable',
-        quarantinedAt: expect.any(Date),
+        attempts: 1,
+        deliveredAt: expect.any(Date),
+        lastError: 'workspace_deleted',
+        quarantinedAt: null,
       });
       expect(await claimAuditEvents(new Date(+now + 100 * 7_200_000), id)).toHaveLength(0);
     }
-    expect(await auditDrainStatus()).toMatchObject({ undelivered: 2, quarantined: 2 });
-    expect(await prisma.ingestReceipt.count({ where: { projectId: streams[0] } })).toBe(0);
-    const diagnostics = warnings.mock.calls.map(([line]) => JSON.parse(String(line))).filter((row) => row.event === 'audit.delivery_failed');
-    expect(diagnostics).toHaveLength(20);
-    expect(diagnostics.every((row) => row.lastError === 'audit_storage_unavailable')).toBe(true);
+    expect(await auditDrainStatus()).toMatchObject({ undelivered: 0, quarantined: 0 });
+    expect(await prisma.ingestReceipt.count({ where: { projectId: { in: streams.filter((_, index) => index !== 1) } } })).toBe(0);
+    const diagnostics = info.mock.calls.map(([line]) => JSON.parse(String(line))).filter((row) => row.event === 'audit.delivery_moot');
+    expect(diagnostics).toHaveLength(3);
+    expect(diagnostics.every((row) => row.reason === 'workspace_deleted')).toBe(true);
+    expect(warnings.mock.calls.map(([line]) => String(line)).some((line) => line.includes('audit.delivery_failed'))).toBe(false);
     expect(JSON.stringify(diagnostics)).not.toContain(secret);
     const healthyRows = await (
       await clickhouse.query({
@@ -310,6 +326,7 @@ it('quarantines deleted-workspace evidence after bounded real-ingest failures wh
     expect(Number(healthyRows[0]?.n)).toBe(1);
   } finally {
     warnings.mockRestore();
+    info.mockRestore();
     for (const stream of streams) await purgeProject(clickhouse, stream);
     await prisma.auditOutbox.deleteMany({ where: { id: { in: ids } } });
     await prisma.organization.deleteMany({ where: { id: { in: orgs } } });

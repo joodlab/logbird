@@ -4,14 +4,28 @@ import type { EventRow } from './normalize';
 
 export type { ClickHouseClient } from '@clickhouse/client';
 export function createClickHouseClient(env = process.env): ClickHouseClient {
+  return configuredClient(env, INGEST_CLAIM_LEASE_MS);
+}
+export const CLICKHOUSE_MAINTENANCE_TIMEOUT_MS = 15 * 60_000;
+export const CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS = 600;
+export function createMaintenanceClickHouseClient(env = process.env): ClickHouseClient {
+  return configuredClient(env, CLICKHOUSE_MAINTENANCE_TIMEOUT_MS, CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS);
+}
+function configuredClient(env: NodeJS.ProcessEnv, requestTimeout: number, maxExecutionTime?: number): ClickHouseClient {
   return createClient({
     url: env.CLICKHOUSE_URL,
     database: env.CLICKHOUSE_DATABASE,
     username: env.CLICKHOUSE_USER,
     password: env.CLICKHOUSE_PASSWORD,
-    // Do not abandon a valid 40-second async acknowledgement at the client's 30-second default.
-    request_timeout: INGEST_CLAIM_LEASE_MS,
-    clickhouse_settings: { date_time_input_format: 'best_effort', output_format_json_quote_64bit_integers: 0 },
+    // This is a socket-idle timeout for every operation, independent of the INSERT lease.
+    request_timeout: requestTimeout,
+    clickhouse_settings: {
+      date_time_input_format: 'best_effort',
+      output_format_json_quote_64bit_integers: 0,
+      ...(maxExecutionTime === undefined
+        ? {}
+        : { max_execution_time: maxExecutionTime, send_progress_in_http_headers: 1, http_headers_progress_interval_ms: '10000' }),
+    },
   });
 }
 export const INGEST_CLAIM_LEASE_MS = 60_000;

@@ -35,7 +35,7 @@ it('resumes an interrupted cutoff index delete after every expired raw row is al
     expect((await read<{ n: number }>(clickhouse, `SELECT count() n FROM ${table} WHERE project_id={p:String}`, { p: f.project }))[0]?.n).toBe(0);
   expect((await prisma.retentionRun.findFirstOrThrow({ where: { projectId: f.project }, orderBy: { startedAt: 'desc' } })).status).toBe('completed');
 });
-it('rebuilds an identity when its merged pointer expires but another raw timestamp survives', async () => {
+it('keeps the surviving identity after the upgrade repaired a collapsed legacy pointer', async () => {
   const id = 'legacy-retention',
     receivedAt = new Date();
   const expired = f.row({ id, action: 'legacy.expired', occurredAt: new Date(Date.now() - 91 * 86_400_000).toISOString() }, receivedAt);
@@ -52,6 +52,18 @@ it('rebuilds an identity when its merged pointer expires but another raw timesta
     format: 'JSONEachRow',
     values: [{ project_id: f.project, event_id: id, timestamp: expired.timestamp, received_at: expired.received_at }],
   });
+  // Required 007/008 upgrade coverage restores every raw tuple before the server starts.
+  await clickhouse.command({
+    query: 'INSERT INTO event_ids SELECT project_id,event_id,received_at,timestamp FROM events WHERE project_id={p:String}',
+    query_params: { p: f.project },
+  });
+  expect(
+    (
+      await read<{ n: number }>(clickhouse, 'SELECT uniqExact((event_id,received_at,timestamp)) n FROM event_ids WHERE project_id={p:String}', {
+        p: f.project,
+      })
+    )[0]?.n,
+  ).toBe(2);
   await enforceProjectRetention(f.project);
   expect(await f.count()).toBe(1);
   const conflict = await f.post({ id, action: 'overwrite', occurredAt: retained.timestamp });

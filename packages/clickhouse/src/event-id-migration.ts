@@ -41,19 +41,24 @@ export async function migrateEventIdIndex(
   if (old(state.get(table))) {
     if (state.has(temporary) && !upgraded(state.get(temporary))) throw new Error('Unexpected temporary event_ids migration state');
     if (state.get(`${table}_mv`)?.engine !== 'MaterializedView') throw new Error('The stable event_ids writer must exist before exchange');
-    const bounded =
-      granularity === undefined
-        ? undefined
-        : {
-            max_threads: 2,
-            max_insert_threads: '1',
-            max_memory_usage: '384000000',
-            max_bytes_before_external_sort: '64000000',
-            min_insert_block_size_rows: '1000000',
-            min_insert_block_size_bytes: '0',
-            max_insert_block_size: '1000000',
-            max_execution_time: 600,
-          };
+    const temporaryView = state.get(`${temporary}_mv`);
+    if (temporaryView && temporaryView.engine !== 'MaterializedView') throw new Error('Unexpected temporary event_ids writer');
+    // A timed-out INSERT SELECT can still own the old temporary table UUID.
+    // Retire it synchronously and allocate a fresh target before repeating the copy.
+    if (state.has(temporary) || temporaryView) {
+      await ch.command({ query: dropView });
+      await ch.command({ query: dropTable });
+    }
+    const bounded = {
+      max_threads: 2,
+      max_insert_threads: '1',
+      max_memory_usage: '384000000',
+      max_bytes_before_external_sort: '64000000',
+      min_insert_block_size_rows: '1000000',
+      min_insert_block_size_bytes: '0',
+      max_insert_block_size: '1000000',
+      max_execution_time: 600,
+    };
     for (const query of [createTable, createView, backfill]) await ch.command({ query, clickhouse_settings: bounded });
     await ch.command({ query: exchange });
     state = await tables();

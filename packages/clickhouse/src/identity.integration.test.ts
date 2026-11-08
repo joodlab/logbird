@@ -47,6 +47,72 @@ it('search and export return the version that actually passed the filter, before
 }, 30_000);
 
 it.each(['asc', 'desc'] as const)(
+  '%s filters exclude conflicting legacy versions with identical pointer tuples',
+  async (order) => {
+    const table = `qa_immutable_${randomUUID().replaceAll('-', '')}`;
+    const admin = createClickHouseClient(),
+      ch = createClickHouseClient();
+    const query = ch.query.bind(ch),
+      insert = ch.exec.bind(ch);
+    ch.query = (params) => query({ ...params, query: params.query.replaceAll(/\bFROM events\b/g, `FROM ${table}`) });
+    ch.exec = (params) => insert({ ...params, query: params.query.replace(/\bINTO events\b/g, `INTO ${table}`) });
+    const now = new Date();
+    try {
+      await admin.command({ query: `CREATE TABLE ${table} AS events ENGINE=MergeTree ORDER BY(project_id,timestamp,event_id)` });
+      const rows = ['old', 'wanted'].map((version) => {
+        const row = normalizeEvent(
+          {
+            id: 'same',
+            action: version,
+            occurredAt: now.toISOString(),
+            tenant: { id: version },
+            targets: [{ id: version, type: 'record' }],
+          },
+          { projectId: 'fictional', receivedAt: now },
+        );
+        if (!row.ok) throw new Error(row.reason);
+        return row.row;
+      });
+      await insertEvents(ch, rows);
+      const stored = await (
+        await admin.query({
+          query: `SELECT count() rows,uniqExact((timestamp,event_id,received_at)) pointers FROM ${table}`,
+          format: 'JSONEachRow',
+        })
+      ).json<{ rows: number; pointers: number }>();
+      expect(Number(stored[0]?.rows)).toBe(2);
+      expect(Number(stored[0]?.pointers)).toBe(1);
+      for (const version of ['old', 'wanted']) {
+        for (const field of ['action', 'tenant', 'target']) {
+          const result = await searchEvents(ch, 'fictional', {
+            from: new Date(now.getTime() - 1000).toISOString(),
+            to: new Date(now.getTime() + 1000).toISOString(),
+            limit: 1,
+            order,
+            q: `${field}:${version}`,
+          });
+          expect(
+            result.data.map((event) => ({
+              id: event.id,
+              action: event.action,
+              tenant: event.tenant?.id,
+              targets: event.targets.map((target) => target.id),
+            })),
+          ).toEqual([{ id: 'same', action: version, tenant: version, targets: [version] }]);
+          expect(result.total).toBe(1);
+          expect(result.nextCursor).toBeNull();
+        }
+      }
+    } finally {
+      await ch.close();
+      await admin.command({ query: `DROP TABLE IF EXISTS ${table} SYNC` });
+      await admin.close();
+    }
+  },
+  30_000,
+);
+
+it.each(['asc', 'desc'] as const)(
   'narrow %s pages preserve matching legacy pointers, receipt ties and cursor boundaries',
   async (order) => {
     const table = `qa_immutable_${randomUUID().replaceAll('-', '')}`;

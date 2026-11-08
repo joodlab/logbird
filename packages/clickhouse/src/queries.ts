@@ -20,7 +20,6 @@ import { pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import { isQueryClient } from './client';
-import { backfillEventIdPointers } from './index-repair';
 import type { EventRow } from './normalize';
 import { columns, compileQuery, QueryError } from './query';
 import { rollupSql } from './rollup-sql';
@@ -150,9 +149,9 @@ export async function searchEvents(ch: ClickHouseClient, projectId: string, q: S
   }
   const rows = await read<EventRow>(
     ch,
-    // Sort/dedupe only narrow identity pointers; fetch wide columns for this bounded page afterward.
-    // received_at keeps the outer fetch on the exact matching version before replacement merges.
-    `SELECT * EXCEPT(payload,search_text) FROM events WHERE project_id={project:String} AND (timestamp,event_id,received_at) IN (SELECT timestamp,event_id,received_at FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
+    // Select pairs in the MergeTree's timestamp/id order; resolve receipt ties only in the bounded fetch.
+    // Legacy versions can share the entire pointer tuple; recheck their filters before outer dedupe.
+    `SELECT * EXCEPT(payload,search_text) FROM events WHERE ${w.sql} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
     params,
   );
   const hasMore = rows.length > q.limit,
@@ -561,15 +560,9 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
   const predicate = `project_id={p:String}${before ? ' AND timestamp < {before:DateTime64(3)}' : ''}`;
   await deleteAndVerify(ch, 'events', predicate, params);
   await deleteAndVerify(ch, 'event_ids', predicate, params);
-  if (before) {
-    // A merged legacy pointer may have expired while another raw timestamp survives.
-    // Keep this cold repair server-side; do not materialize an unbounded list of ids in the worker.
-    await backfillEventIdPointers(
-      ch,
-      'INSERT INTO event_ids SELECT DISTINCT project_id,event_id,received_at,timestamp FROM events WHERE project_id={p:String} AND cityHash64(project_id,event_id)%{identityBuckets:UInt64}={identityBucket:UInt64} AND (project_id,event_id,received_at,timestamp) NOT IN (SELECT project_id,event_id,received_at,timestamp FROM event_ids WHERE project_id={p:String} AND cityHash64(project_id,event_id)%{identityBuckets:UInt64}={identityBucket:UInt64})',
-      { p },
-    );
-  }
+  // The required 007/008 migration repairs collapsed legacy pointers once before rollout.
+  // Its plain MergeTree/MV keeps every raw tuple, so cutoff deletion preserves surviving
+  // versions without scanning retained history under the exclusive project lock.
 
   if (!before) return rebuildProjectRollups(ch, p, false);
   const filters = {

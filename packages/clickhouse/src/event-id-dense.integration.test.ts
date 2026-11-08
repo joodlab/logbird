@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { createClient } from '@clickhouse/client';
 import { expect, it } from 'vitest';
-import { createClickHouseClient } from './client';
+import { createMaintenanceClickHouseClient } from './client';
 import { migrateEventIdIndex } from './event-id-migration';
 
 const run = process.env.CLICKHOUSE_ONLINE_DENSE_MIGRATION_TEST === '1';
-it.runIf(run).each([-1, 0, 1, 2, 3, 4, 5, 6, 'late-backfill', 'late-retire'] as const)(
+it.runIf(run).each([-1, 0, 1, 2, 3, 4, 5, 6, 'late-backfill', 'late-retire', 'timeout-copy'] as const)(
   'upgrades the dense index online across interruption %s',
   async (fault) => {
-    const ch = createClickHouseClient();
+    const ch = createMaintenanceClickHouseClient();
+    let timedClient: ReturnType<typeof createClient> | undefined;
     const suffix = randomUUID().replaceAll('-', '');
     const source = `qa_dense_source_${suffix}`,
       table = `qa_dense_ids_${suffix}`,
@@ -46,13 +48,22 @@ it.runIf(run).each([-1, 0, 1, 2, 3, 4, 5, 6, 'late-backfill', 'late-retire'] as 
       await command({ query: `INSERT INTO ${source} SELECT 'fictional',concat('before-',toString(number)),now64(3),now64(3) FROM numbers(10)` });
       if (fault === -1) {
         for (const age of [2, 1])
-          await command({ query: `INSERT INTO ${source} SELECT 'fictional','legacy',now64(3)-INTERVAL ${age} SECOND,now64(3)` });
+          await command({
+            query: `INSERT INTO ${source} SELECT 'fictional','legacy',now64(3)-INTERVAL ${age} SECOND,now64(3)-INTERVAL ${age === 1 ? 91 : 3} DAY`,
+          });
         await command({ query: `OPTIMIZE TABLE ${table} FINAL` });
         expect((await query<{ n: number }>(`SELECT count() n FROM ${table} WHERE event_id='legacy'`))[0]?.n).toBe(1);
         await migrateEventIdIndex(ch, await sql('007_event_ids_merge_tree.sql'), { table, temporary: `${table}_v2`, source });
         expect((await query<{ n: number }>(`SELECT uniqExact((received_at,timestamp)) n FROM ${table} WHERE event_id='legacy'`))[0]?.n).toBe(2);
+        // Upgrade coverage is mandatory before cutoff cleanup: the newest replacing pointer was expired.
+        for (const name of [source, table])
+          await command({
+            query: `DELETE FROM ${name} WHERE timestamp<now64(3)-INTERVAL 90 DAY`,
+            clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
+          });
+        expect((await query<{ n: number }>(`SELECT count() n FROM ${table} WHERE event_id='legacy'`))[0]?.n).toBe(1);
       }
-      const late = typeof fault === 'string';
+      const late = fault === 'late-backfill' || fault === 'late-retire';
       const writerId = randomUUID();
       writer = (
         late
@@ -84,7 +95,24 @@ it.runIf(run).each([-1, 0, 1, 2, 3, 4, 5, 6, 'late-backfill', 'late-retire'] as 
         await new Promise((r) => setTimeout(r, 100));
       }
       let armed = typeof fault === 'number' && fault >= 0;
+      let timedOut = false;
+      let timedUuid: string | undefined;
+      const timedQueryId = randomUUID();
       ch.command = async (params) => {
+        if (fault === 'timeout-copy' && params.query === statements[2] && !timedOut) {
+          timedOut = true;
+          timedUuid = (
+            await query<{ uuid: string }>(`SELECT toString(uuid) uuid FROM system.tables WHERE database=currentDatabase() AND name='${temporary}'`)
+          )[0]?.uuid;
+          timedClient = createClient({
+            url: process.env.CLICKHOUSE_URL,
+            database: process.env.CLICKHOUSE_DATABASE,
+            username: process.env.CLICKHOUSE_USER,
+            password: process.env.CLICKHOUSE_PASSWORD,
+            request_timeout: 50,
+          });
+          return timedClient.command({ ...params, query: `${params.query} WHERE sleepEachRow(0.05)=0`, query_id: timedQueryId });
+        }
         const result = await command(params);
         if (params.query === statements[2] && fault === 'late-backfill') expect((await writer)?.ok).toBe(true);
         if (armed && statements.indexOf(params.query) === fault) {
@@ -95,6 +123,10 @@ it.runIf(run).each([-1, 0, 1, 2, 3, 4, 5, 6, 'late-backfill', 'late-retire'] as 
       };
       const migrate = () => migrateEventIdIndex(ch, statements, { table, temporary, source, granularity: 256 });
       if (armed) await expect(migrate()).rejects.toThrow('Injected dense migration interruption');
+      if (fault === 'timeout-copy') {
+        await expect(migrate()).rejects.toThrow(/timeout/i);
+        expect((await query<{ n: number }>(`SELECT count() n FROM system.processes WHERE query_id='${timedQueryId}'`))[0]?.n).toBe(1);
+      }
       await migrate();
       await migrate();
       const written = await writer;
@@ -103,7 +135,15 @@ it.runIf(run).each([-1, 0, 1, 2, 3, 4, 5, 6, 'late-backfill', 'late-retire'] as 
       const counts = await query<{ raw: number; ids: number; missing: number }>(
         `SELECT (SELECT count() FROM ${source}) raw,(SELECT uniqExact((project_id,event_id,received_at,timestamp)) FROM ${table}) ids,(SELECT count() FROM ${source} WHERE (project_id,event_id,received_at,timestamp) NOT IN (SELECT project_id,event_id,received_at,timestamp FROM ${table})) missing`,
       );
-      expect(counts[0]).toEqual({ raw: late ? 111 : fault === -1 ? 33 : 31, ids: late ? 111 : fault === -1 ? 33 : 31, missing: 0 });
+      expect(counts[0]).toEqual({ raw: late ? 111 : fault === -1 ? 32 : 31, ids: late ? 111 : fault === -1 ? 32 : 31, missing: 0 });
+      if (fault === 'timeout-copy') {
+        expect(
+          (await query<{ uuid: string }>(`SELECT toString(uuid) uuid FROM system.tables WHERE database=currentDatabase() AND name='${table}'`))[0]
+            ?.uuid,
+        ).not.toBe(timedUuid);
+        expect((await query<{ n: number }>(`SELECT count() n FROM ${table} WHERE startsWith(event_id,'before-')`))[0]?.n).toBe(10);
+        expect((await query<{ n: number }>(`SELECT count() n FROM system.processes WHERE query_id='${timedQueryId}'`))[0]?.n).toBe(0);
+      }
       const state = await query<{ name: string; create_table_query: string }>(
         `SELECT name,create_table_query FROM system.tables WHERE database=currentDatabase() AND name IN ('${table}','${temporary}','${table}_mv','${temporary}_mv')`,
       );
@@ -116,6 +156,7 @@ it.runIf(run).each([-1, 0, 1, 2, 3, 4, 5, 6, 'late-backfill', 'late-retire'] as 
       for (const name of [`${temporary}_mv`, `${table}_v2_mv`, `${table}_mv`]) await command({ query: `DROP VIEW IF EXISTS ${name} SYNC` });
       for (const name of [temporary, `${table}_v2`, table, source]) await command({ query: `DROP TABLE IF EXISTS ${name} SYNC` });
       await ch.close();
+      await timedClient?.close();
     }
   },
   60_000,

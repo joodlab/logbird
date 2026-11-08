@@ -1,10 +1,10 @@
--- 007 only: inventory records 007 complete and actual event_ids engine is plain MergeTree.
+-- 007+ profile: inventory records 007 complete and actual event_ids engine is plain MergeTree.
 -- All result sets must be empty. No FINAL is valid on this engine.
 SELECT throwIf(countIf(name = '006_event_ids.sql') != 1 OR countIf(name = '007_event_ids_merge_tree.sql') != 1, '007 receipt migration inventory mismatch')
 FROM logbird.migrations FORMAT Null;
 SELECT throwIf(countIf(name = 'event_ids') != 1 OR anyIf(engine,name = 'event_ids') != 'MergeTree'
                OR countIf(name != 'event_ids') != 0, '007 receipt engine or interrupted migration mismatch')
-FROM system.tables WHERE database = 'logbird' AND name IN ('event_ids','event_ids_v2','event_ids_v2_mv') FORMAT Null;
+FROM system.tables WHERE database = 'logbird' AND name IN ('event_ids','event_ids_v2','event_ids_v2_mv','event_ids_v3','event_ids_v3_mv') FORMAT Null;
 
 SELECT throwIf(count() = 0, 'no fixture receipt tuples'),
        throwIf(count() != uniqExact((project_id,event_id,received_at,timestamp)), 'duplicate expected receipt tuples'),

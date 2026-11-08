@@ -7,7 +7,7 @@ import { logIngestRecoveryFailure, recoverProjectIngest } from '@logbird/worker/
 import { enqueueProjectRetention } from '@logbird/worker/queue';
 import type { Context } from 'hono';
 import { queueAuditEvent } from './audit-outbox';
-import { clickhouse } from './clickhouse';
+import { maintenanceClickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { type IngestCandidate, insertImmutableEvents } from './immutable-ingest';
 import { clientAddress } from './rate-limit';
@@ -70,7 +70,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
   let replayed = false,
     replayStarted = false;
   try {
-    replayed = await recoverProjectIngest(clickhouse, projectId, {
+    replayed = await recoverProjectIngest(maintenanceClickhouse, projectId, {
       eventIds: candidates.map((c) => c.row.event_id),
       replay: () => {
         replayStarted = true;

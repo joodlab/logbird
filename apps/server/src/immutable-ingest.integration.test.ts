@@ -1,5 +1,5 @@
 import { eventFingerprint, exportEvents, getEvent, insertEvents, read, searchEvents } from '@logbird/clickhouse';
-import { prisma, pruneIngestReceipts, purgeIngestReceipts, withProjectLock } from '@logbird/database';
+import { claimIngestReceipts, prisma, pruneIngestReceipts, purgeIngestReceipts, withProjectLock } from '@logbird/database';
 import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -218,18 +218,18 @@ it('HTTP identity preserves lossy input differences and recursively reordered ke
   expect(await f.count()).toBe(4);
 });
 
-it('Prisma claim dates round-trip in a non-UTC Postgres session', async () => {
+it('typed-array claim dates round-trip in a non-UTC Postgres session', async () => {
   const receivedAt = new Date();
   const row = f.row(original, receivedAt);
   await insertEvents(clickhouse, [row]);
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET LOCAL TIME ZONE 'Pacific/Auckland'");
-    const receipts = await tx.ingestReceipt.createManyAndReturn({
-      data: [
+    const receipts = await claimIngestReceipts(
+      f.project,
+      f.org,
+      [
         {
-          projectId: f.project,
           eventId: row.event_id,
-          organizationId: f.org,
           fingerprint: eventFingerprint(row),
           receivedAt,
           eventAt: new Date(row.timestamp),
@@ -237,13 +237,39 @@ it('Prisma claim dates round-trip in a non-UTC Postgres session', async () => {
           claimedAt: receivedAt,
         },
       ],
-      skipDuplicates: true,
-    });
+      tx,
+    );
     expect(receipts[0]?.receivedAt.toISOString()).toBe(receivedAt.toISOString());
     expect(receipts[0]?.eventAt.toISOString()).toBe(row.timestamp);
   });
   expect((await f.post(original)).status).toBe(202);
   expect(await f.count()).toBe(1);
+});
+
+it('typed-array claims arbitrate 1000 overlapping ids with lossless strings and only return owned rows', async () => {
+  const receivedAt = new Date(),
+    eventAt = new Date(receivedAt.getTime() - 1000);
+  const claims = Array.from({ length: 1000 }, (_, i) => ({
+    eventId: `claim-${i}-'\\🚀`,
+    fingerprint: `v1:${i}`,
+    receivedAt,
+    eventAt,
+    confirmedAt: null,
+    claimedAt: receivedAt,
+  }));
+  const [a, b] = await Promise.all([claimIngestReceipts(f.project, f.org, claims), claimIngestReceipts(f.project, f.org, [...claims].reverse())]);
+  expect(a.length + b.length).toBe(1000);
+  expect(new Set([...a, ...b].map((r) => r.eventId)).size).toBe(1000);
+  expect(a.some((r) => b.some((other) => other.eventId === r.eventId))).toBe(false);
+  for (const receipt of [...a, ...b]) {
+    expect(receipt.receivedAt.toISOString()).toBe(receivedAt.toISOString());
+    expect(receipt.eventAt.toISOString()).toBe(eventAt.toISOString());
+    expect(receipt.claimedAt?.toISOString()).toBe(receivedAt.toISOString());
+    expect(receipt.confirmedAt).toBeNull();
+  }
+  expect(await claimIngestReceipts(f.project, f.org, claims)).toHaveLength(0);
+  const confirmed = { eventId: 'already-stored', fingerprint: 'v1:stored', receivedAt, eventAt, claimedAt: receivedAt, confirmedAt: receivedAt };
+  expect((await claimIngestReceipts(f.project, f.org, [confirmed]))[0]?.confirmedAt?.toISOString()).toBe(receivedAt.toISOString());
 });
 
 it('upgrades a missing legacy receipt on reinsertion and rejects lossy same-batch variants', async () => {

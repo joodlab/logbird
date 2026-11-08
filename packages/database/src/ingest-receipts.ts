@@ -1,5 +1,24 @@
 import { Prisma, prisma } from './index';
 
+/** Sorted, typed-array claims preserve ON CONFLICT ownership without a bind parameter per cell. */
+export async function claimIngestReceipts(
+  projectId: string,
+  organizationId: string,
+  claims: { eventId: string; fingerprint: string; receivedAt: Date; eventAt: Date; confirmedAt: Date | null; claimedAt: Date }[],
+  db: Pick<Prisma.TransactionClient, '$queryRaw'> = prisma,
+) {
+  if (!claims.length) return [];
+  return db.$queryRaw<import('./generated/client').IngestReceipt[]>(Prisma.sql`
+    INSERT INTO "IngestReceipt" ("projectId","organizationId","eventId","fingerprint","receivedAt","eventAt","confirmedAt","claimedAt")
+    SELECT ${projectId},${organizationId},v.id,v.fingerprint,v.received,v.event,v.confirmed,v.claimed
+    FROM unnest(${claims.map((r) => r.eventId)}::text[], ${claims.map((r) => r.fingerprint)}::text[],
+      ${claims.map((r) => r.receivedAt.toISOString())}::timestamp[], ${claims.map((r) => r.eventAt.toISOString())}::timestamp[],
+      ${claims.map((r) => r.confirmedAt?.toISOString() ?? null)}::timestamp[], ${claims.map((r) => r.claimedAt.toISOString())}::timestamp[])
+      AS v(id,fingerprint,received,event,confirmed,claimed)
+    ORDER BY v.id
+    ON CONFLICT ("projectId","eventId") DO NOTHING RETURNING *`);
+}
+
 /** Bulk confirmation avoids a sequential round trip per recovered id. UTC strings avoid session-TZ casts. */
 export async function confirmIngestReceipts(
   projectId: string,

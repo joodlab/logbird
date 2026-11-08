@@ -1,15 +1,11 @@
 import { Readable } from 'node:stream';
 import { insertEvents } from '@logbird/clickhouse';
-import { type Prisma, prisma } from '@logbird/database';
+import * as receipts from '@logbird/database';
+import { prisma } from '@logbird/database';
 import { Logbird } from '@logbird/sdk';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { clickhouse } from './clickhouse';
+import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
-
-// Prisma delegates return branded lazy promises; these mocks await the real insert before simulating a pause.
-function prismaResult<T>(result: Promise<T>): Prisma.PrismaPromise<T> {
-  return Object.defineProperty(result, Symbol.toStringTag, { value: 'PrismaPromise' }) as Prisma.PrismaPromise<T>;
-}
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 let f: ImmutableFixture;
@@ -84,15 +80,12 @@ it('retains only an ambiguity after the body was consumed, then recovers an abse
   expect(await f.count()).toBe(1);
 });
 it('refuses an insert if its claim lease expires while the process is paused', async () => {
-  const claim = prisma.ingestReceipt.createManyAndReturn.bind(prisma.ingestReceipt);
-  vi.spyOn(prisma.ingestReceipt, 'createManyAndReturn').mockImplementation((args) =>
-    prismaResult(
-      claim(args).then((receipts) => {
-        for (const receipt of receipts) receipt.claimedAt = new Date(Date.now() - 61_000);
-        return receipts;
-      }),
-    ),
-  );
+  const claim = receipts.claimIngestReceipts;
+  vi.spyOn(receipts, 'claimIngestReceipts').mockImplementation(async (...args) => {
+    const rows = await claim(...args);
+    for (const receipt of rows) receipt.claimedAt = new Date(Date.now() - 61_000);
+    return rows;
+  });
   const spy = vi.spyOn(clickhouse, 'exec');
   expect((await f.post(input)).status).toBe(503);
   expect(spy).not.toHaveBeenCalled();
@@ -137,21 +130,19 @@ for (const phase of ['first lookup', 'ownership recheck', 'recovery lookup'] as 
     async () => {
       if (phase === 'recovery lookup') await f.pending(input, { expired: true });
       const armFailure = () => {
-        const query = clickhouse.query.bind(clickhouse);
+        const target = phase === 'recovery lookup' ? maintenanceClickhouse : clickhouse;
+        const query = target.query.bind(target);
         let identityReads = 0;
         if (phase === 'ownership recheck') {
-          const claim = prisma.ingestReceipt.createManyAndReturn.bind(prisma.ingestReceipt);
-          vi.spyOn(prisma.ingestReceipt, 'createManyAndReturn').mockImplementationOnce((args) =>
-            prismaResult(
-              claim(args).then((rows) => {
-                // Model a >WINDOW/2 pause between absent lookup and ownership acquisition.
-                vi.setSystemTime(Date.now() + 301_000);
-                return rows;
-              }),
-            ),
-          );
+          const claim = receipts.claimIngestReceipts;
+          vi.spyOn(receipts, 'claimIngestReceipts').mockImplementationOnce(async (...args) => {
+            const rows = await claim(...args);
+            // Model a >WINDOW/2 pause between absent lookup and ownership acquisition.
+            vi.setSystemTime(Date.now() + 301_000);
+            return rows;
+          });
         }
-        return vi.spyOn(clickhouse, 'query').mockImplementation((params) => {
+        return vi.spyOn(target, 'query').mockImplementation((params) => {
           if (
             phase === 'recovery lookup'
               ? params.query.includes('FROM events') && params.query.includes('event_id IN {ids')
@@ -233,18 +224,15 @@ it('releases a recovered claim on a definite server rejection', async () => {
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(0);
 });
 it('rechecks retained evidence after a long lookup-to-claim pause without double inserting', async () => {
-  const claim = prisma.ingestReceipt.createManyAndReturn.bind(prisma.ingestReceipt);
+  const claim = receipts.claimIngestReceipts;
   const insert = vi.spyOn(clickhouse, 'exec');
-  vi.spyOn(prisma.ingestReceipt, 'createManyAndReturn').mockImplementationOnce((args) =>
-    prismaResult(
-      claim(args).then(async (receipts) => {
-        // A prior owner became visible and its cache expired while this process was paused.
-        await insertEvents(clickhouse, [f.row(input)]);
-        vi.setSystemTime(Date.now() + 301_000);
-        return receipts;
-      }),
-    ),
-  );
+  vi.spyOn(receipts, 'claimIngestReceipts').mockImplementationOnce(async (...args) => {
+    const rows = await claim(...args);
+    // A prior owner became visible and its cache expired while this process was paused.
+    await insertEvents(clickhouse, [f.row(input)]);
+    vi.setSystemTime(Date.now() + 301_000);
+    return rows;
+  });
   expect((await f.post(input)).status).toBe(202);
   expect(insert).toHaveBeenCalledTimes(1);
   expect(await f.count()).toBe(1);
@@ -252,7 +240,7 @@ it('rechecks retained evidence after a long lookup-to-claim pause without double
 
 it('a failed async-queue drain keeps expired claims fenced', async () => {
   await f.pending(input, { expired: true });
-  vi.spyOn(clickhouse, 'command').mockRejectedValueOnce(new Error('queue drain timeout'));
+  vi.spyOn(maintenanceClickhouse, 'command').mockRejectedValueOnce(new Error('queue drain timeout'));
   const response = await f.post(input);
   expect(response.status).toBe(503);
   expect((await response.json()).error).toMatchObject({ code: 'ingest_pending', details: { accepted: 0, indices: [0], eventIds: ['same'] } });

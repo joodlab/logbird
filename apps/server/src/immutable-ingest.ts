@@ -12,7 +12,14 @@ import {
   retryFingerprint,
 } from '@logbird/clickhouse';
 import { ingestPendingDetailsSchema } from '@logbird/contracts';
-import { confirmIngestReceipts, INGEST_RECEIPT_WINDOW_MS, type IngestReceipt, prisma, pruneIngestReceipts } from '@logbird/database';
+import {
+  claimIngestReceipts,
+  confirmIngestReceipts,
+  INGEST_RECEIPT_WINDOW_MS,
+  type IngestReceipt,
+  prisma,
+  pruneIngestReceipts,
+} from '@logbird/database';
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
@@ -82,7 +89,7 @@ async function recheckAfterPause(projectId: string, owned: Map<string, IngestRec
 }
 
 /** Claim/recheck owns release until it hands the claims to the insert phase. */
-async function claimEvents(projectId: string, organizationId: string, candidates: IngestCandidate[]) {
+async function claimEvents(projectId: string, organizationId: string, candidates: IngestCandidate[], fingerprint: (row: EventRow) => string) {
   await pruneIngestReceipts(projectId, true);
   const unique = new Map<string, EventRow>();
   for (const { row } of candidates) if (!unique.has(row.event_id)) unique.set(row.event_id, row);
@@ -101,10 +108,8 @@ async function claimEvents(projectId: string, organizationId: string, candidates
       const row = unique.get(id) as EventRow;
       const legacy = stored.get(id);
       return {
-        projectId,
         eventId: id,
-        organizationId,
-        fingerprint: legacy?.fingerprint ?? eventFingerprint(row),
+        fingerprint: legacy?.fingerprint ?? fingerprint(row),
         receivedAt: legacy?.receivedAt ?? new Date(row.received_at),
         eventAt: legacy?.eventAt ?? new Date(row.timestamp),
         confirmedAt: legacy ? new Date() : null,
@@ -113,7 +118,7 @@ async function claimEvents(projectId: string, organizationId: string, candidates
     });
   const owned = new Map<string, IngestReceipt>();
   try {
-    const inserted = values.length ? await prisma.ingestReceipt.createManyAndReturn({ data: values, skipDuplicates: true }) : [];
+    const inserted = await claimIngestReceipts(projectId, organizationId, values);
     for (const receipt of inserted) owned.set(receipt.eventId, receipt);
     await takeOverReadyClaims(projectId, prior, candidates, owned);
     const rechecked = await recheckAfterPause(projectId, owned, stored, lookupAt);
@@ -137,6 +142,7 @@ function classifyCandidates(
   candidates: IngestCandidate[],
   receipts: Map<string, IngestReceipt>,
   owned: Map<string, IngestReceipt>,
+  fingerprintFor: (row: EventRow) => string,
 ) {
   const ids: string[] = [],
     rejected: { index: number; reason: string; code: string }[] = [],
@@ -163,8 +169,13 @@ function classifyCandidates(
     }
     const planned = rows.get(id);
     // An unversioned ready receipt switches to canonical identity after its first planned row.
-    const fingerprint = planned ? eventFingerprint(planned) : receipt.fingerprint;
-    if (retryFingerprint(candidate.input, projectId, receipt.receivedAt, id, fingerprint, receipt.eventAt) !== fingerprint) {
+    const fingerprint = planned ? fingerprintFor(planned) : receipt.fingerprint;
+    const sameTimestamp = candidate.row.timestamp === receipt.eventAt.toISOString();
+    const candidateFingerprint =
+      fingerprint.startsWith('v1:') && sameTimestamp
+        ? fingerprintFor(candidate.row)
+        : retryFingerprint(candidate.input, projectId, receipt.receivedAt, id, fingerprint, receipt.eventAt);
+    if (candidateFingerprint !== fingerprint) {
       const value = candidate.input && typeof candidate.input === 'object' ? (candidate.input as Record<string, unknown>).occurredAt : undefined;
       const difference =
         resolveTimestamp(value, receipt.receivedAt).timestamp.getTime() === receipt.eventAt.getTime()
@@ -174,10 +185,14 @@ function classifyCandidates(
       continue;
     }
     if (!receipt.confirmedAt && owned.has(id) && !rows.has(id)) {
-      const normalized = normalizeEvent(candidate.input, { projectId, receivedAt: receipt.receivedAt, sdk: candidate.row.sdk });
-      if (!normalized.ok) throw new Error('Validated candidate cannot be normalized');
-      normalized.row.event_id = id;
-      rows.set(id, normalized.row);
+      // Reuse validated fresh rows. Retries with an older receipt must retain its original clock.
+      if (sameTimestamp && candidate.row.received_at === receipt.receivedAt.toISOString()) rows.set(id, candidate.row);
+      else {
+        const normalized = normalizeEvent(candidate.input, { projectId, receivedAt: receipt.receivedAt, sdk: candidate.row.sdk });
+        if (!normalized.ok) throw new Error('Validated candidate cannot be normalized');
+        normalized.row.event_id = id;
+        rows.set(id, normalized.row);
+      }
     }
     ids.push(id);
   }
@@ -185,7 +200,7 @@ function classifyCandidates(
 }
 
 /** Insert owns release before send and on definite failure. Unproven write outcomes retain the lease. */
-async function persistRows(projectId: string, rows: EventRow[], owned: Map<string, IngestReceipt>) {
+async function persistRows(projectId: string, rows: EventRow[], owned: Map<string, IngestReceipt>, fingerprint: (row: EventRow) => string) {
   if (!rows.length) {
     await releaseClaims(projectId, owned);
     return;
@@ -212,7 +227,7 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
       projectId,
       rows.map((row) => ({
         eventId: row.event_id,
-        fingerprint: eventFingerprint(row),
+        fingerprint: fingerprint(row),
         receivedAt: new Date(row.received_at),
         eventAt: new Date(row.timestamp),
       })),
@@ -225,16 +240,26 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
 /** Caller holds a project lock: exclusive during recovery, shared otherwise. Receipts fence every API process. */
 export async function insertImmutableEvents(projectId: string, organizationId: string, candidates: IngestCandidate[]) {
   if (!candidates.length) return { ids: [] as string[], rejected: [] as { index: number; reason: string; code: string }[] };
-  const { owned, receipts } = await claimEvents(projectId, organizationId, candidates);
+  // The wire payload and normalized rows are immutable within this attempt; hash each row once.
+  const fingerprints = new Map<EventRow, string>();
+  const fingerprint = (row: EventRow) => {
+    let value = fingerprints.get(row);
+    if (!value) {
+      value = eventFingerprint(row);
+      fingerprints.set(row, value);
+    }
+    return value;
+  };
+  const { owned, receipts } = await claimEvents(projectId, organizationId, candidates, fingerprint);
   let result: ReturnType<typeof classifyCandidates>;
   try {
-    result = classifyCandidates(projectId, candidates, receipts, owned);
+    result = classifyCandidates(projectId, candidates, receipts, owned, fingerprint);
   } catch (error) {
     await releaseClaims(projectId, owned);
     throw error;
   }
   try {
-    await persistRows(projectId, result.rows, owned);
+    await persistRows(projectId, result.rows, owned, fingerprint);
   } catch (error) {
     if (error instanceof ApiError && error.code === 'ingest_pending') {
       const pendingIds = new Set([...result.pending.map((p) => p.eventId), ...result.rows.map((r) => r.event_id)]);

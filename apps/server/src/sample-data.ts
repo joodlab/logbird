@@ -3,7 +3,7 @@ import { ASYNC_INSERT_FLUSH_BOUND_MS, INGEST_CLAIM_LEASE_MS, normalizeEvent, raw
 import { SAMPLE_DATA_EVENTS, SAMPLE_DATA_SOURCE, SAMPLE_DATA_SOURCES } from '@logbird/contracts';
 import { confirmIngestReceipts, prisma } from '@logbird/database';
 import { rebuildProjectReadModel } from '@logbird/worker/project-repair';
-import { clickhouse } from './clickhouse';
+import { maintenanceClickhouse as clickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { insertImmutableEvents } from './immutable-ingest';
 

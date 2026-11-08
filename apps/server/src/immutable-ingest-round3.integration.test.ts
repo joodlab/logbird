@@ -4,7 +4,7 @@ import { prisma, withProjectLock } from '@logbird/database';
 import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { legacyFingerprint3a1541f, normalizeEvent3a1541f } from '../../../packages/clickhouse/src/fixtures/identity-3a1541f';
-import { clickhouse } from './clickhouse';
+import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 
 let f: ImmutableFixture,
@@ -27,8 +27,8 @@ it('settles a mismatching stored row terminally instead of keeping an expired cl
   await f.pending(input, { expired: true });
   const stored = { ...input, action: 'stored.winner' };
   await insertEvents(clickhouse, [f.row(stored)]);
-  const commands = vi.spyOn(clickhouse, 'command');
-  await recoverProjectIngest(clickhouse, f.project);
+  const commands = vi.spyOn(maintenanceClickhouse, 'command');
+  await recoverProjectIngest(maintenanceClickhouse, f.project);
   const result = await f.post(input);
   expect(result.status).toBe(202);
   expect(await result.json()).toMatchObject({ accepted: 0, rejected: [{ index: 0, code: 'duplicate_id_conflict' }] });
@@ -39,8 +39,8 @@ it('settles a mismatching stored row terminally instead of keeping an expired cl
 });
 it('prechecks five different-content retries without a flush and releases a ready id after grace', async () => {
   await f.pending(input, { expired: true });
-  await recoverProjectIngest(clickhouse, f.project);
-  const commands = vi.spyOn(clickhouse, 'command');
+  await recoverProjectIngest(maintenanceClickhouse, f.project);
+  const commands = vi.spyOn(maintenanceClickhouse, 'command');
   for (let i = 0; i < 5; i++) expect((await f.post({ ...input, action: 'new.content' })).status).toBe(503);
   expect(commands.mock.calls.filter(([p]) => p.query === 'SYSTEM FLUSH ASYNC INSERT QUEUE')).toHaveLength(0);
   vi.setSystemTime(Date.now() + 10 * 60_000 + 1);
@@ -50,7 +50,7 @@ it('prechecks five different-content retries without a flush and releases a read
 });
 it('keeps the exclusive lock through a worker-readied replay', async () => {
   await f.pending(input, { expired: true });
-  await recoverProjectIngest(clickhouse, f.project);
+  await recoverProjectIngest(maintenanceClickhouse, f.project);
   const insert = clickhouse.exec.bind(clickhouse);
   let checked = false;
   vi.spyOn(clickhouse, 'exec').mockImplementation(async (params) => {
@@ -147,9 +147,9 @@ it('recovers a missing old long-id claim using the safe stored id and its origin
 
 it('throttles failed global flush attempts while healthy sibling rows still commit', async () => {
   await f.pending(input, { expired: true });
-  const command = clickhouse.command.bind(clickhouse);
+  const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
   const calls = vi
-    .spyOn(clickhouse, 'command')
+    .spyOn(maintenanceClickhouse, 'command')
     .mockImplementation((params) =>
       params.query === 'SYSTEM FLUSH ASYNC INSERT QUEUE' ? Promise.reject(new Error('QA missing flush grant')) : command(params),
     );

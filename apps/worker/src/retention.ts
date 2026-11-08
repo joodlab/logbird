@@ -1,7 +1,7 @@
-import { createClickHouseClient, hasExpiredEvents, purgeProject, rebuildProjectRollups } from '@logbird/clickhouse';
+import { createMaintenanceClickHouseClient, hasExpiredEvents, purgeProject, rebuildProjectRollups } from '@logbird/clickhouse';
 import { prisma, pruneIngestReceipts, purgeIngestReceipts, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { heartbeatMaintenanceRun } from './project-repair';
-export const clickhouse = createClickHouseClient();
+export const clickhouse = createMaintenanceClickHouseClient();
 export async function enforceProjectRetention(projectId: string) {
   await pruneIngestReceipts(projectId);
   const current = await prisma.project.findUnique({ where: { id: projectId } });
