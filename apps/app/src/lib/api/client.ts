@@ -11,6 +11,7 @@ import {
   entityProfileSchema,
   eventDetailSchema,
   eventSchema,
+  exportStatusSchema,
   facetResponseSchema,
   fieldsResponseSchema,
   histogramResponseSchema,
@@ -242,4 +243,6 @@ export const api = {
 
   workspaceActivity: (query: RangeParams & { cursor?: string; limit?: number }, signal?: AbortSignal) =>
     request(searchResponseSchema, 'GET', routes.workspaceActivity.path, { query: { ...query }, signal }),
+  exportStatus: (exportId: string, signal?: AbortSignal) =>
+    request(exportStatusSchema, 'GET', pathFor(routes.exportStatus.path, { exportId }), { signal }),
 };

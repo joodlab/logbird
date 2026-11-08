@@ -39,7 +39,7 @@ for (const file of files) {
         '--reporter=json',
         `--outputFile=${report}`,
       ],
-      { stdio: ['ignore', out, err], windowsHide: true },
+      { stdio: ['ignore', out, err], windowsHide: true, env: { ...process.env, LOGBIRD_EXPORT_PROOF_DIR: output } },
     );
   } finally {
     closeSync(out);

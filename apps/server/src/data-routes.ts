@@ -2,13 +2,22 @@ import { randomUUID } from 'node:crypto';
 import * as ch from '@logbird/clickhouse';
 import * as s from '@logbird/contracts';
 import { type AuditPayload, type Prisma, prisma } from '@logbird/database';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { resolver, validator } from 'hono-openapi';
 import { z } from 'zod';
-import { clickhouse, queryClickhouse } from './clickhouse';
+import { cancelExportQuery, clickhouse, queryClickhouse } from './clickhouse';
 import { ApiError } from './errors';
-import { finishExport, releaseExport, renewExport, stageExport, validateExportMembership } from './export-outcomes';
+import { startExportHeartbeat } from './export-lifecycle';
+import {
+  confirmExportOutcome,
+  finishExport,
+  getExportStatus,
+  releaseExportAdmission,
+  renewExport,
+  stageExport,
+  validateExportMembership,
+} from './export-outcomes';
 import { auditedExport } from './export-stream';
 import { ingest, readIngestBody, requireProjectReadable } from './ingest';
 import { requireApiKey, requireProjectAccess, requireSession } from './middlewares';
@@ -57,7 +66,7 @@ const found = <T>(value: T | null) => {
   return value;
 };
 const projectRead = createMiddleware<AppEnv>(async (c, next) => {
-  if (c.req.method !== 'GET') return next();
+  if (c.req.method !== 'GET' || /\/projects\/[^/]+\/export$/.test(c.req.path)) return next();
   await requireProjectReadable(c.get('project').id);
   await next();
 });
@@ -101,13 +110,23 @@ export const publicRoutes = new Hono<AppEnv>()
     doc('Event detail', s.eventDetailSchema, 200, 'readKey'),
     async (c) => c.json(s.eventDetailSchema.parse(found(await ch.getEvent(clickhouse, c.get('project').id, c.req.param('eventId'))))),
   );
+async function activeWorkspace(c: Context<AppEnv>) {
+  const id = c.get('activeOrganizationId');
+  if (!id || !(await prisma.member.findFirst({ where: { organizationId: id, userId: c.get('user').id } })))
+    throw new ApiError(403, 'organization_required', 'Select a workspace.');
+  return id;
+}
 export const dataRoutes = new Hono<AppEnv>()
   .use('*', requireSession)
   .get('/workspace/activity', doc('Workspace activity', s.searchResponseSchema), query(s.searchQuerySchema), async (c) => {
-    const id = c.get('activeOrganizationId');
-    if (!id || !(await prisma.member.findFirst({ where: { organizationId: id, userId: c.get('user').id } })))
-      throw new ApiError(403, 'organization_required', 'Select a workspace.');
+    const id = await activeWorkspace(c);
     return c.json(s.searchResponseSchema.parse(await ch.searchEvents(queryClient(c.req.valid('query')), `ws:${id}`, c.req.valid('query'))));
+  })
+  .get('/workspace/exports/:exportId', doc('Export outcome', s.exportStatusSchema), async (c) => {
+    const workspace = await activeWorkspace(c);
+    const id = z.uuid().safeParse(c.req.param('exportId'));
+    if (!id.success) throw new ApiError(404, 'not_found', 'Export record not found.');
+    return c.json(s.exportStatusSchema.parse(await getExportStatus(id.data, `ws:${workspace}`)));
   })
   .use('/projects/:projectId/*', requireProjectAccess)
   .use('/projects/:projectId/*', projectRead)
@@ -199,16 +218,16 @@ export const dataRoutes = new Hono<AppEnv>()
       const stream = `ws:${project.organizationId}`;
       let resolved: ch.ExportPlan | undefined;
       let membership: string | null = null;
-      let heartbeat: ReturnType<typeof setInterval> | undefined;
+      let stopHeartbeat: (() => void) | undefined;
       const expired = new AbortController();
       const formatName = s.EXPORT_FORMAT_LABELS[input.format];
       c.header(s.EXPORT_ID_HEADER, exportId);
       c.header(s.EXPORT_SCHEMA_HEADER, `${input.format}/${s.EXPORT_SCHEMA_VERSION}`);
       const body = await auditedExport(
-        async () => {
+        async (signal) => {
           const client = queryClient(input);
           resolved = await ch.prepareExport(client, input, clock);
-          return ch.exportEvents(client, project.id, input, resolved);
+          return ch.exportEvents(client, project.id, input, resolved, { signal, cancelQuery: cancelExportQuery });
         },
         input.format === 'csv',
         async (action, counts) => {
@@ -219,6 +238,8 @@ export const dataRoutes = new Hono<AppEnv>()
             audit_unavailable: 'audit record not confirmed',
             sql_unavailable: 'SQL mode unavailable',
             membership_changed: 'stored events changed; retry the export',
+            project_unreadable: 'retention or deletion is incomplete; retry after maintenance',
+            storage_unavailable: 'export validation storage unavailable; retry the export',
             project_busy: 'project busy; retry the export',
             idle_timeout: 'download inactive',
             lease_expired: 'export expired',
@@ -284,6 +305,7 @@ export const dataRoutes = new Hono<AppEnv>()
                 },
               },
             };
+            const stageStarted = performance.now();
             const requested = await stageExport({
               id: exportId,
               userId: c.get('user').id,
@@ -296,26 +318,33 @@ export const dataRoutes = new Hono<AppEnv>()
               receivedBefore: new Date(clock),
             });
             membership = requested.membership;
-            heartbeat = setInterval(() => {
-              void renewExport(exportId).catch(() =>
-                expired.abort(new ApiError(503, 'export_lease_expired', 'The export lease could not be renewed. Retry.')),
+            if (membership)
+              stopHeartbeat = startExportHeartbeat(
+                () => renewExport(exportId),
+                requested.leaseMs - (performance.now() - stageStarted),
+                () => expired.abort(new ApiError(503, 'export_lease_expired', 'The export lease could not be renewed safely. Retry.')),
               );
-            }, 10_000);
-            heartbeat.unref();
             await deliverOutboxEvent(requested.id, ingest);
             if (!(await waitForAuditDelivery(requested.id))) throw new Error('Export request not acknowledged');
+            if (!membership)
+              throw new ApiError(
+                503,
+                'export_project_unreadable',
+                'Retention or deletion is incomplete for this project. Retry after maintenance finishes.',
+              );
           } catch (error) {
-            if (error instanceof ApiError && ['export_busy', 'export_project_busy'].includes(error.code)) throw error;
+            if (error instanceof ApiError && ['export_busy', 'export_project_busy', 'export_project_unreadable'].includes(error.code)) throw error;
             throw new ApiError(503, 'export_audit_unavailable', 'The export request could not be recorded. Retry the export before downloading.');
           }
         },
         AbortSignal.any([c.req.raw.signal, expired.signal]),
         exportId,
         {
-          beforeComplete: () => validateExportMembership(project.id, membership, exportId),
-          onSettled: async (action) => {
-            clearInterval(heartbeat);
-            await releaseExport(exportId, action);
+          beforeComplete: (signal) => validateExportMembership(project.id, membership, exportId, signal),
+          onTerminal: (action) => confirmExportOutcome(exportId, action),
+          onSettled: async () => {
+            stopHeartbeat?.();
+            await releaseExportAdmission(exportId);
           },
         },
       );

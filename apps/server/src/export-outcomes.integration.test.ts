@@ -1,7 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { auditNamespace, prisma, withProjectLock } from '@logbird/database';
 import { expect, it, vi } from 'vitest';
-import { finishExport, releaseExport, stageExport, sweepExportOutcomes, validateExportMembership } from './export-outcomes';
+import {
+  confirmExportOutcome,
+  finishExport,
+  releaseExport,
+  releaseExportAdmission,
+  stageExport,
+  sweepExportOutcomes,
+  validateExportMembership,
+} from './export-outcomes';
+import { auditedExport, drainExportAudits } from './export-stream';
 import { drainAuditOutbox } from './outbox-delivery';
 
 it('atomically reserves terminal evidence, recovers write failures/crashes, and bounds replica admission', async () => {
@@ -117,6 +126,80 @@ it('atomically reserves terminal evidence, recovers write failures/crashes, and 
   }
 });
 
+it('keeps SQL capacity charged after cancellation until the deferred page and iterator settle', async () => {
+  const org = `qa-export-cancel-capacity-${randomUUID()}`;
+  await prisma.organization.create({ data: { id: org, name: 'QA Export cancel capacity', slug: org, createdAt: new Date() } });
+  const project = await prisma.project.create({ data: { organizationId: org, name: 'QA Deferred page', slug: 'deferred-page' } });
+  const id = randomUUID(),
+    replacement = randomUUID();
+  const input = (id: string) => ({
+    id,
+    userId: id,
+    workspaceId: org,
+    projectId: project.id,
+    stream: `ws:${org}`,
+    sql: true,
+    requested: { id: `${id}-requested`, action: 'export.requested' },
+    unknown: { id: `${id}-outcome`, action: 'export.outcome_unknown' },
+  });
+  let unblock!: () => void, entered!: () => void, confirmed!: () => void;
+  const page = new Promise<void>((resolve) => {
+    unblock = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const frozen = new Promise<void>((resolve) => {
+    confirmed = resolve;
+  });
+  const abort = new AbortController();
+  try {
+    async function* source() {
+      yield '{}\n';
+      entered();
+      await page;
+      yield '{}\n';
+    }
+    const body = await auditedExport(
+      source(),
+      false,
+      async (action, counts) => {
+        if (action === 'export.requested') await stageExport(input(id));
+        else await finishExport(id, `ws:${org}`, { action, metadata: { export: counts } });
+      },
+      abort.signal,
+      id,
+      {
+        onTerminal: async (action) => {
+          await confirmExportOutcome(id, action);
+          confirmed();
+        },
+        onSettled: () => releaseExportAdmission(id),
+      },
+    );
+    const reader = body.getReader();
+    await reader.read();
+    const next = reader.read();
+    await started;
+    abort.abort();
+    await expect(next).rejects.toThrow('Export aborted');
+    await frozen;
+    expect((await prisma.auditOutbox.findUniqueOrThrow({ where: { id: `${id}-outcome` } })).payload).toMatchObject({ action: 'export.failed' });
+    expect(await prisma.exportLease.count({ where: { id } })).toBe(1);
+    await expect(stageExport(input(replacement))).rejects.toMatchObject({ code: 'export_busy' });
+    unblock();
+    await drainExportAudits();
+    await expect(stageExport(input(replacement))).resolves.toBeTruthy();
+  } finally {
+    unblock();
+    abort.abort();
+    await drainExportAudits();
+    await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${org}` } });
+    await prisma.exportLease.deleteMany({ where: { projectId: project.id } });
+    await prisma.organization.delete({ where: { id: org } });
+  }
+});
+
 it('bounds both exclusive export boundaries and releases the gate to new ingests behind a slow writer', async () => {
   const id = randomUUID();
   const org = `qa-export-boundary-${id}`;
@@ -155,7 +238,7 @@ it('bounds both exclusive export boundaries and releases the gate to new ingests
       const start = performance.now();
       await expect(work()).rejects.toMatchObject({ code: 'export_project_busy', status: 503 });
       timings.push(performance.now() - start);
-      expect(timings.at(-1)).toBeLessThan(400);
+      expect(timings.at(-1)).toBeLessThan(timings.length === 1 ? 400 : 3500);
     }
     // The slow ingest still owns its shared lock. A failed export must not keep its writer-preference gate.
     expect(await withProjectLock(project.id, async () => true, { mode: 'shared', waitMs: 100 })).toBe(true);

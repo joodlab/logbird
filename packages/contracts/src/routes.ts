@@ -66,6 +66,7 @@ export const routes = {
   },
   /** Logbird's own management actions (project/key/retention/member changes), dogfooded into ClickHouse. */
   workspaceActivity: { method: 'GET', path: '/api/workspace/activity', auth: 'session' },
+  exportStatus: { method: 'GET', path: '/api/workspace/exports/:exportId', auth: 'session' },
   /** Workspace setup summary + resumable onboarding target (WorkspaceSetup, ./setup.ts). */
   workspaceSetup: { method: 'GET', path: '/api/workspace/setup', auth: 'session' },
   /**

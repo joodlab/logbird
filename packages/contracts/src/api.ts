@@ -51,6 +51,13 @@ export const exportEvidenceRowSchema = z.object({ exportSchemaVersion: z.literal
 export const exportNormalizedRowSchema = eventSchema.extend({ exportSchemaVersion: z.literal(EXPORT_SCHEMA_VERSION) });
 export type ExportNormalizedRow = z.infer<typeof exportNormalizedRowSchema>;
 export type ExportEvidenceRow = z.infer<typeof exportEvidenceRowSchema>;
+export const exportStatusSchema = z.object({
+  exportId: z.uuid(),
+  state: z.enum(['pending', 'completed', 'failed', 'unknown']),
+  reason: z.string().max(64).nullable(),
+  description: z.string().nullable(),
+});
+export type ExportStatus = z.infer<typeof exportStatusSchema>;
 
 export const searchQuerySchema = rangeQuerySchema.extend({
   cursor: z.string().optional(), // opaque, returned as nextCursor

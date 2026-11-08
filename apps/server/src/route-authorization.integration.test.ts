@@ -82,6 +82,7 @@ it('denies anonymous and foreign-project requests through every concrete route; 
       const path = pattern
         .replace(':projectId', project)
         .replace(':eventId', eventId)
+        .replace(':exportId', '00000000-0000-4000-8000-000000000072')
         .replace(':operationId', 'shared-operation')
         .replace(':kind', 'actor')
         .replace(':entityId', 'shared-actor')
@@ -101,8 +102,21 @@ it('denies anonymous and foreign-project requests through every concrete route; 
       expect(own.status, `own ${method} ${pattern}`).toBe(200);
       expect(await own.text()).not.toContain(marker);
     }
+    const exportId = randomUUID();
+    await prisma.auditOutbox.create({
+      data: {
+        id: `${exportId}-outcome`,
+        namespace: process.env.BULLMQ_PREFIX ?? '{logbird}',
+        stream: `ws:${foreignOrganization}`,
+        payload: { action: 'export.failed', description: marker },
+      },
+    });
+    const foreignOutcome = await request(`/api/workspace/exports/${exportId}`, 'GET', actor.cookie);
+    expect(foreignOutcome.status).toBe(404);
+    expect(await foreignOutcome.text()).not.toContain(marker);
     // A stale/forged active workspace must never turn into membership.
     await prisma.session.updateMany({ where: { userId: actor.id }, data: { activeOrganizationId: foreignOrganization } });
+    expect((await request(`/api/workspace/exports/${exportId}`, 'GET', actor.cookie)).status).toBe(403);
     for (const [method, pattern] of consoleMatrix.filter(([method, path]) => method === 'GET' && path.includes(':projectId'))) {
       const response = await request(pathFor(pattern, foreign), method, actor.cookie);
       expect(response.status, `missing membership ${pattern}`).toBe(404);

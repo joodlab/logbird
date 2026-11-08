@@ -6,6 +6,7 @@ import { enforceProjectRetention } from '@logbird/worker/retention';
 import { expect, it, vi } from 'vitest';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
+import { drainExportAudits } from './export-stream';
 import * as ingestion from './ingest';
 import { drainTestAudit } from './test-audit';
 
@@ -46,6 +47,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     };
   }
   async function receipts(requestId: string) {
+    await drainExportAudits();
     await drainTestAudit(organizationId);
     return (
       await clickhouse.query({
@@ -108,6 +110,22 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
       ).status,
     ).toBe(202);
     const query = `from=${encodeURIComponent(new Date(Date.now() - 60_000).toISOString())}&to=${encodeURIComponent(new Date(Date.now() + 60_000).toISOString())}&q=action:evidence.updated`;
+    const incompleteRetention = await prisma.retentionRun.create({ data: { projectId, status: 'failed', retentionDays: 90, cutoff: new Date() } });
+    const refused = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
+    expect(refused.status).toBe(503);
+    expect((await refused.json()).error).toMatchObject({
+      code: 'export_project_unreadable',
+      message: expect.stringContaining('Retention or deletion is incomplete'),
+    });
+    const refusedId = refused.headers.get('X-Logbird-Export-Id');
+    const refusedStatus = await request(owner.cookie, `/api/workspace/exports/${refusedId}`);
+    expect(refusedStatus.status).toBe(200);
+    expect(await refusedStatus.json()).toMatchObject({
+      state: 'failed',
+      reason: 'project_unreadable',
+      description: expect.stringContaining('retention or deletion is incomplete'),
+    });
+    await prisma.retentionRun.delete({ where: { id: incompleteRetention.id } });
     for (const actor of actors) {
       for (const format of ['jsonl', 'csv', 'jsonl-evidence'] as const) {
         const response = await request(actor.cookie, `/api/projects/${projectId}/export?${query}&format=${format}`);

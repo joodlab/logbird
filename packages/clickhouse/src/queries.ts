@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
   AuditEvent,
   Entity,
@@ -37,7 +38,15 @@ async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }, no
 }
 
 type Params = Record<string, unknown>;
-export async function read<T>(ch: ClickHouseClient, query: string, parameters: Params = {}, guard = 10, exportBudget = false): Promise<T[]> {
+export type ExportExecution = { signal: AbortSignal; cancelQuery: (queryId: string) => Promise<void> };
+export async function read<T>(
+  ch: ClickHouseClient,
+  query: string,
+  parameters: Params = {},
+  guard = 10,
+  exportBudget = false,
+  execution?: ExportExecution,
+): Promise<T[]> {
   const query_params = { ...parameters };
   for (const key of ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff', 'exportReceivedBefore']) {
     const value = query_params[key];
@@ -47,10 +56,21 @@ export async function read<T>(ch: ClickHouseClient, query: string, parameters: P
   // expression. Bind per HTTP query, not on the shared client's session.
   const project = query_params.project ?? query_params.p;
   if (isQueryClient(ch) && (typeof project !== 'string' || !project)) throw new Error('Restricted query requires one project');
+  execution?.signal.throwIfAborted();
+  const queryId = execution ? randomUUID() : undefined;
+  let cancellation: Promise<void> | undefined;
+  const cancel = () => {
+    if (!execution || !queryId) return;
+    cancellation ??= execution.cancelQuery(queryId).catch(() => {
+      console.error(JSON.stringify({ event: 'export.query_cancel_failed', queryId }));
+    });
+  };
+  execution?.signal.addEventListener('abort', cancel, { once: true });
   try {
-    return await (
+    const rows = await (
       await ch.query({
         query,
+        query_id: queryId,
         query_params,
         format: 'JSONEachRow',
         clickhouse_settings: {
@@ -63,6 +83,8 @@ export async function read<T>(ch: ClickHouseClient, query: string, parameters: P
         },
       })
     ).json<T>();
+    execution?.signal.throwIfAborted();
+    return rows;
   } catch (error) {
     if (
       /TOO_MANY_ROWS|TOO_MANY_BYTES|TIMEOUT_EXCEEDED|MEMORY_LIMIT_EXCEEDED|TOO_SLOW|LIMIT_EXCEEDED/.test(
@@ -79,6 +101,11 @@ export async function read<T>(ch: ClickHouseClient, query: string, parameters: P
     if (isQueryClient(ch) && /SYNTAX_ERROR|Syntax error/.test(error instanceof Error ? error.message : ''))
       throw sqlSyntaxError(error, query, (query_params as Record<symbol, string>)[sqlExpression] ?? '');
     throw error;
+  } finally {
+    execution?.signal.removeEventListener('abort', cancel);
+    // Keep the original response open: aborting HTTP alone does not prove the SELECT stopped.
+    // An early KILL with no match still waits for this read to finish before releasing capacity.
+    await cancellation;
   }
 }
 export function timeRange(q: RangeQuery, now = Date.now()) {
@@ -148,6 +175,7 @@ async function searchPage(
   compiled?: Awaited<ReturnType<typeof filter>>,
   includePayload = false,
   exportClock?: string,
+  execution?: ExportExecution,
 ): Promise<{ page: SearchResponse; payloads: string[] }> {
   const start = performance.now(),
     w = await where(ch, projectId, q, compiled),
@@ -172,6 +200,7 @@ async function searchPage(
     params,
     10,
     Boolean(exportClock),
+    execution,
   );
   const hasMore = rows.length > q.limit,
     data = rows.slice(0, q.limit).map(toEvent),
@@ -517,7 +546,7 @@ export async function prepareExport(ch: ClickHouseClient, q: ExportQuery, clock 
   return { range, compiled, clock: new Date(clock).toISOString() };
 }
 export type ExportPlan = Awaited<ReturnType<typeof prepareExport>>;
-export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQuery, plan?: ExportPlan) {
+export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQuery, plan?: ExportPlan, execution?: ExportExecution) {
   const frozen = plan ?? (await prepareExport(ch, q));
   const query = { ...q, ...frozen.range };
   let nextCursor: string | undefined;
@@ -530,6 +559,7 @@ export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQu
       frozen.compiled,
       q.format === 'jsonl-evidence',
       frozen.clock,
+      execution,
     );
     if (first && q.format === 'csv') yield `${CSV_COLUMNS.join(',')}\n`;
     first = false;

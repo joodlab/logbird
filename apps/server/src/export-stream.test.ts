@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { expect, it, vi } from 'vitest';
-import { auditedExport } from './export-stream';
+import { auditedExport, drainExportAudits } from './export-stream';
 
 it('counts UTF-8 bytes and rows separately from the CSV header', async () => {
   const receipt = vi.fn().mockResolvedValue(undefined);
@@ -187,4 +187,78 @@ it('releases admission and records a safe reason when a consumer stalls', async 
   await expect(reader.read()).rejects.toThrow('idle timeout');
   expect(receipt.mock.calls.at(-1)?.[1].reason).toBe('idle_timeout');
   expect(release).toHaveBeenCalledExactlyOnceWith('export.failed');
+});
+
+it('freezes cancellation promptly but keeps SQL admission charged through a deferred page and iterator cleanup', async () => {
+  let finishPage!: () => void, entered!: () => void;
+  const page = new Promise<void>((resolve) => {
+    finishPage = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let capacity = 2;
+  const receipt = vi.fn().mockResolvedValue(undefined),
+    terminal = vi.fn().mockResolvedValue(undefined);
+  const release = vi.fn(async () => {
+    capacity = 0;
+  });
+  const closed = vi.fn();
+  async function* source() {
+    try {
+      yield '{}\n';
+      entered();
+      await page;
+      yield '{}\n';
+    } finally {
+      closed();
+    }
+  }
+  const abort = new AbortController();
+  const reader = (
+    await auditedExport(source(), false, receipt, abort.signal, 'deferred-sql', { onTerminal: terminal, onSettled: release })
+  ).getReader();
+  await reader.read();
+  const pending = reader.read();
+  await started;
+  abort.abort();
+  await expect(pending).rejects.toThrow('Export aborted');
+  await vi.waitFor(() => expect(terminal).toHaveBeenCalledWith('export.failed'));
+  const admitSql = () => {
+    if (capacity + 2 > 2) throw new Error('export_busy');
+  };
+  expect(admitSql).toThrow('export_busy');
+  expect(release).not.toHaveBeenCalled();
+  finishPage();
+  await drainExportAudits();
+  expect(closed).toHaveBeenCalledOnce();
+  expect(release).toHaveBeenCalledOnce();
+  expect(admitSql).not.toThrow();
+  expect(receipt.mock.calls.map(([action]) => action)).toEqual(['export.requested', 'export.failed']);
+});
+
+it('shutdown drains a terminal confirmation still pending after the response closes', async () => {
+  let confirm!: () => void;
+  const confirmation = new Promise<void>((resolve) => {
+    confirm = resolve;
+  });
+  const release = vi.fn().mockResolvedValue(undefined);
+  async function* source() {
+    yield '{}\n';
+  }
+  const body = await auditedExport(source(), false, vi.fn().mockResolvedValue(undefined), new AbortController().signal, 'confirmation-drain', {
+    onTerminal: () => confirmation,
+    onSettled: release,
+  });
+  expect(await new Response(body).text()).toBe('{}\n');
+  let drained = false;
+  const pending = drainExportAudits().then(() => {
+    drained = true;
+  });
+  await Promise.resolve();
+  expect(drained).toBe(false);
+  expect(release).not.toHaveBeenCalled();
+  confirm();
+  await pending;
+  expect(release).toHaveBeenCalledOnce();
 });

@@ -95,10 +95,10 @@ it('rolls back every owned mutation when its outbox insert fails, including all 
           expected = JSON.parse(before);
         const actualProject = actual.projects.find((row: { id: string }) => row.id === project.id);
         const expectedProject = expected.projects.find((row: { id: string }) => row.id === project.id);
-        expect(actualProject.exportDeleteStartedAt).not.toBeNull();
+        expect(actualProject.exportDeleteStartedAt).toBeNull();
         expect(actualProject.exportGeneration).toBe(expectedProject.exportGeneration + 1);
         expect(new Date(actualProject.updatedAt).getTime()).toBeGreaterThanOrEqual(new Date(expectedProject.updatedAt).getTime());
-        // Purge precedes the owned delete transaction. Keep its internal fence even on failure;
+        // Purge precedes the owned delete transaction. Keep its generation even on failure, clear the marker;
         // every business field, key revocation, membership and outbox change must still roll back.
         Object.assign(actualProject, {
           exportDeleteStartedAt: expectedProject.exportDeleteStartedAt,

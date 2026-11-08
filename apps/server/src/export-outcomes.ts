@@ -9,6 +9,7 @@ import {
   withProjectLock,
 } from '@logbird/database';
 import { ApiError } from './errors';
+import { retryExportValidation } from './export-lifecycle';
 
 export const EXPORT_LEASE_MS = 60_000;
 export const EXPORT_CONCURRENCY = 2;
@@ -51,18 +52,32 @@ async function readMembership(db: Prisma.TransactionClient, projectId: string) {
     where: { id: projectId },
     select: { id: true, exportDeleteStartedAt: true, exportGeneration: true },
   });
+  // Holding the exclusive project lock proves an older delete attempt no longer owns it.
+  // Its persisted generation still invalidates earlier exports; its stale marker must not block new ones forever.
+  if (project?.exportDeleteStartedAt) await db.project.update({ where: { id: projectId }, data: { exportDeleteStartedAt: null } });
   const run = await db.retentionRun.findFirst({ where: { projectId }, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }] });
-  if (!project || project.exportDeleteStartedAt || run?.status === 'running' || run?.status === 'failed') throw unavailable();
+  if (!project || run?.status === 'running' || run?.status === 'failed')
+    throw new ApiError(503, 'export_project_unreadable', 'Retention or deletion is incomplete for this project. Retry after maintenance finishes.');
   return `${project.exportGeneration}:${run?.id ?? ''}`;
 }
 
-export async function validateExportMembership(projectId: string, initial: string | null, id: string) {
-  await exportBoundary(projectId, async (db) => {
-    const lease = await db.exportLease.findUnique({ where: { id } });
-    if (!lease || lease.invalidated || (await readMembership(db, projectId)) !== initial) throw unavailable();
-  }).catch((error) => {
-    if (error instanceof ApiError && error.code === 'export_project_busy') throw error;
-    throw unavailable();
+export async function validateExportMembership(projectId: string, initial: string | null, id: string, signal = new AbortController().signal) {
+  await retryExportValidation(
+    () =>
+      exportBoundary(projectId, async (db) => {
+        const lease = await db.exportLease.findUnique({ where: { id } });
+        const now = await leaseClock(db);
+        if (lease && lease.expiresAt <= now) throw new ApiError(503, 'export_lease_expired', 'The export expired. Retry the download.');
+        if (!lease || lease.invalidated || (await readMembership(db, projectId)) !== initial) throw unavailable();
+      }),
+    signal,
+  ).catch((error) => {
+    if (error instanceof ApiError) {
+      if (error.code === 'export_project_unreadable') throw unavailable();
+      throw error;
+    }
+    if (signal.aborted) throw error;
+    throw new ApiError(503, 'export_storage_unavailable', 'Export validation storage is unavailable. Retry the download.');
   });
 }
 
@@ -86,7 +101,13 @@ export async function stageExport(
   return exportBoundary(input.projectId, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${namespace}:exports`},0))`;
     const now = await leaseClock(tx, at);
-    const membership = await readMembership(tx, input.projectId);
+    let membership: string | null;
+    try {
+      membership = await readMembership(tx, input.projectId);
+    } catch (error) {
+      if (!(error instanceof ApiError && error.code === 'export_project_unreadable')) throw error;
+      membership = null;
+    }
     const active = { namespace, expiresAt: { gt: now } };
     const [total, user, workspace] = await Promise.all([
       tx.exportLease.aggregate({ where: active, _sum: { weight: true } }),
@@ -94,31 +115,32 @@ export async function stageExport(
       tx.exportLease.count({ where: { ...active, workspaceId: input.workspaceId } }),
     ]);
     const weight = input.sql ? 2 : 1;
-    if ((total._sum.weight ?? 0) + weight > EXPORT_CONCURRENCY || user >= 1 || workspace >= 2)
+    if (membership && ((total._sum.weight ?? 0) + weight > EXPORT_CONCURRENCY || user >= 1 || workspace >= 2))
       throw new ApiError(429, 'export_busy', 'An export is already running. Finish or cancel it, then retry.');
     const expiresAt = new Date(+now + EXPORT_LEASE_MS);
-    await tx.exportLease.create({
-      data: {
-        id: input.id,
-        namespace,
-        userId: input.userId,
-        workspaceId: input.workspaceId,
-        projectId: input.projectId,
-        expiresAt,
-        weight,
-        receivedBefore: input.receivedBefore ?? now,
-      },
-    });
+    if (membership)
+      await tx.exportLease.create({
+        data: {
+          id: input.id,
+          namespace,
+          userId: input.userId,
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          expiresAt,
+          weight,
+          receivedBefore: input.receivedBefore ?? now,
+        },
+      });
     const requested = await storeAuditEvent(input.stream, input.requested, tx);
     await tx.auditOutbox.create({
       data: { ...freezeAuditEvent(input.unknown), stream: input.stream, namespace, confirmedAt: null, awaitingUntil: expiresAt },
     });
-    return { ...requested, membership };
+    return { ...requested, membership, leaseMs: EXPORT_LEASE_MS };
   });
 }
 
 export async function renewExport(id: string, at?: Date) {
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const now = await leaseClock(tx, at);
     const expiresAt = new Date(+now + EXPORT_LEASE_MS);
     // Same lock order as settlement/reaping: outcome, then admission lease.
@@ -130,9 +152,10 @@ export async function renewExport(id: string, at?: Date) {
       where: { id: `${id}-outcome`, namespace: auditNamespace(), confirmedAt: null },
       data: { awaitingUntil: expiresAt },
     });
+    return EXPORT_LEASE_MS;
   });
 }
-export async function releaseExport(id: string, action: 'export.completed' | 'export.failed') {
+export async function confirmExportOutcome(id: string, action: 'export.completed' | 'export.failed') {
   await prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<{ pendingOutcome: AuditPayload | null }[]>`SELECT "pendingOutcome" FROM "AuditOutbox"
       WHERE id=${`${id}-outcome`} AND namespace=${auditNamespace()} AND "confirmedAt" IS NULL FOR UPDATE`;
@@ -149,8 +172,23 @@ export async function releaseExport(id: string, action: 'export.completed' | 'ex
         },
       });
     }
-    await tx.exportLease.deleteMany({ where: { id, namespace: auditNamespace() } });
   });
+}
+export async function releaseExportAdmission(id: string) {
+  await prisma.exportLease.deleteMany({ where: { id, namespace: auditNamespace() } });
+}
+export async function releaseExport(id: string, action: 'export.completed' | 'export.failed') {
+  await confirmExportOutcome(id, action);
+  await releaseExportAdmission(id);
+}
+
+export async function getExportStatus(id: string, stream: string) {
+  const row = await prisma.auditOutbox.findFirst({ where: { id: `${id}-outcome`, namespace: auditNamespace(), stream } });
+  if (!row) throw new ApiError(404, 'not_found', 'Export record not found.');
+  if (!row.confirmedAt) return { exportId: id, state: 'pending' as const, reason: null, description: null };
+  const payload = row.payload as { action?: string; description?: string; metadata?: { export?: { reason?: string } } };
+  const state = payload.action === 'export.completed' ? 'completed' : payload.action === 'export.failed' ? 'failed' : 'unknown';
+  return { exportId: id, state, reason: payload.metadata?.export?.reason ?? null, description: payload.description ?? null };
 }
 
 /** The frozen event is retried exactly; a failed UPDATE always leaves the durable unknown fallback. */

@@ -29,6 +29,7 @@ import { keys } from '@/lib/api/queries';
 import { fieldErrorMessage } from '@/lib/forms';
 import { rangeLabel, resolveRange } from '@/lib/range';
 import { DEFAULT_COLUMNS, EVENT_COLUMNS } from './columns';
+import { exportFailureDescription } from './export-error';
 
 export function ColumnPicker({ columns, onChange }: { columns: string[]; onChange: (cols: string[]) => void }) {
   return (
@@ -77,14 +78,17 @@ function useExport({ projectId, range, q, lang = 'query' }: { projectId: string;
   const [busy, setBusy] = useState(false);
   const download = async (format: ExportFormat) => {
     setBusy(true);
+    let exportId: string | null = null;
+    let reading = false;
     try {
       const r = resolveRange(range);
       const response = await fetch(
         api.events.exportUrl(projectId, { from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, format }),
       );
       if (!response.ok) throw await toApiError(response);
-      const exportId = response.headers.get(EXPORT_ID_HEADER);
+      exportId = response.headers.get(EXPORT_ID_HEADER);
       if (!exportId || !/^[a-f0-9-]{36}$/.test(exportId)) throw new Error('Export response is missing its record identifier.');
+      reading = true;
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -96,7 +100,10 @@ function useExport({ projectId, range, q, lang = 'query' }: { projectId: string;
         description: `${rangeLabel(range)}${q ? ` · ${q}` : ''}`,
       });
     } catch (error) {
-      toast.error('Export failed', { description: errorMessage(error) });
+      const failedId = exportId;
+      const description =
+        reading && failedId ? await exportFailureDescription(failedId, (signal) => api.exportStatus(failedId, signal)) : errorMessage(error);
+      toast.error('Export failed', { description });
     } finally {
       setBusy(false);
     }

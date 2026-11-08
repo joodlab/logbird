@@ -7,18 +7,19 @@ its resolved range, compiled predicate/parameters and clock appear in the termin
 and SQL `now`, `now64`, `today`, `yesterday` calls stay fixed across pages. SQL clock functions need literal
 precision/time zones; use explicit timestamps for more complex expressions.
 
+An export includes matching events accepted before it started; for example, yesterday's event received after the export started is excluded.
 Membership is the matching rows committed at the short admission boundary with `received_at <=` the frozen export start, ordered by occurrence time/id.
 Later received backdated rows are excluded on both sides of the cursor. The receive-time fence is applied to both
 the candidate lookup and the selected physical row. It uses stored receive timestamps, not a cross-replica wall-clock
-or transaction-commit ordering guarantee. Legacy duplicate arbitration remains the existing search policy.
+or transaction-commit ordering guarantee. **#62's immutable ingest path is a merge dependency:** exact retries must acknowledge the stored fingerprint without reinserting a later physical version; receipt recovery retains its original receive time and participates in the same fence.
 
 Retention/sample replacement advance a Postgres project generation **before** destructive I/O. Deletion persists
-a start marker before purging. Export admission drains earlier ingests with the existing short exclusive project lock
+a start marker before purging. A failed delete clears its marker but preserves the generation increment; admission holding the exclusive lock also clears any orphaned marker left by a crash. Export admission drains earlier ingests with the existing short exclusive project lock
 and commits its receive fence before allowing new writers in. Writers whose receive timestamps fall inside an active
 fence mark that export invalid **before** inserting into ClickHouse, covering delayed normalization and replica clock
 skew. Ordinary later-received writes stay excluded. Final validation takes the same short exclusive lock, drains prior
 writes and compares the lease invalidation flag and generation/retention-run boundary. A changed boundary, in-progress/failed retention or deletion
-fails the stream with `membership_changed`, rather than recording completion of an incomplete file. Discard the
+fails the stream with `membership_changed`, rather than recording completion of an incomplete file. An unreadable project at admission still records requested/failed evidence with `project_unreadable` and an honest maintenance message; no query capacity is reserved. A validation storage outage is `storage_unavailable`, not a claim that stored events changed. Discard the
 partial file and retry. No lock or Postgres transaction spans the download. Direct administrative ClickHouse writes
 that bypass these application fences require stopping exports first. This is not a general database snapshot.
 
@@ -28,8 +29,9 @@ later-received writes do not update the active lease. Only the first delayed wri
 Both export boundary acquisitions use nonblocking advisory tries with a 100-ms contention budget. Their short
 Postgres transaction has `lock_timeout=100ms`, `statement_timeout=100ms`, a 250-ms transaction deadline and 50-ms
 pool-admission deadline. These are transaction-local settings. Contention returns `503 export_project_busy`
-(`project_busy` terminal reason) and releases the writer-preference gate, allowing new ingests to continue behind
+and releases the writer-preference gate, allowing new ingests to continue behind
 the earlier shared writer. No ClickHouse I/O runs under an exclusive export boundary lock.
+Final validation retries only contention, with 25–75 ms jitter and a 2.5-second retry budget (plus the last bounded attempt); every attempt retains the 100-ms lock-wait bound and releases its gate before waiting. Sustained contention can still fail a fully streamed file with `project_busy`; discard it and retry. Admission contention returns immediately without a download.
 
 ## Which format?
 
@@ -89,8 +91,8 @@ lifecycle and produce correlated failure records when initial audit storage is a
 
 Requested evidence and an unconfirmed `export.outcome_unknown` fallback are inserted in **one Postgres transaction**
 with the admission lease. Without that commit no event bytes leave. Completion/failure/cancel UPDATE the provisional
-terminal payload, retrying the exact event four times with backoff. Settlement atomically freezes that payload and
-releases admission. Cancellation while completion is in flight supersedes its provisional draft, so only the final
+terminal payload, retrying the exact event four times with backoff. Terminal settlement freezes that payload promptly;
+admission is released separately after the producer's pending read and iterator cleanup settle. Cancellation while completion is in flight supersedes its provisional draft, so only the final
 outcome is delivered. Drafts are never ingested. If storing cancellation fails, an earlier completion draft cannot
 be confirmed by mistake. Recovery after an already-frozen unknown may add a separately identified correction.
 
@@ -102,15 +104,15 @@ null rows/bytes and no digest; they never imply success. Safe diagnostics are `e
 drains tracked terminal writes before closing clients; a forced exit leaves the durable leased fallback.
 
 Reasons are `client_aborted` (download canceled), `invalid_query`, `audit_unavailable` (audit record not confirmed),
-`sql_unavailable` (SQL mode unavailable), `membership_changed`, `project_busy`, `idle_timeout`, `lease_expired`, `resource_limit`,
+`sql_unavailable` (SQL mode unavailable), `membership_changed`, `project_unreadable`, `storage_unavailable`, `project_busy`, `idle_timeout`, `lease_expired`, `resource_limit`,
 `export_error`, and `outcome_not_confirmed`. Sentences name the cause; private exception messages are excluded.
 
 Completion means the producer exhausted its pages and handed bytes to the stream. Counts are not client receipt
-acknowledgement. Discard partial or errored downloads. An in-flight database query may finish before iterator cleanup.
+acknowledgement. Discard partial or errored downloads. Each page has a generated query id. Cancellation requests `KILL QUERY … SYNC` through the API's existing server client and keeps weighted capacity charged until both the original read and cancellation acknowledgement settle, followed by iterator cleanup. An early no-match or failed cancellation cannot release an ongoing read's capacity.
 The console buffers a Blob, so very large downloads depend on browser memory; HTTP clients can stream to disk.
 There is no row-total truncation. Admission is shared by replicas through expiring Postgres leases: one export per
 user, two per workspace, and two weighted slots per audit namespace (ordinary export: one; SQL: both). A 30-second idle deadline, 15-minute duration deadline and
-60-second lease (renewed every 10 seconds) bound slow/disconnected producers. Abort/settlement releases capacity;
+60-second lease (normally renewed every 10 seconds) bound slow/disconnected producers. Transient renewal failures retry every second while the existing lease has slack; a separate monotonic deadline aborts at a 10-second safety margin, even if renewal hangs. Abort freezes failure promptly, then producer cleanup releases capacity;
 expired capacity is reclaimed after a crash. Admission denial is `429 export_busy`, before any file or audit request
 is started. Ordinary pages have a 10-second query deadline, 128 MiB memory, 256 MiB read-byte budget, two threads and
 throw-on-overflow. Restricted SQL retains its existing immutable profile: 10 seconds, 1 GiB memory/read bytes,
@@ -124,4 +126,6 @@ Expired admission leases are bounded sweep deletions; they contain ids only, no 
 unknown outcome, search its export id and check independent request logs. Never infer a digest or saved file from
 the provisional draft. Use the [outbox requeue procedure](workspace-audit.md) only for frozen delivery failures.
 
-Until #62 lands, this branch uses the existing duplicate-id arbitration. Complete exports pair the selected normalized row with its exact stored payload; immutable first-acceptance and ambiguous-retry guarantees belong to #62 and require combined verification.
+After a broken response stream, the console looks up `GET /api/workspace/exports/:exportId` for the durable failure reason and id. This read rechecks current workspace membership, is scoped to that workspace and namespace, and exposes no provisional drafts. If lookup is unavailable, the toast retains the short id and directs the user to Workspace activity. A producer-completed outcome is distinguished from an interrupted download.
+
+#72 must merge after #62. Combined acceptance requires the reconciled ingest hook, exact-retry/replacement-merge export regression and receipt-replay coverage at the final head; the earlier standalone proof does not establish those guarantees.

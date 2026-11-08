@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import type { ClickHouseClient } from './client';
 import { normalizeEvent } from './normalize';
-import { exportEvents } from './queries';
+import { exportEvents, read } from './queries';
 import { freezeSqlClock } from './sql-guard';
 
 function payloadClient(payload: string) {
@@ -13,6 +13,45 @@ function payloadClient(payload: string) {
     }),
   } as unknown as ClickHouseClient;
 }
+
+it.each(['read-first', 'kill-first'])('waits for both the SELECT and KILL acknowledgement (%s)', async (order) => {
+  let finishRead!: () => void, finishKill!: () => void;
+  const deferredRead = new Promise<void>((resolve) => {
+    finishRead = resolve;
+  });
+  const deferredKill = new Promise<void>((resolve) => {
+    finishKill = resolve;
+  });
+  const query = vi.fn(async (_params: { query_id?: string }) => ({
+    json: async () => {
+      await deferredRead;
+      return [];
+    },
+  }));
+  const cancelQuery = vi.fn(async (_id: string) => {
+    await deferredKill;
+  });
+  const abort = new AbortController();
+  let settled = false;
+  const pending = read({ query } as unknown as ClickHouseClient, 'SELECT 1', {}, 10, true, { signal: abort.signal, cancelQuery });
+  const failed = expect(pending)
+    .rejects.toMatchObject({ name: 'AbortError' })
+    .then(() => {
+      settled = true;
+    });
+  await vi.waitFor(() => expect(query).toHaveBeenCalledOnce());
+  abort.abort();
+  expect(cancelQuery).toHaveBeenCalledWith(expect.any(String));
+  expect(query.mock.calls[0]?.[0]).toMatchObject({ query_id: cancelQuery.mock.calls[0]?.[0] });
+  if (order === 'kill-first') finishKill();
+  else finishRead();
+  await Promise.resolve();
+  expect(settled).toBe(false);
+  finishRead();
+  finishKill();
+  await failed;
+  expect(settled).toBe(true);
+});
 
 it.each(['', '{"broken":'])('rejects invalid stored JSON instead of producing malformed evidence (%j)', async (payload) => {
   const output = exportEvents(payloadClient(payload), 'stored', { format: 'jsonl-evidence' });
