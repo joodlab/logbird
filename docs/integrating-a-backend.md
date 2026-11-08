@@ -111,17 +111,16 @@ function recordDocumentUpdate(input: {
   });
 }
 
-// Inside an authenticated update handler, after this document change commits:
-recordDocumentUpdate({
-  eventId: uuidv7(),
-  occurredAt: new Date().toISOString(),
-  operationId,
-  userId,
-  tenantId,
-  documentId,
-  previousStatus,
-  status,
-});
+// Called by the authenticated update handler after each document change commits.
+function onDocumentChangeCommitted(
+  change: Omit<Parameters<typeof recordDocumentUpdate>[0], 'eventId' | 'occurredAt'>,
+) {
+  recordDocumentUpdate({
+    ...change,
+    eventId: uuidv7(),
+    occurredAt: new Date().toISOString(),
+  });
+}
 ```
 
 Use the SDK's exported `uuidv7()` to generate the event ID, and generate its timestamp once per committed change. Persist both with
