@@ -11,6 +11,10 @@ Fixtures are fictional: a fresh onboarding user per mode (`qa-fix-a11y-phone-<mo
 "QA Fix a11y phone", project "QA Phone Shell", 60 fixture events, one pending invitation to `qa-fix-a11y-phone-invitee@example.test`)
 created by the before run and reused by the after run, so the crops show the same data. OTP codes came from Mailpit. Every QA project
 was deleted at the end (HTTP 204); their API keys, visible in the first-event screenshots, were deleted with them (cascade).
+Two later fixtures, both deleted the same way: `qa-fix-a11y-phone-axe-*@example.test` / "QA Fix a11y phone axe" / project
+"QA Phone Axe" (the first re-check of Settings → Retention after the `current` label fix, not committed as a log), and
+`qa-fix-a11y-phone-review-*@example.test` / "QA Fix a11y phone review" / project "QA Phone Review" (the review follow-up
+below). The fixtures' Playwright session files live outside the repo and `.qa-a11y-shell.json` is gitignored.
 
 Results: `before-proof.txt` / `after-proof.txt` (one line per check; `BUG` in the before run documents the defect) and the matching
 `.json` (checks, axe violations, crop hashes).

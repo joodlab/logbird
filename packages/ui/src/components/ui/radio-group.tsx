@@ -1,7 +1,7 @@
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group";
-import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/utils";
+import { filterChipClassName } from "../filter-chip";
 
 function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props) {
 	return (
@@ -33,35 +33,35 @@ function RadioGroupItem({ className, ...props }: RadioPrimitive.Root.Props) {
 	);
 }
 
-const radioChoiceVariants = cva(
-	"cursor-pointer outline-none transition-colors focus-visible:outline-hidden focus-visible:ring-3 focus-visible:ring-ring/50 data-disabled:cursor-not-allowed data-disabled:opacity-60 forced-colors:data-checked:border-[Highlight]",
-	{
-		variants: {
-			variant: {
-				card: "flex flex-col items-start gap-0.5 rounded-lg border bg-card p-3 text-start hover:border-foreground/25 data-checked:border-brand data-checked:ring-1 data-checked:ring-brand data-disabled:hover:border-border data-checked:data-disabled:hover:border-brand",
-				chip: "inline-flex h-(--control-size-compact) shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm whitespace-nowrap shadow-xs data-checked:border-brand/50 data-checked:bg-brand/10 data-checked:font-medium data-checked:text-brand not-data-checked:bg-background not-data-checked:text-muted-foreground not-data-checked:hover:bg-muted not-data-checked:hover:text-foreground dark:not-data-checked:bg-input/30 dark:not-data-checked:hover:bg-input/50 data-disabled:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-			},
-		},
-		defaultVariants: { variant: "card" },
-	},
-);
+const radioCardClassName =
+	"flex cursor-pointer flex-col items-start gap-0.5 rounded-lg border bg-card p-3 text-start outline-none transition-colors hover:border-foreground/25 focus-visible:outline-hidden focus-visible:ring-3 focus-visible:ring-ring/50 data-checked:border-brand data-checked:ring-1 data-checked:ring-brand data-disabled:cursor-not-allowed data-disabled:opacity-60 data-disabled:hover:border-border data-checked:data-disabled:hover:border-brand forced-colors:data-checked:border-[Highlight]";
 
 /**
  * A whole card or chip as one radio of a `RadioGroup`: one Tab stop per group, arrow keys move the selection
- * (Base UI roving focus). Use instead of `button role="radio"`.
+ * (Base UI roving focus). Use instead of `button role="radio"`. The chip looks exactly like `FilterChip`.
  */
 function RadioChoice({
 	className,
-	variant,
+	variant = "card",
 	...props
-}: RadioPrimitive.Root.Props & VariantProps<typeof radioChoiceVariants>) {
+}: RadioPrimitive.Root.Props & { variant?: "card" | "chip" }) {
 	return (
 		<RadioPrimitive.Root
-			className={cn(radioChoiceVariants({ variant }), className)}
+			className={(state) =>
+				cn(
+					variant === "chip"
+						? cn(
+								filterChipClassName(state.checked),
+								"data-disabled:pointer-events-none data-disabled:opacity-50",
+							)
+						: radioCardClassName,
+					typeof className === "function" ? className(state) : className,
+				)
+			}
 			data-slot="radio-choice"
 			{...props}
 		/>
 	);
 }
 
-export { RadioChoice, RadioGroup, RadioGroupItem, radioChoiceVariants };
+export { RadioChoice, RadioGroup, RadioGroupItem };

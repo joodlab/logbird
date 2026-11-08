@@ -15,7 +15,7 @@ import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { CheckCircle2Icon, KeyRoundIcon, Loader2Icon, PlusIcon, TriangleAlertIcon } from 'lucide-react';
-import { type RefObject, useRef, useState } from 'react';
+import { type RefObject, useId, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { AdminNote, AdminOnly } from '@/components/admin-gate';
@@ -165,6 +165,7 @@ function CreateKeyDialog({
 }) {
   const queryClient = useQueryClient();
   const nameInput = useRef<HTMLInputElement>(null);
+  const kindLabel = useId();
   const [created, setCreated] = useState<{ key: ApiKey; secret: string } | null>(null);
   const create = useMutation({
     mutationFn: (value: { name: string; kind: 'ingest' | 'read' }) => api.keys.create(projectId, { name: value.name.trim(), kind: value.kind }),
@@ -253,16 +254,19 @@ function CreateKeyDialog({
             <form.Field name="kind">
               {(field) => (
                 <div className="flex flex-col gap-1.5">
-                  <Label id="key-kind-label">Permission</Label>
+                  <Label id={kindLabel}>Permission</Label>
                   <RadioGroup
-                    aria-labelledby="key-kind-label"
+                    aria-labelledby={kindLabel}
                     className="grid gap-2 sm:grid-cols-2"
                     onValueChange={(kind) => field.handleChange(kind as 'ingest' | 'read')}
                     value={field.state.value}
                   >
                     {(['ingest', 'read'] as const).map((kind) => (
                       <RadioChoice key={kind} value={kind}>
-                        <span className="font-medium text-sm">{KIND_COPY[kind].label}</span>
+                        <span className="font-medium text-sm">
+                          {KIND_COPY[kind].label}
+                          <span className="sr-only"> — </span>
+                        </span>
                         <span className="text-muted-foreground text-xs">{KIND_COPY[kind].hint}</span>
                       </RadioChoice>
                     ))}

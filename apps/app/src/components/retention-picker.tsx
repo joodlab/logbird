@@ -43,6 +43,8 @@ export function RetentionPicker({
             disabled={disabled}
             key={days}
             onClick={() => onChange(days)}
+            // A pointer shortcut: clicking must not move focus onto an element hidden from assistive tech.
+            onMouseDown={(event) => event.preventDefault()}
             tabIndex={-1}
             type="button"
           >

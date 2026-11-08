@@ -8,9 +8,9 @@ export interface SetupStep {
 }
 
 /**
- * Onboarding progress. On phone only the current label is shown, but every label stays in the accessibility tree
- * (sr-only, not display:none), so a screen reader hears "Step 2 of 4, Workspace, completed" for each item and the
- * current item carries aria-current="step".
+ * Onboarding progress. On phone only the current label is shown, but each item always carries one sr-only string
+ * ("Step 1 of 4: You, completed"), so a screen reader hears every step and its state, and the current item carries
+ * aria-current="step".
  */
 export function SetupSteps({ steps, current }: { steps: readonly SetupStep[]; current: number }) {
   return (
@@ -31,11 +31,11 @@ export function SetupSteps({ steps, current }: { steps: readonly SetupStep[]; cu
             >
               {isDone ? <CheckIcon className="size-3.5" /> : i + 1}
             </span>
-            <span className="sr-only">
-              Step {i + 1} of {steps.length}:{' '}
+            {/* One spoken string (no stray separators between sr-only fragments); the visible label is hidden from AT. */}
+            <span className="sr-only">{`Step ${i + 1} of ${steps.length}: ${step.label}${isDone ? ', completed' : ''}`}</span>
+            <span aria-hidden className={cn(isCurrent ? 'font-medium text-foreground' : 'hidden text-muted-foreground sm:inline')}>
+              {step.label}
             </span>
-            <span className={cn(isCurrent ? 'font-medium text-foreground' : 'sr-only text-muted-foreground sm:not-sr-only')}>{step.label}</span>
-            {isDone ? <span className="sr-only">, completed</span> : null}
             {i < steps.length - 1 ? <span aria-hidden className="mx-1 h-px w-4 bg-border sm:w-10" /> : null}
           </li>
         );

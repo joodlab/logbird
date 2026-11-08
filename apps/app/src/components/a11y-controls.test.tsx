@@ -111,6 +111,16 @@ describe('RetentionPicker (PHONE-08)', () => {
     expect(document.activeElement).toBe(now);
   });
 
+  it('a shortcut card does not take focus when clicked (it is hidden from assistive tech)', () => {
+    const el = mount(<Harness />);
+    const card = el.querySelector('[data-testid="retention-shortcuts"] button') as HTMLButtonElement;
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    act(() => {
+      card.dispatchEvent(down);
+    });
+    expect(down.defaultPrevented).toBe(true);
+  });
+
   it('a shortcut card sets the same single value', () => {
     const onChange = vi.fn();
     const el = mount(<Harness onChange={onChange} />);
@@ -164,8 +174,12 @@ describe('SetupSteps (PHONE-12)', () => {
       'Step 4 of 4: First event',
     ]);
     expect(items.map((li) => li.getAttribute('aria-current'))).toEqual([null, 'step', null, null]);
-    // Labels are visually hidden on phone, never display:none.
-    for (const label of el.querySelectorAll('li > span:nth-of-type(3)')) expect(tokens(label)).not.toContain('hidden');
+    // Each item is one sr-only string (never display:none); the visible label is hidden from AT so it is not read twice.
+    for (const li of items) {
+      const srOnly = [...li.querySelectorAll(':scope > .sr-only')];
+      expect(srOnly).toHaveLength(1);
+      expect(tokens(srOnly[0] as Element)).not.toContain('hidden');
+    }
   });
 });
 
