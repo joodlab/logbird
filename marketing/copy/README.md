@@ -134,7 +134,7 @@ These variants are **not** used anywhere on the site. The owner may approve them
 
 ## Pending owner decisions that affect copy
 
-- **Domain.** `logbird.dev` is **not bought yet** (`docs/brand.md` §1, §9). Copy writes the domain as `logbird.dev`
+- **Domain.** `logbird.dev` is **not bought yet**. Copy writes the domain as `logbird.dev`
   wherever one is needed, but nothing on the site may imply it is live before it is bought and configured. No mailbox
   is derived from it: contact addresses come only from `WEB_SECURITY_EMAIL` and `WEB_CONTACT_EMAIL`, with no default. The engineer should keep the domain in one config value.
 - **Public repository timing.** All copy says "the repository opens publicly soon".
@@ -154,7 +154,7 @@ Pages use the console captures in `marketing/captures/2026-11-07-site-console/` 
 - **No query timings:** the explorer's query timer was removed before each still, because the site makes no
   performance claims. Some shots still show durations that belong to the fictional data itself, such as an operation
   tree's "3.50 s" and step offsets. Those are seeded event timestamps, not measurements of Logbird.
-- **Older captures:** the 2026-11-04/05/06 folders predate the rename or show the design partner's demo workspace. Don't
+- **Older captures:** the 2026-11-04/05/06 folders predate the rename or show older fictional demo workspaces. Don't
   use them on the site.
 - **Replacing a capture:** keep its manifest id, or mark the entry `interim: true` while a replacement is pending. An
   interim entry blocks indexing and the Cloudflare build (`apps/web/src/lib/release.ts`).
