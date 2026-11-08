@@ -9,7 +9,8 @@ import { apiReferenceContentSecurityPolicy } from './server/proxy-paths';
  * The console talks to exactly one origin. The Nitro middleware (server/proxy.ts) forwards `/api` (better-auth +
  * internal API), `/v1` (public API), health checks and the read-only `/docs` + `/openapi.json` reference to the Hono
  * server, so the better-auth session cookie stays first-party; it reads its target at runtime in production.
- * The Vite proxy below mirrors that allowlist for any request Nitro does not see first.
+ * The reference is GET/HEAD-only and forwarded without Cookie/Authorization (server/proxy-paths.ts). The Vite proxy
+ * below is a fallback for `/api` and `/v1` only; the reference and health paths deliberately go through Nitro alone.
  */
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -63,7 +64,6 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/api': { target: serverTarget, changeOrigin: false },
         '/v1': { target: serverTarget, changeOrigin: false },
-        '^/(docs|openapi\\.json)$': { target: serverTarget, changeOrigin: false },
       },
     },
     plugins: [

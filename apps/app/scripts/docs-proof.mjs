@@ -1,10 +1,12 @@
 /**
  * Proof that the public origin serves the API reference and nothing else from the API listener (#61).
  *
- *   BASE_URL=http://localhost:4600 node scripts/docs-proof.mjs <outDir> [--insecure]
+ *   BASE_URL=http://localhost:4600 node scripts/docs-proof.mjs <outDir> [--insecure] [--echo]
  *
  * 1. HTTP: /docs and /openapi.json return 200 through the console; unknown server-style paths are answered by the
- *    console (HTML), never by the API's JSON 404.
+ *    console (HTML), never by the API's JSON 404; POST/PUT/PATCH/DELETE/OPTIONS on the reference get the console's 405.
+ *    With --echo (console's LOGBIRD_SERVER_URL pointed at a header-echo server), it records which credentials reach
+ *    the upstream per path and skips the browser step.
  * 2. Browser (Playwright's bundled Chromium, fresh context): /docs renders the Scalar reference under the console's
  *    /docs CSP with no CSP violations or page errors; screenshots go to <outDir>.
  */
@@ -35,6 +37,30 @@ const head = async (p, method = 'GET') => {
 for (const p of ['/docs', '/openapi.json', '/readyz']) report.http.push(await head(p), await head(p, 'HEAD'));
 for (const p of ['/internal', '/internal/metrics', '/metrics', '/docs/anything', '/openapi.yaml', '/v10/events', '/server-only-probe'])
   report.http.push(await head(p));
+// Read-only: other methods are answered by the console (405), never forwarded.
+report.methods = [];
+for (const p of ['/docs', '/openapi.json'])
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
+    const r = await fetch(new URL(p, BASE), { method, body: ['POST', 'PUT', 'PATCH'].includes(method) ? '{"fixture":true}' : undefined });
+    report.methods.push({ path: p, method, status: r.status, allow: r.headers.get('allow') });
+  }
+if (process.argv.includes('--echo')) {
+  // The console points at a header-echo upstream: show which credentials reach the "API" per path.
+  const credentials = { cookie: 'better-auth.session_token=fixture-session', authorization: 'Bearer lb_read_fixture' };
+  report.echo = [];
+  for (const p of ['/docs', '/openapi.json', '/api/echo-probe', '/v1/echo-probe']) {
+    const seen = await (await fetch(new URL(p, BASE), { headers: credentials })).json();
+    report.echo.push({
+      path: p,
+      upstreamMethod: seen.method,
+      upstreamCookie: Boolean(seen.headers.cookie),
+      upstreamAuthorization: Boolean(seen.headers.authorization),
+    });
+  }
+  await writeFile(path.join(outDir, 'docs-proof.json'), `${JSON.stringify(report, null, 2)}\n`);
+  console.log(JSON.stringify(report, null, 2));
+  process.exit(0);
+}
 const doc = await (await fetch(new URL('/openapi.json', BASE))).json();
 report.openapi = { title: doc.info?.title, servers: doc.servers, operations: Object.values(doc.paths ?? {}).flatMap(Object.keys).length };
 

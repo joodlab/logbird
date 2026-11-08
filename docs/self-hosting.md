@@ -212,7 +212,10 @@ Keep forwardedHeaders.insecure disabled; trust only known upstreams. Live tail p
 The console (public origin) forwards exactly these API-listener paths: `/api/*`, `/v1/*`, `/health`, `/livez`,
 `/readyz`, and the read-only, unauthenticated `GET /docs` (interactive Scalar reference) and `GET /openapi.json`
 (OpenAPI document). Every other path is served by the console itself, so no other server route becomes public
-([owner decision](decisions.md), #61). The allowlist lives in `apps/app/server/proxy-paths.ts`.
+([owner decision](decisions.md), #61). The allowlist lives in `apps/app/server/proxy-paths.ts`. The two reference
+paths accept only GET and HEAD (the console answers other methods with `405`, `Allow: GET, HEAD`) and are forwarded
+without `Cookie`, `Authorization` or `Proxy-Authorization`, so a signed-in browser's session never reaches the API
+through them. `/api` and `/v1` keep their normal authenticated forwarding.
 
 ```sh
 curl -I https://audit.example.com/docs          # 200 text/html

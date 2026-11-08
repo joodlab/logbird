@@ -8,10 +8,11 @@ what the source implements now and what still waits for a later step. Newest fir
 ### API reference on the public origin ([#61](https://github.com/joodlab/logbird/issues/61))
 
 The public origin (the console, `:4600`) **proxies read-only `GET /docs` and `GET /openapi.json`** to the private API
-listener, without authentication, alongside `/api`, `/v1`, `/health`, `/livez` and `/readyz`. Nothing else on the
-server becomes public: the allowlist in `apps/app/server/proxy-paths.ts` matches those paths exactly, and its tests
+listener, without authentication, alongside `/api`, `/v1`, `/health`, `/livez` and `/readyz`. Only GET and HEAD are
+forwarded (other methods get `405` from the console), and `Cookie`, `Authorization` and `Proxy-Authorization` are
+stripped from those requests. Nothing else on the server becomes public: the allowlist in `apps/app/server/proxy-paths.ts` matches those paths exactly, and its tests
 check that other paths (for example `/internal`, `/metrics`, `/docs/anything`) stay on the console. The same code
-handles source development (Nitro middleware, with the Vite proxy mirroring it), the default Compose stack and the
+handles source development (Nitro middleware; the Vite dev proxy covers only `/api` and `/v1`), the default Compose stack and the
 Caddy profile (Caddy forwards the whole origin to the console).
 
 The reference page runs on the console origin, so it loads a version-pinned Scalar bundle from jsDelivr with
