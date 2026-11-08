@@ -1,0 +1,9 @@
+# Export stream failure evidence
+
+Frontend before: actual master `8ba30e0`, with only Vite's development filesystem allowlist extended for the owned dependency junctions. Frontend/API after: `2af74b4`. Both use the same Round 4 API and fictional fixture.
+
+The capture starts eight genuine exports, waits for each durable admission lease, then advances that fictional project's generation under its project lock. Each response starts with HTTP 200 and sends 401 rows before final validation rejects the changed membership. The durable outcome is `export.failed` / `membership_changed`. No frontend response or toast is mocked. After images show the outcome lookup's reason and short id; before images show the master's generic network error. Desktop 1440 and mobile 390, light/dark; two after recordings.
+
+`proof.json` retains every scene, artifact hash and raw harness observation. Its `failure` is the harness's overly broad network-error classification: all scene assertions passed, but it counted **48 canceled background setup/facet GETs (`net::ERR_ABORTED`)** as problems. The eight deliberately broken export streams are recorded separately. There were no page exceptions, non-200 API responses or other recorded errors. These observations remain in the raw proof rather than being discarded; `capture-verdict.json` records their review.
+
+Cleanup verified zero fixture rows in all five ClickHouse tables, zero PG users/organizations/projects/outbox/leases and zero private Redis keys. `process-cleanup.json` verifies all 19 observed process identities stopped, zero listeners on 4600/4601 and zero worktree references before release at 03:11:01 CET. No worker or watcher started. The baseline worktree and both dependency junctions were removed after saving its one-file recovery patch privately. The retained load-test cohort was untouched.

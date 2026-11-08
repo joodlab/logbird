@@ -1,0 +1,474 @@
+{
+  "revision": "2af74b4151d82afe2c7e80ea48bfb1352b759375",
+  "beforeRevision": "8ba30e0994f9489ea404c5a4c40a2e257483749e",
+  "before": [
+    "before-master-light-1440-midstream-toast.png",
+    "before-master-dark-1440-midstream-toast.png",
+    "before-master-light-390-midstream-toast.png",
+    "before-master-dark-390-midstream-toast.png"
+  ],
+  "screenshots": [
+    "after-light-1440-midstream-toast.png",
+    "after-dark-1440-midstream-toast.png",
+    "after-light-390-midstream-toast.png",
+    "after-dark-390-midstream-toast.png"
+  ],
+  "videos": [
+    "light-1440-midstream-failure.webm",
+    "light-390-midstream-failure.webm"
+  ],
+  "events": [
+    {
+      "before": true,
+      "theme": "light",
+      "width": 1440,
+      "id": "d89fd445-313d-4e91-9aac-cf2fc1c3dd77",
+      "httpStatus": 200,
+      "rows": 401,
+      "reason": "membership_changed",
+      "toast": "Export failed\nFailed to fetch"
+    },
+    {
+      "before": true,
+      "theme": "dark",
+      "width": 1440,
+      "id": "13465c62-a864-46e9-a418-2c0171d7ab17",
+      "httpStatus": 200,
+      "rows": 401,
+      "reason": "membership_changed",
+      "toast": "Export failed\nFailed to fetch"
+    },
+    {
+      "before": true,
+      "theme": "light",
+      "width": 390,
+      "id": "7410f408-e97c-4db9-a0d6-a3b76b6fcbf1",
+      "httpStatus": 200,
+      "rows": 401,
+      "reason": "membership_changed",
+      "toast": "Export failed\nFailed to fetch"
+    },
+    {
+      "before": true,
+      "theme": "dark",
+      "width": 390,
+      "id": "7ae88f5a-7e43-4aeb-97e0-b612b9cf508a",
+      "httpStatus": 200,
+      "rows": 401,
+      "reason": "membership_changed",
+      "toast": "Export failed\nFailed to fetch"
+    },
+    {
+      "before": false,
+      "theme": "light",
+      "width": 1440,
+      "id": "be59f809-580e-43ee-a71f-0c2337348da9",
+      "httpStatus": 200,
+      "rows": 401,
+      "reason": "membership_changed",
+      "toast": "Export failed\nExport be59f809: stored events changed; retry the export after 401 events: Complete (original payloads) export of QA Export Storefront"
+    },
+    {
+      "before": false,
+      "theme": "dark",
+      "width": 1440,
+      "id": "a5e9c259-f0e5-40fc-b75e-5f05309b93aa",
+      "httpStatus": 200,
+      "rows": 401,
+      "reason": "membership_changed",
+      "toast": "Export failed\nExport a5e9c259: stored events changed; retry the export after 401 events: Complete (original payloads) export of QA Export Storefront"
+    },
+    {
+      "before": false,
+      "theme": "light",
+      "width": 390,
+      "id": "7dedc30a-567a-48aa-99a2-2f53e8742168",
+      "httpStatus": 200,
+      "rows": 401,
+      "reason": "membership_changed",
+      "toast": "Export failed\nExport 7dedc30a: stored events changed; retry the export after 401 events: Complete (original payloads) export of QA Export Storefront"
+    },
+    {
+      "before": false,
+      "theme": "dark",
+      "width": 390,
+      "id": "f3ce6ff5-570d-4bb0-b0cc-f8ada0f2283f",
+      "httpStatus": 200,
+      "rows": 401,
+      "reason": "membership_changed",
+      "toast": "Export failed\nExport f3ce6ff5: stored events changed; retry the export after 401 events: Complete (original payloads) export of QA Export Storefront"
+    }
+  ],
+  "expectedNetworkFailures": [
+    {
+      "before": true,
+      "theme": "light",
+      "width": 1440,
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/export",
+      "error": "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
+    },
+    {
+      "before": true,
+      "theme": "dark",
+      "width": 1440,
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/export",
+      "error": "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
+    },
+    {
+      "before": true,
+      "theme": "light",
+      "width": 390,
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/export",
+      "error": "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
+    },
+    {
+      "before": true,
+      "theme": "dark",
+      "width": 390,
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/export",
+      "error": "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
+    },
+    {
+      "before": false,
+      "theme": "light",
+      "width": 1440,
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/export",
+      "error": "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
+    },
+    {
+      "before": false,
+      "theme": "dark",
+      "width": 1440,
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/export",
+      "error": "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
+    },
+    {
+      "before": false,
+      "theme": "light",
+      "width": 390,
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/export",
+      "error": "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
+    },
+    {
+      "before": false,
+      "theme": "dark",
+      "width": 390,
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/export",
+      "error": "net::ERR_INCOMPLETE_CHUNKED_ENCODING"
+    }
+  ],
+  "problems": [
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/setup",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/setup",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/setup",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/setup",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/setup",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/setup",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/setup",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/setup",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "kind": "requestfailed",
+      "path": "/api/projects/cmw76yyyq00002oyogmq8a89e/facets",
+      "error": "net::ERR_ABORTED"
+    }
+  ],
+  "cleanup": {
+    "clickhouse": {
+      "events": 0,
+      "events_by_minute": 0,
+      "entities": 0,
+      "attribute_keys": 0,
+      "event_ids": 0
+    },
+    "postgres": {
+      "users": 0,
+      "organizations": 0,
+      "projects": 0,
+      "outbox": 0,
+      "leases": 0
+    },
+    "redisKeys": 0
+  },
+  "auditNamespace": "{logbird-media-exports-r4-c0e7e3d6-7e6b-42ca-815c-d6e371cb36f6}",
+  "fixtureEmail": "qa-exports-r4-4d54b7e2-0574-49cf-86db-fb7375c0534d@example.test",
+  "failure": "Error: Unexpected browser problems: [{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/setup\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/setup\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/setup\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/setup\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/setup\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/setup\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/setup\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/setup\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"},{\"kind\":\"requestfailed\",\"path\":\"/api/projects/cmw76yyyq00002oyogmq8a89e/facets\",\"error\":\"net::ERR_ABORTED\"}]",
+  "artifacts": [
+    {
+      "file": "before-master-light-1440-midstream-toast.png",
+      "bytes": 172377,
+      "sha256": "cbb5ce8ca65a84c5d7c920d4311c93e4c27d27c0f4afba29ef607fd401fbe6c6"
+    },
+    {
+      "file": "before-master-dark-1440-midstream-toast.png",
+      "bytes": 190504,
+      "sha256": "0419ab1425aa193288fcaf1b64bd66fc5a7b7b4eb1573abe1b76b18b5622dad7"
+    },
+    {
+      "file": "before-master-light-390-midstream-toast.png",
+      "bytes": 55035,
+      "sha256": "409bff0c311822a2944ec060b49834cc6e0c71549bcd21eafe3ca20b493de692"
+    },
+    {
+      "file": "before-master-dark-390-midstream-toast.png",
+      "bytes": 60062,
+      "sha256": "6efe87eaed9b5767414ddc87848482a4102275cee1466306e1a7539232244d69"
+    },
+    {
+      "file": "after-light-1440-midstream-toast.png",
+      "bytes": 181196,
+      "sha256": "a8f056199cde076c516b112c16f4930e245ae57fe2d81a9e701b10059fb31eb2"
+    },
+    {
+      "file": "after-dark-1440-midstream-toast.png",
+      "bytes": 199819,
+      "sha256": "1f4626b9a589ec3eab3ba6f12dc1e720ef0fd12d0e3597a5236a19cb985da574"
+    },
+    {
+      "file": "after-light-390-midstream-toast.png",
+      "bytes": 58778,
+      "sha256": "d4f593db19e48c8087227af38e1c661b6e634a2ea43c4163bce5754063045fe0"
+    },
+    {
+      "file": "after-dark-390-midstream-toast.png",
+      "bytes": 66429,
+      "sha256": "84c832004ce8e9b705c492be3f59e0f0fc3584737e9945fb82b8498ee3ff8ba8"
+    },
+    {
+      "file": "light-1440-midstream-failure.webm",
+      "bytes": 756599,
+      "sha256": "327378693db2a6157c7069175f2dd197c267513071743f0244d556bdc49b66cc"
+    },
+    {
+      "file": "light-390-midstream-failure.webm",
+      "bytes": 297914,
+      "sha256": "7ba5d5e1284123f729f9c5813ed44786880a1124645fc76f6e603b0d3be1d564"
+    }
+  ]
+}
