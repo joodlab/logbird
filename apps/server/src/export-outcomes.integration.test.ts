@@ -238,7 +238,7 @@ it('bounds both exclusive export boundaries and releases the gate to new ingests
       const start = performance.now();
       await expect(work()).rejects.toMatchObject({ code: 'export_project_busy', status: 503 });
       timings.push(performance.now() - start);
-      expect(timings.at(-1)).toBeLessThan(3500);
+      expect(timings.at(-1)).toBeLessThan(31_500);
     }
     // The slow ingest still owns its shared lock. A failed export must not keep its writer-preference gate.
     expect(await withProjectLock(project.id, async () => true, { mode: 'shared', waitMs: 100 })).toBe(true);
@@ -248,6 +248,7 @@ it('bounds both exclusive export boundaries and releases the gate to new ingests
         admissionMs: timings[0],
         finalizationMs: timings[1],
         contentionBudgetMs: 100,
+        outerRetryBudgetMs: 30_000,
         transactionDeadlineMs: 250,
         newSharedWriterProceeded: true,
       }),
@@ -260,3 +261,133 @@ it('bounds both exclusive export boundaries and releases the gate to new ingests
     await prisma.organization.delete({ where: { id: org } });
   }
 });
+
+it('waits through six-second admission and eight-second finalization writers, while cancellation remains prompt', async () => {
+  const id = randomUUID(),
+    org = `qa-export-long-boundary-${id}`;
+  const project = await prisma.$transaction(async (tx) => {
+    await tx.organization.create({ data: { id: org, name: 'QA Export long boundary', slug: org, createdAt: new Date() } });
+    return tx.project.create({ data: { organizationId: org, name: 'QA Export long writer', slug: 'long-writer' } });
+  });
+  const input = {
+    id,
+    userId: id,
+    workspaceId: org,
+    projectId: project.id,
+    stream: `ws:${org}`,
+    requested: { id: `${id}-requested`, action: 'export.requested' },
+    unknown: { id: `${id}-outcome`, action: 'export.outcome_unknown' },
+  };
+  let writer: Promise<unknown> | undefined;
+  const hold = async (ms: number) => {
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    writer = withProjectLock(
+      project.id,
+      async () => {
+        entered();
+        await new Promise((resolve) => setTimeout(resolve, ms));
+      },
+      { mode: 'shared' },
+    );
+    void writer.catch(() => entered());
+    await started;
+  };
+  try {
+    await hold(6000);
+    const began = performance.now();
+    const staged = await stageExport(input);
+    const admissionMs = performance.now() - began;
+    expect(admissionMs).toBeGreaterThan(5500);
+    expect(admissionMs).toBeLessThan(10_000);
+    await writer;
+    await hold(8000);
+    const abort = new AbortController();
+    const canceledAt = performance.now();
+    const canceled = validateExportMembership(project.id, staged.membership, id, abort.signal);
+    setTimeout(() => abort.abort(), 150);
+    await expect(canceled).rejects.toMatchObject({ name: 'AbortError' });
+    expect(performance.now() - canceledAt).toBeLessThan(750);
+    const finalAt = performance.now();
+    const finalValidation = validateExportMembership(project.id, staged.membership, id);
+    // A boundary retry must release its gate between probes so another fresh writer can proceed.
+    expect(await withProjectLock(project.id, async () => true, { mode: 'shared', waitMs: 1000 })).toBe(true);
+    await finalValidation;
+    const finalizationMs = performance.now() - finalAt;
+    expect(finalizationMs).toBeGreaterThan(7000);
+    expect(finalizationMs).toBeLessThan(12_000);
+    await writer;
+    console.log(JSON.stringify({ event: 'qa.export_long_writer', admissionMs, finalizationMs, outerRetryBudgetMs: 30_000, probeBudgetMs: 100 }));
+  } finally {
+    try {
+      await writer;
+    } finally {
+      await prisma.auditOutbox.deleteMany({ where: { stream: input.stream } });
+      await prisma.exportLease.deleteMany({ where: { projectId: project.id } });
+      await prisma.organization.delete({ where: { id: org } });
+    }
+  }
+}, 90_000);
+it('makes bounded export progress alongside a continuous serial writer without holding an exclusive lock over I/O', async () => {
+  const id = randomUUID(),
+    org = `qa-export-continuous-${id}`;
+  const project = await prisma.$transaction(async (tx) => {
+    await tx.organization.create({ data: { id: org, name: 'QA Export continuous writer', slug: org, createdAt: new Date() } });
+    return tx.project.create({ data: { organizationId: org, name: 'QA Export continuous writer', slug: 'continuous' } });
+  });
+  const input = {
+    id,
+    userId: id,
+    workspaceId: org,
+    projectId: project.id,
+    stream: `ws:${org}`,
+    requested: { id: `${id}-requested`, action: 'export.requested' },
+    unknown: { id: `${id}-outcome`, action: 'export.outcome_unknown' },
+  };
+  let stop = false,
+    batches = 0,
+    entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const writer = (async () => {
+    while (!stop) {
+      await withProjectLock(
+        project.id,
+        async () => {
+          batches++;
+          entered();
+          await new Promise((resolve) => setTimeout(resolve, 6000));
+        },
+        { mode: 'shared' },
+      );
+    }
+  })();
+  void writer.catch(() => entered());
+  try {
+    await started;
+    const start = performance.now();
+    const staged = await stageExport(input);
+    const admissionMs = performance.now() - start;
+    const final = performance.now();
+    await validateExportMembership(project.id, staged.membership, id);
+    const finalizationMs = performance.now() - final;
+    expect(admissionMs).toBeLessThan(31_500);
+    expect(finalizationMs).toBeLessThan(31_500);
+    expect(batches).toBeGreaterThan(0);
+    console.log(
+      JSON.stringify({ event: 'qa.export_continuous_writer', admissionMs, finalizationMs, batches, writerHoldMs: 6000, noThinkTime: true }),
+    );
+  } finally {
+    stop = true;
+    try {
+      await writer;
+    } finally {
+      await prisma.auditOutbox.deleteMany({ where: { stream: input.stream } });
+      await prisma.exportLease.deleteMany({ where: { projectId: project.id } });
+      await prisma.organization.delete({ where: { id: org } });
+    }
+  }
+}, 90_000);

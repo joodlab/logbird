@@ -247,33 +247,8 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     } finally {
       rejected.mockRestore();
     }
-    // Retention starts after the first page. Both timestamp orderings must fail closed at final validation.
-    for (const lateTimestamp of [new Date(eventClock - 30_000), new Date(eventClock + 30_000)]) {
-      const fastClock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60_000);
-      let paused: Response;
-      try {
-        paused = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
-      } finally {
-        fastClock.mockRestore();
-      }
-      if (!paused.body) throw new Error('Export body missing');
-      const reader = paused.body.getReader();
-      await reader.read();
-      // A slow-clock/delayed writer can have a receive timestamp inside the fence. It must invalidate the export.
-      await ingestion.ingest(projectId, { id: randomUUID(), action: 'evidence.updated', occurredAt: lateTimestamp.toISOString() });
-      expect((await prisma.exportLease.findUniqueOrThrow({ where: { id: paused.headers.get('X-Logbird-Export-Id') ?? '' } })).invalidated).toBe(true);
-      let failed = false;
-      try {
-        while (!(await reader.read()).done) {
-          /* drain */
-        }
-      } catch {
-        failed = true;
-      }
-      expect(failed).toBe(true);
-      const terminal = (await receipts(paused.headers.get('x-request-id') ?? '')).find((row) => row.action === 'export.failed');
-      expect(terminal.metadata.export.reason).toBe('membership_changed');
-    }
+    // Fresh pre-normalized/post-fence/equal-clock writes are covered by exports-membership.
+    // Only an original-clock replay may invalidate; fresh backdated events remain outside the file.
     await ingestion.ingest(
       projectId,
       Array.from({ length: 401 }, (_, i) => ({
@@ -341,7 +316,10 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
 it('waits for a requested receipt already claimed by another replica', async () => {
   const { deliverOutboxEvent, waitForAuditDelivery } = await import('./outbox-delivery');
   const id = randomUUID();
+  const org = `qa-export-claim-race-${id}`;
+  await prisma.organization.create({ data: { id: org, name: 'QA Export claim race', slug: org, createdAt: new Date() } });
   let started!: () => void, release!: () => void;
+  let delivery: Promise<void> | undefined;
   const entered = new Promise<void>((resolve) => {
     started = resolve;
   });
@@ -349,8 +327,8 @@ it('waits for a requested receipt already claimed by another replica', async () 
     release = resolve;
   });
   try {
-    await storeAuditEvent('ws:qa-export-claim-race', { id, action: 'export.requested' });
-    const delivery = deliverOutboxEvent(id, async () => {
+    await storeAuditEvent(`ws:${org}`, { id, action: 'export.requested' });
+    delivery = deliverOutboxEvent(id, async () => {
       started();
       await blocked;
       return { accepted: 1, rejected: [] };
@@ -368,6 +346,11 @@ it('waits for a requested receipt already claimed by another replica', async () 
     expect(await waiting).toBe(true);
   } finally {
     release();
-    await prisma.auditOutbox.deleteMany({ where: { id } });
+    try {
+      await delivery;
+    } finally {
+      await prisma.auditOutbox.deleteMany({ where: { id } });
+      await prisma.organization.deleteMany({ where: { id: org } });
+    }
   }
 });

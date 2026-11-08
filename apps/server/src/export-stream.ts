@@ -170,6 +170,8 @@ export async function auditedExport(
         first = undefined;
         if (failure || !next) return;
         if (next.done) {
+          // The consumer exhausted every page. Boundary validation is not a stalled download.
+          clearTimeout(idle);
           await lifecycle.beforeComplete?.(producer.signal);
           if (failure) return;
           state = 'completing';

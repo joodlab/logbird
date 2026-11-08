@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
-export const EXPORT_BOUNDARY_RETRY_MS = 2500;
+export const EXPORT_BOUNDARY_RETRY_MS = 30_000;
 /** Each attempt releases the writer gate before jittering; only contention is retried. */
 export async function retryExportBoundary<T>(attempt: () => Promise<T>, signal: AbortSignal, budgetMs = EXPORT_BOUNDARY_RETRY_MS) {
   const deadline = performance.now() + budgetMs;

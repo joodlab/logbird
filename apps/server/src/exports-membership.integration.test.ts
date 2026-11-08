@@ -65,13 +65,8 @@ it('keeps exact retries and reconstructed receipts in a later export page after 
   const partition = '201801';
   expect(
     Number(
-      (
-        await read<{ n: number }>(
-          clickhouse,
-          'SELECT count() n FROM events WHERE toYYYYMM(timestamp)=toUInt32({partition:String})',
-          { partition },
-        )
-      )[0]?.n,
+      (await read<{ n: number }>(clickhouse, 'SELECT count() n FROM events WHERE toYYYYMM(timestamp)=toUInt32({partition:String})', { partition }))[0]
+        ?.n,
     ),
   ).toBe(0);
   const f = await fixture();
@@ -127,7 +122,14 @@ it('accepts paused normalization, genuinely post-fence events and equal-clock ev
   let release: () => void = () => undefined;
   let writer: Promise<unknown> | undefined;
   try {
-    for (const mode of ['paused', 'post-fence', 'equal-clock'] as const) {
+    const seedClock = Date.now() - 60_000;
+    const seeds = Array.from({ length: 401 }, (_, index) => ({
+      id: `${f.project}-clock-seed-${index}`,
+      action: 'qa.export.clock',
+      occurredAt: new Date(seedClock).toISOString(),
+    }));
+    expect((await ingest(f.project, seeds)).accepted).toBe(401);
+    for (const [caseIndex, mode] of (['paused', 'post-fence', 'equal-clock'] as const).entries()) {
       gate.project = f.project;
       let entered: () => void = () => undefined;
       const paused = new Promise<void>((resolve) => {
@@ -141,6 +143,7 @@ it('accepts paused normalization, genuinely post-fence events and equal-clock ev
       const inputs = [
         { id: `${f.project}-${mode}-missing`, action: 'qa.export.clock' },
         { id: `${f.project}-${mode}-invalid`, action: 'qa.export.clock', occurredAt: 'not-a-date' },
+        { id: `${f.project}-${mode}-backdated`, action: 'qa.export.clock', occurredAt: new Date(seedClock + 1000).toISOString() },
       ];
       if (mode === 'paused') {
         writer = ingest(f.project, inputs);
@@ -148,25 +151,27 @@ it('accepts paused normalization, genuinely post-fence events and equal-clock ev
       }
       // A fence ahead of the DB clock deterministically exercises equal-ms ordering, without clock sleeps.
       const download = await f.stage(Date.now() + (mode === 'equal-clock' ? 2000 : 0));
-      const first = await download.rows.next();
+      const ids: string[] = [];
+      for (let index = 0; index < 200; index++) ids.push(JSON.parse((await download.rows.next()).value as string).id);
       release();
       if (mode !== 'paused') writer = ingest(f.project, inputs);
       await writer;
       writer = undefined;
       const receipts = await prisma.ingestReceipt.findMany({ where: { projectId: f.project, eventId: { in: inputs.map((input) => input.id) } } });
-      expect(receipts).toHaveLength(2);
+      expect(receipts).toHaveLength(3);
       for (const receipt of receipts) {
         expect(+receipt.receivedAt).toBeGreaterThan(download.clock);
-        expect(receipt.eventAt).toEqual(receipt.receivedAt);
+        expect(receipt.eventAt).toEqual(receipt.eventId.endsWith('-backdated') ? new Date(seedClock + 1000) : receipt.receivedAt);
       }
       if (mode === 'equal-clock') expect(+receipts[0]!.receivedAt).toBe(download.clock + 1);
-      const ids: string[] = first.done ? [] : [JSON.parse(first.value).id];
       for await (const line of download.rows) ids.push(JSON.parse(line).id);
       expect(ids.some((id) => inputs.some((input) => input.id === id))).toBe(false);
+      expect(ids).toHaveLength(401 + caseIndex * 3);
+      expect(ids).toEqual(expect.arrayContaining(seeds.map((seed) => seed.id)));
       expect((await prisma.exportLease.findUniqueOrThrow({ where: { id: download.id } })).invalidated).toBe(false);
       await validateExportMembership(f.project, download.membership, download.id);
       // Retries with omitted/invalid occurredAt continue using the first receipt clock and fingerprint.
-      expect((await ingest(f.project, inputs)).accepted).toBe(2);
+      expect((await ingest(f.project, inputs)).accepted).toBe(3);
       expect(
         await prisma.ingestReceipt.findMany({
           where: { projectId: f.project, eventId: { in: inputs.map((input) => input.id) } },

@@ -26,6 +26,28 @@ it('bounds final retries and interrupts the backoff on cancellation', async () =
   }, abort.signal);
   await expect(waiting).rejects.toMatchObject({ name: 'AbortError' });
 });
+it('allows several eight-second writer waits but stops at the bounded outer deadline', async () => {
+  let elapsed = 0;
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+  try {
+    const attempt = vi.fn(async () => {
+      elapsed += 8000;
+      if (elapsed < 24_000) throw Object.assign(new Error('Busy'), { code: 'export_project_busy' });
+      return 'ready';
+    });
+    await expect(retryExportBoundary(attempt, new AbortController().signal)).resolves.toBe('ready');
+    expect(attempt).toHaveBeenCalledTimes(3);
+    elapsed = 0;
+    const blocked = vi.fn(async () => {
+      elapsed += 8000;
+      throw Object.assign(new Error('Busy'), { code: 'export_project_busy' });
+    });
+    await expect(retryExportBoundary(blocked, new AbortController().signal)).rejects.toMatchObject({ code: 'export_project_busy' });
+    expect(blocked).toHaveBeenCalledTimes(4);
+  } finally {
+    clock.mockRestore();
+  }
+});
 it('recovers renewal blips while the confirmed lease still has slack', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
   const renew = vi.fn().mockRejectedValueOnce(new Error('fictional outage')).mockResolvedValue(60_000);

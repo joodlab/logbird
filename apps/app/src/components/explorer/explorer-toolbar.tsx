@@ -78,12 +78,17 @@ function useExport({ projectId, range, q, lang = 'query' }: { projectId: string;
   const [busy, setBusy] = useState(false);
   const download = async (format: ExportFormat) => {
     setBusy(true);
+    const controller = new AbortController();
+    const notice = toast.loading('Preparing export \u2014 waiting for active writes', {
+      cancel: { label: 'Cancel', onClick: () => controller.abort() },
+    });
     let exportId: string | null = null;
     let reading = false;
     try {
       const r = resolveRange(range);
       const response = await fetch(
         api.events.exportUrl(projectId, { from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, format }),
+        { signal: controller.signal },
       );
       if (!response.ok) throw await toApiError(response);
       exportId = response.headers.get(EXPORT_ID_HEADER);
@@ -97,13 +102,23 @@ function useExport({ projectId, range, q, lang = 'query' }: { projectId: string;
       a.click();
       URL.revokeObjectURL(url);
       toast.success(`${EXPORT_FORMATS.find((f) => f.format === format)?.label ?? format} ready`, {
+        id: notice,
+        cancel: null,
         description: `${rangeLabel(range)}${q ? ` · ${q}` : ''}`,
       });
     } catch (error) {
+      if (controller.signal.aborted) {
+        toast.info('Export canceled', {
+          id: notice,
+          cancel: null,
+          description: exportId ? `Export ${exportId.slice(0, 8)} was canceled.` : undefined,
+        });
+        return;
+      }
       const failedId = exportId;
       const description =
         reading && failedId ? await exportFailureDescription(failedId, (signal) => api.exportStatus(failedId, signal)) : errorMessage(error);
-      toast.error('Export failed', { description });
+      toast.error('Export failed', { id: notice, cancel: null, description });
     } finally {
       setBusy(false);
     }

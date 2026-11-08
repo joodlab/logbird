@@ -29,7 +29,7 @@ Postgres transaction has `lock_timeout=100ms`, `statement_timeout=100ms`, a 250-
 pool-admission deadline. These are transaction-local settings. Contention returns `503 export_project_busy`
 and releases the writer-preference gate, allowing new ingests to continue behind
 the earlier shared writer. No ClickHouse I/O runs under an exclusive export boundary lock.
-Admission and final validation retry only contention, with 25–75 ms jitter and a 2.5-second retry budget (plus the last bounded attempt); every attempt retains the 100-ms lock-wait bound and releases its gate before waiting. Sustained contention can still fail a fully streamed file with `project_busy`; discard it and retry. Sustained admission contention returns without a download.
+Admission and final validation retry only contention, with 25–75 ms jitter and a 30-second retry budget (plus the last bounded attempt); every attempt retains the 100-ms lock-wait bound and releases its gate before waiting. Sustained contention can still fail a fully streamed file with `project_busy`; discard it and retry. Sustained admission contention returns without a download. These bounded probes improve progress when writes take seconds; they do not guarantee progress under arbitrarily long or continuously overlapping writers. The console shows ?Preparing export ? waiting for active writes? with Cancel, and abort interrupts backoff. After the last page, the consumer-idle timer is cleared while final validation waits; request cancellation, lease renewal and the 15-minute duration limit remain active.
 
 ## Which format?
 

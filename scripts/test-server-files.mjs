@@ -39,7 +39,11 @@ for (const file of files) {
         '--reporter=json',
         `--outputFile=${report}`,
       ],
-      { stdio: ['ignore', out, err], windowsHide: true, env: { ...process.env, LOGBIRD_EXPORT_PROOF_DIR: output } },
+      {
+        stdio: ['ignore', out, err],
+        windowsHide: true,
+        env: { ...process.env, LOGBIRD_EXPORT_PROOF_DIR: output, INGEST_FIXTURE_LEDGER: path.join(output, 'immutable-fixtures.jsonl') },
+      },
     );
   } finally {
     closeSync(out);

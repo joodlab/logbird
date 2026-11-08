@@ -262,3 +262,73 @@ it('shutdown drains a terminal confirmation still pending after the response clo
   await pending;
   expect(release).toHaveBeenCalledOnce();
 });
+
+it('does not count final-boundary waiting as a consumer idle timeout', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  let release!: () => void, entered!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const waiting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const receipt = vi.fn().mockResolvedValue(undefined);
+  async function* chunks() {
+    yield '{}\n';
+  }
+  let text: Promise<string> | undefined;
+  try {
+    const stream = await auditedExport(chunks(), false, receipt, new AbortController().signal, undefined, {
+      idleMs: 20,
+      maxDurationMs: 200,
+      beforeComplete: async () => {
+        entered();
+        await gate;
+      },
+    });
+    text = new Response(stream).text();
+    const settled = text.then(
+      () => true,
+      () => false,
+    );
+    await waiting;
+    await vi.advanceTimersByTimeAsync(80);
+    expect(receipt.mock.calls.some(([action]) => action === 'export.failed')).toBe(false);
+    release();
+    expect(await settled).toBe(true);
+    expect(await text).toBe('{}\n');
+    await drainExportAudits();
+    expect(receipt.mock.calls.at(-1)?.[0]).toBe('export.completed');
+  } finally {
+    release();
+    await text?.catch(() => undefined);
+    vi.useRealTimers();
+  }
+});
+it('still cancels while final-boundary waiting has its idle timer cleared', async () => {
+  const receipt = vi.fn().mockResolvedValue(undefined),
+    abort = new AbortController();
+  let entered!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  async function* chunks() {
+    yield '{}\n';
+  }
+  const stream = await auditedExport(chunks(), false, receipt, abort.signal, undefined, {
+    beforeComplete: async (signal) => {
+      entered();
+      await new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('Boundary canceled')), { once: true }));
+    },
+  });
+  const text = new Response(stream).text();
+  const settled = text.then(
+    () => false,
+    () => true,
+  );
+  await waiting;
+  abort.abort();
+  expect(await settled).toBe(true);
+  await drainExportAudits();
+  expect(receipt.mock.calls.at(-1)?.[1].reason).toBe('client_aborted');
+});
