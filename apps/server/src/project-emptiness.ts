@@ -42,3 +42,28 @@ export async function projectHasNoStoredRows(ch: Reader, projectId: string): Pro
     return false;
   }
 }
+
+type PurgeStep = (projectId: string) => Promise<unknown>;
+
+/**
+ * The project purge used by project deletion. Only the ClickHouse mutations are conditional: they are skipped when
+ * `hasNoStoredRows` says no ClickHouse table holds a row for the project (an empty project deletes in milliseconds
+ * instead of seconds). Every `alwaysRun` step — cleanup that lives outside ClickHouse, such as PostgreSQL ingest
+ * receipts — runs on both paths, so the shortcut can never orphan state elsewhere.
+ */
+export function projectPurger({
+  hasNoStoredRows,
+  purgeClickhouse,
+  alwaysRun = [],
+}: {
+  hasNoStoredRows: (projectId: string) => Promise<boolean>;
+  purgeClickhouse: PurgeStep;
+  alwaysRun?: readonly PurgeStep[];
+}) {
+  return async (projectId: string): Promise<{ clickhouse: 'purged' | 'skipped_empty' }> => {
+    const empty = await hasNoStoredRows(projectId);
+    if (!empty) await purgeClickhouse(projectId);
+    for (const step of alwaysRun) await step(projectId);
+    return { clickhouse: empty ? 'skipped_empty' : 'purged' };
+  };
+}

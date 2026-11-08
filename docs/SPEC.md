@@ -284,6 +284,27 @@ Postgres facts are fresh; ClickHouse facts may be cached for 30 seconds after a 
 Replacement is limited to projects with at most 100000 stored rows. Sample mutations hold the
 project ingestion lock and synchronously rebuild project rollups from surviving events.
 
+`POST /api/projects/:projectId/keys/:keyId/roll` (owners/admins) rotates a key: it creates a replacement with the same
+name and kind under the project lock, returns its secret once (`CreateApiKeyResponse`, 201) and links it with
+`replacesKeyId`. The old key **keeps working until it is revoked** with the normal `DELETE …/keys/:keyId`, so the new
+secret can be deployed first; rolling a revoked key returns 409 `key_revoked`. It is audited as `api_key.created` with
+`reason: rotation` and the replaced key as an extra target. Public API requests sample the caller's `User-Agent`
+(≤ 256 chars) into `lastUsedUserAgent` together with `lastUsedAt` (at most once a minute per key), so the keys list can
+say which client last used a key before it is revoked.
+
+`DELETE /api/projects/:projectId` purges stored data under the exclusive project lock. Only the ClickHouse mutations
+are conditional: when no project-scoped ClickHouse table (discovered from `system.columns`) holds a row for the
+project, they are skipped and an empty project deletes in well under a second. Every non-ClickHouse cleanup step runs
+on both paths.
+
+`GET /api/onboarding/workspace-name` (session, self) returns `{ name }`: a workspace name derived from the registrable
+domain of the signed-in user's email (`lina@eu.acme.co.uk` → "Acme"), or `null` for personal mailbox providers and for
+domains where a member or a pending invitation already exists (teammates should join that workspace instead). It
+reveals no workspace names or ids.
+
+When onboarding is done, `GET /api/workspace/setup` returns as `onboarding.projectId` the most active project: most
+events in the last 24 hours, then the most recent event, then the oldest project.
+
 `GET /api/invitations/:invitationId` is public (the id is the secret sent only to the invited address) and returns an
 `InvitationPreview` for the accept page: invited email, role, workspace, inviter name, `expiresAt` and a derived
 `state` (pending / accepted / rejected / canceled / expired). Accepting still goes through better-auth with a session
@@ -371,8 +392,11 @@ server configuration. See the query-language security model for the verification
 better-auth tables (user, session, account, verification) + organization plugin (organization, member,
 invitation) + app tables:
 - `Project { id, organizationId, name, slug (unique per org), description?, retentionDays=90, createdAt, updatedAt }`
-- `ApiKey { id, projectId, name, kind (ingest|read), prefix, hash (unique), createdById?, createdAt, lastUsedAt?, revokedAt? }`
-- `SavedView { id, projectId, name, description?, state Json, createdById?, createdAt }`
+- `ApiKey { id, projectId, name, kind (ingest|read), prefix, hash (unique), createdById?, createdAt, lastUsedAt?, lastUsedUserAgent?, replacesKeyId?, revokedAt? }`
+  (`replacesKeyId`: set on a rolled key, pointing at the key it replaces; `lastUsedUserAgent`: sampled with `lastUsedAt`)
+- `SavedView { id, projectId, name, description?, state Json, createdById?, createdAt }` — `state` = `{ q?, lang?, range?,
+  columns?, labels? }`; `labels` (≤ 20) are display names for entity terms of `q` (`tenant:biz_5` → "Bayt Al Rimal"),
+  purely presentational
 - `RetentionRun { id, projectId, retentionDays, cutoff, startedAt, finishedAt?, status, error? }`
 
 ## 7. Auth
@@ -400,7 +424,7 @@ invitation acceptance remain available; organization administration uses its rol
 | POST projects | yes | yes | no |
 | PATCH project: name, description, retentionDays, setupDismissed, retentionReviewed | yes | yes | no |
 | DELETE project | yes | yes | no |
-| POST project keys / DELETE project key | yes | yes | no |
+| POST project keys / POST project key roll / DELETE project key | yes | yes | no |
 | POST project views | yes | yes | yes |
 | DELETE project view | any | any | own only (others return 404) |
 | POST / DELETE project sample-data | yes | yes | no |
@@ -434,13 +458,17 @@ in TanStack Router search params (shareable URLs, back/forward works). Responsiv
 
 User journeys (each must work end-to-end against the real server):
 1. **Sign in**: `/login` email → `/login/verify` 6-digit OTP (input-otp, paste support, resend with cooldown) →
-   redirect to last project or onboarding.
+   redirect to the onboarding step that is missing, else to the project this browser visited last, else to the most
+   active project of the workspace (see `GET /api/workspace/setup`).
 2. **Onboarding** (resumable): you (name) → create workspace (org) → create first project (name, retention) →
    "Send your first event". `/` and every post-sign-in redirect follow `GET /api/workspace/setup` →
    `onboarding.next`, so leaving and coming back resumes at the missing step; the wizard's progress reflects real
    state. The first-event step reuses the Setup page's component: ingest key shown once (copy), curl / SDK / fetch
    snippets pre-filled, a **live waiting indicator** that polls setup every 2.5 s and flips to the received event,
-   "Send a test event", "Load sample data" (never counts) and "Skip for now" → Overview.
+   "Send a test event", "Load sample data" (never counts) and "Skip for now" → Overview. The workspace step pre-fills
+   the name from `GET /api/onboarding/workspace-name` (selected, so typing replaces it). The full-screen wizard is only
+   for a workspace's first project: later projects are created from a dialog inside the app shell (Projects page and
+   switcher → New project) that lands on the new project's Setup page.
    Invited people land on `/accept-invitation/$invitationId` (signed-out preview → OTP as the invited email → accept /
    decline; expired, accepted, canceled and wrong-account states).
 3. **Overview dashboard** (`/p/$projectId`): KPI cards with deltas (events, active actors, tenants, failure rate,
@@ -459,19 +487,23 @@ User journeys (each must work end-to-end against the real server):
    (same explorer component, pre-filtered). Directory pages list entities with fuzzy search.
 6. **Operation view** (`/p/$projectId/operations/$operationId`): causation tree (parent → children), each node
    with outcome dot, executor, timing; waterfall-style timing bar.
-7. **Saved views**: save current explorer state, list in sidebar, share by URL.
+7. **Saved views**: save current explorer state, list in sidebar, share by URL ("Copy link" on each card and on the
+   open-view banner). Entity pages save "<name> — <range>" in one click (with Undo); views show entity terms by name
+   ("Tenant: Bayt Al Rimal") from their stored labels.
 8. **Fields** (`/p/$projectId/fields`): discovered core + attribute fields with coverage bars and samples;
    conformance explainer linking to the recommended envelope docs.
 9. **Settings**: project general (name, description, slug), **retention** (select from options; lowering opens a
    destructive confirm dialog requiring the slug, explains permanent deletion; shows last purge + oldest event),
-   **API keys** (create dialog → secret shown once with copy + snippet; list with kind badges, last used,
-   revoke confirm), workspace members + invite by email, **workspace activity** (Logbird's own audit stream,
+   **API keys** (create dialog → secret shown once with copy + snippet; an uncopied secret is never lost to Escape or
+   a backdrop tap — the dialog asks first; list with kind badges + hints, last used and the client that used it,
+   **Roll** → replacement shown once while the old key stays valid → "Revoke old key", revoke confirm), workspace members + invite by email, **workspace activity** (Logbird's own audit stream,
    rendered with the same explorer components; see the [activity action catalogue](workspace-audit.md)), danger zone (delete project).
 10. **Setup** (`/p/$projectId/setup`, replaces Docs / Quickstart; `/docs` redirects): live checklist from
     `GET /api/projects/:projectId/setup` with one section per step (inline ingest/read keys, first event, envelope
     coverage with "find missing" explorer links, operationId, retention review, invite), followed by the envelope
     semantics, query language cheatsheet and keyboard shortcuts. The overview shows a compact, expandable checklist
     card until setup is complete or dismissed (workspace-wide, reopened from Setup); the sidebar shows "Setup n/m".
+    Both are shown to owners and admins only (every remaining step is theirs); members can still open Setup.
 
 App shell: collapsible left sidebar (workspace switcher, project switcher, nav: Overview, Explorer, Actors,
 Tenants, Workers, Records, Fields, Saved views, Settings; footer: theme toggle, docs, user menu), top bar with

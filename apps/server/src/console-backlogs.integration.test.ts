@@ -128,6 +128,24 @@ it('real services: key roll + last-used client, empty-project delete, landing pr
     const emptyDeleteMs = performance.now() - started;
     expect(removed.status).toBe(204);
     expect(emptyDeleteMs).toBeLessThan(1000);
+    // The fast path skips only ClickHouse mutations: the PostgreSQL side of the deletion still ran in full.
+    expect(await prisma.project.findUnique({ where: { id: empty.id } })).toBeNull();
+    expect(await prisma.apiKey.count({ where: { projectId: empty.id } })).toBe(0);
+    await drainTestAudit(orgId);
+    const deletion = await (
+      await clickhouse.query({
+        query: `SELECT action, JSONExtractString(payload, 'metadata', 'apiKey', 'reason') reason FROM events
+          WHERE project_id={ws:String} AND has(target_ids, {p:String}) AND action IN ('project.deleted', 'api_key.revoked')`,
+        query_params: { ws: `ws:${orgId}`, p: empty.id },
+        format: 'JSONEachRow',
+      })
+    ).json<{ action: string; reason: string }>();
+    expect(deletion).toEqual(
+      expect.arrayContaining([
+        { action: 'project.deleted', reason: '' },
+        { action: 'api_key.revoked', reason: 'project_deleted' },
+      ]),
+    );
     const withData = await request(`/api/projects/${fixture.id}?confirm=${encodeURIComponent(fixture.slug)}`, 'DELETE', undefined, { cookie });
     expect(withData.status).toBe(204);
     const [left] = await (

@@ -90,10 +90,14 @@ export const setupRoutes = new Hono<AppEnv>()
     const company = companyFromEmail(c.get('user').email);
     if (!company) return c.json(workspaceNameSuggestionSchema.parse({ name: null }));
     // A teammate at the same domain should join the existing workspace, not create a look-alike "Acme".
-    const sameDomain = { endsWith: `@${company.domain}`, mode: 'insensitive' as const };
+    // Same registrable domain, including subdomains: lina@eu.acme.com and omar@acme.com are both "Acme".
+    const sameCompany = [
+      { email: { endsWith: `@${company.domain}`, mode: 'insensitive' as const } },
+      { email: { endsWith: `.${company.domain}`, mode: 'insensitive' as const } },
+    ];
     const [member, invitation] = await Promise.all([
-      prisma.member.findFirst({ where: { user: { email: sameDomain } }, select: { id: true } }),
-      prisma.invitation.findFirst({ where: { email: sameDomain, status: 'pending', expiresAt: { gt: new Date() } }, select: { id: true } }),
+      prisma.member.findFirst({ where: { user: { OR: sameCompany } }, select: { id: true } }),
+      prisma.invitation.findFirst({ where: { OR: sameCompany, status: 'pending', expiresAt: { gt: new Date() } }, select: { id: true } }),
     ]);
     return c.json(workspaceNameSuggestionSchema.parse({ name: member || invitation ? null : company.name }));
   })

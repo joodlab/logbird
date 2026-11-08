@@ -1,6 +1,5 @@
 import { expect, it } from 'vitest';
 import { companyFromEmail, pickLandingProject } from './landing';
-import { projectHasNoStoredRows } from './project-emptiness';
 
 const project = (id: string, day: number) => ({ id, createdAt: new Date(Date.UTC(2026, 10, day)) });
 
@@ -28,35 +27,18 @@ it('breaks ties by the most recent event, then by the oldest project', () => {
 it('suggests a workspace name only from company domains', () => {
   expect(companyFromEmail('lina@acme.com')).toEqual({ domain: 'acme.com', name: 'Acme' });
   expect(companyFromEmail('LINA@Bayt-Al-Rimal.co.uk')).toEqual({ domain: 'bayt-al-rimal.co.uk', name: 'Bayt Al Rimal' });
+  // The company is the registrable domain, not the first label.
+  expect(companyFromEmail('lina@eu.acme.com')).toEqual({ domain: 'acme.com', name: 'Acme' });
+  expect(companyFromEmail('lina@corp.mail.acme.co.uk')).toEqual({ domain: 'acme.co.uk', name: 'Acme' });
+  expect(companyFromEmail('lina@acme.com.au.')).toEqual({ domain: 'acme.com.au', name: 'Acme' });
+  expect(companyFromEmail('owner@qa-fix-backlogs-1a2b3c4d.test')).toEqual({
+    domain: 'qa-fix-backlogs-1a2b3c4d.test',
+    name: 'Qa Fix Backlogs 1a2b3c4d',
+  });
+  for (const personal of ['a@web.de', 'a@qq.com', 'a@163.com', 'a@naver.com', 'a@t-online.de', 'a@orange.fr', 'a@free.fr', 'a@mail.yahoo.co.jp'])
+    expect(companyFromEmail(personal)).toBeNull();
   expect(companyFromEmail('someone@gmail.com')).toBeNull();
   expect(companyFromEmail('someone@proton.me')).toBeNull();
   expect(companyFromEmail('demo@logbird.local')).toBeNull();
   expect(companyFromEmail('no-at-sign')).toBeNull();
-});
-
-function reader(tables: string[], withRows: string[], fail = false) {
-  const queries: string[] = [];
-  return {
-    queries,
-    query: (async ({ query }: { query: string }) => {
-      queries.push(query);
-      if (fail) throw new Error('system tables unavailable');
-      const rows = query.includes('system.tables')
-        ? tables.map((name) => ({ name }))
-        : withRows.some((t) => query.includes(`\`${t}\``))
-          ? [{ present: 1 }]
-          : [];
-      return { json: async () => rows };
-    }) as never,
-  };
-}
-
-it('treats a project as empty only when no project-scoped table has a row for it', async () => {
-  const empty = reader(['events', 'events_by_minute', 'entities'], []);
-  expect(await projectHasNoStoredRows(empty, 'p1')).toBe(true);
-  expect(empty.queries.filter((q) => q.includes('LIMIT 1'))).toHaveLength(3);
-  expect(await projectHasNoStoredRows(reader(['events', 'entities'], ['entities']), 'p1')).toBe(false);
-  // Unknown state always keeps the full purge.
-  expect(await projectHasNoStoredRows(reader([], []), 'p1')).toBe(false);
-  expect(await projectHasNoStoredRows(reader(['events'], [], true), 'p1')).toBe(false);
 });

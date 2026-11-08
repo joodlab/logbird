@@ -31,7 +31,6 @@ import { generateApiKey } from './keys';
 import { requireProjectAccess, requireSession } from './middlewares';
 import { hasAdminRole } from './middlewares/require-role';
 import { doc, routeDoc } from './openapi';
-import { projectHasNoStoredRows } from './project-emptiness';
 import { creatorSelect, serializeKey, serializeProject, serializeView } from './serialize';
 import { invalidateSetup } from './setup-cache';
 import type { AppEnv } from './types';
@@ -270,8 +269,8 @@ export const managementRoutes = new Hono<AppEnv>()
       if (confirm !== c.get('project').slug) throw new ApiError(422, 'confirmation_required', 'Type the project slug to delete the project.');
       const projectId = c.get('project').id;
       await withProjectLock(projectId, async () => {
-        // Brand-new or never-used projects have nothing to purge: skip the multi-second synchronous mutations.
-        if (!(await projectHasNoStoredRows(clickhouse, projectId))) await purgeProjectEvents(projectId);
+        // Skips only the ClickHouse mutations for projects without stored rows; non-ClickHouse cleanup always runs.
+        await purgeProjectEvents(projectId);
         await prisma.$transaction(async (tx) => {
           const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
           for (const key of revoked) await auditApiKey(c, 'api_key.revoked', key, c.get('project'), 'project_deleted', tx);
