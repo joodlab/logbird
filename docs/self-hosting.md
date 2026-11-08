@@ -618,6 +618,26 @@ delete took 2.283 versus 2.741 seconds, including 324 ms of bloom calculation.
 Budget and monitor that index cost alongside disk and merge work rather than
 attributing all synchronous DELETE latency to index calculation.
 
+Receipt expiry has its own `ingest-receipts` queue, separate from ClickHouse
+retention. Keep the worker running: it schedules a globally single-flight sweep
+every minute, in 5000-row batches with 10 ms yields and a 20-second work budget.
+The last batch is additionally bounded by a five-second SQL timeout and a
+six-second transaction/one-second connection wait. Its timeout and
+`enable_bitmapscan=off` are transaction-local (SET LOCAL semantics), not shared
+Postgres settings; the planner setting keeps ordered expiry scans on the existing
+indexes when statistics are stale. The hourly sweep remains a backstop.
+
+At an aggregate 5000 receipts/second, sustained cleanup must exceed 300000/minute
+(more than 15000/second while the 20-second worker budget runs). With healthy
+on-time scheduling, budget roughly three million live-cache rows plus at most
+450000 expired rows. This does not cap physical disk usage; watch autovacuum,
+dead tuples, WAL, queue lag and `ingest.receipts_pruned` logs, especially repeated
+`limited` results or `ingest.receipt_sweep_failed`. A worker outage adds roughly
+300000 expired rows per minute at that rate, without a hard bound. An hourly-only
+backstop can accumulate about 18 million between successful sweeps. Requests
+expire only their own requested ids in a bounded statement; fresh batches never
+drain unrelated backlog. See [receipt coordination](ingest-identity.md#coordination-and-identity).
+
 ## Disposable acceptance fixture
 
 For a disposable evaluation only, `scripts/selfhost-smoke.mjs` creates a fictional

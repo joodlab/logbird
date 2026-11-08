@@ -29,7 +29,7 @@ what changed*.
 ```
 apps/app      TanStack Start (React 19, TanStack Router/Query/Table/Virtual/Form), shadcn design system  :4600
 apps/server   Hono on Node: better-auth, internal /api, public /v1 ingest+read, OpenAPI (+Scalar docs) :4601
-apps/worker   BullMQ worker (Dragonfly): retention purge (hourly + on-demand), housekeeping
+apps/worker   BullMQ workers (Dragonfly): retention purge (hourly + on-demand), receipt expiry (minute)
 packages/contracts   zod schemas + route table shared by server and app (source of truth for the API)
 packages/database    Prisma 7 + @prisma/adapter-pg (Postgres): auth tables, orgs, projects, keys, views
 packages/clickhouse  @clickhouse/client wrapper, SQL migrations, query builder, query-language parser

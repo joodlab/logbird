@@ -15,10 +15,11 @@ import { ingestPendingDetailsSchema } from '@logbird/contracts';
 import {
   claimIngestReceipts,
   confirmIngestReceipts,
+  expireIngestReceipts,
+  findIngestReceipts,
   INGEST_RECEIPT_WINDOW_MS,
   type IngestReceipt,
   prisma,
-  pruneIngestReceipts,
 } from '@logbird/database';
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { clickhouse } from './clickhouse';
@@ -90,12 +91,24 @@ async function recheckAfterPause(projectId: string, owned: Map<string, IngestRec
 
 /** Claim/recheck owns release until it hands the claims to the insert phase. */
 async function claimEvents(projectId: string, organizationId: string, candidates: IngestCandidate[], fingerprint: (row: EventRow) => string) {
-  await pruneIngestReceipts(projectId, true);
   const unique = new Map<string, EventRow>();
   for (const { row } of candidates) if (!unique.has(row.event_id)) unique.set(row.event_id, row);
   const eventIds = [...unique.keys()].sort();
-  const prior = await prisma.ingestReceipt.findMany({ where: { projectId, eventId: { in: eventIds } } });
-  const cached = new Map(prior.map((r) => [r.eventId, r]));
+  const prior = await findIngestReceipts(projectId, eventIds);
+  const cacheCutoff = new Date(Date.now() - INGEST_RECEIPT_WINDOW_MS);
+  const expired = prior.filter((r) => r.confirmedAt && r.confirmedAt < cacheCutoff);
+  if (expired.length) {
+    try {
+      await expireIngestReceipts(
+        projectId,
+        expired.map((r) => r.eventId),
+        cacheCutoff,
+      );
+    } catch {
+      throw new ApiError(503, 'ingest_unavailable', 'Event identity cache is unavailable. Retry this batch.');
+    }
+  }
+  const cached = new Map(prior.filter((r) => !r.confirmedAt || r.confirmedAt >= cacheCutoff).map((r) => [r.eventId, r]));
   const lookupAt = Date.now();
   const stored = await lookup(
     projectId,
@@ -126,9 +139,7 @@ async function claimEvents(projectId: string, organizationId: string, candidates
     // can have changed the remaining identities while the shared project lock is held.
     const receipts = new Map(owned);
     const reloadIds = rechecked ? eventIds : eventIds.filter((id) => !owned.has(id));
-    if (reloadIds.length)
-      for (const receipt of await prisma.ingestReceipt.findMany({ where: { projectId, eventId: { in: reloadIds } } }))
-        receipts.set(receipt.eventId, receipt);
+    if (reloadIds.length) for (const receipt of await findIngestReceipts(projectId, reloadIds)) receipts.set(receipt.eventId, receipt);
     return { owned, receipts };
   } catch (error) {
     await releaseClaims(projectId, owned);

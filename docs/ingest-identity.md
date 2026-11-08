@@ -26,14 +26,74 @@ path is not required by an ordinary release upgrade. Unprefixed pending receipts
 stored evidence or reinsertion upgrades them. Frozen 3a1541f fixtures and literal
 legacy/v1 digest vectors protect this rollout path.
 
-Confirmed receipts are a ten-minute cache. Hot-path pruning runs at most once per
-minute per project/process; each DELETE removes at most 5000 receipts. Fresh claims
+Confirmed receipts are authoritative for ten minutes. After reading the requested
+ids, ingest expires only those with an old non-null `confirmedAt`, in one guarded
+DELETE. Public batches contain at most 1000 ids; the helper rejects more than
+5000 rather than looping. Fresh ids execute no cleanup SQL, even when unrelated
+expired receipts remain. The subsequent index/raw lookup preserves surviving
+identity and the first receipt clock. A sample-removal crash cache cannot remain
+authoritative past its ten-minute window. Fresh claims
 reuse their RETURNING receipts; bulk confirmation uses four typed arrays instead
 of four bind parameters per event. UTC strings keep session timezone independent.
 Only competing identities and pause rechecks need a subsequent receipt read.
+Receipt reads and confirmation use sorted unique-key point probes. LATERAL with
+OFFSET 0 keeps a new busy project's stale statistics from choosing a full-project
+scan; confirmation locks those rows in key order and updates their statement-local
+tuple ids with the same project/id predicates. A 600000-row fictional cache without
+ANALYZE exposed the old plan: first batch 738 ms, warm expired-cache median/p95
+468/555 ms, prior lookup 46 ms and confirmation 181 ms. Point probes reduced these
+to 428 ms first batch, 278/300 ms warm, 4 ms lookup and 26 ms confirmation. These
+are separate in-process diagnostics on shared services, not matched HTTP acceptance
+numbers. Fresh batches issued zero cleanup DELETEs; 1000 requested expired ids
+used one guarded DELETE. A similarly sized live-cache control exposed the same
+planning cost before expiry, so it was not attributed to cleanup.
 Fresh claims retain the same CAS/skipDuplicates arbitration. Ordinary
 pruning and retention never remove unresolved receipts. Only exclusive recovery
 can settle or remove an unresolved receipt.
+
+A separate `ingest-receipts` BullMQ queue runs every minute with global concurrency
+one, independently of long ClickHouse retention jobs. Each worker batch deletes
+at most 5000 rows with `FOR UPDATE SKIP LOCKED`, yields 10 ms, and stops after a
+20-second work budget. Each batch has a five-second SQL timeout inside a
+six-second transaction with a one-second connection-wait limit, so the last
+in-flight batch can extend the work budget. Tuple ids are used only inside the
+row-locked DELETE statement, never as persistent event identity. Worker batches
+use transaction-local `set_config(..., true)` (SET LOCAL semantics) to disable
+bitmap scans: stale estimates must not turn ordered LIMIT into a history-sized
+bitmap and sort. The existing `(projectId, confirmedAt)` and global `confirmedAt`
+indexes serve the expiry scans; settings revert at commit. Hourly/project retention
+keeps a batched, yielding bulk sweep as a backstop.
+
+Capacity depends on aggregate expiry across all projects. At 5000 receipts/second,
+ten live minutes contain about three million confirmed receipts. With on-time
+minute scheduling and more than 15000 deletions/second during the 20-second budget,
+cleanup capacity exceeds 300000 arrivals/minute. A conservative healthy bound is
+about 450000 expired receipts (90 seconds of arrivals, allowing the final batch),
+plus the live cache. These bounds cover confirmed receipts, not unresolved writes.
+This is a logical-row bound, not a disk quota: autovacuum,
+index bloat and WAL also need monitoring. Repeated `limited` sweep logs or queue
+lag mean that capacity/scheduling assumption is failing. During a worker outage
+there is no hard backlog bound: 5000/second adds about 300000 expired rows/minute;
+targeted request cleanup only helps ids being retried. If only the minute queue
+fails, a healthy on-time hourly backstop can still leave about 18 million expired
+receipts between sweeps. Restore worker health rather than relying on that
+degraded mode.
+
+A smaller real-service proof used 600000 live receipts, a 300000-row initial
+expired backlog and 375000 receipts crossing expiry naturally at 5000/second over
+75 seconds. A separate worker process drained 300139 rows in 1.930 seconds and
+290210 in 1.880 seconds (154000–156000/second). Backlog rose between minute jobs
+and drained again; it stayed below the one-minute arrival budget after the
+initial drain. Two receipt workers never overlapped while a separate retention
+job remained blocked. An isolated 675000-row burst control measured ingest p95
+309 ms before, 302 ms during cleanup and 308 ms after. The natural-expiry run's
+active/idle p95 was 411/624 ms, with drifting before/after controls (288/802 ms),
+so that run does not establish a precise latency ratio. Neither test performs
+producer INSERTs during the measured window. These bounded shared-service
+diagnostics demonstrate cleanup headroom, not a production throughput guarantee.
+The natural-expiry process hit the shared-machine RAM floor during final cleanup;
+its exact fixture was subsequently cleaned and checked separately. Earlier
+interrupted and confounded attempts remain in the local evidence pack.
 
 ## Identity index and online migrations
 

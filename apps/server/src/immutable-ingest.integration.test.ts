@@ -1,5 +1,13 @@
 import { eventFingerprint, exportEvents, getEvent, insertEvents, read, searchEvents } from '@logbird/clickhouse';
-import { claimIngestReceipts, prisma, pruneIngestReceipts, purgeIngestReceipts, withProjectLock } from '@logbird/database';
+import {
+  claimIngestReceipts,
+  expireIngestReceipts,
+  findIngestReceipts,
+  prisma,
+  pruneIngestReceipts,
+  purgeIngestReceipts,
+  withProjectLock,
+} from '@logbird/database';
 import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -22,6 +30,25 @@ afterEach(async () => {
   await f.cleanup();
 });
 const original = { id: 'original', action: 'evidence.original', actor: { id: 'actor' }, metadata: { status: 'pending' } };
+
+it('targeted expiry preserves a concurrently renewed receipt after waiting for its row lock', async () => {
+  expect((await f.post(original)).status).toBe(202);
+  await prisma.ingestReceipt.updateMany({ where: { projectId: f.project }, data: { confirmedAt: new Date(0) } });
+  const [prior] = await findIngestReceipts(f.project, [original.id]);
+  expect(prior?.confirmedAt).toEqual(new Date(0));
+  let expiry: Promise<void> | undefined;
+  await prisma.$transaction(async (tx) => {
+    await tx.ingestReceipt.updateMany({ where: { projectId: f.project }, data: { confirmedAt: new Date() } });
+    expiry = expireIngestReceipts(f.project, [original.id], new Date(Date.now() - 600_000));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  });
+  await expiry;
+  const [renewed] = await findIngestReceipts(f.project, [original.id]);
+  expect(renewed?.confirmedAt).toEqual(new Date());
+  expect(renewed?.fingerprint).toBe(prior?.fingerprint);
+  expect((await f.post(original)).status).toBe(202);
+  expect(await f.count()).toBe(1);
+});
 
 it('exact retries preserve the first clock and every rollup contribution', async () => {
   expect((await f.post(original)).status).toBe(202);
@@ -310,4 +337,44 @@ it('keeps the exclusive project lock through an expired-claim reinsert', async (
   } finally {
     spy.mockRestore();
   }
+});
+
+it('rechecks expired confirmed cache ids without needing a prior bulk sweep', async () => {
+  const expire = vi.spyOn(await import('@logbird/database'), 'expireIngestReceipts');
+  const input = Array.from({ length: 3 }, (_, n) => ({ ...original, id: `expired-cache-${n}` }));
+  try {
+    expect((await f.post(input)).status).toBe(202);
+    expect(expire).not.toHaveBeenCalled();
+    const first = await prisma.ingestReceipt.findMany({ where: { projectId: f.project }, orderBy: { eventId: 'asc' } });
+    await prisma.ingestReceipt.updateMany({ where: { projectId: f.project }, data: { confirmedAt: new Date(0) } });
+    expect((await (await f.post(input)).json()).accepted).toBe(3);
+    expect(expire).toHaveBeenCalledTimes(1);
+    expect([...(expire.mock.calls[0]?.[1] ?? [])].sort()).toEqual(input.map((e) => e.id).sort());
+    expect(await (await f.post({ ...input[0], action: 'overwrite' })).json()).toMatchObject({
+      accepted: 0,
+      rejected: [{ code: 'duplicate_id_conflict' }],
+    });
+    expect(expire).toHaveBeenCalledTimes(1);
+    expect(await f.count()).toBe(3);
+    const current = await prisma.ingestReceipt.findMany({ where: { projectId: f.project }, orderBy: { eventId: 'asc' } });
+    expect(current.map((r) => r.receivedAt)).toEqual(first.map((r) => r.receivedAt));
+  } finally {
+    expire.mockRestore();
+  }
+});
+
+it('returns a retryable error when targeted expiry fails before a claim', async () => {
+  expect((await f.post(original)).status).toBe(202);
+  await prisma.ingestReceipt.updateMany({ where: { projectId: f.project }, data: { confirmedAt: new Date(0) } });
+  const expire = vi.spyOn(await import('@logbird/database'), 'expireIngestReceipts').mockRejectedValueOnce(new Error('fictional storage failure'));
+  try {
+    const response = await f.post(original);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: 'ingest_unavailable' } });
+    expect(await f.count()).toBe(1);
+  } finally {
+    expire.mockRestore();
+  }
+  expect((await (await f.post(original)).json()).accepted).toBe(1);
+  expect(await f.count()).toBe(1);
 });

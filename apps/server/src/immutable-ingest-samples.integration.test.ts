@@ -1,5 +1,5 @@
 ﻿import { getEvent, insertEvents, read } from '@logbird/clickhouse';
-import { prisma, pruneIngestReceipts } from '@logbird/database';
+import { prisma, pruneIngestReceipts, withProjectLock } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
@@ -71,3 +71,34 @@ it('upgraded legacy sample/customer collisions retain and rebuild the customer f
   expect((await getEvent(clickhouse, f.project, customer.id))?.event.action).toBe(customer.action);
   expect(await f.count()).toBe(1);
 }, 60_000);
+
+it('an expired sample-removal crash cache cannot acknowledge or reject a missing raw row', async () => {
+  const sample = { id: 'sample-crash-cache', action: 'sample.original', source: 'logbird-sample' };
+  expect((await f.post(sample)).status).toBe(202);
+  // Simulate a crash after raw deletion and before index/receipt reconciliation.
+  await withProjectLock(f.project, () =>
+    clickhouse.command({
+      query: 'DELETE FROM events WHERE project_id={p:String}',
+      query_params: { p: f.project },
+      clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
+    }),
+  );
+  const replacement = { id: sample.id, action: 'customer.after-expiry' };
+  expect(await (await f.post(replacement)).json()).toMatchObject({ accepted: 0, rejected: [{ code: 'duplicate_id_conflict' }] });
+  await prisma.ingestReceipt.createMany({
+    data: Array.from({ length: 501 }, (_, n) => ({
+      projectId: f.project,
+      organizationId: f.org,
+      eventId: `unrelated-expired-${n}`,
+      fingerprint: 'v1:fixture',
+      receivedAt: new Date(0),
+      eventAt: new Date(0),
+      confirmedAt: new Date(0),
+    })),
+  });
+  await prisma.ingestReceipt.updateMany({ where: { projectId: f.project, eventId: sample.id }, data: { confirmedAt: new Date(1) } });
+  expect(await (await f.post(replacement)).json()).toMatchObject({ accepted: 1, rejected: [] });
+  expect((await getEvent(clickhouse, f.project, sample.id))?.event.action).toBe(replacement.action);
+  expect(await f.count()).toBe(1);
+  expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, confirmedAt: { lt: new Date(2) } } })).toBe(501);
+});

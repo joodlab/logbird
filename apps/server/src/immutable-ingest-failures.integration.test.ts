@@ -199,9 +199,11 @@ it('rejects corrupt stored evidence per id while storing healthy siblings', asyn
 it('fast fresh batches issue one narrow identity lookup, with no payload scan or recheck', async () => {
   const spy = vi.spyOn(clickhouse, 'query');
   const receipts = vi.spyOn(prisma.ingestReceipt, 'findMany');
+  const queries = vi.spyOn(prisma, '$queryRaw');
   expect((await f.post(Array.from({ length: 1000 }, (_, i) => ({ ...input, id: `fresh-${i}` })))).status).toBe(202);
-  // Recovery preview and prior cache only: the bulk claim already returns all owned receipts.
-  expect(receipts).toHaveBeenCalledTimes(2);
+  // One recovery preview and one point-probed prior cache: RETURNING supplies fresh ownership.
+  expect(receipts).toHaveBeenCalledTimes(1);
+  expect(queries.mock.calls.filter(([sql]) => 'text' in sql && sql.text.includes('SELECT r.* FROM'))).toHaveLength(1);
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, confirmedAt: { not: null }, eventAt: new Date(input.occurredAt) } })).toBe(
     1000,
   );

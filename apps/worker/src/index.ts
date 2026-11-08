@@ -1,5 +1,5 @@
-import { closeProjectLocks, prisma, pruneIngestReceipts } from '@logbird/database';
-import { Worker } from 'bullmq';
+import { closeProjectLocks, prisma, pruneIngestReceipts, sweepIngestReceipts } from '@logbird/database';
+import { Queue, Worker } from 'bullmq';
 import { env } from './env';
 import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from './ingest-recovery';
 import { closeRetentionQueue, connection, retentionQueue, retentionQueueName } from './queue';
@@ -41,6 +41,28 @@ worker.on('completed', (job) => console.log(JSON.stringify({ level: 'info', even
 worker.on('failed', (job) => console.error(JSON.stringify({ level: 'error', event: 'retention.failed', jobId: job?.id })));
 worker.on('error', () => console.error(JSON.stringify({ level: 'error', event: 'worker.error' })));
 await retentionQueue.upsertJobScheduler('retention-hourly', { every: 3_600_000 }, { name: 'retention.enforce', data: {} });
+// Separate queue: slow ClickHouse retention must not delay receipt expiry.
+const receiptQueueName = 'ingest-receipts';
+const receiptQueue = new Queue(receiptQueueName, {
+  connection,
+  prefix: env.BULLMQ_PREFIX,
+  defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 1000 }, removeOnComplete: 100, removeOnFail: 100 },
+});
+await receiptQueue.setGlobalConcurrency(1);
+const receiptWorker = new Worker(
+  receiptQueueName,
+  async () => {
+    const started = Date.now();
+    const result = await sweepIngestReceipts();
+    console.log(
+      JSON.stringify({ level: result.limited ? 'warn' : 'info', event: 'ingest.receipts_pruned', ...result, durationMs: Date.now() - started }),
+    );
+  },
+  { connection, prefix: env.BULLMQ_PREFIX, concurrency: 1 },
+);
+receiptWorker.on('failed', (job) => console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_sweep_failed', jobId: job?.id })));
+receiptWorker.on('error', () => console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_worker_error' })));
+await receiptQueue.upsertJobScheduler('ingest-receipts-minute', { every: 60_000 }, { name: 'ingest-receipts.prune', data: {} });
 // Startup sweep uses the same locked recovery path as hourly and on-demand jobs.
 for (const run of await prisma.retentionRun.findMany({ where: { status: 'running' }, distinct: ['projectId'], select: { projectId: true } }))
   await retentionQueue.add('retention.project', { projectId: run.projectId });
@@ -49,7 +71,8 @@ let stopping = false;
 async function shutdown() {
   if (stopping) return;
   stopping = true;
-  await worker.close();
+  await Promise.all([worker.close(), receiptWorker.close()]);
+  await receiptQueue.close();
   const results = await Promise.allSettled([closeRetentionQueue(), closeProjectLocks(), clickhouse.close(), prisma.$disconnect()]);
   if (results.some((r) => r.status === 'rejected')) process.exitCode = 1;
 }
