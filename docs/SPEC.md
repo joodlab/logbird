@@ -336,10 +336,15 @@ say which client last used a key before it is revoked.
 `DELETE /api/projects/:projectId` runs under the exclusive project lock (ingest waits on its shared lock) and first
 proves that nothing can land in ClickHouse after the purge:
 1. **Maintenance writes.** Every maintenance statement for a project (rollup rebuilds, index repair, retention and
-   sample purges) carries `query_id = logbird-maint:<projectId>:<uuid>`, because ClickHouse keeps executing a
-   statement after its HTTP call fails. Deletion stops every such statement still in `system.processes` with
-   `KILL QUERY … SYNC` and checks none is left; otherwise it answers 503 `maintenance_pending` (`Retry-After`) and
-   deletes nothing.
+   sample purges, ingest recovery including `scripts/reconcile-ingest.ts`) carries
+   `query_id = logbird-maint:<base64url(projectId)>:<suffix>`, because ClickHouse keeps executing a statement after its
+   HTTP call fails. The tag is applied inside the shared helpers (`purgeProject`, `rebuildProjectRollups`,
+   `repairEventIndex`, recovery and read-model rebuild), so every caller inherits it; the encoded id never contains
+   `:`, so one project's prefix never matches another's. Deletion stops every such statement still in
+   `system.processes` with `KILL QUERY … SYNC` and checks none is left; otherwise it answers 503 `maintenance_pending`
+   with `Retry-After: 10` and deletes nothing. **Single node only:** `system.processes` and `KILL QUERY` see the node
+   the server talks to, so a multi-replica ClickHouse (a cluster, or replicas behind a load balancer) is not covered;
+   the supported self-host topology is one node.
 2. **Ingest writes** (ingest, test events, sample data) hold a claimed receipt. While the newest unresolved claim is
    younger than its lease + async-flush bound (70 s) the delete answers 503 `ingest_pending` with `Retry-After` and
    deletes nothing; once it is older, a `SYSTEM FLUSH ASYNC INSERT QUEUE` settles any queued insert (a failed flush

@@ -152,17 +152,24 @@ function DangerZone() {
                 value={typed}
               />
             </div>
-            {block !== null && !remove.isPending ? (
-              <p
-                className="flex items-start gap-2 rounded-lg border border-outcome-denied/30 bg-outcome-denied/[0.07] px-3 py-2.5 text-sm"
-                data-testid="delete-retry-notice"
-                role="status"
-              >
-                <HourglassIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-outcome-denied" />
-                {/* Static text: announced when refused and once when the wait is over, not every second. */}
-                <span>{deleteBlockedMessage(block, waitLeft > 0)}</span>
-              </p>
-            ) : null}
+            {/* The live region exists (empty) from the moment the dialog opens, so text inserted later is announced. Static
+                text: announced when refused and once when the wait is over, never every second. */}
+            <p
+              className={
+                block !== null && !remove.isPending
+                  ? 'flex items-start gap-2 rounded-lg border border-outcome-denied/30 bg-outcome-denied/[0.07] px-3 py-2.5 text-sm'
+                  : 'sr-only'
+              }
+              data-testid="delete-retry-notice"
+              role="status"
+            >
+              {block !== null && !remove.isPending ? (
+                <>
+                  <HourglassIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-outcome-denied" />
+                  <span>{deleteBlockedMessage(block, waitLeft > 0)}</span>
+                </>
+              ) : null}
+            </p>
             <PendingHint
               pending={remove.isPending}
               slow={`Deleting ${p.name}: removing its events, keys and saved views…`}

@@ -1,8 +1,9 @@
-import { createClient } from '@clickhouse/client';
-import { maintenanceQueryPrefix, projectMaintenance, read, stopProjectMaintenance } from '@logbird/clickhouse';
+import { type ClickHouseClient, createClient } from '@clickhouse/client';
+import { createMaintenanceClickHouseClient, maintenanceQueryPrefix, projectMaintenance, read, stopProjectMaintenance } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
+import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { afterEach, expect, it, vi } from 'vitest';
-import { clickhouse } from './clickhouse';
+import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 
 /**
@@ -139,7 +140,7 @@ it('real services: a maintenance INSERT left running by a failed call never comm
   expect(stored.status).toBe(202);
   expect((await storedRows(fixture.project)).events_by_minute).toBeGreaterThan(0);
 
-  // A rollup-style INSERT … SELECT that takes ~10 s server-side, issued through the maintenance tagging with a client
+  // A rollup-style INSERT … SELECT that takes ~60 s server-side, issued through the maintenance tagging with a client
   // that gives up after 300 ms — exactly what a failed sample-removal / retention rebuild leaves behind.
   const impatient = createClient({
     url: process.env.CLICKHOUSE_URL,
@@ -185,3 +186,78 @@ it('real services: a maintenance INSERT left running by a failed call never comm
   ).toBe(0);
   expect(await runningMaintenance(fixture.project)).toBe(0);
 }, 240_000);
+
+it('real services: refused deletes say when to retry (503 + code + Retry-After) and delete nothing', async () => {
+  f = await immutableFixture();
+  await f.authorize();
+  const fixture = f;
+  const remove = () =>
+    fixture.management(`/api/projects/${encodeURIComponent(fixture.project)}?confirm=${encodeURIComponent(fixture.project)}`, 'DELETE');
+  const stillThere = async () => (await prisma.project.findUnique({ where: { id: fixture.project } })) !== null;
+
+  // maintenance_pending: a tagged statement that survives KILL QUERY … SYNC (stubbed system.processes lookups only).
+  const query = maintenanceClickhouse.query.bind(maintenanceClickhouse);
+  const command = maintenanceClickhouse.command.bind(maintenanceClickhouse);
+  const stuck = `${maintenanceQueryPrefix(fixture.project)}stuck`;
+  const processes = vi
+    .spyOn(maintenanceClickhouse, 'query')
+    .mockImplementation(((params: { query: string }) =>
+      params.query.includes('system.processes') ? Promise.resolve({ json: async () => [{ query_id: stuck }] }) : query(params as never)) as never);
+  const kills = vi
+    .spyOn(maintenanceClickhouse, 'command')
+    .mockImplementation(((params: { query: string }) =>
+      params.query.startsWith('KILL QUERY') ? Promise.resolve({}) : command(params as never)) as never);
+  const maintenance = await remove();
+  expect(maintenance.status).toBe(503);
+  expect((await maintenance.json()).error.code).toBe('maintenance_pending');
+  expect(maintenance.headers.get('Retry-After')).toBe('10');
+  expect(kills.mock.calls.some(([params]) => String((params as { query: string }).query).includes(stuck))).toBe(true);
+  expect(await stillThere()).toBe(true);
+  processes.mockRestore();
+  kills.mockRestore();
+
+  // ingest_pending: a claim taken just now may still have an insert in flight.
+  await fixture.pending({ id: 'retry-after-claim', action: 'retry.claim' });
+  const ingest = await remove();
+  expect(ingest.status).toBe(503);
+  expect((await ingest.json()).error.code).toBe('ingest_pending');
+  const retryAfter = Number(ingest.headers.get('Retry-After'));
+  expect(retryAfter).toBeGreaterThan(60);
+  expect(retryAfter).toBeLessThanOrEqual(70);
+  expect(await stillThere()).toBe(true);
+  expect(await prisma.ingestReceipt.count({ where: { projectId: fixture.project } })).toBe(1);
+});
+
+it('real services: operator recovery with a bare client (scripts/reconcile-ingest.ts) tags every statement it sends', async () => {
+  f = await immutableFixture();
+  const fixture = f;
+  const stored = await fixture.post({ id: 'reconcile-1', action: 'reconcile.fixture', actor: { id: 'qa-reconcile', type: 'user' } });
+  expect(stored.status).toBe(202);
+  // An expired, unresolved claim: recovery flushes, rebuilds the read model and repairs the index for it.
+  await fixture.pending({ id: 'reconcile-2', action: 'reconcile.pending' }, { expired: true });
+  const bare = createMaintenanceClickHouseClient();
+  const sent: { method: string; query_id?: string; what: string }[] = [];
+  const recording = new Proxy(bare, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== 'function') return value;
+      if (property === 'query' || property === 'command' || property === 'insert' || property === 'exec')
+        return (params: { query_id?: string; query?: string; table?: string }) => {
+          sent.push({ method: property, query_id: params.query_id, what: String(params.query ?? params.table).slice(0, 60) });
+          return value.call(target, params);
+        };
+      return value.bind(target);
+    },
+  }) as ClickHouseClient;
+  try {
+    // Exactly what the operator script does: a bare maintenance client straight into the shared helper.
+    await recoverProjectIngest(recording, fixture.project);
+  } finally {
+    await bare.close();
+  }
+  const writes = sent.filter((s) => s.method !== 'query' || /^\s*(INSERT|DELETE|ALTER)/i.test(s.what));
+  expect(writes.length).toBeGreaterThan(0);
+  const prefix = maintenanceQueryPrefix(fixture.project);
+  expect(sent.filter((s) => !s.query_id?.startsWith(prefix))).toEqual([]);
+  expect(await prisma.ingestReceipt.count({ where: { projectId: fixture.project, confirmedAt: null, claimedAt: { not: null } } })).toBe(0);
+});
