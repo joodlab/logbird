@@ -23,11 +23,12 @@ storage.
 Role images are named `ghcr.io/joodlab/logbird-<role>:local` (`LOGBIRD_IMAGE_REGISTRY`
 defaults to `ghcr.io/joodlab`; [owner decision](decisions.md)). **Nothing is published
 there yet**; the names only label your local builds. The four buildable roles use
-`pull_policy: build`, so a source install never pulls a runnable role, even when
-the local image is missing. Bare `up` can rebuild them even when images exist.
-Build sequentially, then use `up --no-build` with the local images you just built;
-if one is missing, `up --no-build` fails instead of pulling. On a replacement host
-those images must be built first. The local runtime matrix for this policy is in
+`pull_policy: build`, so `up` builds a source install's roles from the checkout
+instead of pulling them. Bare `up` can rebuild them even when images exist.
+Build all four sequentially, then use `up --no-build` with the local images you
+just built. On a replacement host those images must be built first. Never run
+`up --no-build` before building all four roles: whether it fails or pulls when a
+local role image is missing is recorded in the local runtime matrix,
 [Compose pull policy, 2026-11-08](verification/compose-pull-policy-2026-11-08.md);
 live upgrade/restore on a real host remains pending in [#77](https://github.com/joodlab/logbird/issues/77)
 and [#88](https://github.com/joodlab/logbird/issues/88).

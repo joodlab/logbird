@@ -25,8 +25,8 @@ Role images are named **`ghcr.io/joodlab/logbird-<role>`** (`migrate`, `server`,
 `LOGBIRD_IMAGE_REGISTRY` defaults to `ghcr.io/joodlab`. **Nothing is published until the repository is open-sourced**,
 and each publication still needs explicit owner approval. No CI workflow builds or pushes images.
 
-Source installs build these names locally and never pull a runnable role implicitly: the four roles keep
-`pull_policy: build`. Only the documented release flow pulls, explicitly, an accepted version. The Docker Hub
+Source installs build these names locally: the four roles keep `pull_policy: build`, so `up` builds them from the
+checkout instead of pulling. Only the documented release flow pulls, explicitly, an accepted version. The Docker Hub
 `logbird` namespace was never verified as owner-controlled and is no longer the default. The local Compose runtime
 matrix is recorded in [verification/compose-pull-policy-2026-11-08.md](verification/compose-pull-policy-2026-11-08.md).
 A live fresh install, upgrade and restore on the real host follows after open-sourcing.
