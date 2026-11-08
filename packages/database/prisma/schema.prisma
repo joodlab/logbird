@@ -225,6 +225,7 @@ model RetentionRun {
   error         String?
 
   @@index([projectId, startedAt])
+  @@index([projectId, kind, status])
 }
 
 model InviteLink {

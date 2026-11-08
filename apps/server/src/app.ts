@@ -2,6 +2,7 @@ import { auth, authAuditContext, clearSessionCookies, setAuthAuditHandler } from
 import { QueryError } from '@logbird/clickhouse';
 import { queryErrorDetailsSchema } from '@logbird/contracts';
 import { Prisma, ProjectBusyError, prisma } from '@logbird/database';
+import { failedRepairStatus } from '@logbird/worker/project-repair';
 import { connection } from '@logbird/worker/queue';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -180,8 +181,12 @@ app.get('/readyz', async (c) => {
     connection.ping(),
   ]);
   const ready = checks.every((r) => r.status === 'fulfilled');
-  const audit = await auditDrainStatus().catch(() => ({ unavailable: true }));
-  return c.json({ status: ready ? 'ok' : 'degraded', audit }, ready ? 200 : 503);
+  const [audit, repairs] = await Promise.all([
+    auditDrainStatus().catch(() => ({ unavailable: true })),
+    failedRepairStatus().catch(() => ({ unavailable: true })),
+  ]);
+  // Non-failing details: a fenced project needs operator attention, not removal of this replica from routing.
+  return c.json({ status: ready ? 'ok' : 'degraded', audit, maintenance: { failedIngestRepairs: repairs } }, ready ? 200 : 503);
 });
 app.get(
   '/health',

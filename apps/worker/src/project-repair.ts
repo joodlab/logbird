@@ -11,6 +11,31 @@ export function heartbeatMaintenanceRun(runId: string) {
   return () => clearInterval(timer);
 }
 
+/**
+ * A failed ingest repair fences every read route of its project, including retention status, until retention
+ * completes the repair. Counts only: readiness is unauthenticated, so it never names a project. RetentionRun
+ * history is never pruned and this filter has no leading project id, so probes share one cached read.
+ */
+const FAILED_REPAIR_STATUS_TTL_MS = 30_000;
+let failedRepairs: { at: number; value: Promise<{ fencedProjects: number; oldestFailedAt: string | null }> } | undefined;
+export function failedRepairStatus(now = Date.now()) {
+  if (!failedRepairs || now - failedRepairs.at >= FAILED_REPAIR_STATUS_TTL_MS) {
+    const value = prisma.retentionRun
+      .groupBy({ by: ['projectId'], where: { kind: 'ingest_repair', status: 'failed' }, _min: { startedAt: true } })
+      .then((projects) => {
+        const oldest = Math.min(...projects.map((p) => p._min.startedAt?.getTime() ?? now));
+        return { fencedProjects: projects.length, oldestFailedAt: projects.length ? new Date(oldest).toISOString() : null };
+      });
+    const entry = { at: now, value };
+    failedRepairs = entry;
+    // Never cache a failure: the next probe retries.
+    value.catch(() => {
+      if (failedRepairs === entry) failedRepairs = undefined;
+    });
+  }
+  return failedRepairs.value;
+}
+
 /** Caller holds EXCLUSIVE. Keep the durable read fence until every derived destination is rebuilt. */
 export async function rebuildProjectReadModel(client: ClickHouseClient, projectId: string) {
   const ch = projectMaintenance(client, projectId);

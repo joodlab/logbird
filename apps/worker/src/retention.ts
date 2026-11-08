@@ -1,10 +1,27 @@
 import { createMaintenanceClickHouseClient, hasExpiredEvents, projectMaintenance, purgeProject, rebuildProjectRollups } from '@logbird/clickhouse';
 import { prisma, pruneIngestReceipts, purgeIngestReceipts, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './destructive-maintenance';
+import { logIngestRecoveryFailure, prepareReceiptSettlement } from './ingest-recovery';
 import { heartbeatMaintenanceRun } from './project-repair';
 export const clickhouse = createMaintenanceClickHouseClient();
+const unfinishedRepair = (projectId: string) => ({ projectId, kind: 'ingest_repair', status: { in: ['running', 'failed'] } });
+export function logReceiptPrune(result: { removed: number; batches: number; limited: boolean }, durationMs: number, projectId?: string) {
+  // Limited means expired rows remain after the budget; the minute queue is the primary cleanup path.
+  if (result.removed || result.limited)
+    console.log(
+      JSON.stringify({
+        level: result.limited ? 'warn' : 'info',
+        event: 'ingest.receipts_pruned',
+        scope: 'backstop',
+        projectId,
+        ...result,
+        durationMs,
+      }),
+    );
+}
 export async function enforceProjectRetention(projectId: string) {
-  await pruneIngestReceipts(projectId);
+  const pruneStarted = Date.now();
+  logReceiptPrune(await pruneIngestReceipts(projectId), Date.now() - pruneStarted, projectId);
   const current = await prisma.project.findUnique({ where: { id: projectId } });
   if (!current) return;
   const previewCutoff = new Date(Date.now() - current.retentionDays * 86_400_000);
@@ -17,7 +34,12 @@ export async function enforceProjectRetention(projectId: string) {
         if (!latest) return true;
         // Any unfinished maintenance defeats the no-op; a completed repair rebuilt every rollup.
         const previous = await tx.retentionRun.findFirst({ where: { projectId }, orderBy: { startedAt: 'desc' } });
-        if (latest.exportDeleteStartedAt || latest.retentionDays !== current.retentionDays || (previous && previous.status !== 'completed'))
+        if (
+          latest.exportDeleteStartedAt ||
+          latest.retentionDays !== current.retentionDays ||
+          (previous && previous.status !== 'completed') ||
+          (await tx.retentionRun.count({ where: unfinishedRepair(projectId) }))
+        )
           return false;
         await tx.retentionRun.create({
           data: {
@@ -65,22 +87,26 @@ export async function enforceProjectRetention(projectId: string) {
       const tagged = projectMaintenance(clickhouse, projectId);
       await purgeProject(tagged, projectId, cutoff);
       await purgeIngestReceipts(projectId, cutoff);
-      if (
-        project.exportDeleteStartedAt ||
-        previous?.status === 'failed' ||
-        (await prisma.retentionRun.count({ where: { projectId, kind: 'ingest_repair', status: { in: ['running', 'failed'] } } }))
-      )
-        await rebuildProjectRollups(tagged, projectId);
+      const repairing = previous?.status === 'failed' || (await prisma.retentionRun.count({ where: unfinishedRepair(projectId) })) > 0;
+      // Prove abandoned claims flushed before this rebuild, so it also covers them and no retry rebuilds again.
+      const settle = repairing
+        ? await prepareReceiptSettlement(tagged, projectId).catch((error) => {
+            logIngestRecoveryFailure(error, projectId);
+          })
+        : undefined;
+      if (project.exportDeleteStartedAt || repairing) await rebuildProjectRollups(tagged, projectId);
       if (await hasExpiredEvents(clickhouse, projectId, cutoff)) throw new Error('Retention cutoff invariant failed');
       await reconcileDestructiveMaintenance(clickhouse, projectId);
       await prisma.retentionRun.updateMany({
-        where: { projectId, kind: 'ingest_repair', status: { in: ['running', 'failed'] } },
+        where: unfinishedRepair(projectId),
         data: { status: 'completed', finishedAt: new Date(), error: null },
       });
       await prisma.retentionRun.update({
         where: { id: run.id },
         data: { status: 'completed', finishedAt: new Date(), deletedEvents: Number(rows[0]?.n ?? 0) },
       });
+      // The read model is consistent now. A settlement failure leaves receipts for a retry or the hourly sweep.
+      if (settle) await settle().catch((error) => logIngestRecoveryFailure(error, projectId));
     } catch (error) {
       const errorCode =
         typeof error === 'object' && error !== null && 'code' in error && (typeof error.code === 'string' || typeof error.code === 'number')

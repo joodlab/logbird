@@ -4,7 +4,7 @@ import { Queue, Worker } from 'bullmq';
 import { env } from './env';
 import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from './ingest-recovery';
 import { closeRetentionQueue, connection, retentionQueue, retentionQueueName } from './queue';
-import { clickhouse, enforceProjectRetention } from './retention';
+import { clickhouse, enforceProjectRetention, logReceiptPrune } from './retention';
 
 await probeIngestRecovery(clickhouse);
 const worker = new Worker(
@@ -12,7 +12,8 @@ const worker = new Worker(
   async (job) => {
     if (job.name === 'retention.project') await enforceProjectRetention(job.data.projectId);
     else if (job.name === 'retention.enforce') {
-      await pruneIngestReceipts(); // Includes idle workspace audit streams.
+      const pruneStarted = Date.now();
+      logReceiptPrune(await pruneIngestReceipts(), Date.now() - pruneStarted); // Includes idle workspace audit streams.
       const failures: unknown[] = [];
       for (const pending of await prisma.ingestReceipt.findMany({
         where: { confirmedAt: null },
