@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
-import { normalizeEvent } from '@logbird/clickhouse';
+import { normalizeEvent, projectMaintenance } from '@logbird/clickhouse';
 import { ingestPendingDetailsSchema, ingestResponseSchema } from '@logbird/contracts';
 import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { logIngestRecoveryFailure, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
@@ -70,7 +70,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
   let replayed = false,
     replayStarted = false;
   try {
-    replayed = await recoverProjectIngest(maintenanceClickhouse, projectId, {
+    replayed = await recoverProjectIngest(projectMaintenance(maintenanceClickhouse, projectId), projectId, {
       eventIds: candidates.map((c) => c.row.event_id),
       replay: () => {
         replayStarted = true;

@@ -31,6 +31,7 @@ import {
   savedViewSchema,
   searchResponseSchema,
   suggestResponseSchema,
+  workspaceNameSuggestionSchema,
   workspaceSetupSchema,
 } from '@logbird/contracts';
 import { z } from 'zod';
@@ -42,6 +43,8 @@ interface RequestOptions {
   query?: Query;
   body?: unknown;
   signal?: AbortSignal;
+  /** Overrides REQUEST_DEADLINE_MS for requests that legitimately run long (deleting a large project). */
+  deadlineMs?: number;
 }
 
 /** Fill `:params` in a contract route path. */
@@ -76,7 +79,7 @@ async function request<S extends z.ZodType>(schema: S, method: string, path: str
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, REQUEST_DEADLINE_MS);
+  }, options.deadlineMs ?? REQUEST_DEADLINE_MS);
   const forwardAbort = () => controller.abort(options.signal?.reason);
   if (options.signal?.aborted) forwardAbort();
   options.signal?.addEventListener('abort', forwardAbort, { once: true });
@@ -150,8 +153,9 @@ export const api = {
         setupDismissed?: boolean;
       },
     ) => request(projectSchema, 'PATCH', pathFor(routes.projects.update.path, { projectId }), { body }) as Promise<Project>,
+    /** Large projects purge their events synchronously: allow minutes, not the usual 30 s deadline. */
     remove: (projectId: string, confirm: string) =>
-      request(ok, 'DELETE', pathFor(routes.projects.remove.path, { projectId }), { query: { confirm } }),
+      request(ok, 'DELETE', pathFor(routes.projects.remove.path, { projectId }), { query: { confirm }, deadlineMs: 10 * 60_000 }),
     /** `preview` (days) also counts the events a lower retention window would delete. */
     retention: (projectId: string, preview?: number, signal?: AbortSignal) =>
       request(retentionStatusSchema, 'GET', pathFor(routes.projects.retention.path, { projectId }), { query: { preview }, signal }),
@@ -161,6 +165,9 @@ export const api = {
     loadSampleData: (projectId: string) => request(sampleDataResponseSchema, 'POST', pathFor(routes.projects.sampleData.path, { projectId })),
     removeSampleData: (projectId: string) => request(ok, 'DELETE', pathFor(routes.projects.removeSampleData.path, { projectId })),
   },
+
+  /** Onboarding pre-fill for the workspace name (null: personal mailbox, or that domain already has a workspace). */
+  workspaceNameSuggestion: (signal?: AbortSignal) => request(workspaceNameSuggestionSchema, 'GET', routes.workspaceNameSuggestion.path, { signal }),
 
   /** Workspace setup summary + resumable onboarding target. */
   workspaceSetup: (signal?: AbortSignal) => request(workspaceSetupSchema, 'GET', routes.workspaceSetup.path, { signal }),
@@ -190,6 +197,8 @@ export const api = {
     create: (projectId: string, body: { name: string; kind: 'ingest' | 'read' }) =>
       request(createApiKeyResponseSchema, 'POST', pathFor(routes.keys.create.path, { projectId }), { body }),
     revoke: (projectId: string, keyId: string) => request(ok, 'DELETE', pathFor(routes.keys.revoke.path, { projectId, keyId })),
+    /** Replacement with the same name and kind; the old key stays valid until revoked. Secret returned once. */
+    roll: (projectId: string, keyId: string) => request(createApiKeyResponseSchema, 'POST', pathFor(routes.keys.roll.path, { projectId, keyId })),
   },
 
   events: {

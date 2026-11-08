@@ -26,20 +26,23 @@ interface CodeBlockProps {
   /** Max height before the block scrolls. */
   maxHeight?: number;
   copyLabel?: string;
+  /** Called after the copy button copied the code (e.g. to mark a once-only secret as saved). */
+  onCopied?: () => void;
 }
 
-export function CodeBlock({ code, language = 'text', title, className, maxHeight, copyLabel = 'Copy code' }: CodeBlockProps) {
+export function CodeBlock({ code, language = 'text', title, className, maxHeight, copyLabel = 'Copy code', onCopied }: CodeBlockProps) {
   return (
     <div className={cn('group/code relative overflow-hidden rounded-lg border bg-muted/40', className)}>
       {title ? (
         <div className="flex h-9 items-center justify-between border-b px-3 pointer-coarse:h-11">
           <span className="font-mono text-[11px] text-muted-foreground uppercase tracking-wider">{title}</span>
-          <CopyButton className="pointer-coarse:size-11" label={copyLabel} value={code} />
+          <CopyButton className="pointer-coarse:size-11" label={copyLabel} onCopied={onCopied} value={code} />
         </div>
       ) : (
         <CopyButton
           className="absolute top-2 end-2 bg-background/80 opacity-70 backdrop-blur group-hover/code:opacity-100 pointer-coarse:size-11"
           label={copyLabel}
+          onCopied={onCopied}
           value={code}
         />
       )}

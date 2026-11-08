@@ -1,4 +1,4 @@
-import { type ClickHouseClient, rebuildProjectRollups } from '@logbird/clickhouse';
+import { type ClickHouseClient, projectMaintenance, rebuildProjectRollups } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
 import { enqueueProjectRetention } from './queue';
 
@@ -12,7 +12,8 @@ export function heartbeatMaintenanceRun(runId: string) {
 }
 
 /** Caller holds EXCLUSIVE. Keep the durable read fence until every derived destination is rebuilt. */
-export async function rebuildProjectReadModel(ch: ClickHouseClient, projectId: string) {
+export async function rebuildProjectReadModel(client: ClickHouseClient, projectId: string) {
+  const ch = projectMaintenance(client, projectId);
   // Workspace activity exposes raw search only, with no rollup-backed read routes or Project FK.
   if (projectId.startsWith('ws:')) return rebuildProjectRollups(ch, projectId);
   const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });

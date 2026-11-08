@@ -1,0 +1,176 @@
+{
+  "run": "r89xu",
+  "startedAt": "2026-11-08T11:34:03.858Z",
+  "owner": "qa-fix-backlogs-r89xu-1@example.test",
+  "member": "qa-fix-backlogs-r89xu-2@example.test",
+  "checks": {
+    "OWNER-15 no pre-fill when the domain already has workspaces (example.test)": {
+      "ok": true,
+      "detail": {
+        "value": ""
+      }
+    },
+    "OWNER-15 no \"URL slug\" line": {
+      "ok": true
+    },
+    "read key works before the roll": {
+      "ok": true,
+      "detail": {
+        "status": 200
+      }
+    },
+    "OPS-19 a fresh browser lands on the most active project, not the one that got the latest event": {
+      "ok": true,
+      "detail": {
+        "landed": "cmw7r8fxo000068yox6ka7t42",
+        "pms": "cmw7r8fxo000068yox6ka7t42",
+        "latest": "cmw7r8gjn000368yo39ro0zb2"
+      }
+    },
+    "OPS-20 members see no \"Finish setup\" in the sidebar": {
+      "ok": true
+    },
+    "OPS-20 members see no setup checklist on the overview": {
+      "ok": true
+    },
+    "OPS-20 owners still see the setup checklist": {
+      "ok": true
+    },
+    "OPS-17 one click saves; the toast offers Undo": {
+      "ok": true
+    },
+    "OPS-17 Undo removes the view again": {
+      "ok": true
+    },
+    "OPS-17 one click saves the view with the hotel name": {
+      "ok": true,
+      "detail": {
+        "q": "tenant:biz_lantern",
+        "lang": "query",
+        "range": "7d",
+        "labels": [
+          {
+            "field": "tenant",
+            "value": "biz_lantern",
+            "label": "Lantern Bay Hotel"
+          }
+        ]
+      }
+    },
+    "OPS-17 the card shows the hotel name": {
+      "ok": true
+    },
+    "OPS-18 \"Copy link\" is a labelled button with a toast naming the workspace": {
+      "ok": true,
+      "detail": "Anyone in QA Fix console backlogs can open “Lantern Bay Hotel — last 7 days”."
+    },
+    "OPS-18 the copied link reopens the view": {
+      "ok": true,
+      "detail": "http://localhost:4600/p/cmw7r8fxo000068yox6ka7t42/events?q=tenant%3Abiz_lantern&range=7d&view=cmw7r8ord000768yos3bgpg0c"
+    },
+    "OPS-18 the open-view banner has \"Copy link\"": {
+      "ok": true
+    },
+    "OPS-21 one plain sentence, no duplicate": {
+      "ok": true,
+      "detail": "Syntax error · A quote mark is missing its partner — add a closing \" after Lantern Bay."
+    },
+    "OPS-22 a bare event says \"outcome not sent\", not success": {
+      "ok": true
+    },
+    "OPS-22 a missing actor points at who the event names": {
+      "ok": true,
+      "detail": "Not recorded\nIts performed_by attribute names Hourly CRM sync scheduler.\nThe step that caused it was done by\nHourly CRM sync scheduler"
+    },
+    "OWNER-11 the key row shows its last client before rolling": {
+      "ok": true
+    },
+    "OWNER-10 Escape asks \"Close without copying?\" and keeps the secret": {
+      "ok": true
+    },
+    "OWNER-10 the secret dialog does not scroll sideways (desktop)": {
+      "ok": true
+    },
+    "OWNER-10 the secret is masked in media": {
+      "ok": true
+    },
+    "OWNER-10 after copying, Escape closes normally": {
+      "ok": true
+    },
+    "OWNER-11 after a roll, focus lands on the old key \"Revoke old key\" button": {
+      "ok": true
+    },
+    "OWNER-11 old and new keys both work during the hand-over": {
+      "ok": true,
+      "detail": {
+        "old": 200,
+        "new": 200
+      }
+    },
+    "OWNER-11 the old key offers \"Revoke old key\" and shows its last use": {
+      "ok": true
+    },
+    "OWNER-16 New project opens a dialog inside the app shell": {
+      "ok": true
+    },
+    "OWNER-16 lands on the new project Setup page": {
+      "ok": true
+    },
+    "OWNER-08 deleting an empty project returns in < 1 s (browser round trip)": {
+      "ok": true,
+      "detail": {
+        "status": 204,
+        "ms": 366
+      }
+    },
+    "OWNER-08 a project with data still deletes (204) and explained the wait": {
+      "ok": true,
+      "detail": {
+        "status": 204,
+        "ms": 29603
+      }
+    },
+    "ops17-18-views phone-light: no sideways overflow": {
+      "ok": true
+    },
+    "owner11-keys phone-light: no sideways overflow": {
+      "ok": true
+    },
+    "ops17-18-views phone-dark: no sideways overflow": {
+      "ok": true
+    },
+    "owner11-keys phone-dark: no sideways overflow": {
+      "ok": true
+    },
+    "OWNER-10 the secret dialog does not scroll sideways (390 px)": {
+      "ok": true
+    },
+    "OWNER-10 \"Close anyway\" is reachable on a phone": {
+      "ok": true
+    },
+    "OWNER-16 closing the dialog returns focus to \"New project\"": {
+      "ok": true
+    },
+    "OWNER-15 an unused company domain is pre-filled and selected": {
+      "ok": true,
+      "detail": {
+        "prefilled": "Lantern Hotels",
+        "selected": 14
+      }
+    },
+    "cleanup: QA projects deleted": {
+      "ok": true
+    }
+  },
+  "timings": {
+    "emptyProjectDeleteMs": 366,
+    "projectWithDataDeleteMs": 29603
+  },
+  "problems": [],
+  "finishedAt": "2026-11-08T11:37:51.980Z",
+  "expectedErrors": {
+    "count": 44,
+    "why": "OPS-21 page deliberately runs an unterminated quoted query; the API answers 422 invalid_query and the explorer shows the plain-language message. Not console noise."
+  },
+  "notes": "Round 2 run after merging #62 (d829ab1): secrets masked in all media; member tab closed before cleanup; delete flow re-run after the 404 hardening."
+}

@@ -13,17 +13,19 @@ import { Input } from '@logbird/ui/components/ui/input';
 import { Label } from '@logbird/ui/components/ui/label';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { Loader2Icon, Trash2Icon } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { createFileRoute, useNavigate, useRouter } from '@tanstack/react-router';
+import { HourglassIcon, Loader2Icon, Trash2Icon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AdminNote, AdminOnly } from '@/components/admin-gate';
+import { PendingHint } from '@/components/pending-hint';
 import { SettingsSection } from '@/components/settings-section';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keys, projectQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
 import { useCan } from '@/lib/permissions';
+import { type DeleteBlock, deleteBlock, deleteBlockedMessage, secondsUntil } from '@/lib/project-delete';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/danger')({
   head: () => ({ meta: [{ title: 'Danger zone · Settings · Logbird' }] }),
@@ -36,22 +38,49 @@ function DangerZone() {
   const project = useQuery(projectQuery(projectId));
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const deleteButton = useRef<HTMLButtonElement>(null);
   const slugInput = useRef<HTMLInputElement>(null);
   const [typed, setTyped] = useState('');
   const manage = useCan()('project.delete');
+  /** Set when the server refused because writes were still settling (503 ingest_pending / maintenance_pending). */
+  const [block, setBlock] = useState<DeleteBlock | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (block === null) return;
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, [block]);
   const remove = useMutation({
-    mutationFn: () => api.projects.remove(projectId, typed.trim()),
+    // The confirmed slug travels with the request, so a retry does not depend on the input still holding it.
+    mutationFn: (slug: string) => api.projects.remove(projectId, slug),
+    onMutate: () => setBlock(null),
     onSuccess: async () => {
       setOpen(false);
-      queryClient.removeQueries({ queryKey: keys.project(projectId) });
-      await queryClient.invalidateQueries({ queryKey: keys.projects });
+      // The deletion keeps running if the person left this page meanwhile: only bring them home when they are still
+      // inside the deleted project (its pages would 404 now).
+      const stillHere = router.state.location.pathname.startsWith(`/p/${projectId}`);
       toast.success(`Deleted ${project.data?.name}`, { description: 'The project and all of its events are gone.' });
-      await navigate({ to: '/' });
+      // Leave first, then drop the deleted project's cache: mounted project pages would otherwise refetch it into 404s.
+      if (stillHere) await navigate({ to: '/' });
+      queryClient.removeQueries({ queryKey: keys.project(projectId) });
+      await queryClient.invalidateQueries({ queryKey: keys.projects, exact: true });
     },
-    onError: (error) => toast.error('Could not delete the project', { description: errorMessage(error) }),
+    onError: (error, slug) => {
+      const refused = deleteBlock(error);
+      if (refused === null) {
+        toast.error('Could not delete the project', { description: errorMessage(error) });
+        return;
+      }
+      // Nothing was deleted. Keep (or reopen) the dialog with the confirmation filled in and a retry button.
+      setNow(Date.now());
+      setBlock(refused);
+      setTyped(slug);
+      setOpen(true);
+    },
   });
+  const waitLeft = block === null ? 0 : secondsUntil(block.retryAt, now);
 
   if (!project.data) return <Skeleton className="h-40 w-full rounded-xl" />;
   const p = project.data;
@@ -85,7 +114,10 @@ function DangerZone() {
       <AlertDialog
         onOpenChange={(next) => {
           setOpen(next);
-          if (!next) setTyped('');
+          if (!next && !remove.isPending) {
+            setTyped('');
+            setBlock(null);
+          }
         }}
         open={open && manage}
       >
@@ -94,7 +126,7 @@ function DangerZone() {
             className="flex flex-col gap-4"
             onSubmit={(event) => {
               event.preventDefault();
-              if (matches) remove.mutate();
+              if (matches && waitLeft === 0) remove.mutate(typed.trim());
             }}
           >
             <AlertDialogHeader>
@@ -120,11 +152,35 @@ function DangerZone() {
                 value={typed}
               />
             </div>
+            {/* The live region exists (empty) from the moment the dialog opens, so text inserted later is announced. Static
+                text: announced when refused and once when the wait is over, never every second. */}
+            <p
+              className={
+                block !== null && !remove.isPending
+                  ? 'flex items-start gap-2 rounded-lg border border-outcome-denied/30 bg-outcome-denied/[0.07] px-3 py-2.5 text-sm'
+                  : 'sr-only'
+              }
+              data-testid="delete-retry-notice"
+              role="status"
+            >
+              {block !== null && !remove.isPending ? (
+                <>
+                  <HourglassIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-outcome-denied" />
+                  <span>{deleteBlockedMessage(block, waitLeft > 0)}</span>
+                </>
+              ) : null}
+            </p>
+            <PendingHint
+              pending={remove.isPending}
+              slow={`Deleting ${p.name}: removing its events, keys and saved views…`}
+              slower="Projects with many events can take a few minutes. You can leave this page — the deletion continues, and you will see a confirmation when it is done."
+            />
             <AlertDialogFooter>
-              <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
-              <Button disabled={!matches || remove.isPending} type="submit" variant="destructive">
+              {/* While deleting, this only hides the dialog: the request keeps running. */}
+              <AlertDialogCancel type="button">{remove.isPending ? 'Hide' : 'Cancel'}</AlertDialogCancel>
+              <Button data-testid="delete-project-submit" disabled={!matches || remove.isPending || waitLeft > 0} type="submit" variant="destructive">
                 {remove.isPending ? <Loader2Icon className="animate-spin" /> : null}
-                Delete project
+                {block === null ? 'Delete project' : waitLeft > 0 ? `Try again in ${waitLeft} s` : 'Try again'}
               </Button>
             </AlertDialogFooter>
           </form>

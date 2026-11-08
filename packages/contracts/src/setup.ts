@@ -126,7 +126,9 @@ export type ProjectSetup = z.infer<typeof projectSetupSchema>;
  *  workspace    – user has no active organization
  *  project      – active organization has no project
  *  first_event  – no project has received a non-sample event yet (projectId = most recently created project)
- *  null         – onboarding done → go to projectId's overview (most recently active project)
+ *  null         – onboarding done → go to projectId's overview (the most active project: most events in the last
+ *                 24 hours, then the most recent event, then the oldest project). The console prefers the project
+ *                 this browser last visited when it is still in the workspace.
  */
 export const ONBOARDING_STEPS = ['profile', 'workspace', 'project', 'first_event'] as const;
 export const onboardingStepSchema = z.enum(ONBOARDING_STEPS);

@@ -2,12 +2,12 @@ import { Button } from '@logbird/ui/components/ui/button';
 import { Input } from '@logbird/ui/components/ui/input';
 import { Label } from '@logbird/ui/components/ui/label';
 import { useForm } from '@tanstack/react-form';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router';
 import { ArrowRightIcon, Loader2Icon } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
-import { meQuery } from '@/lib/api/queries';
+import { api } from '@/lib/api/client';
 import { authCall, authClient } from '@/lib/auth-client';
 import { fieldErrorMessage } from '@/lib/forms';
 import { hasName } from '@/lib/user';
@@ -23,6 +23,7 @@ export const Route = createFileRoute('/_authed/onboarding/')({
   component: WorkspaceStep,
 });
 
+/** Workspace URL slugs: unique per instance, never shown in the console (hence the random suffix on create). */
 function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -39,11 +40,17 @@ function WorkspaceStep() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [serverError, setServerError] = useState<string | null>(null);
-  const suggested = me.user.email.split('@')[1]?.split('.')[0] ?? '';
+  const nameInput = useRef<HTMLInputElement>(null);
+  // Pre-fill from the email domain only when nobody at that domain has a workspace or a pending invitation yet:
+  // otherwise every acme.com teammate would create another "Acme" instead of joining the existing one.
+  const suggestion = useQuery({
+    queryKey: ['onboarding', 'workspace-name', me.user.id],
+    queryFn: ({ signal }) => api.workspaceNameSuggestion(signal),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  });
   const form = useForm({
-    defaultValues: {
-      name: suggested && !/gmail|outlook|hotmail|yahoo|icloud|logbird/.test(suggested) ? suggested.charAt(0).toUpperCase() + suggested.slice(1) : '',
-    },
+    defaultValues: { name: '' },
     onSubmit: async ({ value }) => {
       setServerError(null);
       try {
@@ -54,7 +61,9 @@ function WorkspaceStep() {
         if (org && typeof org === 'object' && 'id' in org) {
           await authCall(authClient.organization.setActive({ organizationId: String((org as { id: string }).id) }));
         }
-        await queryClient.invalidateQueries({ queryKey: meQuery().queryKey });
+        // A new active workspace: drop everything cached for the previous one (project list, setup, views), like the
+        // workspace switcher does, so the first-project step sees this workspace's (empty) project list.
+        queryClient.clear();
         // `/` resumes at whatever is missing next (normally the project step).
         await navigate({ to: '/' });
       } catch (error) {
@@ -62,6 +71,18 @@ function WorkspaceStep() {
       }
     },
   });
+
+  const suggested = suggestion.data?.name ?? null;
+  useEffect(() => {
+    if (!suggested || form.getFieldValue('name') !== '' || form.getFieldMeta('name')?.isDirty) return;
+    form.setFieldValue('name', suggested, { dontUpdateMeta: true });
+    // Selected, so typing the real name replaces the guess in one go.
+    // The field is the only input on the page (autoFocus): focus it and select the guess once React has rendered it.
+    requestAnimationFrame(() => {
+      nameInput.current?.focus();
+      nameInput.current?.select();
+    });
+  }, [suggested, form]);
 
   return (
     <div className="grid gap-10 md:grid-cols-[1fr_260px]">
@@ -83,7 +104,6 @@ function WorkspaceStep() {
           <form.Field name="name" validators={{ onSubmit: nameSchema, onChange: nameSchema }}>
             {(field) => {
               const message = field.state.meta.isTouched ? fieldErrorMessage(field.state.meta.errors) : undefined;
-              const slug = slugify(field.state.value);
               return (
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor="workspace-name">Workspace name</Label>
@@ -95,16 +115,18 @@ function WorkspaceStep() {
                     size="lg"
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
+                    onFocus={(e) => {
+                      if (suggested && e.currentTarget.value === suggested) e.currentTarget.select();
+                    }}
                     placeholder="Acme Inc."
+                    ref={nameInput}
                     value={field.state.value}
                   />
                   <p className="text-muted-foreground text-xs" id="workspace-help">
                     {message ? (
                       <span className="text-destructive">{message}</span>
                     ) : (
-                      <>
-                        URL slug: <span className="font-mono text-foreground">{slug || 'your-workspace'}</span>
-                      </>
+                      'Usually your company or team name. Teammates see it in their invitation.'
                     )}
                   </p>
                 </div>

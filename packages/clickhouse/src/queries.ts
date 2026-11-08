@@ -20,6 +20,7 @@ import { pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import { isQueryClient } from './client';
+import { projectMaintenance } from './maintenance-tag';
 import type { EventRow } from './normalize';
 import { columns, compileQuery, QueryError } from './query';
 import { rollupSql } from './rollup-sql';
@@ -538,7 +539,9 @@ async function deleteAndVerify(ch: ClickHouseClient, table: string, predicate: s
   }
 }
 
-export async function purgeProject(ch: ClickHouseClient, p: string, before?: Date) {
+export async function purgeProject(client: ClickHouseClient, p: string, before?: Date) {
+  // Every statement is tagged as this project's maintenance, whoever the caller is (see maintenance-tag.ts).
+  const ch = projectMaintenance(client, p);
   // Caller serializes ingestion. Capture only aggregate keys touched by expired rows.
   const params = {
     p,
@@ -590,7 +593,8 @@ export async function purgeProject(ch: ClickHouseClient, p: string, before?: Dat
 }
 
 /** Caller holds the project ingestion lock. Rebuild from surviving raw rows. */
-export async function rebuildProjectRollups(ch: ClickHouseClient, p: string, rebuild = true) {
+export async function rebuildProjectRollups(client: ClickHouseClient, p: string, rebuild = true) {
+  const ch = projectMaintenance(client, p);
   for (const table of ['events_by_minute', 'entities', 'attribute_keys']) await deleteAndVerify(ch, table, 'project_id={p:String}', { p });
   if (rebuild) {
     for (const statement of rollupSql.split(';')) {

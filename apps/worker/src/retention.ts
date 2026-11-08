@@ -1,4 +1,4 @@
-import { createMaintenanceClickHouseClient, hasExpiredEvents, purgeProject, rebuildProjectRollups } from '@logbird/clickhouse';
+import { createMaintenanceClickHouseClient, hasExpiredEvents, projectMaintenance, purgeProject, rebuildProjectRollups } from '@logbird/clickhouse';
 import { prisma, pruneIngestReceipts, purgeIngestReceipts, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { heartbeatMaintenanceRun } from './project-repair';
 export const clickhouse = createMaintenanceClickHouseClient();
@@ -58,13 +58,15 @@ export async function enforceProjectRetention(projectId: string) {
         })
       ).json<{ n: string }>();
       // Resume index deletion even when an earlier attempt already removed every expired raw row.
-      await purgeProject(clickhouse, projectId, cutoff);
+      // Tagged: project deletion stops these statements if a failed call left them running in ClickHouse.
+      const tagged = projectMaintenance(clickhouse, projectId);
+      await purgeProject(tagged, projectId, cutoff);
       await purgeIngestReceipts(projectId, cutoff);
       if (
         previous?.status === 'failed' ||
         (await prisma.retentionRun.count({ where: { projectId, kind: 'ingest_repair', status: { in: ['running', 'failed'] } } }))
       )
-        await rebuildProjectRollups(clickhouse, projectId);
+        await rebuildProjectRollups(tagged, projectId);
       if (await hasExpiredEvents(clickhouse, projectId, cutoff)) throw new Error('Retention cutoff invariant failed');
       await prisma.retentionRun.updateMany({
         where: { projectId, kind: 'ingest_repair', status: { in: ['running', 'failed'] } },

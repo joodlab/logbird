@@ -186,3 +186,39 @@ export function splitAction(action: string): { namespace: string; verb: string }
 }
 
 export const OUTCOME_ORDER = ['success', 'partial', 'denied', 'failure', 'unknown'] as const;
+
+/**
+ * Whether the producer actually sent an `outcome`. ClickHouse stores a missing outcome as "success", so the detail
+ * view checks the raw payload: `false` = not sent (show it neutrally, not as a green success), `null` = unknown
+ * (payload not loaded or not an object).
+ */
+export function outcomeWasSent(payload: unknown): boolean | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const outcome = (payload as Record<string, unknown>).outcome;
+  return typeof outcome === 'string' ? outcome.trim() !== '' : outcome !== undefined && outcome !== null;
+}
+
+/** Attribute keys (last dot segment) that producers commonly use to name who did something outside `actor`. */
+const ACTOR_LIKE_KEY =
+  /^(?:(?:performed|initiated|triggered|requested|started|created|updated|changed|done|run|executed)[_-]?by|(?:actor|user|operator)[_-]?name|username|operator)$/i;
+
+/**
+ * For events without an actor: an attribute that names who did it (`performed_by: "Hourly CRM bookings scheduler"`).
+ * Shown as a hint, never as the actor — the producer did not say so in the envelope.
+ */
+export function actorAttributeHint(attributes: Record<string, string>): { key: string; value: string } | null {
+  const candidates = Object.entries(attributes)
+    .filter(([key, value]) => value.trim() && ACTOR_LIKE_KEY.test(key.split('.').at(-1) ?? key))
+    .sort(([a], [b]) => a.split('.').length - b.split('.').length || a.localeCompare(b));
+  const [key, value] = candidates[0] ?? [];
+  return key && value ? { key, value: value.trim() } : null;
+}
+
+/** The nearest step in the causation chain (root → direct parent) that recorded an actor. */
+export function parentActor(parents: readonly Pick<AuditEvent, 'actor'>[]): NonNullable<AuditEvent['actor']> | null {
+  for (let i = parents.length - 1; i >= 0; i--) {
+    const actor = parents[i]?.actor;
+    if (actor && (actor.id || actor.name)) return actor;
+  }
+  return null;
+}

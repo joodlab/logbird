@@ -180,6 +180,10 @@ model ApiKey {
   createdBy   User?      @relation(fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime   @default(now())
   lastUsedAt  DateTime?
+  /// User agent of the request that last bumped lastUsedAt (≤ 256 chars).
+  lastUsedUserAgent String?
+  /// Rolled keys point at the key they replace; the old key stays valid until revoked.
+  replacesKeyId String?
   revokedAt   DateTime?
 
   @@index([projectId])

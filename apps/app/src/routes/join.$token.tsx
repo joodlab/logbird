@@ -21,6 +21,7 @@ import { type ReactNode, useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { DetailRow, LoadingCard, PublicInviteLayout, StateCard } from '@/components/invite/public-invite';
+import { PendingHint } from '@/components/pending-hint';
 import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { ApiRequestError, errorMessage } from '@/lib/api/errors';
@@ -224,6 +225,12 @@ function JoinLink({ link, me }: { link: InviteLinkPreview; me: MeResponse | null
             Join {ws}
             {accept.isPending ? null : <ArrowRightIcon />}
           </Button>
+          <PendingHint
+            className="text-center [&>span]:justify-center"
+            pending={accept.isPending}
+            slow={`Joining ${ws} and opening its projects…`}
+            slower="This can take a few seconds the first time. Keep this tab open."
+          />
           <p className="text-center text-muted-foreground text-xs">
             Signed in as {me.user.email} ·{' '}
             <button

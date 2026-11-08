@@ -46,13 +46,16 @@ import {
   SunIcon,
   UserIcon,
 } from 'lucide-react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { UserAvatar } from '@/components/account/user-avatar';
 import { BrandMark } from '@/components/brand';
+import { NewProjectDialog } from '@/components/projects/new-project-dialog';
 import { SetupProgress } from '@/components/setup/setup-progress';
 import { meQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { authCall, authClient } from '@/lib/auth-client';
 import { canDo } from '@/lib/permissions';
+import { sortProjectsByActivity } from '@/lib/projects';
 import { signOutFromConsole } from '@/lib/sign-out';
 import { displayName, hasName } from '@/lib/user';
 import { PROJECT_NAV } from './nav';
@@ -174,6 +177,9 @@ function WorkspaceSwitcher({ projectId }: { projectId?: string }) {
   const workspace = me.data?.organizations.find((o) => o.id === me.data?.activeOrganizationId);
   const project = projects.data?.find((p) => p.id === projectId);
   const canCreateProject = canDo(workspace?.role, 'project.create');
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  /** The dialog opens from a menu item that unmounts: return focus to the switcher itself. */
+  const switcherButton = useRef<HTMLButtonElement>(null);
 
   const switchWorkspace = async (organizationId: string) => {
     try {
@@ -190,6 +196,7 @@ function WorkspaceSwitcher({ projectId }: { projectId?: string }) {
       <SidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger
+            ref={switcherButton}
             render={
               <SidebarMenuButton className="h-11 data-popup-open:bg-sidebar-accent" size="lg">
                 <BrandMark className="size-7 shrink-0" />
@@ -204,7 +211,7 @@ function WorkspaceSwitcher({ projectId }: { projectId?: string }) {
           <DropdownMenuContent align="start" className="w-64">
             <DropdownMenuGroup>
               <DropdownMenuLabel className="text-[11px] uppercase tracking-wider">Projects in {workspace?.name}</DropdownMenuLabel>
-              {projects.data?.map((p) => (
+              {sortProjectsByActivity(projects.data ?? []).map((p) => (
                 <DropdownMenuItem key={p.id} onClick={() => navigate({ to: '/p/$projectId', params: { projectId: p.id } })}>
                   <EntityAvatar id={p.id} name={p.name} size="sm" square />
                   <span className="flex-1 truncate">{p.name}</span>
@@ -212,7 +219,7 @@ function WorkspaceSwitcher({ projectId }: { projectId?: string }) {
                 </DropdownMenuItem>
               ))}
               {canCreateProject ? (
-                <DropdownMenuItem onClick={() => navigate({ to: '/onboarding/project' })}>
+                <DropdownMenuItem onClick={() => setNewProjectOpen(true)}>
                   <PlusIcon />
                   New project
                 </DropdownMenuItem>
@@ -245,6 +252,9 @@ function WorkspaceSwitcher({ projectId }: { projectId?: string }) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {canCreateProject ? (
+          <NewProjectDialog finalFocus={switcherButton} onOpenChange={setNewProjectOpen} open={newProjectOpen} workspaceName={workspace?.name} />
+        ) : null}
       </SidebarMenuItem>
     </SidebarMenu>
   );

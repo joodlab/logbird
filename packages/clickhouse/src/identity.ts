@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ClickHouseClient } from './client';
+import { projectMaintenance } from './maintenance-tag';
 import { type EventRow, normalizeEvent } from './normalize';
 import { read } from './queries';
 import { resolveTimestamp } from './timestamp';
@@ -137,7 +138,8 @@ export async function existingEventIdentities(ch: ClickHouseClient, projectId: s
   return found;
 }
 /** Caller holds the exclusive project lock. Keep every surviving raw identity protected. */
-export async function repairEventIndex(ch: ClickHouseClient, projectId: string, ids: string[], stored: Map<string, EventIdentity>) {
+export async function repairEventIndex(client: ClickHouseClient, projectId: string, ids: string[], stored: Map<string, EventIdentity>) {
+  const ch = projectMaintenance(client, projectId);
   const absent = ids.filter((id) => !stored.has(id));
   if (absent.length)
     await ch.command({
