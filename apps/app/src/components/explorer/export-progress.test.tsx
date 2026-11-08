@@ -88,7 +88,7 @@ it('shows the safe server reason when preparation fails', async () => {
   expect(document.body.textContent).toContain('Export failed');
   expect(document.body.textContent).toContain('processing writes');
 });
-it('changes to Downloading on headers, without a waiting notice during a slow body', async () => {
+it('clears the 30-second description after delayed headers, then shows Downloading during a slow body', async () => {
   const id = '9cfb85bf-1c6a-46d8-a8fe-3790d5f72d5d';
   let finish: (blob: Blob) => void = () => undefined;
   const response = new Response('', { headers: { 'X-Logbird-Export-Id': id } });
@@ -98,14 +98,28 @@ it('changes to Downloading on headers, without a waiting notice during a slow bo
         finish = resolve;
       }),
   );
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+  let headers: (response: Response) => void = () => undefined;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          headers = resolve;
+        }),
+    ),
+  );
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:qa-export');
   const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
   const button = await start();
   await settle(1100);
+  expect(document.body.textContent).toContain('waiting for server');
+  expect(document.body.textContent).toContain('up to 30 seconds');
+  act(() => headers(response));
+  await settle();
   expect(document.body.textContent).toContain('Downloading export 9cfb85bf');
   expect(document.body.textContent).not.toContain('waiting for');
+  expect(document.body.textContent).not.toContain('up to 30 seconds');
   act(() => finish(new Blob(['id,timestamp\n'])));
   await settle();
   expect(button.disabled).toBe(false);

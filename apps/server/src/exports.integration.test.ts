@@ -126,7 +126,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     expect(await refusedStatus.json()).toMatchObject({
       state: 'failed',
       reason: 'project_unreadable',
-      description: expect.stringContaining('retention or deletion is incomplete'),
+      description: expect.stringContaining('data maintenance is incomplete'),
     });
     await prisma.retentionRun.delete({ where: { id: incompleteRetention.id } });
     for (const actor of actors) {
@@ -211,6 +211,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     const canceled = await receipts(aborted.headers.get('x-request-id') ?? '');
     expect(canceled.map((r) => r.action).sort()).toEqual(['export.failed', 'export.requested']);
     expect(canceled.find((r) => r.action === 'export.failed').metadata.export).toMatchObject({ reason: 'client_aborted' });
+    expect(canceled.find((r) => r.action === 'export.failed').description).toContain('Canceled after');
     const invalid = await request(owner.cookie, `/api/projects/${projectId}/export?format=jsonl&q=%28`);
     expect(invalid.status).toBe(422);
     expect((await receipts(invalid.headers.get('x-request-id') ?? '')).map((r) => r.action).sort()).toEqual(['export.failed', 'export.requested']);

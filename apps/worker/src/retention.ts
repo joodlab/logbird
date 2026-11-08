@@ -1,5 +1,6 @@
 import { createMaintenanceClickHouseClient, hasExpiredEvents, projectMaintenance, purgeProject, rebuildProjectRollups } from '@logbird/clickhouse';
 import { prisma, pruneIngestReceipts, purgeIngestReceipts, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
+import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './destructive-maintenance';
 import { heartbeatMaintenanceRun } from './project-repair';
 export const clickhouse = createMaintenanceClickHouseClient();
 export async function enforceProjectRetention(projectId: string) {
@@ -16,7 +17,8 @@ export async function enforceProjectRetention(projectId: string) {
         if (!latest) return true;
         // Any unfinished maintenance defeats the no-op; a completed repair rebuilt every rollup.
         const previous = await tx.retentionRun.findFirst({ where: { projectId }, orderBy: { startedAt: 'desc' } });
-        if (latest.retentionDays !== current.retentionDays || (previous && previous.status !== 'completed')) return false;
+        if (latest.exportDeleteStartedAt || latest.retentionDays !== current.retentionDays || (previous && previous.status !== 'completed'))
+          return false;
         await tx.retentionRun.create({
           data: {
             projectId,
@@ -38,11 +40,12 @@ export async function enforceProjectRetention(projectId: string) {
     if (await tx.retentionRun.findFirst({ where: { projectId, status: 'running' } })) return;
     const project = await tx.project.findUnique({ where: { id: projectId } });
     if (!project) return;
-    // A later successful ingest repair subsumes an earlier failed retention's rollup state.
+    // Derived repair completion cannot settle an older raw DELETE: the independent destructive fence survives it.
     const previous = await tx.retentionRun.findFirst({ where: { projectId }, orderBy: { startedAt: 'desc' } });
     const cutoff = new Date(Date.now() - project.retentionDays * 86_400_000);
     const run = await prisma.$transaction(async (db) => {
-      await db.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 }, exportGeneration: { increment: 1 } } });
+      await beginDestructiveMaintenance(projectId, db);
+      await db.project.update({ where: { id: projectId }, data: { maintenanceGeneration: { increment: 1 } } });
       return db.retentionRun.create({
         data: { projectId, retentionDays: project.retentionDays, cutoff, status: 'running', startedAt: new Date(), heartbeatAt: new Date() },
       });
@@ -63,11 +66,13 @@ export async function enforceProjectRetention(projectId: string) {
       await purgeProject(tagged, projectId, cutoff);
       await purgeIngestReceipts(projectId, cutoff);
       if (
+        project.exportDeleteStartedAt ||
         previous?.status === 'failed' ||
         (await prisma.retentionRun.count({ where: { projectId, kind: 'ingest_repair', status: { in: ['running', 'failed'] } } }))
       )
         await rebuildProjectRollups(tagged, projectId);
       if (await hasExpiredEvents(clickhouse, projectId, cutoff)) throw new Error('Retention cutoff invariant failed');
+      await reconcileDestructiveMaintenance(clickhouse, projectId);
       await prisma.retentionRun.updateMany({
         where: { projectId, kind: 'ingest_repair', status: { in: ['running', 'failed'] } },
         data: { status: 'completed', finishedAt: new Date(), error: null },

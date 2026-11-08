@@ -140,7 +140,7 @@ model Project {
   retentionReviewedAt DateTime?
   setupDismissedAt DateTime?
   setupCompletedAt DateTime?
-  /// Durable destructive-maintenance fence (project deletion AND sample removal); reconciliation alone clears it.
+  /// Durable destructive-maintenance fence (retention, project deletion and sample removal); reconciliation alone clears it.
   exportDeleteStartedAt DateTime?
   exportGeneration Int @default(0)
   createdAt      DateTime       @default(now())

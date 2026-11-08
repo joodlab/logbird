@@ -61,6 +61,21 @@ it('refuses an orphaned destructive fence even with exclusive lock ownership', a
   await expect(validateExportMembership('project', '5:0:', 'export')).rejects.toMatchObject({ code: 'export_invalidated' });
   expect(tx.project.update).not.toHaveBeenCalled();
 });
+it('reuses the existing transaction clock for admission and final validation', async () => {
+  await stageExport({
+    id: 'export',
+    userId: 'user',
+    workspaceId: 'workspace',
+    projectId: 'project',
+    stream: 'ws:workspace',
+    requested: { action: 'export.requested' },
+    unknown: { action: 'export.outcome_unknown' },
+  });
+  expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+  tx.$queryRaw.mockClear();
+  await validateExportMembership('project', '1:0:', 'export');
+  expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+});
 it('labels storage outages separately from changed membership and rejects expired leases', async () => {
   prisma.$transaction.mockRejectedValueOnce({ code: 'P1001' });
   await expect(validateExportMembership('project', '1:0:', 'export')).rejects.toMatchObject({ code: 'export_storage_unavailable' });

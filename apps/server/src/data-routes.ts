@@ -248,7 +248,7 @@ export const dataRoutes = new Hono<AppEnv>()
             audit_unavailable: 'audit record not confirmed',
             sql_unavailable: 'SQL mode unavailable',
             membership_changed: 'stored events changed; retry the export',
-            project_unreadable: 'retention or deletion is incomplete; retry after maintenance',
+            project_unreadable: 'data maintenance is incomplete; retry after maintenance',
             storage_unavailable: 'export validation storage unavailable; retry the export',
             project_busy: 'project busy; retry the export',
             idle_timeout: 'download inactive',
@@ -261,7 +261,7 @@ export const dataRoutes = new Hono<AppEnv>()
               ? `Started a ${formatName} export of ${project.name}`
               : action === 'export.completed'
                 ? `Exported ${counts.rows} ${noun} from ${project.name} as ${formatName}`
-                : `${action === 'export.failed' ? 'Failed' : 'Canceled'} after ${counts.rows} ${noun}: ${reasons[counts.reason ?? 'export_error']}. ${formatName} export of ${project.name}`;
+                : `${counts.reason === 'client_aborted' ? 'Canceled' : 'Failed'} after ${counts.rows} ${noun}: ${reasons[counts.reason ?? 'export_error']}. ${formatName} export of ${project.name}`;
           const event: AuditPayload = {
             id: `${exportId}-${action.split('.')[1]}`,
             occurredAt: new Date().toISOString(),
