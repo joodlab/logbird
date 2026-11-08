@@ -71,8 +71,9 @@ temp/
 # local launchers
 shared-local.ps1
 
-# console QA session (apps/app/scripts/qa-shoot.mjs)
+# console QA sessions (apps/app/scripts/qa-shoot.mjs, console-a11y-proof.mjs): Playwright storage state with session cookies
 .qa-state.json
+.qa-a11y-shell.json
 
 # SDK spike: regenerable artifacts (see docs/sdk-generation.md)
 experiments/forge/*.input.json
