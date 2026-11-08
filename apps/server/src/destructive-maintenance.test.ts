@@ -63,3 +63,16 @@ it('periodically warns about fences older than five minutes without expiring or 
       code: 'destructive_work_pending',
     });
 });
+it('does not warn while a young fence is merely lock-busy, but still warns when an old fence cannot reconcile', async () => {
+  vi.useFakeTimers();
+  findMany.mockResolvedValue([
+    { id: 'old', exportDeleteStartedAt: new Date(Date.now() - 360_000) },
+    { id: 'new', exportDeleteStartedAt: new Date() },
+  ]);
+  reconcile.mockRejectedValue(new Error('project lock busy'));
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  loop = startDestructiveMaintenanceReconciler();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(warning).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(warning.mock.calls[0]?.[0])).toMatchObject({ projectId: 'old', code: 'reconciliation_unavailable' });
+});

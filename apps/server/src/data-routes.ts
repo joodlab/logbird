@@ -341,7 +341,7 @@ export const dataRoutes = new Hono<AppEnv>()
               throw new ApiError(
                 503,
                 'export_project_unreadable',
-                'Retention or deletion is incomplete for this project. Retry after maintenance finishes.',
+                'Data maintenance is incomplete for this project. Retry after maintenance finishes.',
               );
           } catch (error) {
             if (error instanceof ApiError && ['export_busy', 'export_project_busy', 'export_project_unreadable'].includes(error.code)) throw error;

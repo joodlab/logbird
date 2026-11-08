@@ -31,9 +31,11 @@ export function startDestructiveMaintenanceReconciler() {
               JSON.stringify({ event: 'maintenance.reconciliation_pending', projectId: project.id, ageSeconds, code: 'destructive_work_pending' }),
             );
         } catch {
-          console.warn(
-            JSON.stringify({ event: 'maintenance.reconciliation_pending', projectId: project.id, ageSeconds, code: 'reconciliation_unavailable' }),
-          );
+          // A busy project lock (e.g. a running retention pass) is normal; alert only on fences past the 5-minute bound.
+          if (ageSeconds >= 300)
+            console.warn(
+              JSON.stringify({ event: 'maintenance.reconciliation_pending', projectId: project.id, ageSeconds, code: 'reconciliation_unavailable' }),
+            );
         }
       }
     })()

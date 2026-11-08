@@ -118,7 +118,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     expect(refused.status).toBe(503);
     expect((await refused.json()).error).toMatchObject({
       code: 'export_project_unreadable',
-      message: expect.stringContaining('Retention or deletion is incomplete'),
+      message: expect.stringContaining('Data maintenance is incomplete'),
     });
     const refusedId = refused.headers.get('X-Logbird-Export-Id');
     const refusedStatus = await request(owner.cookie, `/api/workspace/exports/${refusedId}`);
