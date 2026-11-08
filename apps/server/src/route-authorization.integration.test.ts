@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import { purgeProject } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
 import { expect, it, vi } from 'vitest';
@@ -19,6 +20,11 @@ it('denies anonymous and foreign-project requests through every concrete route; 
   const users: string[] = [];
   const organizations: string[] = [];
   const projects: string[] = [];
+  // Preserve ownership if the external RAM guard kills this process before finally can run.
+  const recordFixture = (ids: Record<string, string>) => {
+    if (process.env.LOGBIRD_AUTHZ_FIXTURE_LEDGER)
+      appendFileSync(process.env.LOGBIRD_AUTHZ_FIXTURE_LEDGER, `${JSON.stringify({ ...ids, prefix: process.env.BULLMQ_PREFIX })}\n`);
+  };
   const marker = `foreign-${randomUUID()}`;
   const eventId = `shared-id-${randomUUID()}`;
   const request = (path: string, method = 'GET', cookie = '', body?: unknown, key?: string) =>
@@ -43,6 +49,7 @@ it('denies anonymous and foreign-project requests through every concrete route; 
     expect(response.status).toBe(200);
     const { user } = await response.json();
     users.push(user.id);
+    recordFixture({ userId: user.id });
     return {
       id: user.id as string,
       cookie: response.headers
@@ -56,8 +63,10 @@ it('denies anonymous and foreign-project requests through every concrete route; 
     for (const name of ['QA Matrix allowed', 'QA Matrix foreign']) {
       const org = await prisma.organization.create({ data: { id: randomUUID(), name, slug: randomUUID(), createdAt: new Date() } });
       organizations.push(org.id);
+      recordFixture({ organizationId: org.id });
       const project = await prisma.project.create({ data: { organizationId: org.id, name, slug: randomUUID() } });
       projects.push(project.id);
+      recordFixture({ projectId: project.id, organizationId: org.id });
     }
     const [allowed, foreign] = projects;
     const [allowedOrganization, foreignOrganization] = organizations;
