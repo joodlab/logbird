@@ -1,0 +1,324 @@
+{
+  "revision": "dd74c7525676b2612759676ca0c1b562b46828e6",
+  "beforeRevision": "8ba30e0994f9489ea404c5a4c40a2e257483749e",
+  "screenshots": [
+    "after-light-1440-menu.png",
+    "after-light-1440-failed-toast.png",
+    "after-light-1440-canceled-activity.png",
+    "after-light-1440-unknown-activity.png",
+    "after-dark-1440-menu.png",
+    "after-dark-1440-failed-toast.png",
+    "after-dark-1440-canceled-activity.png",
+    "after-dark-1440-unknown-activity.png",
+    "after-light-390-menu.png",
+    "after-light-390-failed-toast.png",
+    "after-light-390-canceled-activity.png",
+    "after-light-390-unknown-activity.png",
+    "after-dark-390-menu.png",
+    "after-dark-390-failed-toast.png",
+    "after-dark-390-canceled-activity.png",
+    "after-dark-390-unknown-activity.png"
+  ],
+  "before": [
+    "before-master-light-1440-menu.png",
+    "before-master-dark-1440-menu.png",
+    "before-master-light-390-menu.png",
+    "before-master-dark-390-menu.png"
+  ],
+  "videos": [
+    "light-1440-failure-interactions.webm",
+    "light-390-failure-interactions.webm"
+  ],
+  "expectedFailures": [
+    {
+      "theme": "light",
+      "width": 1440,
+      "status": 422
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "status": 422
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "status": 422
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "status": 422
+    }
+  ],
+  "problems": [],
+  "cleanup": {
+    "clickhouse": {
+      "events": 0,
+      "events_by_minute": 0,
+      "entities": 0,
+      "attribute_keys": 0,
+      "event_ids": 0
+    },
+    "postgres": {
+      "users": 0,
+      "organizations": 0,
+      "projects": 0,
+      "members": 0,
+      "outbox": 0,
+      "leases": 0,
+      "windows": 0,
+      "budgets": 0,
+      "admissions": 0,
+      "receipts": 0
+    },
+    "redisKeys": 0
+  },
+  "auditNamespace": "{logbird-media-exports-r3-b575378d-aa36-4ccd-86cf-15df8d7f02a7}",
+  "fixtureEmail": "qa-fix-exports-r3-d053ac32-cbde-4c87-8e53-df24097f34d7@example.test",
+  "canceled": {
+    "id": "f9fa5219-e5cc-45db-b936-3f52585698f7",
+    "payload": {
+      "id": "f9fa5219-e5cc-45db-b936-3f52585698f7-outcome",
+      "actor": {
+        "id": "6RxqR55m3BazpEBfu4S8MgSvWdmI835O",
+        "name": "QA Export Reviewer",
+        "type": "user"
+      },
+      "action": "export.failed",
+      "context": {
+        "ip": "::ffff:127.0.0.1",
+        "requestId": "9ee3926d-7c6a-4fc3-8189-3d810a4f512d",
+        "userAgent": "node",
+        "operationId": "f9fa5219-e5cc-45db-b936-3f52585698f7"
+      },
+      "outcome": "failure",
+      "targets": [
+        {
+          "id": "cmw72ukjz0000t4yoks1mekw4",
+          "name": "QA Export Storefront",
+          "type": "project"
+        },
+        {
+          "id": "f9fa5219-e5cc-45db-b936-3f52585698f7",
+          "type": "export"
+        }
+      ],
+      "executor": {
+        "id": "api-server",
+        "type": "api"
+      },
+      "metadata": {
+        "export": {
+          "to": "2026-11-08T00:11:35.043Z",
+          "from": "2026-11-07T00:11:35.043Z",
+          "lang": "query",
+          "rows": 36,
+          "bytes": 1261102,
+          "clock": "2026-11-08T00:11:35.043Z",
+          "query": "action:qa.cancel",
+          "format": "jsonl-evidence",
+          "reason": "client_aborted",
+          "exportId": "f9fa5219-e5cc-45db-b936-3f52585698f7",
+          "projectId": "cmw72ukjz0000t4yoks1mekw4",
+          "formatLabel": "Complete (original payloads)",
+          "resolvedQuery": {
+            "sql": "(action = {q0:String})",
+            "params": {
+              "q0": "qa.cancel"
+            }
+          },
+          "schemaVersion": 1,
+          "receivedBefore": "2026-11-08T00:11:35.043Z"
+        }
+      },
+      "occurredAt": "2026-11-08T00:11:35.268Z",
+      "description": "Export f9fa5219: download canceled after 36 events: Complete (original payloads) export of QA Export Storefront"
+    }
+  },
+  "unknown": {
+    "id": "3a8aefcf-1eb3-49d1-acf1-3ed53efd7665",
+    "payload": {
+      "id": "3a8aefcf-1eb3-49d1-acf1-3ed53efd7665-outcome",
+      "actor": {
+        "id": "6RxqR55m3BazpEBfu4S8MgSvWdmI835O",
+        "name": "QA Export Reviewer",
+        "type": "user"
+      },
+      "action": "export.outcome_unknown",
+      "context": {
+        "ip": "::ffff:127.0.0.1",
+        "requestId": "d7f2aae1-e072-41a8-8b29-0405fa0ed567",
+        "userAgent": "node",
+        "operationId": "3a8aefcf-1eb3-49d1-acf1-3ed53efd7665"
+      },
+      "outcome": "unknown",
+      "targets": [
+        {
+          "id": "cmw72ukjz0000t4yoks1mekw4",
+          "name": "QA Export Storefront",
+          "type": "project"
+        },
+        {
+          "id": "3a8aefcf-1eb3-49d1-acf1-3ed53efd7665",
+          "type": "export"
+        }
+      ],
+      "executor": {
+        "id": "api-server",
+        "type": "api"
+      },
+      "metadata": {
+        "export": {
+          "to": null,
+          "from": null,
+          "lang": "query",
+          "rows": null,
+          "bytes": null,
+          "clock": "2026-11-08T00:11:35.781Z",
+          "query": "action:qa.cancel",
+          "format": "jsonl-evidence",
+          "reason": "outcome_not_confirmed",
+          "exportId": "3a8aefcf-1eb3-49d1-acf1-3ed53efd7665",
+          "projectId": "cmw72ukjz0000t4yoks1mekw4",
+          "formatLabel": "Complete (original payloads)",
+          "resolvedQuery": null,
+          "schemaVersion": 1,
+          "receivedBefore": "2026-11-08T00:11:35.781Z"
+        }
+      },
+      "occurredAt": "2026-11-08T00:11:35.781Z",
+      "description": "Export 3a8aefcf: Outcome unknown for Complete (original payloads) export of QA Export Storefront (producer outcome not confirmed)"
+    }
+  },
+  "beforeNote": "Actual master frontend 8ba30e0; only dev fs.allow extended for junctioned dependencies; captured in preceding owned stack session.",
+  "export": {
+    "id": "87259a09-35c2-47de-addf-d8e64dfab9ce",
+    "bytes": 18141,
+    "sha256": "b2e24b341042778718f86f6e63dedcf0cf2ad830fe346472295a7d554ae7302d",
+    "rows": 3,
+    "matched": true
+  },
+  "fixture": {
+    "userId": "6RxqR55m3BazpEBfu4S8MgSvWdmI835O",
+    "orgId": "f4IIkMg5u6SXHq5z1o4Nr3kSCSHmmjBV",
+    "projectId": "cmw72ukjz0000t4yoks1mekw4"
+  },
+  "artifacts": [
+    {
+      "file": "after-light-1440-menu.png",
+      "bytes": 128507,
+      "sha256": "1a4d89ec53188789280913603e158b9bffc583b16754678b4d979e750836c445"
+    },
+    {
+      "file": "after-light-1440-failed-toast.png",
+      "bytes": 107394,
+      "sha256": "2f6b3db34964e426edca9e93a878cb7ed4da88a156c694cf98db634d5801dcee"
+    },
+    {
+      "file": "after-light-1440-canceled-activity.png",
+      "bytes": 100484,
+      "sha256": "6548874554c0d287d6229d726710b1c2bdce8432ed59a443edd421d1d83fb6dd"
+    },
+    {
+      "file": "after-light-1440-unknown-activity.png",
+      "bytes": 91691,
+      "sha256": "e989799f6894431cf968377a615cdc86de2fc1dfa6bd69e6d8116f57710377bb"
+    },
+    {
+      "file": "after-dark-1440-menu.png",
+      "bytes": 138626,
+      "sha256": "0978ad812a78501b78163a1b905e7914e0537331ca1657ee2fb8781f480ee867"
+    },
+    {
+      "file": "after-dark-1440-failed-toast.png",
+      "bytes": 116256,
+      "sha256": "08c9cef980e588323b5ef13e229771bfdb66f71a6c1748dad508240cda064857"
+    },
+    {
+      "file": "after-dark-1440-canceled-activity.png",
+      "bytes": 121037,
+      "sha256": "ed995713cfaa187c1c0e19236b462ecc490250771f88fc6c6e8fe441f90f7c4c"
+    },
+    {
+      "file": "after-dark-1440-unknown-activity.png",
+      "bytes": 102341,
+      "sha256": "1c95ba7bc33ea280e32b4ee1db4549975374954a32959ffa60ded0d9fc2489c8"
+    },
+    {
+      "file": "after-light-390-menu.png",
+      "bytes": 45993,
+      "sha256": "4e1168fa2eb793696c4b46f2fd761ddec46012041cd79fb7f07547f66d03dafc"
+    },
+    {
+      "file": "after-light-390-failed-toast.png",
+      "bytes": 35250,
+      "sha256": "82422b93c3edd2a0cfbcedc5e4dc3da1c236652646e8fe6b2b70b2072c7c07d5"
+    },
+    {
+      "file": "after-light-390-canceled-activity.png",
+      "bytes": 58074,
+      "sha256": "e3f29771d38d8815c520c81ff668467942ba6d3744d0612c016c9ce4e283e1a7"
+    },
+    {
+      "file": "after-light-390-unknown-activity.png",
+      "bytes": 42727,
+      "sha256": "ac88abb7a828e57c22a0133e0710ef6e954c1d46e2f33405cd370cbe21cc8846"
+    },
+    {
+      "file": "after-dark-390-menu.png",
+      "bytes": 49652,
+      "sha256": "e07661e3e615501e6c7da01fee1730dc113a9036b88fd153303274128e3f68e0"
+    },
+    {
+      "file": "after-dark-390-failed-toast.png",
+      "bytes": 38367,
+      "sha256": "9a0a6b42219948b31a6da5b0cbb74ea60d81e7fcf9257597c65837b169e7a71f"
+    },
+    {
+      "file": "after-dark-390-canceled-activity.png",
+      "bytes": 71556,
+      "sha256": "8b76d5b84537e5a1525f8a7149dd05b1b932c487da36d13b42a0ab7a7ae31480"
+    },
+    {
+      "file": "after-dark-390-unknown-activity.png",
+      "bytes": 49298,
+      "sha256": "0de52ee070d04c5b91ad9e5cc378ea58b9f741bcff7d473818ccdcd4e00c4cf2"
+    },
+    {
+      "file": "before-master-light-1440-menu.png",
+      "bytes": 111783,
+      "sha256": "af6fb30e4c0ac659270ba274169facdee7e3aaa69f850a8794bcd0949d1f1e7e"
+    },
+    {
+      "file": "before-master-dark-1440-menu.png",
+      "bytes": 121540,
+      "sha256": "5a549b812e17672d4cd0fae27ebd0d32168e9ef7e6f09ebbbe5df597c680327b"
+    },
+    {
+      "file": "before-master-light-390-menu.png",
+      "bytes": 37133,
+      "sha256": "6c34d4f4ddc6e9446f2ba7023a30f8100c6c80a6081cd263f41ee6e84a29f949"
+    },
+    {
+      "file": "before-master-dark-390-menu.png",
+      "bytes": 40352,
+      "sha256": "20826e804e077c9d91751246fae209b5c616cc44d8d1b4a991de47d37c300c0a"
+    },
+    {
+      "file": "light-1440-failure-interactions.webm",
+      "bytes": 1733358,
+      "sha256": "222e352d1346005272e9957e97d02dbc6e91319ab6f4c6b28e4c548cff453889"
+    },
+    {
+      "file": "light-390-failure-interactions.webm",
+      "bytes": 530039,
+      "sha256": "19e589a03cd961ca24390b53d899140dc7c20febf5fd637ce43174fad41b9b17"
+    },
+    {
+      "file": "proof-export.jsonl",
+      "bytes": 18141,
+      "sha256": "b2e24b341042778718f86f6e63dedcf0cf2ad830fe346472295a7d554ae7302d"
+    }
+  ]
+}

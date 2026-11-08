@@ -53,7 +53,7 @@ export const routes = {
     histogram: { method: 'GET', path: '/api/projects/:projectId/histogram', auth: 'session' },
     facets: { method: 'GET', path: '/api/projects/:projectId/facets', auth: 'session' },
     operation: { method: 'GET', path: '/api/projects/:projectId/operations/:operationId', auth: 'session' },
-    export: { method: 'GET', path: '/api/projects/:projectId/export', auth: 'session' }, // ?format=csv|jsonl + range query, streamed
+    export: { method: 'GET', path: '/api/projects/:projectId/export', auth: 'session' }, // exportQuerySchema; streamed
     testEvent: { method: 'POST', path: '/api/projects/:projectId/test-event', auth: 'session' },
   },
   overview: { method: 'GET', path: '/api/projects/:projectId/overview', auth: 'session' },
@@ -71,6 +71,7 @@ export const routes = {
   },
   /** Logbird's own management actions (project/key/retention/member changes), dogfooded into ClickHouse. */
   workspaceActivity: { method: 'GET', path: '/api/workspace/activity', auth: 'session' },
+  exportStatus: { method: 'GET', path: '/api/workspace/exports/:exportId', auth: 'session' },
   /** Workspace setup summary + resumable onboarding target (WorkspaceSetup, ./setup.ts). */
   workspaceSetup: { method: 'GET', path: '/api/workspace/setup', auth: 'session' },
   /** Onboarding workspace-name pre-fill (WorkspaceNameSuggestion, ./api.ts). */

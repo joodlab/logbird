@@ -82,7 +82,7 @@ export async function withProjectLock<T>(
       }
       if (data) break;
       if (Date.now() >= deadline) throw new ProjectBusyError();
-      await sleep(delay);
+      await sleep(Math.min(delay, Math.max(0, deadline - Date.now())));
     }
     // Database calls use short, independent statements. The callback is NOT a transaction.
     return await work(prisma);
@@ -104,6 +104,18 @@ export async function withProjectLock<T>(
   }
 }
 export const closeProjectLocks = () => projectLocks.end();
+
+/** Replaces the existing project lookup: acceptance follows every active fence, with no extra round trip.
+ * The caller holds the shared project lock, so an export cannot register a new fence until INSERT settles.
+ */
+export async function findIngestProject(db: import('./generated/client').Prisma.TransactionClient, projectId: string) {
+  const rows = await db.$queryRaw<{ id: string; organizationId: string; acceptedAt: Date }[]>`
+    SELECT p.id,p."organizationId",greatest(clock_timestamp(),
+      (SELECT (max("receivedBefore") AT TIME ZONE 'UTC') + interval '1 millisecond' FROM "ExportLease"
+       WHERE "projectId"=p.id AND "expiresAt">(clock_timestamp() AT TIME ZONE 'UTC'))) AS "acceptedAt"
+    FROM "Project" p WHERE p.id=${projectId}`;
+  return rows[0] ?? null;
+}
 
 /** Call only while holding the project lock. Old clients/runs fall back to startedAt. */
 export const RETENTION_LEASE_MS = 10 * 60_000;

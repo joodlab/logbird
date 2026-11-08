@@ -1,0 +1,8 @@
+{
+  "minDiskGiB": 106.54627227783203,
+  "peakTreeGiB": 1.6922111511230469,
+  "date": "2026-11-07T23:14:23.3335728+01:00",
+  "reason": "completed",
+  "minFreeGiB": 24.134941101074219,
+  "observedProcesses": 16
+}

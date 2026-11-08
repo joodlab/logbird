@@ -1,0 +1,137 @@
+{
+  "beforeExportRevision": "021b66ccbf14d203fc220bef05c3bc10e635050c",
+  "revision": "0da268d29fb9e7e85915d939dbdfeab97bd43e61",
+  "screenshots": [
+    "after-light-1440-export-menu.png",
+    "after-light-1440-export-activity.png",
+    "after-dark-1440-export-menu.png",
+    "after-dark-1440-export-activity.png",
+    "after-light-390-export-menu.png",
+    "after-light-390-export-activity.png",
+    "after-dark-390-export-menu.png",
+    "after-dark-390-export-activity.png"
+  ],
+  "before": [
+    "before-light-desktop-export-menu.png",
+    "before-light-mobile-export-menu.png",
+    "before-dark-desktop-export-menu.png",
+    "before-dark-mobile-export-menu.png"
+  ],
+  "videos": ["light-1440-interactions.webm", "light-390-interactions.webm"],
+  "problems": [],
+  "cleanup": {
+    "clickhouse": {
+      "events": 0,
+      "events_by_minute": 0,
+      "entities": 0,
+      "attribute_keys": 0,
+      "event_ids": 0
+    },
+    "postgresProjects": 0,
+    "postgres": {
+      "admissions": 0,
+      "privateBudgets": 0,
+      "users": 0,
+      "organizations": 0,
+      "projects": 0,
+      "members": 0,
+      "outbox": 0,
+      "windows": 0,
+      "budgets": 0,
+      "receipts": 0
+    }
+  },
+  "export": {
+    "id": "3727d867-7c65-4f71-ba1e-4e4f6c6da5ed",
+    "headerId": "3727d867-7c65-4f71-ba1e-4e4f6c6da5ed",
+    "schema": "jsonl-evidence/1",
+    "filename": "logbird-events-3727d867-7c65-4f71-ba1e-4e4f6c6da5ed-evidence.jsonl",
+    "sha256": "d69ef5f38bec02ec11c52dbf679a6d964a46016f6026ee10383ad09e447f6f1d",
+    "bytes": 18477,
+    "rows": 3,
+    "matched": true
+  },
+  "fixture": {
+    "userId": "oGaXNNEnT9PZXTGPDgdjHK7XcsH1WgTt",
+    "orgId": "um23kq4NZd8BsfKUwAI8D7lgspclUnrE",
+    "projectId": "cmw6ylp7z0000j0yooulmzi8v"
+  },
+  "auditNamespace": "{logbird-media-exports-d13433ad-5625-45b4-942b-8eb99027f569}",
+  "artifacts": [
+    {
+      "file": "after-light-1440-export-menu.png",
+      "bytes": 128166,
+      "sha256": "6351579a5fbee295152640b4ed78eda431b4ed131196885c14aa7752f5652cf4"
+    },
+    {
+      "file": "after-light-1440-export-activity.png",
+      "bytes": 101496,
+      "sha256": "cb19cff6a758582960c52da0e846024553584fb124ec716f4105264a29f2c552"
+    },
+    {
+      "file": "after-dark-1440-export-menu.png",
+      "bytes": 138353,
+      "sha256": "b2d6a76065b15f30ef000de781661eceab641618071b139e436ae471ea234c83"
+    },
+    {
+      "file": "after-dark-1440-export-activity.png",
+      "bytes": 112638,
+      "sha256": "2524d69eba27f873525cd2a2faf2b430085bd7a1e20a9c6c8ba2a40f74073c46"
+    },
+    {
+      "file": "after-light-390-export-menu.png",
+      "bytes": 42640,
+      "sha256": "308516aac79d0844d57b55031e3e69d715c5f8fe46edbbd419dfd17126dfd728"
+    },
+    {
+      "file": "after-light-390-export-activity.png",
+      "bytes": 48547,
+      "sha256": "2d6d60e9e2ee3f0cd471919c060f968d514a5691472e8b88e7efeeea094bef06"
+    },
+    {
+      "file": "after-dark-390-export-menu.png",
+      "bytes": 46230,
+      "sha256": "6267e56b806d912aaf7c28b837c0d3d23a5e19a1ec841e34454628d40c637068"
+    },
+    {
+      "file": "after-dark-390-export-activity.png",
+      "bytes": 54689,
+      "sha256": "ca497dac58211304a0f4e91c618b3d3220b4d468e9da0f4954520da6b47eb11c"
+    },
+    {
+      "file": "before-light-desktop-export-menu.png",
+      "bytes": 104078,
+      "sha256": "d70230ec85eefad291b78d8355329f83a8e9c33a91487ace57220fe2948c67c9"
+    },
+    {
+      "file": "before-light-mobile-export-menu.png",
+      "bytes": 30736,
+      "sha256": "611b8b64f261d28723e381de0cab6d53c59fce600ead9be8540dcd87a575138e"
+    },
+    {
+      "file": "before-dark-desktop-export-menu.png",
+      "bytes": 112630,
+      "sha256": "d11816d2f9d9cea694a0793a5c2984b7864847c7b09f262cd4744a2bbcd75be2"
+    },
+    {
+      "file": "before-dark-mobile-export-menu.png",
+      "bytes": 33512,
+      "sha256": "a4afb7793e327ff414867988d56a1107575755d808e73732f2230fea15adf34f"
+    },
+    {
+      "file": "light-1440-interactions.webm",
+      "bytes": 861946,
+      "sha256": "946844b2e22e58e321243826c18a8e6b0aa9e580c56fa34e7cd9e12aafa0a6d7"
+    },
+    {
+      "file": "light-390-interactions.webm",
+      "bytes": 283479,
+      "sha256": "a9665f705bcf82c1ed1cb6ab4edd8ff7bba929577c237df8a2fb5aea3368eed1"
+    },
+    {
+      "file": "proof-export.jsonl",
+      "bytes": 18477,
+      "sha256": "d69ef5f38bec02ec11c52dbf679a6d964a46016f6026ee10383ad09e447f6f1d"
+    }
+  ]
+}

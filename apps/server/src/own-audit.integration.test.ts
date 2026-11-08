@@ -217,6 +217,9 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
       expect(row.targets[0].name).toMatch(/@example.test$/); // Stored member address is an allowed display fallback.
       expect(JSON.stringify(row)).not.toContain('000000');
     }
+    const exported = await request(owner.cookie, `${path}/export?format=jsonl`);
+    expect(exported.status).toBe(200);
+    await exported.text();
     // Delete only the owned fictional project, then reconstruct all key evidence from the surviving workspace stream.
     expect((await request(owner.cookie, `${path}?confirm=${project.slug}`, 'DELETE')).status).toBe(204);
     project = undefined;
@@ -245,7 +248,7 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
       }
     }
     console.log(
-      'SECURITY own-audit: owner/admin/member failed OTP + lockout rate limit, actual sign-out/replay and successful sign-in; owner/admin rename before/after; read/ingest/initial key evidence survives project deletion; retention-only single receipt and disjoint mixed receipt; all seven activity categories verified for all roles.',
+      'SECURITY own-audit: owner/admin/member failed OTP + lockout rate limit, actual sign-out/replay and successful sign-in; owner/admin rename before/after; read/ingest/initial key evidence survives project deletion; retention-only single receipt and disjoint mixed receipt; all eight activity categories verified for all roles.',
     );
   } finally {
     if (project) await request(ownerCookie, `/api/projects/${project.id}?confirm=${project.slug}`, 'DELETE');

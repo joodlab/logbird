@@ -256,7 +256,9 @@ it('rejects NUL and split Unicode ids individually, storing healthy siblings', a
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(1);
 });
 it('search, detail, export and cursor pages agree for newly immutable writes', async () => {
-  for (let i = 0; i < 3; i++) expect((await f.post({ ...original, id: `page-${i}`, action: `action.${i}` })).status).toBe(202);
+  // Tie the pagination fixture to its queried clock, independently of the real PG first-acceptance clock.
+  for (let i = 0; i < 3; i++)
+    expect((await f.post({ ...original, id: `page-${i}`, action: `action.${i}`, occurredAt: new Date().toISOString() })).status).toBe(202);
   const q = { from: new Date(Date.now() - 60_000).toISOString(), to: new Date(Date.now() + 60_000).toISOString(), limit: 1 };
   for (const order of ['asc', 'desc'] as const) {
     const ids: string[] = [];

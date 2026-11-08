@@ -30,7 +30,7 @@ listEntities(ch, projectId, q: EntityListQuery): Promise<EntityListResponse>
 entityProfile(ch, projectId, kind: EntityKind, id, q: RangeQuery): Promise<EntityProfile | null>
 listFields(ch, projectId, q: RangeQuery): Promise<FieldsResponse>
 operationEvents(ch, projectId, operationId): Promise<AuditEvent[]>
-exportEvents(ch, projectId, q: RangeQuery & { format: 'csv' | 'jsonl' }): AsyncGenerator<string>
+exportEvents(ch, projectId, q: ExportQuery): AsyncGenerator<string> // csv | jsonl | jsonl-evidence; docs/exports.md
 projectStats(ch, projectIds: string[]): Promise<Record<string, {lastEventAt: string | null; eventsLast24h: number}>>
 purgeProject(ch, projectId, before?: Date): Promise<void>
 ```

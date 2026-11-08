@@ -128,8 +128,8 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       await ch.close();
     }
   },
-  // Includes cutoff repair, five-table project purges, and final fixture cleanup on real services.
-  120_000,
+  // Two body purges plus two finally purges (~20 s/events deletion on the shared 2-slot pool); measured 96.6 s with passing assertions.
+  180_000,
 );
 
 it.runIf(process.env.CLICKHOUSE_URL)(

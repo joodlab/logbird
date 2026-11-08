@@ -36,6 +36,7 @@ export const consoleMatrix = [
   ['POST', '/api/projects/:projectId/views', 'member'],
   ['DELETE', '/api/projects/:projectId/views/:viewId', 'view-author'],
   ['GET', '/api/workspace/activity', 'workspace'],
+  ['GET', '/api/workspace/exports/:exportId', 'workspace'],
   ['GET', '/api/workspace/setup', 'workspace'],
   ['GET', '/api/onboarding/workspace-name', 'self'],
   ['GET', '/api/invitations/:invitationId', 'invitation-secret'],

@@ -58,8 +58,8 @@ function WorkspaceActivity() {
     <div className="flex min-h-[28rem] flex-1 flex-col">
       <div className="flex flex-col gap-3 border-b px-4 py-4 sm:px-6">
         <p className="max-w-3xl text-muted-foreground text-sm">
-          Logbird records its own management actions — projects, keys, retention, members, views, invite links, sign-ins and sessions — into this
-          stream. It is the same event model you send, shown with the same components.{' '}
+          Logbird records its own management actions — projects, keys, retention, members, views, invite links, sign-ins, sessions and exports — into
+          this stream. It is the same event model you send, shown with the same components.{' '}
           <a
             className="underline underline-offset-4"
             href="https://github.com/joodlab/logbird/blob/master/docs/workspace-audit.md"
@@ -103,7 +103,9 @@ function WorkspaceActivity() {
             ))}
           </fieldset>
           <span className="text-muted-foreground text-xs sm:ms-auto">
-            {activity.data ? `${formatNumber(activity.data.pages[0]?.total ?? 0)} actions · ${rangeLabel(range)}` : null}
+            {activity.data
+              ? `${formatNumber(activity.data.pages[0]?.total ?? 0)} ${(activity.data.pages[0]?.total ?? 0) === 1 ? 'action' : 'actions'} · ${rangeLabel(range)}`
+              : null}
           </span>
         </div>
       </div>

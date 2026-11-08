@@ -12,6 +12,7 @@ import { SAMPLE_DATA_EVENTS, SAMPLE_DATA_SOURCE, SAMPLE_DATA_SOURCES } from '@lo
 import { confirmIngestReceipts, prisma } from '@logbird/database';
 import { rebuildProjectReadModel } from '@logbird/worker/project-repair';
 import { maintenanceClickhouse } from './clickhouse';
+import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './destructive-maintenance';
 import { ApiError } from './errors';
 import { insertImmutableEvents } from './immutable-ingest';
 
@@ -22,6 +23,7 @@ export async function removeSampleData(projectId: string) {
   const expired = new Date(Date.now() - INGEST_CLAIM_LEASE_MS - ASYNC_INSERT_FLUSH_BOUND_MS);
   if (await prisma.ingestReceipt.findFirst({ where: { projectId, confirmedAt: null, claimedAt: { gte: expired } } }))
     throw new ApiError(503, 'ingest_pending', 'An event write must settle before replacing sample data. Retry shortly.');
+  await beginDestructiveMaintenance(projectId);
   await clickhouse.command({ query: 'SYSTEM FLUSH ASYNC INSERT QUEUE', clickhouse_settings: { max_execution_time: 30 } });
   const removed = await read<{ event_id: string }>(
     clickhouse,
@@ -46,6 +48,7 @@ export async function removeSampleData(projectId: string) {
     if (absent.length) await prisma.ingestReceipt.deleteMany({ where: { projectId, eventId: { in: absent } } });
   }
   await rebuildProjectReadModel(clickhouse, projectId);
+  await reconcileDestructiveMaintenance(projectId);
 }
 export async function loadSampleData(projectId: string) {
   await removeSampleData(projectId);

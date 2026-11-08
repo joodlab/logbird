@@ -1,0 +1,12 @@
+{
+  "remainingRecorded": 0,
+  "lockReleaseAt": "2026-11-08T18:46:30.6947139+01:00",
+  "earlierConfirmedKilled": [
+    8408, 65872, 39304, 76808, 37004, 22088, 71208, 9176, 80484
+  ],
+  "stoppedAt": "2026-11-08T18:46:30.6703814+01:00",
+  "observedProcesses": 39,
+  "processReferences": [],
+  "killedRoots": [62392, 83724],
+  "listeners": 0
+}

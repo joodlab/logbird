@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./destructive-maintenance": "./src/destructive-maintenance.ts",
     "./ingest-recovery": "./src/ingest-recovery.ts",
     "./project-repair": "./src/project-repair.ts",
     "./queue": "./src/queue.ts",

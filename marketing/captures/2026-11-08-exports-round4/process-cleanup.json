@@ -1,0 +1,10 @@
+{
+  "remainingWorktreeReferences": 0,
+  "remainingOwnedProcesses": 0,
+  "remainingListeners": 0,
+  "workerStarted": false,
+  "stoppedAt": "2026-11-08T03:11:01.2862627+01:00",
+  "killedFinalRoots": [45456, 69444],
+  "stoppedBaselineRoot": 48540,
+  "checkedProcessIdentities": 19
+}
