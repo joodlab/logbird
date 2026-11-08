@@ -111,7 +111,13 @@ for (const path of ['/about/', '/no-such-page']) {
   if (response.status !== 405 || /<script|<html/i.test(body)) {
     problems.push(`POST ${path}: ${response.status} with ${body.length} bytes, expected an empty 405`);
   }
-  rows.push({ path: `POST ${path}`, status: response.status, inline: '-', uncovered: '-', url: `allow: ${response.headers.get('allow') ?? '-'}, ${body.length} bytes` });
+  rows.push({
+    path: `POST ${path}`,
+    status: response.status,
+    inline: '-',
+    uncovered: '-',
+    url: `allow: ${response.headers.get('allow') ?? '-'}, ${body.length} bytes`,
+  });
 }
 console.table(rows);
 if (problems.length) {
