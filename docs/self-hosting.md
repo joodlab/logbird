@@ -738,7 +738,7 @@ user. A database rename requires every other connection to be closed; the script
 lists blockers and refuses rather than terminating them.
 
 1. Stop ingress, console, server, workers and every other database client, including
-   development worktrees. Drain in-flight jobs. Take PostgreSQL `pg_dump` plus globals,
+   development instances. Drain in-flight jobs. Take PostgreSQL `pg_dump` plus globals,
    a ClickHouse backup including access metadata, and a Redis snapshot; verify restore
    into a separate instance. Preserve `.env`, passwords and the migration journal.
 2. From the repository root with the old `.env` still in place:
