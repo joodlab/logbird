@@ -2,13 +2,17 @@
  * Wording that depends on whether the repository is public (WEB_GITHUB_PUBLIC). scripts/check-source-state.ts scans
  * every prerendered page with these lists after a build, and the tests check the data modules in both states.
  *
- * Phrases are matched case-insensitively on the page's visible text (visibleText(): tags dropped, entities decoded,
- * whitespace collapsed, plus the text-bearing attributes such as meta descriptions and alt text), so a claim split by
- * markup (`We have <b>released</b> Logbird`), a lowercase or qualified variant can't slip past an exact-phrase check.
+ * Phrases are matched case-insensitively on the page's visible text, one text unit at a time (textSegments()): a
+ * paragraph, list item, heading, cell, link, button or attribute value is its own unit, so a match can't run from one
+ * into the next, while inline markup within a sentence (`We have <b>released</b> Logbird`) doesn't split it. Entities
+ * are decoded and typographic apostrophes and quotes normalized first.
  *
  * Quotation marks don't exempt anything: a quoted first-party claim still counts. The only exemption is text a
  * component explicitly marks as a third-party quotation with `data-third-party-quote`: comparison pages mark what they
  * quote from another product's docs (the Retraced comparison quotes its Kubernetes page: "Coming soon").
+ *
+ * Labels aren't the only way a repository link leaks: repositoryLinks() finds any `href` to WEB_GITHUB_URL, which a
+ * private build must not contain.
  */
 export interface SourcePhrase {
   /** What the build report prints. */
@@ -65,7 +69,20 @@ export const SOURCE_OPEN_PHRASES: readonly SourcePhrase[] = [
   },
 ];
 
-const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', mdash: '—', ndash: '–' };
+const ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+  mdash: '—',
+  ndash: '–',
+  lsquo: '‘',
+  rsquo: '’',
+  ldquo: '“',
+  rdquo: '”',
+};
 /** HTML entities decoded (React escapes `'` as `&#x27;`), so phrases match what a reader sees. */
 export const decodeEntities = (html: string) =>
   html.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
@@ -76,30 +93,88 @@ export const decodeEntities = (html: string) =>
     return ENTITIES[entity.toLowerCase()] ?? match;
   });
 
+/** Entities decoded, typographic apostrophes and quotes made plain (`isn’t` → `isn't`), whitespace collapsed. */
+const normalize = (text: string) =>
+  decodeEntities(text)
+    .replace(/[‘’‚‛ʼ′]/g, "'")
+    .replace(/[“”„‟″]/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 // An element carrying the third-party marker, with its content (comparison quotes are flat text).
 const THIRD_PARTY_QUOTE = new RegExp(String.raw`<([a-z][\w-]*)\b[^>]*\s${THIRD_PARTY_QUOTE_ATTRIBUTE}\b[^>]*>[\s\S]*?<\/\1\s*>`, 'gi');
 // Attributes whose values readers (or search results) see: meta descriptions, alt text, titles, labels.
 const TEXT_ATTRIBUTES = /\s(?:content|alt|title|aria-label|placeholder)\s*=\s*"([^"]*)"/gi;
-const collapse = (text: string) => decodeEntities(text).replace(/\s+/g, ' ').trim();
+/**
+ * Phrasing elements that stay inside a sentence. Every other tag (block elements, links, buttons, list items, cells,
+ * scripts, line breaks) ends a text unit: a link label or a placeholder is its own unit.
+ */
+const INLINE = new Set([
+  'abbr',
+  'b',
+  'bdi',
+  'bdo',
+  'cite',
+  'code',
+  'data',
+  'dfn',
+  'em',
+  'i',
+  'kbd',
+  'mark',
+  'q',
+  's',
+  'small',
+  'span',
+  'strong',
+  'sub',
+  'sup',
+  'time',
+  'u',
+  'var',
+]);
+const BREAK = '\u001F';
 
 /**
- * What a reader sees of `html`: marked third-party quotations removed, tags (and comments) replaced by spaces,
- * entities decoded and whitespace collapsed; then the text-bearing attribute values, one per line, so a phrase can't
- * run from one into another. Script contents (JSON-LD) stay, as text. Plain text passes through unchanged.
+ * The text units a reader sees in `html`: marked third-party quotations removed; each run of text between non-inline
+ * tags, then each text-bearing attribute value. Script contents (JSON-LD) are units of their own. Plain text is one unit.
  */
-export function visibleText(html: string) {
-  const unquoted = html.replace(THIRD_PARTY_QUOTE, ' ');
-  const attributes = [...unquoted.matchAll(TEXT_ATTRIBUTES)].map((match) => collapse(match[1] ?? ''));
-  const text = collapse(unquoted.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]*>/g, ' '));
-  return [text, ...attributes].filter(Boolean).join('\n');
+export function textSegments(html: string): string[] {
+  const unquoted = html.replace(THIRD_PARTY_QUOTE, BREAK);
+  const attributes = [...unquoted.matchAll(TEXT_ATTRIBUTES)].map((match) => normalize(match[1] ?? ''));
+  const text = unquoted
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<![^>]*>/g, BREAK)
+    .replace(/<\/?([a-z][\w-]*)\b[^>]*>/gi, (_tag, name: string) => (INLINE.has(name.toLowerCase()) ? ' ' : BREAK));
+  return [...text.split(BREAK).map(normalize), ...attributes].filter(Boolean);
 }
 
-/** Every phrase from `phrases` that occurs in the visible text of `html` (markup or plain text), with its count. */
+/** Every phrase from `phrases` that occurs in a text unit of `html` (markup or plain text), with its count. */
 export function findSourcePhrases(html: string, phrases: readonly SourcePhrase[]): { label: string; count: number }[] {
-  // One segment per line (the text, then each attribute value), so no match spans two of them.
-  const segments = visibleText(html).split('\n');
+  const segments = textSegments(html);
   return phrases.flatMap(({ label, pattern }) => {
     const count = segments.reduce((sum, segment) => sum + [...segment.matchAll(new RegExp(pattern.source, pattern.flags))].length, 0);
     return count ? [{ label, count }] : [];
   });
+}
+
+/** Repository URL in a comparable form: lowercase, no trailing slash or `.git`. */
+const canonicalUrl = (url: string) =>
+  url
+    .trim()
+    .toLowerCase()
+    .replace(/\.git$/, '')
+    .replace(/\/+$/, '');
+/**
+ * Every `href` in `html` that points at the repository (the URL itself, or anything beneath it), whatever its label.
+ * A private build must have none (scripts/check-source-state.ts).
+ */
+export function repositoryLinks(html: string, repositoryUrl: string): string[] {
+  const repository = canonicalUrl(repositoryUrl);
+  return [...html.matchAll(/\shref\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)]
+    .map((match) => decodeEntities(match[1] ?? match[2] ?? ''))
+    .filter((href) => {
+      const target = canonicalUrl(href.replace(/[?#].*$/, ''));
+      return target === repository || target.startsWith(`${repository}/`);
+    });
 }

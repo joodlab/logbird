@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { inlineScripts, scriptHash, scriptSources, writeCsp } from '../lib/csp';
 import { decidePage } from '../lib/page-response';
+import { securityHeaders } from '../lib/security-headers';
 
 /**
  * The Node server's page middleware (server/static-pages.ts), called as Nitro calls it, against a fictional build in a
@@ -19,9 +20,14 @@ const files: Record<string, string> = {
   '404.html': page('Not found'),
   'assets/app.js': 'console.log("app")',
   'robots.txt': 'User-agent: *\nDisallow: /\n',
+  // Written after Nitro listed its assets (compress-html, scripts/csp.ts): never served as files.
+  'about/index.html.br': 'not really brotli',
+  'sitemap.xml.gz': 'not really gzip',
 };
 
 type Handler = (event: unknown) => Promise<unknown>;
+const handlerOf = (module: { default: Handler | { handler: Handler } }) =>
+  typeof module.default === 'function' ? module.default : module.default.handler;
 let output: string;
 let handler: Handler;
 
@@ -35,8 +41,7 @@ beforeAll(async () => {
   // The middleware finds .output from Nitro's entry point, as in `node .output/server/index.mjs`.
   (globalThis as { __nitro_main__?: string }).__nitro_main__ = pathToFileURL(join(output, 'server', 'index.mjs')).href;
   vi.resetModules();
-  const module = (await import('../../server/static-pages')) as { default: Handler | { handler: Handler } };
-  handler = typeof module.default === 'function' ? module.default : module.default.handler;
+  handler = handlerOf((await import('../../server/static-pages')) as { default: Handler | { handler: Handler } });
 });
 afterAll(async () => {
   delete (globalThis as { __nitro_main__?: string }).__nitro_main__;
@@ -50,7 +55,10 @@ async function request(path: string, method = 'GET') {
   return { body, status: event.res.status, headers: event.res.headers };
 }
 
-/** The response is the given HTML file, with a policy covering every inline script in it and no 'unsafe-inline'. */
+/**
+ * The response is the given HTML file, with a policy covering every inline script in it, no 'unsafe-inline', and the
+ * other security headers.
+ */
 async function expectPage(path: string, file: string, status: number) {
   const response = await request(path);
   const html = await readFile(join(output, 'public', file), 'utf8');
@@ -63,10 +71,16 @@ async function expectPage(path: string, file: string, status: number) {
     expect(sources, `${path}: ${script.slice(0, 30)}`).toContain(`'${scriptHash(script)}'`);
   }
   expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8');
+  // Set by the middleware itself, not left to the routeRules middleware's order.
+  for (const [name, value] of Object.entries(securityHeaders)) {
+    if (name !== 'Content-Security-Policy') {
+      expect(response.headers.get(name), `${path}: ${name}`).toBe(value);
+    }
+  }
 }
 
 describe('Node server pages', () => {
-  it('serves each prerendered page with its own policy', async () => {
+  it('serves each prerendered page with its own policy and the security headers', async () => {
     await expectPage('/', 'index.html', 200);
     await expectPage('/about', 'about/index.html', 200);
     await expectPage('/about/', 'about/index.html', 200);
@@ -74,7 +88,7 @@ describe('Node server pages', () => {
     await expectPage('/404.html', '404.html', 200);
   });
 
-  it('answers every other path with the 404 page and its policy, dotted or not', async () => {
+  it('answers every other path with the 404 page and its policy', async () => {
     for (const path of [
       '/no-such-page',
       '/foo.bar',
@@ -86,22 +100,52 @@ describe('Node server pages', () => {
       '/%E0%A4%A',
       '/..%2F..%2Fpackage.json',
       '/about/index.html/x',
+      // Escaped separators and traversal that would resolve back to a real page or asset: Nitro looks these up
+      // verbatim and would hand them to the renderer.
+      '/x%2f..%2fabout%2findex.html',
+      '/x%2F..%2Fassets%2Fapp.js',
+      '/assets%2fapp.js',
+      '/assets%5capp.js',
+      '/x/%2e%2e%2fabout',
+      '//assets/app.js',
+      '/assets//app.js',
+      '/assets/app.js%00',
+      // API look-alikes that Nitro doesn't route to /api/**.
+      '/api',
+      '/api%2fwaitlist',
+      '/API/waitlist',
+      '/%61pi/waitlist',
+      // Post-build files.
+      '/_headers',
+      '/about/index.html.br',
+      '/sitemap.xml.gz',
     ]) {
       await expectPage(path, '404.html', 404);
     }
   });
 
-  it('leaves existing public files, the waitlist API and other methods to Nitro', async () => {
+  it('leaves canonical build-time public files and /api/* to Nitro', async () => {
     for (const [path, method] of [
       ['/assets/app.js', 'GET'],
+      ['/assets/app.js', 'HEAD'],
       ['/robots.txt', 'GET'],
       ['/api/waitlist', 'GET'],
       ['/api/waitlist', 'POST'],
-      ['/about', 'POST'],
+      ['/api/no-such-endpoint', 'GET'],
+      ['/api/no-such-endpoint', 'DELETE'],
     ] as const) {
       const response = await request(path, method);
       expect(response.body, `${method} ${path}`).toBeUndefined();
       expect(response.headers.get('content-security-policy'), `${method} ${path}`).toBeNull();
+    }
+  });
+
+  it('answers other methods on pages with 405, never the renderer', async () => {
+    for (const method of ['POST', 'PUT', 'DELETE', 'OPTIONS']) {
+      const response = (await request('/about', method)).body as Response;
+      expect(response.status, method).toBe(405);
+      expect(response.headers.get('allow')).toBe('GET, HEAD');
+      expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     }
   });
 
@@ -114,17 +158,35 @@ describe('Node server pages', () => {
 });
 
 describe('decidePage', () => {
-  const manifest = { pages: { '/': { file: 'index.html', scriptHashes: ['sha256-a='] }, '/404': { file: '404.html', scriptHashes: ['sha256-b='] } } };
-  it('never returns pass for an unknown GET path, only for public files and the API', () => {
-    const none = () => false;
+  const manifest = {
+    pages: { '/': { file: 'index.html', scriptHashes: ['sha256-a='] }, '/404': { file: '404.html', scriptHashes: ['sha256-b='] } },
+  };
+  const none = () => false;
+  const all = () => true;
+  it('passes only canonical public files and the raw /api/ prefix', () => {
     expect(decidePage({ method: 'GET', pathname: '/x.y', manifest, isPublicFile: none })).toMatchObject({
       kind: 'page',
       status: 404,
       file: '404.html',
     });
-    expect(decidePage({ method: 'GET', pathname: '/x.y', manifest, isPublicFile: () => true })).toEqual({ kind: 'pass' });
-    expect(decidePage({ method: 'GET', pathname: '/api', manifest, isPublicFile: none })).toEqual({ kind: 'pass' });
+    expect(decidePage({ method: 'GET', pathname: '/x.y', manifest, isPublicFile: all })).toEqual({ kind: 'pass' });
+    expect(decidePage({ method: 'GET', pathname: '/x%2Fy.js', manifest, isPublicFile: all })).toMatchObject({ status: 404 });
+    expect(decidePage({ method: 'GET', pathname: '/x/./y.js', manifest, isPublicFile: all })).toMatchObject({ status: 404 });
+    expect(decidePage({ method: 'GET', pathname: '/x.js.br', manifest, isPublicFile: all })).toMatchObject({ status: 404 });
+    expect(decidePage({ method: 'GET', pathname: '/api/x', manifest, isPublicFile: none })).toEqual({ kind: 'pass' });
+    expect(decidePage({ method: 'GET', pathname: '/api', manifest, isPublicFile: none })).toMatchObject({ status: 404 });
     expect(decidePage({ method: 'GET', pathname: '/apix', manifest, isPublicFile: none })).toMatchObject({ status: 404 });
+    expect(decidePage({ method: 'POST', pathname: '/', manifest, isPublicFile: none })).toEqual({ kind: 'method-not-allowed' });
     expect(() => decidePage({ method: 'GET', pathname: '/', manifest: { pages: {} }, isPublicFile: none })).toThrow('no /404 page');
+  });
+});
+
+describe('API catch-all', () => {
+  it('answers unknown /api/* paths with JSON, never HTML', async () => {
+    const apiHandler = handlerOf((await import('../../server/api-not-found')) as unknown as { default: Handler | { handler: Handler } });
+    const response = (await apiHandler({})) as Response;
+    expect(response.status).toBe(404);
+    expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8');
+    expect(await response.json()).toEqual({ error: { code: 'not_found', message: 'No such API endpoint.' } });
   });
 });

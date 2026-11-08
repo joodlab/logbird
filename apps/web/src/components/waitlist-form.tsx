@@ -53,12 +53,15 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
       setCode(status);
     }
   }, [status]);
-  useEffect(() => {
-    const radio = formRef.current?.querySelector<HTMLInputElement>(`input[name="interest"][value="${CSS.escape(interest)}"]`);
+  // Selects the URL's interest; also after a successful send, when form.reset() would fall back to "cloud".
+  const selectInterest = (form: HTMLFormElement | null) => {
+    const radio = form?.querySelector<HTMLInputElement>(`input[name="interest"][value="${CSS.escape(interest)}"]`);
     if (radio) {
       radio.checked = true;
     }
-  }, [interest]);
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selectInterest only reads `interest`, listed here
+  useEffect(() => selectInterest(formRef.current), [interest]);
   const [sending, setSending] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -77,6 +80,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
       if (response.ok) {
         setCode('ok');
         form.reset();
+        selectInterest(form);
       } else {
         setCode(body.error?.code ?? 'error');
         setErrors(body.error?.details ?? {});

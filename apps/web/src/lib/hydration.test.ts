@@ -31,9 +31,21 @@ describe('prerendered files hydrate at every URL that serves them', () => {
   });
 
   it('renders an unknown path identically to the prerendered /404 page', async () => {
-    const [notFound, ...unknown] = await renderPages(['/404', '/no-such-page', '/blog/no-such-post.md', '/compare/nothing']);
+    const [notFound, ...unknown] = await renderPages([
+      '/404',
+      '/no-such-page',
+      '/blog/no-such-post.md',
+      '/compare/nothing',
+      // Beneath a matched leaf: the router keeps the /product (or /compare/bemi) match and flags the root.
+      '/product/no-such-page',
+      '/compare/bemi/no-such-page',
+      '/developers/x/y',
+      '/legal/privacy/x',
+    ]);
     expect(notFound?.html).toContain('No event at this address.');
+    expect(notFound?.html).not.toContain('aria-current="page"');
     for (const page of unknown) {
+      expect(page.html, page.path).not.toContain('aria-current="page"');
       expect(markup(page.html), page.path).toBe(markup(notFound?.html ?? ''));
     }
   });

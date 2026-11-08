@@ -4,13 +4,14 @@ import { dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineEventHandler } from 'nitro/h3';
 import { decidePage, type PageManifest } from '../src/lib/page-response';
-import { PAGE_CACHE } from '../src/lib/security-headers';
+import { PAGE_CACHE, securityHeaders } from '../src/lib/security-headers';
 
 /**
  * Node server only (vite.config.ts registers it for node-server builds, never in dev or on Cloudflare). Answers every
- * GET/HEAD the way Cloudflare's static assets do (src/lib/page-response.ts): the prerendered page with its own hashed
- * Content-Security-Policy from `.output/csp.json`, an existing public file through Nitro, the waitlist API through
- * Nitro, and 404.html (status 404, the 404 page's policy) for every other path, dotted or not.
+ * request the way Cloudflare's static assets do (src/lib/page-response.ts): the prerendered page with its own hashed
+ * Content-Security-Policy from `.output/csp.json` and the other security headers, a canonical build-time public file
+ * through Nitro, /api/* through Nitro (JSON only), and 404.html (status 404, the 404 page's policy) for every other
+ * path: unknown, dotted, escaped, traversing or post-build.
  *
  * Nitro's own static handler can't serve the pages: its asset list is fixed before TanStack Start prerenders, so the
  * server would render each page again per request, and every render carries a fresh hydration timestamp that no
@@ -66,6 +67,9 @@ export default defineEventHandler(async (event) => {
   if (decision.kind === 'pass') {
     return;
   }
+  if (decision.kind === 'method-not-allowed') {
+    return new Response(null, { status: 405, headers: { ...securityHeaders, Allow: 'GET, HEAD' } });
+  }
   let file = resolve(publicDir, decision.file);
   const accepts = event.req.headers.get('accept-encoding') ?? '';
   let encoding: string | undefined;
@@ -80,6 +84,11 @@ export default defineEventHandler(async (event) => {
     }
   }
   event.res.status = decision.status;
+  // Every security header, set here rather than relying on the routeRules middleware's order; the page's own policy
+  // replaces the catch-all CSP.
+  for (const [name, value] of Object.entries(securityHeaders)) {
+    event.res.headers.set(name, value);
+  }
   event.res.headers.set('Content-Security-Policy', decision.policy);
   event.res.headers.set('Content-Type', 'text/html; charset=utf-8');
   event.res.headers.set('Cache-Control', PAGE_CACHE);

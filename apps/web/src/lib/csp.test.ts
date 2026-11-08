@@ -108,6 +108,16 @@ describe('build output', () => {
     await expect(writeCsp(join(output, 'missing'))).rejects.toThrow();
   });
 
+  it('writes nothing when the check fails, and removes a stale policy', async () => {
+    await writeCsp(output);
+    // 40 distinct inline scripts make the page's _headers line longer than Cloudflare's 2,000 characters.
+    const scripts = Array.from({ length: 40 }, (_, index) => `<script>window.s${index}=${index}</script>`).join('');
+    await writeFile(join(output, 'public', 'about/index.html'), `<!DOCTYPE html><html><head>${scripts}</head><body>About</body></html>`);
+    await expect(writeCsp(output)).rejects.toThrow(/2000|2,000|character line/);
+    await expect(readFile(join(output, 'csp.json'), 'utf8')).rejects.toThrow();
+    await expect(readFile(join(output, 'public', '_headers'), 'utf8')).rejects.toThrow();
+  });
+
   it('matches the deploy configuration it assumes', async () => {
     // cloudflarePath() follows auto-trailing-slash, and the catch-all policy relies on 404.html for unknown paths.
     const wrangler = (await readFile('wrangler.jsonc', 'utf8')).replace(/^\s*\/\/.*$/gm, '');

@@ -39,12 +39,16 @@ function ThemeSwitch() {
 const navPages = siteMap.filter((page) => page.inNav && page.ready);
 
 /**
- * True on a not-found page (no route below the root matched). Links there match exactly, so none is current: otherwise
- * `/compare/x` would mark Compare (and "All comparisons") active, while the 404.html it is served, and hydrates, has
- * no active link, which is a hydration mismatch.
+ * True on a not-found page: the router flagged a match as not found. That flag sits on the root even when a fuzzy leaf
+ * still matches (`/product/x` keeps the /product match), so the leaf's identity can't tell. Links there match nothing,
+ * so none is current: otherwise `/product/x` would mark Product active, while the 404.html it is served, and hydrates,
+ * has no active link, which is a hydration mismatch.
  */
 function useNotFound() {
-  return useRouterState({ select: (state) => state.matches.at(-1)?.routeId === rootRouteId });
+  return useRouterState({
+    select: (state) =>
+      state.matches.some((match) => match._notFound === true || match.status === 'notFound') || state.matches.at(-1)?.routeId === rootRouteId,
+  });
 }
 
 function HomeLink() {

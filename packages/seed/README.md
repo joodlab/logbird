@@ -32,8 +32,14 @@ for relative console ranges. IDs depend on project/seed, timestamps also depend 
   diffusion rather than chance, so even a few hundred events contain each of them.
   The import spike and provider outage last one day, or 5% of a shorter window.
 
-`pnpm demo` passes `--profile joodcms` and no `--until`, so its output is unchanged;
-`pnpm demo --profile neutral --until now` opts in to both.
+`pnpm demo` passes `--profile joodcms` and no `--until`, so its output is unchanged.
+`pnpm demo --profile neutral --until now` changes only the events: neutral source and
+integration names, spread over the recent window. The demo still creates the `Jood`
+organisation and the `JoodCMS` and `Ledger demo` projects, and the project name is part
+of every operation ID (`JoodCMS-s42-op…`), so the console's project switcher and
+operation IDs still say JoodCMS. For public screenshots, seed a project with a neutral
+name instead (`pnpm seed --sink direct --project-id <id> --until now`, which defaults
+to `Hotel demo`).
 
 Reset calls the existing `purgeProject` with exactly the supplied project ID,
 awaits deletion of events and its derived aggregates, then inserts bounded

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { ASSET_CACHE, contentSecurityPolicy, MEDIA_CACHE, securityHeaders } from './security-headers';
 
 /**
@@ -225,24 +225,34 @@ export async function verifyCsp(publicDir: string, manifest: CspManifest, header
   return problems;
 }
 
-/** Writes the manifest and `_headers` for a finished build in `outputDir` (`.output`), verifies them, and summarises. */
+/**
+ * Builds the manifest and `_headers` for a finished build in `outputDir` (`.output`), verifies them against the final
+ * HTML, and only then writes them. A failed check leaves no policy behind: it also removes a stale one from an earlier
+ * build, so neither the Node server nor a deploy can pick it up. Returns a summary.
+ */
 export async function writeCsp(outputDir: string) {
   const publicDir = resolve(outputDir, 'public');
-  const manifest = await buildCspManifest(publicDir);
+  const manifestFile = resolve(outputDir, CSP_MANIFEST_FILE);
+  const headersPath = resolve(publicDir, '_headers');
+  const fail = async (message: string) => {
+    await Promise.all([rm(manifestFile, { force: true }), rm(headersPath, { force: true })]);
+    throw new Error(message);
+  };
+  const manifest = await buildCspManifest(publicDir).catch((error: unknown) => fail(error instanceof Error ? error.message : String(error)));
   const headers = headersFile(manifest);
-  await writeFile(resolve(outputDir, CSP_MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
-  await writeFile(resolve(publicDir, '_headers'), headers);
   const problems = await verifyCsp(publicDir, manifest, headers);
   if (problems.length) {
-    throw new Error(`csp: the policy doesn't cover the built pages:\n${problems.join('\n')}`);
+    await fail(`csp: the policy doesn't cover the built pages:\n${problems.join('\n')}`);
   }
+  await writeFile(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeFile(headersPath, headers);
   const hashes = new Set(Object.values(manifest.pages).flatMap((page) => page.scriptHashes));
   return {
     pages: Object.keys(manifest.pages).length,
     hashes: hashes.size,
     rules: parseHeadersFile(headers).length,
     longestLine: Math.max(...headers.split('\n').map((line) => line.length)),
-    manifestFile: resolve(outputDir, CSP_MANIFEST_FILE),
-    headersFile: resolve(dirname(publicDir), 'public', '_headers'),
+    manifestFile,
+    headersFile: headersPath,
   };
 }

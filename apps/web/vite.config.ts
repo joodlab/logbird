@@ -37,6 +37,8 @@ export default defineConfig(({ mode, command }) => {
         preset,
         handlers: [
           { route: '/api/waitlist', handler: './server/waitlist.ts' },
+          // Any other /api/* path: a JSON 404, never an on-demand page.
+          { route: '/api/**', handler: './server/api-not-found.ts' },
           // The Node server serves the prerendered pages with their hashed CSP (Cloudflare does this with _headers).
           ...(command === 'build' && preset === 'node-server' ? [{ route: '/**', middleware: true, handler: './server/static-pages.ts' }] : []),
         ],
