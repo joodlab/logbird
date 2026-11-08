@@ -1,8 +1,8 @@
 {
-  "run": "oow6z",
-  "startedAt": "2026-11-08T10:23:00.347Z",
-  "owner": "qa-fix-backlogs-oow6z-1@example.test",
-  "member": "qa-fix-backlogs-oow6z-2@example.test",
+  "run": "r89xu",
+  "startedAt": "2026-11-08T11:34:03.858Z",
+  "owner": "qa-fix-backlogs-r89xu-1@example.test",
+  "member": "qa-fix-backlogs-r89xu-2@example.test",
   "checks": {
     "OWNER-15 no pre-fill when the domain already has workspaces (example.test)": {
       "ok": true,
@@ -22,9 +22,9 @@
     "OPS-19 a fresh browser lands on the most active project, not the one that got the latest event": {
       "ok": true,
       "detail": {
-        "landed": "cmw7op25d0000u8yooy106pmn",
-        "pms": "cmw7op25d0000u8yooy106pmn",
-        "latest": "cmw7op2lv0003u8yoiuse0haf"
+        "landed": "cmw7r8fxo000068yox6ka7t42",
+        "pms": "cmw7r8fxo000068yox6ka7t42",
+        "latest": "cmw7r8gjn000368yo39ro0zb2"
       }
     },
     "OPS-20 members see no \"Finish setup\" in the sidebar": {
@@ -34,6 +34,12 @@
       "ok": true
     },
     "OPS-20 owners still see the setup checklist": {
+      "ok": true
+    },
+    "OPS-17 one click saves; the toast offers Undo": {
+      "ok": true
+    },
+    "OPS-17 Undo removes the view again": {
       "ok": true
     },
     "OPS-17 one click saves the view with the hotel name": {
@@ -60,7 +66,7 @@
     },
     "OPS-18 the copied link reopens the view": {
       "ok": true,
-      "detail": "http://localhost:4600/p/cmw7op25d0000u8yooy106pmn/events?q=tenant%3Abiz_lantern&range=7d&view=cmw7opagr0006u8yoxejqr1qw"
+      "detail": "http://localhost:4600/p/cmw7r8fxo000068yox6ka7t42/events?q=tenant%3Abiz_lantern&range=7d&view=cmw7r8ord000768yos3bgpg0c"
     },
     "OPS-18 the open-view banner has \"Copy link\"": {
       "ok": true
@@ -82,7 +88,16 @@
     "OWNER-10 Escape asks \"Close without copying?\" and keeps the secret": {
       "ok": true
     },
+    "OWNER-10 the secret dialog does not scroll sideways (desktop)": {
+      "ok": true
+    },
+    "OWNER-10 the secret is masked in media": {
+      "ok": true
+    },
     "OWNER-10 after copying, Escape closes normally": {
+      "ok": true
+    },
+    "OWNER-11 after a roll, focus lands on the old key \"Revoke old key\" button": {
       "ok": true
     },
     "OWNER-11 old and new keys both work during the hand-over": {
@@ -105,21 +120,42 @@
       "ok": true,
       "detail": {
         "status": 204,
-        "ms": 297
+        "ms": 366
       }
     },
     "OWNER-08 a project with data still deletes (204) and explained the wait": {
       "ok": true,
       "detail": {
         "status": 204,
-        "ms": 16889
+        "ms": 29603
       }
     },
+    "ops17-18-views phone-light: no sideways overflow": {
+      "ok": true
+    },
+    "owner11-keys phone-light: no sideways overflow": {
+      "ok": true
+    },
+    "ops17-18-views phone-dark: no sideways overflow": {
+      "ok": true
+    },
+    "owner11-keys phone-dark: no sideways overflow": {
+      "ok": true
+    },
+    "OWNER-10 the secret dialog does not scroll sideways (390 px)": {
+      "ok": true
+    },
+    "OWNER-10 \"Close anyway\" is reachable on a phone": {
+      "ok": true
+    },
+    "OWNER-16 closing the dialog returns focus to \"New project\"": {
+      "ok": true
+    },
     "OWNER-15 an unused company domain is pre-filled and selected": {
-      "ok": false,
+      "ok": true,
       "detail": {
         "prefilled": "Lantern Hotels",
-        "selected": 0
+        "selected": 14
       }
     },
     "cleanup: QA projects deleted": {
@@ -127,46 +163,14 @@
     }
   },
   "timings": {
-    "emptyProjectDeleteMs": 297,
-    "projectWithDataDeleteMs": 16889
+    "emptyProjectDeleteMs": 366,
+    "projectWithDataDeleteMs": 29603
   },
-  "problems": [
-    "[http 404] GET /api/projects/cmw7opm500008u8yoh1i4gqiy",
-    "[error] http://localhost:4600/p/cmw7opm500008u8yoh1i4gqiy/settings/danger Failed to load resource: the server responded with a status of 404 (Not Found)",
-    "[http 404] GET /api/projects/cmw7opm500008u8yoh1i4gqiy/setup",
-    "[error] http://localhost:4600/ Failed to load resource: the server responded with a status of 404 (Not Found)",
-    "[http 404] GET /api/projects/cmw7opm500008u8yoh1i4gqiy/views",
-    "[http 404] GET /api/projects/cmw7opotd000au8yokb7rmzp9",
-    "[error] http://localhost:4600/p/cmw7opotd000au8yokb7rmzp9/settings/danger Failed to load resource: the server responded with a status of 404 (Not Found)",
-    "[http 404] GET /api/projects/cmw7opotd000au8yokb7rmzp9/setup",
-    "[http 404] GET /api/projects/cmw7opotd000au8yokb7rmzp9/views",
-    "[http 404] GET /api/projects/cmw7op25d0000u8yooy106pmn/overview?from=2026-11-07T10%3A26%3A13.000Z&to=2026-11-08T10%3A26%3A13.000Z",
-    "[error] http://localhost:4600/p/cmw7op25d0000u8yooy106pmn Failed to load resource: the server responded with a status of 404 (Not Found)",
-    "[http 404] GET /api/projects/cmw7op25d0000u8yooy106pmn/setup"
-  ],
-  "finishedAt": "2026-11-08T10:26:46.819Z",
-  "recheck": {
-    "OWNER-15 an unused company domain is pre-filled and selected": {
-      "note": "First measurement in the full run raced the selection (selected 0) although the value was pre-filled; the pre-fill now focuses and selects explicitly. Re-checked against the same stack after the fix (scripts/console-backlogs-proof.mjs OWNER-15 step, run on its own).",
-      "results": [
-        {
-          "variant": "desktop-dark",
-          "prefilled": "Lantern Hotels",
-          "selected": 14,
-          "slugLine": 0
-        },
-        {
-          "variant": "phone-light",
-          "prefilled": "Lantern Hotels",
-          "selected": 14,
-          "slugLine": 0
-        }
-      ],
-      "ok": true
-    }
-  },
+  "problems": [],
+  "finishedAt": "2026-11-08T11:37:51.980Z",
   "expectedErrors": {
-    "count": 46,
+    "count": 44,
     "why": "OPS-21 page deliberately runs an unterminated quoted query; the API answers 422 invalid_query and the explorer shows the plain-language message. Not console noise."
-  }
+  },
+  "notes": "Round 2 run after merging #62 (d829ab1): secrets masked in all media; member tab closed before cleanup; delete flow re-run after the 404 hardening."
 }
