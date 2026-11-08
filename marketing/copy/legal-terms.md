@@ -35,8 +35,7 @@ path: /legal/terms
   - **The waitlist:** joining it creates no contract, no reservation and no promise of price, date or availability.
   - **No warranty for site content:** docs and comparisons are provided as is. Comparison pages state the date each
     fact was checked.
-  - **Trademarks:** Logbird, لوغبيرد and the bird mark are the publisher's (filings pending counsel's clearance,
-    `docs/brand.md` §8). Third-party product names are used only to identify those products.
+  - **Trademarks:** Logbird, لوغبيرد and the bird mark are the publisher's (see `docs/brand.md` for public brand guidance). Third-party product names are used only to identify those products.
   - **Liability limits and governing law:** for counsel to set, given where the publisher is established.
   - **Changes to the terms**, with a "last updated" date.
   - **Contact:** a legal contact address (owner to provide; there is no default mailbox, and the domain isn't bought

@@ -1,12 +1,12 @@
 # Cloud readiness evidence ledger
 
-Reviewed baseline: `2bce2fa`, 2026-11-07. This is a source review and test plan until
+Planning baseline: 2026-11-07. This is a source review and test plan until
 dated runtime evidence is recorded below. "Fail" means a cloud launch gate remains
 open; it does not imply a reproduced exploit. No production deployment is claimed.
 
 | Gate | Status | Evidence / remaining proof |
 | --- | --- | --- |
-| Every `/api` and `/v1` route inventoried | Static pass | [PR #48](https://github.com/joodlab/logbird/pull/48), head `31f622a`: 40 concrete routes and 65 auth capabilities; 15 registry/policy tests pass; behavioral auth coverage remains pending |
+| Every `/api` and `/v1` route inventoried | Static pass | [PR #48](https://github.com/joodlab/logbird/pull/48): 40 concrete routes and 65 auth capabilities; 15 registry/policy tests pass; behavioral auth coverage remains pending |
 | Cross-project reads, roles and key scopes | Pending | Matrix integration test prepared; runtime not yet run; existing `requireProjectAccess`, `requireApiKey`, mutation ACL and SQL row-policy suite inspected |
 | ClickHouse defense in depth | Partial | Restricted SQL account has policies on all four tables; query-language endpoints use main client and parameterized project filters; compare per-tenant users below |
 | No free-form SQL | Source pass; runtime pending | Only guarded boolean expressions in console; public routes reject SQL; AST allowlist and statement-template checks inspected |
@@ -19,7 +19,7 @@ open; it does not imply a reproduced exploit. No production deployment is claime
 | Service observability | Partial | Structured HTTP/worker logs and live/readiness probes exist; metrics endpoint and measured alerting evidence missing |
 | Backups and disaster recovery | Pending | Deployment docs describe backups; restore rehearsal and provider receipts not supplied |
 | Hosting manifests and status page | Pending | Operations design/manifests tracked separately; no cloud provisioned |
-| 10M fictional one-project load | Pending | Requires exclusive `logbird-stack` and `heavy` slots, enough RAM/disk and cleanup through project deletion |
+| 10M fictional one-project load | Pending | Requires an isolated load-test environment, sufficient memory/disk capacity and cleanup through project deletion |
 
 ## Isolation decision
 
@@ -56,10 +56,10 @@ wall-clock throughput and the exact server/worker revision. Direct ClickHouse
 insertion is not ingest-throughput evidence.
 
 Before/after record ClickHouse free disk, active part bytes, table row counts and
-container memory; sample peak process/container RAM and C: free disk throughout.
-Keep at least 40 GiB free disk and do not begin below 8 GiB free RAM. Hold both
-resource locks for the complete loading/measurement/cleanup window. Never reset
-shared data or stop another thread's process.
+container memory; sample peak process/container memory and free disk throughout.
+Set memory and disk budgets for the loading, measurement and cleanup window.
+Run against isolated fixtures, preserve neighboring data and avoid disrupting
+other workloads.
 
 At 10M stored events, measure at least 30 complete HTTP responses per read case,
 report p50/p95/p99 with sample count, warm-up, errors, range, concurrency and cache
@@ -82,13 +82,11 @@ incomplete cleanup explicitly and retain fixture identifiers privately for recov
 - Counts-only orphan inventory, without identifiers or content.
 - Load report with p95 numbers, errors, actual row count and cleanup receipt.
 - Focused ready PR links, issues with acceptance criteria and remaining decisions.
-- Peak measured RAM/disk and processes/worktrees/artifacts retained or cleaned.
+- Peak measured memory/disk and test processes/artifacts retained or cleaned.
 
-## Current static evidence
+## Validation requirements
 
-PR #48 static stage: `pnpm install --frozen-lockfile`, Prisma generation,
-`pnpm --filter @logbird/server typecheck`, and `pnpm check` passed. Biome reports
-76 existing warnings. The registry/policy suite has 15 passing tests; it loads the
-real Hono registry with limiter/queue mocks and does not establish service behavior.
-The integration cases are prepared. The shared stack and RAM resource hold prevent
-service execution at this stage. Full server/repository tests and builds are pending.
+Run the route-policy tests, server typecheck and static checks before service
+acceptance. Tests with mocked queues or limiters establish source-level behavior
+only. Execute the authorization matrix, service integration tests and load
+protocol in an isolated test environment; record skipped checks as unverified.

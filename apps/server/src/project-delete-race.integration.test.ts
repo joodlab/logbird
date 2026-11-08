@@ -7,7 +7,7 @@ import { clickhouse, maintenanceClickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 
 /**
- * Sol round 2 (PR #109): an async INSERT that is still queued in ClickHouse after its ingest call ended ambiguously
+ * An async INSERT that is still queued in ClickHouse after its ingest call ended ambiguously
  * must not survive a project delete — neither on the empty-project fast path nor on the full purge. Real Postgres,
  * ClickHouse and Mailpit, in process (no listeners), fictional fixture removed afterwards.
  */

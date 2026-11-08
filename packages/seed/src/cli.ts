@@ -32,7 +32,7 @@ const { values } = parseArgs({
 });
 if (!(values.profile in SEED_PROFILES)) throw new Error(`profile must be one of ${Object.keys(SEED_PROFILES).join(', ')}`);
 const profile = values.profile as SeedProfile;
-// The project name ends up in every operation ID, so the neutral profile doesn't default to the JoodCMS name.
+// The project name appears in every operation ID; choose a label matching the profile.
 const project = values.project ?? (profile === 'joodcms' ? 'JoodCMS' : 'Hotel demo');
 // --until now (or an ISO time) spreads the events over the most recent --days, ending then, with the full mix.
 const until = values.until === undefined ? undefined : values.until === 'now' ? new Date() : new Date(values.until);

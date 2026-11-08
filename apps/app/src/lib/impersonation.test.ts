@@ -56,7 +56,7 @@ describe('who did it', () => {
     expect(withWhoFilter('impersonator:(support_1 OR support_2)', 'self')).toBe('-impersonator:*');
   });
 
-  it('takes a unary NOT with the group it removes (round 5)', () => {
+  it('takes a unary NOT with the group it removes', () => {
     const authored = 'NOT impersonator:(support_1 OR support_2) action:booking.modified';
     expect(whoFilter(authored)).toBe('all');
     expect(withWhoFilter(authored, 'self')).toBe('action:booking.modified -impersonator:*');

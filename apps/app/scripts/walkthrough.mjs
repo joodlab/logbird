@@ -228,7 +228,7 @@ await qb('query bar: focus shows recent queries, saved views and top fields', as
           body: JSON.stringify({
             name: `Failed CRM syncs (walkthrough ${new Date().toISOString().slice(11, 19)})`,
             description: null,
-            state: { q: 'outcome:failure action:business-crm.*', range: '7d' },
+            state: { q: 'outcome:failure action:crm.*', range: '7d' },
           }),
         })
       ).json(),
@@ -344,8 +344,8 @@ await qb('query bar: SQL suggestions (operators, values, attribute keys, signatu
   await shot('qb-18-sql-attribute-by-name');
   await page.keyboard.press('Tab');
   await page.keyboard.press('Tab');
-  await expectOption('business-crm');
-  await page.keyboard.type('crm', { delay: 70 });
+  await expectOption('guest-sync');
+  await page.keyboard.type('guest', { delay: 70 });
   await page.keyboard.press('Tab');
   await page.keyboard.type(' ', { delay: 70 });
   await expectOption('AND');
@@ -357,7 +357,7 @@ await qb('query bar: SQL suggestions (operators, values, attribute keys, signatu
   await typeQuery('timestamp > ');
   await expectOption('INTERVAL 7 DAY');
   await shot('qb-21-sql-time');
-  await typeQuery("job_attempt >= 2 AND attributes['metadata.queue'] = 'business-crm'", 15);
+  await typeQuery("job_attempt >= 2 AND attributes['metadata.queue'] = 'guest-sync'", 15);
   await run();
   await shot('qb-22-sql-results');
 });
@@ -369,7 +369,7 @@ await qb('query bar: rejected SQL (subquery)', async () => {
 });
 
 await qb('query bar: save + restore a SQL view', async () => {
-  await typeQuery("job_attempt >= 2 AND attributes['metadata.queue'] = 'business-crm'", 15);
+  await typeQuery("job_attempt >= 2 AND attributes['metadata.queue'] = 'guest-sync'", 15);
   await run();
   await page.getByRole('button', { name: /save view/i }).click();
   const name = `CRM retries (SQL) ${new Date().toISOString().slice(11, 19)}`;
@@ -462,9 +462,9 @@ await qb('query bar: investigation from empty using only suggestions (Query, the
     await press('Tab', 900); // outcome:failure — operators lead after a complete term
     await keys('jobn');
     await press('Tab');
-    await want('crm:sync:bookings');
+    await want('hospitality:sync:bookings');
     await keys('book');
-    await press('Tab', 800); // metadata.jobName:"crm:sync:bookings" (quoted: the value has colons)
+    await press('Tab', 800); // metadata.jobName:"hospitality:sync:bookings" (quoted: the value has colons)
     await keys('rawd');
     await want('Rawda Suites');
     await press('Tab', 800); // tenant:biz_2
@@ -479,7 +479,7 @@ await qb('query bar: investigation from empty using only suggestions (Query, the
     await press('ArrowDown');
     await press('Tab', 900);
     const q = await field().inputValue();
-    if (!/^outcome:failure metadata\.jobName:"crm:sync:bookings" tenant:biz_2 attempt:>1 occurredAt:>\d{4}-\d{2}-\d{2} $/.test(q)) {
+    if (!/^outcome:failure metadata\.jobName:"hospitality:sync:bookings" tenant:biz_2 attempt:>1 occurredAt:>\d{4}-\d{2}-\d{2} $/.test(q)) {
       throw new Error(`query built: ${q}`);
     }
     await s.shot('qb-inv-01-query-built');
@@ -508,7 +508,7 @@ await qb('query bar: investigation from empty using only suggestions (Query, the
     await want("attributes['metadata.jobName']");
     await press('Tab');
     await press('Tab'); // =
-    await want('crm:sync:bookings');
+    await want('hospitality:sync:bookings');
     await keys('book');
     await press('Tab');
     await keys(' ');
@@ -534,7 +534,7 @@ await qb('query bar: investigation from empty using only suggestions (Query, the
     await press('Tab', 900);
     const q = await field().inputValue();
     const expected =
-      "outcome = 'failure' AND attributes['metadata.jobName'] = 'crm:sync:bookings' AND tenant_id = 'biz_2' AND job_attempt > 1 AND timestamp > now() - INTERVAL 7 DAY ";
+      "outcome = 'failure' AND attributes['metadata.jobName'] = 'hospitality:sync:bookings' AND tenant_id = 'biz_2' AND job_attempt > 1 AND timestamp > now() - INTERVAL 7 DAY ";
     if (q !== expected) throw new Error(`SQL built: ${q}`);
     await s.shot('qb-inv-03-sql-built');
     await press('Enter');

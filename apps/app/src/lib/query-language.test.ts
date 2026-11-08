@@ -297,8 +297,8 @@ describe('include / exclude', () => {
     expect(formatTerm('action', 'OR')).toBe('action:"OR"');
     expect(formatTerm('attr.note', '>5')).toBe('attr.note:">5"');
     expect(formatTerm('attr.path', '/a/b')).toBe('attr.path:"/a/b"');
-    // The server lexer splits on : [ ] { } < > too (metadata.jobName:crm:sync:bookings would not mean one value).
-    expect(formatTerm('metadata.jobName', 'crm:sync:bookings')).toBe('metadata.jobName:"crm:sync:bookings"');
+    // The server lexer splits on : [ ] { } < > too (metadata.jobName:hospitality:sync:bookings would not mean one value).
+    expect(formatTerm('metadata.jobName', 'hospitality:sync:bookings')).toBe('metadata.jobName:"hospitality:sync:bookings"');
     expect(formatTerm('attr.range', 'a[1]')).toBe('attr.range:"a[1]"');
     expect(formatTerm('action', 'booking.created')).toBe('action:booking.created');
   });
@@ -337,7 +337,7 @@ describe('andQuery (OR precedence)', () => {
   });
 });
 
-describe('removeTerm with a unary NOT (round 5)', () => {
+describe('removeTerm with a unary NOT', () => {
   it('removes the NOT with its operand and keeps every other polarity', () => {
     expect(removeTerm('NOT actor:x action:y', 'actor')).toBe('action:y');
     expect(removeTerm('action:y NOT actor:x -tenant:t', 'actor')).toBe('action:y -tenant:t');

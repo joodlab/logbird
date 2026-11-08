@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { client, endpoint, login } from './http';
 
 const cookie = await login('demo@logbird.local'),
@@ -46,5 +46,6 @@ for (const field of ['action', 'actor', 'actor.name', 'target', 'target.type', '
   output.push(JSON.stringify({ suggest: field, tookMs: r.curlMs, processMs: performance.now() - start, ...r }));
   assert.equal(r.status, 200);
 }
-await writeFile('docs/search-v2-evidence.jsonl', `${output.join('\n')}\n`);
+await mkdir('.tmp', { recursive: true });
+await writeFile('.tmp/search-v2-evidence.jsonl', `${output.join('\n')}\n`);
 console.log(output.join('\n'));

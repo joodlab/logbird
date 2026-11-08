@@ -8,8 +8,20 @@ import { canonicalFingerprint, existingEventIdentities } from './identity';
 import { migrate } from './migrations';
 import { normalizeEvent } from './normalize';
 
+/**
+ * Opt-in local migration test setup:
+ * - Create a fresh throwaway database named logbird_qa_062 with the Atomic engine.
+ *   Set its database COMMENT to exactly 'event-id migration fixture' at creation.
+ *   The ownership assertions below reject a missing or mismatched marker; do not
+ *   retag an existing database or point this test at application/customer data.
+ * - Configure CLICKHOUSE_URL, CLICKHOUSE_USER and CLICKHOUSE_PASSWORD for that
+ *   local test instance, then set CLICKHOUSE_ONLINE_MIGRATION_TEST=1.
+ * - From packages/clickhouse, run: vitest run src/event-id-migration.integration.test.ts
+ * This test repeatedly mutates its fixture tables. Keep other writers out of the
+ * throwaway database and retain the ownership marker throughout the run.
+ */
 const database = 'logbird_qa_062',
-  owner = 'PR62 QA t3-fe2f6967';
+  owner = 'event-id migration fixture';
 const run = process.env.CLICKHOUSE_ONLINE_MIGRATION_TEST === '1';
 it.skipIf(!run)(
   'upgrades online and resumes after every durable phase with concurrent writers',

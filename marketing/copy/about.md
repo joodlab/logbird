@@ -29,8 +29,8 @@ path: /about
 - **id:** `design-partner`
 - **eyebrow:** First design partner
 - **heading:** Shaped by a real product.
-- **body:** Logbird is being integrated with a hotel-booking SaaS, our first design partner. Its code drives the
-  roadmap: we add an item only when that integration shows the need.
+- **body:** Logbird is being integrated with a hotel-booking SaaS, our first design partner. Integration feedback helps
+  inform the roadmap.
   <!-- site: rendered from DESIGN_PARTNER_LINE (apps/web/src/lib/copy-flags.ts), shared with the home page -->
   <!-- source: docs/roadmap.md intro. Named variant is owner-gated: see README.md § Owner-gated copy -->
 - **visual:** none

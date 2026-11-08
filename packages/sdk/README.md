@@ -4,12 +4,21 @@ Dependency-free capture for Node 22+ and modern browsers with Fetch and Web Cryp
 The structural `EventInput` type is copied from contracts so publishing does not
 require a private workspace package. Keep envelope additions synchronized with contracts.
 
+`@logbird/sdk` is not published on npm yet; `pnpm add @logbird/sdk` returns 404.
+Use `packages/sdk` from source: inside this repository run
+`pnpm --filter <your-workspace-app> add '@logbird/sdk@workspace:*'`, or link a sibling
+checkout with `pnpm add @logbird/sdk@link:../logbird/packages/sdk`. Run `pnpm install`
+in that Logbird clone before linking from your backend. Source exports are
+TypeScript; use `tsx` or a bundler such as Vite or esbuild. Native Node type stripping
+does not support the SDK's constructor parameter property. See the
+[backend integration guide](../../docs/integrating-a-backend.md#configure-delivery).
+
 ```ts
 import { Logbird } from '@logbird/sdk';
 const audit = new Logbird({
   // Your Logbird public origin, e.g. https://audit.example.com (http://localhost:4600 for a local stack).
   endpoint: (process.env.LOGBIRD_ENDPOINT)!, apiKey: (process.env.LOGBIRD_INGEST_KEY)!,
-  onError: error => console.error(error.message),
+  onError: () => console.warn('Audit delivery failed'),
 });
 audit.track({ action: 'hotel.updated', actor: { type: 'user', id: 'user_42' } });
 await audit.flush();
@@ -45,11 +54,13 @@ audit.track({ id: requestEventId, action: 'crm.sync.requested', actor,
   executor: { type: 'api', id: 'api-server' }, context: { operationId } });
 // Pass { actor, operationId, parentEventId: requestEventId } into the job.
 audit.track({ action: 'guest.updated', actor,
-  executor: { type: 'worker', id: 'business-crm-worker', jobId: 'job_1', attempt: 2 },
+  executor: { type: 'worker', id: 'guest-sync-worker', jobId: 'job_1', attempt: 2 },
   context: { operationId, parentEventId: requestEventId },
   changes: [{ field: 'status', before: 'pending', after: 'ready' }] });
 // Scheduled work uses actor: { type: 'system', id: 'crm-scheduler' }.
 ```
+
+Do not log raw SDK error objects, events, headers or credentials. Use safe diagnostic messages as above.
 
 ## Outage backpressure
 
@@ -92,7 +103,7 @@ const client = new Logbird({
   enabled: Boolean(process.env.LOGBIRD_INGEST_KEY),
   defaults: { environment: 'staging' },
   beforeSend: redact(),
-  onError: console.error,
+  onError: () => console.warn('Audit delivery failed'),
 });
 client.track({ action: 'record.updated', metadata: { token: 'never stored' } });
 await client.shutdown();
@@ -106,14 +117,17 @@ stamping, before serialization and size checks. Returning null/undefined silentl
 a throwing hook fails closed and reports onError. Neither counts as an overflow drop.
 
 `redact({ keys?, changeFields?, replacement? })` deep copies the event, redacts matching
-object keys throughout objects/arrays (except top-level id/action), and replaces present
+object-key values throughout objects/arrays (except top-level id/action), retaining the keys, and replaces present
 before/after values of matching change fields. Default replacement is `[redacted]`.
 `DEFAULT_SECRET_KEYS` matches passwords, secrets, tokens, OTPs, API keys, authorization,
 cookies, credentials and private keys. Add email/phone patterns for your PII policy;
-the default secret pattern does not cover all PII. Hooks compose:
+the default secret pattern does not cover all PII. Supplying `keys` replaces the default pattern; combine them to retain secret protection. `changeFields` defaults to the resulting `keys` pattern. Hooks compose:
 
 ```ts
-const hide = redact({ keys: /email|phone|token|secret/i });
+import { DEFAULT_SECRET_KEYS, redact } from '@logbird/sdk';
+
+const keys = new RegExp(DEFAULT_SECRET_KEYS.source + '|email|phone', 'i');
+const hide = redact({ keys });
 const beforeSend = event => event.action === 'health.checked' ? null : hide(event);
 ```
 

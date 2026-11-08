@@ -11,8 +11,8 @@ import { isReady } from '../lib/site-map';
 
 export const Route = createFileRoute('/about')({ head: () => pageHead('/about'), component: AboutPage });
 
-// Copy: marketing/copy/about.md. Change wording there first. The company name appears only once the owner sets
-// WEB_ORG_NAME; the origin story and the design partner stay unnamed (owner-gated, see marketing/copy/README.md).
+// Copy: marketing/copy/about.md. Change wording there first. WEB_ORG_NAME controls the company label;
+// maintainers keep the published origin story and partner attribution unnamed (see marketing/copy/README.md).
 const principles: { title: string; body: string }[] = [
   {
     title: 'Accept anything.',
@@ -58,7 +58,7 @@ function AboutPage() {
         <SectionHeader
           eyebrow="First design partner"
           id="partner-title"
-          lead={`${DESIGN_PARTNER_LINE} Its code drives the roadmap: we add an item only when that integration shows the need.`}
+          lead={`${DESIGN_PARTNER_LINE} Integration feedback helps inform the roadmap.`}
           title="Shaped by a real product."
         />
       </Section>

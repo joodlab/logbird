@@ -1,5 +1,5 @@
 /**
- * Keyboard + axe proof for the event grid (PR #70, rounds 2 to 5), against a REAL local stack (app :4600, server :4601, worker).
+ * Keyboard + axe verification for the event grid against a local stack (app :4600, server :4601, worker).
  *
  *   AXE=/path/to/axe.min.js OUT=../../marketing/captures/2026-11-07-a11y-explorer node scripts/a11y-grid-proof.mjs
  *
@@ -9,7 +9,6 @@
  *  - Workspace Activity: ArrowDown moves the roving tab stop; Shift+Tab out and Tab back returns to that row; the event
  *    sheet's Escape returns focus to it; the focused row survives a scroll far away.
  *  - Settings at 390px under dir=rtl: General → Danger zone → General keeps the active tab fully visible; the fade flips.
- * Round 3:
  *  - Scroll jump: cursor on row 90, mouse back to the top, a new query from the bar → the view stays at the top, no
  *    second page is fetched, and the tab stop is row 0 of the new results.
  *  - Empty results: a refetch that empties the list moves focus from a focused row to the query bar; the sheet closing
@@ -18,14 +17,12 @@
  *    dir=ltr and the polite "Inserted …" announcement; Settings tabs focused by Tab at 390px clear the fade; the phone
  *    gridcell is a real flex box.
  *  - axe-core (wcag2a/aa, wcag21a/aa, wcag22aa, best-practice) on the changed screens, light and dark.
- * Round 4:
  *  - Forced colors: only the focused element computes an outline. No unfocused row, sidebar item, CopyValue or Settings
  *    tab does: Tailwind's `outline-hidden` paints a transparent outline in forced colors, so it must be focus-only.
- *    Shoots the focused row (after) and the same screen with round 2's classes put back (before).
+ *    Shoots the focused row (after) and the same screen with baseline classes put back (before).
  *  - "Filter by…" from the sheet, with the filtered response held back so focus returns to the old row first (the
  *    race): focus lands on row 0 of the new results, the view at the top, and no second page is fetched. When the new
  *    results still hold the open event, focus stays on it at its new index, scrolled into view.
- * Round 5:
  *  - "Filter by" a common value (the newest event's tenant) from row ≈ 299, under the same race: the old first row is
  *    row 0 of the new results too, and focus still lands there, the view at the top, with no second page.
  *  - A new query while focus is in the query bar, with the cursor's event surviving further down: the view stays at the
@@ -343,7 +340,7 @@ try {
     tabs,
   );
 
-  /* ---------------- round 3: the query bar's description, direction and accept announcement ---------------- */
+  /* ---------------- the query bar's description, direction and accept announcement ---------------- */
   {
     const bar = page.getByRole('combobox', { name: 'Query' });
     const meta = await bar.evaluate((el) => {
@@ -364,7 +361,7 @@ try {
     });
   }
 
-  /* ---------------- round 3: no scroll jump on a new result set ---------------- */
+  /* ---------------- no scroll jump on a new result set ---------------- */
   {
     await page.goto(`${BASE}/p/${projectId}/events?range=1h`);
     await settle(page);
@@ -448,7 +445,7 @@ try {
     check('forced colors: an unfocused row computes outline-style none', row1 === 'none', { row1 });
     check('forced colors (explorer): no unfocused element (rows, sidebar, toolbar) is outlined', fc.unfocusedOutlined === 0, fc);
     await page.screenshot({ path: path.join(OUT, 'after-forced-colors-row-focus-desktop.png') });
-    // Before: the same screen with round 2's classes (328c227) put back, and the same row focused. The PR's controls had
+    // Before: the same screen with baseline classes put back, and the same row focused. The PR's controls had
     // `outline-none`; the shadcn sidebar and chart had their unconditional `outline-hidden`.
     const restored = await page.evaluate(() => {
       const els = [...document.querySelectorAll('[class*="focus-visible:outline-hidden"]')];
@@ -484,7 +481,7 @@ try {
     await page.emulateMedia({ forcedColors: 'none' });
   }
 
-  /* ---------------- round 4: "Filter by…" from the sheet, focus back on the old row before the results ---------------- */
+  /* ---------------- "Filter by…" from the sheet, focus back on the old row before the results ---------------- */
   {
     const EVENTS = /\/api\/projects\/[^/]+\/events\?/;
     let hold = null;
@@ -604,7 +601,7 @@ try {
     await page.unroute(EVENTS);
   }
 
-  /* ---------------- round 5: "Filter by" a common value, and a surviving cursor with focus elsewhere ---------------- */
+  /* ---------------- "Filter by" a common value, and a surviving cursor with focus elsewhere ---------------- */
   {
     const EVENTS = /\/api\/projects\/[^/]+\/events\?/;
     let hold = null;
@@ -776,7 +773,7 @@ try {
     await page.unroute(EVENTS);
   }
 
-  /* ---------------- round 3: empty results never drop focus to <body> ---------------- */
+  /* ---------------- empty results never drop focus to <body> ---------------- */
   {
     const invalidate = () =>
       page.evaluate(() => window.__TSR_ROUTER__?.options.context.queryClient.invalidateQueries({ predicate: (q) => q.queryKey.includes('events') }));
@@ -829,7 +826,7 @@ try {
     await page.unroute(/\/api\/projects\/[^/]+\/events\?/);
   }
 
-  /* ---------------- round 4: rescans of the other screens the PR touches ---------------- */
+  /* ---------------- rescans of the other screens the PR touches ---------------- */
   const screenAxe = async (url, name) => {
     await page.goto(url);
     await settle(page);
@@ -890,7 +887,7 @@ try {
     }
     if (dir === 'ltr') await axe(page, 'settings phone-light');
   }
-  // Round 3: Tab through the strip — each focused (inactive) tab is scrolled clear of the 28px fades, not just to the edge.
+  // Tab through the strip — each focused (inactive) tab is scrolled clear of the 28px fades, not just to the edge.
   {
     await page.evaluate(() => {
       document.documentElement.dir = 'ltr';

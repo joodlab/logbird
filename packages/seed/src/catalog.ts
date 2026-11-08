@@ -66,8 +66,8 @@ export interface Action {
   before: unknown;
   after: unknown;
 }
-// Action-specific diffs keep unrelated fields out of each event. Audit names are
-// synthetic; source operations and exact queue names are documented in README.
+// Action-specific diffs keep unrelated fields out of each event. These illustrative
+// records are described in the dataset documentation at ../README.md.
 function actions(rows: string): Action[] {
   return rows
     .trim()
