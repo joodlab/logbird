@@ -1,0 +1,133 @@
+{
+  "earlierCompleteRun": {
+    "head": "661e71dbeb81d8196bcd77698ce0e2cd4956d23c",
+    "files": 33,
+    "passed": 139,
+    "failed": 1,
+    "skipped": 51,
+    "failure": "retention-errors test exceeded its 5-second default at 5014ms; not counted as a passing merge proof",
+    "comment": "https://github.com/joodlab/logbird/pull/62#issuecomment-6711893667"
+  },
+  "focused": {
+    "passed": 9,
+    "failed": 0,
+    "failedRepairRetries": "First failed rebuild plus two retries after flush-throttle expiry issue exactly three rollup DELETEs total; siblings commit with Retry-After60; worker repairs all destinations",
+    "contentionLogging": "ProjectBusyError does not emit ingest.recovery_failed"
+  },
+  "retentionTimeoutComparison": {
+    "cleanMasterHead": "a407c3130c4c3896637a11c4e78d16f781df73d4",
+    "masterTestUnchanged": true,
+    "masterPassed": 1,
+    "masterDurationMs": 13434.3701,
+    "unchangedBranchDurationMs": 20219,
+    "newPerTestBudgetMs": 60000,
+    "branchRecheckPassed": 1,
+    "branchRecheckDurationMs": 16035.1613,
+    "interpretation": "Both native-service samples exceed the old 5s default. These samples do not establish equal latency; branch cleanup verifies an additional derived index destination."
+  },
+  "comparisonFixtureCleanup": {
+    "fixtures": [
+      {
+        "projectId": "cmw6skc9o0000royoqlh0u9h6",
+        "organizationId": "1c6ff253-7308-40b7-8f28-3354475ab1e9",
+        "name": "QA expired fixture",
+        "createdAt": "2026-11-07T19:23:40.188Z"
+      },
+      {
+        "projectId": "cmw6s3vw10000zgyofjpj6j6c",
+        "organizationId": "5d16384a-889b-41d4-af65-fbef5b5b39d7",
+        "name": "QA expired fixture",
+        "createdAt": "2026-11-07T19:10:52.465Z"
+      }
+    ],
+    "timedOutFixtureRemaining": 1,
+    "before": [
+      {
+        "table": "events",
+        "rows": 0
+      },
+      {
+        "table": "event_ids",
+        "rows": 2
+      },
+      {
+        "table": "events_by_minute",
+        "rows": 1
+      },
+      {
+        "table": "entities",
+        "rows": 0
+      },
+      {
+        "table": "attribute_keys",
+        "rows": 0
+      }
+    ],
+    "after": [
+      {
+        "table": "events",
+        "rows": 0
+      },
+      {
+        "table": "event_ids",
+        "rows": 0
+      },
+      {
+        "table": "events_by_minute",
+        "rows": 0
+      },
+      {
+        "table": "entities",
+        "rows": 0
+      },
+      {
+        "table": "attribute_keys",
+        "rows": 0
+      }
+    ],
+    "receipts": 0
+  },
+  "checks": {
+    "typecheck": "18/18",
+    "biome": "passed with 76 existing warnings",
+    "build": "13/13",
+    "fullServerSuite": "A new complete 33-file run is required at this commit; its per-file verdicts and aggregate are posted in the final PR follow-up."
+  },
+  "resources": {
+    "round5-focused": {
+      "command": "node --env-file=.env .temp/run-round3.cjs src/immutable-ingest-round4.integration.test.ts --reporter=json --outputFile=../../.temp/round5-focused.json",
+      "exitCode": 0,
+      "elapsedSeconds": 331.38,
+      "peakProcessTreeRssGiB": 0.574,
+      "peakMachineUsedGiB": 40.105,
+      "minAvailableGiB": 23.314,
+      "diskFreeGiB": 109.95
+    },
+    "round5-static": {
+      "command": "node .temp/final-static.cjs",
+      "exitCode": 0,
+      "elapsedSeconds": 18.12,
+      "peakProcessTreeRssGiB": 1.554,
+      "peakMachineUsedGiB": 40.104,
+      "minAvailableGiB": 23.315,
+      "diskFreeGiB": 109.642
+    },
+    "round5-build": {
+      "command": "node .temp/build-round3.cjs",
+      "exitCode": 0,
+      "elapsedSeconds": 56.55,
+      "peakProcessTreeRssGiB": 1.025,
+      "peakMachineUsedGiB": 39.215,
+      "minAvailableGiB": 24.204,
+      "diskFreeGiB": 109.623
+    }
+  },
+  "scope": {
+    "claude_m1": "fixed with durable failed-repair guard before and after lock acquisition, worker-owned retries and 60s pending polling",
+    "claude_m2": "fixed upgrade block placement and sequential-build instruction",
+    "claude_m3": "fixed SPEC fences, failure modes, lastRun kind and model fields",
+    "n1": "fixed normal-contention logging",
+    "n3": "documented latest-maintenance lookup semantics",
+    "n2": "deferred optional cosmetic wrapping; current reference UI and verified captures preserved"
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "database": "logbird_qa_062",
+  "report": [
+    {
+      "interruptedAfterStep": null,
+      "events": 33,
+      "ids": 32,
+      "index_ids": 32,
+      "missing": 0,
+      "state": [
+        {
+          "name": "event_ids",
+          "engine": "MergeTree"
+        },
+        {
+          "name": "event_ids_mv",
+          "engine": "MaterializedView"
+        }
+      ]
+    },
+    {
+      "interruptedAfterStep": 1,
+      "events": 64,
+      "ids": 63,
+      "index_ids": 63,
+      "missing": 0,
+      "state": [
+        {
+          "name": "event_ids",
+          "engine": "MergeTree"
+        },
+        {
+          "name": "event_ids_mv",
+          "engine": "MaterializedView"
+        }
+      ]
+    },
+    {
+      "interruptedAfterStep": 2,
+      "events": 95,
+      "ids": 94,
+      "index_ids": 94,
+      "missing": 0,
+      "state": [
+        {
+          "name": "event_ids",
+          "engine": "MergeTree"
+        },
+        {
+          "name": "event_ids_mv",
+          "engine": "MaterializedView"
+        }
+      ]
+    },
+    {
+      "interruptedAfterStep": 3,
+      "events": 126,
+      "ids": 125,
+      "index_ids": 125,
+      "missing": 0,
+      "state": [
+        {
+          "name": "event_ids",
+          "engine": "MergeTree"
+        },
+        {
+          "name": "event_ids_mv",
+          "engine": "MaterializedView"
+        }
+      ]
+    },
+    {
+      "interruptedAfterStep": 4,
+      "events": 157,
+      "ids": 156,
+      "index_ids": 156,
+      "missing": 0,
+      "state": [
+        {
+          "name": "event_ids",
+          "engine": "MergeTree"
+        },
+        {
+          "name": "event_ids_mv",
+          "engine": "MaterializedView"
+        }
+      ]
+    },
+    {
+      "interruptedAfterStep": 5,
+      "events": 188,
+      "ids": 187,
+      "index_ids": 187,
+      "missing": 0,
+      "state": [
+        {
+          "name": "event_ids",
+          "engine": "MergeTree"
+        },
+        {
+          "name": "event_ids_mv",
+          "engine": "MaterializedView"
+        }
+      ]
+    },
+    {
+      "interruptedAfterStep": 6,
+      "events": 219,
+      "ids": 218,
+      "index_ids": 218,
+      "missing": 0,
+      "state": [
+        {
+          "name": "event_ids",
+          "engine": "MergeTree"
+        },
+        {
+          "name": "event_ids_mv",
+          "engine": "MaterializedView"
+        }
+      ]
+    },
+    {
+      "interruptedAfterStep": 7,
+      "events": 250,
+      "ids": 249,
+      "index_ids": 249,
+      "missing": 0,
+      "state": [
+        {
+          "name": "event_ids",
+          "engine": "MergeTree"
+        },
+        {
+          "name": "event_ids_mv",
+          "engine": "MaterializedView"
+        }
+      ]
+    }
+  ],
+  "lateWriters": [
+    {
+      "boundary": "finishes after backfill before exchange",
+      "raw": 10,
+      "missing": 0
+    },
+    {
+      "boundary": "active through synchronous retirement",
+      "raw": 10,
+      "missing": 0
+    }
+  ],
+  "realStorageFailures": {
+    "queuedAsyncTimeout159": "passed; claim retained while row queued, then flush/recovery without duplicate counters",
+    "eventIdsDestinationFailure": "passed; raw evidence survived and missing index/rollups repaired",
+    "minuteRollupDestinationFailure": "passed; raw evidence survived and all derived counters repaired"
+  },
+  "authorizationException": "Coordinator explicitly approved creation/migration/testing/drop of logbird_qa_062; no shared-logbird fault DDL was used.",
+  "databaseDropped": true,
+  "proofHarness": "packages/clickhouse/src/event-id-migration.integration.test.ts ports the executed scratch harness; opt-in requires explicitly pre-created owned QA database. It does not create or drop a database.",
+  "harnessLimits": "Executed scratch harness used the same SQL and production migration helper. The ported opt-in wrapper is typechecked and skipped by default after the QA database was dropped."
+}

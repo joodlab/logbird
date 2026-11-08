@@ -92,6 +92,7 @@ model Organization {
   invitations Invitation[]
   projects    Project[]
   inviteLinks InviteLink[]
+  ingestReceipts IngestReceipt[]
 
   @@map("organization")
 }
@@ -135,6 +136,7 @@ model Project {
   slug           String
   description    String?
   retentionDays  Int            @default(90)
+  maintenanceGeneration BigInt @default(0)
   retentionReviewedAt DateTime?
   setupDismissedAt DateTime?
   setupCompletedAt DateTime?
@@ -145,6 +147,25 @@ model Project {
   retentionRuns  RetentionRun[]
 
   @@unique([organizationId, slug])
+}
+
+model IngestReceipt {
+  projectId String
+  eventId String
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fingerprint String
+  receivedAt DateTime
+  eventAt DateTime
+  confirmedAt DateTime?
+  claimedAt DateTime? @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
+
+  @@id([projectId, eventId])
+  @@index([projectId, confirmedAt])
+  @@index([confirmedAt])
+  @@index([projectId, eventAt])
+  @@index([organizationId])
+  @@index([projectId, confirmedAt, claimedAt])
 }
 
 model ApiKey {
@@ -179,6 +200,7 @@ model SavedView {
 }
 
 model RetentionRun {
+  kind          String    @default("retention")
   id            String    @id @default(cuid())
   projectId     String
   project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)

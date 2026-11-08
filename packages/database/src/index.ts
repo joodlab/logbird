@@ -4,6 +4,7 @@ import { PrismaClient } from './generated/client';
 import { keys } from './keys';
 
 export * from './generated/client';
+export * from './ingest-receipts';
 
 const databaseUrl = keys().DATABASE_URL;
 const poolLimit = Number(new URL(databaseUrl).searchParams.get('connection_limit') ?? 10);
