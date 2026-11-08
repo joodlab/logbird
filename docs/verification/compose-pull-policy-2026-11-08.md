@@ -113,6 +113,27 @@ API as `GET /docs`/`GET /openapi.json`, forwarded without credentials by the Nit
 rendered in Chromium under the tightened CSP (exact bundle URL + inline-script hash, no `'unsafe-inline'` scripts)
 with 0 console errors or CSP violations.
 
+## Dev and built chain with explicit Nitro routes (PR #106 round 4)
+
+Removing the Vite proxy also stopped API paths that end in an asset extension (for example the event id
+`receipt.png`) from reaching the API in dev: Nitro's dev pre-middleware treats such paths as static assets unless an
+explicit route matches. `/api`, `/api/**`, `/v1`, `/v1/**`, the health checks and the reference are now explicit Nitro
+routes on the same handler (`proxiedRoutePatterns`), so they are dispatched to Nitro before that heuristic.
+
+`scripts/dev-proxy-check.ts` sends raw request lines (node:http, so `..` and `%2e%2e` reach the server unnormalized)
+through the console with a fictional QA workspace it creates and removes. Hono answers every request with
+`X-Request-Id`; the console does not. Results: [dev-proxy-chain-2026-11-08.json](dev-proxy-chain-2026-11-08.json), revision ef0d2f6.
+
+| Group | Dev (`turbo watch dev`, Vite + Nitro on 4600) | Built app (`.output/server`, 4602) |
+| --- | --- | --- |
+| Ordinary session read, ingest write (202), public search read | Hono 200/202/200 | same |
+| Dotted ids `GET /v1/events/qa-receipt.png`, `GET /api/projects/<id>/events/qa-bundle.js` (plain and `Sec-Fetch-Dest: empty`) | Hono 200 with the event | same |
+| Dotted write `DELETE /api/projects/<id>/views/qa-missing.svg` | reaches Hono (404 from the API) | same |
+| POST/PUT/PATCH/DELETE/OPTIONS on `/docs`, `/openapi.json` | console 405 | same |
+| `/api/../docs`, `/api/%2e%2e/openapi.json`, `/api/%2E%2E/docs`, `/v1/../openapi.json` × `Sec-Fetch-Dest` image/script/document | POST → console 405; GET → Hono 200 (reference, credentials stripped) | same |
+| `/v1/../internal`, `/api/../metrics`, `/v1/%2e%2e/internal`, `/api/%2e%2e/internal`, `/api/%2E%2E/server-only-probe` × POST/GET × image/script/document | console 404, never Hono | same |
+| Total | **75/75 passed** | **75/75 passed** |
+
 ## Cleanup
 
 Removed by exact ID: the four role images above, every image rebuilt by the matrix, `registry:2.8.3`, the
