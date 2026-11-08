@@ -24,7 +24,7 @@ import { enforceProjectRetention } from '@logbird/worker/retention';
 import { Hono } from 'hono';
 import { validator } from 'hono-openapi';
 import { z } from 'zod';
-import { clickhouse, purgeProjectEvents, queryClickhouse } from './clickhouse';
+import { clickhouse, purgeProjectEvents, queryClickhouse, settleProjectInserts } from './clickhouse';
 import { ApiError } from './errors';
 import { audit } from './ingest';
 import { generateApiKey } from './keys';
@@ -268,8 +268,12 @@ export const managementRoutes = new Hono<AppEnv>()
       const { confirm } = c.req.valid('query');
       if (confirm !== c.get('project').slug) throw new ApiError(422, 'confirmation_required', 'Type the project slug to delete the project.');
       const projectId = c.get('project').id;
+      // Exclusive project lock: ingest (shared lock) cannot claim or insert for this project until it is gone.
       await withProjectLock(projectId, async () => {
-        // Skips only the ClickHouse mutations for projects without stored rows; non-ClickHouse cleanup always runs.
+        // First prove no earlier claimed insert can still land in ClickHouse (503 ingest_pending + Retry-After while
+        // one may; otherwise flush the async queue), then purge. The purge skips only the ClickHouse mutations for a
+        // provably empty project; non-ClickHouse cleanup (ingest receipts) always runs.
+        await settleProjectInserts(projectId);
         await purgeProjectEvents(projectId);
         await prisma.$transaction(async (tx) => {
           const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });

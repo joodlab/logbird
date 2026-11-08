@@ -335,9 +335,13 @@ say which client last used a key before it is revoked.
 
 `DELETE /api/projects/:projectId` purges stored data under the exclusive project lock. Only the ClickHouse mutations
 are conditional: when no project-scoped ClickHouse table (discovered from `system.columns`) holds a row for the
-project (events, rollups, event ids), they are skipped and an empty project deletes in well under a second. Every
-non-ClickHouse cleanup step runs on both paths — in particular the project's PostgreSQL ingest receipts are always
-removed, so none can outlive the project and fail recovery.
+project (events, rollups, event ids) and no ingest receipt is still claimed, they are skipped and an empty project
+deletes in well under a second. Every non-ClickHouse cleanup step runs on both paths — in particular the project's
+PostgreSQL ingest receipts are always removed, so none can outlive the project and fail recovery.
+Before any of that, still under the exclusive lock, deletion proves no earlier insert can land afterwards: every
+project write holds a claimed receipt, so while the newest unresolved claim is younger than its lease + async-flush
+bound (70 s) the delete answers 503 `ingest_pending` with `Retry-After` and deletes nothing; once it is older, a
+`SYSTEM FLUSH ASYNC INSERT QUEUE` settles any queued insert before the purge (a failed flush aborts the delete).
 
 `GET /api/onboarding/workspace-name` (session, self) returns `{ name }`: a workspace name derived from the registrable
 domain of the signed-in user's email (`lina@eu.acme.co.uk` → "Acme"), or `null` for personal mailbox providers and for

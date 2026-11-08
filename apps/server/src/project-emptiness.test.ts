@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
-import { projectHasNoStoredRows, projectPurger } from './project-emptiness';
+import { ApiError } from './errors';
+import { projectHasNoStoredRows, projectPurger, settleInFlightInserts } from './project-emptiness';
 
 function reader(tables: string[], withRows: string[], fail = false) {
   const queries: string[] = [];
@@ -26,6 +27,38 @@ it('treats a project as empty only when no project-scoped table has a row for it
   // Unknown state always keeps the full purge.
   expect(await projectHasNoStoredRows(reader([], []), 'p1')).toBe(false);
   expect(await projectHasNoStoredRows(reader(['events'], [], true), 'p1')).toBe(false);
+});
+
+const LEASE = 60_000;
+const BOUND = 10_000;
+const settle = (claimedAt: Date | null, now: number, flush: () => Promise<unknown> = async () => undefined) =>
+  settleInFlightInserts({ newestUnresolvedClaim: async () => claimedAt, flush, leaseMs: LEASE, flushBoundMs: BOUND, now: () => now });
+
+it('settle: no unresolved claim means nothing can be in flight — no flush', async () => {
+  let flushed = 0;
+  expect(await settle(null, 1_000_000, async () => flushed++)).toBe('none');
+  expect(flushed).toBe(0);
+});
+
+it('settle: a claim still inside lease + flush bound aborts the deletion with 503 ingest_pending and Retry-After', async () => {
+  const claimedAt = new Date(1_000_000);
+  let flushed = 0;
+  const error = await settle(claimedAt, 1_000_000 + 30_000, async () => flushed++).catch((e) => e);
+  expect(error).toBeInstanceOf(ApiError);
+  expect(error).toMatchObject({ status: 503, code: 'ingest_pending', retryAfter: 40 });
+  expect(flushed).toBe(0);
+});
+
+it('settle: once the window has passed, the async queue is flushed before anything is purged', async () => {
+  let flushed = 0;
+  expect(await settle(new Date(1_000_000), 1_000_000 + LEASE + BOUND, async () => flushed++)).toBe('flushed');
+  expect(flushed).toBe(1);
+  // A failed flush is no proof: the deletion aborts.
+  await expect(
+    settle(new Date(1_000_000), 1_000_000 + LEASE + BOUND + 1, async () => {
+      throw new Error('flush not granted');
+    }),
+  ).rejects.toThrow('flush not granted');
 });
 
 it('fast path: an empty project skips only the ClickHouse purge — non-ClickHouse cleanup still runs', async () => {
