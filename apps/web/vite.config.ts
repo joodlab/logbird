@@ -6,10 +6,10 @@ import { defineConfig } from 'vite';
 import { loadPublicEnv } from './scripts/public-env';
 import { localPublicUrls, siteConfigFrom } from './src/env';
 import { llmsTxt, robotsTxt, sitemapXml } from './src/lib/discovery';
-import { MEDIA_CACHE, securityHeaders } from './src/lib/security-headers';
+import { ASSET_CACHE, DEV_CONTENT_SECURITY_POLICY, MEDIA_CACHE, securityHeaders } from './src/lib/security-headers';
 import { prerenderPaths } from './src/lib/site-map';
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   // Only WEB_* variables reach the site, so the console's APP_URL (localhost in the shared .env) never leaks in.
   // Resolved once and passed to the bundle and the discovery files alike.
   const publicEnv = loadPublicEnv(mode);
@@ -21,6 +21,9 @@ export default defineConfig(({ mode }) => {
       throw new Error(`A public (Cloudflare) build can't point at a developer machine: ${local.join(', ')}.`);
     }
   }
+  // Builds serve every page with its own hashed script policy (scripts/csp.ts runs after the build). `vite dev` renders
+  // on demand and injects HMR scripts, so only the dev server keeps 'unsafe-inline' for scripts.
+  const headers = command === 'build' ? securityHeaders : { ...securityHeaders, 'Content-Security-Policy': DEV_CONTENT_SECURITY_POLICY };
   return {
     // One React for the site and @logbird/ui (which resolves React from the workspace root).
     resolve: { tsconfigPaths: true, dedupe: ['react', 'react-dom'] },
@@ -32,10 +35,14 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       nitro({
         preset,
-        handlers: [{ route: '/api/waitlist', handler: './server/waitlist.ts' }],
+        handlers: [
+          { route: '/api/waitlist', handler: './server/waitlist.ts' },
+          // The Node server serves the prerendered pages with their hashed CSP (Cloudflare does this with _headers).
+          ...(command === 'build' && preset === 'node-server' ? [{ route: '/**', middleware: true, handler: './server/static-pages.ts' }] : []),
+        ],
         routeRules: {
-          '/**': { headers: securityHeaders },
-          '/assets/**': { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
+          '/**': { headers },
+          '/assets/**': { headers: { 'Cache-Control': ASSET_CACHE } },
           // Media keeps stable names (a replaced capture reuses its URL), so it is never immutable.
           '/media/**': { headers: { 'Cache-Control': MEDIA_CACHE } },
         },
@@ -76,13 +83,7 @@ export default defineConfig(({ mode }) => {
           })) {
             this.emitFile({ type: 'asset', fileName, source });
           }
-          this.emitFile({
-            type: 'asset',
-            fileName: '_headers',
-            source: `/*\n${Object.entries(securityHeaders)
-              .map(([key, value]) => `  ${key}: ${value}`)
-              .join('\n')}\n/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n/media/*\n  Cache-Control: ${MEDIA_CACHE}\n`,
-          });
+          // `_headers` is written after prerendering by scripts/csp.ts, which needs the final HTML to hash.
         },
       },
     ],

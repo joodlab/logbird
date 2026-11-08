@@ -11,9 +11,9 @@ browser run, check ≥ 8 GB free RAM, ≥ 40 GB free on C:, and that no `quiet` 
 ```sh
 pnpm --filter @logbird/web typecheck
 pnpm --filter @logbird/web test
-pnpm --filter @logbird/web build              # media + OG + prerender + pre-compressed HTML (Node preset)
+pnpm --filter @logbird/web build              # media + OG + prerender + pre-compressed HTML + CSP hashes (Node preset)
 pnpm --filter @logbird/web serve:static       # serves .output/public like Cloudflare (compression, real 404) on 4620
-pnpm --filter @logbird/web check:source-state  # after a build: fails if a WEB_GITHUB_PUBLIC=true build still says the source is closed
+pnpm --filter @logbird/web check:source-state  # after a build: fails if a public build says the source is closed, or a private one says it's open
 pnpm --filter @logbird/web start              # the Node server (needed for /api/waitlist) on 4620
 pnpm --filter @logbird/web build:cloudflare   # the public build; refuses interim media or localhost URLs
 ```
@@ -84,8 +84,13 @@ OG cards (`scripts/og.ts`, Satori + Resvg, local fonts) render one 1200×630 PNG
 
 - `scripts/lighthouse.mjs` runs Lighthouse on demand through `npx` (not a dependency) against Playwright's bundled
   Chromium, mobile and desktop, median of `RUNS` (3). Serve the static build first. `PATHS`, `OUT_DIR`, `--no-fail`.
-  The pass mark (95) applies to SEO without the `is-crawlable` audit (`seo-content`): noindex comes from the release
-  gate and `ready`, which have their own tests, so a gated build still measures every other SEO check.
+  While the served `robots.txt` disallows crawling (a release blocker is open, so every page is noindex by design), the
+  SEO pass mark (95) is the score without the `is-crawlable` audit (`seo-content`). Once `robots.txt` allows crawling,
+  ready pages and published posts are held to the full SEO score, `is-crawlable` included, so an accidental `noindex`
+  fails; pages that stay noindex (unready pages, 404) keep `seo-content` (`src/lib/lighthouse-score.ts`).
+- `check:source-state` matches its phrase lists (`src/lib/source-state.ts`) case-insensitively, across markup and
+  entities. The public link label "Source on GitHub" counts as "open" unless the placeholder's "— coming soon" follows
+  it, and phrases inside quotation marks (a quoted competitor page) don't count.
 - `scripts/capture.mjs` takes 1440×900 and 390×844 stills in both themes (`PATHS`, `OUT_DIR`, `VIDEO=1` for scroll clips)
   with Playwright's bundled Chromium only, and fails on console errors or failed requests.
 
@@ -98,5 +103,22 @@ cd apps/web && npx wrangler deploy --config wrangler.jsonc
 
 The wrapper prerenders with the Node preset, checks every hashed asset the HTML references, then packages the Worker.
 `_headers` sets the CSP, nosniff, referrer policy, HSTS (no `includeSubDomains` until the domain is decided) and a
-restrictive permissions policy. Hashed `/assets/*` are immutable for a year; `/media/*` for a day. Replacing
-`script-src 'unsafe-inline'` with per-page hashes is tracked in #84.
+restrictive permissions policy. Hashed `/assets/*` are immutable for a year; `/media/*` for a day.
+
+### Content-Security-Policy
+
+`script-src` has no `'unsafe-inline'`. Every page is prerendered, so `scripts/csp.ts` (the last step of `build` and
+`build:cloudflare`) hashes each page's inline scripts (theme bootstrap, JSON-LD, TanStack Start's hydration data, which
+changes with every build) and writes:
+
+- `.output/public/_headers`: a `/*` rule with the shared headers and the 404 page's policy (Cloudflare serves 404.html
+  for unknown paths), then one rule per page that detaches that policy (`! Content-Security-Policy`) and sets its own.
+  Without the detach Cloudflare would comma-join two policies and enforce both. Page rules use the trailing-slash URLs
+  of `html_handling: "auto-trailing-slash"`; a test keeps `wrangler.jsonc` on that setting. Cloudflare allows 100 rules
+  and 2,000-character lines, and the build fails past either (one rule per page: about 95 pages and posts fit).
+- `.output/csp.json`: the same hashes for `pnpm start` (`server/static-pages.ts` serves the prerendered page and its
+  policy, and 404.html for unknown paths) and `pnpm serve:static`.
+
+The step then re-reads the final HTML and fails the build if any inline script isn't covered by the policy each target
+serves. `vite dev` renders on demand and injects HMR scripts, so only the dev server keeps `'unsafe-inline'`.
+`style-src 'unsafe-inline'` stays until the runtime styles are reviewed separately.

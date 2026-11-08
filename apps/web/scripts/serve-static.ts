@@ -1,17 +1,22 @@
 /**
  * Serves the prerendered site from .output/public the way Cloudflare's static assets do: files only, pre-compressed
  * .br/.gz variants when the client accepts them, `/x` → `/x/index.html`, and `404.html` with status 404.
+ * Each page gets its own hashed Content-Security-Policy from `.output/csp.json` (scripts/csp.ts), as on Cloudflare.
  * Use it for Lighthouse and captures of what actually ships. There is no /api here (the waitlist needs `pnpm start`).
  *
  *   PORT=4620 tsx scripts/serve-static.ts
  */
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { extname, join, normalize, resolve } from 'node:path';
-import { MEDIA_CACHE, securityHeaders } from '../src/lib/security-headers';
+import { extname, join, normalize, relative, resolve } from 'node:path';
+import { CSP_MANIFEST_FILE, type CspManifest } from '../src/lib/csp';
+import { ASSET_CACHE, contentSecurityPolicy, MEDIA_CACHE, PAGE_CACHE, securityHeaders } from '../src/lib/security-headers';
 
 const root = resolve('.output/public');
+const manifest = JSON.parse(await readFile(resolve('.output', CSP_MANIFEST_FILE), 'utf8')) as CspManifest;
+// HTML file (relative to root) → its hashed policy.
+const policies = new Map(Object.values(manifest.pages).map((page) => [page.file, contentSecurityPolicy(page.scriptHashes)]));
 const port = Number(process.env.PORT ?? 4620);
 const types: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -56,15 +61,17 @@ createServer(async (request, response) => {
   }
   const accepts = String(request.headers['accept-encoding'] ?? '');
   let file = found.file;
+  const policy = policies.get(relative(root, found.file).replaceAll('\\', '/'));
+  if (found.file.endsWith('.html') && !policy) {
+    response.writeHead(500).end('No CSP for this page: rebuild (pnpm build ends with scripts/csp.ts).');
+    return;
+  }
   const headers: Record<string, string> = {
     ...securityHeaders,
+    ...(policy ? { 'Content-Security-Policy': policy } : {}),
     'Content-Type': types[extname(found.file)] ?? 'application/octet-stream',
     Vary: 'Accept-Encoding',
-    'Cache-Control': url.pathname.startsWith('/assets/')
-      ? 'public, max-age=31536000, immutable'
-      : url.pathname.startsWith('/media/')
-        ? MEDIA_CACHE
-        : 'public, max-age=0, must-revalidate',
+    'Cache-Control': url.pathname.startsWith('/assets/') ? ASSET_CACHE : url.pathname.startsWith('/media/') ? MEDIA_CACHE : PAGE_CACHE,
   };
   for (const [encoding, suffix] of [
     ['br', '.br'],
