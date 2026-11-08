@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { siteConfigFrom } from '../src/env';
-import { SOURCE_OPEN_PHRASES, SOURCE_STATE_PHRASES } from '../src/lib/source-state';
+import { findSourcePhrases, SOURCE_OPEN_PHRASES, SOURCE_STATE_PHRASES } from '../src/lib/source-state';
 import { loadPublicEnv } from './public-env';
 
 /**
@@ -17,15 +17,13 @@ const pages = (await readdir(publicDir, { recursive: true })).filter((path) => p
 if (!pages.length) {
   throw new Error('No prerendered HTML in .output/public. Run pnpm build first.');
 }
-const mentions = (html: string, where: string, phrases: readonly string[]) =>
-  phrases.flatMap((phrase) => {
-    const count = html.split(phrase).length - 1;
-    return count ? [`${where}: "${phrase}" ×${count}`] : [];
-  });
+// Case-insensitive, across markup and entities (src/lib/source-state.ts).
+const mentions = (html: string, where: string, phrases: Parameters<typeof findSourcePhrases>[1]) =>
+  findSourcePhrases(html, phrases).map(({ label, count }) => `${where}: "${label}" ×${count}`);
 const closed: string[] = [];
 const open: string[] = [];
 for (const page of pages) {
-  const html = (await readFile(resolve(publicDir, page), 'utf8')).replaceAll('&#x27;', "'");
+  const html = await readFile(resolve(publicDir, page), 'utf8');
   const where = relative(publicDir, resolve(publicDir, page)).replaceAll('\\', '/');
   closed.push(...mentions(html, where, SOURCE_STATE_PHRASES));
   open.push(...mentions(html, where, SOURCE_OPEN_PHRASES));

@@ -105,16 +105,13 @@ export const faqLd = (items: { q: string; a: string }[]) =>
     '@type': 'FAQPage',
     mainEntity: items.map((item) => ({ '@type': 'Question', name: item.q, acceptedAnswer: { '@type': 'Answer', text: item.a } })),
   });
+/** Head for a static page. Published posts use postHead(); `/blog/$slug` adds no head for an unknown slug. */
 export function pageHead(path: string) {
   const page = getPage(path);
-  // A template path (`/blog/$slug`) is never a real URL: it gets no canonical and is always noindex. Published posts
-  // use postHead() instead.
-  const draft = path.includes('$');
-  const canonicalPath = draft ? '/blog' : path;
   return {
-    // Not-ready pages, drafts, and every page while a release blocker is open are noindex (release.ts).
-    meta: [...pageMeta({ ...page, path: canonicalPath }), ...(pageIndexable(page) && !draft ? [] : [{ name: 'robots', content: 'noindex' }])],
-    links: draft ? [] : [{ rel: 'canonical', href: canonicalHref(canonicalPath) }],
+    // Not-ready pages, and every page while a release blocker is open, are noindex (release.ts).
+    meta: [...pageMeta({ ...page, path }), ...(pageIndexable(page) ? [] : [{ name: 'robots', content: 'noindex' }])],
+    links: [{ rel: 'canonical', href: canonicalHref(path) }],
     scripts:
       path === '/'
         ? [organizationLd(), websiteLd(), softwareLd()].filter((script) => script !== null)
@@ -122,7 +119,7 @@ export function pageHead(path: string) {
             breadcrumbLd([
               { name: 'Home', path: '/' },
               ...(path.startsWith('/compare/') ? [{ name: 'Compare', path: '/compare' }] : []),
-              { name: page.title, path: canonicalPath },
+              { name: page.title, path },
             ]),
           ],
   };
