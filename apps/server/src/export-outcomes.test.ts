@@ -6,6 +6,7 @@ const { tx, prisma } = vi.hoisted(() => {
     $executeRaw: vi.fn(),
     project: { findUnique: vi.fn(), update: vi.fn() },
     retentionRun: { findFirst: vi.fn() },
+    ingestReceipt: { findFirst: vi.fn() },
     exportLease: { findUnique: vi.fn(), aggregate: vi.fn(), count: vi.fn(), create: vi.fn() },
     auditOutbox: { create: vi.fn(), findFirst: vi.fn() },
   };
@@ -29,7 +30,13 @@ beforeEach(() => {
   tx.$queryRaw.mockResolvedValue([{ now: new Date('2026-11-08T00:00:00Z') }]);
   tx.project.findUnique.mockResolvedValue({ id: 'project', exportGeneration: 1, maintenanceGeneration: 0, exportDeleteStartedAt: null });
   tx.retentionRun.findFirst.mockResolvedValue(null);
-  tx.exportLease.findUnique.mockResolvedValue({ id: 'export', expiresAt: new Date('2026-11-08T00:01:00Z'), invalidated: false });
+  tx.ingestReceipt.findFirst.mockResolvedValue(null);
+  tx.exportLease.findUnique.mockResolvedValue({
+    id: 'export',
+    receivedBefore: new Date('2026-11-08T00:00:00Z'),
+    expiresAt: new Date('2026-11-08T00:01:00Z'),
+    invalidated: false,
+  });
   tx.exportLease.aggregate.mockResolvedValue({ _sum: { weight: 0 } });
   tx.exportLease.count.mockResolvedValue(0);
   tx.auditOutbox.create.mockImplementation(async ({ data }) => ({ id: data.id ?? 'requested', ...data }));
