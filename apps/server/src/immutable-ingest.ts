@@ -136,7 +136,13 @@ async function claimEvents(projectId: string, organizationId: string, candidates
     // can have changed the remaining identities while the shared project lock is held.
     const receipts = new Map(owned);
     const reloadIds = rechecked ? eventIds : eventIds.filter((id) => !owned.has(id));
-    if (reloadIds.length) for (const receipt of await findIngestReceipts(projectId, reloadIds)) receipts.set(receipt.eventId, receipt);
+    if (reloadIds.length) {
+      // A paused request must re-apply the receipt window: an expired confirmation is no longer authoritative.
+      // Its id stays pending (retryable); the retry expires it and consults stored evidence instead.
+      const reloadCutoff = new Date(Date.now() - INGEST_RECEIPT_WINDOW_MS);
+      for (const receipt of await findIngestReceipts(projectId, reloadIds))
+        if (owned.has(receipt.eventId) || !receipt.confirmedAt || receipt.confirmedAt >= reloadCutoff) receipts.set(receipt.eventId, receipt);
+    }
     return { owned, receipts };
   } catch (error) {
     await releaseClaims(projectId, owned);

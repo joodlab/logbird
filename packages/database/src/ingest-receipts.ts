@@ -1,6 +1,25 @@
 import { setTimeout as pause } from 'node:timers/promises';
 import { Prisma, prisma } from './index';
 
+type ReceiptIdentity = { eventId: string; fingerprint: string; receivedAt: Date; eventAt: Date };
+type CasResult = { found: number; changed: number; skipped: string[] };
+
+/** A receipt changed between the unlocked key seek and its row lock on every bounded retry. */
+export class IngestReceiptConflictError extends Error {
+  constructor(readonly operation: 'confirm' | 'expire') {
+    super(`Ingest receipt ${operation} kept losing a concurrent row update`);
+    this.name = 'IngestReceiptConflictError';
+  }
+}
+
+/**
+ * Ordered key seek. Equality alone can choose the project/confirmedAt index once per id. Seek in full PK
+ * order, then check equality outside LIMIT so neither the filter nor stale project estimates undo the seek.
+ */
+const seek = (projectId: string, id: Prisma.Sql, columns: Prisma.Sql) =>
+  Prisma.sql`SELECT ${columns} FROM "IngestReceipt" WHERE ("projectId","eventId")>=(${projectId},${id})
+    ORDER BY "projectId","eventId" LIMIT 1`;
+
 /**
  * Per-id probes must be index-driven whatever the statistics say. A drained or rolled-back receipt backlog
  * leaves a bloated, nearly empty heap: the planner then prices one seq scan + sort per id below the ordered
@@ -25,17 +44,14 @@ async function guarded<T>(statement: Prisma.Sql) {
   return rows;
 }
 
-/** Ordered key seeks avoid project-range scans before statistics catch up with a busy new project. Exposed for plan tests. */
+/** Exposed for the plan-shape test: every per-id probe must stay a primary-key seek. */
 export function findIngestReceiptsSql(projectId: string, eventIds: string[]) {
-  // Equality alone can choose the project/confirmedAt index once per id. Seek in full PK order,
-  // then check equality outside LIMIT so neither the filter nor stale project estimates undo the seek.
   return Prisma.sql`
     SELECT r.* FROM (SELECT id FROM unnest(${eventIds}::text[]) AS ids(id) ORDER BY id) AS requested
-    CROSS JOIN LATERAL (
-      SELECT * FROM "IngestReceipt" WHERE ("projectId","eventId")>=(${projectId},requested.id)
-      ORDER BY "projectId","eventId" LIMIT 1
-    ) AS r WHERE r."projectId"=${projectId} AND r."eventId"=requested.id`;
+    CROSS JOIN LATERAL (${seek(projectId, Prisma.sql`requested.id`, Prisma.sql`*`)}) AS r
+    WHERE r."projectId"=${projectId} AND r."eventId"=requested.id`;
 }
+
 export async function findIngestReceipts(projectId: string, eventIds: string[]) {
   if (!eventIds.length) return [];
   return guarded<import('./generated/client').IngestReceipt[]>(findIngestReceiptsSql(projectId, eventIds));
@@ -79,63 +95,99 @@ export async function takeOverIngestReceipts(projectId: string, eventIds: string
     SELECT * FROM claimed`);
 }
 
-/** Bulk confirmation avoids a sequential round trip per recovered id. UTC strings avoid session-TZ casts. Exposed for plan tests. */
-export function confirmIngestReceiptsSql(
-  projectId: string,
-  identities: { eventId: string; fingerprint: string; receivedAt: Date; eventAt: Date }[],
-  confirmedAt: Date,
-) {
+/**
+ * Compare-and-set result. `hits` is what the unlocked seek saw; `locked` keeps only tuples whose exact
+ * ctid/key still matched once the row lock was granted. A concurrent update moves the row to a new ctid, so
+ * READ COMMITTED's recheck drops it from `locked`. The modification itself matches on ctid only and cannot
+ * skip a tuple this statement holds locked, so `skipped` names every id lost to a concurrent writer.
+ */
+const casResult = (changed: Prisma.Sql) => Prisma.sql`
+  SELECT (SELECT count(*) FROM hits)::int AS found, (SELECT count(*) FROM ${changed})::int AS changed,
+    CASE WHEN (SELECT count(*) FROM hits)=(SELECT count(*) FROM ${changed}) THEN '{}'::text[]
+      ELSE ARRAY(SELECT id FROM hits EXCEPT SELECT "eventId" FROM ${changed}) END AS skipped`;
+
+/** Exposed for the plan-shape test. UTC strings avoid session-TZ casts. */
+export function confirmIngestReceiptsSql(projectId: string, identities: ReceiptIdentity[], confirmedAt: Date) {
   // Four array parameters avoid parsing/encoding four bind parameters per event.
   // Seek without locking, then lock the checked tuple: a missing id must not lock its successor.
-  return Prisma.sql`WITH targets AS MATERIALIZED (
-    SELECT v.*, r.ctid FROM (
+  return Prisma.sql`WITH hits AS MATERIALIZED (
+    SELECT v.*, hit.ctid AS tid FROM (
       SELECT * FROM unnest(${identities.map((r) => r.eventId)}::text[], ${identities.map((r) => r.fingerprint)}::text[],
         ${identities.map((r) => r.receivedAt.toISOString())}::timestamp[], ${identities.map((r) => r.eventAt.toISOString())}::timestamp[])
         AS input(id,fingerprint,received,event) ORDER BY id
-    ) AS v CROSS JOIN LATERAL (
-      SELECT ctid,"projectId","eventId" FROM "IngestReceipt" WHERE ("projectId","eventId")>=(${projectId},v.id)
-      ORDER BY "projectId","eventId" LIMIT 1
-    ) AS hit CROSS JOIN LATERAL (
-      SELECT ctid FROM "IngestReceipt" WHERE ctid=hit.ctid AND "projectId"=${projectId} AND "eventId"=v.id OFFSET 0 FOR UPDATE
-    ) AS r WHERE hit."projectId"=${projectId} AND hit."eventId"=v.id)
+    ) AS v CROSS JOIN LATERAL (${seek(projectId, Prisma.sql`v.id`, Prisma.sql`ctid,"projectId","eventId"`)}) AS hit
+    WHERE hit."projectId"=${projectId} AND hit."eventId"=v.id
+  ), locked AS MATERIALIZED (
+    SELECT hits.*, r.ctid FROM hits CROSS JOIN LATERAL (
+      SELECT ctid FROM "IngestReceipt" WHERE ctid=hits.tid AND "projectId"=${projectId} AND "eventId"=hits.id OFFSET 0 FOR UPDATE
+    ) AS r
+  ), changed AS (
     UPDATE "IngestReceipt" AS r
     SET "fingerprint"=v.fingerprint, "receivedAt"=v.received, "eventAt"=v.event, "confirmedAt"=${confirmedAt.toISOString()}::timestamp
-    FROM targets AS v WHERE r.ctid=v.ctid`;
+    FROM locked AS v WHERE r.ctid=v.ctid RETURNING r."eventId"
+  ) ${casResult(Prisma.sql`changed`)}`;
 }
-export async function confirmIngestReceipts(
-  projectId: string,
-  identities: { eventId: string; fingerprint: string; receivedAt: Date; eventAt: Date }[],
+
+/** Exposed for the plan-shape test. Checks the exact key before locking: a missing key's successor may belong to another project. */
+export function expireIngestReceiptsSql(projectId: string, eventIds: string[], cutoff: Date) {
+  const expiredBefore = Prisma.sql`${cutoff.toISOString()}::timestamp`;
+  return Prisma.sql`WITH hits AS MATERIALIZED (
+    SELECT requested.id, hit.ctid AS tid FROM (SELECT id FROM unnest(${eventIds}::text[]) AS ids(id) ORDER BY id) AS requested
+    CROSS JOIN LATERAL (${seek(projectId, Prisma.sql`requested.id`, Prisma.sql`ctid,"projectId","eventId","confirmedAt"`)}) AS hit
+    WHERE hit."projectId"=${projectId} AND hit."eventId"=requested.id AND hit."confirmedAt"<${expiredBefore}
+  ), locked AS MATERIALIZED (
+    SELECT r.ctid FROM hits CROSS JOIN LATERAL (
+      SELECT ctid FROM "IngestReceipt" WHERE ctid=hits.tid AND "projectId"=${projectId} AND "eventId"=hits.id
+        AND "confirmedAt"<${expiredBefore} OFFSET 0 FOR UPDATE
+    ) AS r
+  ), changed AS (
+    DELETE FROM "IngestReceipt" AS target USING locked WHERE target.ctid=locked.ctid RETURNING target."eventId"
+  ) ${casResult(Prisma.sql`changed`)}`;
+}
+
+/** Concurrent writers lose only their stale tuple: re-seek the skipped ids against the current version. */
+const CAS_ATTEMPTS = 3;
+async function compareAndSet<T extends string | { eventId: string }>(
+  operation: 'confirm' | 'expire',
+  items: T[],
+  statement: (items: T[]) => Prisma.Sql,
 ) {
+  let remaining = items;
+  for (let attempt = 1; remaining.length; attempt++) {
+    const [result] = await guarded<CasResult[]>(statement(remaining));
+    if (!result || result.changed + result.skipped.length !== result.found) throw new IngestReceiptConflictError(operation);
+    if (!result.skipped.length) return;
+    if (attempt >= CAS_ATTEMPTS) throw new IngestReceiptConflictError(operation);
+    const skipped = new Set(result.skipped);
+    remaining = items.filter((item) => skipped.has(typeof item === 'string' ? item : item.eventId));
+  }
+}
+
+/** Bulk confirmation avoids a sequential round trip per recovered id. */
+export async function confirmIngestReceipts(projectId: string, identities: ReceiptIdentity[]) {
   if (!identities.length) return;
-  await guarded(confirmIngestReceiptsSql(projectId, identities, new Date()));
+  const confirmedAt = new Date();
+  // One identity per id keeps found/changed comparable; the last identity for an id wins, as UPDATE ... FROM would.
+  const unique = [...new Map(identities.map((identity) => [identity.eventId, identity])).values()];
+  await compareAndSet('confirm', unique, (items) => confirmIngestReceiptsSql(projectId, items, confirmedAt));
 }
 
 /** Expire confirmed claims only. An unresolved INSERT must never become writable by timeout. */
 export const INGEST_RECEIPT_WINDOW_MS = 10 * 60_000;
 export const INGEST_RECEIPT_PRUNE_BATCH_SIZE = 5000;
 export const INGEST_RECEIPT_SWEEP_BUDGET_MS = 20_000;
+/** The hourly/project backstop gets more room than the minute sweep, but never an unbounded loop. */
+export const INGEST_RECEIPT_BACKSTOP_BUDGET_MS = 60_000;
 
-/** Check the exact key before locking: a missing key's successor may belong to another project. Exposed for plan tests. */
-export function expireIngestReceiptsSql(projectId: string, eventIds: string[], cutoff: Date) {
-  return Prisma.sql`WITH expired AS MATERIALIZED (
-    SELECT r.ctid FROM (SELECT id FROM unnest(${eventIds}::text[]) AS ids(id) ORDER BY id) AS requested
-    CROSS JOIN LATERAL (
-      SELECT ctid,"projectId","eventId" FROM "IngestReceipt" WHERE ("projectId","eventId")>=(${projectId},requested.id)
-      ORDER BY "projectId","eventId" LIMIT 1
-    ) AS hit CROSS JOIN LATERAL (
-      SELECT ctid FROM "IngestReceipt" WHERE ctid=hit.ctid AND "projectId"=${projectId} AND "eventId"=requested.id
-        AND "confirmedAt"<${cutoff.toISOString()}::timestamp OFFSET 0 FOR UPDATE
-    ) AS r WHERE hit."projectId"=${projectId} AND hit."eventId"=requested.id)
-    DELETE FROM "IngestReceipt" AS target USING expired WHERE target.ctid=expired.ctid`;
-}
 /** A request expires only ids it actually looked up; fresh ids do no cleanup work. */
 export async function expireIngestReceipts(projectId: string, eventIds: string[], cutoff: Date) {
   if (!eventIds.length) return;
   if (eventIds.length > INGEST_RECEIPT_PRUNE_BATCH_SIZE) throw new RangeError('Receipt expiry exceeds one bounded batch');
-  await guarded(expireIngestReceiptsSql(projectId, eventIds, cutoff));
+  // A renewed receipt is re-sought against its new version, where the cutoff no longer matches.
+  await compareAndSet('expire', [...new Set(eventIds)], (items) => expireIngestReceiptsSql(projectId, items, cutoff));
 }
 
-/** One sweep batch. Exposed for plan tests; the minute sweep runs it under SWEEP_GUARD. */
+/** One sweep batch. Exposed for plan tests; the minute sweep and backstop run it under SWEEP_GUARD. */
 export function pruneReceiptBatchSql(projectId: string | undefined, cutoff: string) {
   // Tuple ids are used only inside this row-locked statement, never as stored identity.
   return Prisma.sql`WITH expired AS MATERIALIZED
@@ -145,36 +197,29 @@ export function pruneReceiptBatchSql(projectId: string | undefined, cutoff: stri
     DELETE FROM "IngestReceipt" AS r USING expired WHERE r.ctid=expired.ctid`;
 }
 /**
- * Bounds the last in-flight batch as well as the between-batch time budget. Like the probes, each batch must
- * walk a confirmedAt-ordered index: a stale or bloated estimate must not turn ORDER BY/LIMIT into a seq scan
- * or a history-sized bitmap plus sort.
+ * Bounds the last in-flight batch as well as the between-batch time budget. SKIP LOCKED never waits on rows;
+ * lock_timeout also bounds a table-level wait behind DDL. Like the probes, each batch must walk a
+ * confirmedAt-ordered index: a stale or bloated estimate must not turn ORDER BY/LIMIT into a seq scan or a
+ * history-sized bitmap plus sort.
  */
-export const SWEEP_GUARD = Prisma.sql`SELECT set_config('statement_timeout','5s',true), set_config('enable_seqscan','off',true),
-  set_config('enable_bitmapscan','off',true), set_config('enable_sort','off',true),
+export const SWEEP_GUARD = Prisma.sql`SELECT set_config('statement_timeout','5s',true), set_config('lock_timeout','1s',true),
+  set_config('enable_seqscan','off',true), set_config('enable_bitmapscan','off',true), set_config('enable_sort','off',true),
   set_config('enable_incremental_sort','off',true), set_config('jit','off',true)`;
-function pruneReceiptBatch(projectId: string | undefined, cutoff: string, db: Pick<Prisma.TransactionClient, '$executeRaw'> = prisma) {
-  return db.$executeRaw(pruneReceiptBatchSql(projectId, cutoff));
-}
 
-/** Bulk worker/operator backstop; never called from the ingest request path. */
-export async function pruneIngestReceipts(projectId?: string) {
-  const cutoff = new Date(Date.now() - INGEST_RECEIPT_WINDOW_MS).toISOString();
-  while ((await pruneReceiptBatch(projectId, cutoff)) === INGEST_RECEIPT_PRUNE_BATCH_SIZE) {
-    await pause(10);
-  }
-}
-
-/** Dedicated minute worker; the optional project scope also supports isolated operator recovery. */
-export async function sweepIngestReceipts(projectId?: string) {
+/**
+ * Guarded batches shared by the minute sweep and the hourly/project backstop. Each batch runs in its own
+ * short transaction with transaction-local (SET LOCAL) settings that revert at commit or rollback.
+ */
+async function pruneWithinBudget(projectId: string | undefined, budgetMs: number) {
   const started = Date.now(),
     cutoff = new Date(started - INGEST_RECEIPT_WINDOW_MS).toISOString();
   let removed = 0,
     batches = 0;
-  while (Date.now() - started < INGEST_RECEIPT_SWEEP_BUDGET_MS) {
+  while (Date.now() - started < budgetMs) {
     const count = await prisma.$transaction(
       async (tx) => {
         await tx.$executeRaw(SWEEP_GUARD);
-        return pruneReceiptBatch(projectId, cutoff, tx);
+        return tx.$executeRaw(pruneReceiptBatchSql(projectId, cutoff));
       },
       { maxWait: 1000, timeout: 6000 },
     );
@@ -184,6 +229,16 @@ export async function sweepIngestReceipts(projectId?: string) {
     await pause(10);
   }
   return { removed, batches, limited: true };
+}
+
+/** Hourly/project backstop; never called from the ingest request path. `limited` means expired rows remain. */
+export function pruneIngestReceipts(projectId?: string) {
+  return pruneWithinBudget(projectId, INGEST_RECEIPT_BACKSTOP_BUDGET_MS);
+}
+
+/** Dedicated minute worker; the optional project scope also supports isolated operator recovery. */
+export function sweepIngestReceipts(projectId?: string) {
+  return pruneWithinBudget(projectId, INGEST_RECEIPT_SWEEP_BUDGET_MS);
 }
 
 /** Call after the matching ClickHouse purge while holding the exclusive project lock. */

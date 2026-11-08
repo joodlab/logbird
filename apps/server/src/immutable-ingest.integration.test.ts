@@ -91,8 +91,18 @@ it('targeted expiry preserves a concurrently renewed receipt after waiting for i
   let expiry: Promise<void> | undefined;
   await prisma.$transaction(async (tx) => {
     await tx.ingestReceipt.updateMany({ where: { projectId: f.project }, data: { confirmedAt: new Date() } });
+    const [renewer] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() pid`;
     expiry = expireIngestReceipts(f.project, [original.id], new Date(Date.now() - 600_000));
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    void expiry.catch(() => undefined); // Awaited after the renewal commits.
+    // Barrier: commit the renewal only once expiry is actually waiting on this row lock.
+    for (let attempt = 0; ; attempt++) {
+      const [row] = await prisma.$queryRaw<
+        { n: number }[]
+      >`SELECT count(*)::int n FROM pg_stat_activity WHERE ${renewer?.pid}=ANY(pg_blocking_pids(pid))`;
+      if (row?.n) break;
+      if (attempt >= 500) throw new Error('Expiry never waited on the renewed row lock');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   });
   await expiry;
   const [renewed] = await findIngestReceipts(f.project, [original.id]);
