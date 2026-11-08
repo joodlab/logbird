@@ -1,6 +1,6 @@
 # Security policy
 
-Version 0.1.x is the initial supported line. Run the [deployment checklist](docs/deployment.md) before accepting customer data.
+Supported source lines match the current package manifests: the platform and `@logbird/nuxt`, `@logbird/tanstack-start` and `@logbird/vue` use 0.1.x; `@logbird/sdk` and `@logbird/hono` use 0.2.x. The npm packages are not published yet. Run the [deployment checklist](docs/deployment.md) before accepting customer data.
 
 Report vulnerabilities from the repository's [Security tab](https://github.com/joodlab/logbird/security): choose **Report a vulnerability**. Never post exploit details or credentials in public issues. If the form is unavailable, open an issue titled "Request a private security contact" without sensitive details and wait for maintainers to provide a private channel.
 

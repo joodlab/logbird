@@ -46,8 +46,9 @@ Development dependencies and production deployment are documented in [self-hosti
 2026-11-08: the public origin proxies the read-only `/docs` and `/openapi.json` reference (and no other new server
 path); role images are named `ghcr.io/joodlab/logbird-<role>` but nothing is published until the repository is
 open-sourced; the hosted instance's transactional email will use Postmark SMTP with required STARTTLS (self-hosters
-choose their own SMTP provider); the hosted instance will run on Coolify
-behind Cloudflare at `logbird.joodlab.com` after open-sourcing.
+choose their own SMTP provider).
+
+The hosted instance is planned on Coolify behind Cloudflare at `logbird.joodlab.com` after the repository is open-sourced. Provisioning and deployment remain separate steps.
 
 Ingestion path (v0): `POST /v1/events` → validate/normalize → ClickHouse `INSERT` with
 `async_insert=1, wait_for_async_insert=1` (ack only after ClickHouse has the rows) → 202. Large batches are
@@ -279,7 +280,7 @@ The **route table and every request/response schema live in `packages/contracts`
   may only read). Keys are stored as SHA-256 hash + display prefix; full secret shown once.
 - Errors: `{ error: { code, message, details? } }` with proper HTTP status.
 - `GET /openapi.json` (hono-openapi) + Scalar reference at `/docs`. Both are read-only, unauthenticated and proxied
-  by the console on the public origin (owner decision, [decisions.md](decisions.md)).
+  by the console on the public origin ([architecture decision](decisions.md)).
 - Size limits on ingest: 1000 events or 5 MB per request.
 - Public fixed-window limits are shared in Redis across replicas: 3000 ingest requests/minute
   and 1200 read requests/minute per project (all keys of the same kind share a bucket).

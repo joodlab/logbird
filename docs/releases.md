@@ -70,10 +70,10 @@ unrun role/stage in the release record.
 
 ## GHCR publishing plan (maintainer action)
 
-The registry is GHCR ([owner decision 2026-11-08](decisions.md)). Image names match
+The registry is GHCR ([architecture decision 2026-11-08](decisions.md)). Image names match
 Compose's defaults: `ghcr.io/joodlab/logbird-app`, `logbird-server`, `logbird-worker`
 and `logbird-migrate`. **Nothing is published until the repository is open-sourced**,
-and every publication needs explicit owner approval. A maintainer must
+and every publication is a manual maintainer release step. A maintainer must
 confirm package visibility and retention policy before the first publication.
 Log in using an authorized package-writing credential via `--password-stdin` or a
 credential helper; never commit or print it. GitHub documents authentication and

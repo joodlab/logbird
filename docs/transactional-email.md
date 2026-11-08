@@ -2,7 +2,7 @@
 
 Status: provider-neutral guidance checked on 2026-11-07; provider chosen 2026-11-08 (Postmark SMTP, see
 [Postmark](#postmark)). No provider/domain purchase, account, DNS record, sender key or live email delivery was
-created or changed. Owner chooses the sending domain, sender and abuse/security contacts before launch.
+created or changed. Operators configure the sending domain, sender and abuse/security contacts before launch.
 
 ## Sender identity and application settings
 
@@ -20,7 +20,7 @@ and fails closed (`ETLS`, nothing sent) when the server does not offer it or the
 Certificates are always verified; never disable that. Validate the certificate/hostname and provider requirements
 in staging.
 Keep `AUTH_LOG_SIGN_IN_CODES=false` in cloud; log readers must never receive usable login codes.
-Preserve existing SMTP credentials unless the owner explicitly authorizes rotation.
+Preserve existing SMTP credentials during deployment. Rotate credentials only through a planned operator procedure with recovery and delivery verification.
 
 ## Hetzner launch prerequisite
 

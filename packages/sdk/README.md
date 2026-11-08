@@ -8,7 +8,8 @@ require a private workspace package. Keep envelope additions synchronized with c
 Use `packages/sdk` from source: inside this repository run
 `pnpm --filter <your-workspace-app> add '@logbird/sdk@workspace:*'`, or link a sibling
 checkout with `pnpm add @logbird/sdk@link:../logbird/packages/sdk`. Source exports are
-TypeScript and require a compatible runtime or bundler. See the
+TypeScript; use `tsx` or a bundler such as Vite or esbuild. Native Node type stripping
+does not support the SDK's constructor parameter property. See the
 [backend integration guide](../../docs/integrating-a-backend.md#configure-delivery).
 
 ```ts

@@ -4,7 +4,7 @@
 
 - Rename the current product to Logbird; include an explicit namespace migration for existing installations.
 - Pin self-host base images by multi-platform digest; document native backup/restore, uninstall and manual release acceptance.
-- Serve the read-only API reference (`/docs`, `/openapi.json`) on the public origin through the console; no other API path becomes public. The page loads a pinned, integrity-checked Scalar bundle with telemetry, hosted fonts and the hosted AI agent off. See [owner decisions](docs/decisions.md).
+- Serve the read-only API reference (`/docs`, `/openapi.json`) on the public origin through the console; no other API path becomes public. The page loads a pinned, integrity-checked Scalar bundle with telemetry, hosted fonts and the hosted AI agent off. See [architecture decisions](docs/decisions.md).
 - Add `SMTP_REQUIRE_TLS`: on port 587 STARTTLS is mandatory and delivery fails closed when it is not offered. Set it for Postmark and other 587 providers; the server warns at boot when a remote SMTP host may fall back to cleartext.
 - Name role images `ghcr.io/joodlab/logbird-<role>` (`LOGBIRD_IMAGE_REGISTRY` defaults to `ghcr.io/joodlab`). Nothing is published yet. Clear an old `LOGBIRD_IMAGE_REGISTRY=logbird` in `.env` and rebuild the four roles.
 - Fix packaged retention's missing rollup SQL by embedding it at build time. Verify deletes before rebuilding, fail with `LOGBIRD_DELETE_INCOMPLETE` if restored rows remain, and log safe `retention.run_failed` error codes. After upgrading, inspect failed retention receipts and worker logs: the first successful run after a failed receipt rebuilds that project's rollups and can be expensive.

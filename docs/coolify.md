@@ -1,6 +1,6 @@
 # Logbird on Coolify
 
-The hosted instance is planned on Coolify behind Cloudflare at `logbird.joodlab.com`, after the repository is open-sourced ([owner decision](decisions.md)); nothing has been deployed there yet.
+The hosted instance is planned on Coolify behind Cloudflare at `logbird.joodlab.com` after the repository is open-sourced. Provisioning and deployment remain separate steps. See the [architecture decision](decisions.md).
 
 Use the Git repository Docker Compose build pack. No images are published yet; Coolify builds from source. The committed file publishes no host ports. Only app:4600 should receive a public domain.
 

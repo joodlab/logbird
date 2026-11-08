@@ -30,7 +30,9 @@ For a backend outside the workspace, clone Logbird beside it and link the source
 pnpm add @logbird/sdk@link:../logbird/packages/sdk
 ```
 
-The source exports TypeScript; use a TypeScript-capable runtime or bundler.
+The source exports TypeScript; use `tsx` (for example, `pnpm exec tsx server.ts`)
+or a bundler such as Vite or esbuild. Native Node type stripping cannot handle the
+SDK's constructor parameter property.
 See the [SDK README](../packages/sdk/README.md) for its runtime requirements.
 
 ```ts
@@ -85,10 +87,6 @@ The example supplies no authentication implementation.
 ```ts
 import { uuidv7 } from '@logbird/sdk';
 
-// Generate once and persist alongside the committed change if it will be replayed.
-const eventId = uuidv7();
-const occurredAt = new Date().toISOString();
-
 function recordDocumentUpdate(input: {
   eventId: string;
   occurredAt: string;
@@ -112,6 +110,18 @@ function recordDocumentUpdate(input: {
     changes: [{ field: 'status', before: input.previousStatus, after: input.status }],
   });
 }
+
+// Inside an authenticated update handler, after this document change commits:
+recordDocumentUpdate({
+  eventId: uuidv7(),
+  occurredAt: new Date().toISOString(),
+  operationId,
+  userId,
+  tenantId,
+  documentId,
+  previousStatus,
+  status,
+});
 ```
 
 Use the SDK's exported `uuidv7()` to generate the event ID, and generate its timestamp once per committed change. Persist both with

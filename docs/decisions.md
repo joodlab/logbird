@@ -42,8 +42,7 @@ with hosting; configure provider credentials and DNS as part of deployment.
 
 ### Hosting: Coolify behind Cloudflare, after open-sourcing
 
-The hosted instance will run on **Coolify behind Cloudflare at the public service origin**, after
-the repository is open-sourced. Provisioning remains a separate deployment step. Follow [Coolify](coolify.md) with
+The hosted instance is planned on Coolify behind Cloudflare at `logbird.joodlab.com` after the repository is open-sourced. Provisioning and deployment remain separate steps. Follow [Coolify](coolify.md) with
 `APP_URL=https://audit.example.com` (replace with your public origin). `TRUST_PROXY` must be set from the verified proxy chain at that time (Cloudflare
 in front of Coolify's proxy adds a hop only if Coolify's proxy is configured to trust Cloudflare's forwarding headers);
 verify the recorded client address before relying on per-client limits. The Kubernetes/Hetzner material in [cloud operations](cloud-operations.md)
