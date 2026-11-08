@@ -5,7 +5,7 @@ import { publishedPages } from './site-map';
 
 /** Ready pages plus every published post: what the sitemap and llms.txt list once the site is indexable. */
 const listed = () => [
-  ...publishedPages,
+  ...publishedPages(),
   ...posts.map((post) => ({ path: postPath(post), title: post.title, description: post.description, changefreq: 'monthly', priority: 0.5 })),
 ];
 

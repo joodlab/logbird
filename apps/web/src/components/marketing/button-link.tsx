@@ -42,7 +42,10 @@ export function ButtonLink({ to, href, variant = 'default', size = 'default', cl
   const classes = cx(base, variants[variant], variant === 'link' ? 'h-auto px-0' : sizes[size], className);
   if (to !== undefined) {
     return (
-      <Link className={classes} onClick={onClick} search={search} to={to}>
+      // A call to action is never "current" for a sub-path: exact matching keeps the 404 page's "Product tour" button
+      // inactive at /product/x, as it is in the prerendered 404.html that URL hydrates. The query string never matters:
+      // /contact?status=… hydrates the same contact/index.html.
+      <Link activeOptions={{ exact: true, includeSearch: false }} className={classes} onClick={onClick} search={search} to={to}>
         {children}
       </Link>
     );

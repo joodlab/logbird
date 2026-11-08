@@ -1,5 +1,5 @@
 import { type Theme, useTheme } from '@logbird/ui/theme';
-import { Link } from '@tanstack/react-router';
+import { Link, rootRouteId, useRouterState } from '@tanstack/react-router';
 import { MenuIcon, MonitorIcon, MoonIcon, SunIcon, XIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { APP_URL, COPYRIGHT_HOLDER, GITHUB_PUBLIC, GITHUB_URL } from '../env';
@@ -38,6 +38,19 @@ function ThemeSwitch() {
 // Only designed pages appear in navigation (site-map `ready`).
 const navPages = siteMap.filter((page) => page.inNav && page.ready);
 
+/**
+ * True on a not-found page: the router flagged a match as not found. That flag sits on the root even when a fuzzy leaf
+ * still matches (`/product/x` keeps the /product match), so the leaf's identity can't tell. Links there match nothing,
+ * so none is current: otherwise `/product/x` would mark Product active, while the 404.html it is served, and hydrates,
+ * has no active link, which is a hydration mismatch.
+ */
+function useNotFound() {
+  return useRouterState({
+    select: (state) =>
+      state.matches.some((match) => match._notFound === true || match.status === 'notFound') || state.matches.at(-1)?.routeId === rootRouteId,
+  });
+}
+
 function HomeLink() {
   return (
     <Link aria-label="Logbird home" className="flex shrink-0 items-center rounded-md" to="/">
@@ -55,6 +68,7 @@ export function SiteHeader() {
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+  const notFound = useNotFound();
   const closeMenu = () => {
     if (menu.current) {
       menu.current.open = false;
@@ -67,7 +81,7 @@ export function SiteHeader() {
         {navPages.length ? (
           <nav aria-label="Primary" className="hidden items-center lg:flex">
             {navPages.map((page) => (
-              <Link activeOptions={{ exact: page.path === '/' }} className="nav-link" key={page.path} to={page.path}>
+              <Link activeOptions={{ exact: page.path === '/' || notFound }} className="nav-link" key={page.path} to={page.path}>
                 {page.title}
               </Link>
             ))}
@@ -92,6 +106,7 @@ export function SiteHeader() {
               <nav aria-label="Mobile" className="container-site flex flex-col py-3">
                 {navPages.map((page) => (
                   <Link
+                    activeOptions={{ exact: notFound }}
                     className="flex min-h-12 items-center border-b font-medium text-base last:border-b-0"
                     key={page.path}
                     onClick={closeMenu}
@@ -132,6 +147,7 @@ const footerGroups: { label: string; sections: string[] }[] = [
 ];
 
 export function SiteFooter() {
+  const notFound = useNotFound();
   return (
     <footer className="mt-24 border-t bg-[var(--surface-sunken)]">
       <div className="container-site grid gap-12 py-14 md:grid-cols-[1.2fr_2fr]">
@@ -161,7 +177,11 @@ export function SiteFooter() {
                 <ul className="mt-3 flex flex-col">
                   {pages.map((page) => (
                     <li key={page.path}>
-                      <Link className="inline-flex min-h-9 items-center text-muted-foreground text-sm hover:text-foreground" to={page.path}>
+                      <Link
+                        activeOptions={{ exact: notFound }}
+                        className="inline-flex min-h-9 items-center text-muted-foreground text-sm hover:text-foreground"
+                        to={page.path}
+                      >
                         {page.footerTitle ?? page.title}
                       </Link>
                     </li>

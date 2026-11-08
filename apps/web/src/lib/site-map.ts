@@ -274,8 +274,11 @@ export const siteMap: SitePage[] = [
   },
 ];
 export const staticPages = siteMap.filter((page) => !page.path.includes('$') && page.path !== '/404');
-/** Pages that are linked from the nav/footer and listed in the sitemap and llms.txt. */
-export const publishedPages = staticPages.filter((page) => page.ready);
+/**
+ * Pages listed in the sitemap and llms.txt. A function, not a snapshot, so it always reflects each page's current
+ * `ready` flag (tests flip the legal pages to simulate launch).
+ */
+export const publishedPages = () => staticPages.filter((page) => page.ready);
 /** Every static page plus each published post. */
 export const prerenderPaths = [...staticPages.map((page) => page.path), ...posts.map(postPath)];
 /** True for designed pages; use it to skip wrappers whose only content is a link to an unready page. */

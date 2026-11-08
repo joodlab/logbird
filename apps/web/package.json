@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "pnpm with-env vite dev --port 4620 --strictPort",
     "with-env": "dotenv -e ../../.env --",
-    "build": "pnpm media && pnpm og && vite build && tsx scripts/compress-html.ts",
+    "build": "pnpm media && pnpm og && vite build && tsx scripts/compress-html.ts && tsx scripts/csp.ts",
     "build:cloudflare": "cross-env NITRO_PRESET=cloudflare-module tsx scripts/build-cloudflare.ts",
     "preview": "pnpm start",
     "start": "pnpm with-env cross-env PORT=4620 HOST=127.0.0.1 node .output/server/index.mjs",
@@ -19,7 +19,9 @@
     "capture": "node --import tsx scripts/capture.mjs",
     "clean": "git clean -xdf .cache .turbo .output .nitro .tanstack .tmp public/media public/og node_modules",
     "serve:static": "tsx scripts/serve-static.ts",
-    "check:source-state": "tsx scripts/check-source-state.ts"
+    "check:source-state": "tsx scripts/check-source-state.ts",
+    "csp": "tsx scripts/csp.ts",
+    "check:live": "tsx scripts/check-live.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
