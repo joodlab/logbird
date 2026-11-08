@@ -1,5 +1,6 @@
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group";
+import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/utils";
 
 function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props) {
@@ -32,4 +33,35 @@ function RadioGroupItem({ className, ...props }: RadioPrimitive.Root.Props) {
 	);
 }
 
-export { RadioGroup, RadioGroupItem };
+const radioChoiceVariants = cva(
+	"cursor-pointer outline-none transition-colors focus-visible:outline-hidden focus-visible:ring-3 focus-visible:ring-ring/50 data-disabled:cursor-not-allowed data-disabled:opacity-60 forced-colors:data-checked:border-[Highlight]",
+	{
+		variants: {
+			variant: {
+				card: "flex flex-col items-start gap-0.5 rounded-lg border bg-card p-3 text-start hover:border-foreground/25 data-checked:border-brand data-checked:ring-1 data-checked:ring-brand data-disabled:hover:border-border data-checked:data-disabled:hover:border-brand",
+				chip: "inline-flex h-(--control-size-compact) shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm whitespace-nowrap shadow-xs data-checked:border-brand/50 data-checked:bg-brand/10 data-checked:font-medium data-checked:text-brand not-data-checked:bg-background not-data-checked:text-muted-foreground not-data-checked:hover:bg-muted not-data-checked:hover:text-foreground dark:not-data-checked:bg-input/30 dark:not-data-checked:hover:bg-input/50 data-disabled:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+			},
+		},
+		defaultVariants: { variant: "card" },
+	},
+);
+
+/**
+ * A whole card or chip as one radio of a `RadioGroup`: one Tab stop per group, arrow keys move the selection
+ * (Base UI roving focus). Use instead of `button role="radio"`.
+ */
+function RadioChoice({
+	className,
+	variant,
+	...props
+}: RadioPrimitive.Root.Props & VariantProps<typeof radioChoiceVariants>) {
+	return (
+		<RadioPrimitive.Root
+			className={cn(radioChoiceVariants({ variant }), className)}
+			data-slot="radio-choice"
+			{...props}
+		/>
+	);
+}
+
+export { RadioChoice, RadioGroup, RadioGroupItem, radioChoiceVariants };

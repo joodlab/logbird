@@ -2,7 +2,7 @@ import { Button } from '@logbird/ui/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, notFound, useNavigate } from '@tanstack/react-router';
 import { ArrowRightIcon, KeyRoundIcon, SendIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 import { NotFound } from '@/components/not-found';
 import { ApiKeyStep } from '@/components/setup/api-key-step';
 import { FIRST_EVENT_POLL_MS, FirstEventPanel } from '@/components/setup/first-event-panel';
@@ -33,11 +33,20 @@ function FirstEventStep() {
   const navigate = useNavigate();
   const setup = useQuery(projectSetupQuery(projectId, { pollUntilFirstEvent: FIRST_EVENT_POLL_MS }));
   const received = Boolean(setup.data?.ingest.firstEventAt);
+  // The earlier steps focus their input; this one has none, so move focus to the heading (not the body) and screen
+  // readers announce where "Create project" landed.
+  const heading = useRef<HTMLHeadingElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: focus again when the step is reused for another project
+  useEffect(() => {
+    heading.current?.focus({ preventScroll: true });
+  }, [projectId]);
 
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-1.5">
-        <h1 className="font-semibold text-2xl tracking-tight">Send your first event to {project.name}</h1>
+        <h1 className="font-semibold text-2xl tracking-tight outline-none" ref={heading} tabIndex={-1}>
+          Send your first event to {project.name}
+        </h1>
         <p className="text-muted-foreground text-sm">
           Any JSON object with an <span className="font-mono text-foreground">action</span> is a valid event. Start small — you can enrich it later
           from the Setup page.

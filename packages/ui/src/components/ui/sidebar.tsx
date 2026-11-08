@@ -154,11 +154,17 @@ function Sidebar({
   className,
   children,
   dir,
+  mobileTitle = "Navigation",
+  mobileDescription,
   ...props
 }: React.ComponentProps<"div"> & {
   side?: "left" | "right"
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
+  /** Accessible name of the phone sheet. */
+  mobileTitle?: string
+  /** Optional accessible description of the phone sheet (e.g. the current workspace and project). */
+  mobileDescription?: string
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
 
@@ -194,8 +200,10 @@ function Sidebar({
           side={side}
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>Sidebar</SheetTitle>
-            <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+            <SheetTitle>{mobileTitle}</SheetTitle>
+            {mobileDescription ? (
+              <SheetDescription>{mobileDescription}</SheetDescription>
+            ) : null}
           </SheetHeader>
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
@@ -535,13 +543,17 @@ function SidebarMenuButton({
     }
   }
 
+  // Tooltips only name icons in the collapsed desktop rail. Elsewhere they are disabled, not just hidden: an
+  // invisible open tooltip would swallow the first Escape meant for the phone sheet.
+  const tooltipDisabled = state !== "collapsed" || isMobile
+
   return (
-    <Tooltip>
+    <Tooltip disabled={tooltipDisabled}>
       {comp}
       <TooltipContent
         side="right"
         align="center"
-        hidden={state !== "collapsed" || isMobile}
+        hidden={tooltipDisabled}
         {...tooltip}
       />
     </Tooltip>

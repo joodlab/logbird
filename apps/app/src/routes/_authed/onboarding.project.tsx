@@ -146,12 +146,12 @@ function ProjectStep() {
           {(field) => (
             <div className="flex flex-col gap-2">
               <div className="flex flex-col gap-0.5">
-                <Label>Retention</Label>
+                <Label id="retention-label">Retention</Label>
                 <p className="text-muted-foreground text-xs">
                   Events older than {formatRetention(field.state.value)} are permanently deleted. You can change this later in Settings.
                 </p>
               </div>
-              <RetentionPicker onChange={field.handleChange} value={field.state.value} />
+              <RetentionPicker aria-labelledby="retention-label" onChange={field.handleChange} value={field.state.value} />
             </div>
           )}
         </form.Field>
