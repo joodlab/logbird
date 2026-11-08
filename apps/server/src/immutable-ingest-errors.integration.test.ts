@@ -62,4 +62,5 @@ it('DELETE project purges confirmed and unresolved receipts before returning 204
     await prisma.organization.deleteMany({ where: { id: org } });
     if (userId) await prisma.user.deleteMany({ where: { id: userId } });
   }
-}, 60_000);
+  // Whole-file runs take 54–69s while events/event_ids purges share the local two-slot mutation pool.
+}, 120_000);
