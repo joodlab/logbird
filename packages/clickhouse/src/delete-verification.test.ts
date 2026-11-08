@@ -23,12 +23,7 @@ it('refuses further rollup writes when a raw-event delete leaves visible rows', 
 it('refuses selective rollup inserts when a scoped delete leaves visible rows', async () => {
   const command = vi.fn().mockResolvedValue({});
   const query = vi.fn().mockImplementation(async ({ query: sql }: { query: string }) => ({
-    json: async () =>
-      sql.includes(' key_bytes ')
-        ? [{ rows: 0, key_bytes: 0 }]
-        : sql.startsWith('SELECT DISTINCT')
-          ? []
-          : [{ n: sql.includes('FROM events_by_minute ') ? 1 : 0 }],
+    json: async () => (sql.startsWith('SELECT DISTINCT') ? [] : [{ n: sql.includes('FROM events_by_minute ') ? 1 : 0 }]),
   }));
   const ch = { command, query } as unknown as ClickHouseClient;
   await expect(purgeProject(ch, 'qa-restored', new Date())).rejects.toMatchObject({ code: 'LOGBIRD_DELETE_INCOMPLETE' });
@@ -48,21 +43,15 @@ it('refuses further writes when the identity-index delete leaves visible rows', 
   expect(command.mock.calls.every(([args]) => args.query.startsWith('DELETE FROM'))).toBe(true);
 });
 
-it('cutoff repair reads identity pointers and affected aggregate keys instead of wide event payloads', async () => {
+it('cutoff cleanup preserves narrow affected-key reads without repairing retained identity history', async () => {
   const command = vi.fn().mockResolvedValue({});
   const query = vi.fn().mockImplementation(async ({ query: sql }: { query: string }) => ({
-    json: async () =>
-      sql.includes(' key_bytes ') ? [{ rows: 10_000_000, key_bytes: 1_000_000_000 }] : sql.startsWith('SELECT DISTINCT') ? [] : [{ n: 0 }],
+    json: async () => (sql.startsWith('SELECT DISTINCT') ? [] : [{ n: 0 }]),
   }));
   await purgeProject({ query, command } as unknown as ClickHouseClient, 'qa-narrow-retention', new Date('2026-11-07T00:00:00.000Z'));
-  const repairs = command.mock.calls.filter(([p]) => p.query.startsWith('INSERT INTO event_ids'));
-  expect(repairs).toHaveLength(32);
-  expect(new Set(repairs.map(([p]) => p.query_params.identityBucket)).size).toBe(32);
-  expect(repairs.every(([p]) => p.clickhouse_settings.max_memory_usage === '268435456')).toBe(true);
-  const indexRepair = repairs[0]?.[0].query as string;
-  expect(indexRepair).toMatch(/^INSERT INTO event_ids SELECT DISTINCT project_id,event_id,received_at,timestamp FROM events WHERE project_id=/);
-  expect(indexRepair).not.toMatch(/payload|search_text|SELECT \*/);
-  expect(indexRepair.match(/cityHash64\(project_id,event_id\)%\{identityBuckets:UInt64\}=\{identityBucket:UInt64\}/g)).toHaveLength(2);
+  expect(command.mock.calls.some(([p]) => p.query.startsWith('DELETE FROM event_ids'))).toBe(true);
+  expect(command.mock.calls.some(([p]) => p.query.startsWith('INSERT INTO event_ids'))).toBe(false);
+  expect(query.mock.calls.some(([p]) => /key_bytes|identityBuckets|NOT IN/.test(p.query))).toBe(false);
   const affected = query.mock.calls.find(([p]) => p.query.startsWith('SELECT DISTINCT'))?.[0].query as string;
   expect(affected).toContain('SELECT DISTINCT kind,id');
   expect(affected).not.toMatch(/payload|search_text|SELECT \*/);

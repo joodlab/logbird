@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import type { ClickHouseClient } from './client';
 import { normalizeEvent } from './normalize';
-import { getEvent, hasExpiredEvents, purgeProject, searchEvents } from './queries';
+import { getEvent, hasExpiredEvents, searchEvents } from './queries';
 
 const from = '2026-11-07T10:00:00.000Z',
   to = '2026-11-07T11:00:00.000Z';
@@ -92,14 +92,4 @@ it('expiration probes stay narrow and bounded in both raw rows and the identity 
   expect(sql.match(/SELECT 1 FROM/g)).toHaveLength(2);
   expect(sql.match(/LIMIT 1/g)).toHaveLength(2);
   expect(sql).not.toContain('SELECT *');
-});
-it('cutoff purge deletes matching pointers without a full-history identity repair under the project lock', async () => {
-  const query = vi.fn(async ({ query: sql }: { query: string }) => ({
-    json: async () => (sql.startsWith('SELECT DISTINCT kind,id') ? [] : [{ n: 0 }]),
-  }));
-  const command = vi.fn().mockResolvedValue({});
-  await purgeProject({ query, command } as unknown as ClickHouseClient, 'qa-narrow-search', new Date(from));
-  expect(command.mock.calls.some(([params]) => params.query.startsWith('DELETE FROM event_ids'))).toBe(true);
-  expect(command.mock.calls.some(([params]) => params.query.startsWith('INSERT INTO event_ids'))).toBe(false);
-  expect(query.mock.calls.some(([params]) => /key_bytes|identityBuckets|NOT IN/.test(params.query))).toBe(false);
 });
