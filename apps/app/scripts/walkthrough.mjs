@@ -228,7 +228,7 @@ await qb('query bar: focus shows recent queries, saved views and top fields', as
           body: JSON.stringify({
             name: `Failed CRM syncs (walkthrough ${new Date().toISOString().slice(11, 19)})`,
             description: null,
-            state: { q: 'outcome:failure action:guest-sync.*', range: '7d' },
+            state: { q: 'outcome:failure action:crm.*', range: '7d' },
           }),
         })
       ).json(),
@@ -345,7 +345,7 @@ await qb('query bar: SQL suggestions (operators, values, attribute keys, signatu
   await page.keyboard.press('Tab');
   await page.keyboard.press('Tab');
   await expectOption('guest-sync');
-  await page.keyboard.type('crm', { delay: 70 });
+  await page.keyboard.type('guest', { delay: 70 });
   await page.keyboard.press('Tab');
   await page.keyboard.type(' ', { delay: 70 });
   await expectOption('AND');
