@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import { apiReferenceBundle, apiReferencePage } from './api-reference';
@@ -35,9 +34,19 @@ describe('GET /docs', () => {
     const hash = `'sha256-${createHash('sha256')
       .update(inline[0] ?? '')
       .digest('base64')}'`;
-    // The console (apps/app) owns the header; keep both packages in step.
-    const policy = readFileSync(new URL('../../app/server/proxy-paths.ts', import.meta.url), 'utf8');
-    expect(policy).toContain(`'${apiReferenceBundle.src}'`);
-    expect(policy).toContain(`"${hash}"`);
+    // The console (apps/app) owns the header; load its actual policy and compare the parsed script-src.
+    const { apiReferenceContentSecurityPolicy: policy } = (await import(new URL('../../app/server/proxy-paths.ts', import.meta.url).href)) as {
+      apiReferenceContentSecurityPolicy: string;
+    };
+    const directives = new Map(
+      policy
+        .split(';')
+        .map((d) => d.trim().split(/\s+/))
+        .filter((tokens) => tokens[0])
+        .map(([name, ...values]) => [name?.toLowerCase(), values] as const),
+    );
+    expect(new Set(directives.get('script-src'))).toEqual(new Set([apiReferenceBundle.src, hash]));
+    expect(directives.get('connect-src')).toEqual(["'self'"]);
+    expect(directives.get('object-src')).toEqual(["'none'"]);
   });
 });

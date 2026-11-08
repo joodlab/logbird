@@ -3,7 +3,7 @@ import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
 import { defineConfig } from 'vite';
-import { apiReferenceContentSecurityPolicy } from './server/proxy-paths';
+import { apiReferenceContentSecurityPolicy, proxiedRoutePatterns } from './server/proxy-paths';
 
 /**
  * The console talks to exactly one origin. The Nitro middleware (server/proxy.ts) forwards `/api` (better-auth +
@@ -15,6 +15,12 @@ import { apiReferenceContentSecurityPolicy } from './server/proxy-paths';
  * segments (`/api/../docs`), so requests Nitro's dev pre-middleware hands to Vite (asset fetches such as
  * `Sec-Fetch-Dest: image`) could reach the API with any method and credentials, around proxyDecision(). Nitro is the
  * only forwarding path in dev and production.
+ *
+ * The same handler is also registered as explicit routes for the proxied paths. Nitro's dev pre-middleware dispatches
+ * a request to Nitro when an explicit route matches its normalized pathname, before its asset heuristic; without
+ * these routes, API paths ending in an asset extension (an event id such as `receipt.png`) would be treated as static
+ * assets in dev and never reach the API. Normalized traversal to other paths (`/v1/../internal`) matches no explicit
+ * route and stays on the console. In production the global middleware already handles every request first.
  */
 export default defineConfig(() => {
   return {
@@ -63,7 +69,10 @@ export default defineConfig(() => {
     plugins: [
       tailwindcss(),
       nitro({
-        handlers: [{ route: '/**', handler: './server/proxy.ts', middleware: true }],
+        handlers: [
+          { route: '/**', handler: './server/proxy.ts', middleware: true },
+          ...proxiedRoutePatterns.map((route) => ({ route, handler: './server/proxy.ts' })),
+        ],
         routeRules: {
           '/**': {
             headers: {

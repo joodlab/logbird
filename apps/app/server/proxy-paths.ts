@@ -13,6 +13,12 @@ const referencePaths = new Set(['/docs', '/openapi.json']);
 
 export const referenceMethods = ['GET', 'HEAD'] as const;
 
+/**
+ * Explicit Nitro routes for every proxied path (see vite.config.ts): they make Nitro's dev server dispatch these paths
+ * to server/proxy.ts even when they end in an asset extension. Keep in step with proxyDecision().
+ */
+export const proxiedRoutePatterns = ['/api', '/api/**', '/v1', '/v1/**', ...healthPaths, ...referencePaths] as const;
+
 /** Request headers never forwarded with an API-reference request: the reference is public and credential-free. */
 export const referenceStrippedHeaders = ['cookie', 'authorization', 'proxy-authorization'] as const;
 

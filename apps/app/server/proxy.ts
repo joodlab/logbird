@@ -7,8 +7,8 @@ export default defineEventHandler((event) => {
   if (decision === 'console') return;
   // The public API reference is read-only: other methods never reach the API listener.
   if (decision === 'method-not-allowed') return new Response(null, { status: 405, headers: { Allow: referenceMethods.join(', ') } });
-  // Nitro serves these routes before Vite's dev proxy, so `pnpm dev` needs the local server as its default; built
-  // images default to the Compose service name. LOGBIRD_SERVER_URL overrides both.
+  // Nitro is the only forwarding path, in `pnpm dev` too (there is no Vite proxy), so dev defaults to the local server;
+  // built images default to the Compose service name. LOGBIRD_SERVER_URL overrides both.
   const fallback = import.meta.dev ? 'http://127.0.0.1:4601' : 'http://server:4601';
   const target = new URL(process.env.LOGBIRD_SERVER_URL || fallback);
   target.pathname = url.pathname;

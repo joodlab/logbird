@@ -250,7 +250,8 @@ The **route table and every request/response schema live in `packages/contracts`
   credentials still undergo lookup so valid keys remain usable behind shared NAT. Unknown/revoked
   well-formed keys therefore still incur lookup. Public limits fail open on Redis errors and log
   `rate_limit.storage_error`; auth limits remain fail closed.
-- Dev: the app proxies `/api` and `/v1` to `http://127.0.0.1:4601` (Vite `server.proxy`), so cookies are
+- Dev: the app's Nitro handler (`apps/app/server/proxy.ts`, the same one production uses; there is no Vite proxy)
+  forwards `/api`, `/v1`, the health checks and the read-only reference to `http://127.0.0.1:4601`, so cookies are
   same-origin. better-auth `baseURL` = app origin (`http://localhost:4600`), `trustedOrigins` includes it.
 
 `GET /api/projects/:projectId/retention?preview=30` returns retentionDays,

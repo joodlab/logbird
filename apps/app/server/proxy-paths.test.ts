@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isProxiedPath, proxyDecision } from './proxy-paths';
+import { isProxiedPath, proxiedRoutePatterns, proxyDecision } from './proxy-paths';
 
 describe('console → API proxy allowlist', () => {
   it.each(['/api', '/api/auth/get-session', '/v1', '/v1/events', '/health', '/livez', '/readyz', '/docs', '/openapi.json'])('forwards %s', (path) => {
@@ -41,5 +41,15 @@ describe('proxy decision by method', () => {
     ['/internal', 'POST', 'console'],
   ] as const)('%s %s → %s', (path, method, decision) => {
     expect(proxyDecision(path, method)).toBe(decision);
+  });
+});
+
+describe('explicit Nitro routes', () => {
+  it('cover exactly the proxied paths, including ids that end in an asset extension', () => {
+    for (const route of proxiedRoutePatterns) {
+      const sample = route.endsWith('/**') ? `${route.slice(0, -3)}/projects/p1/events/receipt.png` : route;
+      expect(proxyDecision(sample, 'GET'), route).not.toBe('console');
+    }
+    expect(proxiedRoutePatterns).toEqual(['/api', '/api/**', '/v1', '/v1/**', '/health', '/livez', '/readyz', '/docs', '/openapi.json']);
   });
 });
