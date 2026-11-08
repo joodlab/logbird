@@ -274,7 +274,7 @@ export const managementRoutes = new Hono<AppEnv>()
         // one may; otherwise flush the async queue), then purge. The purge skips only the ClickHouse mutations for a
         // provably empty project; non-ClickHouse cleanup (ingest receipts) always runs.
         await settleProjectInserts(projectId);
-        await purgeProjectEvents(projectId);
+        await purgeProjectEvents(projectId, { settled: true });
         await prisma.$transaction(async (tx) => {
           const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
           for (const key of revoked) await auditApiKey(c, 'api_key.revoked', key, c.get('project'), 'project_deleted', tx);

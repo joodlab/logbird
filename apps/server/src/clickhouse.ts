@@ -36,13 +36,14 @@ export const settleProjectInserts = (projectId: string) =>
 
 /**
  * Purges everything a project stored. Callers hold the exclusive project lock. The ClickHouse mutations are skipped
- * only for a project with no unresolved ingest claim (so no insert of its own can still be queued) and no stored rows
- * in any project-scoped ClickHouse table (including event ids). Cleanup outside ClickHouse belongs in `alwaysRun`, so it also
+ * only when no insert of the project's own can still be queued — the caller ran `settleProjectInserts` under the same
+ * lock (`{ settled: true }`), or no unresolved ingest claim exists — and no project-scoped ClickHouse table (including
+ * event ids) holds a row for it. Cleanup outside ClickHouse belongs in `alwaysRun`, so it also
  * runs on that fast path: ingest receipts live in PostgreSQL and must never outlive their project.
  */
 export const purgeProjectEvents = projectPurger({
-  hasNoStoredRows: async (projectId) =>
-    (await newestUnresolvedClaim(projectId)) === null && (await projectHasNoStoredRows(maintenanceClickhouse, projectId)),
+  hasNoStoredRows: async (projectId, settled) =>
+    (settled || (await newestUnresolvedClaim(projectId)) === null) && (await projectHasNoStoredRows(maintenanceClickhouse, projectId)),
   purgeClickhouse: (projectId) => purgeProject(maintenanceClickhouse, projectId),
   alwaysRun: [purgeIngestReceipts],
 });

@@ -96,3 +96,17 @@ it('a failing cleanup step fails the purge (so the project is not deleted with s
   });
   await expect(purge('p1')).rejects.toThrow('receipt cleanup failed');
 });
+
+it('passes "settled" through, so only a delete that settled in-flight inserts may skip a claimed project', async () => {
+  const seen: boolean[] = [];
+  const purge = projectPurger({
+    hasNoStoredRows: async (_p, settled) => {
+      seen.push(settled);
+      return settled;
+    },
+    purgeClickhouse: async () => undefined,
+  });
+  expect(await purge('p1')).toEqual({ clickhouse: 'purged' });
+  expect(await purge('p1', { settled: true })).toEqual({ clickhouse: 'skipped_empty' });
+  expect(seen).toEqual([false, true]);
+});

@@ -62,12 +62,13 @@ export function projectPurger({
   purgeClickhouse,
   alwaysRun = [],
 }: {
-  hasNoStoredRows: (projectId: string) => Promise<boolean>;
+  /** `settled`: the caller already ran `settleInFlightInserts` under the same exclusive lock. */
+  hasNoStoredRows: (projectId: string, settled: boolean) => Promise<boolean>;
   purgeClickhouse: PurgeStep;
   alwaysRun?: readonly PurgeStep[];
 }) {
-  return async (projectId: string): Promise<{ clickhouse: 'purged' | 'skipped_empty' }> => {
-    const empty = await hasNoStoredRows(projectId);
+  return async (projectId: string, { settled = false }: { settled?: boolean } = {}): Promise<{ clickhouse: 'purged' | 'skipped_empty' }> => {
+    const empty = await hasNoStoredRows(projectId, settled);
     if (!empty) await purgeClickhouse(projectId);
     for (const step of alwaysRun) await step(projectId);
     return { clickhouse: empty ? 'skipped_empty' : 'purged' };
