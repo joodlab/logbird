@@ -71,10 +71,11 @@ it('reuses the existing transaction clock for admission and final validation', a
     requested: { action: 'export.requested' },
     unknown: { action: 'export.outcome_unknown' },
   });
-  expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+  // Transaction-local settings and one clock read; membership must not issue another clock SELECT.
+  expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
   tx.$queryRaw.mockClear();
   await validateExportMembership('project', '1:0:', 'export');
-  expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+  expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
 });
 it('labels storage outages separately from changed membership and rejects expired leases', async () => {
   prisma.$transaction.mockRejectedValueOnce({ code: 'P1001' });
