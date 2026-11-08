@@ -123,7 +123,7 @@ export function ApiKeyStep({ projectId, kind }: { projectId: string; kind: Kind 
           {active.slice(0, 4).map((k) => (
             <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm" key={k.id}>
               <code className="font-mono text-[12.5px]">{k.prefix}…</code>
-              <span className="min-w-0 flex-1 truncate">{k.name}</span>
+              <span className="min-w-0 flex-1 basis-32 break-words sm:basis-0 sm:truncate">{k.name}</span>
               <span className="text-muted-foreground text-xs">
                 {k.lastUsedAt ? (
                   <>

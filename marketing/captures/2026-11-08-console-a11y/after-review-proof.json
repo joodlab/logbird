@@ -1,0 +1,40 @@
+{
+  "checks": {
+    "stepper: one spoken string per step, no stray separator": {
+      "ok": true,
+      "detail": "- list \"Setup progress\":\n  - listitem: \"Step 1 of 4: You, completed\"\n  - listitem: \"Step 2 of 4: Workspace, completed\"\n  - listitem: \"Step 3 of 4: Project\"\n  - listitem: \"Step 4 of 4: First event\""
+    },
+    "key kind: radios are named \"Ingest — …\" and \"Read — …\"": {
+      "ok": true,
+      "detail": "- radiogroup \"Permission\":\n  - radio \"Ingest — Can only send events (POST /v1/events). Use in your services.\" [checked]\n  - radio \"Read — Can only search and read events (GET /v1/events). Use in products that show history.\""
+    },
+    "L2 axe Settings → Retention desktop-light: 0 violations": {
+      "ok": true,
+      "detail": []
+    },
+    "L2 axe Settings → Retention desktop-dark: 0 violations": {
+      "ok": true,
+      "detail": []
+    },
+    "shortcut card click: value set, focus not on the hidden card": {
+      "ok": true,
+      "detail": {
+        "focusInShortcuts": false,
+        "focused": "BODY",
+        "checked": "30 days, debugging"
+      }
+    },
+    "forced colors: focused retention chip radio paints an outline ≥ 2px": {
+      "ok": true,
+      "detail": {
+        "style": "solid",
+        "width": "2px",
+        "offset": "2px"
+      }
+    }
+  },
+  "axe": {
+    "settings-retention desktop-light": [],
+    "settings-retention desktop-dark": []
+  }
+}
