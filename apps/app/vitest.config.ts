@@ -7,6 +7,6 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   test: {
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'server/**/*.test.ts'],
   },
 });

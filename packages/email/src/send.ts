@@ -18,12 +18,41 @@ if (env.AUTH_LOG_SIGN_IN_CODES === 'true')
     }),
   );
 
-const transport = nodemailer.createTransport({
-  host: env.SMTP_HOST,
-  port: env.SMTP_PORT,
-  secure: env.SMTP_SECURE === 'true',
-  ...(env.SMTP_USER ? { auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD } } : {}),
-});
+type SmtpSettings = Pick<typeof env, 'SMTP_HOST' | 'SMTP_PORT' | 'SMTP_SECURE' | 'SMTP_REQUIRE_TLS' | 'SMTP_USER' | 'SMTP_PASSWORD'>;
+
+/** How the SMTP connection is protected: implicit TLS, mandatory STARTTLS, or opportunistic STARTTLS (may be cleartext). */
+export type SmtpTlsMode = 'implicit' | 'starttls-required' | 'opportunistic';
+
+export const smtpTlsMode = (settings: Pick<SmtpSettings, 'SMTP_SECURE' | 'SMTP_REQUIRE_TLS'>): SmtpTlsMode =>
+  settings.SMTP_SECURE === 'true' ? 'implicit' : settings.SMTP_REQUIRE_TLS === 'true' ? 'starttls-required' : 'opportunistic';
+
+/**
+ * Nodemailer transport options. `requireTLS` makes Nodemailer refuse to authenticate or send when the server does not
+ * advertise STARTTLS or the upgrade fails, so a downgrade cannot expose credentials or codes. Certificate verification
+ * stays on (no `rejectUnauthorized: false`).
+ */
+export function smtpTransportOptions(settings: SmtpSettings) {
+  const mode = smtpTlsMode(settings);
+  return {
+    host: settings.SMTP_HOST,
+    port: settings.SMTP_PORT,
+    secure: mode === 'implicit',
+    requireTLS: mode === 'starttls-required',
+    ...(settings.SMTP_USER ? { auth: { user: settings.SMTP_USER, pass: settings.SMTP_PASSWORD } } : {}),
+  };
+}
+
+const loopback = (host: string) => host === 'localhost' || host === '::1' || host.startsWith('127.');
+if (env.SMTP_HOST && !loopback(env.SMTP_HOST) && smtpTlsMode(env) === 'opportunistic')
+  console.warn(
+    JSON.stringify({
+      level: 'warn',
+      event: 'email.smtp_tls_not_required',
+      message: 'SMTP may fall back to cleartext. For a provider on port 587 set SMTP_REQUIRE_TLS=true; for implicit TLS (465) set SMTP_SECURE=true.',
+    }),
+  );
+
+const transport = nodemailer.createTransport(smtpTransportOptions(env));
 
 /** Props as callers pass them: the product URL defaults to this install's APP_URL. */
 export type SendProps<P> = Omit<P, 'appUrl'> & { appUrl?: string };
@@ -63,4 +92,4 @@ export const sendMemberJoined = (props: SendProps<MemberJoinedEmailProps>) => se
 export const sendRoleChanged = (props: SendProps<RoleChangedEmailProps>) => sendEmail(roleChanged, props);
 
 /** SMTP settings safe to print (never credentials). */
-export const smtpTarget = () => ({ host: env.SMTP_HOST, port: env.SMTP_PORT, from: env.MAIL_FROM, appUrl: env.APP_URL });
+export const smtpTarget = () => ({ host: env.SMTP_HOST, port: env.SMTP_PORT, tls: smtpTlsMode(env), from: env.MAIL_FROM, appUrl: env.APP_URL });

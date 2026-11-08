@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { chromium } from '@playwright/test';
+import { robotsAllowsCrawling, seoPassMark, seoWithoutCrawlable } from '../src/lib/lighthouse-score.ts';
 import { prerenderPaths } from '../src/lib/site-map.ts';
 
 const LIGHTHOUSE = 'lighthouse@13.6.0';
@@ -19,13 +20,14 @@ const paths = process.env.PATHS ? process.env.PATHS.split(',').map((path) => pat
 const runs = Math.max(1, Number(process.env.RUNS ?? 3));
 const categories = ['performance', 'accessibility', 'best-practices', 'seo'];
 // noindex pages (404, unready pages, and every page while a release blocker is open) fail Lighthouse's is-crawlable
-// audit by design; the release gate decides crawlability and has its own tests. So the pass mark applies to the SEO
-// score without that one audit (`seo-content`), and the plain score is reported beside it.
-const seoWithoutCrawlable = (lhr) => {
-  const refs = lhr.categories.seo.auditRefs.filter((ref) => ref.weight > 0 && ref.id !== 'is-crawlable' && lhr.audits[ref.id]?.score !== null);
-  const weight = refs.reduce((sum, ref) => sum + ref.weight, 0);
-  return weight ? Math.round((refs.reduce((sum, ref) => sum + ref.weight * (lhr.audits[ref.id]?.score ?? 0), 0) / weight) * 100) : 0;
-};
+// audit by design. While the served robots.txt disallows crawling, the SEO pass mark is the score without that audit
+// (`seo-content`); once the site is indexable, ready pages and posts must pass the full score, is-crawlable included
+// (src/lib/lighthouse-score.ts). Both scores are reported.
+const robots = await fetch(new URL('/robots.txt', base)).then((response) => (response.ok ? response.text() : ''));
+const siteCrawlable = robotsAllowsCrawling(robots);
+console.log(
+  `robots.txt ${siteCrawlable ? 'allows crawling: ready pages are held to the full SEO score' : 'disallows crawling: SEO pass mark is seo-content'}`,
+);
 const chromePath = chromium.executablePath();
 await mkdir(output, { recursive: true });
 
@@ -72,6 +74,7 @@ for (const path of paths) {
       'seo-content': median(reports.map(seoWithoutCrawlable)),
       runs: scores('performance').join(' '),
     };
+    row['seo-mark'] = seoPassMark(row, siteCrawlable).key;
     rows.push(row);
     const representative = reports.find((lhr) => Math.round(lhr.categories.performance.score * 100) === row.performance) ?? reports[0];
     await writeFile(
@@ -83,6 +86,9 @@ for (const path of paths) {
 }
 console.table(rows);
 await writeFile(resolve(output, 'summary.json'), JSON.stringify(rows, null, 2));
-if (!process.argv.includes('--no-fail') && rows.some((row) => categories.some((key) => (key === 'seo' ? row['seo-content'] : row[key]) < 95))) {
+if (
+  !process.argv.includes('--no-fail') &&
+  rows.some((row) => categories.some((key) => (key === 'seo' ? seoPassMark(row, siteCrawlable).score : row[key]) < 95))
+) {
   process.exitCode = 1;
 }

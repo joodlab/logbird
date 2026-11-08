@@ -70,8 +70,10 @@ unrun role/stage in the release record.
 
 ## GHCR publishing plan (maintainer action)
 
-The proposed image names match Compose's existing naming:
-`ghcr.io/joodlab/logbird/app`, `/server`, `/worker`, `/migrate`. A maintainer must
+The registry is GHCR ([owner decision 2026-11-08](decisions.md)). Image names match
+Compose's defaults: `ghcr.io/joodlab/logbird-app`, `logbird-server`, `logbird-worker`
+and `logbird-migrate`. **Nothing is published until the repository is open-sourced**,
+and every publication needs explicit owner approval. A maintainer must
 confirm package visibility and retention policy before the first publication.
 Log in using an authorized package-writing credential via `--password-stdin` or a
 credential helper; never commit or print it. GitHub documents authentication and
@@ -86,8 +88,8 @@ provenance and SBOM. For example (this command publishes):
 docker buildx build --platform linux/amd64 \
   --label org.opencontainers.image.revision="$REVISION" \
   --label org.opencontainers.image.version="$VERSION" \
-  --tag "ghcr.io/joodlab/logbird/server:$VERSION" \
-  --tag "ghcr.io/joodlab/logbird/server:sha-$REVISION" \
+  --tag "ghcr.io/joodlab/logbird-server:$VERSION" \
+  --tag "ghcr.io/joodlab/logbird-server:sha-$REVISION" \
   --provenance=mode=max --sbom=true --push -f apps/server/Dockerfile .
 ```
 
@@ -98,10 +100,14 @@ arm64 is currently unverified.
 Never overwrite a published version or use `latest` as an upgrade selector. Inspect
 the resulting manifest/index digests, pull those images into an empty host and
 rerun acceptance. Record all four registry digests in the release notes before
-announcing availability. Consumers then set
-`LOGBIRD_IMAGE_REGISTRY=ghcr.io/joodlab/logbird` and `LOGBIRD_VERSION=<exact-version>`
+announcing availability. Consumers then keep
+`LOGBIRD_IMAGE_REGISTRY` empty (default `ghcr.io/joodlab`), set `LOGBIRD_VERSION=<exact-version>`
 and use `docker compose up -d --no-build --pull always`. Verify the pulled digests
-against the release record. Existing source-build instructions remain valid.
+against the release record. Every later startup or reconfiguration of a published-image
+installation, including Caddy and external-service paths, uses `up --no-build`: a bare
+`up` under `pull_policy: build` rebuilds from the checkout and shadows the verified tag.
+Existing source-build instructions remain valid. See the
+[Compose pull-policy matrix](verification/compose-pull-policy-2026-11-08.md).
 
 Publication, tag creation, package visibility and public ACME/SMTP are separate
 actions from local validation. This document authorizes none of them and adds no
@@ -138,6 +144,10 @@ Test only in a fresh disposable stack, with no shared or customer database:
    This override removes the build definition and requires the image already
    built in step 1. Compose `run` has no `--no-build` flag; removing `build` and
    setting `pull_policy: never` prevents an implicit rebuild or registry pull.
+   Compose v2.24.4's `run` has no `--pull` flag either: on that version drop
+   `--pull never` from the commands below; the override alone fails with
+   `No such image` when the image is missing (verified in the
+   [pull-policy matrix](verification/compose-pull-policy-2026-11-08.md)).
 
 3. With that override, run the real migration command in the background:
    `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run --pull never -d --no-deps --name logbird-migration-cancel-probe migrate`.

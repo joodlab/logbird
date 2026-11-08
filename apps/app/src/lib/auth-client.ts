@@ -5,7 +5,7 @@ import { withDeadline } from '@/lib/api/errors';
 
 /**
  * better-auth client. Same origin as the console: `/api/auth/*` is proxied to the Hono server
- * (vite dev proxy / Nitro route rules), so the session cookie is first-party.
+ * (the Nitro handler in apps/app/server/proxy.ts, in dev and production), so the session cookie is first-party.
  */
 export const authClient = createAuthClient({
   baseURL: typeof window === 'undefined' ? 'http://localhost:4600' : window.location.origin,

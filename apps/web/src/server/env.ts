@@ -9,6 +9,8 @@ export const serverEnv = createEnv({
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().min(1).max(65_535).default(1025),
     SMTP_SECURE: boolean.default(false),
+    /** With SMTP_SECURE=false: require STARTTLS (fail closed when the server does not offer it). */
+    SMTP_REQUIRE_TLS: boolean.default(false),
     SMTP_USER: z.string().optional(),
     SMTP_PASSWORD: z.string().optional(),
     /** Required when SMTP_HOST is set; no default (never a guessed address). */

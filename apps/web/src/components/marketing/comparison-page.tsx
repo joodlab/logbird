@@ -57,7 +57,7 @@ function SourceItem({ source }: { source: ComparisonSource }) {
       <div className="flex min-w-0 flex-col gap-1">
         <a className="text-link body-copy inline-flex min-h-6 items-start gap-1.5 leading-relaxed" href={source.url} rel="noopener" target="_blank">
           <span>
-            <Rich text={source.title} />
+            <Rich text={source.title} thirdPartyQuotes />
             <span className="sr-only"> (opens in a new tab)</span>
           </span>
           <ExternalLinkIcon aria-hidden="true" className="mt-1.5 size-3.5 shrink-0" />
@@ -130,7 +130,7 @@ export function ComparisonPage({ comparison, figure }: { comparison: Comparison;
             cells: [
               <Rich key="logbird" text={row.logbird} />,
               <Fragment key="them">
-                <Rich text={row.them} /> <SourceRefs ids={row.sourceIds} />
+                <Rich text={row.them} thirdPartyQuotes /> <SourceRefs ids={row.sourceIds} />
               </Fragment>,
             ],
           }))}
