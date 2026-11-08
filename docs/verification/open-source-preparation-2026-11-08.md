@@ -79,10 +79,15 @@ objects remain reachable.
   changed documents resolve, and the tracked tree has no remaining links to the
   removed starter or old integration guide.
 - `git diff --check`: passed.
-- `gitleaks dir . --redact`: no leaks found, approximately 240.55 MB scanned in
-  5.81 seconds. A temporary configuration extends default rules and excludes only
-  ignored dependency, Git-metadata, build and temporary directories. No tracked
-  source is excluded. This is a working-tree scan, not a new history scan.
+- `gitleaks dir . --redact`: before updating from master, no findings. After
+  incorporating merged PR #72, the final tree scan inspected approximately
+  248.05 MB in 4.43 seconds and exited 1 with exactly three known false positives:
+  API revision commit hashes in the exports-round5-waiting README and `apiRevision`
+  fields in `after-proof.json` and `before-proof.json`. Each was checked against its
+  source line. No credential finding was identified. A temporary configuration
+  extends default rules and excludes only ignored dependency, Git-metadata, build
+  and temporary directories; no tracked source is excluded. No suppression was
+  added. This is a working-tree scan, not a new history scan.
 - No files changed by PR #72 were edited, including `docs/SPEC.md`.
 - Full installation attempts were stopped when available RAM dropped below the
   owner's threshold. The measured Node 22 attempt peaked at 1.000 GiB process-tree
