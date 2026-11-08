@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { z } from 'zod';
 import { meQuery } from '@/lib/api/queries';
 import { sendSignInCode } from '@/lib/auth-client';
-import { fieldErrorMessage } from '@/lib/forms';
+import { changeAndRevalidate, fieldErrorMessage } from '@/lib/forms';
 import { markOtpSent } from '@/lib/otp';
 import { safeRedirect } from '@/lib/session';
 
@@ -75,7 +75,7 @@ function EmailStep() {
                     inputMode="email"
                     name={field.name}
                     onBlur={field.handleBlur}
-                    onChange={(e) => field.handleChange(e.target.value)}
+                    onChange={(e) => changeAndRevalidate(field, e.target.value)}
                     placeholder="you@company.com"
                     type="email"
                     value={field.state.value}

@@ -8,13 +8,14 @@ import { useConfirm } from '@logbird/ui/components/ui/confirm';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@logbird/ui/components/ui/dialog';
 import { Input } from '@logbird/ui/components/ui/input';
 import { Label } from '@logbird/ui/components/ui/label';
+import { RadioChoice, RadioGroup } from '@logbird/ui/components/ui/radio-group';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { cn } from '@logbird/ui/lib/utils';
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { CheckCircle2Icon, KeyRoundIcon, Loader2Icon, PlusIcon, TriangleAlertIcon } from 'lucide-react';
-import { type RefObject, useRef, useState } from 'react';
+import { type RefObject, useId, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { AdminNote, AdminOnly } from '@/components/admin-gate';
@@ -164,6 +165,7 @@ function CreateKeyDialog({
 }) {
   const queryClient = useQueryClient();
   const nameInput = useRef<HTMLInputElement>(null);
+  const kindLabel = useId();
   const [created, setCreated] = useState<{ key: ApiKey; secret: string } | null>(null);
   const create = useMutation({
     mutationFn: (value: { name: string; kind: 'ingest' | 'read' }) => api.keys.create(projectId, { name: value.name.trim(), kind: value.kind }),
@@ -252,26 +254,23 @@ function CreateKeyDialog({
             <form.Field name="kind">
               {(field) => (
                 <div className="flex flex-col gap-1.5">
-                  <Label>Permission</Label>
-                  <div className="grid gap-2 sm:grid-cols-2" role="radiogroup">
+                  <Label id={kindLabel}>Permission</Label>
+                  <RadioGroup
+                    aria-labelledby={kindLabel}
+                    className="grid gap-2 sm:grid-cols-2"
+                    onValueChange={(kind) => field.handleChange(kind as 'ingest' | 'read')}
+                    value={field.state.value}
+                  >
                     {(['ingest', 'read'] as const).map((kind) => (
-                      // biome-ignore lint/a11y/useSemanticElements: card-style choices; role=radio + aria-checked expose them as a radio group
-                      <button
-                        aria-checked={field.state.value === kind}
-                        className={cn(
-                          'flex flex-col items-start gap-1 rounded-lg border p-3 text-start outline-none transition-colors hover:border-foreground/25 focus-visible:ring-3 focus-visible:ring-ring/40',
-                          field.state.value === kind && 'border-brand ring-1 ring-brand',
-                        )}
-                        key={kind}
-                        onClick={() => field.handleChange(kind)}
-                        role="radio"
-                        type="button"
-                      >
-                        <span className="font-medium text-sm">{KIND_COPY[kind].label}</span>
+                      <RadioChoice key={kind} value={kind}>
+                        <span className="font-medium text-sm">
+                          {KIND_COPY[kind].label}
+                          <span className="sr-only"> — </span>
+                        </span>
                         <span className="text-muted-foreground text-xs">{KIND_COPY[kind].hint}</span>
-                      </button>
+                      </RadioChoice>
                     ))}
-                  </div>
+                  </RadioGroup>
                 </div>
               )}
             </form.Field>
