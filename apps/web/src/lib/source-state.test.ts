@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { quietHrefWarnings, renderPages } from '../test/render-pages';
 import { findSourcePhrases, SOURCE_OPEN_PHRASES, SOURCE_STATE_PHRASES } from './source-state';
 
 const PUBLIC_ENV = { WEB_GITHUB_PUBLIC: 'true', WEB_GITHUB_URL: 'https://github.example.test/acme/logbird' };
@@ -58,48 +59,42 @@ describe('source-state matching', () => {
     expect(findSourcePhrases('coming soon, coming soon', SOURCE_STATE_PHRASES)).toEqual([{ label: 'coming soon', count: 2 }]);
   });
 
-  it('ignores a phrase quoted from someone else, but not a half-quoted one', () => {
-    // The Retraced comparison quotes its Kubernetes docs page.
-    expect(closed('the Kubernetes docs page says &quot;Coming soon&quot;')).toEqual([]);
-    expect(closed('Kubernetes page: “Coming soon”')).toEqual([]);
-    expect(closed('&quot;Coming soon, they said')).toEqual(['coming soon']);
-    expect(closed('Self-hosting is coming soon&quot;')).toEqual(['coming soon']);
+  it('counts quoted first-party claims; only explicitly marked third-party quotations are left out', () => {
+    // A leaked public link in quotation marks still fails a private build.
+    expect(open('<a href="https://github.example.test/acme/logbird">&quot;Source on GitHub&quot;</a>')).toEqual(['Source on GitHub']);
+    expect(open('<p>“We released it under MIT.”</p>')).toEqual(['released (the source)']);
+    // Quoted closed-source copy still fails a public build.
+    expect(closed('<p>Logbird is &quot;coming soon&quot;.</p>')).toEqual(['coming soon']);
+    expect(closed('<p>Self-hosting is “coming soon”.</p>')).toEqual(['coming soon']);
+    // The comparison pages mark what they quote from another product's docs (Rich thirdPartyQuotes).
+    expect(closed('the Kubernetes docs page says <span data-third-party-quote="">&quot;Coming soon&quot;</span>')).toEqual([]);
+    // The marker covers its own element only.
+    expect(closed('<span data-third-party-quote="">"Coming soon"</span> and Logbird is coming soon')).toEqual(['coming soon']);
+    expect(closed('<span data-third-party-quotes-like="">coming soon</span>')).toEqual(['coming soon']);
+  });
+
+  it('matches claims split across markup, on the visible text', () => {
+    expect(open('<p>We have <b>released</b> Logbird under MIT.</p>')).toEqual(['released (the source)']);
+    expect(open('<p>The code is <em>released</em> <strong>under MIT</strong>.</p>')).toEqual(['released (the source)']);
+    expect(open('<p>Logbird is released <strong>under MIT</strong>.</p>')).toEqual(['released (the source)']);
+    expect(open('<p><a href="/self-hosting">Self-host</a>\n  <span>it</span></p>')).toEqual(['Self-host it']);
+    expect(closed('<p>The repository <!-- note --> <b>is public</b> soon? No: it <i>isn&#39;t public</i>.</p>')).toEqual([
+      'repository is public',
+      "isn't public",
+    ]);
+    expect(open('<p>Not released <b>under</b> any licence yet.</p>')).toEqual([]);
+  });
+
+  it('checks text-bearing attributes, each on its own', () => {
+    expect(closed('<meta name="description" content="One repository that opens publicly soon."/>')).toEqual(['opens publicly soon']);
+    expect(open('<img alt="Source on GitHub" src="/x.png"/>')).toEqual(['Source on GitHub']);
+    // A phrase can't run from one attribute into the next.
+    expect(closed('<meta content="Self-hosting is coming"/><meta content="soon to a server near you"/>')).toEqual([]);
   });
 });
 
-/**
- * Renders whole pages (root shell, header, footer and route) through the real router, in a fresh module graph so the
- * repository state comes from the environment the test sets.
- */
-async function renderPages(paths: string[], env: Record<string, string> = {}) {
-  vi.resetModules();
-  vi.unstubAllEnvs();
-  for (const [key, value] of Object.entries(env)) {
-    vi.stubEnv(key, value);
-  }
-  const { createMemoryHistory, createRouter, RouterProvider } = await import('@tanstack/react-router');
-  const { createElement } = await import('react');
-  const { renderToString } = await import('react-dom/server');
-  const { routeTree } = await import('../routeTree.gen');
-  const pages: { path: string; html: string }[] = [];
-  for (const path of paths) {
-    const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: [path] }), isServer: true });
-    await router.load();
-    pages.push({ path, html: renderToString(createElement(RouterProvider, { router })) });
-  }
-  return pages;
-}
-
 describe('rendered pages', () => {
-  beforeEach(() => {
-    // Asset URLs (`?url` imports) are empty under vitest, and React warns about the empty stylesheet href.
-    const error = console.error;
-    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
-      if (!String(args[0]).includes('href')) {
-        error(...args);
-      }
-    });
-  });
+  beforeEach(quietHrefWarnings);
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -121,6 +116,14 @@ describe('rendered pages', () => {
     const pages = await renderPages(staticPages.map((page) => page.path));
     expect(pages.flatMap(({ path, html }) => open(html).map((label) => `${path}: ${label}`))).toEqual([]);
     expect(pages.filter(({ html }) => closed(html).length).length).toBeGreaterThan(0);
+    // Third-party quotation markers appear only on comparison pages, and only around double-quoted passages.
+    const marked = pages.flatMap(({ path, html }) =>
+      [...html.matchAll(/<span data-third-party-quote="">([^<]*)<\/span>/g)].map((match) => ({ path, text: match[1] ?? '' })),
+    );
+    expect(marked.length).toBeGreaterThan(0);
+    expect(marked.filter(({ path }) => !path.startsWith('/compare/'))).toEqual([]);
+    expect(marked.every(({ text }) => /^(&quot;|")[^"]+(&quot;|")$/.test(text))).toBe(true);
+    expect(pages.reduce((sum, { html }) => sum + html.split('data-third-party-quote').length - 1, 0)).toBe(marked.length);
   });
 
   it('drops every "source is closed" phrase once the repository is public', async () => {

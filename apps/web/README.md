@@ -88,9 +88,11 @@ OG cards (`scripts/og.ts`, Satori + Resvg, local fonts) render one 1200×630 PNG
   SEO pass mark (95) is the score without the `is-crawlable` audit (`seo-content`). Once `robots.txt` allows crawling,
   ready pages and published posts are held to the full SEO score, `is-crawlable` included, so an accidental `noindex`
   fails; pages that stay noindex (unready pages, 404) keep `seo-content` (`src/lib/lighthouse-score.ts`).
-- `check:source-state` matches its phrase lists (`src/lib/source-state.ts`) case-insensitively, across markup and
-  entities. The public link label "Source on GitHub" counts as "open" unless the placeholder's "— coming soon" follows
-  it, and phrases inside quotation marks (a quoted competitor page) don't count.
+- `check:source-state` matches its phrase lists (`src/lib/source-state.ts`) case-insensitively on each page's visible
+  text (tags dropped, entities decoded, plus meta descriptions, alt text and labels), so a claim split by markup still
+  counts. The public link label "Source on GitHub" counts as "open" unless the placeholder's "— coming soon" follows it.
+  Quotation marks exempt nothing; only text marked `data-third-party-quote` is left out, and only comparison pages set
+  it (`<Rich thirdPartyQuotes>` on the competitor column and sources, for quotes from that product's docs).
 - `scripts/capture.mjs` takes 1440×900 and 390×844 stills in both themes (`PATHS`, `OUT_DIR`, `VIDEO=1` for scroll clips)
   with Playwright's bundled Chromium only, and fails on console errors or failed requests.
 
@@ -116,8 +118,14 @@ changes with every build) and writes:
   Without the detach Cloudflare would comma-join two policies and enforce both. Page rules use the trailing-slash URLs
   of `html_handling: "auto-trailing-slash"`; a test keeps `wrangler.jsonc` on that setting. Cloudflare allows 100 rules
   and 2,000-character lines, and the build fails past either (one rule per page: about 95 pages and posts fit).
-- `.output/csp.json`: the same hashes for `pnpm start` (`server/static-pages.ts` serves the prerendered page and its
-  policy, and 404.html for unknown paths) and `pnpm serve:static`.
+- `.output/csp.json`: the same hashes for `pnpm start` and `pnpm serve:static`. Like Cloudflare, `server/static-pages.ts`
+  serves each prerendered page with its policy, existing public files and `/api/*` through Nitro, and 404.html (status
+  404, the 404 policy) for every other path, dotted ones (`/x.js`, `/post.md`) included. Nothing is rendered on demand.
+
+One file serves many URLs (contact/index.html for `?status=` and `?interest=`, 404.html for every unknown path), so
+the page rendered at each of those URLs must equal the file the browser hydrates. The waitlist form applies `status`
+and `interest` after mount, the `/404` route has no head of its own, and no nav or footer link is current on a
+not-found page; `src/lib/hydration.test.ts` compares the renders.
 
 The step then re-reads the final HTML and fails the build if any inline script isn't covered by the policy each target
 serves. `vite dev` renders on demand and injects HMR scripts, so only the dev server keeps `'unsafe-inline'`.

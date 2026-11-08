@@ -115,10 +115,15 @@ describe('profiles', () => {
     return hash.digest('hex');
   };
   it('keeps the JoodCMS profile byte-identical to the original generator, so pnpm demo output is unchanged', () => {
-    // Digests of the generator on master 8ba30e0 (before profiles), with the demo's window (59 days).
-    const demo = { days: 59, seed: 42, now: options.now, profile: 'joodcms' } as const;
-    expect(fingerprint({ ...demo, events: 300_000, project: 'JoodCMS' })).toBe('45bed05172850688eb56d013dd84c1c87bd260206c3433f542611874d2b61540');
-    expect(fingerprint({ ...demo, events: 5000, project: 'Ledger demo' })).toBe('000ab2fcb44c5e32f4315b4a8260806432009e82be11fd7f105f65b0c567966c');
+    // Digests of the generator on master 8ba30e0 (before profiles), with the demo's windows: min(60, retention - 1)
+    // days, so 59 for JoodCMS (90-day retention) and 29 for Ledger demo (30-day retention).
+    const demo = { seed: 42, now: options.now, profile: 'joodcms' } as const;
+    expect(fingerprint({ ...demo, days: 59, events: 300_000, project: 'JoodCMS' })).toBe(
+      '45bed05172850688eb56d013dd84c1c87bd260206c3433f542611874d2b61540',
+    );
+    expect(fingerprint({ ...demo, days: 29, events: 5000, project: 'Ledger demo' })).toBe(
+      '410e1f93728ab9eb7b0e23c9f19b6a08589ff48ab12723a41aefc954dc94b6dd',
+    );
   }, 60_000);
   it('uses neutral, fictional source and integration names by default', () => {
     const sources = new Set<string>();

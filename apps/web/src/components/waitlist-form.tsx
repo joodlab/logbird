@@ -1,7 +1,7 @@
 import { Input } from '@logbird/ui/components/ui/input';
 import { Label } from '@logbird/ui/components/ui/label';
 import { Textarea } from '@logbird/ui/components/ui/textarea';
-import { type FormEvent, type ReactNode, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { CONTACT_EMAIL, GITHUB_PUBLIC } from '../env';
 
 // Copy: marketing/copy/contact.md (form, states).
@@ -44,7 +44,21 @@ const INTERESTS = [
  * `?status=<code>#waitlist-<code>`, and a :target message shows), upgraded to fetch with inline field errors.
  */
 export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; interest?: string }) {
-  const [code, setCode] = useState<string | undefined>(status);
+  // The page is prerendered once, without its query string, and hydrated at `?status=…` or `?interest=…`. The first
+  // render must match that static HTML (no message, "cloud" checked), so both are applied after mount.
+  const [code, setCode] = useState<string | undefined>();
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (status) {
+      setCode(status);
+    }
+  }, [status]);
+  useEffect(() => {
+    const radio = formRef.current?.querySelector<HTMLInputElement>(`input[name="interest"][value="${CSS.escape(interest)}"]`);
+    if (radio) {
+      radio.checked = true;
+    }
+  }, [interest]);
   const [sending, setSending] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -85,7 +99,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
       </p>
     ) : null;
   return (
-    <form action="/api/waitlist" className="waitlist-form" method="post" onSubmit={submit}>
+    <form action="/api/waitlist" className="waitlist-form" method="post" onSubmit={submit} ref={formRef}>
       <noscript>
         {Object.entries(STATUS_MESSAGES).map(([key, value]) => (
           <p className="native-status rounded-lg border px-4 py-3 text-sm" id={`waitlist-${key}`} key={key} tabIndex={-1}>
@@ -128,7 +142,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
               className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border bg-background px-3 py-2 text-sm has-[:checked]:border-brand has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50"
               key={option.value}
             >
-              <input className="accent-[var(--brand)]" defaultChecked={option.value === interest} name="interest" type="radio" value={option.value} />
+              <input className="accent-[var(--brand)]" defaultChecked={option.value === 'cloud'} name="interest" type="radio" value={option.value} />
               {option.label}
             </label>
           ))}
