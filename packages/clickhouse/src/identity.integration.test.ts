@@ -19,7 +19,8 @@ it('search and export return the version that actually passed the filter, before
     for (const [index, action] of ['evidence.original', 'evidence.replacement'].entries()) {
       const row = normalizeEvent(
         { id: 'same', action, occurredAt: now.toISOString() },
-        { projectId: 'fictional', receivedAt: new Date(now.getTime() + index * 1000) },
+        // Both accepted versions precede the export fence; their relative receive order remains distinct.
+        { projectId: 'fictional', receivedAt: new Date(now.getTime() - 1000 + index * 1000) },
       );
       if (!row.ok) throw new Error('Invalid fixture');
       await insertEvents(ch, [row.row]);
