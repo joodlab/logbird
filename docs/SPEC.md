@@ -42,6 +42,13 @@ packages/seed        StayDesk-shaped synthetic data generator that sends through
 
 Development dependencies and production deployment are documented in [self-hosting.md](self-hosting.md). Configuration comes from environment variables; see the root .env.example.
 
+**Owner decisions** that shape self-hosting, releases and hosting are recorded in [decisions.md](decisions.md). As of
+2026-11-08: the public origin proxies the read-only `/docs` and `/openapi.json` reference (and no other new server
+path); role images are named `ghcr.io/joodlab/logbird-<role>` but nothing is published until the repository is
+open-sourced; the hosted instance's transactional email will use Postmark SMTP with required STARTTLS (self-hosters
+choose their own SMTP provider); the hosted instance will run on Coolify
+behind Cloudflare at `logbird.joodlab.com` after open-sourcing.
+
 Ingestion path (v0): `POST /v1/events` → validate/normalize → ClickHouse `INSERT` with
 `async_insert=1, wait_for_async_insert=1` (ack only after ClickHouse has the rows) → 202. Large batches are
 inserted in one statement. A Postgres/queue buffer can be added later behind the same API.
@@ -230,7 +237,8 @@ The **route table and every request/response schema live in `packages/contracts`
   active org). Public API (`/v1/*`, project-bound API keys: `lb_ingest_<random>` may only ingest, `lb_read_<random>`
   may only read). Keys are stored as SHA-256 hash + display prefix; full secret shown once.
 - Errors: `{ error: { code, message, details? } }` with proper HTTP status.
-- `GET /openapi.json` (hono-openapi) + Scalar reference at `/docs`.
+- `GET /openapi.json` (hono-openapi) + Scalar reference at `/docs`. Both are read-only, unauthenticated and proxied
+  by the console on the public origin (owner decision, [decisions.md](decisions.md)).
 - Size limits on ingest: 1000 events or 5 MB per request.
 - Public fixed-window limits are shared in Redis across replicas: 3000 ingest requests/minute
   and 1200 read requests/minute per project (all keys of the same kind share a bucket).
@@ -242,7 +250,8 @@ The **route table and every request/response schema live in `packages/contracts`
   credentials still undergo lookup so valid keys remain usable behind shared NAT. Unknown/revoked
   well-formed keys therefore still incur lookup. Public limits fail open on Redis errors and log
   `rate_limit.storage_error`; auth limits remain fail closed.
-- Dev: the app proxies `/api` and `/v1` to `http://127.0.0.1:4601` (Vite `server.proxy`), so cookies are
+- Dev: the app's Nitro handler (`apps/app/server/proxy.ts`, the same one production uses; there is no Vite proxy)
+  forwards `/api`, `/v1`, the health checks and the read-only reference to `http://127.0.0.1:4601`, so cookies are
   same-origin. better-auth `baseURL` = app origin (`http://localhost:4600`), `trustedOrigins` includes it.
 
 `GET /api/projects/:projectId/retention?preview=30` returns retentionDays,

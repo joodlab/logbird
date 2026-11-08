@@ -19,7 +19,7 @@
     "lint": "ultracite check",
     "format": "biome format --write .",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
+    "test": "turbo run test && node --test scripts/selfhost-init.test.mjs",
     "db:generate": "pnpm --filter @logbird/database generate",
     "db:migrate": "pnpm --filter @logbird/database migrate:dev",
     "db:deploy": "pnpm --filter @logbird/database migrate:deploy",

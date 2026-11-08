@@ -3,7 +3,6 @@ import { QueryError } from '@logbird/clickhouse';
 import { queryErrorDetailsSchema } from '@logbird/contracts';
 import { Prisma, ProjectBusyError, prisma } from '@logbird/database';
 import { connection } from '@logbird/worker/queue';
-import { apiReference } from '@scalar/hono-api-reference';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
@@ -12,6 +11,7 @@ import { requestId } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
 import { openAPIRouteHandler } from 'hono-openapi';
 import { z } from 'zod';
+import { apiReferencePage } from './api-reference';
 import { queueAuditEvent } from './audit-outbox';
 import { recordFailedSignIn } from './auth-activity';
 import { clickhouse } from './clickhouse';
@@ -218,4 +218,4 @@ app.get(
     },
   }),
 );
-app.get('/docs', apiReference({ url: '/openapi.json' }));
+app.get('/docs', apiReferencePage);
