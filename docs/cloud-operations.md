@@ -19,7 +19,7 @@ by these files. No production, failover, restore or capacity acceptance is claim
   That automation is launch-blocking; its implementation is additional, **unestimated**
   setup work outside the 3–5 engineer-days. A named primary/backup night on-call
   or paging rota is required **even with automation**; it removes routine attended
-  hours, not incident response. Default policy (owner may explicitly override):
+  hours, not incident response. Document the deployment's failure policy. The proposed default is:
   dump/encrypt/upload/readback failure before writer restart reopens traffic with
   the previous good backup still current and a P1 **nightly backup missing** alert;
   readiness/canary failure after restart stays fenced and pages the rota. That
@@ -29,7 +29,7 @@ by these files. No production, failover, restore or capacity acceptance is claim
   of night work/month**, or 19–30.5 hours including routine work, plus an explicit
   primary/backup night rota. Measure the actual run duration; these are estimates,
   not measured staffing costs. Do not approve the smaller effort figure for manual nights.
-- **Data ownership is an open owner decision:** this budget assumes self-run
+- **Data operations require an explicit service model:** this budget assumes self-run
   Postgres, ClickHouse and Redis/Dragonfly on three separate data VMs. Approve that
   operational responsibility or obtain managed-service quotes before provisioning.
 - **Stages:** phase 1 is one k3s server plus the data VMs; two app replicas on that
@@ -38,7 +38,7 @@ by these files. No production, failover, restore or capacity acceptance is claim
 - **Top three risks:** unproven restored-data recovery (#75/#77); single-node/data-VM
   outages and nightly backup downtime; login failure from SMTP blocks or collapsed
   client-IP limits. Each is a launch gate below, not an accepted customer risk.
-- **Reconsider** if nobody can own data/on-call, the owner rejects maintenance
+- **Reconsider** if nobody can own data/on-call, maintenance policy disallows
   outages, managed-service quotes are cheaper than staff time, CX capacity is
   unavailable, or the measured workload/SLO requires dedicated compute or data HA.
 - **Nightly ingest outage:** the current matched backup stops API/worker writes.
@@ -52,9 +52,8 @@ by these files. No production, failover, restore or capacity acceptance is claim
 
 Planning date **2026-11-07**, Nuremberg/Helsinki, EUR excluding VAT. VM figures use
 Hetzner's [public website price data](https://www.hetzner.com/_resources/app/data/bench/cloud_data.json),
-fetched on that date; the [small source-hashed receipt](verification/cloud-prices-2026-11-07.json)
-records each SKU/region. Confirm the Console quote and capacity before approval.
-The website currently flags cost-optimized capacity as unavailable, so this worksheet
+fetched on that date. Confirm current provider quotes and regional capacity before provisioning.
+At the planning date, the website flagged cost-optimized capacity as unavailable, so this worksheet
 uses regular-performance CPX plans rather than assuming the cheaper CX tier is orderable.
 
 | Phase-1 item | Monthly basis | EUR/month |
@@ -121,7 +120,7 @@ should identify exact artifacts and include an isolated restore rehearsal.
 ## Topology and capacity gates
 
 Phase 1 intentionally accepts one k3s failure domain while launch gates are proved;
-owner approval of that maintenance/outage model is required. Phase 2 uses three
+document and accept that maintenance/outage model before deployment. Phase 2 uses three
 control-plane nodes with fast durable disks, a private registration address and
 workload placement across nodes. K3s's
 [embedded-etcd HA design](https://docs.k3s.io/datastore/ha-embedded) needs at least three server
@@ -146,7 +145,7 @@ initial dedicated 8-vCPU/16-GiB-or-larger trial, propose `background_pool_size=8
 values; retain one Logbird retention consumer and serialize its project purges.
 Check CPU, disk latency, free space, part growth and request tails during mixed
 ingest/search/export/retention traffic before increasing maintenance concurrency.
-Do not apply these values to the owner's shared server as part of a benchmark.
+Do not apply these values to a shared development server as part of a benchmark.
 
 The pool controls merge/mutation threads; a larger pool consumes more CPU/I/O, and
 reducing it requires restart. See [server pool settings](https://clickhouse.com/docs/reference/settings/server-settings/settings/background#background_pool_size).
@@ -184,7 +183,7 @@ Job. It installs **no database, volume, cluster, load balancer, cert-manager or 
 All images use a deliberately unusable `registry.invalid` reference; replace each with a real
 immutable digest from a manual build of one recorded Git SHA. No published image digest is supplied here.
 The server Dockerfile's `migrate` target is the migration image; API runtime images omit tooling.
-Build/publish manually through the owner's release process. Do not add automatic PR Docker builds
+Build/publish manually through the documented release process. Do not add automatic PR Docker builds
 or CI workflows. No build, push or deployment is performed by Kustomize.
 
 **Artifact qualification is a release and recovery prerequisite.** The chosen source
@@ -253,11 +252,10 @@ that copy's `deploy/k3s` directory:
    with the matched set. Restore/recreate each scoped Secret with its preserved credentials;
    changed restore endpoints follow the [ordered cutover](backup-disaster-recovery.md#cut-over-to-restored-targets).
    Do not replace the worker Secret with the API file. ConfigMap defaults supply the
-   non-secret settings. **Hetzner blocks outbound 25/465 by default**; request
-   unblocking after account eligibility (one month and first invoice paid), and retain
-   approval plus actual connection/OTP proof. Port 587 is reachable, but requires
-   OPS-06's fail-closed `requireTLS` implementation and downgrade test before launch.
-   Do not simply flip the baseline's 465/TLS settings. See [mail prerequisites](transactional-email.md#hetzner-launch-prerequisite).
+   non-secret settings. Verify outbound SMTP connectivity from the deployment host.
+   Configure the provider's supported port and TLS mode, require fail-closed STARTTLS
+   on port 587, and test downgrade rejection and real OTP delivery before launch.
+   Do not change the baseline's 465/TLS settings without validating the new transport. See [mail prerequisites](transactional-email.md#hetzner-launch-prerequisite).
    Keep `CLICKHOUSE_QUERY_USER=logbird_query`
    consistent for API/migration. Review overrides against [.env.example](../.env.example).
 5. Give the migration identity Postgres DDL and the ClickHouse schema/access-management grants
@@ -434,8 +432,8 @@ fenced when either prerequisite or any logical comparison is missing or mismatch
 Test node/process restarts, a failed migration, dependency outages, recovery and a rejected
 unhealthy rollout before launch. Measure any request interruption continuously; RollingUpdate
 settings do not establish zero downtime. Proposed telemetry is in [alerts and status](alerts-status.md).
-The cloud/backend owner owns signup, quotas and workspace lifecycle; the release
-owner approves launch after the linked issues have executed acceptance evidence.
+Assign operators for signup, quotas and workspace lifecycle. Launch only after
+the linked acceptance gates have passing evidence for the serving revision.
 
 If no incompatible migration ran, restore the previous image digests and configuration under
 the release lock, then repeat acceptance before reopening traffic. For an incompatible schema
@@ -470,30 +468,29 @@ It requires localhost and the existing `logbird` database, creates only UUID-own
 QA tables plus session-private Memory expectations, validates native 006/007 engines
 and checked-in SQL with QA object names substituted, then verifies cleanup. It
 creates no database/user/settings
-and changes no application table. Follow current RAM/lock rules before execution.
-The dated [Round 5 receipt](verification/cloud-operations-round5-2026-11-07.md)
-records both native engine variants, raw namespace assertions and cleanup.
+and changes no application table. Check available memory and isolate concurrent test runs before execution.
+Validate both native engine variants, raw namespace assertions and cleanup.
 
 The baseline retains v1.34 restricted Pod Security rules and is schema-checked
 against Kubernetes 1.35 for the proposed pinned K3s release. Repeat against the
 actual chosen controller/chart/engine versions before installation.
 Schema checks cannot verify image availability, Secret values, CNI behavior, SMTP, migration
-privileges, probes against running images, backups or real traffic. The release owner must complete the
+privileges, probes against running images, backups or real traffic. Operators must complete the
 [issue-ready launch gates](cloud-operations-gaps.md) under an authorized test environment.
 
 ## Launch checklist
 
-- [ ] Owner approves region, spend, self-run versus managed data services, on-call and
+- [ ] Document region, budget, self-run versus managed data services, on-call and
   phase-1 single-node/nightly-outage model; representative load/sizing receipt exists.
 - [ ] #51 embedding is present in the accepted SHA; exact image retention/repair passes.
 - [ ] #75/#77 packaged restore/guard/normalization/retry and conditional event_ids checks pass.
 - [ ] Bootstrap, DNS, renewed production TLS, CNI/data isolation and both-IP buckets pass.
-- [ ] Hetzner 25/465 unblock request is approved **and tested**, or port 587 has
-  shipped fail-closed `requireTLS` with downgrade rejection and real OTP proof.
+- [ ] Outbound SMTP connectivity, the configured TLS mode, downgrade rejection
+  and real OTP delivery pass from the deployment host.
 - [ ] Scoped Secrets, readonly runtimes, migration exception audit, image pull and
   failed-Job handling pass against qualified images.
 - [ ] Matched off-host recovery, deletion reconciliation, measured outage/RPO/RTO,
   automated nightly fence/capture/verify/reopen, alert delivery/runbooks and
   independent status access pass.
-- [ ] Functional tunnel and operator-only edge acceptance pass; release owner signs
-  the receipt before unfencing. Remaining gates are listed in [operations gaps](cloud-operations-gaps.md).
+- [ ] Functional tunnel and operator-only edge acceptance pass; record the
+  acceptance evidence before unfencing. Remaining gates are listed in [operations gaps](cloud-operations-gaps.md).

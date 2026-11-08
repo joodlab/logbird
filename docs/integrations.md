@@ -49,8 +49,8 @@ lives in these package READMEs, so integrations do not change the console or cop
 The SDK's structural read types are compile-checked against packages/contracts in read.test.ts.
 Run `node --env-file=.env --import tsx scripts/verify-integrations.ts` to provision only a disposable
 project, run all examples, assert real readback and remove its keys/events/project in finally.
-The runner must have ports 4872/4871 free and uses existing shared services. Private diagnostics
-stay in .tmp; the credential-free receipt is docs/verification/sdk-integrations/runtime-results.json.
+The runner must have ports 4872/4871 free and uses configured development services. Diagnostics
+and runtime results stay in the gitignored `.tmp` directory.
 
 ## Outage backpressure
 

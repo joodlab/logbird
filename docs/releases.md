@@ -106,8 +106,7 @@ and use `docker compose up -d --no-build --pull always`. Verify the pulled diges
 against the release record. Every later startup or reconfiguration of a published-image
 installation, including Caddy and external-service paths, uses `up --no-build`: a bare
 `up` under `pull_policy: build` rebuilds from the checkout and shadows the verified tag.
-Existing source-build instructions remain valid. See the
-[Compose pull-policy matrix](verification/compose-pull-policy-2026-11-08.md).
+Existing [source-build instructions](self-hosting.md#five-minute-quickstart) remain valid.
 
 Publication, tag creation, package visibility and public ACME/SMTP are separate
 actions from local validation. This document authorizes none of them and adds no
@@ -146,8 +145,7 @@ Test only in a fresh disposable stack, with no shared or customer database:
    setting `pull_policy: never` prevents an implicit rebuild or registry pull.
    Compose v2.24.4's `run` has no `--pull` flag either: on that version drop
    `--pull never` from the commands below; the override alone fails with
-   `No such image` when the image is missing (verified in the
-   [pull-policy matrix](verification/compose-pull-policy-2026-11-08.md)).
+   `No such image` when the image is missing.
 
 3. With that override, run the real migration command in the background:
    `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run --pull never -d --no-deps --name logbird-migration-cancel-probe migrate`.

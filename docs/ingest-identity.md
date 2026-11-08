@@ -462,9 +462,9 @@ alone does not rewrite existing parts. Never replay EXCHANGE blindly or remove
 008 from the ledger while its smaller-granule table is still installed.
 
 The UTC correction alone may safely remain deployed; do not restore shifted
-leases. Recheck origin/master's migration filenames immediately before merging
+leases. Check migration filenames against the deployed inventory before upgrading,
 and coordinate ledger renames for any already-applied migration that is renumbered.
-Shared-dev orphan index cleanup is an operator-owned one-off, outside this PR.
+Orphan index cleanup requires a separate, scoped reconciliation procedure.
 The shipped reconciliation command accepts one project id only.
 
 Search/export return the row that passed the filter; detail chooses the oldest
@@ -479,9 +479,8 @@ boundaries apply before page-local id deduplication. A legacy id at another
 timestamp can therefore recur on a later page; new immutable writes cannot create
 that case. Detail independently chooses the oldest surviving receipt across timestamps.
 The >=10M retained-history benchmark and 1M receipt bytes remain a
-separately scheduled acceptance gate. The script shipped separately in PR #79;
-run it at the final clean PR head under heavy and logbird-stack with the approved
-cloud fixture and fourth argument `immutable`. Small real-service proofs are not
+separately scheduled acceptance gate. Run `scripts/benchmark-ingest-identity.ts` against isolated fictional fixtures
+with the fourth argument `immutable`, under a documented memory and concurrency budget. Small real-service proofs are not
 10M/day capacity evidence.
 
 Other scoped follow-ups: [#90](https://github.com/joodlab/logbird/issues/90) covers

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { prisma } from '@logbird/database';
 import { closeRetentionQueue } from '../apps/worker/src/queue';
 import { clickhouse, enforceProjectRetention } from '../apps/worker/src/retention';
@@ -102,6 +102,7 @@ try {
   }
   console.log(JSON.stringify({ verified: true, projectId: p, evidence: evidence.length }));
 } finally {
-  await writeFile('docs/server-followups-evidence.json', `${JSON.stringify(evidence, null, 2)}\n`);
+  await mkdir('.tmp', { recursive: true });
+  await writeFile('.tmp/server-followups-evidence.json', `${JSON.stringify(evidence, null, 2)}\n`);
   await Promise.all([prisma.$disconnect(), clickhouse.close(), closeRetentionQueue()]);
 }

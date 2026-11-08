@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 
 const dbUrl = new URL(process.env.DATABASE_URL!);
@@ -144,7 +144,8 @@ try {
 } finally {
   releasePurge?.();
   await purge?.catch(() => undefined);
-  await writeFile('docs/server-concurrency-evidence.json', `${JSON.stringify(evidence, null, 2)}\n`);
+  await mkdir('.tmp', { recursive: true });
+  await writeFile('.tmp/server-concurrency-evidence.json', `${JSON.stringify(evidence, null, 2)}\n`);
   await Promise.allSettled([
     baseline.end(),
     closeProjectLocks(),

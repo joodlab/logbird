@@ -365,9 +365,8 @@ expected nonzero raw/survivor counts, query count, exit status and checkpoint.
 SimpleAggregateFunction counts use `sum`; attribute `samples` uses `groupUniqArrayMerge`.
 
 Use only the small version-pinned QA fixture on isolated targets. The existing
-[merged self-host harness](../scripts/selfhost-smoke.mjs)
-and [dated self-host evidence](verification/selfhost-2026-11-07.json)
-are reference inputs, not a cloud PASS. Follow #77 for the accepted built-image
+[self-host harness](../scripts/selfhost-smoke.mjs)
+is a reference input, not cloud acceptance evidence. Follow #77 for the accepted built-image
 guard/repair scenario. Keep constant labels per entity and at most five distinct
 values per attribute key so the reference sample set is deterministic.
 

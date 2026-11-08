@@ -172,6 +172,6 @@ The explorer's query bar suggests as you type, at any caret position; accepting 
 
 ## Local verification
 
-See [recorded HTTP evidence](search-v2-evidence.jsonl) and scripts/search-v2-proof.ts. Search total saturates at 10001 (the existing count cap); this is not an exact count above the cap. Run the HTTP tests with SEARCH_V2_HTTP=1, SERVER_URL=http://127.0.0.1:4631, APP_URL=http://localhost:4630 and the server running on port 4631. The ClickHouse integration tests require the root environment. Tests only create fictional records; HTTP security fixtures are retained with a Search v2 security name for inspection.
+Use `scripts/search-v2-proof.ts` for local HTTP verification; results are written to gitignored `.tmp/search-v2-evidence.jsonl`. Search total saturates at 10001 (the existing count cap); this is not an exact count above the cap. Run the HTTP tests with SEARCH_V2_HTTP=1, SERVER_URL=http://127.0.0.1:4631, APP_URL=http://localhost:4630 and the server running on port 4631. The ClickHouse integration tests require the root environment. Tests only create fictional records; HTTP security fixtures are retained with a Search v2 security name for inspection.
 
 See [event exports](exports.md) for complete original payloads, normalized CSV/JSONL, versioned schemas, fixed query clocks and file-to-record verification.
