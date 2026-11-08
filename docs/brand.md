@@ -196,8 +196,7 @@ of log rows with the newest one highlighted, and the domain.
 
 **Email:**
 
-- **Done 2026-11-06:** the Postmark server is now "logbird" (id 21236377), sending as `Logbird <logbird@joodlab.com>`
-  through the DKIM-verified joodlab.com domain.
+- Configure Postmark with a verified sending domain and a sender address for your deployment.
 - After logbird.dev is bought and DKIM-verified in Postmark, switch `MAIL_FROM` to an address such as
   `hello@logbird.dev`.
 

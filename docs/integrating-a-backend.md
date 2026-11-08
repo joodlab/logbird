@@ -9,22 +9,39 @@ verify their stored contents before expanding coverage.
 Create a project and ingest key in Logbird. Set these server environment variables:
 
 ```sh
-LOGBIRD_URL=https://audit.example.com
+LOGBIRD_ENDPOINT=https://audit.example.com
 LOGBIRD_INGEST_KEY=<project ingest key>
 ```
 
-`LOGBIRD_URL` is your public Logbird origin without `/v1/events`. This application
-variable is passed to `endpoint`; the SDK does not read it automatically. Install
-an available SDK release with `pnpm add @logbird/sdk`, or use the workspace package
-when working from source.
+`LOGBIRD_ENDPOINT` is your public Logbird origin without `/v1/events`. This application
+variable is passed to `endpoint`; the SDK does not read it automatically.
+
+`@logbird/sdk` is not published on npm yet: `pnpm add @logbird/sdk` returns 404.
+Use the source package at `packages/sdk`. Inside this repository, add it to a
+workspace app with:
+
+```sh
+pnpm --filter <your-workspace-app> add '@logbird/sdk@workspace:*'
+```
+
+For a backend outside the workspace, clone Logbird beside it and link the source:
+
+```sh
+pnpm add @logbird/sdk@link:../logbird/packages/sdk
+```
+
+The source exports TypeScript; use a TypeScript-capable runtime or bundler.
+See the [SDK README](../packages/sdk/README.md) for its runtime requirements.
 
 ```ts
-import { Logbird, redact } from '@logbird/sdk';
+import { DEFAULT_SECRET_KEYS, Logbird, redact } from '@logbird/sdk';
 
 const audit = new Logbird({
-  endpoint: process.env.LOGBIRD_URL!,
+  endpoint: process.env.LOGBIRD_ENDPOINT!,
   apiKey: process.env.LOGBIRD_INGEST_KEY!,
-  beforeSend: redact(),
+  beforeSend: redact({
+    keys: new RegExp(DEFAULT_SECRET_KEYS.source + '|email|phone', 'i'),
+  }),
   maxQueueSize: 1000,
   onError: () => console.warn('Audit delivery failed'),
   onDrop: () => console.warn('Audit event dropped'),
@@ -51,17 +68,27 @@ SDK error objects that may contain sensitive details.
 
 Copy only allowlisted fields. Avoid request bodies, session objects, customer
 messages and full database rows. Prefer IDs over personal information.
-`redact()` removes common secret keys and matching change fields; add personal-data
-patterns for your policy. Inspect the stored raw payload as well as attributes.
+`redact()` deep copies the event and replaces matching object-key values and
+matching change fields' `before`/`after` values with `[redacted]`; keys remain.
+Supplying `keys` replaces `DEFAULT_SECRET_KEYS`, so combine the patterns as above
+to retain default secret protection while adding personal-data fields.
+`changeFields` defaults to that same combined pattern. Inspect the stored raw
+payload as well as attributes.
 See [SDK redaction options](../packages/sdk/README.md#host-context-options-02).
 
-## Capture from Hono
+## Capture a committed change
 
 Call this helper from an existing authenticated route after its write commits.
 The caller resolves identity and tenant after checking access to the document.
 The example supplies no authentication implementation.
 
 ```ts
+import { uuidv7 } from '@logbird/sdk';
+
+// Generate once and persist alongside the committed change if it will be replayed.
+const eventId = uuidv7();
+const occurredAt = new Date().toISOString();
+
 function recordDocumentUpdate(input: {
   eventId: string;
   occurredAt: string;
@@ -87,7 +114,7 @@ function recordDocumentUpdate(input: {
 }
 ```
 
-Generate the event ID and timestamp once per committed change. Persist both with
+Use the SDK's exported `uuidv7()` to generate the event ID, and generate its timestamp once per committed change. Persist both with
 the event if delivery will be replayed. Carry the initiating actor, operation ID
 and parent event ID through trusted job data; the worker records its own executor
 and attempt. See the [Hono adapter](../packages/integrations/hono/README.md) and
@@ -105,6 +132,11 @@ your own dispatcher.
 The SDK retries network failures, 429 and 5xx with backoff and jitter. It retains
 the identical serialized event, including ID, timestamp and job attempt. After
 the retry budget, `flush()` rejects and the batch remains queued; retry later.
+Non-retryable HTTP 4xx responses (all except 429) drop the entire batch and
+invoke `onDrop` for each event plus `onError`; `flush()` then continues. Successful
+responses can still reject individual events, reported through the same callbacks.
+Monitor both callbacks with safe messages, without logging their event/error arguments.
+
 On graceful shutdown, stop accepting requests, finish in-flight work, then await
 `audit.shutdown()` within your host's shutdown budget and handle rejection.
 Your backend's HTTP response alone does not prove audit delivery.
@@ -131,17 +163,22 @@ Save an envelope as `event.json`, keeping its ID and timestamp stable for retrie
 ```
 
 ```sh
-curl --fail-with-body "$LOGBIRD_URL/v1/events" \
+curl --fail-with-body "$LOGBIRD_ENDPOINT/v1/events" \
   -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" \
   -H 'Content-Type: application/json' \
   --data-binary @event.json
 ```
 
 Use a current timestamp when creating an event. Send a single event, an array or
-`{ "events": [...] }` with at most 1000 entries. Inspect even a 202 response:
+`{ "events": [...] }` with at most 1000 entries. Limits are 256 KB per event and
+5 MB per request (256 * 1024 and 5 * 1024 * 1024 bytes). Inspect even a 202 response:
 `rejected` lists individual failures and `warnings` reports normalization.
-Retry the saved body on transient errors, honor `Retry-After`, and inspect pending
-response details before marking outbox entries delivered. Fix permanent validation
+A `503 ingest_pending` response means some immutable event IDs are still being
+settled. Its `details` include the settled 202 response fields plus pending
+`indices` (zero-based batch positions) and `eventIds`; every index outside
+`indices` is settled. Retry the saved body on transient errors and honor
+`Retry-After`; do not mark pending outbox entries delivered. The SDK retries the
+identical serialized batch, including settled siblings, safely. Fix permanent validation
 failures instead of retrying indefinitely.
 
 Verify the event in the console by ID, actor, target and operation ID. Exercise

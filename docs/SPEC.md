@@ -6,7 +6,7 @@ API; Logbird stores them in ClickHouse, keeps them for a per-project retention w
 team a fast console to search, follow and understand *who did what, to which record, through which worker, and
 what changed*.
 
-> Audience: developers / operators of the product that sends events (e.g. the JoodCMS team). It is **not** an
+> Audience: developers / operators of the product that sends events (for example, a hospitality software team). It is **not** an
 > end-customer portal. Products that want to show history to their own users consume the read API.
 
 ## 1. Principles
@@ -37,12 +37,12 @@ packages/auth        better-auth server/client config (email OTP, organization p
 packages/email       react-email templates (OTP sign-in, invitation) + SMTP sender (Mailpit locally)
 packages/ui          shadcn design system (Base UI variant like nibleaf), tokens, charts, shared components
 packages/sdk         `@logbird/sdk` TypeScript client: batching, retries, idempotent ids, flush on exit
-packages/seed        JoodCMS-shaped synthetic data generator that sends through the public ingest API
+packages/seed        Fictional hospitality data generator that sends through the public ingest API
 ```
 
 Development dependencies and production deployment are documented in [self-hosting.md](self-hosting.md). Configuration comes from environment variables; see the root .env.example.
 
-**Owner decisions** that shape self-hosting, releases and hosting are recorded in [decisions.md](decisions.md). As of
+**Architecture decisions** that shape self-hosting, releases and hosting are recorded in [decisions.md](decisions.md). As of
 2026-11-08: the public origin proxies the read-only `/docs` and `/openapi.json` reference (and no other new server
 path); role images are named `ghcr.io/joodlab/logbird-<role>` but nothing is published until the repository is
 open-sourced; the hosted instance's transactional email will use Postmark SMTP with required STARTTLS (self-hosters
@@ -573,7 +573,7 @@ Tenants, Workers, Records, Fields, Saved views, Settings; footer: theme toggle, 
 breadcrumb + time range + ⌘K. Use TanStack Query for all data (query keys per project/range/q, prefetch in route
 loaders, `placeholderData: keepPreviousData` for filters), TanStack Form for forms, sonner for toasts.
 
-## 9. Synthetic JoodCMS data (`packages/seed`)
+## 9. Synthetic hospitality data (`packages/seed`)
 
 Generate a fictional hospitality domain; do not connect to customer systems. Generate via the
 public ingest API with the SDK (dogfooding): workspace "Jood", project "JoodCMS" (~300k events over 60 days,
@@ -581,7 +581,7 @@ weekday/hour seasonality) + small project "Ledger demo" (a fictional accounting 
 vocabulary) to prove "accept anything". Include: ~30 businesses as tenants with websites, ~150 users across
 roles + platform admins (impersonation), API-key actors, scheduler/system actors; executors api-server, workers
 (crm, content, bookings, media, email, ads), schedulers, webhooks (JoodBooking, Meta WhatsApp, Stripe-like
-payment provider); actions derived from real models (hotel/room/rate/booking/guest/campaign/article/page/
+payment provider); illustrative actions for hospitality records (hotel/room/rate/booking/guest/campaign/article/page/
 website/member/role/integration/media/export/auth.*/crm.sync.*/catalog.sync.*); operation trees (request →
 job → child record changes), retries (attempt 2/3), failures/denied/unknown outcomes at realistic low rates,
 some events deliberately off-standard (missing actor, custom top-level keys) to exercise conformance. Seed also

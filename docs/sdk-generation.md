@@ -49,7 +49,7 @@ that are in the contracts but not implemented yet (e.g. suggest) must use `route
 
 ## Reproduction
 
-From the isolated Logbird worktree in PowerShell (configure the root `.env` first; never print it):
+From the Logbird checkout in PowerShell (configure the root `.env` first; never print it):
 
 ```powershell
 pnpm install
@@ -66,7 +66,7 @@ change. `prepare.ts` adds Forge extensions only in `experiments/forge/*.input.js
 clients are committed (they back `pnpm sdk:verify`); the full-console clients and Forge input files are
 regenerable and gitignored to keep the repo small.
 
-Forge setup and generation (PowerShell; paths here match the requested worktree):
+Forge setup and generation (PowerShell; clone Forge beside the Logbird checkout):
 
 ```powershell
 git clone https://github.com/cloudflare/forge ../forge
@@ -89,12 +89,12 @@ The plain public spec was also tried first with `--target ts`; exit 0 produced `
 Adding `x-forge-group-name` and `x-forge-method-name` to every operation fixes this. Forge reads those names,
 not standard operationId/tags, to include operations. No upstream source was patched.
 
-Start the owned server in a separate terminal, then verify and measure:
+Start a development server in a separate terminal, then verify and measure:
 
 ```powershell
 $env:PORT='4641'; $env:APP_URL='http://localhost:4640'
 pnpm --filter @logbird/server with-env tsx src/index.ts
-# In another terminal at the worktree root:
+# In another terminal at the repository root:
 pnpm sdk:verify
 pnpm exec tsc -p experiments/tsconfig.json
 pnpm exec tsc -p experiments/tsconfig.forge.json
@@ -107,7 +107,7 @@ pnpm test
 The verifier reads existing Jood/JoodCMS demo data, creates one temporary read key via Prisma, keeps its secret
 in memory and deletes only that exact throwaway row in `finally`. Existing keys and events remain intact.
 It needs at least two `action:hotel.*` demo events in the last 89 days; it fails if that fixture is absent.
-No seed/reset/backfill or retention mutation is performed. Stop the owned server when done.
+No seed/reset/backfill or retention mutation is performed. Stop the development server when done.
 
 ## Errors and workarounds observed
 

@@ -1,10 +1,8 @@
 # Security policy
 
-Version 0.1.x is the initial supported line. Run the deployment checklist before accepting customer data.
+Version 0.1.x is the initial supported line. Run the [deployment checklist](docs/deployment.md) before accepting customer data.
 
-Report vulnerabilities using [GitHub private vulnerability reporting](https://github.com/joodlab/logbird/security/advisories/new). Never post exploit details or credentials in public issues. If the form is unavailable, open an issue titled "Request a private security contact" without sensitive details and wait for maintainers to provide a private channel.
-
-Maintainers must enable and verify private vulnerability reporting before public release. A link to the form alone does not confirm that reporting is enabled.
+Report vulnerabilities from the repository's [Security tab](https://github.com/joodlab/logbird/security): choose **Report a vulnerability**. Never post exploit details or credentials in public issues. If the form is unavailable, open an issue titled "Request a private security contact" without sensitive details and wait for maintainers to provide a private channel.
 
 Include affected version, fictional reproduction and impact. We coordinate remediation and disclosure privately. No response-time SLA is offered yet.
 

@@ -127,7 +127,7 @@ feature disabled; no live challenge-provider account or payment is required here
 
 ## UI handoff specification
 
-Claude-owned UI work follows backend contracts. Workspace Settings gets an
+The UI follows backend contracts. Workspace Settings gets an
 owner-only deletion section with a permanent-deletion explanation, typed slug,
 pending/running/failed status, safe retry and a completed destination outside the
 deleted workspace. Account Settings lists last-owner blockers and links to transfer
