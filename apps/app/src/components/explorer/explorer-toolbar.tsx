@@ -23,11 +23,13 @@ import { toast } from 'sonner';
 import { z } from 'zod';
 import { DisabledReason } from '@/components/admin-gate';
 import { HighlightedText } from '@/components/query-input/highlighted';
+import { ViewLabelChips } from '@/components/views/view-label-chips';
 import { api, langParam } from '@/lib/api/client';
 import { errorMessage, toApiError } from '@/lib/api/errors';
 import { keys } from '@/lib/api/queries';
 import { fieldErrorMessage } from '@/lib/forms';
 import { rangeLabel, resolveRange } from '@/lib/range';
+import { useCopyViewLink, useResolvedViewLabels } from '@/lib/views';
 import { DEFAULT_COLUMNS, EVENT_COLUMNS } from './columns';
 
 export function ColumnPicker({ columns, onChange }: { columns: string[]; onChange: (cols: string[]) => void }) {
@@ -282,14 +284,24 @@ function SaveViewDialog({
 }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const copyLink = useCopyViewLink();
+  // "Tenant: Bayt Al Rimal" instead of tenant:biz_5, in this dialog and on the saved view's card.
+  const labels = useResolvedViewLabels(projectId, q, lang, open);
   const create = useMutation({
     mutationFn: (value: { name: string; description: string }) =>
-      api.views.create(projectId, { name: value.name.trim(), description: value.description.trim() || null, state: { q, lang, range, columns } }),
+      api.views.create(projectId, {
+        name: value.name.trim(),
+        description: value.description.trim() || null,
+        state: { q, lang, range, columns, ...(labels.length ? { labels } : {}) },
+      }),
     onSuccess: async (view) => {
       await queryClient.invalidateQueries({ queryKey: [...keys.project(projectId), 'views'] });
       onOpenChange(false);
       form.reset();
-      toast.success(`Saved “${view.name}”`, { description: 'It is in the sidebar and shareable by URL.' });
+      toast.success(`Saved “${view.name}”`, {
+        description: 'It is in the sidebar for everyone in the workspace.',
+        action: { label: 'Copy link', onClick: () => copyLink(projectId, view) },
+      });
       navigate({ to: '.', search: ((prev: Record<string, unknown>) => ({ ...prev, view: view.id })) as never, replace: true });
     },
   });
@@ -323,6 +335,7 @@ function SaveViewDialog({
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-lg border bg-muted/40 px-3 py-2 font-mono text-[12px]">
+            <ViewLabelChips className="mb-1.5" labels={labels} lang={lang} q={q} />
             <div className="flex min-w-0 items-center gap-2">
               {lang === 'sql' ? <SqlBadge /> : null}
               <span className="truncate">

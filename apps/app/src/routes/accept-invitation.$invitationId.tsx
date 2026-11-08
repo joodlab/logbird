@@ -7,6 +7,7 @@ import { ArrowRightIcon, CircleAlertIcon, CircleCheckIcon, CircleSlashIcon, Cloc
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 import { DetailRow, LoadingCard, PublicInviteLayout, StateCard } from '@/components/invite/public-invite';
+import { PendingHint } from '@/components/pending-hint';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { invitationPreviewQuery, keys, meQuery } from '@/lib/api/queries';
@@ -176,6 +177,12 @@ function Invitation({ invitation, signedInAs }: { invitation: InvitationPreview;
             Accept and join {invitation.organization.name}
             {accept.isPending ? null : <ArrowRightIcon />}
           </Button>
+          <PendingHint
+            className="text-center [&>span]:justify-center"
+            pending={accept.isPending}
+            slow={`Joining ${invitation.organization.name} and opening its projects…`}
+            slower="This can take a few seconds the first time. Keep this tab open."
+          />
           <Button disabled={accept.isPending || decline.isPending} onClick={() => decline.mutate()} variant="ghost">
             {decline.isPending ? <Loader2Icon className="animate-spin" /> : null}
             Decline

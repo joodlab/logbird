@@ -15,7 +15,7 @@ import { QueryInput, type QueryInputHandle } from '@/components/query-input/quer
 import { api, langParam } from '@/lib/api/client';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
-import { queryProblem, reasonTitle } from '@/lib/query-error';
+import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import { andQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
@@ -422,10 +422,10 @@ export function Explorer({
             {problem ? (
               <>
                 <CircleAlertIcon className="size-3.5 shrink-0" />
-                <span className="min-w-0 truncate" title={[problem.message, problem.details?.hint].filter(Boolean).join(' — ')}>
+                <span className="min-w-0 truncate" data-testid="query-problem" title={queryProblemText(problem, q)}>
                   <span className="font-medium">{reasonTitle(problem.details, problem.code)}</span>
-                  {problem.message && problem.message !== problem.details?.hint ? ` · ${problem.message}` : ''}
-                  {problem.details?.hint ? <span className="text-muted-foreground"> — {problem.details.hint}</span> : null}
+                  {' · '}
+                  {queryProblemText(problem, q)}
                 </span>
                 {problem.code === 'sql_mode_unavailable' ? (
                   <button

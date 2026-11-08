@@ -13,11 +13,12 @@ import { Input } from '@logbird/ui/components/ui/input';
 import { Label } from '@logbird/ui/components/ui/label';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, useNavigate, useRouter } from '@tanstack/react-router';
 import { Loader2Icon, Trash2Icon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AdminNote, AdminOnly } from '@/components/admin-gate';
+import { PendingHint } from '@/components/pending-hint';
 import { SettingsSection } from '@/components/settings-section';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
@@ -36,6 +37,7 @@ function DangerZone() {
   const project = useQuery(projectQuery(projectId));
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const deleteButton = useRef<HTMLButtonElement>(null);
   const slugInput = useRef<HTMLInputElement>(null);
@@ -45,10 +47,13 @@ function DangerZone() {
     mutationFn: () => api.projects.remove(projectId, typed.trim()),
     onSuccess: async () => {
       setOpen(false);
+      // The deletion keeps running if the person left this page meanwhile: only bring them home when they are still
+      // inside the deleted project (its pages would 404 now).
+      const stillHere = router.state.location.pathname.startsWith(`/p/${projectId}`);
       queryClient.removeQueries({ queryKey: keys.project(projectId) });
       await queryClient.invalidateQueries({ queryKey: keys.projects });
       toast.success(`Deleted ${project.data?.name}`, { description: 'The project and all of its events are gone.' });
-      await navigate({ to: '/' });
+      if (stillHere) await navigate({ to: '/' });
     },
     onError: (error) => toast.error('Could not delete the project', { description: errorMessage(error) }),
   });
@@ -120,8 +125,14 @@ function DangerZone() {
                 value={typed}
               />
             </div>
+            <PendingHint
+              pending={remove.isPending}
+              slow={`Deleting ${p.name}: removing its events, keys and saved views…`}
+              slower="Projects with many events can take a few minutes. You can leave this page — the deletion continues, and you will see a confirmation when it is done."
+            />
             <AlertDialogFooter>
-              <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
+              {/* While deleting, this only hides the dialog: the request keeps running. */}
+              <AlertDialogCancel type="button">{remove.isPending ? 'Hide' : 'Cancel'}</AlertDialogCancel>
               <Button disabled={!matches || remove.isPending} type="submit" variant="destructive">
                 {remove.isPending ? <Loader2Icon className="animate-spin" /> : null}
                 Delete project

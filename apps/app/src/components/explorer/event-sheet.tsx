@@ -37,7 +37,7 @@ import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
-import { eventSentence, personLabel } from '@/lib/events';
+import { actorAttributeHint, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
 import { formatTerm } from '@/lib/query-language';
 import { eventCurl } from '@/lib/snippets';
@@ -186,6 +186,60 @@ function KV({
   );
 }
 
+/** Neutral pill for events that did not send an outcome (stored as "success" by default). */
+function OutcomeNotSent({ stored }: { stored: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            className="inline-flex h-5 cursor-default items-center gap-1.5 rounded-full bg-muted px-2 font-medium text-[11px] text-muted-foreground ring-1 ring-border ring-inset"
+            data-testid="outcome-not-sent"
+            type="button"
+          >
+            <span className="size-1.5 rounded-full border border-muted-foreground/60" />
+            outcome not sent
+          </button>
+        }
+      />
+      <TooltipContent className="max-w-64">
+        This event did not include an outcome, so Logbird files it as “{stored}” (it matches outcome:{stored}). Send outcome to record failures and
+        denials.
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** "Not recorded", plus where the event (or the step that caused it) does name someone. */
+function MissingActor({ event, detail, projectId }: { event: AuditEvent; detail?: EventDetail; projectId?: string }) {
+  const fromAttribute = actorAttributeHint(event.attributes);
+  const fromParent = detail ? parentActor(detail.parents) : null;
+  return (
+    <div className="flex min-w-0 flex-col gap-1" data-testid="missing-actor">
+      <span className="text-muted-foreground text-sm">Not recorded</span>
+      {fromAttribute ? (
+        <span className="text-muted-foreground text-xs">
+          Its <span className="font-mono">{fromAttribute.key}</span> attribute names{' '}
+          <bdi className="font-medium text-foreground">{fromAttribute.value}</bdi>.
+        </span>
+      ) : null}
+      {fromParent ? (
+        <span className="flex min-w-0 flex-wrap items-center gap-1 text-muted-foreground text-xs">
+          The step that caused it was done by
+          {projectId && fromParent.id ? (
+            <EntityProfileLink className="min-w-0 font-medium text-foreground hover:underline" id={fromParent.id} kind="actor" projectId={projectId}>
+              <bdi className="truncate">{personLabel(fromParent)}</bdi>
+            </EntityProfileLink>
+          ) : (
+            <bdi className="truncate font-medium text-foreground">{personLabel(fromParent)}</bdi>
+          )}
+        </span>
+      ) : null}
+      {fromAttribute || fromParent ? null : <span className="text-muted-foreground text-xs">The event did not include actor.id or actor.type.</span>}
+    </div>
+  );
+}
+
 function PartyCard({
   label,
   hint,
@@ -255,7 +309,7 @@ function EventDetailBody({
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <OutcomeBadge outcome={e.outcome} />
+          {outcomeWasSent(detail?.payload) === false ? <OutcomeNotSent stored={e.outcome} /> : <OutcomeBadge outcome={e.outcome} />}
           <SeverityBadge severity={e.severity} />
           <TypePill>{e.environment}</TypePill>
           {e.source ? <TypePill tone="brand">via {e.source}</TypePill> : null}
@@ -324,7 +378,7 @@ function EventDetailBody({
                   {e.actor.email ? <span className="truncate text-muted-foreground text-xs">{e.actor.email}</span> : null}
                 </div>
               ) : (
-                <span className="text-muted-foreground text-sm">Not recorded</span>
+                <MissingActor detail={detail} event={e} projectId={projectId} />
               )}
             </PartyCard>
             <PartyCard hint="who performed it" icon={<CogIcon className="size-3" />} label="Executor">

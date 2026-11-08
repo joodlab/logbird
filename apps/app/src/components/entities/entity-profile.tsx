@@ -17,6 +17,7 @@ import { EntityProfileLink } from '@/components/entity-link';
 import { Explorer, type ExplorerState } from '@/components/explorer/explorer';
 import { RankList } from '@/components/rank-list';
 import { Timestamp } from '@/components/timestamp';
+import { SaveEntityViewButton } from '@/components/views/save-entity-view-button';
 import { ApiRequestError } from '@/lib/api/errors';
 import { entityProfileQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
@@ -127,7 +128,15 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
               <CopyValue className="text-muted-foreground" value={displayId} />
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <SaveEntityViewButton
+              entityId={entityId}
+              kind={kind}
+              name={p?.entity.name || displayId}
+              projectId={projectId}
+              query={baseQuery}
+              range={timeline.range}
+            />
             <Button
               nativeButton={false}
               render={<Link params={{ projectId }} search={(prev) => ({ range: prev.range, q: baseQuery })} to="/p/$projectId/events" />}

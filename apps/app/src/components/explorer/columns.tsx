@@ -6,7 +6,7 @@ import { ActionName } from '@/components/action-name';
 import { JobHint, PlacedSupportMarker, SupportMarker } from '@/components/impersonation';
 import { Timestamp } from '@/components/timestamp';
 import { typeIcon } from '@/lib/entities';
-import { eventSentence } from '@/lib/events';
+import { actorAttributeHint, eventSentence } from '@/lib/events';
 
 export interface EventColumn {
   id: string;
@@ -79,7 +79,7 @@ export const EVENT_COLUMNS: EventColumn[] = [
       ) : e.impersonator ? (
         <PlacedSupportMarker event={e} placement="actor" />
       ) : (
-        <span className="text-muted-foreground text-xs">—</span>
+        <MissingActorCell attributes={e.attributes} />
       ),
   },
   {
@@ -195,4 +195,19 @@ export function parseColumns(cols: string | undefined): string[] {
 export function serializeColumns(ids: string[]): string | undefined {
   const same = ids.length === DEFAULT_COLUMNS.length && ids.every((id) => DEFAULT_COLUMNS.includes(id));
   return same ? undefined : ids.join(',');
+}
+
+/** No actor sent: "—", or the attribute that names someone (muted and italic — it is a hint, not the actor). */
+function MissingActorCell({ attributes }: { attributes: Record<string, string> }) {
+  const hint = actorAttributeHint(attributes);
+  if (!hint) return <span className="text-muted-foreground text-xs">—</span>;
+  return (
+    <span
+      className="truncate text-muted-foreground text-xs italic"
+      data-testid="actor-hint"
+      title={`No actor was sent. The ${hint.key} attribute names ${hint.value}.`}
+    >
+      {hint.value}
+    </span>
+  );
 }

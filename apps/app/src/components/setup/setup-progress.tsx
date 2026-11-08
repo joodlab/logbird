@@ -2,20 +2,23 @@ import { SidebarMenuButton, SidebarMenuItem, useSidebar } from '@logbird/ui/comp
 import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { projectSetupQuery } from '@/lib/api/queries';
+import { useCan } from '@/lib/permissions';
 import { ProgressRing, stepCopy } from './steps';
 
 /**
  * Compact "Finish setup 5/8" item for the project sidebar — the way into the Setup page while setup is incomplete.
  * Hidden for good once setup was completed the first time (`completedAt`, persisted by the server), even if a step
- * regresses later; the page stays reachable from Settings and ⌘K. In icon mode the ring stays and the tooltip says
- * what is next.
+ * regresses later, and while the checklist is dismissed; the page stays reachable from Settings and ⌘K. Only owners
+ * and admins see it: every remaining step (keys, retention, invitations) is theirs to do, so members would get a
+ * permanent nag they cannot act on. In icon mode the ring stays and the tooltip says what is next.
  */
 export function SetupProgress({ projectId }: { projectId: string }) {
-  const setup = useQuery(projectSetupQuery(projectId));
+  const manage = useCan()('setup.manage');
+  const setup = useQuery({ ...projectSetupQuery(projectId), enabled: manage });
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { isMobile, setOpenMobile } = useSidebar();
   const data = setup.data;
-  if (!data || data.complete || data.completedAt) return null;
+  if (!manage || !data || data.complete || data.completedAt || data.dismissedAt) return null;
   const { done, total } = data.progress;
   const next = data.nextStep ? stepCopy(data.nextStep, data, 'todo').title : null;
   return (
