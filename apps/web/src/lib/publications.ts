@@ -1,7 +1,6 @@
 /**
- * What the changelog and the blog publish. Both start empty on purpose: nothing here is posted by an agent
- * (marketing/README.md). An entry is added only after the owner approves it and it goes live, and the page that lists
- * it becomes `ready` with its first entry (site-map.ts).
+ * Public changelog and blog entries. Maintainers add an entry when the change or post is published,
+ * following marketing/README.md. The page that lists it becomes `ready` with its first entry (site-map.ts).
  *
  * Rules for every entry (marketing/copy/changelog.md § how-we-write): one change in the user's words, the limit stated
  * with the change, real captures only (a media-manifest id), no performance numbers without a linked measurement, no

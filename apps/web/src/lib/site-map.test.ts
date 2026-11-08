@@ -39,7 +39,7 @@ it('defines the provisional domain only in env.ts', () => {
   const occurrences = files.filter((file) => readFileSync(file, 'utf8').includes(literal));
   expect(occurrences).toEqual([resolve('src/env.ts')]);
 });
-it('names no company or design partner anywhere in the site source (pending the owner)', () => {
+it('keeps company and design-partner names out of public site source', () => {
   const files = [
     ...readdirSync('src', { recursive: true }).map((name) => resolve('src', String(name))),
     ...readdirSync('scripts', { recursive: true }).map((name) => resolve('scripts', String(name))),
