@@ -1,4 +1,4 @@
-# Fictional hospitality and accounting data
+# Synthetic hospitality and accounting data
 
 ```sh
 # SDK dogfood path; the key determines the destination project
@@ -18,10 +18,10 @@ generator accepts an explicit `now` for reproducibility; CLI runs use current ti
 for relative console ranges. IDs depend on project/seed, timestamps also depend on
 `now`. Use `--reset` for replacement rather than appending a second run.
 
-- Both profiles use fictional demo names. `--profile neutral` (default) names
-  the emitting app `booking-engine` and the booking channel `channel-manager`,
-  with `Hotel demo` as the default project. `--profile joodcms` uses the fictional
-  source names `joodcms` / `joodbooking` and defaults the project to `JoodCMS`.
+- `--profile neutral` (default) uses generic names for screenshots: emitting app
+  `booking-engine`, booking channel `channel-manager`, and project `Hotel demo`.
+  `--profile joodcms` selects the maintainers' own hospitality demo (Jood), using
+  `joodcms` / `joodbooking` as source names and `JoodCMS` as the default project.
   The project name is part of every operation ID.
 - `--until now` (or an ISO date-time) spreads the requested events over the most
   recent `--days`, ending then. Without it, events are a prefix of the full stream:

@@ -154,7 +154,7 @@ Pages use the console captures in `marketing/captures/2026-11-07-site-console/` 
 - **No query timings:** the explorer's query timer was removed before each still, because the site makes no
   performance claims. Some shots still show durations that belong to the fictional data itself, such as an operation
   tree's "3.50 s" and step offsets. Those are seeded event timestamps, not measurements of Logbird.
-- **Older captures:** the 2026-11-04/05/06 folders predate the rename or show older fictional demo workspaces. Don't
+- **Older captures:** the 2026-11-04/05/06 folders predate the rename or show the maintainers' Jood demo workspace. Don't
   use them on the site.
 - **Replacing a capture:** keep its manifest id, or mark the entry `interim: true` while a replacement is pending. An
   interim entry blocks indexing and the Cloudflare build (`apps/web/src/lib/release.ts`).

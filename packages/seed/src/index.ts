@@ -2,8 +2,8 @@ import type { EventInput } from '@logbird/sdk';
 import { type Action, businesses, hospitalityActions, ledgerActions, support, users } from './catalog';
 
 /**
- * Both profiles use fictional demo source and integration names. `neutral` is the default;
- * `joodcms` selects another fictional naming set for `pnpm demo`.
+ * `neutral` (the default) uses generic source and integration names for screenshots.
+ * `joodcms` selects the maintainers' own hospitality demo (Jood) for `pnpm demo`.
  */
 export const SEED_PROFILES = {
   neutral: { source: 'booking-engine', bookingChannel: 'channel-manager' },

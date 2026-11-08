@@ -576,14 +576,17 @@ loaders, `placeholderData: keepPreviousData` for filters), TanStack Form for for
 
 ## 9. Synthetic hospitality data (`packages/seed`)
 
-Generate a fictional hospitality domain; do not connect to customer systems. Generate via the
-public ingest API with the SDK (dogfooding): workspace "Jood", project "JoodCMS" (~300k events over 60 days,
-weekday/hour seasonality) + small project "Ledger demo" (a fictional accounting app, ~5k events, different
-vocabulary) to prove "accept anything". Include: ~30 businesses as tenants with websites, ~150 users across
-roles + platform admins (impersonation), API-key actors, scheduler/system actors; executors api-server, workers
-(crm, content, bookings, media, email, ads), schedulers, webhooks (JoodBooking, Meta WhatsApp, Stripe-like
-payment provider); illustrative actions for hospitality records (hotel/room/rate/booking/guest/campaign/article/page/
-website/member/role/integration/media/export/auth.*/crm.sync.*/catalog.sync.*); operation trees (request →
-job → child record changes), retries (attempt 2/3), failures/denied/unknown outcomes at realistic low rates,
-some events deliberately off-standard (missing actor, custom top-level keys) to exercise conformance. Seed also
-creates a dev login user `demo@logbird.local` as owner of "Jood" (OTP arrives in Mailpit).
+Generate synthetic hospitality and accounting records without connecting to customer
+systems. The maintainers dogfood through their own Jood demo workspace: project
+`JoodCMS` contains approximately 300k hospitality events over 60 days with weekday
+and hourly seasonality; `Ledger demo` contains approximately 5k accounting events.
+The neutral seed profile supplies generic names for screenshots.
+
+The dataset includes 30 hospitality businesses, their websites, 150 staff members,
+support impersonation, API-key actors and scheduled activity. Workers use the seed's
+queues `guest-sync`, `catalog`, `localization`, `site-preview` and `ledger-posting`.
+Actions illustrate hospitality, content, access and accounting changes. Operation
+trees connect requests, jobs and record changes; retries, failures, denied and unknown
+outcomes exercise the envelope. Some events intentionally omit recommended fields
+or include custom fields to exercise conformance. The demo command creates the
+`demo@logbird.local` login as owner of Jood; development OTPs arrive in Mailpit.

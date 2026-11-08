@@ -41,26 +41,26 @@ current result per screen is in [Current axe state](#current-axe-state-round-4) 
 
 | Check | Before | After |
 |---|---|---|
-| afterSheetEscape desktop-light | div[role=row][data-index=2] "Nov 4, 22:35 success booking.modified Hourly CRM b" | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hotels's hospitality:sync:bookings job pro |
+| afterSheetEscape desktop-light | div[role=row][data-index=2] "Nov 4, 22:35 success booking.modified Hourly CRM b" | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hotels's crm:sync:bookings job pro |
 | keyDialogInitialFocus desktop-light | input "" | input "" |
 | afterKeyDialogEscape desktop-light | BODY | button "Create key" |
 | confirmInitialFocus desktop-light | button "Revoke key" | button "Cancel" |
 | afterConfirmEscape desktop-light | BODY | button "Revoke" |
 | settingsActiveTabVisible desktop-light | fully visible (tab 265–338 in nav 265–1407) | fully visible (tab 752–859 in nav 265–1407) |
 | tabStopsFromQueryToRow | not reached in 40 | 9 |
-| afterSheetEscape desktop-dark | div[role=row][data-index=2] "Nov 4, 22:35 success booking.modified Hourly CRM b" | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hotels's hospitality:sync:bookings job pro |
+| afterSheetEscape desktop-dark | div[role=row][data-index=2] "Nov 4, 22:35 success booking.modified Hourly CRM b" | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hotels's crm:sync:bookings job pro |
 | keyDialogInitialFocus desktop-dark | input "" | input "" |
 | afterKeyDialogEscape desktop-dark | BODY | button "Create key" |
 | confirmInitialFocus desktop-dark | button "Revoke key" | button "Cancel" |
 | afterConfirmEscape desktop-dark | BODY | button "Revoke" |
 | settingsActiveTabVisible desktop-dark | fully visible (tab 265–338 in nav 265–1407) | fully visible (tab 752–859 in nav 265–1407) |
-| afterSheetEscape phone-light | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hot" | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hotels's hospitality:sync:bookings job pro |
+| afterSheetEscape phone-light | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hot" | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hotels's crm:sync:bookings job pro |
 | keyDialogInitialFocus phone-light | input "" | input "" |
 | afterKeyDialogEscape phone-light | BODY | button "Create key" |
 | confirmInitialFocus phone-light | button "Revoke key" | button "Cancel" |
 | afterConfirmEscape phone-light | BODY | button "Revoke" |
 | settingsActiveTabVisible phone-light | fully visible (tab 16–89 in nav 16–374) | fully visible (tab 267–374 in nav 16–374) |
-| afterSheetEscape phone-dark | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hot" | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hotels's hospitality:sync:bookings job pro |
+| afterSheetEscape phone-dark | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hot" | div[role=row][data-index=2] "Hourly CRM bookings scheduler - Rimal Crescent Hotels's crm:sync:bookings job pro |
 | keyDialogInitialFocus phone-dark | input "" | input "" |
 | afterKeyDialogEscape phone-dark | BODY | button "Create key" |
 | confirmInitialFocus phone-dark | button "Revoke key" | button "Cancel" |
