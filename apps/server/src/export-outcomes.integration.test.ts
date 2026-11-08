@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { auditNamespace, prisma } from '@logbird/database';
+import { auditNamespace, prisma, withProjectLock } from '@logbird/database';
 import { expect, it, vi } from 'vitest';
-import { finishExport, releaseExport, stageExport, sweepExportOutcomes } from './export-outcomes';
+import { finishExport, releaseExport, stageExport, sweepExportOutcomes, validateExportMembership } from './export-outcomes';
 import { drainAuditOutbox } from './outbox-delivery';
 
 it('atomically reserves terminal evidence, recovers write failures/crashes, and bounds replica admission', async () => {
@@ -114,5 +114,66 @@ it('atomically reserves terminal evidence, recovers write failures/crashes, and 
     await prisma.auditOutbox.deleteMany({ where: { namespace, stream: { in: ids.map((id) => `ws:qa-export-${id}`) } } });
     await prisma.exportLease.deleteMany({ where: { namespace, id: { in: ids } } });
     await prisma.organization.delete({ where: { id: organizationId } });
+  }
+});
+
+it('bounds both exclusive export boundaries and releases the gate to new ingests behind a slow writer', async () => {
+  const id = randomUUID();
+  const org = `qa-export-boundary-${id}`;
+  await prisma.organization.create({ data: { id: org, name: 'QA Export boundary', slug: org, createdAt: new Date() } });
+  const project = await prisma.project.create({ data: { organizationId: org, name: 'QA Export slow writer', slug: 'slow-writer' } });
+  const input = {
+    id,
+    userId: id,
+    workspaceId: org,
+    projectId: project.id,
+    stream: `ws:${org}`,
+    requested: { id: `${id}-requested`, action: 'export.requested' },
+    unknown: { id: `${id}-outcome`, action: 'export.outcome_unknown' },
+  };
+  let release!: () => void, entered!: () => void;
+  const waiting = new Promise<void>((r) => {
+    release = r;
+  });
+  const started = new Promise<void>((r) => {
+    entered = r;
+  });
+  let writer: Promise<unknown> | undefined;
+  try {
+    const staged = await stageExport(input);
+    writer = withProjectLock(
+      project.id,
+      async () => {
+        entered();
+        await waiting;
+      },
+      { mode: 'shared' },
+    );
+    await started;
+    const timings: number[] = [];
+    for (const work of [() => stageExport({ ...input, id: `${id}-other` }), () => validateExportMembership(project.id, staged.membership, id)]) {
+      const start = performance.now();
+      await expect(work()).rejects.toMatchObject({ code: 'export_project_busy', status: 503 });
+      timings.push(performance.now() - start);
+      expect(timings.at(-1)).toBeLessThan(400);
+    }
+    // The slow ingest still owns its shared lock. A failed export must not keep its writer-preference gate.
+    expect(await withProjectLock(project.id, async () => true, { mode: 'shared', waitMs: 100 })).toBe(true);
+    console.log(
+      JSON.stringify({
+        event: 'qa.export_boundary',
+        admissionMs: timings[0],
+        finalizationMs: timings[1],
+        contentionBudgetMs: 100,
+        transactionDeadlineMs: 250,
+        newSharedWriterProceeded: true,
+      }),
+    );
+  } finally {
+    release();
+    await writer;
+    await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${org}` } });
+    await prisma.exportLease.deleteMany({ where: { projectId: project.id } });
+    await prisma.organization.delete({ where: { id: org } });
   }
 });

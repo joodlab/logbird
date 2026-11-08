@@ -22,6 +22,15 @@ fails the stream with `membership_changed`, rather than recording completion of 
 partial file and retry. No lock or Postgres transaction spans the download. Direct administrative ClickHouse writes
 that bypass these application fences require stopping exports first. This is not a general database snapshot.
 
+The ingest fence piggybacks on the existing project lookup in one SQL statement: **zero additional Postgres round
+trips per batch**, whether an export is active or not. An indexed lease probe returns no rows when inactive; ordinary
+later-received writes do not update the active lease. Only the first delayed write marks a lease invalid.
+Both export boundary acquisitions use nonblocking advisory tries with a 100-ms contention budget. Their short
+Postgres transaction has `lock_timeout=100ms`, `statement_timeout=100ms`, a 250-ms transaction deadline and 50-ms
+pool-admission deadline. These are transaction-local settings. Contention returns `503 export_project_busy`
+(`project_busy` terminal reason) and releases the writer-preference gate, allowing new ingests to continue behind
+the earlier shared writer. No ClickHouse I/O runs under an exclusive export boundary lock.
+
 ## Which format?
 
 - **Complete (original payloads)** — `jsonl-evidence`. Each line contains `exportSchemaVersion: 1`, the normalized
@@ -93,7 +102,7 @@ null rows/bytes and no digest; they never imply success. Safe diagnostics are `e
 drains tracked terminal writes before closing clients; a forced exit leaves the durable leased fallback.
 
 Reasons are `client_aborted` (download canceled), `invalid_query`, `audit_unavailable` (audit record not confirmed),
-`sql_unavailable` (SQL mode unavailable), `membership_changed`, `idle_timeout`, `lease_expired`, `resource_limit`,
+`sql_unavailable` (SQL mode unavailable), `membership_changed`, `project_busy`, `idle_timeout`, `lease_expired`, `resource_limit`,
 `export_error`, and `outcome_not_confirmed`. Sentences name the cause; private exception messages are excluded.
 
 Completion means the producer exhausted its pages and handed bytes to the stream. Counts are not client receipt

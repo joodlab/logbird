@@ -10,6 +10,7 @@ export type ExportCounts = {
     | 'audit_unavailable'
     | 'sql_unavailable'
     | 'membership_changed'
+    | 'project_busy'
     | 'idle_timeout'
     | 'lease_expired'
     | 'resource_limit'
@@ -31,6 +32,7 @@ const failureReason = (error: unknown): NonNullable<ExportCounts['reason']> => {
   if (error instanceof Error && (error.name === 'QueryError' || /^Invalid (time range|query syntax)/.test(error.message))) return 'invalid_query';
   if (code === 'sql_mode_unavailable') return 'sql_unavailable';
   if (code === 'export_invalidated') return 'membership_changed';
+  if (code === 'export_project_busy') return 'project_busy';
   if (code === 'export_lease_expired') return 'lease_expired';
   return 'export_error';
 };

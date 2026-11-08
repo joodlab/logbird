@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import { insertEvents, normalizeEvent } from '@logbird/clickhouse';
 import { ingestResponseSchema } from '@logbird/contracts';
-import { prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
+import { findIngestProject, prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { enqueueProjectRetention } from '@logbird/worker/queue';
 import type { Context } from 'hono';
 import { queueAuditEvent } from './audit-outbox';
@@ -56,16 +56,12 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
   await withProjectLock(
     projectId,
     async (tx) => {
-      if (!projectId.startsWith('ws:') && !(await tx.project.findUnique({ where: { id: projectId } })))
-        throw new ApiError(404, 'not_found', 'Project not found.');
-      await requireRetentionReady(tx, projectId);
-      // Normalization can precede the project lock. A delayed/slow-clock writer whose receive time
-      // crosses an active export's fence must invalidate that file before its ClickHouse INSERT.
-      if (rows.length && !projectId.startsWith('ws:')) {
-        const earliest = new Date(Math.min(...rows.map((row) => Date.parse(row.received_at))));
-        await tx.$executeRaw`UPDATE "ExportLease" SET invalidated=true WHERE "projectId"=${projectId}
-          AND "expiresAt">clock_timestamp() AND "receivedBefore">=${earliest}`;
+      if (!projectId.startsWith('ws:')) {
+        // Piggyback the delayed-write fence on the existing project lookup: no additional PG round trip.
+        const earliest = rows.length ? new Date(Math.min(...rows.map((row) => Date.parse(row.received_at)))) : null;
+        if (!(await findIngestProject(tx, projectId, earliest))) throw new ApiError(404, 'not_found', 'Project not found.');
       }
+      await requireRetentionReady(tx, projectId);
       try {
         await insertEvents(clickhouse, rows);
       } catch (error) {

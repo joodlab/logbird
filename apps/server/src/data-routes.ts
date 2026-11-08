@@ -219,6 +219,7 @@ export const dataRoutes = new Hono<AppEnv>()
             audit_unavailable: 'audit record not confirmed',
             sql_unavailable: 'SQL mode unavailable',
             membership_changed: 'stored events changed; retry the export',
+            project_busy: 'project busy; retry the export',
             idle_timeout: 'download inactive',
             lease_expired: 'export expired',
             resource_limit: 'query resource limit',
@@ -304,7 +305,7 @@ export const dataRoutes = new Hono<AppEnv>()
             await deliverOutboxEvent(requested.id, ingest);
             if (!(await waitForAuditDelivery(requested.id))) throw new Error('Export request not acknowledged');
           } catch (error) {
-            if (error instanceof ApiError && error.code === 'export_busy') throw error;
+            if (error instanceof ApiError && ['export_busy', 'export_project_busy'].includes(error.code)) throw error;
             throw new ApiError(503, 'export_audit_unavailable', 'The export request could not be recorded. Retry the export before downloading.');
           }
         },

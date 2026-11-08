@@ -81,7 +81,7 @@ export async function withProjectLock<T>(
       }
       if (data) break;
       if (Date.now() >= deadline) throw new ProjectBusyError();
-      await sleep(delay);
+      await sleep(Math.min(delay, Math.max(0, deadline - Date.now())));
     }
     // Database calls use short, independent statements. The callback is NOT a transaction.
     return await work(prisma);
@@ -103,6 +103,16 @@ export async function withProjectLock<T>(
   }
 }
 export const closeProjectLocks = () => projectLocks.end();
+
+/** Replaces the existing ingest project lookup: one statement/round trip, including a delayed-write fence. */
+export async function findIngestProject(db: import('./generated/client').Prisma.TransactionClient, projectId: string, receivedAt: Date | null) {
+  const rows = await db.$queryRaw<{ id: string }[]>`
+    WITH current_project AS MATERIALIZED (SELECT id FROM "Project" WHERE id=${projectId}),
+    fenced AS (UPDATE "ExportLease" SET invalidated=true WHERE "projectId" IN (SELECT id FROM current_project)
+      AND NOT invalidated AND "expiresAt">clock_timestamp() AND "receivedBefore">=${receivedAt} RETURNING id)
+    SELECT id FROM current_project`;
+  return rows[0] ?? null;
+}
 
 /** Call only while holding the project lock. Old clients/runs fall back to startedAt. */
 export const RETENTION_LEASE_MS = 10 * 60_000;

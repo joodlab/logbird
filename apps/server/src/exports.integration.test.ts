@@ -163,9 +163,19 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
     }
     const resilient = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
     expect(resilient.status).toBe(200);
-    const unavailable = vi.spyOn(prisma, '$transaction').mockRejectedValueOnce(new Error('fictional terminal storage outage'));
+    const transaction = prisma.$transaction.bind(prisma);
+    let terminalFault = true;
+    const unavailable = vi.spyOn(prisma, '$transaction').mockImplementation((...args) => {
+      // Boundary validation now has its own short transaction. Inject the terminal draft, not that validation.
+      if (terminalFault && args[1] === undefined) {
+        terminalFault = false;
+        return Promise.reject(new Error('fictional terminal storage outage'));
+      }
+      return Reflect.apply(transaction, prisma, args);
+    });
     try {
       expect((await resilient.text()).trimEnd().split('\n')).toHaveLength(205);
+      expect(terminalFault).toBe(false);
     } finally {
       unavailable.mockRestore();
     }
