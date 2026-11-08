@@ -6,7 +6,7 @@ by these files. No production, failover, restore or capacity acceptance is claim
 
 ## Decision summary
 
-- **Recommend k3s on Hetzner:** reuse the team's JoodCMS Kubernetes practice, keep
+- **Recommend k3s on Hetzner:** keep
   migrations separate from running apps, and replace each role independently.
   Coolify is simpler to set up, but its Compose deployment path has an interruption
   window and does not remove the database/recovery work.
@@ -104,7 +104,7 @@ interruptions are acceptable. Data operations and recovery gates apply to both c
 
 | Consideration | k3s on Hetzner | Coolify |
 | --- | --- | --- |
-| Existing fit | Reuses JoodCMS Kubernetes and migration-Job operating practice | Uses the supplied Compose path, adding a separate control panel to operate |
+| Existing fit | Separates Kubernetes workloads and migration Jobs | Uses the supplied Compose path, adding a separate control panel to operate |
 | Releases | Gate one migration Job, then replace app/API/worker independently | Compose replacement has an interruption window; separate Docker Image apps would be another design |
 | State | Separate data VMs or approved managed stores; matched backups and restore ownership stay with the team | Same data responsibility; the panel's own backup/encryption key is additional state |
 | Operator burden | Team owns K3s/CNI/ingress/cert-manager upgrades plus the data services | Team owns host/panel upgrades plus the same data services |
@@ -115,11 +115,8 @@ excludes Docker Compose applications and describes the health, shutdown and comp
 requirements for eligible applications. Moving to separate image applications would be a
 separate release design; do not describe the existing Compose path as zero downtime.
 
-Read-only source comparisons used here: JoodCMS `k8s/README.md`,
-`k8s/templates/api/{deployment,migration-job}.yaml` and `infra/terraform/README.md` separate
-workloads, migrations and state ownership; Nibleaf `operations/deployment-reliability.md` and
-`docs/self-hosting/backups-upgrades.mdx` require exact artifacts and isolated restore evidence.
-No credentials, addresses, state or deployment scripts were copied from either project.
+Separate application workloads, migration jobs and state ownership. Release evidence
+should identify exact artifacts and include an isolated restore rehearsal.
 
 ## Topology and capacity gates
 

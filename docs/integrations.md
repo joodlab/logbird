@@ -4,6 +4,8 @@ We maintain integrations for the stacks we use first: Hono, TanStack Start, Vue 
 Express, Next.js, Laravel and Django follow when we use them. Generated clients remain deferred;
 these adapters use the hand-maintained TypeScript SDK.
 
+For an existing Node service, start with [Integrating an existing backend](integrating-a-backend.md).
+
 ## Design
 
 Ingest runs only on servers. Never put an ingest or read key in public runtime config, client

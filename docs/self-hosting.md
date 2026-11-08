@@ -5,7 +5,7 @@
 Install Docker Engine and Compose >=2.24.4 (Linux containers). First builds can take longer depending on CPU/network. No images are published yet.
 
 ```sh
-git clone https://github.com/joodlab/logbird.git # private repository: use authorized GitHub access
+git clone https://github.com/joodlab/logbird.git
 cd logbird
 sh scripts/selfhost-init.sh
 # Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.

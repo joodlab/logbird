@@ -43,10 +43,10 @@ with hosting; no Postmark account, token or DNS record was created or changed he
 
 ### Hosting: Coolify behind Cloudflare, after open-sourcing
 
-The hosted instance will run on **Coolify (`coolify.joodlab.com`) behind Cloudflare at `logbird.joodlab.com`**, after
+The hosted instance will run on **Coolify behind Cloudflare at the public service origin**, after
 the repository is open-sourced. This is a recorded decision only. No Coolify resource, Cloudflare setting, DNS record
 or account was created or changed. The deployment will follow [Coolify](coolify.md) with
-`APP_URL=https://logbird.joodlab.com`. `TRUST_PROXY` must be set from the verified proxy chain at that time (Cloudflare
+`APP_URL=https://audit.example.com` (replace with your public origin). `TRUST_PROXY` must be set from the verified proxy chain at that time (Cloudflare
 in front of Coolify's proxy adds a hop only if Coolify's proxy is configured to trust Cloudflare's forwarding headers);
 verify the recorded client address before relying on per-client limits. The Kubernetes/Hetzner material in [cloud operations](cloud-operations.md)
 remains design work and is not the chosen launch path.

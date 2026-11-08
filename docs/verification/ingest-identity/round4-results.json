@@ -108,7 +108,7 @@
       "diskFreeGiB": 109.946
     },
     "round4-audit-regressions": {
-      "command": "node --env-file=.env .temp/run-round3.cjs src/invite-links.integration.test.ts src/qa-backend.integration.test.ts src/invitation-activity.integration.test.ts --reporter=json --outputFile=C:/Users/raedb/.t3/worktrees/logbird/t3-fe2f6967/.temp/branch-audit-comparison.json",
+      "command": "node --env-file=.env .temp/run-round3.cjs src/invite-links.integration.test.ts src/qa-backend.integration.test.ts src/invitation-activity.integration.test.ts --reporter=json --outputFile=.temp/branch-audit-comparison.json",
       "exitCode": 0,
       "elapsedSeconds": 70.49,
       "peakProcessTreeRssGiB": 0.532,
@@ -117,7 +117,7 @@
       "diskFreeGiB": 109.846
     },
     "round4-fence-tests": {
-      "command": "node --env-file=.env .temp/run-round3.cjs src/immutable-ingest-round4.integration.test.ts --reporter=json --outputFile=C:/Users/raedb/.t3/worktrees/logbird/t3-fe2f6967/.temp/round4-fence-results.json",
+      "command": "node --env-file=.env .temp/run-round3.cjs src/immutable-ingest-round4.integration.test.ts --reporter=json --outputFile=.temp/round4-fence-results.json",
       "exitCode": 1,
       "elapsedSeconds": 289.59,
       "peakProcessTreeRssGiB": 0.578,
@@ -126,7 +126,7 @@
       "diskFreeGiB": 110.048
     },
     "round4-fence-final-recheck": {
-      "command": "node --env-file=.env .temp/run-round3.cjs src/immutable-ingest-round4.integration.test.ts -t fences --reporter=json --outputFile=C:/Users/raedb/.t3/worktrees/logbird/t3-fe2f6967/.temp/round4-fence-final-recheck.json",
+      "command": "node --env-file=.env .temp/run-round3.cjs src/immutable-ingest-round4.integration.test.ts -t fences --reporter=json --outputFile=.temp/round4-fence-final-recheck.json",
       "exitCode": 0,
       "elapsedSeconds": 41.04,
       "peakProcessTreeRssGiB": 0.504,

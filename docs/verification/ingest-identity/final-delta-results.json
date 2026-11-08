@@ -205,7 +205,7 @@
       "diskFreeGiB": 109.907
     },
     "final-merged-install": {
-      "command": "node C:/Users/raedb/AppData/Local/npm-cache/_npx/6f08beb95ac65f4b/node_modules/pnpm/bin/pnpm.cjs install --frozen-lockfile",
+      "command": "pnpm install --frozen-lockfile",
       "exitCode": 0,
       "elapsedSeconds": 3.74,
       "peakProcessTreeRssGiB": 0.619,

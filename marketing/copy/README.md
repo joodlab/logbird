@@ -125,7 +125,7 @@ These variants are **not** used anywhere on the site. The owner may approve them
 
 - **Design partner:** the site says "Logbird is being integrated with a hotel-booking SaaS, our first design partner."
   Never say "in production" or "customer" until the rollout says so (`docs/roadmap.md`).
-  <!-- owner-gated: design-partner-name. "JoodCMS, a hotel-booking SaaS, is our first design partner, being integrated." -->
+  <!-- Name design partners only after they approve publication. -->
 - **Cloud clause in the positioning:** used only once Logbird Cloud accepts sign-ups.
   <!-- owner-gated: cloud-clause. "…and run it on your own servers or ours." (docs/brand.md) -->
 - **Repository link:** comes from `WEB_GITHUB_URL`. Until the repository is public, every mention reads

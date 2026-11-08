@@ -5,7 +5,7 @@ The hosted instance is planned on Coolify behind Cloudflare at `logbird.joodlab.
 Use the Git repository Docker Compose build pack. No images are published yet; Coolify builds from source. The committed file publishes no host ports. Only app:4600 should receive a public domain.
 
 1. Open Projects, choose the project/environment, then New Resource (some versions show + New).
-2. Choose Git repository. For this private repository use your authorized private GitHub App installation, or a deploy key. Select joodlab/logbird, a pinned branch/revision and destination server.
+2. Choose Public Repository and enter `https://github.com/joodlab/logbird.git`. Select a pinned branch/revision and destination server. For a private fork instead, use your authorized private GitHub App installation or a deploy key.
 3. Select Docker Compose build pack / Compose build strategy. Set Base Directory `/` and Docker Compose Location `/docker-compose.coolify.yml`. Save, load and review Compose content.
 4. Under Domains, assign app `https://audit.example.com:4600`. The suffix selects the internal listener; visitors use ordinary HTTPS. Do not assign domains to data services, server, migrate or worker.
 5. In Environment Variables, confirm SERVICE_URL_APP_4600 represents the public console URL with scheme. Set APP_URL explicitly to `https://audit.example.com` if necessary; the definition defaults it to SERVICE_URL_APP_4600. SERVICE_FQDN_APP_4600 contains a hostname without scheme and cannot be APP_URL.

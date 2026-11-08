@@ -5,8 +5,8 @@ TanStack Start, every page prerendered to static HTML, packaged for Cloudflare W
 
 ## Commands
 
-Node 22.18+, pnpm 10.30.3. Port **4620** only (marketing range 4620–4629 on the shared machine). Before a build or a
-browser run, check ≥ 8 GB free RAM, ≥ 40 GB free on C:, and that no `quiet` slot is held (`C:/Users/raedb/.t3/logbird-locks/RULES.md`).
+Use Node 22.18+ and pnpm 10.30.3. The development server uses port **4620**.
+Keep machine-specific resource limits and coordination rules in gitignored `AGENTS.local.md`.
 
 ```sh
 pnpm --filter @logbird/web typecheck
