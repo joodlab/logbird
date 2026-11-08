@@ -59,6 +59,36 @@ both before and after ANALYZE. Actual helper timings were about 8/23/10 ms befor
 and 9/22/11 ms after. These are shared-service diagnostics, not production latency
 guarantees. Earlier cold-cache and interrupted attempts remain in the evidence
 record; they do not establish a statistics-independent plan.
+
+A bloated, nearly empty table defeats the ordered seek without a guard. After a large
+backlog is deleted or rolled back, autovacuum records few live rows while the heap
+and index pages remain. On the shared development database (33 estimated live rows
+in a 14364-page heap), the planner priced one sequential scan plus sort per id below
+the primary-key seek. One lookup of 1000 fresh ids touched 14,364,000 buffers
+(2446 ms execution, 2.6 s wall), and its inflated cost also enabled JIT. Prior lookup, confirmation and targeted
+expiry therefore run in a short transaction that first sets `enable_seqscan`,
+`enable_bitmapscan`, `enable_sort`, `enable_incremental_sort` and `jit` off with
+transaction-local `set_config(..., true)`. Every alternative plan (a sequential,
+bitmap or secondary-index scan plus a sort or incremental sort per id) then
+contains an extra disabled node. The primary-key seek has the fewest: none beyond the
+input-id sort that every plan shares. The settings are transaction-local and revert at
+COMMIT or ROLLBACK. The cost is one extra statement and three extra round trips per
+probe (BEGIN, guard and COMMIT around the original statement); a fresh batch's lookup
+plus confirmation adds six. Confirmation and expiry also hold their row locks for one
+more round trip, until COMMIT. The local timings in #111 do not measure a remote
+database's round-trip time. The transaction is bounded at 60 seconds for both the
+connection wait and execution (`RECEIPT_PROBE_TRANSACTION`), not Prisma's 2 s/5 s
+batch defaults. These were unbounded plain statements before. 60 seconds matches the
+claim lease and ingest ClickHouse socket budget. It also lets a confirmation after an
+acknowledged ClickHouse write wait behind a sweep batch (at most about six seconds)
+instead of being rolled back, which would report a stored write as failed and force
+recovery.
+Minute-sweep batches use the same guard plus their five-second timeout, so they walk
+a `confirmedAt`-ordered index. The `receipt-plan-guard` real-PG test plans the
+shipped SQL against an owned temp table that shadows `IngestReceipt` with fresh,
+large, stale and bloated (800k deleted, 5 kept) statistics. It also proves the bloated
+fixture abandons the seek when unguarded. The replacement depends on exact page
+counts: a secondary-index, bitmap or sequential scan plus a sort for every id.
 Fresh claims retain the same CAS/skipDuplicates arbitration. Ordinary
 pruning and retention never remove unresolved receipts. Only exclusive recovery
 can settle or remove an unresolved receipt.
