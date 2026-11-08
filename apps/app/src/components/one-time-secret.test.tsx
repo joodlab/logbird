@@ -47,7 +47,7 @@ function SecretDialog() {
 }
 const dialogState = () => document.querySelector('[data-testid="dialog-state"]')?.textContent;
 
-const escape = async () => {
+const pressEscape = async () => {
   await act(async () => {
     const target = document.activeElement ?? document.body;
     target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
@@ -59,12 +59,12 @@ const secretVisible = () => Boolean(document.querySelector('[data-testid="one-ti
 it('OWNER-10: Escape never discards an uncopied secret, it asks first', async () => {
   render(<SecretDialog />);
   expect(secretVisible()).toBe(true);
-  await escape();
+  await pressEscape();
   expect(dialogState()).toBe('open');
   expect(secretVisible()).toBe(true);
   expect(document.querySelector('[data-testid="secret-close-confirm"]')?.textContent).toContain('Close without copying?');
   // "Keep it open" has focus: a second stray Escape still keeps the secret.
-  await escape();
+  await pressEscape();
   expect(dialogState()).toBe('open');
   expect(secretVisible()).toBe(true);
 });
@@ -77,7 +77,7 @@ it('OWNER-10: once copied, Escape closes normally', async () => {
     copy?.click();
     await new Promise((r) => setTimeout(r, 0));
   });
-  await escape();
+  await pressEscape();
   await act(async () => {
     await new Promise((r) => setTimeout(r, 50));
   });

@@ -120,7 +120,17 @@ function KeysSettings() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={cn('truncate font-medium text-sm', k.revokedAt && 'text-muted-foreground line-through')}>{k.name}</span>
                       <Tooltip>
-                        <TooltipTrigger render={<TypePill tone={k.kind === 'ingest' ? 'brand' : 'neutral'}>{k.kind}</TypePill>} />
+                        <TooltipTrigger
+                          render={
+                            <button
+                              aria-label={`${k.kind} key: ${KIND_COPY[k.kind].hint}`}
+                              className="cursor-default rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                              type="button"
+                            />
+                          }
+                        >
+                          <TypePill tone={k.kind === 'ingest' ? 'brand' : 'neutral'}>{k.kind}</TypePill>
+                        </TooltipTrigger>
                         <TooltipContent className="max-w-64">{KIND_COPY[k.kind].hint}</TooltipContent>
                       </Tooltip>
                       {k.revokedAt ? (
@@ -285,7 +295,12 @@ function CreateKeyDialog({
   return (
     // Escape, a backdrop tap or the corner × never discard an uncopied secret: the dialog asks first (OWNER-10).
     <Dialog onOpenChange={(next, details) => secretGuard.guard(next, details) && close(next)} open={open}>
-      <DialogContent className="sm:max-w-lg" finalFocus={finalFocus} initialFocus={created ? undefined : nameInput}>
+      <DialogContent
+        // Phones: the secret, its snippet and the close confirmation can be taller than the screen — scroll inside.
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
+        finalFocus={finalFocus}
+        initialFocus={created ? undefined : nameInput}
+      >
         {created ? (
           <div className="flex flex-col gap-4">
             <DialogHeader>

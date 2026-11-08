@@ -76,8 +76,10 @@ function WorkspaceStep() {
     if (!suggested || form.getFieldValue('name') !== '' || form.getFieldMeta('name')?.isDirty) return;
     form.setFieldValue('name', suggested, { dontUpdateMeta: true });
     // Selected, so typing the real name replaces the guess in one go.
+    // The field is the only input on the page (autoFocus): focus it and select the guess once React has rendered it.
     requestAnimationFrame(() => {
-      if (document.activeElement === nameInput.current) nameInput.current?.select();
+      nameInput.current?.focus();
+      nameInput.current?.select();
     });
   }, [suggested, form]);
 

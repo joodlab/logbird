@@ -50,10 +50,11 @@ function DangerZone() {
       // The deletion keeps running if the person left this page meanwhile: only bring them home when they are still
       // inside the deleted project (its pages would 404 now).
       const stillHere = router.state.location.pathname.startsWith(`/p/${projectId}`);
-      queryClient.removeQueries({ queryKey: keys.project(projectId) });
-      await queryClient.invalidateQueries({ queryKey: keys.projects });
       toast.success(`Deleted ${project.data?.name}`, { description: 'The project and all of its events are gone.' });
+      // Leave first, then drop the deleted project's cache: mounted project pages would otherwise refetch it into 404s.
       if (stillHere) await navigate({ to: '/' });
+      queryClient.removeQueries({ queryKey: keys.project(projectId) });
+      await queryClient.invalidateQueries({ queryKey: keys.projects, exact: true });
     },
     onError: (error) => toast.error('Could not delete the project', { description: errorMessage(error) }),
   });

@@ -56,8 +56,11 @@ it('real services: key roll + last-used client, empty-project delete, landing pr
     // OWNER-15: a company domain nobody uses yet is pre-filled; once a workspace exists there, it is not.
     const before = s.workspaceNameSuggestionSchema.parse(await (await api('/api/onboarding/workspace-name')).json());
     expect(before.name).toMatch(/^Qa Fix Backlogs [0-9a-f]{8}$/i);
-    orgId = ((await (await api('/api/auth/organization/create', 'POST', { name: 'QA Fix backlogs', slug: `qa-fix-${randomUUID()}` })).json()) as { id: string })
-      .id;
+    orgId = (
+      (await (await api('/api/auth/organization/create', 'POST', { name: 'QA Fix backlogs', slug: `qa-fix-${randomUUID()}` })).json()) as {
+        id: string;
+      }
+    ).id;
     await api('/api/auth/organization/set-active', 'POST', { organizationId: orgId });
     expect(s.workspaceNameSuggestionSchema.parse(await (await api('/api/onboarding/workspace-name')).json()).name).toBeNull();
 
@@ -75,8 +78,11 @@ it('real services: key roll + last-used client, empty-project delete, landing pr
     expect(setup.onboarding).toEqual({ next: null, projectId: busy.id });
 
     // OWNER-11: roll a key; the old one keeps working and records the client that last used it.
-    const read = s.createApiKeyResponseSchema.parse(await (await api(`/api/projects/${busy.id}/keys`, 'POST', { name: 'QA Fix reader', kind: 'read' })).json());
-    const asKey = (secret: string) => request('/v1/events?limit=1', 'GET', undefined, { Authorization: `Bearer ${secret}`, 'User-Agent': 'qa-fix-client/1.0' });
+    const read = s.createApiKeyResponseSchema.parse(
+      await (await api(`/api/projects/${busy.id}/keys`, 'POST', { name: 'QA Fix reader', kind: 'read' })).json(),
+    );
+    const asKey = (secret: string) =>
+      request('/v1/events?limit=1', 'GET', undefined, { Authorization: `Bearer ${secret}`, 'User-Agent': 'qa-fix-client/1.0' });
     expect((await asKey(read.secret)).status).toBe(200);
     const rolled = await request(`/api/projects/${busy.id}/keys/${read.key.id}/roll`, 'POST', undefined, { cookie });
     expect(rolled.status).toBe(201);
@@ -125,7 +131,11 @@ it('real services: key roll + last-used client, empty-project delete, landing pr
     const withData = await request(`/api/projects/${fixture.id}?confirm=${encodeURIComponent(fixture.slug)}`, 'DELETE', undefined, { cookie });
     expect(withData.status).toBe(204);
     const [left] = await (
-      await clickhouse.query({ query: 'SELECT count() n FROM events WHERE project_id={p:String}', query_params: { p: fixture.id }, format: 'JSONEachRow' })
+      await clickhouse.query({
+        query: 'SELECT count() n FROM events WHERE project_id={p:String}',
+        query_params: { p: fixture.id },
+        format: 'JSONEachRow',
+      })
     ).json<{ n: string }>();
     expect(Number(left?.n)).toBe(0);
     process.stdout.write(`[console-backlogs] empty project delete: ${Math.round(emptyDeleteMs)} ms\n`);

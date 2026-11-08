@@ -25,9 +25,9 @@ describe('#63 / #65 contract additions', () => {
   it('saved views may label entity terms with display names, bounded', () => {
     const state = { q: 'tenant:biz_5', range: '7d', labels: [{ field: 'tenant', value: 'biz_5', label: 'Bayt Al Rimal' }] };
     expect(createSavedViewSchema.parse({ name: 'Bayt Al Rimal — last 7 days', description: null, state }).state.labels).toHaveLength(1);
-    expect(createSavedViewSchema.safeParse({ name: 'x', description: null, state: { labels: [{ field: 'attr.x', value: 'a', label: 'b' }] } }).success).toBe(
-      false,
-    );
+    expect(
+      createSavedViewSchema.safeParse({ name: 'x', description: null, state: { labels: [{ field: 'attr.x', value: 'a', label: 'b' }] } }).success,
+    ).toBe(false);
     const many = Array.from({ length: 21 }, (_, i) => ({ field: 'actor', value: `usr_${i}`, label: `Person ${i}` }));
     expect(createSavedViewSchema.safeParse({ name: 'x', description: null, state: { labels: many } }).success).toBe(false);
     // Views saved before labels existed stay valid.
