@@ -126,6 +126,11 @@ four threads and throw-on-overflow. It reserves both admission slots so admitted
 still shares that server cap. Exports skip the unused per-page count scan. Deploy the server/worker/console together
 after the additive Postgres migrations; no ClickHouse migration is needed.
 
+For the first upgrade from workers without the destructive fence, stop the old API/workers and verify their tagged
+maintenance queries and unfinished mutations have settled before enabling the new exports. Old failed purges may
+not have a marker. Keep exports unavailable while resolving that old work; then start the matching server/worker/console
+versions together. All subsequent raw retention, sample and project-deletion submissions use the durable fence.
+
 Outbox retention keeps delivered evidence for seven days and never removes awaiting/undelivered/quarantined rows.
 Expired admission leases are bounded sweep deletions; they contain ids only, no event payloads. To investigate an
 unknown outcome, search its export id and check independent request logs. Never infer a digest or saved file from
