@@ -1,5 +1,5 @@
 import { projectMaintenance } from '@logbird/clickhouse';
-import { closeProjectLocks, prisma, pruneIngestReceipts, sweepExpiredAuthRecords, sweepIngestReceipts } from '@logbird/database';
+import { closeProjectLocks, compactIngestReceiptIndex, prisma, pruneIngestReceipts, sweepExpiredAuthRecords, sweepIngestReceipts } from '@logbird/database';
 import { Queue, Worker } from 'bullmq';
 import { env } from './env';
 import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from './ingest-recovery';
@@ -14,6 +14,17 @@ const worker = new Worker(
     else if (job.name === 'retention.enforce') {
       const pruneStarted = Date.now();
       logReceiptPrune(await pruneIngestReceipts(), Date.now() - pruneStarted); // Includes idle workspace audit streams.
+      // Hourly at most, worker only: rebuild a bloated receipt primary key online. Never fails the sweep.
+      try {
+        const compaction = await compactIngestReceiptIndex();
+        if (compaction.action !== 'skipped_compact')
+          console.log(
+            JSON.stringify({ level: compaction.action === 'reindexed' ? 'info' : 'warn', event: 'ingest.receipt_index_compaction', ...compaction }),
+          );
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
+        console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_compaction_failed', code }));
+      }
       const failures: unknown[] = [];
       for (const pending of await prisma.ingestReceipt.findMany({
         where: { confirmedAt: null },

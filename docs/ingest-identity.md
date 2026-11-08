@@ -180,12 +180,55 @@ this machine, the steady and during-sweep p95 therefore stay above twice the
 matched baseline (242 ms), and #110's latency gate remains open. The run shares a
 busy machine, so the steady p95 includes outliers.
 
-For operators: alert on `pg_relation_size('"IngestReceipt_pkey"')` growing far
-beyond the live receipt count; a healthy 10-minute window holds about three
-million receipts at 5000 events/second. Rebuild a bloated index online with
-`REINDEX INDEX CONCURRENTLY "IngestReceipt_pkey"`, and size `shared_buffers` to
-hold the receipt indexes. Keep the minute worker healthy so a backlog does not
-build up.
+VACUUM recycles empty index pages but never shrinks a B-tree below its high-water
+mark. Random-UUID leaf pages left half empty by a drained backlog stay in the index,
+so only a rebuild restores a compact primary key. The hourly worker job therefore
+runs `compactIngestReceiptIndex`:
+
+- It runs only in the worker's hourly `retention.enforce` job. A unit test fails if
+  any API server source references it, so it never runs on the ingest path.
+- It is single-flight across workers through a session advisory try-lock, and uses
+  its own connection, because `REINDEX CONCURRENTLY` cannot run inside a transaction
+  or a pooled Prisma call.
+- It estimates the pages the live entries need from `reltuples` and the analyzed key
+  widths, at a 90% leaf fill. It rebuilds with `REINDEX INDEX CONCURRENTLY
+  "IngestReceipt_pkey"` only when the index is at least 64 MiB **and** at least
+  three times that estimate. Otherwise it does nothing. The threshold comes from the
+  experiment below: steady churn stays under 2×, and a drained backlog leaves
+  about 4×.
+- The rebuild is online: reads and writes continue, and the new index is swapped
+  in at the end. It is bounded by a 15-minute statement timeout and a one-minute
+  lock timeout.
+- An interrupted rebuild's invalid `_ccnew`/`_ccold` copy is dropped concurrently,
+  both before each run and after a failure.
+- It logs `ingest.receipt_index_compaction` with page counts, ratio and duration
+  when it rebuilds or is busy, and `ingest.receipt_index_compaction_failed` with
+  only an error code. A failure never fails the retention job.
+
+A churn experiment backs both the job and its threshold. It used session-local temp
+tables with the receipt schema, 200,000 live receipts, 150 one-minute churn cycles
+of 4000 claims, confirmations and sweeps, then a 400,000-receipt backlog drained in
+5000-row batches followed by 50 more cycles. Autovacuum's trigger was replayed as
+explicit VACUUMs. The estimate (2713 pages) was within 3% of a fresh rebuild (2791
+pages).
+
+| Primary-key pages | Default autovacuum (25 runs) | Tuned per table (scale 0.01, 150 runs) |
+| --- | ---: | ---: |
+| Steady churn | 5317 (1.9×) | 4584 (1.6×) |
+| After the drained backlog and churn | 10,911 (3.9×) | 10,944 (3.9×) |
+| After REINDEX | 2791 | 2791 |
+
+More aggressive per-table autovacuum gains about 14% at steady state and nothing
+after a backlog. Default autovacuum already runs about once a minute under steady
+churn, because each receipt leaves two dead tuples (confirmation and sweep) within
+a window that holds ten minutes of inserts. No storage-parameter migration is
+shipped; only a rebuild returns the index to its compact size.
+
+Sizing: give `shared_buffers` room for the receipt primary key at the live window's
+size. A healthy ten-minute window at 5000 events/second holds about three million
+receipts, roughly 30,000 primary-key pages (about 250 MiB) when compact. Keep the
+minute worker healthy so a backlog does not build up. Operators can still run the
+same `REINDEX INDEX CONCURRENTLY` by hand.
 
 A smaller real-service proof used 600000 live receipts, a 300000-row initial
 expired backlog and 375000 receipts crossing expiry naturally at 5000/second over
