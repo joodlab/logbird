@@ -41,7 +41,7 @@ services:
       retries: 10
     restart: unless-stopped
   # Role images are named <namespace>/logbird-<role>:<version>, default ghcr.io/joodlab (nothing is published yet).
-  # pull_policy: build: `up` builds these roles from the checkout instead of pulling them; build all four before `up --no-build`.
+  # pull_policy: build: bare `up` builds these roles from the checkout; `up --no-build` with a missing image fails, never pulls.
   # Only the documented release flow pulls, explicitly (`up --no-build --pull always` with an accepted version).
   migrate:
     pull_policy: build

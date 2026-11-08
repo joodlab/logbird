@@ -144,6 +144,10 @@ Test only in a fresh disposable stack, with no shared or customer database:
    This override removes the build definition and requires the image already
    built in step 1. Compose `run` has no `--no-build` flag; removing `build` and
    setting `pull_policy: never` prevents an implicit rebuild or registry pull.
+   Compose v2.24.4's `run` has no `--pull` flag either: on that version drop
+   `--pull never` from the commands below; the override alone fails with
+   `No such image` when the image is missing (verified in the
+   [pull-policy matrix](verification/compose-pull-policy-2026-11-08.md)).
 
 3. With that override, run the real migration command in the background:
    `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run --pull never -d --no-deps --name logbird-migration-cancel-probe migrate`.
