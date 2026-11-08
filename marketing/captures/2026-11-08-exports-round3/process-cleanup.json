@@ -1,0 +1,14 @@
+{
+    "checkedProcessIdentities":  18,
+    "killedFinalRoots":  [
+                             38872,
+                             47392
+                         ],
+    "stoppedAt":  "2026-11-08T01:14:57.6876576+01:00",
+    "remainingOwnedProcesses":  0,
+    "remainingWorktreeReferences":  0,
+    "workerStarted":  false,
+    "crashRoot":  54184,
+    "remainingListeners":  0,
+    "monitorStopped":  true
+}

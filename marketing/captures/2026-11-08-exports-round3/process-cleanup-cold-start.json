@@ -1,0 +1,13 @@
+{
+    "capture":  "cold-start attempt failed before fixture creation",
+    "remainingListeners":  0,
+    "workerStarted":  false,
+    "stoppedAt":  "2026-11-08T00:54:49.6501353+01:00",
+    "remainingOwnedProcesses":  0,
+    "remainingWorktreeReferences":  0,
+    "killedRoots":  [
+                        28656,
+                        77880
+                    ],
+    "checkedProcessIdentities":  7
+}
