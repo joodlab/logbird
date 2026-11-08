@@ -20,16 +20,25 @@ The sequential builds above reduce concurrent compiler/package-install memory.
 Runtime sizing below does not include peak source-build memory or build-cache
 storage.
 
-The four buildable roles use `pull_policy: build`, so source installs build their
-own images rather than automatically falling back to the default Hub namespace.
-Bare `up` can rebuild them even when images exist. Build sequentially, then use
-`up --no-build` with the local images you just built. On a replacement host those
-images must be built first. This policy changes the earlier tested command path;
-its upgrade/restore runtime matrix remains pending in [#77](https://github.com/joodlab/logbird/issues/77)
-and the [registry-owner decision #88](https://github.com/joodlab/logbird/issues/88).
+Role images are named `ghcr.io/joodlab/logbird-<role>:local` (`LOGBIRD_IMAGE_REGISTRY`
+defaults to `ghcr.io/joodlab`; [owner decision](decisions.md)). **Nothing is published
+there yet**; the names only label your local builds. The four buildable roles use
+`pull_policy: build`, so a source install never pulls a runnable role, even when
+the local image is missing. Bare `up` can rebuild them even when images exist.
+Build sequentially, then use `up --no-build` with the local images you just built;
+if one is missing, `up --no-build` fails instead of pulling. On a replacement host
+those images must be built first. The local runtime matrix for this policy is in
+[Compose pull policy, 2026-11-08](verification/compose-pull-policy-2026-11-08.md);
+live upgrade/restore on a real host remains pending in [#77](https://github.com/joodlab/logbird/issues/77)
+and [#88](https://github.com/joodlab/logbird/issues/88).
 The manual release flow retains its explicit
 `--pull always`. See [Compose pull policy](https://docs.docker.com/reference/compose-file/services/#pull_policy)
 and [`up --no-build`](https://docs.docker.com/reference/cli/docker/compose/up/).
+
+Installations configured before 2026-11-08 may have `LOGBIRD_IMAGE_REGISTRY=logbird`
+(the old, unverified Docker Hub namespace) in `.env`; `selfhost-init.sh` warns about
+it. Clear the value (or set `ghcr.io/joodlab`) and rebuild the four roles; the old
+`logbird/<role>:local` tags can then be removed by their exact image IDs.
 
 Image build stages default to one pnpm build/postinstall at a time and four
 concurrent downloads (`BUILD_CONCURRENCY=1`, `DOWNLOAD_CONCURRENCY=4`). For an
@@ -72,6 +81,7 @@ One .env.example serves source development and containers. Empty URL overrides l
 | CLICKHOUSE_URL / CLICKHOUSE_USER / CLICKHOUSE_DATABASE | http://clickhouse:8123 / logbird / logbird; keep database logbird because restricted policies name it explicitly |
 | REDIS_URL / BULLMQ_PREFIX | redis://redis:6379/0 / {logbird} |
 | SMTP_HOST / SMTP_PORT / SMTP_SECURE | No host default / 587 / false (STARTTLS); true for implicit TLS, usually 465 |
+| SMTP_REQUIRE_TLS | false; true requires STARTTLS before AUTH and fails closed when the server does not offer it. Set true for a provider on 587 (Postmark); false only for a local sink such as Mailpit |
 | SMTP_USER / SMTP_PASSWORD / MAIL_FROM | Provider credentials / verified sender |
 | AUTH_LOG_SIGN_IN_CODES | false; true logs sign-in codes, warns at boot, bypasses SMTP only without SMTP_HOST |
 | LOGBIRD_SERVER_URL | Production runtime proxy target, http://server:4601; recreate app to change, no rebuild |
@@ -79,7 +89,7 @@ One .env.example serves source development and containers. Empty URL overrides l
 | AUTH_RATE_LIMIT_PER_MINUTE / PUBLIC_RATE_LIMIT_PER_MINUTE | 30 / 600 per client: sign-in requests and failed public-API authentications |
 | INGEST_RATE_LIMIT_PER_MINUTE / READ_RATE_LIMIT_PER_MINUTE | 3000 / 1200 per project key (shared Redis limits) |
 | LOGBIRD_BIND / LOGBIRD_HTTP_PORT | 127.0.0.1 / 4600; only app is published |
-| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | logbird / local; both image names and local build instructions |
+| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / local; images are `<registry>/logbird-<role>:<version>`. Nothing is published yet; source builds use these names locally |
 | LOGBIRD_DOMAIN / ACME_EMAIL | TLS hostname / optional ACME email |
 | NODE_ENV / PORT | Source development / 4601; containers force production and service ports |
 | SERVER_URL | Source smoke API target |
@@ -89,12 +99,37 @@ URL-encode special characters in manual connection URLs. Generated hex values ne
 
 ## SMTP and first login
 
-Configure SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASSWORD and MAIL_FROM using provider settings. Examples: Amazon SES regional SMTP endpoint and SMTP credentials; Postmark smtp.postmarkapp.com:587 and server token credentials; Brevo smtp-relay.brevo.com:587 and SMTP credentials. Verify sender/domain and SPF/DKIM/DMARC with the provider.
+Configure SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_REQUIRE_TLS, SMTP_USER, SMTP_PASSWORD and MAIL_FROM using provider settings. Examples: Amazon SES regional SMTP endpoint and SMTP credentials; Postmark smtp.postmarkapp.com:587 and server token credentials; Brevo smtp-relay.brevo.com:587 and SMTP credentials. Verify sender/domain and SPF/DKIM/DMARC with the provider.
+
+Choose the TLS mode explicitly. On port 587 set `SMTP_REQUIRE_TLS=true` (with `SMTP_SECURE=false`): the server must
+offer STARTTLS and the certificate must verify before credentials or a message are sent, otherwise delivery fails
+with `ETLS` and nothing is sent. With `SMTP_SECURE=true` (implicit TLS, usually 465) TLS starts on connect. With
+neither, STARTTLS is opportunistic and a downgraded connection can expose credentials and codes; the server logs
+`email.smtp_tls_not_required` at boot for a non-loopback host. Certificate verification is never
+disabled.
+
+Postmark (the hosted instance's provider, [owner decision](decisions.md)):
+
+```sh
+SMTP_HOST=smtp.postmarkapp.com
+SMTP_PORT=587            # 2525 also offers STARTTLS where 587 is blocked
+SMTP_SECURE=false
+SMTP_REQUIRE_TLS=true
+SMTP_USER=<server API token>     # the same token is both user and password
+SMTP_PASSWORD=<server API token>
+MAIL_FROM=Logbird <hello@notify.example.test>   # a verified sender signature or domain
+```
+
+Keep the token private (never in Git, tickets or logs); it can send as any verified sender of that Postmark server.
+Logbird's messages are transactional and go to the server's default transactional stream; do not route them
+through a broadcast stream. Align SPF/DKIM/DMARC, the return-path and bounce/suppression handling as described in
+[transactional email](transactional-email.md#postmark).
 
 Without SMTP explicitly enable AUTH_LOG_SIGN_IN_CODES=true. Each auth.sign_in_code JSON line contains recipient/code: log readers can sign in. Only sign-in bypasses SMTP, never invitations or other OTP purposes. With SMTP configured it logs and sends. After SMTP works, disable the flag and run `docker compose up -d --no-build server worker` using the images already built; handle existing log retention appropriately. Missing SMTP with the flag off fails delivery. Invitations/courtesy emails need SMTP.
 
 For a Docker Desktop evaluation using an existing host Mailpit, set
-`SMTP_HOST=host.docker.internal`, `SMTP_PORT=1025`, `SMTP_SECURE=false`, and leave
+`SMTP_HOST=host.docker.internal`, `SMTP_PORT=1025`, `SMTP_SECURE=false`,
+`SMTP_REQUIRE_TLS=false` (Mailpit offers no STARTTLS), and leave
 SMTP credentials empty. Read the fictional recipient's message at
 http://127.0.0.1:8025. Do not set container SMTP_HOST to 127.0.0.1. On Linux,
 configure a reachable SMTP host (or an explicit host-gateway mapping); Docker
@@ -140,7 +175,7 @@ test. Revert local overrides before following the public ACME instructions.
 
 ## Any reverse proxy
 
-Forward the whole origin to port 4600, including /api, /v1 and readiness. The runtime app proxy retains CSP/security headers. Set APP_URL to the exact public HTTPS origin. Client addresses drive per-client rate limits, audit context and the sign-in email's "requested from" line. The console is always one trusted hop: it appends the address it received the request from to X-Forwarded-For. Keep the default TRUST_PROXY=1 when browsers and SDKs reach port 4600 directly. Set TRUST_PROXY=2 behind exactly one reverse proxy that appends the real client address (Caddy, Nginx `$proxy_add_x_forwarded_for` or `$remote_addr`, Traefik, Coolify), and add one per additional trusted proxy. Logbird reads the X-Forwarded-For entry that many places from the right, so entries a client sends are ignored. A count that is too high lets clients choose their own address; too low groups everyone under the proxy's address. Never expose server:4601.
+Forward the whole origin to port 4600, including /api, /v1, readiness and the [API reference](#api-reference). The runtime app proxy retains CSP/security headers. Set APP_URL to the exact public HTTPS origin. Client addresses drive per-client rate limits, audit context and the sign-in email's "requested from" line. The console is always one trusted hop: it appends the address it received the request from to X-Forwarded-For. Keep the default TRUST_PROXY=1 when browsers and SDKs reach port 4600 directly. Set TRUST_PROXY=2 behind exactly one reverse proxy that appends the real client address (Caddy, Nginx `$proxy_add_x_forwarded_for` or `$remote_addr`, Traefik, Coolify), and add one per additional trusted proxy. Logbird reads the X-Forwarded-For entry that many places from the right, so entries a client sends are ignored. A count that is too high lets clients choose their own address; too low groups everyone under the proxy's address. Never expose server:4601.
 
 Nginx inside an existing TLS server block (configure certificates separately):
 
@@ -170,6 +205,24 @@ labels:
 ```
 
 Keep forwardedHeaders.insecure disabled; trust only known upstreams. Live tail polls HTTP; no WebSocket/SSE. Exports stream: disable buffering and allow sufficient read timeouts.
+
+## API reference
+
+The console (public origin) forwards exactly these API-listener paths: `/api/*`, `/v1/*`, `/health`, `/livez`,
+`/readyz`, and the read-only, unauthenticated `GET /docs` (interactive Scalar reference) and `GET /openapi.json`
+(OpenAPI document). Every other path is served by the console itself, so no other server route becomes public
+([owner decision](decisions.md), #61). The allowlist lives in `apps/app/server/proxy-paths.ts`.
+
+```sh
+curl -I https://audit.example.com/docs          # 200 text/html
+curl -I https://audit.example.com/openapi.json  # 200 application/json
+```
+
+The document's `servers` entry is `APP_URL`, so "try it" requests go to the public origin. The reference page loads
+a version-pinned Scalar bundle from `cdn.jsdelivr.net` with Subresource Integrity; Scalar telemetry, hosted fonts and
+its hosted AI agent are off, and a `/docs`-only CSP limits the page to that script host and same-origin requests.
+Browsers without access to jsDelivr see an empty reference page; `/openapi.json` still works. To keep the reference
+private, block `/docs` and `/openapi.json` at your reverse proxy.
 
 ## External services
 
@@ -268,7 +321,7 @@ On **any host**, confirm `git rev-parse HEAD` equals the recorded revision and
 `docker compose images` (with the original installation's env/project flags)
 matches the backup receipt's image IDs. The `:local` role tags are shared with the
 stopped original project, not scoped by Compose project name; also confirm their
-current IDs with `docker image inspect --format '{{.Id}}' logbird/migrate:local logbird/server:local logbird/worker:local logbird/app:local`
+current IDs with `docker image inspect --format '{{.Id}}' ghcr.io/joodlab/logbird-migrate:local ghcr.io/joodlab/logbird-server:local ghcr.io/joodlab/logbird-worker:local ghcr.io/joodlab/logbird-app:local`
 (substitute the recorded registry/version). If the revision or image identity
 does not match or cannot be verified, for example after a failed upgrade, run
 `git switch --detach <recorded-git-sha>` and rebuild all four roles sequentially
