@@ -32,15 +32,16 @@ Results: `before-proof.txt` / `after-proof.txt` (one line per check; `BUG` in th
 |---|---|
 | #85 forced colors, focused Button | `forced-colors-button-focus-{desktop,phone}.png`, `forced-colors-explorer-toolbar-{desktop,phone}.png`, `forced-colors-event-sheet-next-{desktop,phone}.png` |
 | #85 forced colors, menus / palette | `forced-colors-settings-menu-{desktop,phone}.png`, `forced-colors-columns-menu-desktop.png`, `forced-colors-palette-{desktop,phone}.png` |
-| #85 no change outside forced colors | `crop-*-{desktop,phone}-{light,dark}.png` (Button focus ring, Members menu, Columns menu, event-sheet Next, palette); the after run compares sha256 with the before crops: all identical |
+| #85 no change outside forced colors | `crop-*-{desktop,phone}-{light,dark}.png` (Button focus ring, Members menu, Columns menu (desktop only: the phone toolbar has no Columns button), event-sheet Next, palette): 18 crops, the after run compares sha256 with the before crops: 18/18 identical |
 | PHONE-07 login | `before-login-stale-error-phone-dark.png` (valid address, stale error, nothing sent); after: first Enter reaches `/login/verify` (video) |
 | PHONE-08 radios and tabs | `onboarding-retention-focus-phone-dark.png`, `create-key-dialog-radio-focus-{desktop,phone}-{light,dark}.png`, `settings-retention-focus-{desktop,phone}-{light,dark}.png`, `snippet-tabs-focus-phone-dark.png` |
 | PHONE-09 sidebar sheet | `sidebar-sheet-after-tabs-phone-dark.png`, `sidebar-sheet-after-one-escape-phone-dark.png` |
 | PHONE-12 stepper | `onboarding-profile-phone-dark.png`, `onboarding-workspace-phone-dark.png` (the aria trees are in the proof logs) |
 | PHONE-13 first event | `first-event-phone-dark.png` (focus on the heading, key name wraps) |
 
-`after-settings-retention-desktop-{light,dark}.png` were taken after the last change (the "current" label lost its `opacity-70`, which
-failed AA contrast on master and in the first after run); the `*-settings-retention-focus-*` shots predate it.
+The `*-settings-retention-focus-*` shots and `after-proof.json` predate the `current` label fix (it lost `opacity-70`, which failed AA
+contrast on master and in the first after run). `after-settings-retention-desktop-{light,dark}.png` come from an uncommitted re-check;
+the committed result for that screen is the review follow-up below.
 
 ## axe (wcag2a/aa, wcag21a/aa, wcag22aa)
 
@@ -48,9 +49,21 @@ failed AA contrast on master and in the first after run); the `*-settings-retent
 |---|---|---|
 | first-event phone-dark | scrollable-region-focusable(1) (snippet `pre`) | 0 (the snippet is a focusable tabpanel) |
 | create-key dialog desktop light/dark | 0 / 0 | 0 / 0 |
-| settings-retention desktop light/dark | color-contrast(1) / color-contrast(1) (`current` label) | 0 / 0 (`after-settings-retention-desktop-*`) |
+| settings-retention desktop light/dark | color-contrast(1) / color-contrast(1) (`current` label) | 0 / 0 in `after-review-proof.json` (`after-proof.json` still shows the pre-fix color-contrast(1)) |
 | members desktop light/dark | color-contrast(1) / 0 | color-contrast(1) / 0 (the same pre-existing `#base-ui-…` node on master; not touched by this PR) |
 | explorer desktop light/dark | 0 / 0 | 0 / 0 |
 | event-sheet desktop light/dark | 0 / 0 | 0 / 0 |
 
 No new violations.
+
+## Review follow-up (PR #108)
+
+`apps/app/scripts/console-a11y-review-proof.mjs` against the same real stack, after the review fixes (fixture "QA Phone Review",
+deleted). Log: `after-review-proof.txt` / `.json`.
+
+- axe Settings → Retention desktop light / dark: **0 / 0** (`after-review-settings-retention-desktop-{light,dark}.png`).
+- Stepper aria: `Step 1 of 4: You, completed`, `Step 2 of 4: Workspace, completed`, `Step 3 of 4: Project`, `Step 4 of 4: First event`.
+- Key kind radios: `Ingest — Can only send events…`, `Read — Can only search and read events…`.
+- Clicking a retention shortcut card sets the value and does not focus the hidden card.
+- Forced colors: the focused retention chip radio (now FilterChip's classes) paints `solid 2px`
+  (`after-review-forced-colors-retention-chip-desktop.png`).
