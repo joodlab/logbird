@@ -1,0 +1,437 @@
+{
+  "mode": "after",
+  "revision": "eadd29b72ba9b280962e7441839dafbc773343dc",
+  "apiRevision": "eadd29b72ba9b280962e7441839dafbc773343dc",
+  "fixture": {
+    "userId": "f55a5200-67c3-4393-ae1e-11831d9b01d7",
+    "orgId": "qa-export-waiting-e24c0082-9500-416d-a918-f8bd7073b14f",
+    "projectId": "cmw849x3d0000l0yoiy96copl"
+  },
+  "screenshots": [
+    "after-light-1440-waiting.png",
+    "after-light-1440-canceled.png",
+    "after-light-1440-downloading.png",
+    "after-light-1440-failed.png",
+    "after-dark-1440-waiting.png",
+    "after-dark-1440-canceled.png",
+    "after-dark-1440-downloading.png",
+    "after-dark-1440-failed.png",
+    "after-light-390-waiting.png",
+    "after-light-390-canceled.png",
+    "after-light-390-downloading.png",
+    "after-light-390-failed.png",
+    "after-dark-390-waiting.png",
+    "after-dark-390-canceled.png",
+    "after-dark-390-downloading.png",
+    "after-dark-390-failed.png"
+  ],
+  "videos": [
+    "after-light-1440-interactions.webm",
+    "after-light-390-interactions.webm"
+  ],
+  "requests": [
+    {
+      "scene": "light-1440",
+      "path": "/api/auth/get-session",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/histogram",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/views",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/events",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/setup",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "status": 503
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/auth/get-session",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/histogram",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/events",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/views",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/setup",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "status": 503
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/auth/get-session",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/histogram",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/events",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/views",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/setup",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "status": 503
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/auth/get-session",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/histogram",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/events",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/views",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/setup",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "status": 503
+    }
+  ],
+  "expectedCancellations": [
+    {
+      "scene": "light-1440",
+      "url": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "scene": "dark-1440",
+      "url": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "scene": "light-390",
+      "url": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "scene": "dark-390",
+      "url": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "error": "net::ERR_ABORTED"
+    }
+  ],
+  "expectedFailures": [
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "status": 503
+    },
+    {
+      "scene": "light-1440",
+      "type": "console",
+      "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "status": 503
+    },
+    {
+      "scene": "dark-1440",
+      "type": "console",
+      "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "status": 503
+    },
+    {
+      "scene": "light-390",
+      "type": "console",
+      "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/export",
+      "status": 503
+    },
+    {
+      "scene": "dark-390",
+      "type": "console",
+      "message": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    }
+  ],
+  "errors": [],
+  "downloads": [
+    {
+      "id": "5f107b69-c748-4b3b-ad0f-64be01a5f7af",
+      "filename": "logbird-events-5f107b69-c748-4b3b-ad0f-64be01a5f7af.csv",
+      "file": "after-light-1440-download.csv",
+      "bytes": 1622,
+      "sha256": "6fa2b780a42bd6aae800e3c5fd51aeb7ff107e8ce653367b37324e93df05f4e2",
+      "rows": 3,
+      "receiptMatched": true
+    },
+    {
+      "id": "0eef7ef8-95b8-4296-bafc-42e886b5d3d8",
+      "filename": "logbird-events-0eef7ef8-95b8-4296-bafc-42e886b5d3d8.csv",
+      "file": "after-dark-1440-download.csv",
+      "bytes": 1622,
+      "sha256": "6fa2b780a42bd6aae800e3c5fd51aeb7ff107e8ce653367b37324e93df05f4e2",
+      "rows": 3,
+      "receiptMatched": true
+    },
+    {
+      "id": "725ad172-ea57-4a1b-b653-99d0b4352ded",
+      "filename": "logbird-events-725ad172-ea57-4a1b-b653-99d0b4352ded.csv",
+      "file": "after-light-390-download.csv",
+      "bytes": 1622,
+      "sha256": "6fa2b780a42bd6aae800e3c5fd51aeb7ff107e8ce653367b37324e93df05f4e2",
+      "rows": 3,
+      "receiptMatched": true
+    },
+    {
+      "id": "d50527b8-14e5-4081-b346-0a5ecd9719cd",
+      "filename": "logbird-events-d50527b8-14e5-4081-b346-0a5ecd9719cd.csv",
+      "file": "after-dark-390-download.csv",
+      "bytes": 1622,
+      "sha256": "6fa2b780a42bd6aae800e3c5fd51aeb7ff107e8ce653367b37324e93df05f4e2",
+      "rows": 3,
+      "receiptMatched": true
+    }
+  ]
+}

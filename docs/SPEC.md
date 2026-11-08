@@ -240,7 +240,7 @@ Requests recover lazily and enqueue a retry; worker startup revisits running pro
 sweep retries all projects, continuing past individual failures. Live running runs return 503 retention_unavailable with Retry-After: 1 for project data reads
 and project setup, including retention status while its project read fence is active. Readiness checks are short non-transactional
 statements, and no read holds a project lock or a Postgres connection during ClickHouse I/O.
-Raw-event reads and exports are not snapshots and may overlap a purge. Rollup-backed reads compare
+Raw-event reads are not snapshots and may overlap a purge. Exports instead use the [receive-time membership fence](exports.md), refuse unfinished destructive maintenance at admission, and fail an overlapped purge as `membership_changed`. Rollup-backed reads compare
 maintenance generation and fence before/after querying; an overlapping rebuild returns 503 even if completed.
 Writers use session advisory locks held on a separate pool (16 connections per process), never a transaction:
 ingest (including Logbird's own audit writes) takes a **shared** data lock, so concurrent ingests for one project
@@ -494,6 +494,8 @@ invitation acceptance remain available; organization administration uses its rol
 | POST invite-links/:token/accept | valid invitation | valid invitation | valid invitation |
 | GET export, workspace activity and other workspace/project reads | yes | yes | yes |
 | GET workspace invite-links | yes | yes | no (contains bearer invitations) |
+
+See [event exports](exports.md) for complete original payloads, CSV/JSONL schemas, fixed query clocks and file-to-record verification.
 
 Link acceptance requires a session and valid token, domain, expiry and remaining
 uses, independent of an existing workspace role. Public invitation previews remain

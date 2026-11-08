@@ -140,6 +140,9 @@ model Project {
   retentionReviewedAt DateTime?
   setupDismissedAt DateTime?
   setupCompletedAt DateTime?
+  /// Durable destructive-maintenance fence (retention, project deletion and sample removal); reconciliation alone clears it.
+  exportDeleteStartedAt DateTime?
+  exportGeneration Int @default(0)
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   keys           ApiKey[]
@@ -147,6 +150,7 @@ model Project {
   retentionRuns  RetentionRun[]
 
   @@unique([organizationId, slug])
+  @@index([exportDeleteStartedAt, id])
 }
 
 model IngestReceipt {
@@ -252,10 +256,31 @@ model AuditOutbox {
   confirmedAt DateTime? @default(now())
   sourceSessionId String?
   quarantinedAt DateTime?
+  awaitingUntil DateTime?
+  pendingOutcome Json?
 
   @@index([deliveredAt, nextAttemptAt])
   @@index([namespace, confirmedAt, createdAt])
   @@index([namespace, deliveredAt])
+  @@index([namespace, awaitingUntil])
+}
+
+// Expiring admission, not evidence: no FK so a deleted project cannot erase its outcome.
+model ExportLease {
+  id String @id
+  namespace String
+  userId String
+  workspaceId String
+  projectId String
+  expiresAt DateTime
+  weight Int @default(1)
+  receivedBefore DateTime @default(now())
+  invalidated Boolean @default(false)
+
+  @@index([namespace, expiresAt])
+  @@index([namespace, userId, expiresAt])
+  @@index([namespace, workspaceId, expiresAt])
+  @@index([projectId, expiresAt])
 }
 
 // Membership-independent failed-auth staging. Legacy encrypted identities are quarantined; new rows hold only HMACs.

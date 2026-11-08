@@ -92,7 +92,24 @@ it('rolls back every owned mutation when its outbox insert fails, including all 
       const response = await request(path, method, body, cookie);
       expect(response.status, `${method} ${path}`).toBe(503);
       expect((await response.json()).error.code).toBe('audit_storage_unavailable');
-      expect(await snapshot(), `${method} ${path} rolled back`).toBe(before);
+      const after = await snapshot();
+      if (path === `${base}?confirm=${project.slug}`) {
+        const actual = JSON.parse(after),
+          expected = JSON.parse(before);
+        const actualProject = actual.projects.find((row: { id: string }) => row.id === project.id);
+        const expectedProject = expected.projects.find((row: { id: string }) => row.id === project.id);
+        expect(actualProject.exportDeleteStartedAt).toBeNull();
+        expect(actualProject.exportGeneration).toBe(expectedProject.exportGeneration + 1);
+        expect(new Date(actualProject.updatedAt).getTime()).toBeGreaterThanOrEqual(new Date(expectedProject.updatedAt).getTime());
+        // Purge precedes the owned delete transaction. Keep its generation even on failure, clear the marker;
+        // every business field, key revocation, membership and outbox change must still roll back.
+        Object.assign(actualProject, {
+          exportDeleteStartedAt: expectedProject.exportDeleteStartedAt,
+          exportGeneration: expectedProject.exportGeneration,
+          updatedAt: expectedProject.updatedAt,
+        });
+        expect(JSON.stringify(actual), `${method} ${path} business state rolled back`).toBe(before);
+      } else expect(after, `${method} ${path} rolled back`).toBe(before);
     }
     control.fail = false;
     expect((await request('/api/workspace', 'PATCH', { name: 'QA Changed workspace' })).status).toBe(200);

@@ -1,0 +1,11 @@
+{
+  "source": "0da268d29fb9e7e85915d939dbdfeab97bd43e61",
+  "stoppedAt": "2026-11-07T23:14:21.0043338+01:00",
+  "outerRootPidsKilled": [65484, 9584],
+  "verifiedObservedProcesses": 16,
+  "remainingOwnedDescendants": 0,
+  "listeners4600_4601": 0,
+  "processesReferencingWorktree": 0,
+  "workerStarted": false,
+  "privateAuditNamespace": "{logbird-media-exports-d13433ad-5625-45b4-942b-8eb99027f569}"
+}

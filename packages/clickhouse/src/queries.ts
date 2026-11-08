@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
   AuditEvent,
   Entity,
@@ -5,6 +6,7 @@ import type {
   EntityProfile,
   EntitySort,
   EventDetail,
+  ExportQuery,
   entityListQuerySchema,
   FacetResponse,
   facetQuerySchema,
@@ -16,27 +18,38 @@ import type {
   SearchQuery,
   SearchResponse,
 } from '@logbird/contracts';
-import { pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
+import { EXPORT_SCHEMA_VERSION, pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import { isQueryClient } from './client';
+import { CSV_COLUMNS, csvEvent } from './export';
 import { projectMaintenance } from './maintenance-tag';
 import type { EventRow } from './normalize';
 import { columns, compileQuery, QueryError } from './query';
 import { rollupSql } from './rollup-sql';
-import { sqlSyntaxError, validateSql } from './sql-guard';
+import { freezeSqlClock, sqlSyntaxError, validateSql } from './sql-guard';
 
 const sqlExpression = Symbol('sqlExpression');
-async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }) {
-  if (q.lang !== 'sql') return compileQuery(q.q);
+async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }, now?: number) {
+  if (q.lang !== 'sql') return compileQuery(q.q, now);
   if (!isQueryClient(ch)) throw new Error('SQL mode requires the restricted query client');
-  return { sql: await validateSql(ch, q.q), params: { [sqlExpression]: q.q ?? '' } };
+  const sql = await validateSql(ch, q.q);
+  const frozen = now === undefined ? { sql, params: {} } : freezeSqlClock(sql, now);
+  return { sql: frozen.sql, params: { ...frozen.params, [sqlExpression]: q.q ?? '' } };
 }
 
 type Params = Record<string, unknown>;
-export async function read<T>(ch: ClickHouseClient, query: string, parameters: Params = {}, guard = 10): Promise<T[]> {
+export type ExportExecution = { signal: AbortSignal; cancelQuery: (queryId: string) => Promise<void> };
+export async function read<T>(
+  ch: ClickHouseClient,
+  query: string,
+  parameters: Params = {},
+  guard = 10,
+  exportBudget = false,
+  execution?: ExportExecution,
+): Promise<T[]> {
   const query_params = { ...parameters };
-  for (const key of ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff']) {
+  for (const key of ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff', 'exportReceivedBefore']) {
     const value = query_params[key];
     if (typeof value === 'string') query_params[key] = new Date(value).toISOString().replace('T', ' ').slice(0, -1);
   }
@@ -44,18 +57,35 @@ export async function read<T>(ch: ClickHouseClient, query: string, parameters: P
   // expression. Bind per HTTP query, not on the shared client's session.
   const project = query_params.project ?? query_params.p;
   if (isQueryClient(ch) && (typeof project !== 'string' || !project)) throw new Error('Restricted query requires one project');
+  execution?.signal.throwIfAborted();
+  const queryId = execution ? randomUUID() : undefined;
+  let cancellation: Promise<void> | undefined;
+  const cancel = () => {
+    if (!execution || !queryId) return;
+    cancellation ??= execution.cancelQuery(queryId).catch(() => {
+      console.error(JSON.stringify({ event: 'export.query_cancel_failed', queryId }));
+    });
+  };
+  execution?.signal.addEventListener('abort', cancel, { once: true });
   try {
-    return await (
+    const rows = await (
       await ch.query({
         query,
+        query_id: queryId,
         query_params,
         format: 'JSONEachRow',
         clickhouse_settings: {
           max_execution_time: isQueryClient(ch) ? 10 : guard,
+          // Restricted SQL's CONST profile supplies 1-GiB memory/read limits and reserves both API admission slots.
+          ...(exportBudget && !isQueryClient(ch)
+            ? { max_memory_usage: '134217728', max_bytes_to_read: '268435456', read_overflow_mode: 'throw' as const, max_threads: 2 }
+            : {}),
           ...(isQueryClient(ch) ? { SQL_logbird_project: project as string } : {}),
         },
       })
     ).json<T>();
+    execution?.signal.throwIfAborted();
+    return rows;
   } catch (error) {
     if (
       /TOO_MANY_ROWS|TOO_MANY_BYTES|TIMEOUT_EXCEEDED|MEMORY_LIMIT_EXCEEDED|TOO_SLOW|LIMIT_EXCEEDED/.test(
@@ -72,16 +102,21 @@ export async function read<T>(ch: ClickHouseClient, query: string, parameters: P
     if (isQueryClient(ch) && /SYNTAX_ERROR|Syntax error/.test(error instanceof Error ? error.message : ''))
       throw sqlSyntaxError(error, query, (query_params as Record<symbol, string>)[sqlExpression] ?? '');
     throw error;
+  } finally {
+    execution?.signal.removeEventListener('abort', cancel);
+    // Keep the original response open: aborting HTTP alone does not prove the SELECT stopped.
+    // An early KILL with no match still waits for this read to finish before releasing capacity.
+    await cancellation;
   }
 }
-export function timeRange(q: RangeQuery) {
-  const to = new Date(q.to ?? Date.now()),
+export function timeRange(q: RangeQuery, now = Date.now()) {
+  const to = new Date(q.to ?? now),
     from = new Date(q.from ?? to.getTime() - 86_400_000);
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
   return { from: from.toISOString(), to: to.toISOString() };
 }
-export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery) {
-  const c = await filter(ch, q);
+export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery, compiled?: Awaited<ReturnType<typeof filter>>) {
+  const c = compiled ?? (await filter(ch, q));
   return {
     sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${c.sql})`,
     params: { project: projectId, ...timeRange(q), ...c.params },
@@ -134,14 +169,26 @@ function cursor(s: string): [string, string] {
   }
   throw new Error('Invalid cursor');
 }
-export async function searchEvents(ch: ClickHouseClient, projectId: string, q: SearchQuery): Promise<SearchResponse> {
+async function searchPage(
+  ch: ClickHouseClient,
+  projectId: string,
+  q: SearchQuery,
+  compiled?: Awaited<ReturnType<typeof filter>>,
+  includePayload = false,
+  exportClock?: string,
+  execution?: ExportExecution,
+): Promise<{ page: SearchResponse; payloads: string[] }> {
   const start = performance.now(),
-    w = await where(ch, projectId, q),
+    w = await where(ch, projectId, q, compiled),
     asc = q.order === 'asc',
     op = asc ? '>' : '<',
     order = asc ? 'ASC' : 'DESC';
   let tail = '';
   const params: Params = { ...w.params, limit: q.limit + 1 };
+  if (exportClock) {
+    w.sql += ' AND received_at <= {exportReceivedBefore:DateTime64(3)}';
+    params.exportReceivedBefore = exportClock;
+  }
   if (q.cursor) {
     const [ts, id] = cursor(q.cursor);
     params.cursorTs = ts;
@@ -152,17 +199,33 @@ export async function searchEvents(ch: ClickHouseClient, projectId: string, q: S
     ch,
     // Select pairs in the MergeTree's timestamp/id order; resolve receipt ties only in the bounded fetch.
     // Legacy versions can share the entire pointer tuple; recheck their filters before outer dedupe.
-    `SELECT * EXCEPT(payload,search_text) FROM events WHERE ${w.sql} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
+    `SELECT * EXCEPT(${includePayload ? 'search_text' : 'payload,search_text'}) FROM events WHERE ${w.sql} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
     params,
+    10,
+    Boolean(exportClock),
+    execution,
   );
   const hasMore = rows.length > q.limit,
     data = rows.slice(0, q.limit).map(toEvent),
     last = data.at(-1);
-  const total = Number(
-    (await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT 10001)`, w.params, 1))[0]?.n ??
-      0,
-  );
-  return { data, total, nextCursor: hasMore && last ? encode([last.timestamp, last.id]) : null, tookMs: performance.now() - start };
+  const total = exportClock
+    ? 0
+    : Number(
+        (await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT 10001)`, w.params, 1))[0]
+          ?.n ?? 0,
+      );
+  return {
+    page: { data, total, nextCursor: hasMore && last ? encode([last.timestamp, last.id]) : null, tookMs: performance.now() - start },
+    payloads: includePayload ? rows.slice(0, q.limit).map((row) => row.payload) : [],
+  };
+}
+export async function searchEvents(
+  ch: ClickHouseClient,
+  projectId: string,
+  q: SearchQuery,
+  compiled?: Awaited<ReturnType<typeof filter>>,
+): Promise<SearchResponse> {
+  return (await searchPage(ch, projectId, q, compiled)).page;
 }
 async function eventRow(ch: ClickHouseClient, p: string, id: string) {
   return (
@@ -482,17 +545,45 @@ export async function operationEvents(ch: ClickHouseClient, p: string, operation
     )
   ).map(toEvent);
 }
-export async function* exportEvents(ch: ClickHouseClient, p: string, q: RangeQuery & { format: 'csv' | 'jsonl' }) {
+/** Capture one query clock and compiled predicate; callers persist these resolved boundaries in export receipts. */
+export async function prepareExport(ch: ClickHouseClient, q: ExportQuery, clock = Date.now()) {
+  const range = timeRange(q, clock);
+  const compiled = await filter(ch, q, clock);
+  return { range, compiled, clock: new Date(clock).toISOString() };
+}
+export type ExportPlan = Awaited<ReturnType<typeof prepareExport>>;
+export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQuery, plan?: ExportPlan, execution?: ExportExecution) {
+  const frozen = plan ?? (await prepareExport(ch, q));
+  const query = { ...q, ...frozen.range };
   let nextCursor: string | undefined;
   let first = true;
   do {
-    const page = await searchEvents(ch, p, { ...q, cursor: nextCursor, limit: 200, order: 'asc' });
-    if (first && q.format === 'csv') yield 'id,timestamp,action,outcome,description\n';
+    const { page, payloads } = await searchPage(
+      ch,
+      p,
+      { ...query, cursor: nextCursor, limit: 200, order: 'asc' },
+      frozen.compiled,
+      q.format === 'jsonl-evidence',
+      frozen.clock,
+      execution,
+    );
+    if (first && q.format === 'csv') yield `${CSV_COLUMNS.join(',')}\n`;
     first = false;
-    for (const e of page.data)
-      yield q.format === 'jsonl'
-        ? `${JSON.stringify(e)}\n`
-        : `${[e.id, e.timestamp, e.action, e.outcome, e.description].map((v) => `"${v.replaceAll('"', '""')}"`).join(',')}\n`;
+    for (const [index, e] of page.data.entries()) {
+      if (q.format === 'jsonl-evidence') {
+        // Same selected physical row, including when legacy conflicting versions share every identity timestamp.
+        const payload = payloads[index];
+        if (payload === undefined) throw new Error('Export payload no longer available');
+        if (/[\r\n]/u.test(payload)) throw new Error('Export payload contains a line separator');
+        try {
+          JSON.parse(payload);
+        } catch {
+          throw new Error('Export payload is not valid stored JSON');
+        }
+        // Validate syntax only; emit stored text unchanged, including numbers beyond JS's exact integer range.
+        yield `{"exportSchemaVersion":${EXPORT_SCHEMA_VERSION},"event":${JSON.stringify(e)},"payload":${payload}}\n`;
+      } else yield q.format === 'jsonl' ? `${JSON.stringify({ ...e, exportSchemaVersion: EXPORT_SCHEMA_VERSION })}\n` : csvEvent(e);
+    }
     nextCursor = page.nextCursor ?? undefined;
   } while (nextCursor);
 }

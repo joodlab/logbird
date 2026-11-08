@@ -10,6 +10,7 @@ export const WORKSPACE_ACTIVITY_CATEGORIES = [
   ['organization', 'Workspace'],
   ['invite_link', 'Invite links'],
   ['auth', 'Sign-ins & sessions'],
+  ['export', 'Exports'],
 ] as const;
 
 /**

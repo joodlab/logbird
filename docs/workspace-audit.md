@@ -216,6 +216,7 @@ user-agent context where available. Keys and session tokens are never recorded. 
 | `member.role.changed` | member | acting user / member | role before → after |
 | `member.removed`, `member.joined_via_link` | member | acting user / member | member id/name |
 | `invite_link.created`, `invite_link.revoked` | invite_link | user / invite link | link id and role, never its secret |
+| `export.requested`, `export.completed`, `export.failed`, `export.outcome_unknown` | export | user / project and export | linked export id, shared format label/version, resolved query clock/range and receive-time fence; known rows/bytes and completion SHA-256, or null counts for an unconfirmed producer outcome; safe reason; see [exports](exports.md) |
 | `auth.signed_in` | auth | signed-in user / user | `metadata.session {createdAt, expiresAt, ipAddress, userAgent}`; deterministic sign-in id |
 | `auth.signed_out`, `auth.session.revoked` | auth | acting user / non-secret session id | `metadata.session {createdAt, expiresAt, ipAddress, userAgent}` describes the ended device; requester context is separate; explicit device/address sentence; replay after sign-out returns 401 and expires stale cookies |
 | `auth.sign_in.failed` | auth | anonymous / targeted member user id | `hashVersion`, `emailHash`, `reason` (`invalid_otp`, `expired_otp`, `locked_out`; legacy `global_overflow` means original reason unavailable), `overflow`, `attempts`, `windowEnd`, `firstAttemptAt`, `lastAttemptAt`, `distinctIps`, `ipsTruncated`; first record snapshots its first attempt, summary describes the window |
@@ -227,4 +228,4 @@ inserts its frozen evidence in one Postgres transaction. No-op/denied renames em
 denied renames is deferred: authorization behavior remains unchanged and this PR does not introduce a new denied-action policy.
 
 Canonical activity chips come from `WORKSPACE_ACTIVITY_CATEGORIES` in `@logbird/contracts`; Views maps to
-`saved_view`, Workspace to `organization`, with separate Invite links and Sign-ins & sessions chips.
+`saved_view`, Workspace to `organization`, with separate Invite links, Sign-ins & sessions and Exports chips.

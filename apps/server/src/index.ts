@@ -4,7 +4,9 @@ import { closeRetentionQueue } from '@logbird/worker/queue';
 import { app } from './app';
 import { backfillAuthEmailHashes, flushFailedSignIns } from './auth-failures';
 import { clickhouse, maintenanceClickhouse, queryClickhouse } from './clickhouse';
+import { startDestructiveMaintenanceReconciler } from './destructive-maintenance';
 import { env } from './env';
+import { drainExportAudits } from './export-stream';
 import { ingest } from './ingest';
 import { startAuditDrainer } from './outbox-delivery';
 import { rateLimitStore } from './rate-limit';
@@ -23,11 +25,12 @@ const auditDrainer = startAuditDrainer(ingest, async () => {
   await backfillAuthEmailHashes(env.BETTER_AUTH_SECRET);
   await flushFailedSignIns();
 });
+const maintenanceReconciler = startDestructiveMaintenanceReconciler();
 let stopping = false;
 function shutdown() {
   if (stopping) return;
   stopping = true;
-  const drained = auditDrainer.stop();
+  const drained = Promise.all([auditDrainer.stop(), maintenanceReconciler.stop()]);
   const deadline = setTimeout(() => {
     if ('closeAllConnections' in server) server.closeAllConnections();
     process.exit(1);
@@ -35,6 +38,7 @@ function shutdown() {
   deadline.unref();
   server.close(async () => {
     await drained;
+    await drainExportAudits();
     const results = await Promise.allSettled([
       closeRetentionQueue(),
       closeProjectLocks(),

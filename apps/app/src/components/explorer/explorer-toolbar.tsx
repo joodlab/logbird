@@ -1,4 +1,4 @@
-import type { QueryLang } from '@logbird/contracts';
+import { EXPORT_FORMAT_LABELS, EXPORT_ID_HEADER, type QueryLang } from '@logbird/contracts';
 import { Button } from '@logbird/ui/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@logbird/ui/components/ui/dialog';
 import {
@@ -31,6 +31,7 @@ import { fieldErrorMessage } from '@/lib/forms';
 import { rangeLabel, resolveRange } from '@/lib/range';
 import { useCopyViewLink, useResolvedViewLabels } from '@/lib/views';
 import { DEFAULT_COLUMNS, EVENT_COLUMNS } from './columns';
+import { exportFailureDescription } from './export-error';
 
 export function ColumnPicker({ columns, onChange }: { columns: string[]; onChange: (cols: string[]) => void }) {
   return (
@@ -67,10 +68,11 @@ export function ColumnPicker({ columns, onChange }: { columns: string[]; onChang
   );
 }
 
-type ExportFormat = 'csv' | 'jsonl';
-const EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
-  { format: 'csv', label: 'CSV (spreadsheet)' },
-  { format: 'jsonl', label: 'JSON Lines (full events)' },
+type ExportFormat = import('@logbird/contracts').ExportFormat;
+const EXPORT_FORMATS: { format: ExportFormat; label: string; hint: string }[] = [
+  { format: 'jsonl-evidence', label: EXPORT_FORMAT_LABELS['jsonl-evidence'], hint: 'Original stored events with provenance. Use as evidence.' },
+  { format: 'csv', label: EXPORT_FORMAT_LABELS.csv, hint: 'Every normalized field; long values shortened.' },
+  { format: 'jsonl', label: EXPORT_FORMAT_LABELS.jsonl, hint: 'Every normalized field; long values shortened.' },
 ];
 
 /** Downloads every match of the range and query as CSV or JSON Lines (the toolbar menu and the mobile menu share it). */
@@ -78,23 +80,60 @@ function useExport({ projectId, range, q, lang = 'query' }: { projectId: string;
   const [busy, setBusy] = useState(false);
   const download = async (format: ExportFormat) => {
     setBusy(true);
+    const controller = new AbortController();
+    const cancel = { label: 'Cancel', onClick: () => controller.abort() };
+    const notice = toast.loading('Preparing export\u2026', {
+      cancel,
+    });
+    const waiting = setTimeout(
+      () =>
+        toast.loading('Preparing export \u2014 waiting for server', {
+          id: notice,
+          description: 'Active writes can delay preparation by up to 30 seconds.',
+          cancel,
+        }),
+      1000,
+    );
+    let exportId: string | null = null;
+    let reading = false;
     try {
       const r = resolveRange(range);
       const response = await fetch(
         api.events.exportUrl(projectId, { from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, format }),
+        { signal: controller.signal },
       );
       if (!response.ok) throw await toApiError(response);
+      exportId = response.headers.get(EXPORT_ID_HEADER);
+      if (!exportId || !/^[a-f0-9-]{36}$/.test(exportId)) throw new Error('Export response is missing its record identifier.');
+      clearTimeout(waiting);
+      toast.loading(`Downloading export ${exportId.slice(0, 8)}\u2026`, { id: notice, description: undefined, cancel });
+      reading = true;
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `logbird-events-${new Date().toISOString().slice(0, 19).replaceAll(':', '')}.${format}`;
+      a.download = `logbird-events-${exportId}${format === 'jsonl-evidence' ? '-evidence' : ''}.${format === 'csv' ? 'csv' : 'jsonl'}`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success('Export ready', { description: `${rangeLabel(range)}${q ? ` · ${q}` : ''}` });
+      toast.success(`${EXPORT_FORMATS.find((f) => f.format === format)?.label ?? format} ready`, {
+        id: notice,
+        cancel: null,
+        description: `${rangeLabel(range)}${q ? ` · ${q}` : ''}`,
+      });
     } catch (error) {
-      toast.error('Export failed', { description: errorMessage(error) });
+      if (controller.signal.aborted) {
+        toast.dismiss(notice);
+        toast.info('Export canceled', {
+          description: exportId ? `Export ${exportId.slice(0, 8)} was canceled.` : undefined,
+        });
+        return;
+      }
+      const failedId = exportId;
+      const description =
+        reading && failedId ? await exportFailureDescription(failedId, (signal) => api.exportStatus(failedId, signal)) : errorMessage(error);
+      toast.error('Export failed', { id: notice, cancel: null, description });
     } finally {
+      clearTimeout(waiting);
       setBusy(false);
     }
   };
@@ -133,17 +172,25 @@ export function ExportMenu({
           {busy ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />}
           <span className="hidden xl:inline">Export</span>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuContent align="end" className="w-72">
           <DropdownMenuGroup>
             <DropdownMenuLabel className="font-normal text-muted-foreground text-xs">
               Exports every match in the current range and query.
             </DropdownMenuLabel>
             {EXPORT_FORMATS.map((f) => (
               <DropdownMenuItem key={f.format} onClick={() => download(f.format)}>
-                {f.label}
+                <DownloadIcon />
+                <span className="flex flex-col gap-0.5">
+                  <span>{f.label}</span>
+                  <span className="text-muted-foreground text-xs">{f.hint}</span>
+                </span>
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem render={<a href="https://github.com/joodlab/logbird/blob/master/docs/exports.md" rel="noreferrer" target="_blank" />}>
+            Which format? (GitHub ↗)
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </DisabledReason>
@@ -185,7 +232,7 @@ export function ExplorerOverflowMenu({
         >
           {busy ? <Loader2Icon className="animate-spin" /> : <MoreHorizontalIcon />}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-60">
+        <DropdownMenuContent align="end" className="w-72">
           {disabledReason ? (
             <DropdownMenuGroup>
               <DropdownMenuLabel className="flex items-start gap-1.5 font-normal text-muted-foreground text-xs" data-testid="explorer-more-reason">
@@ -206,10 +253,17 @@ export function ExplorerOverflowMenu({
             {EXPORT_FORMATS.map((f) => (
               <DropdownMenuItem disabled={busy || Boolean(disabledReason)} key={f.format} onClick={() => download(f.format)}>
                 <DownloadIcon />
-                {f.label}
+                <span className="flex flex-col gap-0.5">
+                  <span>{f.label}</span>
+                  <span className="text-muted-foreground text-xs">{f.hint}</span>
+                </span>
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem render={<a href="https://github.com/joodlab/logbird/blob/master/docs/exports.md" rel="noreferrer" target="_blank" />}>
+            Which format? (GitHub ↗)
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <SaveViewDialog

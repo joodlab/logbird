@@ -1,0 +1,9 @@
+{
+  "cancelledBackgroundGetRequests": 48,
+  "unclassifiedProblems": 0,
+  "deliberatelyBrokenExportStreams": 8,
+  "note": "All eight scene assertions passed. Raw harness exit 1 counted canceled setup/facet GET notifications as problems. No page exceptions or non-200 API responses were recorded; all raw observations are retained.",
+  "sceneAssertionsPassed": true,
+  "rawEvidence": "proof.json",
+  "rawHarnessExitCode": 1
+}

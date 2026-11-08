@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import { purgeProject } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
 import { expect, it, vi } from 'vitest';
@@ -19,6 +20,11 @@ it('denies anonymous and foreign-project requests through every concrete route; 
   const users: string[] = [];
   const organizations: string[] = [];
   const projects: string[] = [];
+  // Preserve ownership if the external RAM guard kills this process before finally can run.
+  const recordFixture = (ids: Record<string, string>) => {
+    if (process.env.LOGBIRD_AUTHZ_FIXTURE_LEDGER)
+      appendFileSync(process.env.LOGBIRD_AUTHZ_FIXTURE_LEDGER, `${JSON.stringify({ ...ids, prefix: process.env.BULLMQ_PREFIX })}\n`);
+  };
   const marker = `foreign-${randomUUID()}`;
   const eventId = `shared-id-${randomUUID()}`;
   const request = (path: string, method = 'GET', cookie = '', body?: unknown, key?: string) =>
@@ -43,6 +49,7 @@ it('denies anonymous and foreign-project requests through every concrete route; 
     expect(response.status).toBe(200);
     const { user } = await response.json();
     users.push(user.id);
+    recordFixture({ userId: user.id });
     return {
       id: user.id as string,
       cookie: response.headers
@@ -56,8 +63,10 @@ it('denies anonymous and foreign-project requests through every concrete route; 
     for (const name of ['QA Matrix allowed', 'QA Matrix foreign']) {
       const org = await prisma.organization.create({ data: { id: randomUUID(), name, slug: randomUUID(), createdAt: new Date() } });
       organizations.push(org.id);
+      recordFixture({ organizationId: org.id });
       const project = await prisma.project.create({ data: { organizationId: org.id, name, slug: randomUUID() } });
       projects.push(project.id);
+      recordFixture({ projectId: project.id, organizationId: org.id });
     }
     const [allowed, foreign] = projects;
     const [allowedOrganization, foreignOrganization] = organizations;
@@ -82,6 +91,7 @@ it('denies anonymous and foreign-project requests through every concrete route; 
       const path = pattern
         .replace(':projectId', project)
         .replace(':eventId', eventId)
+        .replace(':exportId', '00000000-0000-4000-8000-000000000072')
         .replace(':operationId', 'shared-operation')
         .replace(':kind', 'actor')
         .replace(':entityId', 'shared-actor')
@@ -101,8 +111,21 @@ it('denies anonymous and foreign-project requests through every concrete route; 
       expect(own.status, `own ${method} ${pattern}`).toBe(200);
       expect(await own.text()).not.toContain(marker);
     }
+    const exportId = randomUUID();
+    await prisma.auditOutbox.create({
+      data: {
+        id: `${exportId}-outcome`,
+        namespace: process.env.BULLMQ_PREFIX ?? '{logbird}',
+        stream: `ws:${foreignOrganization}`,
+        payload: { action: 'export.failed', description: marker },
+      },
+    });
+    const foreignOutcome = await request(`/api/workspace/exports/${exportId}`, 'GET', actor.cookie);
+    expect(foreignOutcome.status).toBe(404);
+    expect(await foreignOutcome.text()).not.toContain(marker);
     // A stale/forged active workspace must never turn into membership.
     await prisma.session.updateMany({ where: { userId: actor.id }, data: { activeOrganizationId: foreignOrganization } });
+    expect((await request(`/api/workspace/exports/${exportId}`, 'GET', actor.cookie)).status).toBe(403);
     for (const [method, pattern] of consoleMatrix.filter(([method, path]) => method === 'GET' && path.includes(':projectId'))) {
       const response = await request(pathFor(pattern, foreign), method, actor.cookie);
       expect(response.status, `missing membership ${pattern}`).toBe(404);
