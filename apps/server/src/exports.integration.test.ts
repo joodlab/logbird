@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { purgeProject } from '@logbird/clickhouse';
 import { createProjectResponseSchema, EXPORT_FORMAT_LABELS, exportEvidenceRowSchema } from '@logbird/contracts';
-import { prisma, storeAuditEvent } from '@logbird/database';
+import { prisma, storeAuditEvent, withProjectLock } from '@logbird/database';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { expect, it, vi } from 'vitest';
 import { app } from './app';
 import * as projectStorage from './clickhouse';
 import { clickhouse } from './clickhouse';
+import { reconcileDestructiveMaintenance } from './destructive-maintenance';
 import { ApiError } from './errors';
 import { drainExportAudits } from './export-stream';
 import * as ingestion from './ingest';
@@ -303,7 +304,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
       } finally {
         fault.mockRestore();
       }
-      expect((await prisma.project.findUniqueOrThrow({ where: { id: projectId } })).exportDeleteStartedAt).toBeNull();
+      expect((await prisma.project.findUniqueOrThrow({ where: { id: projectId } })).exportDeleteStartedAt).not.toBeNull();
       await expect(
         (async () => {
           while (!(await reader.read()).done) {
@@ -314,6 +315,7 @@ it('SECURITY-02/03/04/07: role exports retain evidence and correlated completed/
       expect(
         (await receipts(concurrent.headers.get('x-request-id') ?? '')).find((row) => row.action === 'export.failed').metadata.export.reason,
       ).toBe('membership_changed');
+      await withProjectLock(projectId, () => reconcileDestructiveMaintenance(projectId));
     }
     const deletionExport = await request(owner.cookie, `/api/projects/${projectId}/export?${query}&format=jsonl`);
     if (!deletionExport.body) throw new Error('Export body missing');

@@ -261,7 +261,7 @@ export const dataRoutes = new Hono<AppEnv>()
               ? `Started a ${formatName} export of ${project.name}`
               : action === 'export.completed'
                 ? `Exported ${counts.rows} ${noun} from ${project.name} as ${formatName}`
-                : `${reasons[counts.reason ?? 'export_error']} after ${counts.rows} ${noun}: ${formatName} export of ${project.name}`;
+                : `${action === 'export.failed' ? 'Failed' : 'Canceled'} after ${counts.rows} ${noun}: ${reasons[counts.reason ?? 'export_error']}. ${formatName} export of ${project.name}`;
           const event: AuditPayload = {
             id: `${exportId}-${action.split('.')[1]}`,
             occurredAt: new Date().toISOString(),

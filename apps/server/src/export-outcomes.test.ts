@@ -56,10 +56,10 @@ it('stores requested and unknown evidence for a refused unreadable project witho
   expect(tx.auditOutbox.create).toHaveBeenCalledTimes(2);
   expect(tx.exportLease.create).not.toHaveBeenCalled();
 });
-it('recovers an orphaned delete marker under the exclusive boundary while preserving its generation', async () => {
+it('refuses an orphaned destructive fence even with exclusive lock ownership', async () => {
   tx.project.findUnique.mockResolvedValue({ id: 'project', exportGeneration: 5, maintenanceGeneration: 0, exportDeleteStartedAt: new Date() });
-  await expect(validateExportMembership('project', '5:0:', 'export')).resolves.toBeUndefined();
-  expect(tx.project.update).toHaveBeenCalledWith({ where: { id: 'project' }, data: { exportDeleteStartedAt: null } });
+  await expect(validateExportMembership('project', '5:0:', 'export')).rejects.toMatchObject({ code: 'export_invalidated' });
+  expect(tx.project.update).not.toHaveBeenCalled();
 });
 it('labels storage outages separately from changed membership and rejects expired leases', async () => {
   prisma.$transaction.mockRejectedValueOnce({ code: 'P1001' });

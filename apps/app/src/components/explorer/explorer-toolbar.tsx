@@ -81,9 +81,19 @@ function useExport({ projectId, range, q, lang = 'query' }: { projectId: string;
   const download = async (format: ExportFormat) => {
     setBusy(true);
     const controller = new AbortController();
-    const notice = toast.loading('Preparing export \u2014 waiting for active writes', {
-      cancel: { label: 'Cancel', onClick: () => controller.abort() },
+    const cancel = { label: 'Cancel', onClick: () => controller.abort() };
+    const notice = toast.loading('Preparing export\u2026', {
+      cancel,
     });
+    const waiting = setTimeout(
+      () =>
+        toast.loading('Preparing export \u2014 waiting for server', {
+          id: notice,
+          description: 'Active writes can delay preparation by up to 30 seconds.',
+          cancel,
+        }),
+      1000,
+    );
     let exportId: string | null = null;
     let reading = false;
     try {
@@ -95,6 +105,8 @@ function useExport({ projectId, range, q, lang = 'query' }: { projectId: string;
       if (!response.ok) throw await toApiError(response);
       exportId = response.headers.get(EXPORT_ID_HEADER);
       if (!exportId || !/^[a-f0-9-]{36}$/.test(exportId)) throw new Error('Export response is missing its record identifier.');
+      clearTimeout(waiting);
+      toast.loading(`Downloading export ${exportId.slice(0, 8)}\u2026`, { id: notice, description: undefined, cancel });
       reading = true;
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -110,9 +122,8 @@ function useExport({ projectId, range, q, lang = 'query' }: { projectId: string;
       });
     } catch (error) {
       if (controller.signal.aborted) {
+        toast.dismiss(notice);
         toast.info('Export canceled', {
-          id: notice,
-          cancel: null,
           description: exportId ? `Export ${exportId.slice(0, 8)} was canceled.` : undefined,
         });
         return;
@@ -122,6 +133,7 @@ function useExport({ projectId, range, q, lang = 'query' }: { projectId: string;
         reading && failedId ? await exportFailureDescription(failedId, (signal) => api.exportStatus(failedId, signal)) : errorMessage(error);
       toast.error('Export failed', { id: notice, cancel: null, description });
     } finally {
+      clearTimeout(waiting);
       setBusy(false);
     }
   };

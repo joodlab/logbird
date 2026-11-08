@@ -1,3 +1,4 @@
+import { ASYNC_INSERT_FLUSH_BOUND_MS, INGEST_CLAIM_LEASE_MS } from '@logbird/clickhouse';
 import {
   type AuditPayload,
   auditNamespace,
@@ -52,16 +53,18 @@ async function readMembership(db: Prisma.TransactionClient, projectId: string, r
     where: { id: projectId },
     select: { id: true, exportDeleteStartedAt: true, exportGeneration: true, maintenanceGeneration: true },
   });
-  // Holding the exclusive project lock proves an older delete attempt no longer owns it.
-  // Its persisted generation still invalidates earlier exports; its stale marker must not block new ones forever.
-  if (project?.exportDeleteStartedAt) await db.project.update({ where: { id: projectId }, data: { exportDeleteStartedAt: null } });
   const run = await db.retentionRun.findFirst({ where: { projectId }, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }] });
-  if (!project || run?.status === 'running' || run?.status === 'failed')
+  if (!project || project.exportDeleteStartedAt || run?.status === 'running' || run?.status === 'failed')
     throw new ApiError(503, 'export_project_unreadable', 'Retention or deletion is incomplete for this project. Retry after maintenance finishes.');
   // An ambiguous INSERT can outlive its ingest caller's shared lock. Its first receipt clock is inside the fence,
   // so wait for confirmation/recovery rather than letting a queued pre-fence row appear behind the export cursor.
   const pending = await db.ingestReceipt.findFirst({
-    where: { projectId, confirmedAt: null, claimedAt: { not: null }, receivedAt: { lte: receivedBefore } },
+    where: {
+      projectId,
+      confirmedAt: null,
+      claimedAt: { gte: new Date(+(await leaseClock(db)) - INGEST_CLAIM_LEASE_MS - ASYNC_INSERT_FLUSH_BOUND_MS) },
+      receivedAt: { lte: receivedBefore },
+    },
     select: { eventId: true },
   });
   if (pending) throw new ApiError(503, 'export_project_busy', 'Recent writes to this project are still settling. Retry the export.', undefined, 1);

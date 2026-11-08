@@ -25,6 +25,7 @@ import { Hono } from 'hono';
 import { validator } from 'hono-openapi';
 import { z } from 'zod';
 import { clickhouse, purgeProjectEvents, queryClickhouse, settleProjectInserts, stopMaintenance } from './clickhouse';
+import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './destructive-maintenance';
 import { ApiError } from './errors';
 import { audit } from './ingest';
 import { generateApiKey } from './keys';
@@ -270,27 +271,18 @@ export const managementRoutes = new Hono<AppEnv>()
       const projectId = c.get('project').id;
       // Exclusive project lock: ingest (shared lock) cannot claim or insert for this project until it is gone.
       await withProjectLock(projectId, async () => {
-        const startedAt = new Date();
-        await prisma.project.update({ where: { id: projectId }, data: { exportDeleteStartedAt: startedAt, exportGeneration: { increment: 1 } } });
-        try {
-          // Settle ambiguous inserts and stop tagged maintenance before any destructive write.
-          await stopMaintenance(projectId);
-          await settleProjectInserts(projectId);
-          await purgeProjectEvents(projectId, { settled: true });
-          await prisma.$transaction(async (tx) => {
-            const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
-            for (const key of revoked) await auditApiKey(c, 'api_key.revoked', key, c.get('project'), 'project_deleted', tx);
-            await audit(c, 'project.deleted', { type: 'project', id: projectId, name: c.get('project').name }, undefined, undefined, tx);
-            await tx.project.delete({ where: { id: projectId } });
-          });
-        } catch (error) {
-          try {
-            await prisma.project.updateMany({ where: { id: projectId, exportDeleteStartedAt: startedAt }, data: { exportDeleteStartedAt: null } });
-          } catch {
-            console.error(JSON.stringify({ event: 'project.delete_marker_clear_failed', projectId }));
-          }
-          throw error;
-        }
+        await beginDestructiveMaintenance(projectId);
+        // Any failure leaves the fence: an ambiguous CH response can outlive this lock.
+        await stopMaintenance(projectId);
+        await settleProjectInserts(projectId);
+        await purgeProjectEvents(projectId, { settled: true });
+        await reconcileDestructiveMaintenance(projectId);
+        await prisma.$transaction(async (tx) => {
+          const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
+          for (const key of revoked) await auditApiKey(c, 'api_key.revoked', key, c.get('project'), 'project_deleted', tx);
+          await audit(c, 'project.deleted', { type: 'project', id: projectId, name: c.get('project').name }, undefined, undefined, tx);
+          await tx.project.delete({ where: { id: projectId } });
+        });
       });
       return c.body(null, 204);
     },
