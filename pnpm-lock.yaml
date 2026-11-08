@@ -32,6 +32,9 @@ importers:
       '@types/pg':
         specifier: ^8.23.1
         version: 8.23.1
+      '@vercel/nft':
+        specifier: 0.30.4
+        version: 0.30.4(rollup@4.67.5)
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
@@ -172,6 +175,31 @@ importers:
       tsx:
         specifier: 4.23.13
         version: 4.23.13
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  apps/migrate:
+    dependencies:
+      prisma:
+        specifier: 7.10.0
+        version: 7.10.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2)
+    devDependencies:
+      '@logbird/clickhouse':
+        specifier: workspace:*
+        version: link:../../packages/clickhouse
+      '@logbird/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@logbird/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsdown:
+        specifier: ^0.22.14
+        version: 0.22.14(tsx@4.23.13)(typescript@7.0.2)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

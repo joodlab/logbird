@@ -5,6 +5,8 @@ RUN npm install --global pnpm@10.30.3 turbo@2.10.12
 COPY . .
 RUN turbo prune @logbird/server --docker
 
+FROM gcr.io/distroless/cc-debian12@sha256:e5d81ddde149641e2a9ba55be4545bc125c67de07508b03ba4c22e6eb0ded5aa AS base
+
 FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS build
 ARG NODE_OPTIONS
 ARG BUILD_CONCURRENCY=1
@@ -14,35 +16,27 @@ RUN npm install --global pnpm@10.30.3 && apt-get update && apt-get install -y --
 COPY --from=prune /source/out/json/ .
 RUN pnpm install --frozen-lockfile --child-concurrency="$BUILD_CONCURRENCY" --network-concurrency="$DOWNLOAD_CONCURRENCY"
 COPY --from=prune /source/out/full/ .
+COPY --from=prune /source/scripts/trace-runtime.mjs scripts/trace-runtime.mjs
 ENV DATABASE_URL=postgresql://build:build@localhost:5432/logbird
 RUN DATABASE_URL=postgresql://build:build@localhost:5432/logbird pnpm --filter @logbird/database generate
 RUN pnpm --workspace-concurrency="$BUILD_CONCURRENCY" --filter @logbird/server... build
+# The entrypoint already bundles @logbird/* and their third-party code; copy only the files it loads.
+RUN node scripts/trace-runtime.mjs /runtime apps/server/dist/index.mjs
+# Distroless has no shell: append the unprivileged `node` user (uid/gid 1000, as before) to its account files.
+COPY --from=base /etc/passwd /etc/group /rootfs/etc/
+RUN echo 'node:x:1000:1000:node:/home/node:/sbin/nologin' >> /rootfs/etc/passwd \
+  && echo 'node:x:1000:' >> /rootfs/etc/group \
+  && mkdir -p /rootfs/home/node
 
-RUN pnpm --child-concurrency="$BUILD_CONCURRENCY" --network-concurrency="$DOWNLOAD_CONCURRENCY" --filter @logbird/server deploy --legacy --prod /runtime
-
-# Copy installed tooling into a fresh image: the build stage also contains the
-# package store, compiler caches and the deployed API dependency tree.
-FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS migrate
-WORKDIR /workspace
-ENV NODE_ENV=production
-RUN apt-get update && apt-get install -y --no-install-recommends openssl tini && rm -rf /var/lib/apt/lists/*
-COPY --from=build /usr/local/lib/node_modules/pnpm /usr/local/lib/node_modules/pnpm
-RUN ln -s /usr/local/lib/node_modules/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm
-COPY --from=build --chown=node:node /workspace/node_modules ./node_modules
-COPY --from=build --chown=node:node /workspace/packages ./packages
-COPY --from=build --chown=node:node /workspace/apps ./apps
-COPY --from=build /workspace/package.json /workspace/pnpm-workspace.yaml ./
-LABEL org.opencontainers.image.source="https://github.com/joodlab/logbird" org.opencontainers.image.licenses="MIT" org.opencontainers.image.title="Logbird migrations"
-USER node
-ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
-CMD ["sh", "-c", "pnpm --filter @logbird/database migrate:deploy && pnpm --filter @logbird/clickhouse migrate && cd packages/clickhouse && exec node --import tsx scripts/create-query-user.ts"]
-
-FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS runtime
-WORKDIR /workspace
+# Shell-free glibc runtime (Debian 12 = bookworm) with the build stage's exact Node binary; no package manager.
+FROM base AS runtime
+COPY --from=build /rootfs/etc/passwd /rootfs/etc/group /etc/
+COPY --from=build --chown=1000:1000 /rootfs/home/node /home/node
+COPY --from=build /usr/local/bin/node /usr/local/bin/node
+COPY --from=build /runtime/ /workspace/
+WORKDIR /workspace/apps/server
 ENV NODE_ENV=production
 LABEL org.opencontainers.image.source="https://github.com/joodlab/logbird"       org.opencontainers.image.licenses="MIT"       org.opencontainers.image.title="Logbird"
-COPY --from=build --chown=node:node /runtime/node_modules ./node_modules
-COPY --from=build --chown=node:node /workspace/apps/server/dist ./dist
 USER node
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD node -e 'fetch("http://127.0.0.1:"+(process.env.PORT||"4601")+"/livez").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||'4601')+'/livez').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 CMD ["node", "dist/index.mjs"]

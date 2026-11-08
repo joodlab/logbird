@@ -30,6 +30,15 @@ backup disk. Command translation and recovery remain unverified in #77.
 All four buildable roles use `pull_policy: build`; deployment builds from source.
 The changed policy's Coolify behavior remains a live acceptance gate in #77.
 
+The migrate role builds from `apps/migrate/Dockerfile`; the file already points there,
+so nothing changes in the Coolify UI. The app, server and worker images are
+distroless and contain no shell, so Coolify's container **Terminal** cannot open in
+them. Use Deployment/Runtime Logs, and for one-off commands use
+`docker compose -p <uuid> -f <generated-compose-file> exec <role> node …` on the
+destination host (see [manual releases](releases.md#what-each-image-contains)). The
+migrate image keeps `sh`. Their health checks are exec-form `node` commands built
+into the images; do not add shell-based health checks in Coolify.
+
 This guide does **not support a data-only restore through the Coolify UI**. A normal
 deployment includes migrate; do not deploy an empty recovery target and then copy
 database archives into it. Use the standalone, empty Compose recovery project in

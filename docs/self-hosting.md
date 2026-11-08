@@ -43,6 +43,15 @@ Installations configured before 2026-11-08 may have `LOGBIRD_IMAGE_REGISTRY=logb
 it. Clear the value (or set `ghcr.io/joodlab`) and rebuild the four roles; the old
 `logbird/<role>:local` tags can then be removed by their exact image IDs.
 
+Since 2026-11-08 the migrate role builds from its own `apps/migrate/Dockerfile`
+(previously the `migrate` target of `apps/server/Dockerfile`), and the app, server and
+worker images use a shell-free distroless runtime. Rebuilding the four roles is the
+whole upgrade; no data or configuration changes. A local Compose override or script
+that still names `target: migrate` must point at the new Dockerfile, and anything that
+ran `sh`, `id` or `ls` inside app/server/worker must use `node` instead (for example
+`docker compose exec server node -p 'process.getuid()'`). The migrate image keeps
+`sh`. See [what each image contains](releases.md#what-each-image-contains).
+
 Image build stages default to one pnpm build/postinstall at a time and four
 concurrent downloads (`BUILD_CONCURRENCY=1`, `DOWNLOAD_CONCURRENCY=4`). For an
 additional per-Node-process heap cap, use

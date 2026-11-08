@@ -44,7 +44,7 @@ services:
   migrate:
     pull_policy: build
     image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-migrate:${LOGBIRD_VERSION:-local}
-    build: {context: ., dockerfile: apps/server/Dockerfile, target: migrate}
+    build: {context: ., dockerfile: apps/migrate/Dockerfile}
     environment: &runtime
       NODE_ENV: production
       APP_URL: ${APP_URL:-http://localhost:4600}

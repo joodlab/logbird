@@ -1,0 +1,24 @@
+{
+  "name": "@logbird/migrate",
+  "license": "MIT",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "One-shot migration image: Prisma CLI, PostgreSQL migrations and bundled ClickHouse migration/query-user provisioning.",
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "clean": "git clean -xdf .turbo dist node_modules"
+  },
+  "dependencies": {
+    "prisma": "7.10.0"
+  },
+  "devDependencies": {
+    "@logbird/clickhouse": "workspace:*",
+    "@logbird/database": "workspace:*",
+    "@logbird/tsconfig": "workspace:*",
+    "@types/node": "^22.20.1",
+    "tsdown": "^0.22.14",
+    "typescript": "^7.0.2"
+  }
+}

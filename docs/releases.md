@@ -43,30 +43,69 @@ while required checks remain unverified. See [self-hosting](self-hosting.md).
 
 ## Local architecture checks
 
-The Dockerfiles use a multi-platform Node index digest, not an amd64-only digest.
-Compose dependencies are pinned by index digest too. A pin change needs a fresh
-security/update review and the same runtime checks. Never assume that a base image's
-arm64 manifest proves the application builds or runs on arm64.
+The Dockerfiles pin every base by multi-platform index digest, not an amd64-only digest:
+`node:22-bookworm-slim` for the build stages, `gcr.io/distroless/cc-debian12` for the
+app/server/worker runtime and `debian:bookworm-slim` for the migrate runtime. Both
+runtimes receive the build stage's exact Node binary (`/usr/local/bin/node`), so the
+Node version follows the Node pin. Compose dependencies are pinned by index digest
+too. A pin change needs a fresh security/update review and the same runtime checks.
+Never assume that a base image's arm64 manifest proves the application builds or
+runs on arm64.
+
+### What each image contains
+
+| Role | Dockerfile | Runtime base | Contents |
+| --- | --- | --- | --- |
+| app | `apps/app/Dockerfile` | distroless cc (no shell) | Node + Nitro's traced `.output` |
+| server | `apps/server/Dockerfile` | distroless cc (no shell) | Node + `dist/` + only the `node_modules` files the bundle loads (`scripts/trace-runtime.mjs`, `@vercel/nft`) |
+| worker | `apps/worker/Dockerfile` | distroless cc (no shell) | Node + `dist/` (index, health) + traced `node_modules` files |
+| migrate | `apps/migrate/Dockerfile` | Debian slim + OpenSSL, CA certificates, tini, sh | Node + Prisma CLI with its declared dependency closure, Prisma schema/migrations, bundled ClickHouse migration and query-user scripts, ClickHouse SQL migrations |
+
+No image contains npm, pnpm, corepack, yarn, a package store, TypeScript, tsx or
+workspace sources. All four run as `node` (uid/gid 1000). The long-running roles have
+no shell: their Dockerfile health checks are exec-form `node` commands, and operator
+commands use `docker compose exec <role> node …` (for example
+`node -p 'process.getuid()'`); `sh`, `id` and `ls` are not available there.
 
 With Docker Buildx and sufficient disk/RAM, build each role without publishing:
 
 ```sh
 docker buildx build --platform linux/amd64 --load -f apps/app/Dockerfile -t logbird-check/app:amd64 .
 docker buildx build --platform linux/amd64 --load -f apps/server/Dockerfile -t logbird-check/server:amd64 .
-docker buildx build --platform linux/amd64 --load -f apps/server/Dockerfile --target migrate -t logbird-check/migrate:amd64 .
+docker buildx build --platform linux/amd64 --load -f apps/migrate/Dockerfile -t logbird-check/migrate:amd64 .
 docker buildx build --platform linux/amd64 --load -f apps/worker/Dockerfile -t logbird-check/worker:amd64 .
 ```
 
 Repeat with `linux/arm64` and `:arm64`. Prefer a native arm64 host; emulation can be
 slow and does not prove native performance. Run the same Compose acceptance on
-each supported architecture and inspect each role's `Config.User` plus `id -u`
-(must be nonzero), readiness, migration and worker health. Record image byte sizes
-with `docker image inspect`. The one-shot migrate image includes development
-migration tooling and is larger than the long-running roles; its fresh final stage
-excludes the build-stage package store and duplicate deployed API tree. Remove only
-the test images/cache created by the run. Arm64 support remains unverified until
-the application builds and acceptance passes there; list the precise failed or
-unrun role/stage in the release record.
+each supported architecture and inspect each role's `Config.User` plus its effective
+UID (must be nonzero): `docker compose exec <role> node -p 'process.getuid()'` for
+app/server/worker and `docker compose run --rm --no-deps migrate id -u` for migrate.
+Check readiness, migration and worker health. Record image byte sizes with
+`docker image inspect --format '{{.Size}}'` and the layer breakdown with
+`docker history --no-trunc --format '{{.Size}}\t{{.CreatedBy}}'` against the
+[size budgets](#image-size-budgets). Remove only the test images/cache created by the
+run. Arm64 support remains unverified until the application builds and acceptance
+passes there; list the precise failed or unrun role/stage in the release record.
+
+### Image size budgets
+
+Budgets are local `docker image inspect` sizes for linux/amd64. On Docker Desktop's
+containerd image store that figure is the unpacked layers plus their compressed
+content, so it is larger than the `docker history` layer sum; record both. A
+classic-store engine reports a smaller number for the same image.
+
+SIZE_BUDGET_TABLE
+
+A role over budget blocks a release until the growth is explained in the release
+record. The migrate budget is set by its minimal required tooling: the Prisma CLI
+cannot run `migrate deploy` without its declared dependencies (Prisma Studio's data
+modules are loaded at CLI start-up, `@prisma/dev` and its embedded Postgres are
+declared dependencies), and its schema engine is a native binary. Removing parts of
+that closure would make the image depend on Prisma internals; reconsider the budget
+when Prisma changes its packaging. The optional `typescript` peer is the only package
+removed after `pnpm deploy`, because the bundled `prisma.config.mjs` needs no
+compiler.
 
 ## GHCR publishing plan (maintainer action)
 
@@ -93,7 +132,7 @@ docker buildx build --platform linux/amd64 \
   --provenance=mode=max --sbom=true --push -f apps/server/Dockerfile .
 ```
 
-Use the corresponding Dockerfile for app/worker and `--target migrate` for migrate.
+Use the corresponding Dockerfile for app/worker and `apps/migrate/Dockerfile` for migrate.
 Add `linux/arm64` to a publication only after that architecture's complete build
 and application acceptance passes. The example publishes amd64 only because
 arm64 is currently unverified.
@@ -117,7 +156,8 @@ describes native/emulated builders and image-store requirements.
 ### Migration cancellation check
 
 The migrate image uses `tini -g` as PID 1 to forward termination to the active
-shell, pnpm and migration process group. Live cancellation/retry verification is
+shell, the Prisma CLI (and its schema-engine child) and the ClickHouse scripts as one
+process group. Live cancellation/retry verification is
 still pending in [#77](https://github.com/joodlab/logbird/issues/77).
 
 Test only in a fresh disposable stack, with no shared or customer database:
@@ -169,7 +209,8 @@ Test only in a fresh disposable stack, with no shared or customer database:
 5. Inspect `_prisma_migrations` and database state. If the QA migration is marked
    failed, verify its sole sleep statement made no schema/data changes, then
    use a one-shot migrate container with the same override:
-   `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run --pull never --rm --no-deps migrate pnpm --filter @logbird/database exec prisma migrate resolve --rolled-back 20991231000000_qa_cancel`.
+   `docker compose --env-file .env.selfhost-test -p logbird-selfhost-test -f docker-compose.yml -f .tmp/compose.migration-cancel.yml run --pull never --rm --no-deps migrate prisma migrate resolve --rolled-back 20991231000000_qa_cancel`
+   (the image's working directory is `/workspace/packages/database`, where `prisma.config.mjs` lives).
    This resolution is only for the schema-free QA fixture. Real failed migrations
    require inspection and an appropriate recovery decision before retry.
 6. Run the default migrate command again with the override and let it finish.
