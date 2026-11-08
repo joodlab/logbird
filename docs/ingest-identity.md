@@ -152,6 +152,41 @@ fails, a healthy on-time hourly backstop can still leave about 18 million expire
 receipts between sweeps. Restore worker health rather than relying on that
 degraded mode.
 
+### Expired-backlog re-measure (#110)
+
+This in-process run used owned fictional projects on the shared development
+services, under the `heavy` lock, on 2026-11-08. It is not HTTP acceptance.
+Each project carried 600,000 confirmed receipts, aged past the window as in the
+#62 probe. Fresh batches were 1000 events through the shipped
+`insertImmutableEvents` path (receipts and ClickHouse). Statement-level runs
+compared #62's SQL as merged (unguarded) with this code. The shared table started
+bloated: 31 live rows, a 14,364-page heap and a 137,302-page (about 1.07 GB)
+primary key, against 128 MB of `shared_buffers`.
+
+| State | #62 SQL (unguarded) | This code |
+| --- | --- | --- |
+| No backlog, bloated table | lookup p95 6181 ms, Postgres total p95 11.6 s | lookup p95 15 ms; batch p50/p95 269/373 ms |
+| First batch after aging | lookup 215 ms (1923 shared reads) | lookup 219 ms (2121 reads); **first batch 469 ms** |
+| 30 steady batches with the backlog | Postgres total p95 439 ms | Postgres total p95 413 ms; batch p50/p95 319/1316 ms |
+| Batches during the sweep (666,000 removed in 18.1 s, 134 batches, not limited) | — | batch p50/p95 653/846 ms (29 samples) |
+| After the drain and ANALYZE | lookup p95 1009 ms (5 samples) | batch p50/p95 269/315 ms |
+
+Every guarded plan was the primary-key seek, with no JIT and at most 1.6 ms
+planning. The first fresh batch now stays below one second. The remaining
+backlog cost is buffer I/O, not plan choice, planning or a missing index. Each
+fresh lookup reads about 2000–7400 primary-key and heap pages that do not fit in
+`shared_buffers`, because this bloated index is about eight times its size. On
+this machine, the steady and during-sweep p95 therefore stay above twice the
+matched baseline (242 ms), and #110's latency gate remains open. The run shares a
+busy machine, so the steady p95 includes outliers.
+
+For operators: alert on `pg_relation_size('"IngestReceipt_pkey"')` growing far
+beyond the live receipt count; a healthy 10-minute window holds about three
+million receipts at 5000 events/second. Rebuild a bloated index online with
+`REINDEX INDEX CONCURRENTLY "IngestReceipt_pkey"`, and size `shared_buffers` to
+hold the receipt indexes. Keep the minute worker healthy so a backlog does not
+build up.
+
 A smaller real-service proof used 600000 live receipts, a 300000-row initial
 expired backlog and 375000 receipts crossing expiry naturally at 5000/second over
 75 seconds. A separate worker process drained 300139 rows in 1.930 seconds and
