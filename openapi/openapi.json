@@ -7543,6 +7543,112 @@
         ]
       }
     },
+    "/api/workspace/exports/{exportId}": {
+      "get": {
+        "operationId": "console_export_outcome",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exportId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "exportId": {
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "maxLength": 64,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "state": {
+                      "enum": [
+                        "pending",
+                        "completed",
+                        "failed",
+                        "unknown"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "exportId",
+                    "state",
+                    "reason",
+                    "description"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Export outcome"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request failed"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Export outcome",
+        "tags": [
+          "console"
+        ]
+      }
+    },
     "/api/workspace/invite-links": {
       "get": {
         "operationId": "console_list_invite_links",
