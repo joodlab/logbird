@@ -1,18 +1,12 @@
 {
-    "checkedProcessIdentities":  34,
-    "killedFinalRoots":  [
-                             69292,
-                             42348
-                         ],
-    "stoppedAt":  "2026-11-08T00:41:08.0527573+01:00",
-    "remainingOwnedProcesses":  0,
-    "baselineRoot":  43160,
-    "remainingWorktreeReferences":  0,
-    "workerStarted":  false,
-    "remainingListeners":  0,
-    "earlierCrashRoots":  [
-                              43696,
-                              60328
-                          ],
-    "monitorStopped":  true
+  "checkedProcessIdentities": 34,
+  "killedFinalRoots": [69292, 42348],
+  "stoppedAt": "2026-11-08T00:41:08.0527573+01:00",
+  "remainingOwnedProcesses": 0,
+  "baselineRoot": 43160,
+  "remainingWorktreeReferences": 0,
+  "workerStarted": false,
+  "remainingListeners": 0,
+  "earlierCrashRoots": [43696, 60328],
+  "monitorStopped": true
 }
