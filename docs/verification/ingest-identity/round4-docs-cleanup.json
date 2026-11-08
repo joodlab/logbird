@@ -1,0 +1,29 @@
+{
+  "at": "2026-11-07T18:07:23.229Z",
+  "counts": [
+    {
+      "table": "events",
+      "rows": 0
+    },
+    {
+      "table": "event_ids",
+      "rows": 0
+    },
+    {
+      "table": "events_by_minute",
+      "rows": 0
+    },
+    {
+      "table": "entities",
+      "rows": 0
+    },
+    {
+      "table": "attribute_keys",
+      "rows": 0
+    }
+  ],
+  "receipts": 0,
+  "organizationDeleted": true,
+  "userDeleted": true,
+  "privateQueueDeleted": true
+}

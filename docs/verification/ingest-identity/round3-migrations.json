@@ -1,0 +1,112 @@
+{
+  "implementationHead": "97b03c2dd710f4fa805c525c57fc7b8395e2aa94",
+  "countSemantics": {
+    "raw_rows": "SELECT count() FROM events",
+    "distinct_event_ids": "uniqExact((project_id,event_id)) FROM events",
+    "index_ids": "uniqExact((project_id,event_id)) FROM event_ids",
+    "missing_pointers": "distinct raw (project_id,event_id,timestamp,received_at) tuples absent from the index"
+  },
+  "before": {
+    "at": "2026-11-07T15:19:56.388Z",
+    "logical": [
+      {
+        "raw_rows": 323636,
+        "distinct_event_ids": 323582,
+        "index_ids": 445712,
+        "missing_pointers": 53
+      }
+    ],
+    "tables": [
+      {
+        "name": "event_ids",
+        "engine": "ReplacingMergeTree"
+      },
+      {
+        "name": "event_ids_mv",
+        "engine": "MaterializedView"
+      }
+    ]
+  },
+  "immediateAfter": {
+    "phase": "after",
+    "at": "2026-11-07T15:19:59.614Z",
+    "logical": [
+      {
+        "raw_rows": 323634,
+        "distinct_event_ids": 323580,
+        "index_ids": 323580,
+        "missing_pointers": 0
+      }
+    ],
+    "tables": [
+      {
+        "name": "event_ids",
+        "engine": "MergeTree"
+      },
+      {
+        "name": "event_ids_mv",
+        "engine": "MaterializedView"
+      }
+    ]
+  },
+  "laterConfirmation": {
+    "start": "2026-11-07T15:21:13.897Z",
+    "after": {
+      "at": "2026-11-07T15:21:13.964Z",
+      "logical": [
+        {
+          "raw_rows": 323632,
+          "distinct_event_ids": 323578,
+          "index_ids": 325589,
+          "missing_pointers": 0
+        }
+      ],
+      "tables": [
+        {
+          "name": "event_ids",
+          "engine": "MergeTree"
+        },
+        {
+          "name": "event_ids_mv",
+          "engine": "MaterializedView"
+        }
+      ]
+    },
+    "writerErrorsObserved": [],
+    "leases": [
+      {
+        "default_expression": "(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"
+      }
+    ]
+  },
+  "finalCoverageAndDrop": {
+    "start": "2026-11-07T16:00:31.915Z",
+    "end": "2026-11-07T16:00:32.712Z",
+    "before": [
+      {
+        "raw_rows": 323145,
+        "distinct_event_ids": 323091,
+        "index_ids": 325333,
+        "missing_pointers": 0
+      }
+    ],
+    "after": [
+      {
+        "raw_rows": 323145,
+        "distinct_event_ids": 323091,
+        "index_ids": 325333,
+        "missing_pointers": 0
+      }
+    ],
+    "writerErrorsObserved": [],
+    "throwawayDatabaseDropped": true,
+    "authorizationException": "Master explicitly authorized logbird_qa_062 for real MV/timeout and online migration tests."
+  },
+  "notes": [
+    "These are logical query counts, not system.parts physical rows.",
+    "Other agents were ingesting/deleting isolated QA fixtures during the online run. This migration does not delete raw events.",
+    "Extra index namespaces predate merged purge code; the orphan CLI was removed and remaining shared-dev cleanup belongs to the coordinator.",
+    "Writer errors are observed query-log exceptions in the recorded window, not end-to-end evidence from every writer.",
+    "The initial migration succeeded; its first read-only query-log collector failed parsing an ISO timestamp. A corrected read-only collector captured the window without rerunning the migrations."
+  ]
+}

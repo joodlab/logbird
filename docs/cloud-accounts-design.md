@@ -42,6 +42,10 @@ must use that same workspace lock to close the create/purge race.
 For each project: take its existing exclusive project lock, drain accepted writes,
 purge `events`, `events_by_minute`, `entities` and `attribute_keys`, verify zero rows,
 then delete the Postgres project. Reuse the same purge routine as project deletion.
+That routine must also purge `IngestReceipt` rows for the project after ClickHouse
+deletion, including unresolved claims. Purge receipts for `ws:<organization id>`
+alongside its activity stream. The organization foreign key cascades as a final
+backstop; it does not replace the locked purge or justify deleting Postgres first.
 Do not hold a Prisma transaction or application connection across ClickHouse I/O.
 Purge `ws:<organization id>` under its project lock too, without emitting another
 workspace event afterwards. Finally delete the organization, clear affected active
