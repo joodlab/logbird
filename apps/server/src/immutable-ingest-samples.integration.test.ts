@@ -12,7 +12,8 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await f.cleanup();
-});
+  // Two synchronous stream purges share the local ClickHouse two-slot mutation pool.
+}, 60_000);
 it('sample API preserves a retained customer sample-event-N identity', async () => {
   expect((await f.post({ id: 'sample-event-0', action: 'customer.original' })).status).toBe(202);
   const loaded = await f.management(`/api/projects/${f.project}/sample-data`, 'POST');
@@ -25,7 +26,8 @@ it('sample API preserves a retained customer sample-event-N identity', async () 
   expect((await f.management(`/api/projects/${f.project}/sample-data`, 'DELETE')).status).toBe(204);
   expect(await f.count()).toBe(1);
   expect((await read<{ n: number }>(clickhouse, 'SELECT count() n FROM event_ids WHERE project_id={p:String}', { p: f.project }))[0]?.n).toBe(1);
-});
+  // Two synchronous purges of the sample stream share the local ClickHouse two-slot mutation pool.
+}, 60_000);
 it('sample removal reconciles receipts so the intentionally deleted event can retry', async () => {
   const input = { id: 'customer-sample-source', action: 'sample.original', source: 'logbird-sample' };
   expect((await f.post(input)).status).toBe(202);

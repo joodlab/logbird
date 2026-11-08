@@ -8,7 +8,8 @@ receipt lifecycle. See [Event ids and retries](concepts.md#event-ids-and-retries
 
 Shared project advisory locks permit concurrent API processes. The Postgres unique
 key on `IngestReceipt(projectId,eventId)` arbitrates ownership. Claims are inserted
-in sorted order with `createManyAndReturn(skipDuplicates)` and Prisma date encoding.
+in sorted order with a typed-array UNNEST INSERT, ON CONFLICT DO NOTHING and RETURNING.
+Explicit UTC encoding preserves session independence.
 No Postgres transaction spans ClickHouse I/O. Maintenance and recovery take the
 exclusive project lock, including any recovered INSERT.
 
@@ -174,6 +175,18 @@ raw/pointer counts and checksums, and positive lookups remained complete. Query
 cost still grows with many small active parts: the online test intentionally
 disabled merges and ended with 216 parts; its post-write timings must not be
 compared to the five-part baseline. Normal background merging remains important.
+
+Runtime retention/project purges use lightweight DELETE. In a controlled 10M-row
+comparison with five Wide history parts, retention part-processing time was
+538 ms without the bloom index and 503 ms with it, with no bloom recalculation:
+the history index files were reused. Small affected Compact parts can recalculate
+their index; six tiny-project deletes totalled 769 microseconds of bloom work.
+Physical ALTER DELETE rewrites and merges pay the index-build cost. Deleting
+about 1% of surviving rows across the same 10M history physically took
+2.283 seconds without bloom and 2.741 seconds with it (+458 ms, about 20%),
+including 324 ms of bloom calculation. These are one layout's measurements;
+wall-clock scheduling varied between repeats, while lightweight part work stayed
+comparable. Measure physical maintenance separately from lightweight retention.
 
 To roll back application code, leave 009 in place. To remove only this index,
 first wait for its `MATERIALIZE INDEX` mutations to finish (`system.mutations`),

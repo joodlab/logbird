@@ -220,6 +220,11 @@ logical rows and existing binaries. `MATERIALIZE INDEX` is a mutation proportion
 to `event_ids` size (604 ms in the isolated 10M online proof); budget more time for
 larger/busy installations. The maintenance migrate client's long timeout covers
 this wait. Confirm completion in `system.mutations`; materialization can be repeated safely.
+Lightweight runtime purges reuse Wide history bloom files. Physical rewrites and
+merges pay the index-build cost: a controlled 10M physical DELETE measured
+2.283 seconds without bloom versus 2.741 seconds with it (+458 ms, about 20%),
+including 324 ms of bloom calculation. This is a measured example, not a duration
+bound; see the [maintenance comparison](ingest-identity.md#multiple-active-parts-009).
 External ClickHouse writers need SELECT/INSERT/DELETE on `event_ids` and
 `GRANT SYSTEM FLUSH ASYNC INSERT QUEUE ON *.* TO <writer>` in addition to existing
 grants. Recovery currently supports one ClickHouse node; a load-balanced cluster
@@ -603,6 +608,15 @@ pool: a larger pool consumes resources, and incompatible mutation thresholds can
 prevent progress. Benchmark representative retention alongside ingestion rather
 than copying a shared development server's settings or extrapolating its purge
 latency to production. See the [ClickHouse background-pool reference](https://clickhouse.com/docs/reference/settings/server-settings/settings/background#background_pool_size).
+
+With 009, distinguish lightweight deletes from physical rewrites. The runtime's
+lightweight retention reused its Wide history bloom files (538 ms versus 503 ms
+of part work without/with bloom on a controlled 10M fixture, no bloom calculation).
+Tiny affected Compact parts may rebuild their small index. Physical ALTER DELETE
+and merges rebuild index files as they rewrite data; the same fixture's physical
+delete took 2.283 versus 2.741 seconds, including 324 ms of bloom calculation.
+Budget and monitor that index cost alongside disk and merge work rather than
+attributing all synchronous DELETE latency to index calculation.
 
 ## Disposable acceptance fixture
 
