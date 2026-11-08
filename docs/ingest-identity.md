@@ -20,11 +20,11 @@ headers do not participate. Search normalization and today's admission rules mus
 never redefine stored identity. Stored v1 identity uses the original payload and
 stored timestamp directly. One malformed legacy payload is rejected individually
 as `stored_event_unreadable`; it cannot block healthy siblings or free its id.
-Unprefixed receipts exist only in pre-merge development deployments of this branch,
-including the shared dev DB; released master never created them. This compatibility
-path is not required by an ordinary release upgrade. Unprefixed pending receipts retain the old normalized-column comparison until
-stored evidence or reinsertion upgrades them. Frozen 3a1541f fixtures and literal
-legacy/v1 digest vectors protect this rollout path.
+Early development deployments may contain unprefixed receipts; ordinary released
+deployments do not require this compatibility path. Unprefixed pending receipts
+retain the old normalized-column comparison until stored evidence or reinsertion
+upgrades them. Frozen legacy fixtures and literal legacy/v1 digest vectors protect
+this compatibility path.
 
 Confirmed receipts are authoritative for ten minutes. After reading the requested
 ids, ingest expires only those with an old non-null `confirmedAt`, in one guarded
@@ -43,29 +43,16 @@ and expiry lock the matching tuple only after checking its exact key; a missing
 key's successor, including another project's row, must never be locked or changed.
 Confirmation retains key order and the original project/id ownership conditions.
 
-An equality-only LATERAL probe was insufficient: a fresh project's stale statistics
-could choose the project/confirmedAt index once per event, filtering the entire
-project repeatedly. A real HTTP reproduction at 33a0553 took 3.06 seconds for one
-batch, including 1.37 seconds in prior lookup and 1.49 seconds in confirmation;
-ClickHouse used about 90 ms. Captured plans showed the secondary index until
-auto-ANALYZE refreshed statistics. Queries were unnamed, pool waits negligible,
-and the slow statements were active without lock waits. A passing short diagnostic
-had missed that plan transition.
-
-On an owned 20000-row stale-statistics fixture, the equality probe filtered 19999
-rows per id and took 1.256 seconds for 1000 hits; the ordered seek took 4.2 ms.
-Plans for prior lookup, confirmation and targeted expiry all used the primary key
-both before and after ANALYZE. Actual helper timings were about 8/23/10 ms before
-and 9/22/11 ms after. These are shared-service diagnostics, not production latency
-guarantees. Earlier cold-cache and interrupted attempts remain in the evidence
-record; they do not establish a statistics-independent plan.
+An equality-only LATERAL probe can choose the project/confirmedAt secondary index
+once per event when project statistics are stale, filtering the entire project
+repeatedly. The ordered primary-key seek avoids that scan pattern. Verify plans
+for prior lookup, confirmation and targeted expiry with both stale and refreshed
+statistics; a short diagnostic with fresh statistics can miss the transition.
 
 A bloated, nearly empty table defeats the ordered seek without a guard. After a large
 backlog is deleted or rolled back, autovacuum records few live rows while the heap
-and index pages remain. On the shared development database (33 estimated live rows
-in a 14364-page heap), the planner priced one sequential scan plus sort per id below
-the primary-key seek. One lookup of 1000 fresh ids touched 14,364,000 buffers
-(2446 ms execution, 2.6 s wall), and its inflated cost also enabled JIT. Prior lookup, confirmation and targeted
+and index pages remain. The planner can price a sequential scan plus sort per id below the primary-key
+seek, and its inflated cost can also enable JIT. Prior lookup, confirmation and targeted
 expiry therefore run in a short transaction that first sets `enable_seqscan`,
 `enable_bitmapscan`, `enable_sort`, `enable_incremental_sort` and `jit` off with
 transaction-local `set_config(..., true)`. Every alternative plan (a sequential,

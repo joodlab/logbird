@@ -59,8 +59,7 @@ can cover supported database engines, but Redis/Dragonfly need their engine-spec
   A successful migration image/Job cannot establish API/worker runtime packaging.
 - **Native-restore mutation versions:** [issue #75](https://github.com/joodlab/logbird/issues/75)
   records correct totals immediately after native restore, followed by doubled
-  rollups after failed-retention repair. The self-host investigation and owner's
-  2026-11-07 root-cause update identify a restore-specific mismatch between preserved
+  rollups after failed-retention repair. The restore investigation identified a restore-specific mismatch between preserved
   part mutation versions and newly allocated mutation IDs. Ordinary failed-run retry
   without restore was exact; this is a distinct restore gate, not proof that every
   retry doubles aggregates. [Live tracker #77](https://github.com/joodlab/logbird/issues/77)

@@ -1,5 +1,5 @@
 /**
- * Support-impersonation proof (PR #69 round 2) against a REAL local stack (app :4600, server :4601, worker).
+ * Support-impersonation verification against a local stack (app :4600, server :4601, worker).
  *
  *   AXE=/path/to/axe.min.js OUT=../../marketing/captures/2026-11-07-impersonation-visible node scripts/support-proof.mjs
  *
@@ -12,7 +12,7 @@
  *  - keyboard on #70's grid: the support links in rows are not tab stops; the row's name says who was at the keyboard;
  *    Enter on a row opens the sheet; Enter on a support link opens only the agent page (Back has no `ev`);
  *    Ctrl+End lands on exactly the last loaded row of a 10k-event result;
- *  - round 3: a user OR on the agent page returns only that agent's events; the agent page opens on 7 days; a failed
+ *  - a user OR on the agent page returns only that agent's events; the agent page opens on 7 days; a failed
  *    summary query shows the page banner and "Couldn't load" in its panel, and Retry recovers every failed panel; the
  *    unknown-agent page shows only its empty state; Ctrl K says when the agent lookup failed; at 390px the support pill
  *    and the action name never overlap;
@@ -316,7 +316,7 @@ try {
     { loadedAtPress, loadedAfter: loaded, focusedIndex: last.index },
   );
 
-  /* ---------------- round 3: OR on the agent page, default range, failures ---------------- */
+  /* ---------------- OR on the agent page, default range, failures ---------------- */
   // M1: the agent page's timeline with a user OR lists only that agent's events (failures exist outside support).
   const orRequests = [];
   const recordSearch = (req) => {
@@ -509,7 +509,7 @@ try {
       await p.screenshot({ path: path.join(OUT, `after-phone-${theme}-long-names-explorer.png`) });
       await p.goto(P(`/support/${agentId(0)}`));
       await settle(p, 1200);
-      // m1 (round 3): the app scrolls inside its own container, so check every section's box, not the document width.
+      // Layout check: the app scrolls inside its own container, so check every section's box, not the document width.
       const sections = await p.evaluate(() =>
         [...document.querySelectorAll('section')].map((el) => ({
           name: (el.querySelector('h2, h3, [data-slot=card-title]')?.textContent ?? el.getAttribute('aria-label') ?? '').trim().slice(0, 30),

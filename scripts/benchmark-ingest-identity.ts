@@ -5,9 +5,9 @@ import { insertEvents, normalizeEvent, read, searchEvents, toEvent, where } from
 import { closeProjectLocks, prisma, withProjectLock } from '@logbird/database';
 import { clickhouse, purgeProjectEvents } from '../apps/server/src/clickhouse';
 
-// Opt-in benchmark. Hold BOTH heavy and logbird-stack slots; check RAM before running.
+// Opt-in benchmark. Run in an isolated environment with sufficient memory and disk capacity.
 // 1M receipts, paired 1000-event INSERTs and explorer queries over 10M owned history rows.
-// Supply the cloud load owner's approved fictional source project. It is read, never modified.
+// Supply a fictional source project reserved for load testing. It is read, never modified.
 const historySource = process.argv[2];
 const expectedHead = process.argv[3];
 const variant = process.argv[4] ?? 'baseline';

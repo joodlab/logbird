@@ -337,7 +337,7 @@ describe('andQuery (OR precedence)', () => {
   });
 });
 
-describe('removeTerm with a unary NOT (round 5)', () => {
+describe('removeTerm with a unary NOT', () => {
   it('removes the NOT with its operand and keeps every other polarity', () => {
     expect(removeTerm('NOT actor:x action:y', 'actor')).toBe('action:y');
     expect(removeTerm('action:y NOT actor:x -tenant:t', 'actor')).toBe('action:y -tenant:t');

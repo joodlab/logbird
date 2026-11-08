@@ -136,7 +136,7 @@ describe('presence facet, SQL', () => {
   });
 });
 
-describe('presence filter across OR and groups (round 3)', () => {
+describe('presence filter across OR and groups', () => {
   it('constrains a whole top-level OR when toggled from the sidebar (M1)', () => {
     expect(q('outcome:failure OR outcome:denied', '*', 'include')).toBe('(outcome:failure OR outcome:denied) impersonator:*');
     expect(q('outcome:failure OR outcome:denied', '*', 'exclude')).toBe('(outcome:failure OR outcome:denied) -impersonator:*');
@@ -171,7 +171,7 @@ describe('presence filter across OR and groups (round 3)', () => {
   });
 });
 
-describe('unary NOT on the presence group (round 5)', () => {
+describe('unary NOT on the presence group', () => {
   const authored = 'NOT impersonator:(support_1 OR support_2) action:booking.modified';
 
   it('reads NOT as an exclusion and removes it with its operand, never negating another predicate', () => {

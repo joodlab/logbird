@@ -144,7 +144,7 @@ async function claimEvents(projectId: string, organizationId: string, candidates
   }
 }
 
-/** Pure classification: the orchestrator releases its claims if this phase throws. */
+/** Pure classification: the caller releases its claims if this phase throws. */
 function classifyCandidates(
   projectId: string,
   candidates: IngestCandidate[],
