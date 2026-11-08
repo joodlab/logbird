@@ -1,0 +1,37 @@
+{
+  "sourceHead": "97b03c2dd710f4fa805c525c57fc7b8395e2aa94",
+  "beforeCapture": "../2026-11-07-ingest-identity/before-*",
+  "evidence": [
+    {
+      "device": "desktop",
+      "theme": "light",
+      "width": 1440,
+      "height": 900,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round3/after-desktop-light.png"
+    },
+    {
+      "device": "desktop",
+      "theme": "dark",
+      "width": 1440,
+      "height": 900,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round3/after-desktop-dark.png"
+    },
+    {
+      "device": "phone",
+      "theme": "light",
+      "width": 390,
+      "height": 844,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round3/after-phone-light.png"
+    },
+    {
+      "device": "phone",
+      "theme": "dark",
+      "width": 390,
+      "height": 844,
+      "file": "marketing/captures/2026-11-07-ingest-identity-round3/after-phone-dark.png"
+    }
+  ],
+  "pageErrors": [],
+  "horizontalOverflow": false,
+  "browser": "bundled Chromium, one isolated context"
+}

@@ -3,7 +3,7 @@ import { closeProjectLocks, prisma } from '@logbird/database';
 import { closeRetentionQueue } from '@logbird/worker/queue';
 import { app } from './app';
 import { backfillAuthEmailHashes, flushFailedSignIns } from './auth-failures';
-import { clickhouse, queryClickhouse } from './clickhouse';
+import { clickhouse, maintenanceClickhouse, queryClickhouse } from './clickhouse';
 import { env } from './env';
 import { ingest } from './ingest';
 import { startAuditDrainer } from './outbox-delivery';
@@ -40,6 +40,7 @@ function shutdown() {
       closeProjectLocks(),
       rateLimitStore.quit(),
       clickhouse.close(),
+      maintenanceClickhouse.close(),
       queryClickhouse?.close(),
       prisma.$disconnect(),
     ]);

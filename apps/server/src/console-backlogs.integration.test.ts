@@ -123,6 +123,21 @@ it('real services: key roll + last-used client, empty-project delete, landing pr
 
     // OWNER-08: an empty, brand-new project deletes in well under a second; a project with data is still purged.
     const empty = await create('QA Fix empty');
+    // A failed/ambiguous ingest can leave an unresolved, claimed receipt while every ClickHouse table is empty (#62).
+    // The fast path must still remove it, or hourly recovery would keep failing on the deleted project.
+    await prisma.ingestReceipt.create({
+      data: {
+        projectId: empty.id,
+        eventId: `qa-fix-orphan-${randomUUID()}`,
+        organizationId: orgId,
+        fingerprint: 'qa-fix-fingerprint',
+        receivedAt: new Date(Date.now() - 3_600_000),
+        eventAt: new Date(Date.now() - 3_600_000),
+        claimedAt: new Date(Date.now() - 3_600_000),
+        confirmedAt: null,
+      },
+    });
+    expect(await prisma.ingestReceipt.count({ where: { projectId: empty.id, confirmedAt: null } })).toBe(1);
     const started = performance.now();
     const removed = await request(`/api/projects/${empty.id}?confirm=${encodeURIComponent(empty.slug)}`, 'DELETE', undefined, { cookie });
     const emptyDeleteMs = performance.now() - started;
@@ -131,6 +146,7 @@ it('real services: key roll + last-used client, empty-project delete, landing pr
     // The fast path skips only ClickHouse mutations: the PostgreSQL side of the deletion still ran in full.
     expect(await prisma.project.findUnique({ where: { id: empty.id } })).toBeNull();
     expect(await prisma.apiKey.count({ where: { projectId: empty.id } })).toBe(0);
+    expect(await prisma.ingestReceipt.count({ where: { projectId: empty.id } })).toBe(0);
     await drainTestAudit(orgId);
     const deletion = await (
       await clickhouse.query({

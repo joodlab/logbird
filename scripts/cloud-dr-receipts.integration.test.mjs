@@ -60,6 +60,8 @@ test('cloud receipt checks cover 006 and 007 engines', { skip: process.env.LOGBI
       .replaceAll('logbird.migrations', 'qa_receipt_migrations')
       .replaceAll("'event_ids_v2_mv'", `'${table}_v2_mv'`)
       .replaceAll("'event_ids_v2'", `'${table}_v2'`)
+      .replaceAll("'event_ids_v3_mv'", `'${table}_v3_mv'`)
+      .replaceAll("'event_ids_v3'", `'${table}_v3'`)
       .replaceAll("'event_ids'", `'${table}'`);
   }
 
@@ -183,6 +185,12 @@ test('cloud receipt checks cover 006 and 007 engines', { skip: process.env.LOGBI
       await expectRows('007', [old, survivor, tie, other], [old, survivor, tie, other, survivor]);
       await create(`${plain}_v2`, 'MergeTree');
       await assert.rejects(query(adapt(checks['007'][1], plain)), /engine or interrupted migration mismatch/);
+    });
+    await t.test('interrupted 008 staging objects reject an otherwise matching engine', async () => {
+      const target = `${plain}_008`;
+      await create(target, 'MergeTree');
+      await create(`${target}_v3`, 'MergeTree');
+      await assert.rejects(query(adapt(checks['007'][1], target)), /engine or interrupted migration mismatch/);
     });
   } finally {
     const failures = [];

@@ -17,9 +17,20 @@ export async function claimAuditEvents(now = new Date(), id?: string) {
     return rows.map((row) => ({ ...row, attempts: row.attempts + 1, nextAttemptAt: lease }));
   });
 }
+async function settleDeletedWorkspace(row: AuditOutbox, where: Prisma.AuditOutboxWhereInput, now: Date) {
+  if (!row.stream.startsWith('ws:')) return false;
+  if (await prisma.organization.findUnique({ where: { id: row.stream.slice(3) }, select: { id: true } })) return false;
+  const settled = await prisma.auditOutbox.updateMany({
+    where: { ...where, quarantinedAt: null },
+    data: { deliveredAt: now, lastError: 'workspace_deleted', quarantinedAt: null },
+  });
+  if (settled.count) console.info(JSON.stringify({ event: 'audit.delivery_moot', id: row.id, stream: row.stream, reason: 'workspace_deleted' }));
+  return true;
+}
 async function deliverClaimed(row: AuditOutbox, deliverAuditEvent: DeliverAuditEvent, now = new Date()) {
   // attempts fences late results from an expired lease; they cannot overwrite a newer delivery attempt.
   const where = { id: row.id, namespace: auditNamespace(), deliveredAt: null, attempts: row.attempts };
+  if (await settleDeletedWorkspace(row, where, now)) return;
   try {
     const result = await deliverAuditEvent(row.stream, row.payload as AuditPayload);
     if (result.accepted !== 1 || result.rejected.length) {
@@ -33,6 +44,8 @@ async function deliverClaimed(row: AuditOutbox, deliverAuditEvent: DeliverAuditE
     }
     await prisma.auditOutbox.updateMany({ where, data: { deliveredAt: new Date(), lastError: null } });
   } catch (error) {
+    // The Organization can disappear after the first check but before the receipt FK write.
+    if (await settleDeletedWorkspace(row, where, now)) return;
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
     const lastError = ['ingest_pending', 'duplicate_id_conflict', 'invalid_event', 'audit_rejected'].includes(code)
       ? code

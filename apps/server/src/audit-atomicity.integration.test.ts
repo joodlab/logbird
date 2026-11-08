@@ -59,16 +59,19 @@ it('rolls back every owned mutation when its outbox insert fails, including all 
       data: { organizationId: org, token: randomUUID(), role: 'member', expiresAt: new Date(Date.now() + 3_600_000) },
     });
     const snapshot = async () =>
-      JSON.stringify({
-        org: await prisma.organization.findUnique({ where: { id: org } }),
-        projects: await prisma.project.findMany({ where: { organizationId: org } }),
-        keys: await prisma.apiKey.findMany({ where: { projectId: project.id } }),
-        views: await prisma.savedView.findMany({ where: { projectId: project.id } }),
-        links: await prisma.inviteLink.findMany({ where: { organizationId: org } }),
-        members: await prisma.member.findMany({ where: { organizationId: org } }),
-        session: await prisma.session.findFirst({ where: { userId: outsider }, select: { id: true, activeOrganizationId: true } }),
-        outbox: await prisma.auditOutbox.count({ where: { stream: `ws:${org}` } }),
-      });
+      JSON.stringify(
+        {
+          org: await prisma.organization.findUnique({ where: { id: org } }),
+          projects: await prisma.project.findMany({ where: { organizationId: org } }),
+          keys: await prisma.apiKey.findMany({ where: { projectId: project.id } }),
+          views: await prisma.savedView.findMany({ where: { projectId: project.id } }),
+          links: await prisma.inviteLink.findMany({ where: { organizationId: org } }),
+          members: await prisma.member.findMany({ where: { organizationId: org } }),
+          session: await prisma.session.findFirst({ where: { userId: outsider }, select: { id: true, activeOrganizationId: true } }),
+          outbox: await prisma.auditOutbox.count({ where: { stream: `ws:${org}` } }),
+        },
+        (_key, value) => (typeof value === 'bigint' ? value.toString() : value),
+      );
     const before = await snapshot(),
       base = `/api/projects/${project.id}`;
     control.fail = true;

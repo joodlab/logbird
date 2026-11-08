@@ -136,7 +136,7 @@ try {
   assert.ok(stats.eventsLast24h >= 4);
   assert.ok(stats.lastEventAt);
   await api(`${base}?confirm=${encodeURIComponent(p.slug)}`, 'DELETE');
-  for (const table of ['events', 'events_by_minute', 'entities', 'attribute_keys']) {
+  for (const table of ['events', 'events_by_minute', 'entities', 'attribute_keys', 'event_ids']) {
     const rows = await (
       await ch.query({ query: `SELECT count() n FROM ${table} WHERE project_id={p:String}`, query_params: { p: p.id }, format: 'JSONEachRow' })
     ).json<{ n: string }>();

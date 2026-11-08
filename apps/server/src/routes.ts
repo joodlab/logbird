@@ -182,7 +182,7 @@ export const managementRoutes = new Hono<AppEnv>()
       const project = c.get('project');
       const [stats, lastRun, scheduler] = await Promise.all([
         retentionStats(clickhouse, project.id, c.req.valid('query').preview),
-        prisma.retentionRun.findFirst({ where: { projectId: project.id }, orderBy: { startedAt: 'desc' } }),
+        prisma.retentionRun.findFirst({ where: { projectId: project.id, kind: 'retention' }, orderBy: { startedAt: 'desc' } }),
         retentionQueue.getJobScheduler('retention-hourly'),
       ]);
       return c.json(

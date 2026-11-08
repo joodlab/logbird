@@ -5,6 +5,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
+it('retries ingest_pending 503 after Retry-After with identical ids and body', async () => {
+  vi.useFakeTimers();
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'ingest_pending' } }), { status: 503, headers: { 'Retry-After': '1' } }))
+    .mockResolvedValueOnce(new Response('{}', { status: 202 }));
+  vi.stubGlobal('fetch', fetch);
+  const sdk = new Logbird({ apiKey: 'fake', endpoint: 'http://test' });
+  sdk.track({ action: 'retry.pending', id: 'immutable' });
+  const flushed = sdk.flush();
+  await vi.advanceTimersByTimeAsync(999);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  await flushed;
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch.mock.calls[0]?.[1].body).toBe(fetch.mock.calls[1]?.[1].body);
+  expect(sdk.dropped).toBe(0);
+  await sdk.shutdown();
+});
 it('batches and retries the identical body with UUIDv7 ids', async () => {
   vi.useFakeTimers();
   const fetch = vi
@@ -190,4 +209,29 @@ it.each(['null', 'undefined', 'throw'])('filters %s without overflow diagnostics
   expect(sdk.dropped).toBe(0);
   expect(onDrop).not.toHaveBeenCalled();
   expect(onError).toHaveBeenCalledTimes(mode === 'throw' ? 1 : 0);
+});
+
+it('surfaces duplicate_id_conflict guidance and drops only the conflicting index', async () => {
+  const onError = vi.fn(),
+    onDrop = vi.fn();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          accepted: 1,
+          ids: ['healthy'],
+          rejected: [{ index: 0, code: 'duplicate_id_conflict', reason: 'duplicate_id_conflict: original is kept; send a correction with a new id' }],
+        }),
+        { status: 202 },
+      ),
+    ),
+  );
+  const sdk = new Logbird({ apiKey: 'fake', endpoint: 'http://test', onError, onDrop });
+  sdk.track({ id: 'conflict', action: 'different' });
+  sdk.track({ id: 'healthy', action: 'original' });
+  await sdk.shutdown();
+  expect(onDrop.mock.calls.map(([event]) => event.id)).toEqual(['conflict']);
+  expect(onError.mock.calls[0]?.[0].message).toContain('duplicate_id_conflict: original is kept');
+  expect(sdk.queueSize).toBe(0);
 });

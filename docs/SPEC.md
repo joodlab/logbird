@@ -29,7 +29,7 @@ what changed*.
 ```
 apps/app      TanStack Start (React 19, TanStack Router/Query/Table/Virtual/Form), shadcn design system  :4600
 apps/server   Hono on Node: better-auth, internal /api, public /v1 ingest+read, OpenAPI (+Scalar docs) :4601
-apps/worker   BullMQ worker (Dragonfly): retention purge (hourly + on-demand), housekeeping
+apps/worker   BullMQ workers (Dragonfly): retention purge (hourly + on-demand), receipt expiry (minute)
 packages/contracts   zod schemas + route table shared by server and app (source of truth for the API)
 packages/database    Prisma 7 + @prisma/adapter-pg (Postgres): auth tables, orgs, projects, keys, views
 packages/clickhouse  @clickhouse/client wrapper, SQL migrations, query builder, query-language parser
@@ -53,6 +53,28 @@ Ingestion path (v0): `POST /v1/events` → validate/normalize → ClickHouse `IN
 `async_insert=1, wait_for_async_insert=1` (ack only after ClickHouse has the rows) → 202. Large batches are
 inserted in one statement. A Postgres/queue buffer can be added later behind the same API.
 
+Ingestion reserves immutable ids in Postgres before ClickHouse writes. Confirmed
+receipts form a ten-minute cache; older ids use the additive `event_ids` MergeTree
+index, fetching full payload only for hits. Sorted bulk claims arbitrate across
+API processes without a transaction spanning ClickHouse I/O. A 60-second lease
+and bounded async flush permit exclusive per-project recovery of ambiguous writes.
+Recovery checks raw evidence, repairs partial destinations, confirms stored rows
+or readies absent writes for an exact retry with the original receipt clock. Ready
+claims expire under exclusive recovery after the ten-minute grace period; ordinary
+retention never releases unresolved claims. `503 ingest_pending` includes settled
+202 response fields plus pending `indices`/`eventIds` and a lease-aware Retry-After.
+Rollup-backed console reads (entities, overview, suggestions; fields is also guarded)
+read a monotonic project maintenance generation and fence before and after ClickHouse.
+Maintenance increments the generation in the same short transaction that persists its
+running fence, before any destructive statement. Changed generations or an unfinished
+fence discard the response with `503 retention_unavailable` and Retry-After, including
+repairs that finish during a read. Readers hold neither a project lock nor a Postgres
+connection across ClickHouse I/O. Raw-event reads retain the existing **not a snapshot**
+semantics: concurrent ingest/retention can change results, and rebuilds do not empty raw events.
+
+The SDK retries the identical body. See [ingest-identity.md](ingest-identity.md) for
+migration, failure classification, permissions, cleanup and proof limits.
+
 ## 3. Recommended event envelope
 
 Supplied `occurredAt` should be ISO-8601 or epoch milliseconds between receive time minus 3650 days
@@ -63,7 +85,7 @@ Omitted values use receive time.
 
 ```jsonc
 {
-  "id": "01J…",                     // idempotency key (UUIDv7/ULID). Server generates when absent.
+  "id": "01J…",                     // stable event id; retries resend identical content. Generated when absent.
   "action": "hotel.policy.updated", // REQUIRED. dot-namespaced: <entity>.<sub>.<verb>
   "occurredAt": "2026-11-04T14:32:10.123Z",
   "environment": "production",
@@ -86,6 +108,22 @@ Omitted values use receive time.
 ```
 
 Semantics worth documenting to users:
+- **id is immutable within a project**, regardless of `occurredAt`. Exact retries
+  appear in `ids` as accepted, without another raw insert or rollup increment.
+  Conflicting canonical full input or resolved timestamp is reported in `rejected`
+  with `code: duplicate_id_conflict` and a code-first reason; the original is kept. Recursively
+  reordered object keys are equivalent; array order and all string contents matter,
+  including values beyond indexing caps. SDK headers do not participate. Omitted
+  or invalid `occurredAt` uses the first receipt clock. Identity digests are versioned.
+  Corrections need a fresh id and may link through `context.parentEventId`.
+  Unconfirmed competing claims return `503 ingest_pending` with a lease-aware
+  Retry-After. Details include the settled 202 response fields plus `indices` and
+  `eventIds`; every index outside `indices` is settled. Healthy siblings commit first. Identity lookup
+  failures return retryable `503 ingest_unavailable`. Expired leases reconcile under
+  the exclusive project lock after draining the async queue. Ordinary retention
+  never releases unresolved receipts. After confirmed retention deletion and cleanup,
+  an id may be used again. Unsafe ids (NUL, lone surrogates or >256 trimmed UTF-16 units)
+  are per-event `invalid_event_id` rejections, so healthy siblings can proceed.
 - **actor = who caused it** (person, API key, scheduler…); **executor = who performed it** (api, worker, job,
   attempt). A worker doing work requested by Lina has `actor=Lina`, `executor=crm-worker`. Scheduled runs use
   `actor.type=system`.
@@ -200,9 +238,10 @@ Runs heartbeat every 30 seconds with a ten-minute lease (legacy null heartbeats 
 Recovery under the project ingestion lock marks expired running runs failed with error `abandoned`.
 Requests recover lazily and enqueue a retry; worker startup revisits running projects and the hourly
 sweep retries all projects, continuing past individual failures. Live running runs return 503 retention_unavailable with Retry-After: 1 for project data reads
-and project setup; retention status remains readable. Readiness checks are short non-transactional
+and project setup, including retention status while its project read fence is active. Readiness checks are short non-transactional
 statements, and no read holds a project lock or a Postgres connection during ClickHouse I/O.
-An already-started read/export is not a snapshot and may overlap a purge.
+Raw-event reads and exports are not snapshots and may overlap a purge. Rollup-backed reads compare
+maintenance generation and fence before/after querying; an overlapping rebuild returns 503 even if completed.
 Writers use session advisory locks held on a separate pool (16 connections per process), never a transaction:
 ingest (including Logbird's own audit writes) takes a **shared** data lock, so concurrent ingests for one project
 coexist; maintenance (retention, sample replacement/removal, deletion, policy changes) takes it **exclusive**. A
@@ -213,10 +252,12 @@ Retry-After: 1 (the SDK retries), and no Prisma connection ever waits behind a p
 The lock statements also have a one-second lock timeout and two-second statement/connection budgets.
 No Postgres transaction spans ClickHouse work. Prisma uses its own independent pool; connection_limit
 in DATABASE_URL sets that pool size (default 10). Callbacks are exclusive sections, not transactions.
-Sample/deletion reads may see transient aggregates during maintenance; once rebuilt, rollups reflect
-surviving rows exactly because concurrent writers never enter the exclusive section.
-Failed runs allow reads and ingestion: surviving raw events remain accessible, but aggregates may be
-incomplete until a successful retry rebuilds them. The retention status endpoint exposes the failure.
+Sample removal persists the same ingest-repair fence and generation before rebuilding rollups.
+Once rebuilt, rollups reflect surviving rows exactly because concurrent writers never enter the exclusive section.
+Failed ordinary retention runs allow reads and ingestion; aggregates may be incomplete until a successful retry.
+Failed ingest-repair runs keep project reads fenced while healthy ingestion can continue. The queued retention
+job owns their retry; matching ingest requests do not repeat the failed rebuild and poll with Retry-After: 60.
+The retention status endpoint exposes ordinary retention failures once the project read fence allows access.
 Recovery never restores expired events. Workspace setup reports `retentionBusy: true` per affected
 project instead of failing the workspace; its progress is a placeholder (0, nextStep null,
 firstEventAt null), not measured emptiness.
@@ -256,7 +297,7 @@ The **route table and every request/response schema live in `packages/contracts`
 
 `GET /api/projects/:projectId/retention?preview=30` returns retentionDays,
 oldestEventAt (null for an empty project), nextPurgeAt (next registered scheduler
-occurrence, null when unregistered), and lastRun (startedAt, finishedAt, status,
+occurrence, null when unregistered), and lastRun for kind=retention only (startedAt, finishedAt, status,
 cutoff, deletedEvents, error). Status uses the worker values running/completed/failed.
 previewDeletedEvents counts stored rows older than the candidate cutoff, or is null
 when preview is omitted. This is an approximate logical event count because storage
@@ -294,8 +335,9 @@ say which client last used a key before it is revoked.
 
 `DELETE /api/projects/:projectId` purges stored data under the exclusive project lock. Only the ClickHouse mutations
 are conditional: when no project-scoped ClickHouse table (discovered from `system.columns`) holds a row for the
-project, they are skipped and an empty project deletes in well under a second. Every non-ClickHouse cleanup step runs
-on both paths.
+project (events, rollups, event ids), they are skipped and an empty project deletes in well under a second. Every
+non-ClickHouse cleanup step runs on both paths — in particular the project's PostgreSQL ingest receipts are always
+removed, so none can outlive the project and fail recovery.
 
 `GET /api/onboarding/workspace-name` (session, self) returns `{ name }`: a workspace name derived from the registrable
 domain of the signed-in user's email (`lina@eu.acme.co.uk` → "Acme"), or `null` for personal mailbox providers and for
@@ -391,13 +433,13 @@ server configuration. See the query-language security model for the verification
 
 better-auth tables (user, session, account, verification) + organization plugin (organization, member,
 invitation) + app tables:
-- `Project { id, organizationId, name, slug (unique per org), description?, retentionDays=90, createdAt, updatedAt }`
+- `Project { id, organizationId, name, slug (unique per org), description?, retentionDays=90, maintenanceGeneration BigInt=0, createdAt, updatedAt }`
 - `ApiKey { id, projectId, name, kind (ingest|read), prefix, hash (unique), createdById?, createdAt, lastUsedAt?, lastUsedUserAgent?, replacesKeyId?, revokedAt? }`
   (`replacesKeyId`: set on a rolled key, pointing at the key it replaces; `lastUsedUserAgent`: sampled with `lastUsedAt`)
 - `SavedView { id, projectId, name, description?, state Json, createdById?, createdAt }` — `state` = `{ q?, lang?, range?,
   columns?, labels? }`; `labels` (≤ 20) are display names for entity terms of `q` (`tenant:biz_5` → "Bayt Al Rimal"),
   purely presentational
-- `RetentionRun { id, projectId, retentionDays, cutoff, startedAt, finishedAt?, status, error? }`
+- `RetentionRun { id, projectId, kind=retention (retention|ingest_repair), retentionDays, cutoff, startedAt, heartbeatAt?, finishedAt?, status, deletedEvents?, error? }`
 
 ## 7. Auth
 
