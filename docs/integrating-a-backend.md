@@ -24,7 +24,9 @@ workspace app with:
 pnpm --filter <your-workspace-app> add '@logbird/sdk@workspace:*'
 ```
 
-For a backend outside the workspace, clone Logbird beside it and link the source:
+For a backend outside the workspace, clone Logbird beside it. Run `pnpm install`
+in the Logbird clone first so the linked source can resolve its dependencies. Then
+run this command from your backend project:
 
 ```sh
 pnpm add @logbird/sdk@link:../logbird/packages/sdk

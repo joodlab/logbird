@@ -235,7 +235,7 @@ try {
   await page.goto(P('/events', '-impersonator:*'));
   await settle(page);
   const group = page.locator('section', { has: page.getByRole('button', { name: /Done by support/ }) }).first();
-  // n5: a stable name plus aria-pressed (APG toggle), not a label that also changes with the state.
+  // a stable name plus aria-pressed (APG toggle), not a label that also changes with the state.
   check(
     '− on "Any support agent" is a pressed toggle with a stable name',
     (await group.locator('button[aria-label="Hide what support did"][aria-pressed="true"]').count()) === 1,
@@ -317,7 +317,7 @@ try {
   );
 
   /* ---------------- OR on the agent page, default range, failures ---------------- */
-  // M1: the agent page's timeline with a user OR lists only that agent's events (failures exist outside support).
+  // the agent page's timeline with a user OR lists only that agent's events (failures exist outside support).
   const orRequests = [];
   const recordSearch = (req) => {
     if (/\/events\?/.test(req.url())) orRequests.push(new URL(req.url()).searchParams.get('q'));
@@ -338,12 +338,12 @@ try {
     },
   );
 
-  // M2: the agent page opens on 7 days.
+  // the agent page opens on 7 days.
   await page.goto(`${BASE}/p/${projectId}/support/${agentId(2)}`);
   await settle(page, 1200);
   check('agent page defaults to the last 7 days', (await page.getByText('Done as support · Last 7 days').count()) === 1);
 
-  // M2/m3: a summary query over budget → page banner + "Couldn't load" in that panel; Retry recovers everything.
+  // a summary query over budget → page banner + "Couldn't load" in that panel; Retry recovers everything.
   let failActions = true;
   let opened = Date.now();
   const actionRequests = [];
@@ -362,7 +362,7 @@ try {
   opened = Date.now();
   await page.goto(`${BASE}/p/${projectId}/support/${agentId(2)}?range=30d`);
   const banner = page.getByTestId('agent-page-failure');
-  // m2: an over-budget summary is not retried. The banner shows at once, and no request follows the failure even after
+  // an over-budget summary is not retried. The banner shows at once, and no request follows the failure even after
   // longer than any retry backoff (1 s, 2 s). The dev server's StrictMode double mount issues the first request twice
   // at mount (about 1 ms apart, the first cancelled), so "no retry" means no request after the banner.
   await banner.waitFor({ timeout: 10_000 });
@@ -418,7 +418,7 @@ try {
   );
   await page.unroute(/\/facets\?.*field=action/);
 
-  // n3: unknown agent → only the empty state (no callout, no zero tiles).
+  // unknown agent → only the empty state (no callout, no zero tiles).
   await page.goto(`${BASE}/p/${projectId}/support/qa_support_nobody?range=1h`);
   await settle(page, 1200);
   check(
@@ -428,7 +428,7 @@ try {
       (await page.getByText('These are the actions').count()) === 0,
   );
 
-  // M2: Ctrl K says when the agent lookup failed.
+  // Ctrl K says when the agent lookup failed.
   await page.route(/\/suggest\?.*field=impersonator/, (route) =>
     route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'query_unavailable', message: 'busy' } }) }),
   );
@@ -486,7 +486,7 @@ try {
           const box = r.getBoundingClientRect();
           return [...r.querySelectorAll('a[href*="/support/"]')].some((a) => a.getBoundingClientRect().right > box.right + 1);
         }).length;
-        // m1: the pill and the action name next to it never overlap.
+        // the pill and the action name next to it never overlap.
         const overlap = rows.filter((r) =>
           [...r.querySelectorAll('a[href*="/support/"]')].some((a) => {
             const next = a.nextElementSibling?.nextElementSibling ?? a.nextElementSibling;

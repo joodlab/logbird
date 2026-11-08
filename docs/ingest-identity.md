@@ -198,7 +198,7 @@ for a second index and enough time to repeat a failed full copy on a large insta
 
 ### Granularity experiment (10M derived pointers)
 
-On the shared local ClickHouse, 20 measured batches plus three warmups per case,
+On local ClickHouse, 20 measured batches plus three warmups per case,
 with 1,000 ids per batch and a 50/50 UUIDv4/UUIDv7 history. Every miss sample uses
 fresh ids, avoiding condition-cache reuse. These are native lookup timings, not
 HTTP ingestion timings. Each table was merged to one part before lookups.
