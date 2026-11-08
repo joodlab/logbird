@@ -1,0 +1,18 @@
+{
+  "tables": {
+    "events": 0,
+    "event_ids": 0,
+    "events_by_minute": 0,
+    "entities": 0,
+    "attribute_keys": 0
+  },
+  "pg": {
+    "users": 0,
+    "organizations": 0,
+    "projects": 0,
+    "members": 0,
+    "outbox": 0,
+    "leases": 0,
+    "receipts": 0
+  }
+}

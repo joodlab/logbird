@@ -1,0 +1,286 @@
+{
+  "mode": "before",
+  "revision": "5ad041f",
+  "apiRevision": "eadd29b72ba9b280962e7441839dafbc773343dc",
+  "fixture": {
+    "userId": "f55a5200-67c3-4393-ae1e-11831d9b01d7",
+    "orgId": "qa-export-waiting-e24c0082-9500-416d-a918-f8bd7073b14f",
+    "projectId": "cmw849x3d0000l0yoiy96copl"
+  },
+  "screenshots": [
+    "before-light-1440-waiting.png",
+    "before-dark-1440-waiting.png",
+    "before-light-390-waiting.png",
+    "before-dark-390-waiting.png"
+  ],
+  "videos": [
+    "before-light-1440-interactions.webm",
+    "before-light-390-interactions.webm"
+  ],
+  "requests": [
+    {
+      "scene": "light-1440",
+      "path": "/api/auth/get-session",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/histogram",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/events",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/views",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/setup",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/auth/get-session",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/histogram",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/events",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/views",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/setup",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-1440",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/auth/get-session",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/histogram",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/events",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/views",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/setup",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "light-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/auth/get-session",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/me",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/histogram",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/events",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/views",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/setup",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    },
+    {
+      "scene": "dark-390",
+      "path": "/api/projects/cmw849x3d0000l0yoiy96copl/facets",
+      "status": 200
+    }
+  ],
+  "expectedCancellations": [],
+  "expectedFailures": [],
+  "errors": [],
+  "downloads": []
+}
