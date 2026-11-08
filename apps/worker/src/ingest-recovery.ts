@@ -2,6 +2,7 @@ import {
   ASYNC_INSERT_FLUSH_BOUND_MS,
   type ClickHouseClient,
   INGEST_CLAIM_LEASE_MS,
+  projectMaintenance,
   rawEventIdentities,
   repairEventIndex,
   retryFingerprint,
@@ -74,7 +75,14 @@ export interface IngestRecoveryOptions {
   candidates?: { input: unknown; eventId: string }[];
 }
 /** Run outside a shared lock. Only matching retries, terminal grace cleanup and operators enter recovery. */
-export async function recoverProjectIngest(ch: ClickHouseClient, projectId: string, { eventIds, replay, candidates }: IngestRecoveryOptions = {}) {
+export async function recoverProjectIngest(
+  client: ClickHouseClient,
+  projectId: string,
+  { eventIds, replay, candidates }: IngestRecoveryOptions = {},
+) {
+  // Tagged as this project's maintenance for every caller (server, worker, scripts/reconcile-ingest.ts): deletion can
+  // stop a rebuild or index repair that a failed call left running in ClickHouse.
+  const ch = projectMaintenance(client, projectId);
   const now = Date.now();
   const expiredAt = new Date(now - INGEST_CLAIM_LEASE_MS - ASYNC_INSERT_FLUSH_BOUND_MS);
   const readyCutoff = new Date(now - INGEST_RECEIPT_WINDOW_MS);

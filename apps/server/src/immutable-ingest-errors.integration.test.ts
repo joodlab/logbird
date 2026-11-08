@@ -48,6 +48,9 @@ it('DELETE project purges confirmed and unresolved receipts before returning 204
         receivedAt: now,
         eventAt: now,
         confirmedAt,
+        // An unresolved claim younger than lease + flush bound may still have an insert in flight: deletion answers
+        // 503 ingest_pending for it (project-delete-race.integration.test.ts). This one is past that window.
+        ...(confirmedAt ? {} : { claimedAt: new Date(now.getTime() - 80_000) }),
       })),
     });
     expect(await prisma.ingestReceipt.count({ where: { projectId } })).toBe(3);

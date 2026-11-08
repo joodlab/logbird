@@ -15,7 +15,7 @@ import { QueryInput, type QueryInputHandle } from '@/components/query-input/quer
 import { api, langParam } from '@/lib/api/client';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
-import { queryProblem, reasonTitle } from '@/lib/query-error';
+import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import { andQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
@@ -418,14 +418,15 @@ export function Explorer({
           )}
         </div>
         <div className="flex items-center justify-between gap-3 text-muted-foreground text-xs">
-          <span className={cn('min-w-0 tabular-nums', problem && 'flex items-center gap-1.5 text-destructive')} aria-live="polite">
+          <span className={cn('min-w-0 tabular-nums', problem && 'flex items-start gap-1.5 text-destructive sm:items-center')} aria-live="polite">
             {problem ? (
               <>
-                <CircleAlertIcon className="size-3.5 shrink-0" />
-                <span className="min-w-0 truncate" title={[problem.message, problem.details?.hint].filter(Boolean).join(' — ')}>
+                <CircleAlertIcon className="mt-px size-3.5 shrink-0 sm:mt-0" />
+                {/* Phones wrap: the actionable half of the sentence must not hide behind a hover-only title. */}
+                <span className="min-w-0 sm:truncate" data-testid="query-problem" title={queryProblemText(problem, q)}>
                   <span className="font-medium">{reasonTitle(problem.details, problem.code)}</span>
-                  {problem.message && problem.message !== problem.details?.hint ? ` · ${problem.message}` : ''}
-                  {problem.details?.hint ? <span className="text-muted-foreground"> — {problem.details.hint}</span> : null}
+                  {' · '}
+                  {queryProblemText(problem, q)}
                 </span>
                 {problem.code === 'sql_mode_unavailable' ? (
                   <button

@@ -21,6 +21,7 @@ import { Loader2Icon, TriangleAlertIcon } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { toast } from 'sonner';
 import { AdminNote } from '@/components/admin-gate';
+import { PendingHint } from '@/components/pending-hint';
 import { RetentionPicker } from '@/components/retention-picker';
 import { SettingsSection } from '@/components/settings-section';
 import { Timestamp } from '@/components/timestamp';
@@ -307,6 +308,11 @@ function LowerRetentionDialog({
             />
             {error ? <p className="text-destructive text-xs">{error}</p> : null}
           </div>
+          <PendingHint
+            pending={pending}
+            slow="Deleting events older than the new window…"
+            slower="Large projects can take a minute. Search keeps working; the project briefly answers “busy” while rollups rebuild."
+          />
           <AlertDialogFooter>
             <AlertDialogCancel type="button">Keep {formatRetention(project.retentionDays)}</AlertDialogCancel>
             <Button disabled={!matches || pending} type="submit" variant="destructive">

@@ -1,11 +1,21 @@
 import { queryErrorDetailsSchema } from '@logbird/contracts';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { attacks, positives } from '../../../packages/clickhouse/test-fixtures/sql';
 import { client, endpoint, login } from '../../../scripts/http';
 
 const enabled = process.env.SEARCH_V2_HTTP === '1';
 describe.runIf(enabled)('Search v2 HTTP on real local services', () => {
   let cookie: string, p: string, api: ReturnType<typeof client>, readKey: string;
+  // Fixture projects live in the demo workspace only for the duration of the suite: deleting them afterwards keeps
+  // "Search v2 security …" projects from piling up in the Projects list and from becoming the landing project.
+  const created: { id: string; slug: string }[] = [];
+  afterAll(async () => {
+    if (!api) return;
+    for (const project of created) {
+      const r = await api(`/api/projects/${project.id}?${new URLSearchParams({ confirm: project.slug })}`, 'DELETE');
+      expect(r.status).toBe(204);
+    }
+  });
   it('creates two isolated fictional projects with distinct events', async () => {
     cookie = await login('demo@logbird.local');
     api = client(cookie);
@@ -13,6 +23,7 @@ describe.runIf(enabled)('Search v2 HTTP on real local services', () => {
     await api('/api/auth/organization/set-active', 'POST', { organizationId: me.organizations.find((o: { name: string }) => o.name === 'Acme').id });
     for (const n of ['a', 'b']) {
       const c = await (await api('/api/projects', 'POST', { name: `Search v2 security ${n} ${Date.now()}` })).json();
+      created.push({ id: c.project.id, slug: c.project.slug });
       if (n === 'a') {
         p = c.project.id;
         readKey = (await (await api(`/api/projects/${p}/keys`, 'POST', { name: 'Security read', kind: 'read' })).json()).secret;

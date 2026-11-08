@@ -1,5 +1,6 @@
 export * from './client';
 export * from './identity';
+export * from './maintenance-tag';
 export * from './migrations';
 export * from './normalize';
 export * from './queries';
