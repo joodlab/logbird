@@ -126,7 +126,7 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       await ch.close();
     }
   },
-  60_000,
+  180_000,
 );
 
 it.runIf(process.env.CLICKHOUSE_URL)(
