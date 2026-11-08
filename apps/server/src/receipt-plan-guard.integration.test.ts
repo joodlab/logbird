@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  confirmIngestReceipts,
   confirmIngestReceiptsSql,
   expireIngestReceiptsSql,
   findIngestReceiptsSql,
@@ -123,4 +124,43 @@ it('receipt probes and sweep batches stay index-driven with fresh, large, stale 
     { maxWait: 10_000, timeout: 280_000 },
   );
   console.log(JSON.stringify({ event: 'qa.receipt_plan_guard', evidence }));
+});
+
+it("a confirmation waiting on a row lock past Prisma's 5 s batch default still commits", async () => {
+  const org = `qa-plan-org-${randomUUID()}`;
+  const project = `qa-plan-${randomUUID()}`;
+  await prisma.organization.create({ data: { id: org, name: 'QA Plan guard', slug: org, createdAt: new Date() } });
+  try {
+    await prisma.ingestReceipt.create({
+      data: { projectId: project, organizationId: org, eventId: 'locked', fingerprint: 'v1:old', receivedAt: new Date(0), eventAt: new Date(0) },
+    });
+    let confirmation: Promise<void> | undefined;
+    await prisma.$transaction(
+      async (tx) => {
+        // A sweep batch or another writer holds the row while the post-ClickHouse confirmation arrives.
+        await tx.$queryRaw`SELECT 1 FROM "IngestReceipt" WHERE "projectId"=${project} AND "eventId"='locked' FOR UPDATE`;
+        const [holder] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() pid`;
+        confirmation = confirmIngestReceipts(project, [{ eventId: 'locked', fingerprint: 'v1:new', receivedAt: new Date(1), eventAt: new Date(2) }]);
+        void confirmation.catch(() => undefined); // Awaited after the holder commits.
+        for (let attempt = 0; ; attempt++) {
+          const [row] = await prisma.$queryRaw<
+            { n: number }[]
+          >`SELECT count(*)::int n FROM pg_stat_activity WHERE ${holder?.pid}=ANY(pg_blocking_pids(pid))`;
+          if (row?.n) break;
+          if (attempt >= 500) throw new Error('Confirmation never waited on the row lock');
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 6500));
+      },
+      { maxWait: 10_000, timeout: 30_000 },
+    );
+    await confirmation;
+    const stored = await prisma.ingestReceipt.findFirstOrThrow({ where: { projectId: project, eventId: 'locked' } });
+    expect(stored.fingerprint).toBe('v1:new');
+    expect(stored.confirmedAt).not.toBeNull();
+  } finally {
+    await prisma.ingestReceipt.deleteMany({ where: { projectId: project } });
+    await prisma.organization.deleteMany({ where: { id: org } });
+  }
+  expect(await prisma.ingestReceipt.count({ where: { projectId: project } })).toBe(0);
 });

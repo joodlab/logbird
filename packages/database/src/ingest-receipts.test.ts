@@ -13,6 +13,7 @@ import {
   findIngestReceipts,
   INGEST_RECEIPT_SWEEP_BUDGET_MS,
   pruneIngestReceipts,
+  RECEIPT_PROBE_TRANSACTION,
   sweepIngestReceipts,
 } from './ingest-receipts';
 
@@ -41,12 +42,16 @@ it('every per-id probe runs right after its transaction-local plan guard', async
   await confirmIngestReceipts('project', [{ eventId: 'a', fingerprint: 'v1:x', receivedAt: new Date(), eventAt: new Date() }]);
   await expireIngestReceipts('project', ['a'], new Date());
   expect(transaction).toHaveBeenCalledTimes(3);
-  for (const [batch] of transaction.mock.calls) expect(batch).toHaveLength(2);
-  // Guard (execute), then probe (query), in each batch.
+  // Batch positions: Prisma executes batch entries sequentially in one transaction, so the guard (first) is
+  // planned before the probe (second). The mock cannot prove that execution order; the real-PG plan test does.
+  for (const [n, [batch, options]] of transaction.mock.calls.entries()) {
+    expect(batch).toEqual([execute.mock.results[n]?.value, query.mock.results[n]?.value]);
+    // Explicit bounds replace Prisma's 2 s / 5 s batch-transaction defaults.
+    expect(options).toEqual(RECEIPT_PROBE_TRANSACTION);
+  }
   const guards = execute.mock.calls;
   expect(guards).toHaveLength(3);
   expect(query).toHaveBeenCalledTimes(3);
-  for (const [n, order] of execute.mock.invocationCallOrder.entries()) expect(order).toBeLessThan(query.mock.invocationCallOrder[n] as number);
   for (const [sql] of guards)
     for (const setting of ['enable_seqscan', 'enable_bitmapscan', 'enable_sort', 'enable_incremental_sort', 'jit'])
       expect(sql.sql).toContain(`set_config('${setting}','off',true)`);

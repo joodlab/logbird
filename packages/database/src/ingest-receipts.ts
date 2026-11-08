@@ -5,14 +5,23 @@ import { Prisma, prisma } from './index';
  * Per-id probes must be index-driven whatever the statistics say. A drained or rolled-back receipt backlog
  * leaves a bloated, nearly empty heap: the planner then prices one seq scan + sort per id below the ordered
  * primary-key seek (or another index plus an incremental sort), and the inflated total cost JIT-compiles an
- * OLTP statement. Every alternative needs a seq scan, bitmap, sort or incremental sort; disabling them leaves
- * the primary-key seek as the only plan without a disabled node. Transaction-local; reverts at commit.
+ * OLTP statement. Every alternative needs a seq scan, bitmap, sort or incremental sort. With those disabled,
+ * the primary-key seek is the plan with the fewest disabled nodes: none beyond the input-id sort that every plan
+ * shares. Transaction-local; reverts at COMMIT or ROLLBACK.
  */
 export const RECEIPT_SEEK_GUARD = Prisma.sql`SELECT set_config('enable_seqscan','off',true), set_config('enable_bitmapscan','off',true),
   set_config('enable_sort','off',true),
   set_config('enable_incremental_sort','off',true), set_config('jit','off',true)`;
+/**
+ * Bounds for the guard's transaction (BEGIN, guard, probe, COMMIT). Prisma's 2 s queue / 5 s execution defaults
+ * must not apply: before the guard these were plain statements that queued for a connection and waited on row
+ * locks without a deadline. A confirmation after an acknowledged ClickHouse write can wait behind a sweep batch
+ * (at most about 6 s per batch); rolling it back would report a stored write as failed and force recovery.
+ * 60 s matches the claim lease and the ingest ClickHouse socket budget the request already lives within.
+ */
+export const RECEIPT_PROBE_TRANSACTION = { maxWait: 60_000, timeout: 60_000 } as const;
 async function guarded<T>(statement: Prisma.Sql) {
-  const [, rows] = await prisma.$transaction([prisma.$executeRaw(RECEIPT_SEEK_GUARD), prisma.$queryRaw<T>(statement)]);
+  const [, rows] = await prisma.$transaction([prisma.$executeRaw(RECEIPT_SEEK_GUARD), prisma.$queryRaw<T>(statement)], RECEIPT_PROBE_TRANSACTION);
   return rows;
 }
 
