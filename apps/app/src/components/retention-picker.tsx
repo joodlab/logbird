@@ -66,7 +66,7 @@ export function RetentionPicker({
               {formatRetention(days)}
               {hint ? <span className="sr-only">, {hint.toLowerCase()}</span> : null}
               {current === days ? (
-                <span className="text-xs opacity-70">
+                <span className="font-normal text-xs">
                   <span className="sr-only">, </span>current
                 </span>
               ) : null}

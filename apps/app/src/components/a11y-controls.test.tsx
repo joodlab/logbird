@@ -13,6 +13,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@logbird/ui/components/ui/dropdown-menu';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@logbird/ui/components/ui/select';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -200,5 +201,26 @@ describe('forced-colors focus (#85)', () => {
       expect(tokens(item)).toContain('focus:outline-hidden');
     }
     expect(el).toBeTruthy();
+  });
+
+  it('select items carry no unconditional outline-hidden either (no console screen renders Select yet)', async () => {
+    mount(
+      <Select defaultOpen defaultValue="30">
+        <SelectTrigger aria-label="Window">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="7">7 days</SelectItem>
+          <SelectItem value="30">30 days</SelectItem>
+        </SelectContent>
+      </Select>,
+    );
+    await settle();
+    const items = [...document.querySelectorAll('[data-slot="select-item"]')];
+    expect(items.length).toBe(2);
+    for (const item of items) {
+      expect(tokens(item)).not.toContain('outline-hidden');
+      expect(tokens(item)).toContain('focus:outline-hidden');
+    }
   });
 });
