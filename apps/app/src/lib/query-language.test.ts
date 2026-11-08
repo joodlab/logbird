@@ -297,8 +297,8 @@ describe('include / exclude', () => {
     expect(formatTerm('action', 'OR')).toBe('action:"OR"');
     expect(formatTerm('attr.note', '>5')).toBe('attr.note:">5"');
     expect(formatTerm('attr.path', '/a/b')).toBe('attr.path:"/a/b"');
-    // The server lexer splits on : [ ] { } < > too (metadata.jobName:crm:sync:bookings would not mean one value).
-    expect(formatTerm('metadata.jobName', 'crm:sync:bookings')).toBe('metadata.jobName:"crm:sync:bookings"');
+    // The server lexer splits on : [ ] { } < > too (metadata.jobName:hospitality:sync:bookings would not mean one value).
+    expect(formatTerm('metadata.jobName', 'hospitality:sync:bookings')).toBe('metadata.jobName:"hospitality:sync:bookings"');
     expect(formatTerm('attr.range', 'a[1]')).toBe('attr.range:"a[1]"');
     expect(formatTerm('action', 'booking.created')).toBe('action:booking.created');
   });

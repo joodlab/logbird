@@ -119,7 +119,7 @@ const PAGES = (ids) => [
   [`${J}/tenants`, 'tenants'],
   [`${J}/tenants/${encodeURIComponent(ids.event.tenant?.id ?? 'biz_1')}`, 'tenant'],
   [`${J}/workers`, 'workers'],
-  [`${J}/workers/business-crm-worker`, 'worker'],
+  [`${J}/workers/guest-sync-worker`, 'worker'],
   [`${J}/records`, 'records'],
   [`${J}/records/${encodeURIComponent(`${ids.event.targets[0]?.type}:${ids.event.targets[0]?.id}`)}`, 'record'],
   [`${J}/views`, 'views'],

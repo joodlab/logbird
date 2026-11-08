@@ -32,7 +32,7 @@ for relative console ranges. IDs depend on project/seed, timestamps also depend 
   diffusion rather than chance, so even a few hundred events contain each of them.
   The import spike and provider outage last one day, or 5% of a shorter window.
 
-`pnpm demo` passes `--profile joodcms` and no `--until`, so its output is unchanged.
+`pnpm demo` passes `--profile joodcms` and no `--until`, retaining the named demo projects.
 `pnpm demo --profile neutral --until now` changes only the events: neutral source and
 integration names, spread over the recent window. The demo still creates the `Jood`
 organisation and the `JoodCMS` and `Ledger demo` projects, and the project name is part
@@ -92,26 +92,7 @@ changes and period locks. Legacy payloads exercise the accept-anything contract.
 Invoice approval requests spawn journal-posting workers and per-invoice child events.
 It has no hospitality actions or schedulers.
 
-## Read-only domain references
-
-Inspected the JoodCMS source tree; no JoodCMS service was contacted or modified.
-The audit action names are synthetic labels for those operations, not a claim
-that JoodCMS already emits this audit vocabulary.
-
-| Source in JoodCMS | Seed mapping |
-| --- | --- |
-| `packages/database/prisma/schema.prisma`: Business, BusinessMembership, BusinessHotel/Room, BusinessGuest/Booking, BusinessCrmCampaign, WebsiteArticle/Asset | Tenants, staff, typed records; capacity, isPublished, checkInTime, startDate, status, locale and campaign changes |
-| `apps/server/src/actions/website/article.ts` | Publish, schedule, archive, restore revisions and translate articles |
-| `apps/server/src/actions/impersonation.ts` | Effective user actor plus separate platform support impersonator |
-| `packages/bullmq/src/constants.ts`, `types.ts`, `jobs/business-crm.ts` | business-crm; crm:sync:guests/bookings, crm:campaign:send, staggered hourly schedules |
-| `apps/server/src/bull/processors/content.ts` | content; sync:business-hotels and translation:article |
-| `apps/server/src/bull/processors/website.ts`, `email.ts`, `business-crm-export.ts` | website:screenshot, invitation email and CRM exports |
-| `apps/worker/src/processors.ts` | Separate queue executors rather than substituting workers for actors |
-| `apps/server/src/modules/public/webhooks/{meta-whatsapp,joodbooking}/handlers.ts` | Provider-originated receipt and booking events with webhook executors |
-
-Rate-plan, policy-hour, page and accounting labels are illustrative vocabulary;
-page events represent theme content, and payment-provider is a fictional source.
-The campaign model uses CANCELLED/FAILED (rather than inventing PAUSED).
+The vocabulary is illustrative of a hospitality CMS.
 
 ## Verification
 
@@ -125,8 +106,7 @@ Tests stream all 300k fixtures and verify exact counts, determinism, time bounds
 parent existence/order, inherited actors, worker attempts, scheduler identity,
 vocabulary, outcome coverage, 150 users/30 tenants, reserved addresses, and 2.5%
 legacy coverage. They also exercise independent Ledger vocabulary, neutral default
-names, a byte-for-byte digest of the `joodcms` profile against the original generator
-(so `pnpm demo` output is unchanged), and the time span and mix of a 400-event, one-day
+names, deterministic digests of the named demo profiles, and the time span and mix of a 400-event, one-day
 spread fixture. Generation is
 streaming: only a tree and the sink batch are retained; tests retain IDs to check
 references. A fixed `now` is necessary for byte-for-byte replay.

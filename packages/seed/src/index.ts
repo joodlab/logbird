@@ -3,7 +3,7 @@ import { type Action, businesses, hospitalityActions, ledgerActions, support, us
 
 /**
  * Source and integration names. `neutral` (the default) uses fictional names that are safe for public screenshots;
- * `joodcms` keeps the original names for the JoodCMS demo (`pnpm demo` passes it, so its output is unchanged).
+ * `joodcms` keeps the original names for the JoodCMS demo (`pnpm demo` passes it).
  */
 export const SEED_PROFILES = {
   neutral: { source: 'booking-engine', bookingChannel: 'channel-manager' },
@@ -224,8 +224,8 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
         ? { queue: 'ledger-posting', job: 'journal:post', root: 'invoice.approval.requested', done: 'journal.posted', record: 'invoice.approved' }
         : resource === 'guests' || resource === 'bookings'
           ? {
-              queue: 'business-crm',
-              job: `crm:sync:${resource}`,
+              queue: 'guest-sync',
+              job: `hospitality:sync:${resource}`,
               root: 'crm.sync.requested',
               done: `crm.${resource}.sync.completed`,
               record: resource === 'guests' ? 'guest.updated' : 'booking.modified',
@@ -233,7 +233,7 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
           : resource === 'catalog'
             ? {
                 queue: 'content',
-                job: 'sync:business-hotels',
+                job: 'catalog:refresh',
                 root: 'catalog.sync.requested',
                 done: 'catalog.sync.completed',
                 record: 'catalog.hotel.synced',
@@ -241,22 +241,22 @@ export function* generateEvents(options: SeedOptions): Generator<EventInput> {
             : resource === 'translation'
               ? {
                   queue: 'content',
-                  job: 'translation:article',
+                  job: 'article:localize',
                   root: 'article.translation.requested',
                   done: 'article.translation.completed',
                   record: 'article.translated',
                 }
               : resource === 'campaign'
                 ? {
-                    queue: 'business-crm',
-                    job: 'crm:campaign:send',
+                    queue: 'guest-sync',
+                    job: 'campaign:deliver',
                     root: 'campaign.send.requested',
                     done: 'campaign.sent',
                     record: 'campaign.recipient.delivered',
                   }
                 : {
                     queue: 'website',
-                    job: 'website:screenshot',
+                    job: 'site:preview',
                     root: 'website.screenshot.requested',
                     done: 'website.screenshot.completed',
                     record: 'website.screenshot.captured',

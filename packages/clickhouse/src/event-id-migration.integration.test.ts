@@ -9,7 +9,7 @@ import { migrate } from './migrations';
 import { normalizeEvent } from './normalize';
 
 const database = 'logbird_qa_062',
-  owner = 'PR62 QA t3-fe2f6967';
+  owner = 'event-id migration fixture';
 const run = process.env.CLICKHOUSE_ONLINE_MIGRATION_TEST === '1';
 it.skipIf(!run)(
   'upgrades online and resumes after every durable phase with concurrent writers',
