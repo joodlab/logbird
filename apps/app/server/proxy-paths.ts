@@ -30,8 +30,15 @@ export function isProxiedPath(pathname: string): boolean {
 }
 
 /**
- * CSP for the proxied `/docs` page only. The API reference UI is a pinned, integrity-checked script from jsDelivr (see
- * apps/server/src/api-reference.ts); it may fetch only this origin. The console's own pages keep the strict default.
+ * CSP for the proxied `/docs` page only. Scripts: exactly the pinned, integrity-checked Scalar bundle (see
+ * apps/server/src/api-reference.ts) plus Scalar's one inline init script by hash; no other jsDelivr file and no other
+ * inline script can run. Styles stay 'unsafe-inline' because the bundle injects its styles at runtime. The page may
+ * fetch only this origin. The console's own pages keep the strict default. apps/server/src/api-reference.test.ts
+ * fails if the bundle URL or the inline script changes without updating this policy.
  */
-export const apiReferenceContentSecurityPolicy =
-  "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'";
+export const apiReferenceScriptSources = [
+  'https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.76.0/dist/browser/standalone.js',
+  "'sha256-fdA7IADxugqK4SkGwA9CdB5bfTF8Itgy8PRry3IMbnw='",
+] as const;
+
+export const apiReferenceContentSecurityPolicy = `default-src 'self'; script-src ${apiReferenceScriptSources.join(' ')}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'`;

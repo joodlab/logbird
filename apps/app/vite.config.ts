@@ -2,23 +2,21 @@ import tailwindcss from '@tailwindcss/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import { apiReferenceContentSecurityPolicy } from './server/proxy-paths';
 
 /**
  * The console talks to exactly one origin. The Nitro middleware (server/proxy.ts) forwards `/api` (better-auth +
  * internal API), `/v1` (public API), health checks and the read-only `/docs` + `/openapi.json` reference to the Hono
  * server, so the better-auth session cookie stays first-party; it reads its target at runtime in production.
- * The reference is GET/HEAD-only and forwarded without Cookie/Authorization (server/proxy-paths.ts). The Vite proxy
- * below is a fallback for `/api` and `/v1` only; the reference and health paths deliberately go through Nitro alone.
+ * The reference is GET/HEAD-only and forwarded without Cookie/Authorization (server/proxy-paths.ts).
+ *
+ * There is deliberately no Vite `server.proxy`: that middleware matches raw prefixes, and its proxy normalizes dot
+ * segments (`/api/../docs`), so requests Nitro's dev pre-middleware hands to Vite (asset fetches such as
+ * `Sec-Fetch-Dest: image`) could reach the API with any method and credentials, around proxyDecision(). Nitro is the
+ * only forwarding path in dev and production.
  */
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '');
-  const rootEnv = loadEnv(mode, '../..', '');
-  const serverTarget =
-    // `||`, not `??`: .env.example ships an empty LOGBIRD_SERVER_URL= (the production runtime proxy target).
-    process.env.LOGBIRD_SERVER_URL || env.LOGBIRD_SERVER_URL || rootEnv.SERVER_URL?.replace('localhost', '127.0.0.1') || 'http://127.0.0.1:4601';
-
+export default defineConfig(() => {
   return {
     resolve: { tsconfigPaths: true },
     // Pre-bundle the heavy client deps up front so the first visit never hits a mid-session
@@ -61,10 +59,6 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 4600,
-      proxy: {
-        '/api': { target: serverTarget, changeOrigin: false },
-        '/v1': { target: serverTarget, changeOrigin: false },
-      },
     },
     plugins: [
       tailwindcss(),

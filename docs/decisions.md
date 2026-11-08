@@ -12,12 +12,12 @@ listener, without authentication, alongside `/api`, `/v1`, `/health`, `/livez` a
 forwarded (other methods get `405` from the console), and `Cookie`, `Authorization` and `Proxy-Authorization` are
 stripped from those requests. Nothing else on the server becomes public: the allowlist in `apps/app/server/proxy-paths.ts` matches those paths exactly, and its tests
 check that other paths (for example `/internal`, `/metrics`, `/docs/anything`) stay on the console. The same code
-handles source development (Nitro middleware; the Vite dev proxy covers only `/api` and `/v1`), the default Compose stack and the
+handles source development (Nitro middleware; there is deliberately no Vite dev proxy), the default Compose stack and the
 Caddy profile (Caddy forwards the whole origin to the console).
 
 The reference page runs on the console origin, so it loads a version-pinned Scalar bundle from jsDelivr with
 Subresource Integrity, turns off Scalar telemetry, hosted fonts and the hosted AI agent, and gets a `/docs`-only CSP
-that allows that one script host and `connect-src 'self'`. The API listener (`:4601`) itself stays private. See
+whose `script-src` allows exactly that bundle URL plus Scalar's inline init script by hash, with `connect-src 'self'`. The API listener (`:4601`) itself stays private. See
 [self-hosting](self-hosting.md#api-reference).
 
 ### Container image registry ([#88](https://github.com/joodlab/logbird/issues/88))
@@ -34,7 +34,7 @@ A live fresh install, upgrade and restore on the real host follows after open-so
 
 ### Transactional email: Postmark SMTP ([#59](https://github.com/joodlab/logbird/issues/59))
 
-Hosted Logbird sends sign-in codes, invitations and membership notifications through **Postmark over SMTP**
+The hosted instance will send sign-in codes, invitations and membership notifications through **Postmark over SMTP**
 (`smtp.postmarkapp.com:587`, STARTTLS required). The source now has `SMTP_REQUIRE_TLS=true`, which fails closed when
 the server does not offer STARTTLS or the upgrade fails; its behaviour is tested against Mailpit. Code logging stays
 off. Postmark setup (server token, SPF/DKIM/DMARC alignment, message streams, bounces and suppressions) is in

@@ -5,13 +5,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": [
-    "src",
-    "scripts",
-    "server/proxy-paths.ts",
-    "server/proxy-paths.test.ts",
-    "vite.config.ts",
-    "vitest.config.ts"
-  ],
+  "include": ["src", "scripts", "server", "vite.config.ts", "vitest.config.ts"],
   "exclude": ["node_modules", "dist", ".output", ".nitro"]
 }

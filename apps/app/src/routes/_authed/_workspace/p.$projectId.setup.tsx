@@ -412,7 +412,7 @@ function Reference({ projectId }: { projectId: string }) {
             API reference
           </a>{' '}
           (OpenAPI document at{' '}
-          <a className="font-mono text-foreground hover:underline" href="/openapi.json" rel="noreferrer" target="_blank">
+          <a className="font-mono text-brand hover:underline" href="/openapi.json" rel="noreferrer" target="_blank">
             /openapi.json
           </a>
           ); the product spec lives in the repository.

@@ -133,7 +133,9 @@ Without SMTP explicitly enable AUTH_LOG_SIGN_IN_CODES=true. Each auth.sign_in_co
 For a Docker Desktop evaluation using an existing host Mailpit, set
 `SMTP_HOST=host.docker.internal`, `SMTP_PORT=1025`, `SMTP_SECURE=false`,
 `SMTP_REQUIRE_TLS=false` (Mailpit offers no STARTTLS), and leave
-SMTP credentials empty. Read the fictional recipient's message at
+SMTP credentials empty. The server then logs `email.smtp_tls_not_required` at boot
+(`host.docker.internal` is not loopback); that warning is expected for this local
+sink only. Read the fictional recipient's message at
 http://127.0.0.1:8025. Do not set container SMTP_HOST to 127.0.0.1. On Linux,
 configure a reachable SMTP host (or an explicit host-gateway mapping); Docker
 Engine does not universally provide the Docker Desktop hostname.
@@ -226,7 +228,8 @@ curl -I https://audit.example.com/openapi.json  # 200 application/json
 
 The document's `servers` entry is `APP_URL`, so "try it" requests go to the public origin. The reference page loads
 a version-pinned Scalar bundle from `cdn.jsdelivr.net` with Subresource Integrity; Scalar telemetry, hosted fonts and
-its hosted AI agent are off, and a `/docs`-only CSP limits the page to that script host and same-origin requests.
+its hosted AI agent are off. A `/docs`-only CSP allows exactly that bundle URL and Scalar's inline init script (by
+hash) as scripts, and only same-origin requests.
 Browsers without access to jsDelivr see an empty reference page; `/openapi.json` still works. To keep the reference
 private, block `/docs` and `/openapi.json` at your reverse proxy.
 
@@ -247,7 +250,10 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
 3. Record `git rev-parse HEAD` and `docker compose images` with the backup receipt.
 4. Fetch/select the tested revision: `git fetch origin`, then
    `git switch --detach <tested-sha>`. Preserve local changes first.
-5. Build migrate/server/worker/app sequentially, then run `docker compose up -d --no-build`.
+5. Re-run `sh scripts/selfhost-init.sh` (it preserves existing values and warns if
+   `.env` still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird` namespace; remove that
+   line so the default `ghcr.io/joodlab` applies). Build migrate/server/worker/app
+   sequentially, then run `docker compose up -d --no-build`.
    One-shot migrate gates new API/worker startup; failure blocks startup.
 6. Verify readiness, SMTP login, retained events/settings/keys and retention
    receipts before reopening ingress. After a failed receipt the next successful
@@ -328,7 +334,9 @@ On **any host**, confirm `git rev-parse HEAD` equals the recorded revision and
 matches the backup receipt's image IDs. The `:local` role tags are shared with the
 stopped original project, not scoped by Compose project name; also confirm their
 current IDs with `docker image inspect --format '{{.Id}}' ghcr.io/joodlab/logbird-migrate:local ghcr.io/joodlab/logbird-server:local ghcr.io/joodlab/logbird-worker:local ghcr.io/joodlab/logbird-app:local`
-(substitute the recorded registry/version). If the revision or image identity
+(substitute the recorded registry/version). Receipts recorded before 2026-11-08 use
+the old names `<registry>/<role>:<version>`, for example `logbird/migrate:local`;
+inspect those names for such a receipt. If the revision or image identity
 does not match or cannot be verified, for example after a failed upgrade, run
 `git switch --detach <recorded-git-sha>` and rebuild all four roles sequentially
 with the restored env/project flags shown below, before any `up --no-build`.

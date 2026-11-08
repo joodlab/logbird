@@ -29,9 +29,15 @@ for key in BETTER_AUTH_SECRET POSTGRES_PASSWORD CLICKHOUSE_PASSWORD CLICKHOUSE_Q
 done
 chmod 600 "$env_file"
 # The pre-2026-11-08 example pinned the unverified Docker Hub namespace. Warn only; never rewrite operator settings.
+# Matches logbird, docker.io/logbird (and index./registry-1. hosts), quoted, padded, CRLF or with an inline comment.
 if awk '
-  /^LOGBIRD_IMAGE_REGISTRY=/ { value=substr($0,24); gsub(/\r$/, "", value); gsub(/^[ \t"\047]+|[ \t"\047]+$/, "", value); if (value == "logbird") legacy=1 }
+  /^LOGBIRD_IMAGE_REGISTRY=/ {
+    value=substr($0,24); gsub(/\r$/, "", value); sub(/[ \t]+#.*$/, "", value)
+    gsub(/^[ \t"\047]+|[ \t"\047]+$/, "", value); value=tolower(value)
+    sub(/^(https?:\/\/)?((index|registry-1)\.)?docker\.io\//, "", value); sub(/\/+$/, "", value)
+    if (value == "logbird") legacy=1
+  }
   END { exit !legacy }' "$env_file"; then
-  printf '%s\n' "Warning: $env_file sets LOGBIRD_IMAGE_REGISTRY=logbird, the old unverified Docker Hub namespace. Clear it (default ghcr.io/joodlab) and rebuild the four roles." >&2
+  printf '%s\n' "Warning: $env_file sets LOGBIRD_IMAGE_REGISTRY to the old unverified Docker Hub namespace (logbird). Remove it (default ghcr.io/joodlab) and rebuild the four roles." >&2
 fi
 printf '%s\n' 'Environment initialized; existing populated secrets preserved.'

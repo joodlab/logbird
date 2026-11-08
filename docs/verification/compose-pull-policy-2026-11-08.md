@@ -8,7 +8,7 @@ and no untrusted role image was pulled. Raw rows: [compose-pull-policy-2026-11-0
 Host: Windows 11, Docker Desktop engine 29.8.1 (linux/amd64). Revision 7ef2ad7 on `feat/selfhost-owner-decisions`.
 Role images were built sequentially from that revision (minimum free host RAM during the builds: 9.8 GB):
 
-| Role | Image ID |
+| Role | Local image ID (= pushed manifest digest on this containerd-store engine) |
 | --- | --- |
 | migrate | `sha256:a30d3745cc70d439e78dbabaf0234803bcaea870e19ceb30ddf04e5f34e2f8ca` |
 | server | `sha256:21211f0599b8d33b1953e087007dbfaf6fad5a0896d9fefc3b497c0372617635` |
@@ -27,7 +27,13 @@ Role images were built sequentially from that revision (minimum free host RAM du
 ## Runtime pull-policy matrix
 
 A throwaway `registry:2.8.3` container (`sha256:a3d8aaa6…`) on `127.0.0.1:5055` held retags of the images above as
-`localhost:5055/joodlab-fixture/logbird-<role>:matrix` (registry digests equal the local image IDs). Compose used
+`localhost:5055/joodlab-fixture/logbird-<role>:matrix`. Two identifiers are recorded separately: the **local image
+ID** (`docker image inspect --format '{{.Id}}'`) and the **registry manifest digest** (`Docker-Content-Digest` of
+`HEAD /v2/joodlab-fixture/logbird-<role>/manifests/matrix` after the push). This Docker Desktop engine uses the
+containerd image store (`docker info`: `driver-type io.containerd.snapshotter.v1`), where the reported image ID is the
+image's manifest/index digest rather than the config hash of the classic store, so the two values were identical here
+for every role (table above; recorded as `roleImages` and `registryManifestDigests` in the JSON). On a classic-store
+engine they differ, and published releases must be verified by registry digest. Compose used
 `LOGBIRD_IMAGE_REGISTRY=localhost:5055/joodlab-fixture`, `LOGBIRD_VERSION=matrix`, project `logbird-matrix`. "Registry
 requests" counts HEAD/GET manifest requests in the registry's access log during the case. Containers were only
 created (`up --no-start --no-deps`), never started.
@@ -35,7 +41,7 @@ created (`up --no-start --no-deps`), never started.
 | Case | Local image | Command | v5.5.1, all four roles | v2.24.4, all four roles |
 | --- | --- | --- | --- | --- |
 | A | absent | `up --no-start --no-deps --no-build <role>` | exit 1 `No such image`; 0 registry requests | exit 1 `No such image`; 0 requests |
-| B | absent | `up --no-start --no-deps --no-build --pull always <role>` (release flow) | exit 0; pulled (2 requests); local ID = fixture digest | same |
+| B | absent | `up --no-start --no-deps --no-build --pull always <role>` (release flow) | exit 0; pulled (2 requests); the pulled image's local ID equals the original local image ID (and the pushed manifest digest) | same |
 | C | present | `up --no-start --no-deps --no-build <role>` | exit 0; 0 requests; no build; same ID | same |
 | D | present | `up --no-start --no-deps <role>` (bare) | exit 0; **rebuilt from the checkout** (new ID); 0 requests | exit 17: build failed (see below); 0 requests; image unchanged |
 | E | absent | `build <role>`, then `up --no-start --no-deps --no-build <role>` | exit 0; built, then used; 0 requests | exit 17: build failed; 0 requests |
@@ -63,6 +69,11 @@ Conclusions:
 
 ## Public API reference on the Compose stack and the Caddy variant (#61)
 
+Built Compose and Caddy deployments contain no Vite dev server: the production app's Nitro handler is the only path to
+the API, so the dev-only Vite fallback fixed in round 3 of PR #106 did not apply to them. The method and credential
+checks below were run at 7ef2ad7; the round-3 changes to the `/docs` CSP (exact script URL and inline-script hash
+instead of the jsDelivr host and `'unsafe-inline'`) were re-checked in the browser in source development.
+
 Default stack (`docker compose --env-file <fixture> -p logbird-docsproof up -d --no-build --wait`, app on
 `127.0.0.1:4790`, all services healthy), checked with `apps/app/scripts/docs-proof.mjs`:
 
@@ -84,6 +95,23 @@ Caddy variant (`--profile tls` with the documented local `tls internal` Caddyfil
 - The same unknown paths → console HTML 404; the same five methods on both reference paths → 405 `Allow: GET, HEAD`.
 - `/openapi.json` `servers: [{url: "https://audit.logbird.test:4743"}]`.
 - Chromium (host-resolver mapping, local CA ignored) rendered `/docs`: 0 problems, only the pinned bundle off-origin.
+
+## Source development: Vite fallback removed (PR #106 round 3)
+
+Dev stack (`turbo watch dev`, `logbird-stack` lock), probes with `curl --path-as-is`, `Sec-Fetch-Dest: image` and
+fictional `Cookie`/`Authorization`. "API saw" counts the server's own `http.request` log lines during the probe.
+
+| Config | `POST /api/../docs`, `/api/%2e%2e/openapi.json`, `/v1/../internal`, `/api/../metrics` | API saw |
+| --- | --- | --- |
+| Before (3618553: Vite `server.proxy` for `/api`, `/v1`) | 404 `application/json` (from the API) | `POST /docs`, `POST /openapi.json`, `POST /internal`, `POST /metrics` |
+| After (no Vite proxy) | 404 `text/html` (console) | 0 requests |
+
+After the fix, the full matrix of seven traversal paths × POST/GET × `Sec-Fetch-Dest: image`/`document` gave:
+image → console 404 for all; document → `405` for POST to the reference, `200` for GET to the reference (logged by the
+API as `GET /docs`/`GET /openapi.json`, forwarded without credentials by the Nitro handler), console 404 for
+`/internal` and `/metrics`, and a console `307` to `/openapi.json` for the trailing-slash form. The `/docs` page also
+rendered in Chromium under the tightened CSP (exact bundle URL + inline-script hash, no `'unsafe-inline'` scripts)
+with 0 console errors or CSP violations.
 
 ## Cleanup
 

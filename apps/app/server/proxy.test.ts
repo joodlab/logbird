@@ -90,3 +90,33 @@ describe('authenticated API forwarding is unchanged', () => {
     expect(captured).toHaveLength(0);
   });
 });
+
+describe('dot segments and asset requests cannot reach other API paths', () => {
+  const asset = (path: string, method = 'GET') =>
+    app.fetch(new Request(`http://console.logbird.test${path}`, { method, headers: { ...credentials, 'sec-fetch-dest': 'image' } }));
+
+  it.each([
+    ['/api/../docs', 'POST'],
+    ['/api/%2e%2e/openapi.json', 'POST'],
+    ['/v1/%2E%2E/docs', 'DELETE'],
+  ])('%s %s is the reference: 405, nothing forwarded', async (path, method) => {
+    expect((await asset(path, method)).status).toBe(405);
+    expect(captured).toHaveLength(0);
+  });
+
+  it.each([
+    ['/api/../docs', '/docs'],
+    ['/api/%2e%2e/openapi.json', '/openapi.json'],
+  ])('GET %s is forwarded as %s without credentials', async (path, upstream) => {
+    expect((await asset(path)).status).toBe(200);
+    expect(captured).toHaveLength(1);
+    expect(new URL(captured[0]?.url ?? '').pathname).toBe(upstream);
+    expect(captured[0]?.headers.get('cookie')).toBeNull();
+    expect(captured[0]?.headers.get('authorization')).toBeNull();
+  });
+
+  it.each(['/v1/../internal', '/api/../metrics', '/api/%2e%2e/internal', '/api/../openapi.json/'])('%s stays on the console', async (path) => {
+    expect((await asset(path, 'POST')).status).toBe(404);
+    expect(captured).toHaveLength(0);
+  });
+});

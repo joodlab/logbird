@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import { apiReferenceBundle, apiReferencePage } from './api-reference';
@@ -24,5 +26,18 @@ describe('GET /docs', () => {
     expect(html).toContain('"withDefaultFonts": false');
     expect(html).toContain('"telemetry": false');
     expect(html).toMatch(/"agent": \{\s*"disabled": true\s*\}/);
+  });
+
+  it("matches the console's /docs CSP (exact bundle URL and inline-script hash)", async () => {
+    const html = await (await app.request('/docs')).text();
+    const inline = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1] ?? '');
+    expect(inline).toHaveLength(1);
+    const hash = `'sha256-${createHash('sha256')
+      .update(inline[0] ?? '')
+      .digest('base64')}'`;
+    // The console (apps/app) owns the header; keep both packages in step.
+    const policy = readFileSync(new URL('../../app/server/proxy-paths.ts', import.meta.url), 'utf8');
+    expect(policy).toContain(`'${apiReferenceBundle.src}'`);
+    expect(policy).toContain(`"${hash}"`);
   });
 });
