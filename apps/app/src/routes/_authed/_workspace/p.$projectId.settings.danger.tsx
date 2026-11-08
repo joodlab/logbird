@@ -14,8 +14,8 @@ import { Label } from '@logbird/ui/components/ui/label';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, useNavigate, useRouter } from '@tanstack/react-router';
-import { Loader2Icon, Trash2Icon } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { HourglassIcon, Loader2Icon, Trash2Icon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AdminNote, AdminOnly } from '@/components/admin-gate';
 import { PendingHint } from '@/components/pending-hint';
@@ -25,6 +25,7 @@ import { errorMessage } from '@/lib/api/errors';
 import { keys, projectQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
 import { useCan } from '@/lib/permissions';
+import { deleteBlockedMessage, deleteRetryAt, secondsUntil } from '@/lib/project-delete';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/danger')({
   head: () => ({ meta: [{ title: 'Danger zone · Settings · Logbird' }] }),
@@ -43,8 +44,18 @@ function DangerZone() {
   const slugInput = useRef<HTMLInputElement>(null);
   const [typed, setTyped] = useState('');
   const manage = useCan()('project.delete');
+  /** Set when the server refused because events were still being written (503 ingest_pending): retry after it. */
+  const [retryAt, setRetryAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (retryAt === null) return;
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, [retryAt]);
   const remove = useMutation({
-    mutationFn: () => api.projects.remove(projectId, typed.trim()),
+    // The confirmed slug travels with the request, so a retry does not depend on the input still holding it.
+    mutationFn: (slug: string) => api.projects.remove(projectId, slug),
+    onMutate: () => setRetryAt(null),
     onSuccess: async () => {
       setOpen(false);
       // The deletion keeps running if the person left this page meanwhile: only bring them home when they are still
@@ -56,8 +67,20 @@ function DangerZone() {
       queryClient.removeQueries({ queryKey: keys.project(projectId) });
       await queryClient.invalidateQueries({ queryKey: keys.projects, exact: true });
     },
-    onError: (error) => toast.error('Could not delete the project', { description: errorMessage(error) }),
+    onError: (error, slug) => {
+      const at = deleteRetryAt(error);
+      if (at === null) {
+        toast.error('Could not delete the project', { description: errorMessage(error) });
+        return;
+      }
+      // Nothing was deleted. Keep (or reopen) the dialog with the confirmation filled in and a retry button.
+      setNow(Date.now());
+      setRetryAt(at);
+      setTyped(slug);
+      setOpen(true);
+    },
   });
+  const waitLeft = retryAt === null ? 0 : secondsUntil(retryAt, now);
 
   if (!project.data) return <Skeleton className="h-40 w-full rounded-xl" />;
   const p = project.data;
@@ -91,7 +114,10 @@ function DangerZone() {
       <AlertDialog
         onOpenChange={(next) => {
           setOpen(next);
-          if (!next) setTyped('');
+          if (!next && !remove.isPending) {
+            setTyped('');
+            setRetryAt(null);
+          }
         }}
         open={open && manage}
       >
@@ -100,7 +126,7 @@ function DangerZone() {
             className="flex flex-col gap-4"
             onSubmit={(event) => {
               event.preventDefault();
-              if (matches) remove.mutate();
+              if (matches && waitLeft === 0) remove.mutate(typed.trim());
             }}
           >
             <AlertDialogHeader>
@@ -126,6 +152,16 @@ function DangerZone() {
                 value={typed}
               />
             </div>
+            {retryAt !== null && !remove.isPending ? (
+              <p
+                className="flex items-start gap-2 rounded-lg border border-outcome-denied/30 bg-outcome-denied/[0.07] px-3 py-2.5 text-sm"
+                data-testid="delete-retry-notice"
+                role="status"
+              >
+                <HourglassIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-outcome-denied" />
+                <span>{deleteBlockedMessage(retryAt, now)}</span>
+              </p>
+            ) : null}
             <PendingHint
               pending={remove.isPending}
               slow={`Deleting ${p.name}: removing its events, keys and saved views…`}
@@ -134,9 +170,9 @@ function DangerZone() {
             <AlertDialogFooter>
               {/* While deleting, this only hides the dialog: the request keeps running. */}
               <AlertDialogCancel type="button">{remove.isPending ? 'Hide' : 'Cancel'}</AlertDialogCancel>
-              <Button disabled={!matches || remove.isPending} type="submit" variant="destructive">
+              <Button data-testid="delete-project-submit" disabled={!matches || remove.isPending || waitLeft > 0} type="submit" variant="destructive">
                 {remove.isPending ? <Loader2Icon className="animate-spin" /> : null}
-                Delete project
+                {retryAt === null ? 'Delete project' : waitLeft > 0 ? `Try again in ${waitLeft} s` : 'Try again'}
               </Button>
             </AlertDialogFooter>
           </form>
