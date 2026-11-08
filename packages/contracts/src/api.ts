@@ -262,6 +262,10 @@ export const apiKeySchema = z.object({
   createdAt: z.string(),
   createdBy: z.object({ id: z.string(), name: z.string(), email: z.string().optional() }).nullable(),
   lastUsedAt: z.string().nullable(),
+  /** User agent of the most recent authenticated request (sampled with lastUsedAt, at most once a minute; ≤ 256 chars). */
+  lastUsedUserAgent: z.string().nullable(),
+  /** Set when this key was created by rolling another key: the key it replaces (which stays valid until revoked). */
+  replacesKeyId: z.string().nullable(),
   revokedAt: z.string().nullable(),
 });
 export type ApiKey = z.infer<typeof apiKeySchema>;
@@ -282,6 +286,20 @@ export const savedViewSchema = z.object({
     lang: queryLangSchema.optional(),
     range: z.string().optional(), // "24h" | "7d" | "<isoFrom>..<isoTo>"
     columns: z.array(z.string()).optional(),
+    /**
+     * Display names for entity terms in `q` (e.g. `tenant:biz_5` → "Bayt Al Rimal"), captured when the view is saved so
+     * cards and the save dialog can say "Tenant: Bayt Al Rimal" instead of a raw id. Purely presentational.
+     */
+    labels: z
+      .array(
+        z.object({
+          field: z.enum(['actor', 'tenant', 'executor', 'target', 'impersonator']),
+          value: z.string().max(512),
+          label: z.string().max(200),
+        }),
+      )
+      .max(20)
+      .optional(),
   }),
   createdBy: z.object({ id: z.string(), name: z.string(), email: z.string().optional() }).nullable(),
   createdAt: z.string(),
@@ -312,6 +330,14 @@ export const apiErrorSchema = z.object({
   error: z.object({ code: z.string(), message: z.string(), details: z.unknown().optional() }),
 });
 export type ApiError = z.infer<typeof apiErrorSchema>;
+
+/**
+ * `GET /api/onboarding/workspace-name` — what the onboarding workspace step pre-fills. `name` is null when the email
+ * domain is a personal mailbox provider, or a workspace member or pending invitation already uses that domain (a
+ * teammate should join that workspace instead of creating a look-alike).
+ */
+export const workspaceNameSuggestionSchema = z.object({ name: z.string().nullable() });
+export type WorkspaceNameSuggestion = z.infer<typeof workspaceNameSuggestionSchema>;
 
 /** DELETE project query: missing/wrong confirmation is rejected before deletion. */
 export const deleteProjectQuerySchema = z.object({ confirm: z.string().optional() });

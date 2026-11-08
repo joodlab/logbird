@@ -14,6 +14,7 @@ import { errorMessage } from '@/lib/api/errors';
 import { keys } from '@/lib/api/queries';
 import { formatRetention } from '@/lib/format';
 import { fieldErrorMessage } from '@/lib/forms';
+import { activeWorkspaceHasProjects } from '@/lib/onboarding';
 import { stashSecret } from '@/lib/one-time-secrets';
 import { activeRole, canDo } from '@/lib/permissions';
 import { ensureActiveWorkspace } from '@/lib/session';
@@ -22,7 +23,11 @@ export const Route = createFileRoute('/_authed/onboarding/project')({
   beforeLoad: async ({ context }) => {
     if (context.me.organizations.length === 0) throw redirect({ to: '/onboarding' });
     // Project creation is scoped to the session's active workspace.
-    return { me: await ensureActiveWorkspace(context.queryClient, context.me) };
+    const me = await ensureActiveWorkspace(context.queryClient, context.me);
+    // The full-screen wizard is for a workspace's first project. Later projects are created from a dialog inside the
+    // app shell (Projects page / switcher), which lands on the new project's Setup page.
+    if (await activeWorkspaceHasProjects(context.queryClient)) throw redirect({ to: '/projects', search: { new: true } });
+    return { me };
   },
   component: ProjectStep,
 });

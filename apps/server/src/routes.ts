@@ -24,7 +24,7 @@ import { enforceProjectRetention } from '@logbird/worker/retention';
 import { Hono } from 'hono';
 import { validator } from 'hono-openapi';
 import { z } from 'zod';
-import { clickhouse, purgeProjectEvents, queryClickhouse } from './clickhouse';
+import { clickhouse, purgeProjectEvents, queryClickhouse, settleProjectInserts, stopMaintenance } from './clickhouse';
 import { ApiError } from './errors';
 import { audit } from './ingest';
 import { generateApiKey } from './keys';
@@ -46,8 +46,10 @@ function auditApiKey(
   action: 'api_key.created' | 'api_key.revoked',
   key: { id: string; name: string; kind: string; prefix: string },
   project: { id: string; name: string; organizationId: string },
-  reason?: 'project_deleted',
+  reason?: 'project_deleted' | 'rotation',
   tx?: Prisma.TransactionClient,
+  /** Rotation: the key the new one replaces (stays valid until revoked). */
+  replaces?: { id: string; name: string; prefix: string },
 ) {
   return audit(
     c,
@@ -58,6 +60,7 @@ function auditApiKey(
       organizationId: project.organizationId,
       targets: [
         { type: 'api_key', id: key.id, name: key.name },
+        ...(replaces ? [{ type: 'api_key', id: replaces.id, name: replaces.name }] : []),
         { type: 'project', id: project.id, name: project.name },
       ],
       metadata: {
@@ -67,8 +70,14 @@ function auditApiKey(
           prefix: key.prefix,
           state: action === 'api_key.created' ? 'active' : 'revoked',
           ...(reason ? { reason } : {}),
+          ...(replaces ? { replaces: { id: replaces.id, prefix: replaces.prefix } } : {}),
         },
       },
+      ...(replaces
+        ? {
+            description: `Rolled the ${key.kind} key “${key.name}”: created ${key.prefix}… to replace ${replaces.prefix}…, which stays valid until revoked`,
+          }
+        : {}),
     },
     tx,
   );
@@ -259,11 +268,15 @@ export const managementRoutes = new Hono<AppEnv>()
       const { confirm } = c.req.valid('query');
       if (confirm !== c.get('project').slug) throw new ApiError(422, 'confirmation_required', 'Type the project slug to delete the project.');
       const projectId = c.get('project').id;
+      // Exclusive project lock: ingest (shared lock) cannot claim or insert for this project until it is gone.
       await withProjectLock(projectId, async () => {
         const startedAt = new Date();
         await prisma.project.update({ where: { id: projectId }, data: { exportDeleteStartedAt: startedAt, exportGeneration: { increment: 1 } } });
         try {
-          await purgeProjectEvents(projectId);
+          // Settle ambiguous inserts and stop tagged maintenance before any destructive write.
+          await stopMaintenance(projectId);
+          await settleProjectInserts(projectId);
+          await purgeProjectEvents(projectId, { settled: true });
           await prisma.$transaction(async (tx) => {
             const revoked = await tx.apiKey.updateManyAndReturn({ where: { projectId, revokedAt: null }, data: { revokedAt: new Date() } });
             for (const key of revoked) await auditApiKey(c, 'api_key.revoked', key, c.get('project'), 'project_deleted', tx);
@@ -310,6 +323,37 @@ export const managementRoutes = new Hono<AppEnv>()
       );
       invalidateSetup(c.get('project').id);
       return c.json({ key: serializeKey(key), secret: material.secret }, 201);
+    },
+  )
+  .post(
+    '/projects/:projectId/keys/:keyId/roll',
+    doc('Roll API key: create a replacement with the same name and kind; the old key stays valid until revoked', createApiKeyResponseSchema, 201),
+    async (c) => {
+      const projectId = c.get('project').id;
+      const created = await withProjectLock(projectId, () =>
+        prisma.$transaction(async (tx) => {
+          const old = await tx.apiKey.findFirst({ where: { id: c.req.param('keyId'), projectId } });
+          if (!old) throw new ApiError(404, 'not_found', 'API key not found.');
+          if (old.revokedAt) throw new ApiError(409, 'key_revoked', 'This key is already revoked. Create a new key instead.');
+          const material = generateApiKey(old.kind);
+          const key = await tx.apiKey.create({
+            data: {
+              projectId,
+              name: old.name,
+              kind: old.kind,
+              hash: material.hash,
+              prefix: material.prefix,
+              createdById: c.get('user').id,
+              replacesKeyId: old.id,
+            },
+            include: creatorSelect,
+          });
+          await auditApiKey(c, 'api_key.created', key, c.get('project'), 'rotation', tx, old);
+          return { key, secret: material.secret };
+        }),
+      );
+      invalidateSetup(projectId);
+      return c.json(createApiKeyResponseSchema.parse({ key: serializeKey(created.key), secret: created.secret }), 201);
     },
   )
   .delete('/projects/:projectId/keys/:keyId', routeDoc('Revoke API key', { responses: { 204: { description: 'Revoked' } } }), async (c) => {

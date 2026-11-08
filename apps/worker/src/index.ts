@@ -1,3 +1,4 @@
+import { projectMaintenance } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma, pruneIngestReceipts, sweepIngestReceipts } from '@logbird/database';
 import { Queue, Worker } from 'bullmq';
 import { env } from './env';
@@ -19,7 +20,8 @@ const worker = new Worker(
         select: { projectId: true },
       })) {
         try {
-          await recoverProjectIngest(clickhouse, pending.projectId);
+          // Tagged per project: deletion can stop a recovery statement left running by a failed call.
+          await recoverProjectIngest(projectMaintenance(clickhouse, pending.projectId), pending.projectId);
         } catch (error) {
           logIngestRecoveryFailure(error, pending.projectId);
           failures.push(error);

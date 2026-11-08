@@ -2,7 +2,7 @@ import { queryLangSchema } from '@logbird/contracts';
 import { Button } from '@logbird/ui/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { BookmarkIcon, XIcon } from 'lucide-react';
+import { BookmarkIcon, LinkIcon, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
 import { z } from 'zod';
 import { parseColumns, serializeColumns } from '@/components/explorer/columns';
@@ -11,6 +11,7 @@ import { SampleDataBanner } from '@/components/setup/sample-data-banner';
 import { eventsInfiniteQuery, histogramQuery, viewsQuery } from '@/lib/api/queries';
 import { DEFAULT_RANGE, isValidRange } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
+import { useCopyViewLink } from '@/lib/views';
 
 const searchSchema = z.object({
   q: z.string().optional(),
@@ -42,6 +43,7 @@ function ExplorerPage() {
   const navigate = useNavigate({ from: Route.fullPath });
   const views = useQuery(viewsQuery(projectId));
   const view = search.view ? views.data?.find((v) => v.id === search.view) : undefined;
+  const copyLink = useCopyViewLink();
 
   const state: ExplorerState = {
     q: search.q ?? '',
@@ -86,10 +88,16 @@ function ExplorerPage() {
             <span className="truncate font-medium">{view.name}</span>
             {view.description ? <span className="hidden truncate text-muted-foreground md:inline">— {view.description}</span> : null}
           </span>
-          <Button onClick={() => navigate({ search: (prev) => ({ ...prev, view: undefined }) })} size="xs" variant="ghost">
-            <XIcon />
-            Close view
-          </Button>
+          <span className="flex shrink-0 items-center gap-1">
+            <Button data-testid="banner-copy-view-link" onClick={() => copyLink(projectId, view)} size="xs" variant="ghost">
+              <LinkIcon />
+              Copy link
+            </Button>
+            <Button onClick={() => navigate({ search: (prev) => ({ ...prev, view: undefined }) })} size="xs" variant="ghost">
+              <XIcon />
+              Close view
+            </Button>
+          </span>
         </div>
       ) : null}
       <SampleDataBanner className="border-b" projectId={projectId} />

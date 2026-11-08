@@ -80,7 +80,13 @@ app.onError((error, c) => {
   if (error instanceof QueryError)
     return c.json({ error: { code: 'invalid_query', message: error.message, details: queryErrorDetailsSchema.parse(error.details) } }, 422);
   if (error instanceof ApiError) {
-    if (error.code === 'retention_unavailable' || error.code === 'ingest_pending' || error.code === 'ingest_unavailable')
+    // Any error that knows when to retry says so (e.g. 503 maintenance_pending); these codes default to 1 s.
+    if (
+      error.retryAfter !== undefined ||
+      error.code === 'retention_unavailable' ||
+      error.code === 'ingest_pending' ||
+      error.code === 'ingest_unavailable'
+    )
       c.header('Retry-After', String(Math.max(1, Math.ceil(error.retryAfter ?? 1))));
     return c.json({ error: { code: error.code, message: error.message, details: error.details } }, error.status);
   }

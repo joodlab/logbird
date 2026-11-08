@@ -14,7 +14,8 @@ export const requireApiKey = (kind: 'ingest' | 'read', limits = publicRateLimits
     if (!key || key.revokedAt || key.kind !== kind) return limits.reject(c);
     await prisma.apiKey.updateMany({
       where: { id: key.id, revokedAt: null, OR: [{ lastUsedAt: null }, { lastUsedAt: { lt: new Date(Date.now() - 60_000) } }] },
-      data: { lastUsedAt: new Date() },
+      // Sampled with lastUsedAt (at most once a minute): tells owners which client still uses a key before they revoke it.
+      data: { lastUsedAt: new Date(), lastUsedUserAgent: c.req.header('user-agent')?.slice(0, 256) || null },
     });
     c.set('project', key.project);
     await next();
