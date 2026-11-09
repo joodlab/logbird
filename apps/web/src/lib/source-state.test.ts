@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { quietHrefWarnings, renderPages } from '../test/render-pages';
 import { findSourcePhrases, repositoryReferences, SOURCE_OPEN_PHRASES, SOURCE_STATE_PHRASES } from './source-state';
 
-const PUBLIC_ENV = { WEB_GITHUB_PUBLI<local-path>true', WEB_GITHUB_URL: 'https://github.example.test/acme/logbird' };
+const PUBLIC_ENV = { WEB_GITHUB_PUBLIC: 'true', WEB_GITHUB_URL: 'https://github.example.test/acme/logbird' };
 const open = (html: string) => findSourcePhrases(html, SOURCE_OPEN_PHRASES).map((match) => match.label);
 const closed = (html: string) => findSourcePhrases(html, SOURCE_STATE_PHRASES).map((match) => match.label);
 

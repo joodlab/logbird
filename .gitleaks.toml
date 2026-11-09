@@ -1,0 +1,10 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Verified Git commit ID in historical export verification evidence"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^marketing/captures/2026-11-08-exports-round5-waiting/(README\.md|(before|after)-proof\.json)$''']
+regexTarget = "secret"
+regexes = ['''^eadd29b72ba9b280962e7441839dafbc773343dc$''']

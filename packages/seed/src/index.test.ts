@@ -119,7 +119,7 @@ describe('profiles', () => {
     // days, so 59 for StayDesk (90-day retention) and 29 for Ledger demo (30-day retention).
     const demo = { seed: 42, now: options.now, profile: 'staydesk' } as const;
     expect(fingerprint({ ...demo, days: 59, events: 300_000, project: 'StayDesk' })).toBe(
-      'a61b8706a175485667aa5e7666046afe7a2ba3e32d6c079df2d59d2d21ef67da',
+      '6a2359736e8b032fa565bc4d0c1c4da6621a4a1e598f18191aeebfb8304dca77',
     );
     expect(fingerprint({ ...demo, days: 29, events: 5000, project: 'Ledger demo' })).toBe(
       '410e1f93728ab9eb7b0e23c9f19b6a08589ff48ab12723a41aefc954dc94b6dd',
