@@ -1,0 +1,19 @@
+# Explicit source-build override for either Compose file. Use a local version so
+# source builds never shadow a published release tag.
+services:
+  migrate:
+    image: logbird-source/migrate:${LOGBIRD_SOURCE_VERSION:-local}
+    pull_policy: build
+    build: {context: ., dockerfile: apps/server/Dockerfile, target: migrate}
+  server:
+    image: logbird-source/server:${LOGBIRD_SOURCE_VERSION:-local}
+    pull_policy: build
+    build: {context: ., dockerfile: apps/server/Dockerfile, target: runtime}
+  worker:
+    image: logbird-source/worker:${LOGBIRD_SOURCE_VERSION:-local}
+    pull_policy: build
+    build: {context: ., dockerfile: apps/worker/Dockerfile, target: runtime}
+  app:
+    image: logbird-source/app:${LOGBIRD_SOURCE_VERSION:-local}
+    pull_policy: build
+    build: {context: ., dockerfile: apps/app/Dockerfile, target: runtime}

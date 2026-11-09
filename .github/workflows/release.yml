@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: logbird-release
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+      actions: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Verify tag, versions, master ancestry and Quality
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-preflight.mjs
+      - name: Resolve version
+        id: version
+        run: echo "version=$(node scripts/check-version-consistency.mjs "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+      - name: Verify release tooling
+        run: node --test scripts/release-notes.test.mjs scripts/release-preflight.test.mjs
+      - name: Generate reviewed release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-notes.mjs --version "$GITHUB_REF_NAME" --to "$GITHUB_REF_NAME" --output release-notes.md
+      - uses: actions/upload-artifact@v6
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 7
+
+  images:
+    name: Publish ${{ matrix.role }}
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {role: server, dockerfile: apps/server/Dockerfile, target: runtime}
+          - {role: worker, dockerfile: apps/worker/Dockerfile, target: runtime}
+          - {role: app, dockerfile: apps/app/Dockerfile, target: runtime}
+          - {role: migrate, dockerfile: apps/server/Dockerfile, target: migrate}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/joodlab/logbird-${{ matrix.role }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.preflight.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+      - name: Build and publish
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=release-${{ matrix.role }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.role }}
+      - name: Record image digest
+        env:
+          IMAGE: ghcr.io/joodlab/logbird-${{ matrix.role }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: printf '%s:%s@%s\n' "$IMAGE" "$VERSION" "$DIGEST" > image-${{ matrix.role }}.txt
+      - uses: actions/upload-artifact@v6
+        with:
+          name: image-${{ matrix.role }}
+          path: image-${{ matrix.role }}.txt
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: [preflight, images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-notes
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: image-*
+          merge-multiple: true
+      - name: Assemble image receipt
+        run: cat image-*.txt > images.txt
+      - name: Create release after all images publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" images.txt \
+            --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Logbird $GITHUB_REF_NAME" --notes-file release-notes.md

@@ -1,117 +1,149 @@
-# Manual releases and container images
+# Releases and container images
 
-No release tags or Logbird registry images have been published yet. Source builds
-are the installation path. Package versions in the repository are development
-metadata, not evidence of a release. No CI workflow builds or pushes Docker images;
-do not add automatic image builds on pull requests or pushes.
+The self-host stack uses stable SemVer tags `vMAJOR.MINOR.PATCH`. All tracked
+package manifests (including the SDK, integrations and examples) share that version.
+Git tags include `v`; package versions, image tags and `LOGBIRD_VERSION` omit it.
+The first release is prepared as 0.1.0; the workflow must finish before its images
+or GitHub Release can be treated as available.
 
-## Version and acceptance record
+## Prepare a release
 
-Use SemVer product tags `vMAJOR.MINOR.PATCH` for the complete self-host stack. During
-0.x, a minor version may require a documented migration; a patch must preserve the
-documented configuration/API contract. Use `v0.1.0-rc.1`-style candidates when a
-release still needs acceptance. SDK packages have independent versions and
-changelog sections; they do not select container versions.
+1. Start a release PR from master. Add `## X.Y.Z` to CHANGELOG.md with one to
+   three user-facing bullets under `### Highlights`. Document configuration,
+   migration, recovery and known limits. Keep an empty `## Unreleased` for later work.
+2. Set every tracked package.json version to X.Y.Z, including examples and SDK
+   integrations. Run `pnpm release:version`; passing a tag additionally checks it:
+   `pnpm release:version v0.1.0`. Update the Compose default and .env.example version
+   when selecting a new recommended self-host release.
+3. Use Node 22.18+ and pnpm 10.30.3. Prepare isolated fictional service fixtures,
+   current additive migrations and the restricted ClickHouse query account, then run:
 
-Git tags include `v`, for example `v0.1.0-rc.1`. Image `$VERSION` and
-`LOGBIRD_VERSION` omit it: `0.1.0-rc.1`. The same prefix-free value is the OCI
-version label; `sha-<full-sha>` remains a separate immutable image tag.
+   ```sh
+   pnpm install --frozen-lockfile
+   pnpm release:check
+   pnpm release:notes:dry -- --version v0.1.0 --to HEAD --output .tmp/release-notes.md
+   ```
 
-Before a maintainer creates a tag, update `CHANGELOG.md` with a dated product
-version, highlights, configuration/migration actions, recovery instructions and
-known limits. Keep an Unreleased section for later work. Record the exact Git SHA,
-toolchain versions, base-image digests, test commands/results, image IDs/sizes,
-platforms tested and backup/restore receipt. Prepare a clean source checkout with
-an ignored `.env` containing valid local test configuration (including APP_URL,
-auth/query credentials and service URLs); `openapi:export` explicitly loads that
-file. Running Postgres, ClickHouse and Redis with the current additive schema and
-restricted query user are prerequisites for complete tests. Use isolated fictional
-fixtures and private queue prefixes; never reset shared data. Then run:
+   The notes command reads Git history and GitHub author identities through an
+   authenticated `gh` session. It never creates/edits a release, including without
+   `--dry`. The first release includes all non-merge history; later releases use the
+   nearest preceding reachable stable version tag. `--from vX.Y.Z` overrides the
+   baseline and must be an ancestor. Highlights must exist in the exact version
+   section; missing/empty/comment-only or more than three bullets fail closed.
+   Preview output belongs in the release PR for review.
+4. Build all four images locally (below), validate both Compose configurations,
+   and prove fresh install, SMTP login, workspace/project/key creation, ingest/read,
+   exports, retention and matched fresh-storage restore using fictional data.
+   For an upgrade preserve pre-existing events/settings/keys and all credentials.
+   Before the first versioned release record the accepted source commit baseline.
+   A build or green CI does not prove application/upgrade acceptance. Record unrun
+   gates; see [self-hosting](self-hosting.md) and the existing #77/#88 limits.
+5. Merge through the maintainer process and wait for the master `Quality` job.
+   An authorized maintainer tags the exact accepted commit and pushes the tag:
 
-```sh
-pnpm install --frozen-lockfile
-pnpm release:check
-```
+   ```sh
+   git fetch origin
+   git switch --detach <accepted-master-sha>
+   node scripts/check-version-consistency.mjs v0.1.0
+   git tag -a v0.1.0 -m "Logbird v0.1.0"
+   git push origin v0.1.0
+   ```
 
-Prove a fresh install, SMTP login, workspace/project/key creation, ingest/read,
-restricted queries, worker retention, fresh-storage backup restore and upgrade
-from the previous release with pre-existing fictional events and settings. Before
-the first tag, use the previous accepted commit and state that baseline explicitly.
-Preserve the original credentials. A passing image build is not application or
-upgrade acceptance. Record skipped checks and blockers; do not promote a candidate
-while required checks remain unverified. See [self-hosting](self-hosting.md).
+   Do not move/reuse a published version tag. Release automation is publication,
+   not a production deployment or authorization to bypass acceptance.
+
+## What the tag workflow does
+
+`.github/workflows/release.yml` runs on `v*` pushes. Its preflight requires a
+stable X.Y.Z tag matching every manifest, verifies the tagged commit is on master,
+and requires the latest GitHub Actions `Quality` check to have succeeded for that
+exact commit in successful master push CI (`.github/workflows/ci.yml`). A tag pushed
+before Quality finishes fails; rerun the failed workflow after CI passes.
+
+The workflow tests the release tooling and generates notes before building. It
+then builds/pushes these four images for `linux/amd64` and `linux/arm64`:
+
+| Role | Image | Dockerfile target |
+| --- | --- | --- |
+| API | ghcr.io/joodlab/logbird-server | apps/server/Dockerfile:runtime |
+| Worker | ghcr.io/joodlab/logbird-worker | apps/worker/Dockerfile:runtime |
+| Console | ghcr.io/joodlab/logbird-app | apps/app/Dockerfile:runtime |
+| Migrations | ghcr.io/joodlab/logbird-migrate | apps/server/Dockerfile:migrate |
+
+Each receives X.Y.Z, X.Y and latest tags, OCI source/version/revision/MIT license
+labels, an SBOM and maximum-mode BuildKit provenance. X.Y and latest are moving
+aliases; pin exact versions or digests for controlled upgrades. Only publish
+releases in increasing version order, since older tags would move these aliases
+backwards. Never rebuild a completed published release under the same version.
+
+Preflight also rejects a tag that already has a GitHub Release, preserving a
+completed publication on full-workflow retries. Only after all four pushes succeed
+does the workflow create the GitHub Release and attach `images.txt` with all four
+index digests. Notes contain the reviewed
+Highlights, conventional-type groups in a collapsible changelog with PR/commit
+links, and a thank-you section. Human authors and co-authors are deduplicated by
+GitHub handle across email aliases; people absent before the baseline are marked
+first-time contributors. Unresolved humans use names without fabricated mentions.
+GitHub Bot accounts, [bot] identities, known automation addresses and AI noreply
+identities are excluded from contributor credit and human-authored change counts.
+Non-conventional commits remain in Other changes rather than silently disappearing.
+
+Release concurrency serializes publications. Partial image-job failure may leave
+some version tags pushed without a release: inspect the run/digests, fix the cause,
+and rerun against the same accepted source before announcing availability. An
+existing GitHub Release blocks a full rerun in preflight; retrying only release
+creation fails rather than replacing its reviewed notes. No Coolify deployment
+runs automatically.
+
+`.github/workflows/docker.yml` separately builds all four amd64 targets on PRs
+changing Dockerfiles, Compose, Docker context exclusions or the image workflows.
+It has read-only repository permissions, no registry login and never pushes.
+The owner explicitly authorized these PR builds and tag-driven publication.
+
+## First publication: make GHCR packages public
+
+GitHub initially creates container packages as private, even for a public source
+repository. After the first successful image publication, an organization owner
+must open each of the four packages under the organization's Packages page,
+choose Package settings, then Change visibility, then Public, and confirm. Keep each
+package linked to this repository and grant its Actions workflow package write
+access if an existing package does not inherit it. Do not paste tokens into logs.
+See GitHub's [container registry guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+and [package access settings](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
+
+From a host without registry credentials, pull the exact release version of all
+four roles and compare the manifest digests with images.txt before announcing
+anonymous self-host availability. Public repository visibility alone is not proof
+of public packages. Configure Coolify with that exact LOGBIRD_VERSION; no build
+steps are needed in the default Compose file. See [Coolify](coolify.md).
 
 ## Local architecture checks
 
-The Dockerfiles use a multi-platform Node index digest, not an amd64-only digest.
-Compose dependencies are pinned by index digest too. A pin change needs a fresh
-security/update review and the same runtime checks. Never assume that a base image's
-arm64 manifest proves the application builds or runs on arm64.
-
-With Docker Buildx and sufficient disk/RAM, build each role without publishing:
+Dockerfiles and dependencies use multi-platform index digests. Keep pin updates
+aligned across both Compose files. With Buildx, build without publishing:
 
 ```sh
-docker buildx build --platform linux/amd64 --load -f apps/app/Dockerfile -t logbird-check/app:amd64 .
-docker buildx build --platform linux/amd64 --load -f apps/server/Dockerfile -t logbird-check/server:amd64 .
+docker buildx build --platform linux/amd64 --load -f apps/server/Dockerfile --target runtime -t logbird-check/server:amd64 .
+docker buildx build --platform linux/amd64 --load -f apps/worker/Dockerfile --target runtime -t logbird-check/worker:amd64 .
+docker buildx build --platform linux/amd64 --load -f apps/app/Dockerfile --target runtime -t logbird-check/app:amd64 .
 docker buildx build --platform linux/amd64 --load -f apps/server/Dockerfile --target migrate -t logbird-check/migrate:amd64 .
-docker buildx build --platform linux/amd64 --load -f apps/worker/Dockerfile -t logbird-check/worker:amd64 .
 ```
 
-Repeat with `linux/arm64` and `:arm64`. Prefer a native arm64 host; emulation can be
-slow and does not prove native performance. Run the same Compose acceptance on
-each supported architecture and inspect each role's `Config.User` plus `id -u`
-(must be nonzero), readiness, migration and worker health. Record image byte sizes
-with `docker image inspect`. The one-shot migrate image includes development
-migration tooling and is larger than the long-running roles; its fresh final stage
-excludes the build-stage package store and duplicate deployed API tree. Remove only
-the test images/cache created by the run. Arm64 support remains unverified until
-the application builds and acceptance passes there; list the precise failed or
-unrun role/stage in the release record.
-
-## GHCR publishing plan (maintainer action)
-
-The registry is GHCR ([architecture decision 2026-11-08](decisions.md)). Image names match
-Compose's defaults: `ghcr.io/joodlab/logbird-app`, `logbird-server`, `logbird-worker`
-and `logbird-migrate`. **Nothing is published until the repository is open-sourced**,
-and every publication is a manual maintainer release step. A maintainer must
-confirm package visibility and retention policy before the first publication.
-Log in using an authorized package-writing credential via `--password-stdin` or a
-credential helper; never commit or print it. GitHub documents authentication and
-repository association in its [container registry guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
-
-After acceptance and explicit publication approval, create the immutable Git tag
-on the accepted SHA. For every role, manually build/push the tested architectures
-with exact version and `sha-<full-git-sha>` tags, revision/version OCI labels,
-provenance and SBOM. For example (this command publishes):
+Repeat with linux/arm64 and :arm64, preferably on a native host. A base image's
+arm64 manifest or an emulated build does not prove application acceptance there.
+Check each runtime's non-root UID, readiness, migrations and worker health.
+Record source SHA, toolchain, image IDs/sizes, architecture and backup/restore
+receipts. Validate Compose using private env files, or fictional simulated values:
 
 ```sh
-docker buildx build --platform linux/amd64 \
-  --label org.opencontainers.image.revision="$REVISION" \
-  --label org.opencontainers.image.version="$VERSION" \
-  --tag "ghcr.io/joodlab/logbird-server:$VERSION" \
-  --tag "ghcr.io/joodlab/logbird-server:sha-$REVISION" \
-  --provenance=mode=max --sbom=true --push -f apps/server/Dockerfile .
+docker compose --env-file .env.selfhost-test -f docker-compose.yml config -q
+docker compose --env-file .env.coolify-test -f docker-compose.coolify.yml config -q
 ```
 
-Use the corresponding Dockerfile for app/worker and `--target migrate` for migrate.
-Add `linux/arm64` to a publication only after that architecture's complete build
-and application acceptance passes. The example publishes amd64 only because
-arm64 is currently unverified.
-Never overwrite a published version or use `latest` as an upgrade selector. Inspect
-the resulting manifest/index digests, pull those images into an empty host and
-rerun acceptance. Record all four registry digests in the release notes before
-announcing availability. Consumers then keep
-`LOGBIRD_IMAGE_REGISTRY` empty (default `ghcr.io/joodlab`), set `LOGBIRD_VERSION=<exact-version>`
-and use `docker compose up -d --no-build --pull always`. Verify the pulled digests
-against the release record. Every later startup or reconfiguration of a published-image
-installation, including Caddy and external-service paths, uses `up --no-build`: a bare
-`up` under `pull_policy: build` rebuilds from the checkout and shadows the verified tag.
-Existing [source-build instructions](self-hosting.md#five-minute-quickstart) remain valid.
-
-Publication, tag creation, package visibility and public ACME/SMTP are separate
-actions from local validation. This document authorizes none of them and adds no
-CI workflows. [Docker's multi-platform guide](https://docs.docker.com/build/building/multi-platform/)
-describes native/emulated builders and image-store requirements.
+A local Coolify simulation cannot prove provider secret generation, proxy routing
+or live recovery. Do not reset shared databases or rotate existing keys. Source
+builds remain available through docker-compose.build.yml; see
+[the source installation path](self-hosting.md#build-from-source).
 
 ### Migration cancellation check
 
