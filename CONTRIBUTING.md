@@ -34,7 +34,8 @@ The Docker workflow builds the images on PRs that touch Dockerfiles or Compose f
 
 `pnpm test:unit` runs every test outside the server except `*.integration.test.ts`,
 the server's three pure export regression suites, and the self-hosting/Kubernetes
-script tests. It does not need backing services. The broader server suite stays
+script tests. Package concurrency and Vitest workers are capped at two so concurrent
+cold transforms do not exhaust small CI runners. It does not need backing services. The broader server suite stays
 local-only for now: even its `unit` Vitest project installs `test-services.ts`,
 whose cleanup connects to Postgres and Redis, and several plain `*.test.ts` files
 exercise real services. Integration suites also require migrated ClickHouse with

@@ -20,7 +20,7 @@
     "format": "biome format --write .",
     "typecheck": "turbo run typecheck",
     "test": "node --test scripts/release-notes.test.mjs scripts/release-preflight.test.mjs && turbo run test && node --test scripts/selfhost-init.test.mjs",
-    "test:unit": "turbo run test --filter=!@logbird/server -- --exclude \"**/*.integration.test.ts\" && pnpm --filter @logbird/server exec vitest run --config vitest.export-unit.config.ts && node --test scripts/release-notes.test.mjs scripts/release-preflight.test.mjs scripts/selfhost-init.test.mjs scripts/k3s-manifests.test.mjs scripts/wait-k8s-job.test.mjs",
+    "test:unit": "turbo run test --concurrency=2 --filter=!@logbird/server -- --exclude \"**/*.integration.test.ts\" --maxWorkers=2 && pnpm --filter @logbird/server exec vitest run --config vitest.export-unit.config.ts && node --test scripts/release-notes.test.mjs scripts/release-preflight.test.mjs scripts/selfhost-init.test.mjs scripts/k3s-manifests.test.mjs scripts/wait-k8s-job.test.mjs",
     "db:generate": "pnpm --filter @logbird/database generate",
     "db:migrate": "pnpm --filter @logbird/database migrate:dev",
     "db:deploy": "pnpm --filter @logbird/database migrate:deploy",
