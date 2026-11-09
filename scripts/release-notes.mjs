@@ -18,14 +18,21 @@ const types = {
   test: 'Tests',
 };
 const conventional = /^(\w+)(?:\(([^)]+)\))?(!)?: (.+)$/;
+// AI coding agents and automation sign commits with these addresses; GitHub can map some of them to real
+// accounts (e.g. codex@users.noreply.github.com resolves to @codex), so match the address, not the login.
 const excludedEmail =
-  /@openai\.com$|^noreply@(?:anthropic\.com|cursor\.com|githubcopilot\.com)$|^(?:\d+\+)?(?:dependabot|github-actions)(?:\[bot\])?@(?:users\.noreply\.github\.com|github\.com)$/i;
+  /@openai\.com$|^noreply@(?:anthropic\.com|cursor\.com|githubcopilot\.com)$|^(?:\d+\+)?(?:dependabot|github-actions|codex|claude|copilot|cursor(?:agent)?|devin-ai-integration)(?:\[bot\])?@(?:users\.noreply\.github\.com|github\.com)$/i;
+const excludedLogin = /^(?:codex|claude|copilot|cursor(?:agent)?|devin-ai-integration)$/i;
 
 // Reserved documentation/test domains (RFC 2606/6761, e.g. history-scrubbed addresses) never identify a real contributor.
 const placeholderEmail = /@(?:[\w-]+\.)*(?:example\.(?:com|net|org)|example|invalid|localhost)$/i;
 
 export function isPerson({ name = '', email = '', login = '', type }) {
-  return type !== 'Bot' && !/\[bot\]/i.test(`${name} ${email} ${login}`) && !excludedEmail.test(email) && !placeholderEmail.test(email);
+  return type !== 'Bot' &&
+    !/\[bot\]/i.test(`${name} ${email} ${login}`) &&
+    !excludedEmail.test(email) &&
+    !excludedLogin.test(login) &&
+    !placeholderEmail.test(email);
 }
 
 export function highlights(markdown, version) {

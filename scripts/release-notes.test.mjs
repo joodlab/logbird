@@ -150,3 +150,12 @@ test('merges a login with the same person under a placeholder or bare email, and
   ];
   assert.deepEqual(summarize(commits, [], logins).contributors, [{ label: '@owner', first: false }]);
 });
+
+test('AI coding agents never count as contributors, even when GitHub resolves their noreply address to an account', () => {
+  const logins = new Map([
+    ['codex@users.noreply.github.com', 'codex'],
+    ['human@users.noreply.github.com', 'human'],
+  ]);
+  const commits = [commit('feat: x', [person('Human', 'human@users.noreply.github.com'), person('Codex', 'codex@users.noreply.github.com')])];
+  assert.deepEqual(summarize(commits, [], logins).contributors, [{ label: '@human', first: false }]);
+});
