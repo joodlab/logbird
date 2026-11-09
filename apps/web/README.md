@@ -71,11 +71,11 @@ minute (per process / per isolate, with a bounded client table). Native form pos
 
 ## Media
 
-`src/lib/media-manifest.ts` lists real console captures from `marketing/captures/2026-11-07-site-console/` (fictional
-"QA Azure Hotels" workspace). `scripts/media.ts` encodes AVIF/WebP (640/1024/1600 px, and phone variants at 390 px)
+`src/lib/media-manifest.ts` lists real console captures from `marketing/media/staydesk/` (fictional
+Acme workspace and StayDesk project). `scripts/media.ts` encodes AVIF/WebP (640/1024/1600 px, and phone variants at 390 px)
 into `public/media` (ignored). `<Screenshot>` renders one lazy `<picture>` per theme; the pre-paint theme class hides the
 other, so only one image downloads and nothing swaps after hydration. Below 640 px an entry's phone capture replaces the
-shrunken desktop one. Run `git lfs pull` if a source is a pointer. Turbo hashes `marketing/captures/**` for this
+shrunken desktop one. Sources are compact WebP files in normal Git. Turbo hashes `marketing/media/**` for this
 package's build, so replacing a capture rebuilds the media. Media URLs are stable (not content-hashed), so `/media/*`
 is cached for a day with stale-while-revalidate, never `immutable`.
 

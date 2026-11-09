@@ -15,7 +15,7 @@ import { signIn, watch } from './qa-shoot.mjs';
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:4600';
 const SERVER = process.env.SERVER_URL ?? 'http://localhost:4601';
-const OUT = path.resolve(process.env.OUT ?? '../../marketing/captures/2026-11-08-console-backlogs');
+const OUT = path.resolve(process.env.OUT ?? '../../output/qa/2026-11-08-console-backlogs');
 const RUN = process.env.RUN ?? Date.now().toString(36).slice(-5);
 const OWNER = `qa-fix-backlogs-${RUN}-1@example.test`;
 const MEMBER = `qa-fix-backlogs-${RUN}-2@example.test`;

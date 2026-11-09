@@ -2,7 +2,7 @@
  * Keyboard, screen-reader, forced-colors and axe proof for #85 + #64 (PHONE-07/08/09/12/13), against a REAL local
  * stack (app :4600, server :4601, worker).
  *
- *   MODE=before|after AXE=/path/to/axe.min.js OUT=../../marketing/captures/2026-11-08-console-a11y \
+ *   MODE=before|after AXE=/path/to/axe.min.js OUT=../../output/qa/2026-11-08-console-a11y \
  *     node scripts/console-a11y-proof.mjs
  *
  * "before" runs against master's sources (checked out into the working tree), "after" against the branch; both write

@@ -47,7 +47,7 @@ Then one `##` block per section, in page order:
 - `heading`: the section heading. On a page's first section it is the H1.
 - `body`, `bullets`: the copy.
 - `cta`: label → target.
-- `visual`: an exact path under `marketing/captures/`, or "code sample", or "diagram: …".
+- `visual`: an exact path under `marketing/media/`, or "code sample", or "diagram: …".
 
 ## Messaging hierarchy
 
@@ -147,7 +147,7 @@ These variants are **not** used anywhere on the site. The owner may approve them
 
 ## Captures
 
-Pages use the console captures in `marketing/captures/2026-11-07-site-console/` (listed in
+Pages use the console captures in a fresh capture from `marketing/media/staydesk/` (choose the matching reviewed asset before publishing) (listed in
 `apps/web/src/lib/media-manifest.ts`). They were shot against the real console in a fictional workspace,
 "QA Azure Hotels", with a fictional user and seed data; see that folder's README for how.
 

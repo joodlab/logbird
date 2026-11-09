@@ -1,7 +1,7 @@
 /**
  * Keyboard + axe verification for the event grid against a local stack (app :4600, server :4601, worker).
  *
- *   AXE=/path/to/axe.min.js OUT=../../marketing/captures/2026-11-07-a11y-explorer node scripts/a11y-grid-proof.mjs
+ *   AXE=/path/to/axe.min.js OUT=../../output/qa/2026-11-07-a11y-explorer node scripts/a11y-grid-proof.mjs
  *
  * Creates a fictional user/workspace/project (qa-fix-a11y-r5-*@example.test, "QA Fix a11y r5"), ingests events, and checks:
  *  - Explorer: keyboard into the grid, ArrowDown to row 50, a 150-event live-tail batch arrives → focus stays on the same

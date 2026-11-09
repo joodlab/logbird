@@ -1,9 +1,27 @@
-name: Feature Request
-description: Suggest an improvement
+name: Feature request
+description: Propose an improvement to Logbird.
 body:
   - type: textarea
+    id: problem
     attributes:
-      label: Problem, expected behavior and reproduction
-      description: Include version and environment. Remove secrets and personal data.
+      label: Problem or use case
+      description: What are you trying to achieve, and who needs it? Use fictional examples.
     validations:
       required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you would like and how you would use it.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include workarounds, tradeoffs or related proposals.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Redact credentials and personal information from examples or attachments.
