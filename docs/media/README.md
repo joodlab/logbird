@@ -2,7 +2,7 @@
 
 Captured on 2026-11-09 from the real local console and API against Postgres, ClickHouse, Dragonfly and Mailpit. No mocked responses or production systems. The additive capture fixture creates a new Acme workspace with StayDesk (18,000 events) and Ledger demo (1,000 events), using the `staydesk` seed profile spread over seven days. Each run has a distinct workspace slug and a fictional `example.com` login named Demo operator; no existing workspace is reset.
 
-`marketing/media/staydesk/` contains 19 WebP stills at 1440?900 (desktop) and 390?844 (phone), including light/dark explorer, overview, changes, SQL and phone views. `walkthrough.gif` and `walkthrough.webm` contain the same short journey: real email OTP sign-in, overview, explorer search, event detail with a changes diff, and live tail receiving three newly ingested fictional bookings. The original Playwright recording remains ignored under `.tmp/`.
+`marketing/media/staydesk/` contains 19 WebP stills at 1440×900 (desktop) and 390×844 (phone), including light/dark explorer, overview, changes, SQL and phone views. `walkthrough.gif` and `walkthrough.webm` contain the same short journey: real email OTP sign-in, overview, explorer search, event detail with a changes diff, and live tail receiving three newly ingested fictional bookings. The original Playwright recording remains ignored under `.tmp/`.
 
 ## Reproduce
 
