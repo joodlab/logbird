@@ -1,11 +1,11 @@
-FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS prune
+FROM node:26-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS prune
 ARG NODE_OPTIONS
 WORKDIR /source
 RUN npm install --global pnpm@10.30.3 turbo@2.10.12
 COPY . .
 RUN turbo prune @logbird/server --docker
 
-FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS build
+FROM node:26-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS build
 ARG NODE_OPTIONS
 ARG BUILD_CONCURRENCY=1
 ARG DOWNLOAD_CONCURRENCY=4
@@ -22,7 +22,7 @@ RUN pnpm --child-concurrency="$BUILD_CONCURRENCY" --network-concurrency="$DOWNLO
 
 # Copy installed tooling into a fresh image: the build stage also contains the
 # package store, compiler caches and the deployed API dependency tree.
-FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS migrate
+FROM node:26-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS migrate
 WORKDIR /workspace
 ENV NODE_ENV=production
 RUN apt-get update && apt-get install -y --no-install-recommends openssl tini && rm -rf /var/lib/apt/lists/*
@@ -37,7 +37,7 @@ USER node
 ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
 CMD ["sh", "-c", "pnpm --filter @logbird/database migrate:deploy && pnpm --filter @logbird/clickhouse migrate && cd packages/clickhouse && exec node --import tsx scripts/create-query-user.ts"]
 
-FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS runtime
+FROM node:26-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS runtime
 WORKDIR /workspace
 ENV NODE_ENV=production
 LABEL org.opencontainers.image.source="https://github.com/joodlab/logbird"       org.opencontainers.image.licenses="MIT"       org.opencontainers.image.title="Logbird"
