@@ -26,15 +26,15 @@
     "@logbird/sdk": "workspace:*"
   },
   "peerDependencies": {
-    "@tanstack/react-start": "1.168.49"
+    "@tanstack/react-start": "1.169.4"
   },
   "devDependencies": {
-    "@tanstack/react-start": "1.168.49",
+    "@tanstack/react-start": "1.169.4",
     "@logbird/tsconfig": "workspace:*",
     "@logbird/contracts": "workspace:*",
-    "@types/node": "22.20.1",
+    "@types/node": "26.6.6",
     "typescript": "7.0.2",
-    "vitest": "4.1.11",
-    "tsdown": "0.22.14"
+    "vitest": "5.1.0",
+    "tsdown": "0.23.5"
   }
 }

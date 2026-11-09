@@ -8,10 +8,10 @@
   "dependencies": {
     "@logbird/nuxt": "workspace:*",
     "@logbird/sdk": "workspace:*",
-    "nuxt": "4.1.3"
+    "nuxt": "4.6.4"
   },
   "devDependencies": {
-    "tsx": "4.23.13"
+    "tsx": "4.23.15"
   },
   "version": "0.1.0"
 }

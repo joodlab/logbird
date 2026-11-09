@@ -26,17 +26,17 @@
     "@logbird/sdk": "workspace:*"
   },
   "peerDependencies": {
-    "vue": "3.5.22"
+    "vue": "3.5.45"
   },
   "devDependencies": {
-    "vue": "3.5.22",
+    "vue": "3.5.45",
     "@logbird/tsconfig": "workspace:*",
     "@logbird/contracts": "workspace:*",
-    "@types/node": "22.20.1",
+    "@types/node": "26.6.6",
     "typescript": "7.0.2",
-    "vitest": "4.1.11",
-    "tsdown": "0.22.14",
-    "@vue/test-utils": "2.4.6",
-    "happy-dom": "20.0.11"
+    "vitest": "5.1.0",
+    "tsdown": "0.23.5",
+    "@vue/test-utils": "2.5.1",
+    "happy-dom": "21.0.4"
   }
 }

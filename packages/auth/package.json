@@ -20,15 +20,15 @@
     "@logbird/contracts": "workspace:*",
     "@logbird/database": "workspace:*",
     "@logbird/email": "workspace:*",
-    "better-auth": "^1.7.2",
-    "react": "^19.2.8"
+    "better-auth": "^1.7.18",
+    "react": "^19.3.1"
   },
   "devDependencies": {
     "@logbird/tsconfig": "workspace:*",
-    "@types/node": "^22.20.1",
+    "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
-    "tsx": "4.23.13",
+    "tsx": "4.23.15",
     "dotenv-cli": "^11.0.0",
-    "tsdown": "^0.22.14"
+    "tsdown": "^0.23.5"
   }
 }
