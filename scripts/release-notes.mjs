@@ -28,11 +28,13 @@ const excludedLogin = /^(?:codex|claude|copilot|cursor(?:agent)?|devin-ai-integr
 const placeholderEmail = /@(?:[\w-]+\.)*(?:example\.(?:com|net|org)|example|invalid|localhost)$/i;
 
 export function isPerson({ name = '', email = '', login = '', type }) {
-  return type !== 'Bot' &&
+  return (
+    type !== 'Bot' &&
     !/\[bot\]/i.test(`${name} ${email} ${login}`) &&
     !excludedEmail.test(email) &&
     !excludedLogin.test(login) &&
-    !placeholderEmail.test(email);
+    !placeholderEmail.test(email)
+  );
 }
 
 export function highlights(markdown, version) {
