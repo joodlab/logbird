@@ -1,15 +1,19 @@
+<!-- Use a Conventional Commit title, e.g. fix(app): preserve explorer filters. -->
 ## What
 
 ## Why
 
 ## How verified
 
-- [ ] install, typecheck, check, test and build
-- [ ] Service behavior exercised with fictional data
-- [ ] Contract changes documented
-- [ ] UI screenshots / recording, or equivalent evidence explained
-- [ ] No credentials or personal configuration
+List commands, results, real-service checks and any limits.
 
-## Decisions needed
+- [ ] `pnpm install`, `pnpm typecheck`, `pnpm check`, `pnpm test`, `pnpm build`
+- [ ] Service-dependent behavior exercised with isolated fictional data
+- [ ] Contracts and API consumers updated together, or not applicable
+- [ ] Screenshots for UI changes; short recording for interactions (or explain equivalent evidence)
+- [ ] No credentials, customer data or personal configuration
+- [ ] Rebased on `origin/master` and ready for review
 
-## Not done
+## Screenshots / recording
+
+## Risks and follow-up

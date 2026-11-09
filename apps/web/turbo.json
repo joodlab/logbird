@@ -19,7 +19,8 @@
         "$TURBO_DEFAULT$",
         ".env*",
         "$TURBO_ROOT$/.env*",
-        "$TURBO_ROOT$/marketing/captures/**"
+        "$TURBO_ROOT$/marketing/media/**",
+        "$TURBO_ROOT$/docs/media/**"
       ]
     }
   }

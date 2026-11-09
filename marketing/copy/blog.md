@@ -32,7 +32,7 @@ path: /blog
   - `path`: `/blog/why-were-building-logbird`
   - `author`: (owner to fill)
   - `date`: (on publication)
-- **visual (header):** `marketing/captures/2026-11-06-logbird-rename/04-explorer-light.png` (after re-capture; see
+- **visual (header):** `marketing/media/staydesk/explorer-light.webp` (after re-capture; see
   `README.md` § Captures)
 
 ### Why we're building Logbird

@@ -54,5 +54,7 @@ it('keeps company and design-partner names out of public site source', () => {
 it('hashes every public variable and every env file the loader reads in Turbo', () => {
   const build = JSON.parse(readFileSync('turbo.json', 'utf8')).tasks.build;
   expect(build.env).toEqual(expect.arrayContaining([...PUBLIC_ENV_KEYS]));
-  expect(build.inputs).toEqual(expect.arrayContaining(['.env*', '$TURBO_ROOT$/.env*', '$TURBO_ROOT$/marketing/captures/**']));
+  expect(build.inputs).toEqual(
+    expect.arrayContaining(['.env*', '$TURBO_ROOT$/.env*', '$TURBO_ROOT$/marketing/media/**', '$TURBO_ROOT$/docs/media/**']),
+  );
 });

@@ -29,8 +29,8 @@ path: /
   Caption under the snippet: "That's a valid event. Only `action` is required."
   <!-- source: README.md Quickstart; docs/SPEC.md §1.1 -->
 - **small print under the CTAs:** Source on GitHub — coming soon. Logbird Cloud is not open yet.
-- **visual:** `marketing/captures/2026-11-06-logbird-rename/04-explorer-light.png` (dark-mode pair:
-  `marketing/captures/2026-11-06-logbird-rename/05-explorer-dark.png`).
+- **visual:** `marketing/media/staydesk/explorer-light.webp` (dark-mode pair:
+  `marketing/media/staydesk/explorer-dark.webp`).
 
 ## for-developers
 
@@ -98,7 +98,7 @@ path: /
   - **Retention** per project, from 7 days to 10 years. Expired events are permanently deleted.
     <!-- source: packages/contracts/src/api.ts RETENTION_OPTIONS (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days) -->
 - **cta:** Take the product tour → `/product`
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/04-event-sheet.png` (event detail with actor, executor,
+- **visual:** `marketing/media/staydesk/event-sheet-light.webp` (event detail with actor, executor,
   tenant, targets and changes).
 
 ## how-it-works
@@ -168,7 +168,7 @@ path: /
 - **while the repository is private:** replace the quickstart code block with "Available when the repository opens.
   On one VM: clone, generate secrets, configure SMTP, build the four roles, then `docker compose up -d --no-build`. We'll
   publish the commands here the day the source is public." and a "Tell me when it opens" button → `/contact?interest=self-host`.
-- **visual:** `marketing/captures/2026-11-05-self-hosting/12-compose-ps.png` (terminal: `docker compose ps` with the
+- **visual:** a new, reviewed capture (required before publication) (terminal: `docker compose ps` with the
   stack running). Check the terminal for paths or hostnames before use.
 
 ## guarantees

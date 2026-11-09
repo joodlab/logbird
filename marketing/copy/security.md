@@ -43,7 +43,7 @@ path: /security
   - Deleting a project deletes all of its events.
   - There's no archive and no undo.
   <!-- source: docs/SPEC.md §1.4, §4 (retention), §5 (preview), §6, §7.1; packages/contracts/src/api.ts RETENTION_OPTIONS -->
-- **visual:** `marketing/captures/2026-11-04-ui-foundation/light-settings-retention-confirm.png` (the slug
+- **visual:** a new, reviewed capture (required before publication) (the slug
   confirmation dialog). Re-capture first (see `README.md` § Captures).
 
 ## isolation
@@ -60,7 +60,7 @@ path: /security
   - **Workspace boundaries.** The server checks on every request that the project belongs to your active workspace.
     A request for another workspace's project gets a 404 and reveals nothing about it.
   <!-- source: docs/SPEC.md §5, §6 (ApiKey lastUsedAt, revokedAt), §7.1; SECURITY.md -->
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/11-api-keys.png`. Check that no full key is visible.
+- **visual:** a new, reviewed capture (required before publication). Check that no full key is visible.
 
 ## sql-guard
 
@@ -82,7 +82,7 @@ path: /security
 - **limit line (callout titled "Where these layers stop"):** These layers protect against a broadened or malformed filter. They don't replace the server's own
   authorization, and they don't protect against stolen database credentials. SQL mode is for the console only; the
   public API rejects it. <!-- source: docs/query-language.md §Security model -->
-- **visual:** `marketing/captures/2026-11-05-final-walkthrough/qb-23-sql-rejected.png`. Re-capture first (see `README.md` § Captures).
+- **visual:** `marketing/media/staydesk/sql-rejected-light.webp`. Re-capture first (see `README.md` § Captures).
 
 ## roles
 
@@ -113,7 +113,7 @@ path: /security
 - **visual (site, until a clean capture exists):** a JSON event: action `room.rate.updated`, actor Lina Haddad
   (`lina@example.test`), impersonator Omar Saleh, tenant Azure Hotels, target Room 12. Title: "Support changes a rate
   for Lina". Caption: "Lina stays the actor. Omar, from support, is on the event as the impersonator."
-  Capture to use later: `marketing/captures/2026-11-05-final-walkthrough/06-impersonation.png`. Re-capture first (see `README.md` § Captures).
+  Capture to use later: a new, reviewed capture (required before publication). Re-capture first (see `README.md` § Captures).
 
 ## self-audit
 
@@ -126,7 +126,7 @@ path: /security
   or atomic capture until #73 (atomic audit rows for management mutations) merges; strengthen in a follow-up then. -->
 - **visual (site, until a clean capture exists):** four log rows: `project.created`, `api_key.created`,
   `api_key.revoked`, `project.retention.changed`. Caption: "Examples of management actions in the activity stream."
-  Capture to use later: `marketing/captures/2026-11-04-ui-foundation/light-workspace-activity.png`. Re-capture first (see `README.md` § Captures).
+  Capture to use later: a new, reviewed capture (required before publication). Re-capture first (see `README.md` § Captures).
 
 ## limits
 

@@ -1,9 +1,40 @@
-name: Bug Report
-description: Report a reproducible problem
+name: Bug report
+description: Report a reproducible problem with Logbird.
 body:
-  - type: textarea
+  - type: markdown
     attributes:
-      label: Problem, expected behavior and reproduction
-      description: Include version and environment. Remove secrets and personal data.
+      value: Remove credentials and personal data. Report security problems using SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Include the image tag or exact source revision.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Deployment method, OS, browser, Node and dependency versions as relevant. Redact secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Provide a minimal reproduction using fictional events.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include sanitized logs or screenshots if helpful.
     validations:
       required: true

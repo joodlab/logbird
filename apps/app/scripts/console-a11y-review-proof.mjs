@@ -6,7 +6,7 @@
  *  - clicking a hidden retention shortcut card does not move focus onto it, and still sets the value;
  *  - forced colors: a focused retention chip radio paints an outline ≥ 2px.
  *
- *   AXE=/path/to/axe.min.js OUT=../../marketing/captures/2026-11-08-console-a11y node scripts/console-a11y-review-proof.mjs
+ *   AXE=/path/to/axe.min.js OUT=../../output/qa/2026-11-08-console-a11y node scripts/console-a11y-review-proof.mjs
  *
  * Fixture: fictional `qa-fix-a11y-phone-review-*@example.test`, workspace "QA Fix a11y phone review", project "QA Phone
  * Review" (deleted at the end). One browser, closed in `finally`.

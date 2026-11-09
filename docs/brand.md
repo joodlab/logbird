@@ -69,7 +69,7 @@ The files are in `apps/app/public/brand/`:
 | `logbird-wordmark-arabic-text.svg` | لوغبيرد in `currentColor` |
 | `logbird-og.png` | 1200×630 social card |
 
-![Wordmarks](../marketing/captures/2026-11-06-logbird/wordmarks.png)
+![Wordmarks](../apps/app/public/brand/logbird-wordmark-bilingual-light.svg)
 
 **Rules:**
 

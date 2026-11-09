@@ -33,5 +33,5 @@ read from Mailpit's API (`http://127.0.0.1:8025`).
 ```bash
 node scripts/qa-shoot.mjs login demo@logbird.local            # saves a session to .qa-state.json
 node scripts/qa-shoot.mjs shoot ./out dark 1440x900 /p/<id>/events  # screenshots + console/HTTP problems
-node scripts/capture-media.mjs                                  # regenerates marketing/captures/2026-11-04-ui-real-api/
+node apps/app/scripts/capture-media.mjs # from repo root; see docs/media/README.md
 ```

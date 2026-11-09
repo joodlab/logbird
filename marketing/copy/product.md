@@ -16,7 +16,7 @@ path: /product
   read API (last section on this page).
   <!-- source: docs/SPEC.md intro ("not an end-customer portal") -->
 - **cta:** Self-host it → `/self-hosting` · Join the waitlist → `/contact`
-- **visual:** `marketing/captures/2026-11-07-site-console/overview-light.png` / `overview-dark.png` (manifest id `overview`).
+- **visual:** `marketing/media/staydesk/overview-light.webp` / `marketing/media/staydesk/overview-dark.webp` (manifest id `overview`).
 
 ## explorer
 
@@ -32,8 +32,7 @@ path: /product
   - Keyboard first: `/` focuses search, `j` and `k` move through events, `Esc` closes the panel, ⌘K opens the command
     palette.
   - Export the current results as CSV or JSONL. <!-- source: packages/contracts/src/routes.ts (export ?format=csv|jsonl) -->
-- **visual:** clip `marketing/captures/2026-11-07-site-console/investigate-explorer-operation.webm` (manifest id `investigate`: type a query, open an event,
-  follow its operation).
+- **visual:** clip `docs/media/walkthrough.webm` (manifest id `investigate`: sign in, search events, inspect changes and watch live tail).
 
 ## search
 
@@ -59,7 +58,7 @@ path: /product
   - Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 attributes
     and the first 2 KiB of each value; the full event is stored as received.
     <!-- source: docs/SPEC.md §3 (flattening); packages/clickhouse/src/normalize.ts -->
-- **visual:** `marketing/captures/2026-11-07-site-console/query-suggestions-light.png` (manifest id `query-suggestions`) under the query-language code sample.
+- **visual:** `marketing/media/staydesk/query-suggestions-light.webp` (manifest id `query-suggestions`) under the query-language code sample.
 
 ## sql-mode
 
@@ -81,7 +80,7 @@ path: /product
   <!-- source: docs/SPEC.md §5.1.2; docs/query-language.md §Security model -->
 - **limit line (small print):** SQL mode is for the console only. The public read API accepts the query language,
   not SQL. A free-form SQL console isn't part of Logbird. <!-- source: docs/query-language.md -->
-- **visual:** `marketing/captures/2026-11-07-site-console/sql-rejected-light.png` (manifest id `sql-rejected`: a subquery rejected before it runs).
+- **visual:** `marketing/media/staydesk/sql-rejected-light.webp` (manifest id `sql-rejected`: a subquery rejected before it runs).
 
 ## entity-pages
 
@@ -97,7 +96,7 @@ path: /product
   - **Tenants:** whose account. "What happened at Azure Hotels last week?" is one click.
   - **Executors:** what did the work. The API, each queue worker and cron job, with job ids and attempts.
   - **Records:** what changed. `booking:bk_1042` has a history of its own.
-- **visual:** `marketing/captures/2026-11-07-site-console/tenant-light.png` (manifest id `tenant`).
+- **visual:** `marketing/media/staydesk/tenant-light.webp` (manifest id `tenant`).
 
 ## operations
 
@@ -108,7 +107,7 @@ path: /product
   caused which. Logbird draws the tree: each step with its outcome, executor and timing. A failed first attempt and
   the retry that worked sit side by side.
   <!-- source: docs/concepts.md §Operations; docs/SPEC.md §8 journey 6 -->
-- **visual:** `marketing/captures/2026-11-07-site-console/operation-light.png` (manifest id `operation`: a scheduler request, its jobs, failed attempts and
+- **visual:** `marketing/media/staydesk/operation-light.webp` (manifest id `operation`: a scheduler request, its jobs, failed attempts and
   the retries that worked; the durations are fixture data).
 
 ## event-detail
@@ -127,7 +126,7 @@ path: /product
   - Support work stands out: rows show "via support", the Done by support filter lists them, and each support agent
     has a page.
   <!-- source: docs/SPEC.md §8 journey 4 (event sheet); #69 (explorer columns, facet-sidebar, support-agent-profile) -->
-- **visual:** `marketing/captures/2026-11-07-site-console/event-sheet-light.png` / `event-sheet-dark.png` (manifest id
+- **visual:** `marketing/media/staydesk/event-sheet-light.webp` / `marketing/media/staydesk/event-sheet-dark.webp` (manifest id
   `event-sheet`). The impersonation still is set aside: it shows the card as it was before #69 ("Impersonator", not
   "Support"). Re-shoot it on master in a stack window, ideally with a "via support" row and the Done by support filter,
   before using it again.
@@ -168,7 +167,7 @@ path: /product
     fictional events over seven days. It never counts as setup, and you can remove it.
     <!-- source: docs/SPEC.md §5 sample-data -->
   - A conformance score on every event, and a Fields page that shows every field you send and how often.
-- **visual:** `marketing/captures/2026-11-07-site-console/setup-light.png` (manifest id `setup`). The onboarding stills were discarded because the page's
+- **visual:** `marketing/media/staydesk/setup-light.webp` (manifest id `setup`). The onboarding stills were discarded because the page's
   snippet prints the ingest key.
 
 ## retention
@@ -182,7 +181,7 @@ path: /product
   <!-- source: docs/SPEC.md §1.4, §4, §5 retention preview, §6 (retentionDays=90), §7.1; packages/contracts/src/api.ts RETENTION_OPTIONS -->
 - **limit line:** Retention deletes are permanent. There's no archive and no undo. The preview count is
   approximate, because storage is at least once.
-- **visual:** `marketing/captures/2026-11-07-site-console/retention-light.png` (manifest id `retention`: the 30-day preview; nothing was confirmed).
+- **visual:** `marketing/media/staydesk/retention-light.webp` (manifest id `retention`: the 30-day preview; nothing was confirmed).
 
 ## workspace-activity
 

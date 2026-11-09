@@ -11,16 +11,16 @@
 >
 > <link>
 
-**Clip:** [`explorer-search-filter-zoom.webm`](../../captures/2026-11-04-ui-foundation/explorer-search-filter-zoom.webm)
+**Clip:** historical media removed; recapture before publication
 — search, filter by a facet, zoom the histogram.
 
 **Replies (one still each)**
 1. "Click any event to see the full story: actor, executor, tenant, records and the before/after of every change." —
-   [`dark-event-detail.png`](../../captures/2026-11-04-ui-foundation/dark-event-detail.png)
+   historical media removed; recapture before publication
 2. "One request, the jobs it spawned and every record they changed, as one tree." —
-   [`entity-follow-operation-tree.webm`](../../captures/2026-11-04-ui-foundation/entity-follow-operation-tree.webm)
+   historical media removed; recapture before publication
 3. "Live tail for when you're watching a deploy." —
-   [`explorer-detail-live-tail.webm`](../../captures/2026-11-04-ui-foundation/explorer-detail-live-tail.webm)
+   historical media removed; recapture before publication
 
 **Alt text (clip):** The Logbird explorer: a search bar, a bar chart of events over 7 days, and a dense table of
 audit events being filtered to failures.

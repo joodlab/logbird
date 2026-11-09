@@ -1,7 +1,7 @@
 /**
  * Support-impersonation verification against a local stack (app :4600, server :4601, worker).
  *
- *   AXE=/path/to/axe.min.js OUT=../../marketing/captures/2026-11-07-impersonation-visible node scripts/support-proof.mjs
+ *   AXE=/path/to/axe.min.js OUT=../../output/qa/2026-11-07-impersonation-visible node scripts/support-proof.mjs
  *
  * Creates a fictional user/workspace/project (qa-fix-support-*@example.test, "QA Fix support"), ingests 10,000 ordinary
  * events plus support events from 22 fictional agents (one with a very long name, one in Arabic), some with no actor or

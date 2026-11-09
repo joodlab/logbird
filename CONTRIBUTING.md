@@ -1,10 +1,28 @@
-# Contributing
+# Contributing to Logbird
 
-Use Node 22.18+ and pnpm 10.30.3 (packageManager is authoritative).
+Use Node 22.18+ and pnpm 10.30.3 (`packageManager` is authoritative). You also need Git and Docker with Compose for local dependencies. Read [SPEC](docs/SPEC.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities through the [security policy](SECURITY.md).
+
+## Development from zero
 
 ```sh
-cp .env.example .env
-# Fill credentials; use localhost dependency URLs for source development.
+git clone https://github.com/joodlab/logbird.git
+cd logbird
+corepack enable
+corepack prepare pnpm@10.30.3 --activate
+sh scripts/selfhost-init.sh
+```
+
+Edit `.env` for source development before starting services:
+
+- `APP_URL=http://localhost:4600`, `SERVER_URL=http://127.0.0.1:4601`, `PORT=4601`.
+- `DATABASE_URL=postgresql://logbird:<POSTGRES_PASSWORD>@127.0.0.1:5432/logbird` (URL-encode the password).
+- `CLICKHOUSE_URL=http://127.0.0.1:8123`, `CLICKHOUSE_DATABASE=logbird`, `CLICKHOUSE_USER=logbird`; keep the initialized password.
+- `REDIS_URL=redis://127.0.0.1:6379`, `BULLMQ_PREFIX={logbird}`.
+- `SMTP_HOST=127.0.0.1`, `SMTP_PORT=1025`, `SMTP_SECURE=false`, `SMTP_REQUIRE_TLS=false`; leave SMTP user/password empty for Mailpit.
+
+Use the plain development Compose file for backing services, then run the application from source:
+
+```sh
 docker compose -f docker-compose.dev.yml up -d
 pnpm install
 pnpm db:generate
@@ -14,16 +32,25 @@ pnpm --filter @logbird/clickhouse create-query-user
 pnpm dev
 ```
 
-App: localhost:4600; API: localhost:4601; email preview (`apps/email`): localhost:4602; Mailpit: localhost:8025.
-You may use existing development services instead of Compose. Use an isolated project namespace and preserve other users' data.
+The query-user command preserves existing keys and may append missing local query credentials to `.env`. Never commit that file. The console is at <http://localhost:4600>, API at <http://localhost:4601>, email preview at <http://localhost:4602>, and Mailpit at <http://localhost:8025>. Sign in with a fictional email; Mailpit catches the code without sending real mail.
 
-ClickHouse tests expect a migrated database. They do not apply migrations implicitly.
-Run `pnpm ch:migrate` separately; `CLICKHOUSE_TEST_MIGRATE=1` explicitly opts the
-package integration test into migration execution against its configured database.
+Maintainers with existing services can use those instead of Compose. Use an isolated project namespace and preserve other users' data. Stop source servers and workers after use; an abandoned worker can consume another checkout's queue. Stop your own Compose services with `docker compose -f docker-compose.dev.yml stop`; avoid deleting volumes unless you intend to discard your own local data.
 
-packages/contracts defines the API; server implements it and app consumes it. Keep schema changes in the same PR. Reuse packages/ui components. Use Biome/ultracite formatting, Vitest tests and isolated fictional fixtures.
+## Commands and verification
 
-Use Conventional Commits: `feat(server): add capability`, `fix(app): correct behavior`, `docs: clarify setup`. Keep PRs focused and ready for review. Run `pnpm release:check`; explain what/why/verification, contract changes, decisions and limits. Include screenshots and recordings for meaningful UI interactions. Never include credentials, customer data or personal paths. Maintainers merge. GitHub Actions runs CI on pull requests and master pushes; releases are tag-driven. PRs that touch Dockerfiles or Compose files build (never push) the four images; pushing a `v*` tag publishes multi-arch images to GHCR and creates the GitHub Release (see docs/releases.md).
+| Command | Purpose |
+| --- | --- |
+| `pnpm dev:server`, `pnpm dev:app` | Run only the API or console and dependencies |
+| `pnpm demo --until now` | Load the fictional Acme / StayDesk and Ledger demo; replaces events in those demo projects |
+| `pnpm typecheck` | Check TypeScript across the monorepo |
+| `pnpm check` / `pnpm fix` | Check / apply Biome and Ultracite formatting |
+| `pnpm test` | Unit and service integration tests |
+| `pnpm build` | Build all packages and applications |
+| `pnpm release:check` | Full checks plus API export drift verification |
+
+Before handoff, run `pnpm install`, `pnpm typecheck`, `pnpm check`, `pnpm test` and `pnpm build`. Exercise service-dependent behavior against real Postgres, ClickHouse and Redis with isolated fictional fixtures. Never reset a shared database or flush a shared cache. ClickHouse tests expect a migrated database; run `pnpm ch:migrate` separately. `CLICKHOUSE_TEST_MIGRATE=1` explicitly opts integration tests into migration execution against their configured database.
+
+`packages/contracts` defines the API; server implements it and app consumes it. Keep contract and implementation changes in the same PR. Reuse `packages/ui` components. Do not add abstractions without a concrete need. Follow the package's existing Vitest tests and cover the behavior being changed.
 
 ## CI and service-dependent tests
 
@@ -50,3 +77,15 @@ query user explicitly as documented above. Never reset shared databases. Quality
 is a service-free gate, not evidence that the integration/release checks passed.
 Load the root environment for every package, for example
 `pnpm exec dotenv -e .env -- pnpm test` (and the same wrapper for `pnpm release:check`).
+
+## Issues, commits and pull requests
+
+Look for the [good first issue](https://github.com/joodlab/logbird/labels/good%20first%20issue) label. For a larger change, open a feature request or Discussion before investing in implementation. Bug reports should include a minimal fictional reproduction, version, expected result and actual result.
+
+Create a focused branch and use Conventional Commits, for example `feat(server): add capability`, `fix(app): correct behavior`, or `docs: clarify setup`. Use a conventional PR title, rebase on `origin/master`, and open the PR ready for review. Explain what changed, why, how it was verified, contract changes and remaining limits. Attach screenshots for UI changes and a short recording when interaction matters; use [the media capture guide](docs/media/README.md) for public demo assets. Never include credentials, customer data or personal paths.
+
+GitHub Actions runs the required `Quality` check, PR-title lint and Gitleaks on every PR; fix failures before asking for review. PRs that touch Dockerfiles or Compose files also build (never push) the four images. Maintainers review and merge; do not merge your own PR.
+
+## Releases and changelog
+
+Releases are tag-driven: a maintainer updates `CHANGELOG.md` (with `### Highlights`), bumps versions and pushes a `v*` tag. The release workflow verifies the tag, publishes multi-arch images to GHCR and creates the GitHub Release with generated notes that thank every contributor. Describe user-facing behavior and upgrade considerations in your PR so maintainers can prepare the release changelog; do not invent release entries or change package versions as part of an unrelated PR. See [releases](docs/releases.md), [self-hosting](docs/self-hosting.md) and [Coolify](docs/coolify.md) for the release and upgrade procedure.
