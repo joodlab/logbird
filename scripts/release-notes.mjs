@@ -21,8 +21,13 @@ const conventional = /^(\w+)(?:\(([^)]+)\))?(!)?: (.+)$/;
 const excludedEmail =
   /@openai\.com$|^noreply@(?:anthropic\.com|cursor\.com|githubcopilot\.com)$|^(?:\d+\+)?(?:dependabot|github-actions)(?:\[bot\])?@(?:users\.noreply\.github\.com|github\.com)$/i;
 
+// Reserved documentation/test domains (RFC 2606/6761, e.g. history-scrubbed addresses) never identify a real contributor.
+const placeholderEmail = /@(?:[\w-]+\.)*(?:example\.(?:com|net|org)|example|invalid|localhost)$/i;
+
 export function isPerson({ name = '', email = '', login = '', type }) {
-  return type !== 'Bot' && !/\[bot\]/i.test(`${name} ${email} ${login}`) && !excludedEmail.test(email);
+  return (
+    type !== 'Bot' && !/\[bot\]/i.test(`${name} ${email} ${login}`) && !excludedEmail.test(email) && !placeholderEmail.test(email)
+  );
 }
 
 export function highlights(markdown, version) {
@@ -58,12 +63,17 @@ export function summarize(commits, previous, logins, accountTypes = new Map()) {
   const peopleFor = (commit) => commit.people.map((person) => identity(person, logins, accountTypes)).filter(isPerson);
   const old = new Set(previous.flatMap(peopleFor).map((person) => person.key));
   const people = new Map(commits.flatMap(peopleFor).map((person) => [person.key, person]));
+  // The same human can appear under a GitHub login and as a bare name/email; keep the login entry.
+  const loginNames = new Set([...people.values()].filter((person) => person.login).map((person) => person.name.toLowerCase()));
+  for (const [key, person] of people) if (!person.login && loginNames.has(person.name.toLowerCase())) people.delete(key);
+  // Nobody is a "first-time contributor" in the very first release.
+  const firstRelease = previous.length === 0;
   return {
     changes: commits.filter((commit) => isPerson(identity(commit.people[0], logins, accountTypes))).length,
     contributors: [...people.values()]
       .map((person) => ({
         label: person.login ? `@${person.login}` : person.name.replace(/[^\p{L}\p{N} .'-]/gu, ''),
-        first: !old.has(person.key),
+        first: !firstRelease && !old.has(person.key),
       }))
       .sort((a, b) => a.label.localeCompare(b.label)),
   };

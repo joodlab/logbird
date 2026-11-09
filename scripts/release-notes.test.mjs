@@ -141,3 +141,12 @@ test('first release includes the root commit; later releases select reachable st
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('merges a login with the same person under a placeholder or bare email, and flags nobody first in the first release', () => {
+  const logins = new Map([['owner@users.noreply.github.com', 'owner']]);
+  const commits = [
+    commit('feat: a', [person('Owner Name', 'owner@users.noreply.github.com'), person('Owner Name', 'owner@example.com')]),
+    commit('fix: b', [person('Owner Name', 'personal@mail.test')]),
+  ];
+  assert.deepEqual(summarize(commits, [], logins).contributors, [{ label: '@owner', first: false }]);
+});
