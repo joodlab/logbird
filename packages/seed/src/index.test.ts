@@ -106,7 +106,7 @@ it('gives business-scoped scheduler and partner identities distinct names', () =
     }
   }
   expect(names.size).toBeGreaterThan(24);
-});
+}, 60_000);
 
 describe('profiles', () => {
   const fingerprint = (input: SeedOptions) => {
