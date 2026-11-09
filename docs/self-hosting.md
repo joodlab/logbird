@@ -2,57 +2,59 @@
 
 ## Five-minute quickstart
 
-Install Docker Engine and Compose >=2.24.4 (Linux containers). First builds can take longer depending on CPU/network. No images are published yet.
+Install Docker Engine and Compose >=2.24.4 (Linux containers). The default stack
+pulls the four published GHCR images for `LOGBIRD_VERSION=0.1.0`; it does not
+compile source. Images are available only after the corresponding tagged release
+finishes publishing. Check the [release page](https://github.com/joodlab/logbird/releases)
+before installing; release preparation in Git is not proof of registry availability.
+
+```sh
+git clone --branch v0.1.0 https://github.com/joodlab/logbird.git
+cd logbird
+sh scripts/selfhost-init.sh
+# Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
+# For an internet-facing instance, set AUTH_SIGNUP=restricted and AUTH_SIGNUP_DOMAINS.
+docker compose pull
+docker compose up -d --no-build
+```
+
+Set `LOGBIRD_VERSION` to an exact released version, without the leading `v`.
+Role names are `ghcr.io/joodlab/logbird-<role>:<version>`. Compose uses
+`pull_policy: always`; the normal startup path pulls images, and a missing or
+private package fails clearly. All four GHCR packages must be public for anonymous
+pulls. Maintainers configure this after first publication; see [releases](releases.md).
+For a mirror, set `LOGBIRD_IMAGE_REGISTRY` to its namespace.
+
+### Build from source
+
+For unreleased code or a customized build, add the explicit override on every
+build/start command. It uses separate `logbird-source/<role>:local` names and
+`pull_policy: build`, keeping local builds separate from published versions.
 
 ```sh
 git clone https://github.com/joodlab/logbird.git
 cd logbird
 sh scripts/selfhost-init.sh
-# Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
-docker compose build migrate
-docker compose build server
-docker compose build worker
-docker compose build app
-docker compose up -d --no-build
+# Configure SMTP/signup as above. Build sequentially to limit peak memory.
+docker compose -f docker-compose.yml -f docker-compose.build.yml build migrate
+docker compose -f docker-compose.yml -f docker-compose.build.yml build server
+docker compose -f docker-compose.yml -f docker-compose.build.yml build worker
+docker compose -f docker-compose.yml -f docker-compose.build.yml build app
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --no-build
 ```
 
-The sequential builds above reduce concurrent compiler/package-install memory.
-Runtime sizing below does not include peak source-build memory or build-cache
-storage.
-
-Role images are named `ghcr.io/joodlab/logbird-<role>:local` (`LOGBIRD_IMAGE_REGISTRY`
-defaults to `ghcr.io/joodlab`; [architecture decision](decisions.md)). **Nothing is published
-there yet**; the names only label your local builds. The four buildable roles use
-`pull_policy: build`, so a source install never pulls a runnable role: bare `up`
-builds from the checkout (and rebuilds even when images exist), and `up --no-build`
-with a missing local role image fails with `No such image` instead of pulling.
-Build all four sequentially, then use `up --no-build` with the local images you
-just built. On a replacement host those images must be built first.
-On Windows Docker Desktop, use a current Compose version; v2.24.4 cannot load
-this repository's build context;
-live upgrade/restore on a real host remains pending in [#77](https://github.com/joodlab/logbird/issues/77)
-and [#88](https://github.com/joodlab/logbird/issues/88).
-The manual release flow retains its explicit
-`--pull always`. See [Compose pull policy](https://docs.docker.com/reference/compose-file/services/#pull_policy)
-and [`up --no-build`](https://docs.docker.com/reference/cli/docker/compose/up/).
-
-Installations configured before 2026-11-08 may have `LOGBIRD_IMAGE_REGISTRY=logbird`
-(the old, unverified Docker Hub namespace) in `.env`; `selfhost-init.sh` warns about
-it. Clear the value (or set `ghcr.io/joodlab`) and rebuild the four roles; the old
-`logbird/<role>:local` tags can then be removed by their exact image IDs.
-
-Image build stages default to one pnpm build/postinstall at a time and four
-concurrent downloads (`BUILD_CONCURRENCY=1`, `DOWNLOAD_CONCURRENCY=4`). For an
-additional per-Node-process heap cap, use
-`docker compose build --build-arg NODE_OPTIONS=--max-old-space-size=1536 migrate`
-and repeat for each role. These are build arguments, not runtime environment
-settings or a hard limit on the whole Docker/WSL VM. Measure host memory before
-and after each target; source builds still need headroom beyond runtime sizing.
+Keep the override flags for later source-install operations. First builds need
+more CPU/RAM/cache storage than runtime. Build stages default to one pnpm task
+and four downloads (`BUILD_CONCURRENCY=1`, `DOWNLOAD_CONCURRENCY=4`). You may add
+`--build-arg NODE_OPTIONS=--max-old-space-size=1536` to each build; this limits each
+Node heap, not total Docker VM memory. On Windows use a current Docker Desktop
+Compose version. Existing registry settings are preserved by init; clear the old
+`LOGBIRD_IMAGE_REGISTRY=logbird` value to use GHCR.
 
 Open http://localhost:4600. Enter your email; read the code in your inbox, or privately run `docker compose logs server` when the log fallback is enabled. Create a workspace and project, copy its ingest key (shown once).
 
 There is no separate instance-admin bootstrap account. A verified first login creates
-a user, and creating a workspace makes that user its owner. Email sign-up is open:
+a user, and creating a workspace makes that user its owner. Email sign-up defaults to open; set AUTH_SIGNUP=restricted and configure approved domains before exposing SMTP publicly:
 the first user does not acquire authority over other workspaces. Keep the listener
 private during evaluation; restrict ingress if the installation is intended only
 for your team.
@@ -91,13 +93,14 @@ One .env.example serves source development and containers. Empty URL overrides l
 | AUTH_RATE_LIMIT_PER_MINUTE / PUBLIC_RATE_LIMIT_PER_MINUTE | 30 / 600 per client: sign-in requests and failed public-API authentications |
 | INGEST_RATE_LIMIT_PER_MINUTE / READ_RATE_LIMIT_PER_MINUTE | 3000 / 1200 per project key (shared Redis limits) |
 | LOGBIRD_BIND / LOGBIRD_HTTP_PORT | 127.0.0.1 / 4600; only app is published |
-| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / local; images are `<registry>/logbird-<role>:<version>`. Nothing is published yet; source builds use these names locally |
+| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / 0.1.0; pulls `<registry>/logbird-<role>:<version>` |
+| LOGBIRD_SOURCE_VERSION | local; only the source-build override uses this tag |
 | LOGBIRD_DOMAIN / ACME_EMAIL | TLS hostname / optional ACME email |
 | NODE_ENV / PORT | Source development / 4601; containers force production and service ports |
 | SERVER_URL | Source smoke API target |
 | LOGBIRD_PRIMARY_ENV | Optional second developer env file for source query provisioning |
 
-URL-encode special characters in manual connection URLs. Generated hex values need no encoding. .env.example preserves optional BASE_URL, SMOKE_* and LOGBIRD_*_KEY smoke inputs. No automated image builds or registry pushes run.
+URL-encode special characters in manual connection URLs. Generated hex values need no encoding. .env.example preserves optional BASE_URL, SMOKE_* and LOGBIRD_*_KEY smoke inputs. Tagged releases publish images; PR Docker checks build without pushing.
 
 ## SMTP and first login
 
@@ -127,7 +130,7 @@ Logbird's messages are transactional and go to the server's default transactiona
 through a broadcast stream. Align SPF/DKIM/DMARC, the return-path and bounce/suppression handling as described in
 [transactional email](transactional-email.md#postmark).
 
-Without SMTP explicitly enable AUTH_LOG_SIGN_IN_CODES=true. Each auth.sign_in_code JSON line contains recipient/code: log readers can sign in. Only sign-in bypasses SMTP, never invitations or other OTP purposes. With SMTP configured it logs and sends. After SMTP works, disable the flag and run `docker compose up -d --no-build server worker` using the images already built; handle existing log retention appropriately. Missing SMTP with the flag off fails delivery. Invitations/courtesy emails need SMTP.
+Without SMTP explicitly enable AUTH_LOG_SIGN_IN_CODES=true. Each auth.sign_in_code JSON line contains recipient/code: log readers can sign in. Only sign-in bypasses SMTP, never invitations or other OTP purposes. With SMTP configured it logs and sends. After SMTP works, disable the flag and run `docker compose up -d --no-build server worker` using the selected images; handle existing log retention appropriately. Missing SMTP with the flag off fails delivery. Invitations/courtesy emails need SMTP.
 
 For a Docker Desktop evaluation using an existing host Mailpit, set
 `SMTP_HOST=host.docker.internal`, `SMTP_PORT=1025`, `SMTP_SECURE=false`,
@@ -141,7 +144,7 @@ Engine does not universally provide the Docker Desktop hostname.
 
 ## Caddy TLS
 
-Point DNS to the host and allow 80/443. Set APP_URL=https://audit.example.com, LOGBIRD_DOMAIN=audit.example.com, optional ACME_EMAIL, and TRUST_PROXY=2 (Caddy plus the console). Run `docker compose --profile tls up -d --no-build` with the previously built or verified release images. Pinned Caddy 2 uses the committed Caddyfile, automatic HTTPS and persistent caddy_data/caddy_config volumes.
+Point DNS to the host and allow 80/443. Set APP_URL=https://audit.example.com, LOGBIRD_DOMAIN=audit.example.com, optional ACME_EMAIL, and TRUST_PROXY=2 (Caddy plus the console). Run `docker compose --profile tls up -d --no-build` with the selected release images (include the build override for source installs). Pinned Caddy 2 uses the committed Caddyfile, automatic HTTPS and persistent caddy_data/caddy_config volumes.
 
 Set TRUST_PROXY explicitly: profiles cannot change another service's environment. Local TLS tests can mount a Caddyfile with `tls internal`, choose LOGBIRD_TLS_HTTP_PORT / LOGBIRD_TLS_HTTPS_PORT, and run `curl -k --resolve hostname:port:127.0.0.1 https://hostname:port/readyz`. Internal test certificates are not publicly trusted.
 
@@ -234,7 +237,7 @@ private, block `/docs` and `/openapi.json` at your reverse proxy.
 
 ## External services
 
-Set DATABASE_URL, CLICKHOUSE_URL, REDIS_URL and ClickHouse admin/query credentials, build the four roles sequentially as in the quickstart (or select verified release images), then run `docker compose -f docker-compose.yml -f docker-compose.external.yml up -d --no-build`. The override uses !reset to remove bundled services and migration dependencies; use Compose >=2.24.4 ([Docker merge reference](https://docs.docker.com/reference/compose-file/merge/)). Base secret validation still applies, including POSTGRES_PASSWORD (unused with DATABASE_URL). External services must already be reachable/ready. Create the logbird ClickHouse database first.
+Set DATABASE_URL, CLICKHOUSE_URL, REDIS_URL and ClickHouse admin/query credentials, select a released LOGBIRD_VERSION (or include the source-build override and build sequentially), then run `docker compose -f docker-compose.yml -f docker-compose.external.yml up -d --no-build`. The override uses !reset to remove bundled services and migration dependencies; use Compose >=2.24.4 ([Docker merge reference](https://docs.docker.com/reference/compose-file/merge/)). Base secret validation still applies, including POSTGRES_PASSWORD (unused with DATABASE_URL). External services must already be reachable/ready. Create the logbird ClickHouse database first.
 
 Postgres needs schema migration rights. ClickHouse needs logbird schema/table/view DDL and read/write, CREATE/ALTER USER, CREATE/ALTER SETTINGS PROFILE, CREATE/ALTER ROW POLICY, SELECT WITH GRANT OPTION on the four Logbird tables, SHOW ACCESS/GRANTS and system.users/settings visibility. Use ClickHouse 26.9 with SQL_ settings. Provisioning checks credentials, four SELECT grants, effective limits and unchanged main-user row counts. Stop writes during upgrades; concurrent ingest can fail that safety check.
 
@@ -251,8 +254,8 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
    `git switch --detach <tested-sha>`. Preserve local changes first.
 5. Re-run `sh scripts/selfhost-init.sh` (it preserves existing values and warns if
    `.env` still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird` namespace; remove that
-   line so the default `ghcr.io/joodlab` applies). Build migrate/server/worker/app
-   sequentially, then run `docker compose up -d --no-build`.
+   line so the default `ghcr.io/joodlab` applies). Set LOGBIRD_VERSION to the tested
+   release, run `docker compose pull`, then `docker compose up -d --no-build`.
    One-shot migrate gates new API/worker startup; failure blocks startup.
 6. Verify readiness, SMTP login, retained events/settings/keys and retention
    receipts before reopening ingress. After a failed receipt the next successful
@@ -270,7 +273,7 @@ for signal handling; its live acceptance is pending in #77.
 ### Upgrading to immutable ids
 
 Back up Postgres and ClickHouse, preserve the private environment file and stop
-server/worker writers; build and start as in step 5 above. The migrate gate applies
+server/worker writers; pull and start as in step 5 above. The migrate gate applies
 006–009, the receipt/UTC migrations and the additive maintenance-kind and generation migrations.
 008 makes a temporary derived-index copy: allow disk space for both copies and
 time proportional to retained history. Migration/maintenance clients use a
@@ -359,20 +362,23 @@ Start only data services; do not run migrations yet.
 
 On **any host**, confirm `git rev-parse HEAD` equals the recorded revision and
 `docker compose images` (with the original installation's env/project flags)
-matches the backup receipt's image IDs. The `:local` role tags are shared with the
+matches the backup receipt's image IDs. Source `:local` role tags are shared with the
 stopped original project, not scoped by Compose project name; also confirm their
-current IDs with `docker image inspect --format '{{.Id}}' ghcr.io/joodlab/logbird-migrate:local ghcr.io/joodlab/logbird-server:local ghcr.io/joodlab/logbird-worker:local ghcr.io/joodlab/logbird-app:local`
-(substitute the recorded registry/version). Receipts recorded before 2026-11-08 use
+current IDs with `docker image inspect --format '{{.Id}}' logbird-source/migrate:local logbird-source/server:local logbird-source/worker:local logbird-source/app:local`
+(substitute the exact recorded image names). Receipts recorded before this release may
+use `ghcr.io/joodlab/logbird-<role>:local`; receipts before 2026-11-08 use
 the old names `<registry>/<role>:<version>`, for example `logbird/migrate:local`;
 inspect those names for such a receipt. If the revision or image identity
 does not match or cannot be verified, for example after a failed upgrade, run
 `git switch --detach <recorded-git-sha>` and rebuild all four roles sequentially
-with the restored env/project flags shown below, before any `up --no-build`.
+with the source override and restored env/project flags, before any `up --no-build`.
+For published images, pull the exact recorded version and verify its digests instead.
 
 On a replacement host, first make an authorized checkout at the recorded Git
 revision. Place the preserved private configuration in `.env.restore` there, copy
 the matched `.pg.dump`, `.zip` and `.sha256` into `.tmp/backups/` (create it first), and
-build all four roles before the gate's `up --no-build`. Do not run the quickstart's
+pull the four recorded release images before the gate's `up --no-build`
+(or build with the source override if the receipt describes a source install). Do not run the quickstart's
 startup command against the empty target:
 
 ```sh
@@ -380,10 +386,10 @@ git clone https://github.com/joodlab/logbird.git
 cd logbird
 git switch --detach <recorded-git-sha>
 # Place .env.restore here and the matched archives/checksum in .tmp/backups/, then:
-docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml build migrate
-docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml build server
-docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml build worker
-docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml build app
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml pull migrate
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml pull server
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml pull worker
+docker compose --env-file .env.restore -p logbird-restore -f docker-compose.yml -f docker-compose.backup.yml pull app
 ```
 
 Then restore the matched data into the empty services:
@@ -661,7 +667,7 @@ separate from retained event storage; keep space for both during upgrades. Revie
 before collecting or sharing logs. `/readyz` is a dependency check; it does not
 prove SMTP, successful retention, backup freshness or spare capacity. There is no
 bundled metrics collector or Prometheus endpoint; configure external host/Docker
-monitoring and alerts. See [manual releases](releases.md) for architecture and
+monitoring and alerts. See [releases](releases.md) for architecture and
 image-publishing gates.
 
 Retention-heavy installations also need background mutation capacity. ClickHouse

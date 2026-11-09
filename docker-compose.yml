@@ -38,13 +38,10 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
-  # Role images are named <namespace>/logbird-<role>:<version>, default ghcr.io/joodlab (nothing is published yet).
-  # pull_policy: build: bare `up` builds these roles from the checkout; `up --no-build` with a missing image fails, never pulls.
-  # Only the documented release flow pulls, explicitly (`up --no-build --pull always` with an accepted version).
+  # Published roles are pulled by default; docker-compose.build.yml opts into source builds.
   migrate:
-    pull_policy: build
-    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-migrate:${LOGBIRD_VERSION:-local}
-    build: {context: ., dockerfile: apps/server/Dockerfile, target: migrate}
+    pull_policy: always
+    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-migrate:${LOGBIRD_VERSION:-0.1.0}
     environment: &runtime
       NODE_ENV: production
       APP_URL: ${APP_URL:-http://localhost:4600}
@@ -80,9 +77,8 @@ services:
       redis: {condition: service_healthy}
     restart: 'no'
   server:
-    pull_policy: build
-    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-server:${LOGBIRD_VERSION:-local}
-    build: {context: ., dockerfile: apps/server/Dockerfile}
+    pull_policy: always
+    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-server:${LOGBIRD_VERSION:-0.1.0}
     environment:
       <<: *runtime
       PORT: '4601'
@@ -91,9 +87,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 45s
   worker:
-    pull_policy: build
-    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-worker:${LOGBIRD_VERSION:-local}
-    build: {context: ., dockerfile: apps/worker/Dockerfile}
+    pull_policy: always
+    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-worker:${LOGBIRD_VERSION:-0.1.0}
     environment: *runtime
     depends_on:
       migrate: {condition: service_completed_successfully}
@@ -101,9 +96,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 5m
   app:
-    pull_policy: build
-    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-app:${LOGBIRD_VERSION:-local}
-    build: {context: ., dockerfile: apps/app/Dockerfile}
+    pull_policy: always
+    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-app:${LOGBIRD_VERSION:-0.1.0}
     environment:
       PORT: '4600'
       HOST: '0.0.0.0'

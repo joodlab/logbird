@@ -2,7 +2,7 @@
 
 The hosted instance is planned on Coolify behind Cloudflare at `logbird.joodlab.com` after the repository is open-sourced. Provisioning and deployment remain separate steps. See the [architecture decision](decisions.md).
 
-Use the Git repository Docker Compose build pack. No images are published yet; Coolify builds from source. The committed file publishes no host ports. Only app:4600 should receive a public domain.
+Use the Git repository Docker Compose build pack. The default file pulls published GHCR images; no application compilation runs on the destination. Confirm the selected version exists on the [release page](https://github.com/joodlab/logbird/releases) first. Pull/start time depends on the host and network. The committed file publishes no host ports. Only app:4600 should receive a public domain.
 
 1. Open Projects, choose the project/environment, then New Resource (some versions show + New).
 2. Choose Public Repository and enter `https://github.com/joodlab/logbird.git`. Select a pinned branch/revision and destination server. For a private fork instead, use your authorized private GitHub App installation or a deploy key.
@@ -10,9 +10,9 @@ Use the Git repository Docker Compose build pack. No images are published yet; C
 4. Under Domains, assign app `https://audit.example.com:4600`. The suffix selects the internal listener; visitors use ordinary HTTPS. Do not assign domains to data services, server, migrate or worker.
 5. In Environment Variables, confirm SERVICE_URL_APP_4600 represents the public console URL with scheme. Set APP_URL explicitly to `https://audit.example.com` if necessary; the definition defaults it to SERVICE_URL_APP_4600. SERVICE_FQDN_APP_4600 contains a hostname without scheme and cannot be APP_URL.
 6. Confirm generated SERVICE_PASSWORD_64_POSTGRES, SERVICE_PASSWORD_64_CLICKHOUSE, SERVICE_HEX_64_QUERY and SERVICE_PASSWORD_64_AUTH. Reuse identical names across services; never regenerate on redeploy. Query password must be exactly 64 lowercase hex characters. Configure SMTP_* and MAIL_FROM (for Postmark on 587 set SMTP_REQUIRE_TLS=true; see [SMTP](self-hosting.md#smtp-and-first-login)), or explicitly enable AUTH_LOG_SIGN_IN_CODES=true temporarily. On a public instance set AUTH_SIGNUP=restricted and AUTH_SIGNUP_DOMAINS to your company domain before configuring SMTP, so strangers cannot create accounts. Keep the default TRUST_PROXY=2 (Coolify's proxy plus the console) while the API stays private. Leave database URL overrides empty for bundled services.
-7. Deploy and inspect Deployment Logs: data services become healthy, migrate exits successfully, API becomes healthy, then worker/app start. Correct migration failures before continuing. Check Runtime Logs for unhealthy services.
+7. Set LOGBIRD_VERSION to `0.1.0` (or another tested release, without `v`), then deploy and inspect Deployment Logs: data services become healthy, migrate exits successfully, API becomes healthy, then worker/app start. Correct migration failures before continuing. Check Runtime Logs for unhealthy services.
 8. Open the console, request the code, sign in, create workspace/project, and send the [quickstart curl](self-hosting.md). Check /readyz publicly. Disable code logging and redeploy once SMTP works.
-9. Upgrades: block ingress and stop writers, take matched backups, pin a tested revision, redeploy, then verify login, event readback, readiness and worker receipts before reopening ingress. Preserve volumes and generated credentials; do not delete storage to fix an upgrade. Coolify does not run `selfhost-init.sh`: if Environment Variables contains `LOGBIRD_IMAGE_REGISTRY=logbird` (the pre-2026-11-08 default), delete it so the default `ghcr.io/joodlab` names apply. Builds stay local either way.
+9. Upgrades: block ingress and stop writers, take matched backups, pin the matching tested Git revision and LOGBIRD_VERSION, redeploy, then verify login, event readback, readiness and worker receipts before reopening ingress. Preserve volumes and generated credentials; do not delete storage to fix an upgrade. Coolify does not run `selfhost-init.sh`: if Environment Variables contains `LOGBIRD_IMAGE_REGISTRY=logbird` (the pre-2026-11-08 default), delete it so the default `ghcr.io/joodlab` names apply. Preserve LOGBIRD_VERSION and all generated secrets across redeploys.
 
 The dependency images are pinned by multi-platform digest, matching the ordinary
 Compose stack. Keep both files aligned when updating those pins. Use the native
@@ -27,8 +27,20 @@ or use `docker exec` / `docker cp` on the recorded container names. Skip the nat
 `-f docker-compose.backup.yml up -d clickhouse` step: this file already mounts the
 backup disk. Command translation and recovery remain unverified in #77.
 
-All four buildable roles use `pull_policy: build`; deployment builds from source.
-The changed policy's Coolify behavior remains a live acceptance gate in #77.
+All four application roles use `pull_policy: always` and contain no build section.
+The migration dependency still gates the API and worker. Live Coolify upgrade
+acceptance remains tracked in #77.
+
+## Build from source
+
+For unreleased/custom code, configure the Compose Location to load
+`docker-compose.coolify.yml,docker-compose.build.yml` in that order if your Coolify
+version supports multiple Compose paths. Select the exact source revision. The
+override supplies builds and separate local image names. If your Coolify version
+accepts only one file, merge the four service entries from the build override into
+the loaded Compose content, retaining the original environment/dependencies and
+magic variables. Review the resolved content before deploying. Returning to
+published images means removing that override and selecting LOGBIRD_VERSION.
 
 This guide does **not support a data-only restore through the Coolify UI**. A normal
 deployment includes migrate; do not deploy an empty recovery target and then copy
@@ -41,8 +53,8 @@ the UI, but this guide does not establish that workflow or authorize changing a
 running resource's generated project/volume identities.
 
 A local Compose simulation cannot validate Coolify's secret generator or reverse
-proxy. The [manual release guide](releases.md) records
-the separate publication/architecture gates; no automatic Docker builds are added.
+proxy. The [release guide](releases.md) describes tag-driven publication and the
+separate architecture/runtime acceptance gates.
 
 The file uses documented Compose interpolation, nested `${APP_URL:-${SERVICE_URL_APP_4600:?}}`, and required-value operators. Magic credential identifiers are single tokens: POSTGRES, CLICKHOUSE, QUERY, AUTH. Extra underscores can change generator parsing; avoid names such as SERVICE_PASSWORD_DB_PASSWORD.
 

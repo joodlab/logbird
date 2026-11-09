@@ -19,7 +19,7 @@
     "lint": "ultracite check",
     "format": "biome format --write .",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test && node --test scripts/selfhost-init.test.mjs",
+    "test": "node --test scripts/release-notes.test.mjs scripts/release-preflight.test.mjs && turbo run test && node --test scripts/selfhost-init.test.mjs",
     "db:generate": "pnpm --filter @logbird/database generate",
     "db:migrate": "pnpm --filter @logbird/database migrate:dev",
     "db:deploy": "pnpm --filter @logbird/database migrate:deploy",
@@ -31,8 +31,11 @@
     "openapi:export": "node --env-file=.env --import tsx scripts/export-openapi.ts",
     "sdk:generate": "pnpm openapi:export && node --import tsx experiments/hey-api/generate.ts",
     "sdk:verify": "node --env-file=.env --import tsx scripts/verify-sdk.ts",
-    "release:check": "pnpm typecheck && pnpm check && pnpm test && pnpm build && pnpm openapi:export && git diff --exit-code -- openapi",
-    "smoke:prod": "node --import tsx scripts/smoke-prod.ts"
+    "release:check": "pnpm release:version && pnpm typecheck && pnpm check && pnpm test && pnpm build && pnpm openapi:export && git diff --exit-code -- openapi",
+    "smoke:prod": "node --import tsx scripts/smoke-prod.ts",
+    "release:version": "node scripts/check-version-consistency.mjs",
+    "release:notes": "node scripts/release-notes.mjs",
+    "release:notes:dry": "node scripts/release-notes.mjs --dry"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.11",

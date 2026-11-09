@@ -1,0 +1,47 @@
+name: Docker
+
+on:
+  pull_request:
+    paths:
+      - 'apps/**/Dockerfile'
+      - 'docker-compose*.yml'
+      - '.dockerignore'
+      - '.github/workflows/docker.yml'
+      - '.github/workflows/release.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  docker:
+    name: Docker (${{ matrix.role }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {role: server, dockerfile: apps/server/Dockerfile, target: runtime}
+          - {role: worker, dockerfile: apps/worker/Dockerfile, target: runtime}
+          - {role: app, dockerfile: apps/app/Dockerfile, target: runtime}
+          - {role: migrate, dockerfile: apps/server/Dockerfile, target: migrate}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4
+      - name: Build without publishing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: false
+          outputs: type=oci,dest=${{ runner.temp }}/logbird-${{ matrix.role }}.tar
+          cache-from: type=gha,scope=pr-${{ matrix.role }}
+          cache-to: type=gha,mode=max,scope=pr-${{ matrix.role }}
