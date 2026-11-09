@@ -4,14 +4,14 @@
 
 ![StayDesk walkthrough: sign in, overview, search, changes and live tail](docs/media/walkthrough.gif)
 
-[![CI](https://img.shields.io/badge/CI-manual%20checks-blue)](https://github.com/joodlab/logbird/actions)
+[![CI](https://github.com/joodlab/logbird/actions/workflows/ci.yml/badge.svg)](https://github.com/joodlab/logbird/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/joodlab/logbird)](https://github.com/joodlab/logbird/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![GHCR](https://img.shields.io/badge/GHCR-0.1.0-blue)](https://github.com/orgs/joodlab/packages?repo_name=logbird)
+[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fjoodlab%2Flogbird--*-blue)](https://github.com/orgs/joodlab/packages?repo_name=logbird)
 
 Send events through HTTP or the TypeScript SDK. Search who did what, inspect before/after changes, follow a record's history, and trace the background jobs behind an operation. Self-host the whole platform on your infrastructure.
 
-[Watch the video](docs/media/walkthrough.webm) ? [Self-hosting](docs/self-hosting.md) ? [Documentation](docs/concepts.md) ? [Contributing](CONTRIBUTING.md)
+[Watch the video](docs/media/walkthrough.webm) · [Self-hosting](docs/self-hosting.md) · [Documentation](docs/concepts.md) · [Contributing](CONTRIBUTING.md)
 
 ## Features
 
@@ -92,10 +92,10 @@ The console uses React and TanStack Start. Shared contracts define the API, Pris
 
 ## Documentation
 
-- [Concepts and event envelope](docs/concepts.md) ? [Query language](docs/query-language.md)
-- [SDK](packages/sdk/README.md) ? [Backend integration](docs/integrating-a-backend.md) ? [Framework integrations](docs/integrations.md) ? [Examples](examples)
-- [Self-hosting](docs/self-hosting.md) ? [Coolify](docs/coolify.md) ? [Releases and upgrades](docs/releases.md)
-- [Security policy](SECURITY.md) ? [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Concepts and event envelope](docs/concepts.md) · [Query language](docs/query-language.md)
+- [SDK](packages/sdk/README.md) · [Backend integration](docs/integrating-a-backend.md) · [Framework integrations](docs/integrations.md) · [Examples](examples)
+- [Self-hosting](docs/self-hosting.md) · [Coolify](docs/coolify.md) · [Releases and upgrades](docs/releases.md)
+- [Security policy](SECURITY.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 - API reference: `/docs` on your console origin; OpenAPI: `/openapi.json`.
 
 ## Contributing
