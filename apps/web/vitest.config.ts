@@ -11,7 +11,7 @@ export const TEST_PUBLIC_ENV = {
   WEB_SITE_URL: 'https://site.example.test',
   WEB_APP_URL: '',
   WEB_GITHUB_URL: '',
-  WEB_GITHUB_PUBLI<local-path>false',
+  WEB_GITHUB_PUBLIC: 'false',
   WEB_ORG_NAME: '',
   WEB_SECURITY_EMAIL: 'security@example.test',
   WEB_CONTACT_EMAIL: 'hello@example.test',

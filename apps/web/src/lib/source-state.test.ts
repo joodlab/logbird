@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { quietHrefWarnings, renderPages } from '../test/render-pages';
 import { findSourcePhrases, repositoryReferences, SOURCE_OPEN_PHRASES, SOURCE_STATE_PHRASES } from './source-state';
 
-const PUBLIC_ENV = { WEB_GITHUB_PUBLI<local-path>true', WEB_GITHUB_URL: 'https://github.example.test/acme/logbird' };
+const PUBLIC_ENV = { WEB_GITHUB_PUBLIC: 'true', WEB_GITHUB_URL: 'https://github.example.test/acme/logbird' };
 const open = (html: string) => findSourcePhrases(html, SOURCE_OPEN_PHRASES).map((match) => match.label);
 const closed = (html: string) => findSourcePhrases(html, SOURCE_STATE_PHRASES).map((match) => match.label);
 
@@ -197,6 +197,7 @@ describe('rendered pages', () => {
     vi.resetModules();
   });
 
+  // The first render transforms the full route tree; this checks source-state markup, not cold-start latency.
   it('renders the footer and /open-source link label only when the repository is public', async () => {
     const [publicPage] = await renderPages(['/open-source'], PUBLIC_ENV);
     expect(publicPage?.html).toContain('href="https://github.example.test/acme/logbird"');
@@ -205,7 +206,7 @@ describe('rendered pages', () => {
     const [privatePage] = await renderPages(['/open-source']);
     expect(privatePage?.html).toContain('Source on GitHub — coming soon');
     expect(open(privatePage?.html ?? '')).toEqual([]);
-  });
+  }, 15_000);
 
   it('says the source is closed on a private site, and never that it is open or links to it', async () => {
     const { staticPages } = await import('./site-map');

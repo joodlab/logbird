@@ -12,7 +12,7 @@ describe('public configuration', () => {
     expect(siteConfig).toEqual({
       SITE_URL: 'https://site.example.test',
       APP_URL: undefined,
-      GITHUB_PUBLI<local-path>false,
+      GITHUB_PUBLIC: false,
       GITHUB_URL: undefined,
       ORG_NAME: undefined,
       SECURITY_EMAIL: 'security@example.test',

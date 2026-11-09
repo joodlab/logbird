@@ -17,6 +17,7 @@ describe('prerendered files hydrate at every URL that serves them', () => {
     vi.resetModules();
   });
 
+  // The first render transforms the full route tree; this checks markup, not cold-start latency.
   it('renders /contact identically with ?status= or ?interest= (both apply after mount)', async () => {
     const [plain, ...variants] = await renderPages([
       '/contact',
@@ -28,7 +29,7 @@ describe('prerendered files hydrate at every URL that serves them', () => {
     for (const variant of variants) {
       expect(markup(variant.html), variant.path).toBe(markup(plain?.html ?? ''));
     }
-  });
+  }, 15_000);
 
   it('renders an unknown path identically to the prerendered /404 page', async () => {
     const [notFound, ...unknown] = await renderPages([

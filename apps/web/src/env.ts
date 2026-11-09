@@ -36,7 +36,7 @@ export interface SiteConfig {
   SITE_URL: string;
   /** Undefined while Cloud is waitlist-only: the header shows no "Sign in" link. */
   APP_URL?: string;
-  GITHUB_PUBLI<local-path>oolean;
+  GITHUB_PUBLIC: boolean;
   GITHUB_URL?: string;
   /** The publisher's legal name is pending the owner; until it is set the site names no company. */
   ORG_NAME?: string;
@@ -70,7 +70,7 @@ export function siteConfigFrom(values: Record<string, string | undefined>): Site
   const config: SiteConfig = {
     SITE_URL: url('WEB_SITE_URL', `https://${DOMAIN}`) as string,
     APP_URL: url('WEB_APP_URL'),
-    GITHUB_PUBLI<local-path>values.WEB_GITHUB_PUBLIC === 'true',
+    GITHUB_PUBLIC: values.WEB_GITHUB_PUBLIC === 'true',
     GITHUB_URL: url('WEB_GITHUB_URL'),
     ORG_NAME: values.WEB_ORG_NAME?.trim() || undefined,
     SECURITY_EMAIL: values.WEB_SECURITY_EMAIL?.trim() || undefined,
