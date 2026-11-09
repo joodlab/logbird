@@ -28,17 +28,31 @@ export const signupPolicy: SignupPolicy = { mode: env.AUTH_SIGNUP, domains: pars
 
 export const emailDomain = (email: string) => email.slice(email.lastIndexOf('@') + 1).toLowerCase();
 
-type Lookups = { hasAccount: (email: string) => Promise<boolean>; hasPendingInvitation: (email: string, now: Date) => Promise<boolean> };
+type Lookups = {
+  hasAccount: (email: string) => Promise<boolean>;
+  hasPendingInvitation: (email: string, now: Date) => Promise<boolean>;
+  hasActiveDomainInviteLink: (domain: string, now: Date) => Promise<boolean>;
+};
 
 const databaseLookups: Lookups = {
-  hasAccount: async (email) => (await prisma.user.count({ where: { email: { equals: email, mode: 'insensitive' } } })) > 0,
+  // better-auth stores and looks up lowercased addresses, so match exactly on the normalized form.
+  hasAccount: async (email) => (await prisma.user.count({ where: { email } })) > 0,
   hasPendingInvitation: async (email, now) =>
     (await prisma.invitation.count({ where: { email: { equals: email, mode: 'insensitive' }, status: 'pending', expiresAt: { gt: now } } })) > 0,
+  // An owner who shares a link limited to a domain has approved that domain for joining.
+  hasActiveDomainInviteLink: async (domain, now) =>
+    (
+      await prisma.inviteLink.findMany({
+        where: { allowedDomain: { equals: domain, mode: 'insensitive' }, revokedAt: null, expiresAt: { gt: now } },
+        select: { maxUses: true, uses: true },
+      })
+    ).some((link) => link.maxUses === null || link.uses < link.maxUses),
 };
 
 /**
  * Whether `email` may sign in, creating an account if needed. Existing accounts always may.
- * Under `restricted`, a new account needs an approved domain or a pending, unexpired email invitation.
+ * Under `restricted`, a new account needs an approved domain, a pending unexpired email invitation, or an
+ * active invite link limited to the address's domain.
  */
 export async function mayCreateAccount(
   email: string,
@@ -48,9 +62,16 @@ export async function mayCreateAccount(
 ): Promise<boolean> {
   if (policy.mode === 'open') return true;
   const normalized = email.trim().toLowerCase();
-  if (policy.domains.has(emailDomain(normalized))) return true;
-  return (await lookups.hasAccount(normalized)) || (await lookups.hasPendingInvitation(normalized, now));
+  const domain = emailDomain(normalized);
+  if (policy.domains.has(domain)) return true;
+  return (
+    (await lookups.hasAccount(normalized)) ||
+    (await lookups.hasPendingInvitation(normalized, now)) ||
+    (await lookups.hasActiveDomainInviteLink(domain, now))
+  );
 }
 
-export const SIGNUP_RESTRICTED_MESSAGE =
-  'This Logbird instance only accepts new accounts from approved email domains or by invitation. Ask a workspace owner to invite you.';
+/** Under `restricted`, only approved domains may create workspaces (and so invite new people). */
+export function mayCreateWorkspace(email: string, policy: SignupPolicy = signupPolicy) {
+  return policy.mode === 'open' || policy.domains.has(emailDomain(email.trim()));
+}

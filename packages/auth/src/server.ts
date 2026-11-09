@@ -11,7 +11,7 @@ import { deleteSessionCookie } from 'better-auth/cookies';
 import { emailOTP, organization } from 'better-auth/plugins';
 import { z } from 'zod';
 import { recordSessionSignIn } from './sign-in-audit';
-import { emailDomain, mayCreateAccount, SIGNUP_RESTRICTED_MESSAGE } from './signup-policy';
+import { emailDomain, mayCreateAccount, mayCreateWorkspace } from './signup-policy';
 
 type AuditUser = { id: string; name: string; email: string };
 type AuthAudit = {
@@ -63,14 +63,17 @@ if (
   !['localhost', '127.0.0.1'].includes(new URL(env.APP_URL).hostname)
 )
   throw new Error('APP_URL must use HTTPS in production');
-/** Refuses sign-in for an address that may not create an account; logs the domain only. */
-async function assertMayCreateAccount(email: string, path: string) {
-  if (await mayCreateAccount(email)) return;
+/**
+ * Signup policy (AUTH_SIGNUP). A refused address is treated exactly like a wrong code: the send step answers
+ * 200 without delivering anything and sign-in fails with better-auth's own INVALID_OTP, so responses never
+ * reveal whether an address has an account. Refusals log the domain only.
+ */
+async function signupAllowed(email: string, path: string) {
+  if (await mayCreateAccount(email)) return true;
   console.warn(JSON.stringify({ level: 'warn', event: 'auth.signup_refused', domain: emailDomain(email), path }));
-  throw new APIError('FORBIDDEN', { message: SIGNUP_RESTRICTED_MESSAGE, code: 'SIGNUP_RESTRICTED' });
+  return false;
 }
-// Sign-in endpoints that can lead to a new account. Checked before a code is generated or sent.
-const SIGNUP_GATED_PATHS = new Set(['/email-otp/send-verification-otp', '/sign-in/email-otp']);
+const invalidCode = () => new APIError('BAD_REQUEST', { message: 'Invalid OTP', code: 'INVALID_OTP' });
 const displayName = (user: { name?: string | null; email: string }) => user.name?.trim() || user.email;
 /** Courtesy notifications must never fail the action that triggered them. */
 async function notify(kind: string, send: () => Promise<unknown>) {
@@ -99,11 +102,9 @@ export const auth = betterAuth({
   },
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
-      if (!SIGNUP_GATED_PATHS.has(ctx.path)) return;
-      const body = ctx.body as { email?: unknown; type?: unknown } | undefined;
-      if (typeof body?.email !== 'string') return;
-      if (ctx.path === '/email-otp/send-verification-otp' && body.type !== 'sign-in') return;
-      await assertMayCreateAccount(body.email, ctx.path);
+      if (ctx.path !== '/sign-in/email-otp') return;
+      const email = (ctx.body as { email?: unknown } | undefined)?.email;
+      if (typeof email === 'string' && !(await signupAllowed(email, ctx.path))) throw invalidCode();
     }),
   },
   databaseHooks: {
@@ -111,7 +112,7 @@ export const auth = betterAuth({
       create: {
         // Backstop for any other path that creates a user.
         before: async (user) => {
-          await assertMayCreateAccount(user.email, 'user.create');
+          if (!(await signupAllowed(user.email, 'user.create'))) throw invalidCode();
         },
       },
     },
@@ -134,6 +135,8 @@ export const auth = betterAuth({
       expiresIn: SIGN_IN_CODE_TTL_SECONDS,
       disableSignUp: false,
       async sendVerificationOTP({ email, otp, type }, ctx) {
+        // Restricted signup: answer like any other request but never deliver a code to a refused address.
+        if (type === 'sign-in' && !(await signupAllowed(email, '/email-otp/send-verification-otp'))) return;
         // Device / IP hints help the recipient spot a request that was not theirs.
         const request = authAuditContext.getStore();
         await sendSignInCode({
@@ -149,6 +152,8 @@ export const auth = betterAuth({
       },
     }),
     organization({
+      // Under AUTH_SIGNUP=restricted only approved domains may start workspaces, so admitted outsiders cannot invite strangers.
+      allowUserToCreateOrganization: (user) => mayCreateWorkspace(user.email),
       organizationHooks: {
         afterCreateOrganization: async ({ organization, user }) => {
           await record(organization.id, 'organization.created', user, { type: 'organization', id: organization.id, name: organization.name });
