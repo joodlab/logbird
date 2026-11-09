@@ -85,6 +85,7 @@ One .env.example serves source development and containers. Empty URL overrides l
 | SMTP_REQUIRE_TLS | false; true requires STARTTLS before AUTH and fails closed when the server does not offer it. Set true for a provider on 587 (Postmark); false only for a local sink such as Mailpit |
 | SMTP_USER / SMTP_PASSWORD / MAIL_FROM | Provider credentials / verified sender |
 | AUTH_LOG_SIGN_IN_CODES | false; true logs sign-in codes, warns at boot, bypasses SMTP only without SMTP_HOST |
+| AUTH_SIGNUP / AUTH_SIGNUP_DOMAINS | open / empty. `restricted` lets only existing accounts, the listed email domains (comma-separated) and addresses with a pending, unexpired email invitation sign in; others get 403 `SIGNUP_RESTRICTED` before any code is sent, logged as `auth.signup_refused` with the domain only. Invite links do not grant signup: invite outsiders by email. Use `restricted` on any internet-facing instance with SMTP |
 | LOGBIRD_SERVER_URL | Production runtime proxy target, http://server:4601; recreate app to change, no rebuild |
 | TRUST_PROXY / TRUSTED_ORIGINS | Trusted proxy hops: 1 in Compose (the console), 2 behind one reverse proxy; source dev 0 / empty. See ingress rules below |
 | AUTH_RATE_LIMIT_PER_MINUTE / PUBLIC_RATE_LIMIT_PER_MINUTE | 30 / 600 per client: sign-in requests and failed public-API authentications |

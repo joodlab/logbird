@@ -6,11 +6,12 @@ import { sendMemberJoined, sendOrganizationInvitation, sendRoleChanged, sendSign
 import { createEnv } from '@t3-oss/env-core';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { APIError, createAuthEndpoint, originCheckMiddleware } from 'better-auth/api';
+import { APIError, createAuthEndpoint, createAuthMiddleware, originCheckMiddleware } from 'better-auth/api';
 import { deleteSessionCookie } from 'better-auth/cookies';
 import { emailOTP, organization } from 'better-auth/plugins';
 import { z } from 'zod';
 import { recordSessionSignIn } from './sign-in-audit';
+import { emailDomain, mayCreateAccount, SIGNUP_RESTRICTED_MESSAGE } from './signup-policy';
 
 type AuditUser = { id: string; name: string; email: string };
 type AuthAudit = {
@@ -62,6 +63,14 @@ if (
   !['localhost', '127.0.0.1'].includes(new URL(env.APP_URL).hostname)
 )
   throw new Error('APP_URL must use HTTPS in production');
+/** Refuses sign-in for an address that may not create an account; logs the domain only. */
+async function assertMayCreateAccount(email: string, path: string) {
+  if (await mayCreateAccount(email)) return;
+  console.warn(JSON.stringify({ level: 'warn', event: 'auth.signup_refused', domain: emailDomain(email), path }));
+  throw new APIError('FORBIDDEN', { message: SIGNUP_RESTRICTED_MESSAGE, code: 'SIGNUP_RESTRICTED' });
+}
+// Sign-in endpoints that can lead to a new account. Checked before a code is generated or sent.
+const SIGNUP_GATED_PATHS = new Set(['/email-otp/send-verification-otp', '/sign-in/email-otp']);
 const displayName = (user: { name?: string | null; email: string }) => user.name?.trim() || user.email;
 /** Courtesy notifications must never fail the action that triggered them. */
 async function notify(kind: string, send: () => Promise<unknown>) {
@@ -88,7 +97,24 @@ export const auth = betterAuth({
     useSecureCookies: new URL(env.APP_URL).protocol === 'https:',
     defaultCookieAttributes: { httpOnly: true, sameSite: 'lax' },
   },
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      if (!SIGNUP_GATED_PATHS.has(ctx.path)) return;
+      const body = ctx.body as { email?: unknown; type?: unknown } | undefined;
+      if (typeof body?.email !== 'string') return;
+      if (ctx.path === '/email-otp/send-verification-otp' && body.type !== 'sign-in') return;
+      await assertMayCreateAccount(body.email, ctx.path);
+    }),
+  },
   databaseHooks: {
+    user: {
+      create: {
+        // Backstop for any other path that creates a user.
+        before: async (user) => {
+          await assertMayCreateAccount(user.email, 'user.create');
+        },
+      },
+    },
     session: {
       create: {
         after: async (session) => {

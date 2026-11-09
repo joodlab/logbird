@@ -105,10 +105,11 @@ function EmailStep() {
           )}
         </form.Subscribe>
       </form>
-      <p className="text-muted-foreground text-xs leading-relaxed">
-        Self-hosting? Codes are delivered through your SMTP server — locally they land in Mailpit at <span className="font-mono">127.0.0.1:8025</span>
-        .
-      </p>
+      {import.meta.env.DEV ? (
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          Local development: codes land in Mailpit at <span className="font-mono">127.0.0.1:8025</span>.
+        </p>
+      ) : null}
     </div>
   );
 }
