@@ -25,9 +25,7 @@ const excludedEmail =
 const placeholderEmail = /@(?:[\w-]+\.)*(?:example\.(?:com|net|org)|example|invalid|localhost)$/i;
 
 export function isPerson({ name = '', email = '', login = '', type }) {
-  return (
-    type !== 'Bot' && !/\[bot\]/i.test(`${name} ${email} ${login}`) && !excludedEmail.test(email) && !placeholderEmail.test(email)
-  );
+  return type !== 'Bot' && !/\[bot\]/i.test(`${name} ${email} ${login}`) && !excludedEmail.test(email) && !placeholderEmail.test(email);
 }
 
 export function highlights(markdown, version) {
