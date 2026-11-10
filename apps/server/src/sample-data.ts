@@ -31,7 +31,7 @@ export async function removeSampleData(projectId: string) {
     'SELECT DISTINCT event_id FROM events WHERE project_id={p:String} AND source IN {source:Array(String)}',
     { p: projectId, source: SAMPLE_DATA_SOURCES },
   );
-  await deleteAndVerify(clickhouse, 'events', 'project_id={p:String} AND source IN {source:Array(String)}', {
+  await deleteAndVerify(clickhouse, projectId, 'events', 'project_id={p:String} AND source IN {source:Array(String)}', {
     p: projectId,
     source: SAMPLE_DATA_SOURCES,
   });

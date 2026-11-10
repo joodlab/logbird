@@ -422,8 +422,9 @@ pinned ClickHouse 26.9.27.3 can restore parts with mutation versions higher than
 new delete mutations. A mutation may report success while rows remain. The source
 guard checks deletion and raises `LOGBIRD_DELETE_INCOMPLETE` before reinsertion.
 Transient [concurrent-mutation skips](https://github.com/ClickHouse/ClickHouse/pull/124167) are retried automatically with a fresh DELETE,
-up to three total attempts. Persistent `LOGBIRD_DELETE_INCOMPLETE` failures still
-require checking restored parts and following the normalization procedure below.
+up to three total attempts (logged as `clickhouse.delete_retry`). If the error still
+appears, retry the operation (retention runs again on its own). Only a failure that
+persists on a natively restored database needs the normalization procedure below.
 The pinned 26.9 line has no upstream fix for that race; ClickHouse 26.10 and later include it.
 Moving the pin is tracked in [#147](https://github.com/joodlab/logbird/issues/147).
 **Live verification of the packaged guard and retry after normalization is pending

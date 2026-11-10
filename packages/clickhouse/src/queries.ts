@@ -614,10 +614,14 @@ export async function hasExpiredEvents(ch: ClickHouseClient, p: string, before: 
   return Number(rows[0]?.n ?? 0) > 0;
 }
 
-/** Internal maintenance SQL: table/predicate are trusted code; params.p is the project id. */
-export async function deleteAndVerify(client: ClickHouseClient, table: string, predicate: string, params: Params & { p: string }) {
-  const ch = projectMaintenance(client, params.p);
-  for (let attempt = 1; attempt <= 3; attempt++) {
+export const DELETE_ATTEMPTS = 3;
+/**
+ * Project-scoped maintenance DELETE that proves its effect. `table` and `predicate` are trusted code, never input;
+ * every statement is tagged as `projectId`'s maintenance so project deletion can stop it.
+ */
+export async function deleteAndVerify(client: ClickHouseClient, projectId: string, table: string, predicate: string, params: Params) {
+  const ch = projectMaintenance(client, projectId);
+  for (let attempt = 1; attempt <= DELETE_ATTEMPTS; attempt++) {
     await ch.command({
       query: `DELETE FROM ${table} WHERE ${predicate}`,
       query_params: params,
@@ -628,14 +632,17 @@ export async function deleteAndVerify(client: ClickHouseClient, table: string, p
     // that outrank every attempt. Completion alone never proves deletion.
     const rows = await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`, params);
     if (Number(rows[0]?.n ?? 0) === 0) return;
-    if (attempt < 3) {
-      console.warn(JSON.stringify({ code: 'clickhouse.delete_retry', table, projectId: params.p, attempt: attempt + 1 }));
+    if (attempt < DELETE_ATTEMPTS) {
+      console.warn(JSON.stringify({ level: 'warn', event: 'clickhouse.delete_retry', table, projectId, attempt: attempt + 1 }));
       await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
     }
   }
-  throw Object.assign(new Error(`Delete left visible rows in ${table}; stop writers and follow the ClickHouse restore normalization procedure.`), {
-    code: 'LOGBIRD_DELETE_INCOMPLETE',
-  });
+  throw Object.assign(
+    new Error(
+      `Delete left visible rows in ${table} after ${DELETE_ATTEMPTS} attempts. Retry the operation; if it persists on a natively restored database, stop writers and follow the ClickHouse restore normalization procedure.`,
+    ),
+    { code: 'LOGBIRD_DELETE_INCOMPLETE', table, attempts: DELETE_ATTEMPTS },
+  );
 }
 
 export async function purgeProject(client: ClickHouseClient, p: string, before?: Date) {
@@ -660,8 +667,8 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
       )
     : [];
   const predicate = `project_id={p:String}${before ? ' AND timestamp < {before:DateTime64(3)}' : ''}`;
-  await deleteAndVerify(ch, 'events', predicate, params);
-  await deleteAndVerify(ch, 'event_ids', predicate, params);
+  await deleteAndVerify(ch, p, 'events', predicate, params);
+  await deleteAndVerify(ch, p, 'event_ids', predicate, params);
   // The required 007/008 migration repairs collapsed legacy pointers once before rollout.
   // Its plain MergeTree/MV keeps every raw tuple, so cutoff deletion preserves surviving
   // versions without scanning retained history under the exclusive project lock.
@@ -678,7 +685,7 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
     entityIds: affected.filter((r) => r.kind !== 'attribute').map((r) => r.id),
     keys: affected.filter((r) => r.kind === 'attribute').map((r) => r.id),
   };
-  for (const [table, filter] of Object.entries(filters)) await deleteAndVerify(ch, table, `project_id={p:String} AND ${filter}`, scoped);
+  for (const [table, filter] of Object.entries(filters)) await deleteAndVerify(ch, p, table, `project_id={p:String} AND ${filter}`, scoped);
   // Recompute the boundary minute and affected entity/key histories exactly; newer buckets stay intact.
   for (const statement of rollupSql.split(';')) {
     const m = statement.match(/CREATE MATERIALIZED VIEW IF NOT EXISTS \w+ TO (\w+) AS (SELECT[\s\S]+)/);
@@ -694,7 +701,7 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
 /** Caller holds the project ingestion lock. Rebuild from surviving raw rows. */
 export async function rebuildProjectRollups(client: ClickHouseClient, p: string, rebuild = true) {
   const ch = projectMaintenance(client, p);
-  for (const table of ['events_by_minute', 'entities', 'attribute_keys']) await deleteAndVerify(ch, table, 'project_id={p:String}', { p });
+  for (const table of ['events_by_minute', 'entities', 'attribute_keys']) await deleteAndVerify(ch, p, table, 'project_id={p:String}', { p });
   if (rebuild) {
     for (const statement of rollupSql.split(';')) {
       const m = statement.match(/CREATE MATERIALIZED VIEW IF NOT EXISTS \w+ TO (\w+) AS (SELECT[\s\S]+)/);

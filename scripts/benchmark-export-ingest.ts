@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { deleteAndVerify, purgeProject } from '@logbird/clickhouse';
+import { purgeProject } from '@logbird/clickhouse';
 import { auditNamespace, closeProjectLocks, prisma } from '@logbird/database';
 
 const baselineRevision = '8ba30e0994f9489ea404c5a4c40a2e257483749e';
@@ -160,7 +160,6 @@ try {
   try {
     for (const project of projects) {
       await purgeProject(clickhouse, project.id);
-      await deleteAndVerify(clickhouse, 'event_ids', 'project_id={p:String}', { p: project.id });
       await prisma.$executeRaw`DELETE FROM "IngestReceipt" WHERE "projectId"=${project.id}`;
     }
     await prisma.auditOutbox.deleteMany({ where: { namespace } });

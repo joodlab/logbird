@@ -141,17 +141,22 @@ export async function existingEventIdentities(ch: ClickHouseClient, projectId: s
 export async function repairEventIndex(client: ClickHouseClient, projectId: string, ids: string[], stored: Map<string, EventIdentity>) {
   const ch = projectMaintenance(client, projectId);
   const absent = ids.filter((id) => !stored.has(id));
+  await ch.insert({
+    table: 'event_ids',
+    format: 'JSONEachRow',
+    values: [...stored].map(([event_id, identity]) => ({
+      project_id: projectId,
+      event_id,
+      received_at: identity.receivedAt.toISOString(),
+      timestamp: identity.eventAt.toISOString(),
+    })),
+  }); // A stale pointer only costs a raw-row fallback lookup (existingEventIdentities), so it must not block recovery:
+  // valid pointers are written first, and a delete that stays visible (restored parts) is reported, not thrown.
   if (absent.length)
-    await deleteAndVerify(ch, 'event_ids', 'project_id={p:String} AND event_id IN {ids:Array(String)}', { p: projectId, ids: absent });
-  if (stored.size)
-    await ch.insert({
-      table: 'event_ids',
-      format: 'JSONEachRow',
-      values: [...stored].map(([event_id, identity]) => ({
-        project_id: projectId,
-        event_id,
-        received_at: identity.receivedAt.toISOString(),
-        timestamp: identity.eventAt.toISOString(),
-      })),
-    });
+    try {
+      await deleteAndVerify(ch, projectId, 'event_ids', 'project_id={p:String} AND event_id IN {ids:Array(String)}', { p: projectId, ids: absent });
+    } catch (error) {
+      if ((error as { code?: string })?.code !== 'LOGBIRD_DELETE_INCOMPLETE') throw error;
+      console.warn(JSON.stringify({ level: 'warn', event: 'clickhouse.event_index_stale_pointers', projectId, count: absent.length }));
+    }
 }

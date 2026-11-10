@@ -16,7 +16,9 @@
  *   runs, old seed sinks such as seed-staydesk-dev). They are listed in every dry run.
  * The demo user, the "Acme" workspace and its StayDesk / Ledger demo projects are protected: the script refuses to
  * run if the plan would touch them, and it never changes retention. ClickHouse deletes are always project-scoped and
- * go through `purgeProject` (the same code retention and project deletion use).
+ * run under the project lock: whole projects go through `purgeProject` (the same code retention and project deletion
+ * use); activity rows in kept workspaces use the same verified delete (`deleteAndVerify`). That targeted delete does
+ * not rebuild the workspace's rollups, so entity/attribute counts there can stay slightly high.
  */
 import { parseArgs } from 'node:util';
 import { createClickHouseClient, deleteAndVerify, purgeProject } from '@logbird/clickhouse';
@@ -117,7 +119,7 @@ try {
     if (values.orphans) for (const r of orphans) await purge(r.project_id);
     for (const a of activity) {
       if (!a.n) continue;
-      await deleteAndVerify(ch, 'events', a.where, a.params);
+      await withProjectLock(a.params.p, () => deleteAndVerify(ch, a.params.p, 'events', a.where, a.params));
     }
     if (dropInvitations.length) await prisma.invitation.deleteMany({ where: { id: { in: dropInvitations.map((i) => i.id) } } });
     if (users.length) {

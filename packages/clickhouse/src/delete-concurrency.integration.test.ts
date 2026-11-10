@@ -59,7 +59,7 @@ it.runIf(process.env.CLICKHOUSE_URL)(
         if (typeof message !== 'string' || !message.startsWith('{')) return false;
         try {
           const entry = JSON.parse(message);
-          return entry.code === 'clickhouse.delete_retry' && projects.includes(entry.projectId);
+          return entry.event === 'clickhouse.delete_retry' && projects.includes(entry.projectId);
         } catch {
           return false;
         }
@@ -67,8 +67,11 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       warn.mockRestore();
       console.info(JSON.stringify({ event: 'qa95.concurrent_delete_result', projects: projects.length, rounds: 2, retries }));
       try {
-        // Serial cleanup keeps the shared mutation pool quiet; only our exact ids.
+        // Serial cleanup keeps the shared mutation pool quiet; only our exact ids. A cleanup error is logged, not
+        // thrown, so it cannot replace the assertion that failed the test.
         if (needsCleanup) for (const project of projects) await purgeProject(ch, project);
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'qa95.cleanup_failed', projects, error: String(error) }));
       } finally {
         await ch.close();
       }
