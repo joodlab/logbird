@@ -2,10 +2,11 @@ import { setTimeout as pause } from 'node:timers/promises';
 import { Prisma, prisma } from './index';
 
 /**
- * Scheduled cleanup of expired authentication records (#129). better-auth deletes an expired session or sign-in code
- * only when it next looks it up, so rows nobody looks up again (abandoned sessions with their IP address and user
- * agent; codes requested for addresses that never signed in, including ones `AUTH_SIGNUP=restricted` refused) would
- * otherwise stay forever. The worker runs this hourly in bounded batches.
+ * Scheduled cleanup of expired authentication records (#129). better-auth removes expired rows only as a side effect of
+ * sign-in traffic (looking up a session or a code), so when that traffic stops, abandoned sessions with their IP
+ * address and user agent, codes requested for addresses that never signed in (including ones `AUTH_SIGNUP=restricted`
+ * refused) and expired invitations would stay forever. This hourly sweep, in bounded batches, is the backstop that
+ * bounds how long they are kept.
  *
  * - Sessions: deleted a day after they expire (they stop working at expiry; the day keeps a just-expired session
  *   visible while someone investigates a sign-in problem).
@@ -48,7 +49,16 @@ export interface AuthRecordSweepResult {
   limited: boolean;
 }
 
-export async function sweepExpiredAuthRecords(now = Date.now()): Promise<AuthRecordSweepResult> {
+/** What the sweep needs from a client; tests pass one that runs each batch in an isolated schema. */
+export interface AuthRecordSweepDb {
+  $transaction<T>(run: (tx: Prisma.TransactionClient) => Promise<T>, options?: { maxWait?: number; timeout?: number }): Promise<T>;
+}
+
+/**
+ * Deletes expired records in batches. The budget is checked between batches, so a run can overshoot it by at most one
+ * batch (6 s transaction timeout).
+ */
+export async function sweepExpiredAuthRecords(now = Date.now(), db: AuthRecordSweepDb = prisma): Promise<AuthRecordSweepResult> {
   const started = Date.now();
   const removed: Record<AuthRecordKind, number> = { session: 0, verification: 0, invitation: 0 };
   let batches = 0;
@@ -56,7 +66,7 @@ export async function sweepExpiredAuthRecords(now = Date.now()): Promise<AuthRec
     const cutoff = new Date(now - AUTH_RECORD_GRACE_MS[kind]);
     for (;;) {
       if (Date.now() - started >= AUTH_RECORD_SWEEP_BUDGET_MS) return { removed, batches, limited: true };
-      const count = await prisma.$transaction(
+      const count = await db.$transaction(
         async (tx) => {
           await tx.$executeRaw(AUTH_RECORD_SWEEP_GUARD);
           return tx.$executeRaw(authRecordBatchSql(kind, cutoff));
