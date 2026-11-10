@@ -25,21 +25,21 @@
   "dependencies": {
     "@logbird/sdk": "workspace:*",
     "@logbird/vue": "workspace:*",
-    "@nuxt/kit": "4.1.3",
-    "h3": "1.15.4"
+    "@nuxt/kit": "4.6.4",
+    "h3": "2.0.8"
   },
   "peerDependencies": {
-    "nuxt": "4.1.3"
+    "nuxt": "4.6.4"
   },
   "devDependencies": {
-    "nuxt": "4.1.3",
+    "nuxt": "4.6.4",
     "@logbird/tsconfig": "workspace:*",
     "@logbird/contracts": "workspace:*",
-    "@types/node": "22.20.1",
+    "@types/node": "26.6.6",
     "typescript": "7.0.2",
-    "vitest": "4.1.11",
-    "tsdown": "0.22.14",
-    "vue": "3.5.22",
-    "nitropack": "2.12.6"
+    "vitest": "5.1.0",
+    "tsdown": "0.23.7",
+    "vue": "3.5.45",
+    "nitropack": "2.13.6"
   }
 }
