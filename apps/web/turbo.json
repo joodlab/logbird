@@ -16,6 +16,7 @@
         "WEB_GOVERNING_LAW",
         "WEB_HOSTING_PROVIDER",
         "WEB_EMAIL_PROVIDER",
+        "WEB_MAILBOX_PROVIDER",
         "NITRO_PRESET",
         "LOGBIRD_WEB_ALLOW_INTERIM"
       ],

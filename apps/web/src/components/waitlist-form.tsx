@@ -119,7 +119,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
         ))}
       </noscript>
       <div className="form-field">
-        <Label htmlFor="email">Work email</Label>
+        <Label htmlFor="email">Email</Label>
         <Input
           autoComplete="email"
           id="email"
@@ -130,7 +130,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
           type="email"
           {...field('email')}
         />
-        <p className="text-muted-foreground text-xs">We'll only use it to contact you about Logbird.</p>
+
         {fieldError('email')}
       </div>
       <div className="grid gap-5 sm:grid-cols-2">
@@ -163,7 +163,9 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
       <div className="form-field">
         <Label htmlFor="message">Message</Label>
         <Textarea id="message" maxLength={2000} name="message" rows={4} {...field('message')} />
-        <p className="text-muted-foreground text-xs">What are you building, and what do you need from an audit log?</p>
+        <p className="text-muted-foreground text-xs">
+          What are you building, and what do you need from an audit log? For a privacy request, tell us what you'd like us to do.
+        </p>
         {fieldError('message')}
       </div>
       <div aria-hidden="true" className="honeypot">
@@ -180,7 +182,8 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
           {sending ? 'Sending…' : 'Send'}
         </button>
         <p className="text-muted-foreground text-xs" id="form-privacy">
-          We use these details to reply to you, and send product updates only if you choose them. No trackers. By sending, you confirm you've read the{' '}
+          We use these details to reply to you, and send product updates only if you choose "Product updates only". No trackers. By sending, you
+          confirm you've read the{' '}
           <a className="text-link" href="/legal/privacy">
             privacy policy
           </a>

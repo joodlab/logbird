@@ -82,7 +82,8 @@ links `/login` itself), SMTP settings and
 `WEB_TRUST_PROXY` for the actual proxy chain. The named `/data` volume holds waitlist
 submissions; preserve it across redeploys. The privacy policy and terms name the
 operator from `WEB_ORG_NAME`, `WEB_PRIVACY_EMAIL`, `WEB_LEGAL_ADDRESS`,
-`WEB_GOVERNING_LAW`, `WEB_HOSTING_PROVIDER` and `WEB_EMAIL_PROVIDER`; the site stays
+`WEB_GOVERNING_LAW`, `WEB_HOSTING_PROVIDER`, `WEB_EMAIL_PROVIDER` and
+`WEB_MAILBOX_PROVIDER`; the site stays
 noindex until the publisher name and the privacy mailbox are set (see
 `marketing/copy/legal-privacy.md`). The privacy policy says each form submission is
 emailed to the team, and until `WEB_PRIVACY_EMAIL` exists the form is the channel

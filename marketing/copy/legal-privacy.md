@@ -19,6 +19,7 @@ re-check the source before you change a sentence, and update the effective date 
 | Privacy mailbox | `WEB_PRIVACY_EMAIL` | the contact form's "A privacy request" topic (release blocker) |
 | Postal address | `WEB_LEGAL_ADDRESS` | no address printed |
 | Server provider and region | `WEB_HOSTING_PROVIDER` | "our server provider" |
+| Team mailbox host (receives form submissions and emails) | `WEB_MAILBOX_PROVIDER` | "our email host" |
 | Email delivery provider | `WEB_EMAIL_PROVIDER` | Postmark (Logbird Cloud's transactional provider, confirmed by the master 2026-11-10) |
 
 The site stays noindex (robots `Disallow: /`) until the publisher name and the privacy mailbox are set
@@ -34,7 +35,11 @@ moves there, rewrite the form section first.
 - The hosting provider and region of the Coolify server (`WEB_HOSTING_PROVIDER`, set at rollout). Transactional email
   is Postmark (server `logbird`; joodlab.com's own mailboxes on Zoho are unrelated). Keep Postmark's open and link
   tracking off: the policy says emails carry no tracking.
-- Backups: provider, location, encryption and how long they're kept (the Cloud hero and the policy say backups exist).
+- Backups: provider, location, encryption and how long they're kept (the Cloud hero and the policy say backups exist;
+  the policy says "stored with our server provider or a storage provider we choose").
+- The team mailbox host (`WEB_MAILBOX_PROVIDER`) and the SMTP relay the site uses for form notifications (expected to
+  mirror the console's Postmark settings).
+- Closed accounts and workspaces deleted within `CLOSURE_DELETION_DAYS` (30) days of closing: a manual commitment.
 - The form retention period: `FORM_RETENTION` ("24 months after our last exchange"). Nothing deletes submissions
   automatically, so this is a manual commitment (a calendar reminder, or a cleanup job later).
 - That the 30-day answer time for rights requests is workable.

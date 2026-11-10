@@ -22,7 +22,9 @@ access. The open-source software is MIT-licensed and the terms say they don't li
 
 - Governing law and courts; the entity and its address.
 - "Free during early access" and the `FEE_NOTICE_DAYS` (30) notice before fees (`apps/web/src/lib/legal-facts.tsx`).
-- The liability wording (as-is during early access; capped at fees paid in 12 months; consumer rights preserved).
+- The liability wording: as-is during early access; total liability for all claims capped at the greater of fees
+  paid in the 12 months before the claim and 100 euros; consumer rights preserved.
+- Deletion within `CLOSURE_DELETION_DAYS` (30) days after the agreement ends, via the privacy contact.
 - That a data processing agreement can be offered on request.
 - A lawyer's review is recommended, not required to ship.
 

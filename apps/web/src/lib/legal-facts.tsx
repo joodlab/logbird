@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { EMAIL_PROVIDER, GOVERNING_LAW, HOSTING_PROVIDER, LEGAL_ADDRESS, ORG_NAME, PRIVACY_EMAIL } from '../env';
+import { EMAIL_PROVIDER, GOVERNING_LAW, HOSTING_PROVIDER, LEGAL_ADDRESS, MAILBOX_PROVIDER, ORG_NAME, PRIVACY_EMAIL } from '../env';
 import { publicationDate } from './publications';
 
 /**
@@ -20,12 +20,16 @@ export const OPERATOR_SENTENCE_START = ORG_NAME ?? 'The operator of Logbird Clou
 /** Request-access and contact submissions: nothing deletes them automatically, so this is a manual commitment. */
 export const FORM_RETENTION = '24 months after our last exchange with you';
 
+/** How long after an account or workspace is closed we delete it (manual commitment). */
+export const CLOSURE_DELETION_DAYS = 30;
+
 /** Notice before Logbird Cloud stops being free. */
 export const FEE_NOTICE_DAYS = 30;
 
 export const HOSTING_PROVIDER_TEXT = HOSTING_PROVIDER ?? 'our server provider';
 /** Logbird Cloud's transactional email goes through Postmark (operator configuration); WEB_EMAIL_PROVIDER overrides it. */
 export const EMAIL_PROVIDER_TEXT = EMAIL_PROVIDER ?? 'Postmark';
+export const MAILBOX_PROVIDER_TEXT = MAILBOX_PROVIDER ?? 'our email host';
 export const GOVERNING_LAW_TEXT = GOVERNING_LAW ?? 'the laws of the country where the operator is established';
 export { LEGAL_ADDRESS };
 
@@ -45,6 +49,30 @@ export function PrivacyContact() {
         contact form
       </Link>{' '}
       (choose "A privacy request")
+    </>
+  );
+}
+
+/** How to make a privacy request, as a clause: "To make a request, <PrivacyRequestHow />." */
+export function PrivacyRequestHow() {
+  if (PRIVACY_EMAIL) {
+    return (
+      <>
+        email{' '}
+        <a className="text-link" href={`mailto:${PRIVACY_EMAIL}`}>
+          {PRIVACY_EMAIL}
+        </a>{' '}
+        from the address on your account
+      </>
+    );
+  }
+  return (
+    <>
+      use the{' '}
+      <Link className="text-link" search={{ interest: 'privacy' }} to="/contact">
+        contact form
+      </Link>
+      , choose "A privacy request" and enter the address on your account
     </>
   );
 }

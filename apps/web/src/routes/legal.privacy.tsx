@@ -2,13 +2,16 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { LegalDocument, LegalList, type LegalSection } from '../components/marketing/legal-document';
 import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import {
+  CLOSURE_DELETION_DAYS,
   EMAIL_PROVIDER_TEXT,
   FORM_RETENTION,
   HOSTING_PROVIDER_TEXT,
   LEGAL_ADDRESS,
+  MAILBOX_PROVIDER_TEXT,
   OPERATOR,
   OPERATOR_SENTENCE_START,
   PrivacyContact,
+  PrivacyRequestHow,
 } from '../lib/legal-facts';
 import { pageHead } from '../lib/seo';
 
@@ -41,14 +44,16 @@ const sections: LegalSection[] = [
     body: (
       <>
         <p>
-          The website sets no cookies and loads no analytics, advertising or tracking scripts. Its fonts are served from our own origin. Your browser
-          stores one preference, your colour theme, in its local storage; it never leaves your device.
+          The website sets no cookies of its own and loads no analytics, advertising or tracking scripts. Cloudflare may set a strictly necessary
+          security cookie to filter bots. Its fonts are served from our own origin. Your browser stores one preference, your colour theme, in its
+          local storage; it never leaves your device.
         </p>
         <p>
           Every request passes through Cloudflare, our content delivery network, and reaches our servers. Like any web server, they process your IP
           address, browser details and the page you ask for, to deliver and protect the site; Cloudflare and our server provider may keep access logs
           of these requests. The request logs of our API record the method, path, status and duration of each request, not your IP address or browser.
-          The API reference page (<code>/docs</code>) loads its viewer script from jsDelivr, so on that page your browser also connects to jsDelivr.
+          The API reference page (<code>/docs</code>) loads its viewer script from jsDelivr, a public content network: on that page your browser
+          connects to jsDelivr directly, which receives your IP address.
         </p>
         <p>We do this because we have a legitimate interest in running a secure, working website.</p>
       </>
@@ -66,12 +71,13 @@ const sections: LegalSection[] = [
           latest when the server next cleans up or restarts.
         </p>
         <p>
-          We keep submissions on our server, and our server emails each one to the team that answers them. We use them to reply, to decide on access
-          to Logbird Cloud and, if you chose "Product updates only", to send you product updates.
+          We keep submissions on our server, and our server emails each one to our team's mailbox, where we answer them. We use them to reply, to
+          decide on access to Logbird Cloud and, if you chose "Product updates only", to send you product updates.
         </p>
         <p>
           We reply because you asked us to (steps you request before any contract, and our legitimate interest in answering). Product updates rely on
-          your consent, which you can withdraw at any time. We keep submissions for {FORM_RETENTION}, or delete them sooner if you ask.
+          your consent, which you can withdraw at any time by replying to any update or through <PrivacyContact />. We keep submissions for{' '}
+          {FORM_RETENTION}, or delete them sooner if you ask.
         </p>
       </>
     ),
@@ -146,14 +152,16 @@ const sections: LegalSection[] = [
             <strong>Cloudflare</strong>: delivers and protects all traffic to this website and to Logbird Cloud.
           </li>
           <li>
-            <strong>Server hosting</strong>: {HOSTING_PROVIDER_TEXT} runs the servers that store Logbird Cloud data, form submissions and backups.
+            <strong>Server hosting</strong>: {HOSTING_PROVIDER_TEXT} runs the servers that store Logbird Cloud data and form submissions.
           </li>
           <li>
-            <strong>Email delivery</strong>: {EMAIL_PROVIDER_TEXT} sends sign-in codes, invitations and notices, and forwards form submissions to our
-            team.
+            <strong>Email delivery</strong>: {EMAIL_PROVIDER_TEXT} sends Logbird Cloud's sign-in codes, invitations and notices.
           </li>
           <li>
-            <strong>jsDelivr</strong>: serves the API reference viewer script to browsers that open <code>/docs</code>.
+            <strong>Our mailbox</strong>: {MAILBOX_PROVIDER_TEXT} hosts the team mailbox that receives form submissions and the emails you send us.
+          </li>
+          <li>
+            <strong>Backups</strong>: stored with our server provider or a storage provider we choose.
           </li>
         </LegalList>
         <p>
@@ -171,7 +179,7 @@ const sections: LegalSection[] = [
           . This website reads public release information from GitHub when it is built; no visitor data is involved. If you open an issue or
           contribute there, GitHub's own privacy terms apply.
         </p>
-        <p>We may also disclose data when the law requires it.</p>
+        <p>We may also disclose data when the law requires it. We don't make decisions about you by automated means alone.</p>
       </>
     ),
   },
@@ -191,10 +199,11 @@ const sections: LegalSection[] = [
     body: (
       <LegalList>
         <li>Form submissions: {FORM_RETENTION}, or until you ask us to delete them.</li>
+        <li>Closed accounts and workspaces: deleted within {CLOSURE_DELETION_DAYS} days of closing, including their projects and events.</li>
         <li>
-          Account details: while your account exists. Invitations: with the workspace that sent them. Sessions and sign-in codes: they stop working
-          when they expire (7 days and 10 minutes). Expired ones are deleted when they're next looked up, but there is no scheduled cleanup yet, so
-          some can stay in the database longer.
+          Account details: while your account exists. Invitations: for as long as the workspace that sent them exists. Sessions and sign-in codes:
+          they stop working when they expire (7 days and 10 minutes). Expired ones are deleted when they're next looked up, but there is no scheduled
+          cleanup yet, so some can stay in the database longer.
         </li>
         <li>
           Workspace activity: activity records are deleted after 10 years at the latest; there is no shorter setting yet. Copies kept to power search
@@ -220,8 +229,9 @@ const sections: LegalSection[] = [
         </p>
         <p>
           In the console you can change your display name, and, if your role allows, export or delete a project's data. Deleting your account and
-          getting a copy of your personal account data are handled by request for now: write to <PrivacyContact /> from the address on your account,
-          or tell us which address the request is about so we can verify it. We answer within 30 days.
+          getting a copy of your personal account data are handled by request for now. To make a request, <PrivacyRequestHow />. If you can't use that
+          address, tell us which one the request is about and we'll check that it's yours. We answer within 30 days, and handle these requests to meet
+          our legal obligations.
         </p>
       </>
     ),

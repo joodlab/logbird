@@ -44,9 +44,9 @@ export function LegalDocument({ title, lead, sections }: { title: string; lead: 
             ))}
           </ol>
         </nav>
-        <div className="legal-body flex max-w-3xl flex-col gap-12">
+        <div className="flex max-w-[70ch] flex-col gap-12">
           {sections.map((section, index) => (
-            <section aria-labelledby={`${section.id}-title`} className="flex scroll-mt-24 flex-col gap-4" id={section.id} key={section.id}>
+            <section aria-labelledby={`${section.id}-title`} className="flex flex-col gap-4" id={section.id} key={section.id}>
               <h2 className="font-semibold text-xl tracking-[-0.02em]" id={`${section.id}-title`}>
                 {index + 1}. {section.title}
               </h2>

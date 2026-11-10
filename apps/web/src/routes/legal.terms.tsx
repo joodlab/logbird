@@ -1,7 +1,15 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { LegalDocument, LegalList, type LegalSection } from '../components/marketing/legal-document';
 import { CONTACT_EMAIL, GITHUB_PUBLIC, GITHUB_URL } from '../env';
-import { FEE_NOTICE_DAYS, GOVERNING_LAW_TEXT, LEGAL_ADDRESS, OPERATOR, OPERATOR_SENTENCE_START } from '../lib/legal-facts';
+import {
+  CLOSURE_DELETION_DAYS,
+  FEE_NOTICE_DAYS,
+  GOVERNING_LAW_TEXT,
+  LEGAL_ADDRESS,
+  OPERATOR,
+  OPERATOR_SENTENCE_START,
+  PrivacyContact,
+} from '../lib/legal-facts';
 import { pageHead } from '../lib/seo';
 
 // Copy: marketing/copy/legal-terms.md lists the code facts behind these terms and the owner facts to confirm.
@@ -137,9 +145,10 @@ const sections: LegalSection[] = [
     title: 'Ending the agreement',
     body: (
       <p>
-        You can stop using Logbird Cloud at any time and ask us to delete your account and workspaces by writing to <Contact />. We may end or suspend
-        your access if you break these terms or if we stop offering the service. Unless we must act at once (for example, for abuse or a legal
-        requirement), we'll give you notice and time to export your data first. After that, we delete your data as the privacy policy describes.
+        You can stop using Logbird Cloud at any time and ask us to delete your account and workspaces through <PrivacyContact />. We may end or
+        suspend your access if you break these terms or if we stop offering the service. Unless we must act at once (for example, for abuse or a legal
+        requirement), we'll give you notice and time to export your data first. After that, we delete your account and your workspaces, including
+        their projects and events, within {CLOSURE_DELETION_DAYS} days; copies in backups expire on their regular rotation.
       </p>
     ),
   },
@@ -150,8 +159,8 @@ const sections: LegalSection[] = [
       <>
         <p>
           During early access the service is provided "as is", without warranties of any kind, to the extent the law allows. We aren't liable for
-          indirect or consequential losses, such as lost profits or lost data you could have exported, and our total liability for any claim is
-          limited to what you paid us for the service in the 12 months before it (nothing while it is free).
+          indirect or consequential losses, such as lost profits or lost data you could have exported, and our total liability for all claims together
+          is limited to the greater of what you paid us in the 12 months before the claim and 100 euros (or the equivalent in your currency).
         </p>
         <p>
           Nothing in these terms limits liability that the law doesn't allow to be limited, or your rights as a consumer where consumer law applies.
@@ -160,13 +169,21 @@ const sections: LegalSection[] = [
     ),
   },
   {
+    id: 'changes',
+    title: 'Changes to these terms',
+    body: (
+      <p>
+        {OPERATOR_SENTENCE_START} may update these terms. We'll change the effective date above and tell account holders about material changes before
+        they apply.
+      </p>
+    ),
+  },
+  {
     id: 'law',
     title: 'Governing law',
     body: (
       <p>
-        These terms are governed by {GOVERNING_LAW_TEXT}. If any part of them can't be enforced, the rest still applies. {OPERATOR_SENTENCE_START} may
-        update these terms; we'll change the effective date above and tell account holders about material changes before they apply. Questions go to{' '}
-        <Contact />.
+        These terms are governed by {GOVERNING_LAW_TEXT}. If any part of them can't be enforced, the rest still applies. Questions go to <Contact />.
       </p>
     ),
   },

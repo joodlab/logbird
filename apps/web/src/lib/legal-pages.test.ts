@@ -15,6 +15,7 @@ const OWNER_FACTS = {
   WEB_GOVERNING_LAW: 'the laws of Exampleland',
   WEB_HOSTING_PROVIDER: 'Example Hosting (Exampleland)',
   WEB_EMAIL_PROVIDER: 'Example Mail',
+  WEB_MAILBOX_PROVIDER: 'Example Mailbox Host',
 };
 
 describe('legal pages', () => {
@@ -37,7 +38,7 @@ describe('legal pages', () => {
     expect(privacy?.html).toContain('href="/contact?interest=privacy"');
     expect(privacyText).toContain('our server provider runs the servers');
     // Logbird Cloud's transactional email provider, unless WEB_EMAIL_PROVIDER says otherwise.
-    expect(privacyText).toContain('Postmark sends sign-in codes');
+    expect(privacyText).toContain("Postmark sends Logbird Cloud's sign-in codes");
     for (const fact of [
       '__Secure-logbird.session_token',
       'expires after 10 minutes',
@@ -58,7 +59,8 @@ describe('legal pages', () => {
     expect(privacyText).toContain('Example Operator Ltd ("we")');
     expect(privacyText).toContain('Our address: 1 Example Street, Example City.');
     expect(privacyText).toContain('Example Hosting (Exampleland) runs the servers');
-    expect(privacyText).toContain('Example Mail sends sign-in codes');
+    expect(privacyText).toContain("Example Mail sends Logbird Cloud's sign-in codes");
+    expect(privacyText).toContain('Example Mailbox Host hosts the team mailbox');
     expect(privacy?.html).toContain('href="mailto:privacy@example.test"');
     expect(privacy?.html).not.toContain('interest=privacy');
     expect(text(terms?.html ?? '')).toContain('governed by the laws of Exampleland');

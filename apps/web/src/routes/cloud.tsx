@@ -52,13 +52,13 @@ const faq: FaqItem[] = [
     q: CLOUD_OPEN ? 'What do you do with the email I give you?' : 'What do you do with my waitlist email?',
     // The privacy notice is referenced only once /legal/privacy is ready (site-map), here and in the FAQ JSON-LD.
     a: privacyReady
-      ? 'We store it to contact you about Logbird. No trackers. See the privacy notice.'
+      ? 'We store it to contact you about Logbird. No trackers. See the privacy policy.'
       : 'We store it to contact you about Logbird. No trackers.',
     body: privacyReady ? (
       <>
         We store it to contact you about Logbird. No trackers. See the{' '}
         <Link className="text-link" to="/legal/privacy">
-          privacy notice
+          privacy policy
         </Link>
         .
       </>

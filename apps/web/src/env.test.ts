@@ -22,6 +22,7 @@ describe('public configuration', () => {
       GOVERNING_LAW: undefined,
       HOSTING_PROVIDER: undefined,
       EMAIL_PROVIDER: undefined,
+      MAILBOX_PROVIDER: undefined,
       SITE_URL_CONFIGURED: true,
     });
   });

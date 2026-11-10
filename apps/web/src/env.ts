@@ -18,6 +18,7 @@
  *   WEB_GOVERNING_LAW  e.g. "the laws of <country>" (terms)          unset → neutral wording (pending owner)
  *   WEB_HOSTING_PROVIDER  server provider and region (privacy)      unset → "our server provider" (pending owner)
  *   WEB_EMAIL_PROVIDER    email delivery provider (privacy)          unset → Postmark, Logbird Cloud's provider
+ *   WEB_MAILBOX_PROVIDER  host of the team mailbox (privacy)         unset → "our email host" (pending owner)
  */
 /** The only variables the build passes to the site (vite.config.ts) and that Turbo hashes (turbo.json). */
 export const PUBLIC_ENV_KEYS = [
@@ -33,6 +34,7 @@ export const PUBLIC_ENV_KEYS = [
   'WEB_GOVERNING_LAW',
   'WEB_HOSTING_PROVIDER',
   'WEB_EMAIL_PROVIDER',
+  'WEB_MAILBOX_PROVIDER',
 ] as const;
 
 declare const __SITE_ENV__: Record<string, string | undefined> | undefined;
@@ -70,6 +72,8 @@ export interface SiteConfig {
   HOSTING_PROVIDER?: string;
   /** The email delivery provider named in the privacy policy; unset, Logbird Cloud's provider (Postmark). */
   EMAIL_PROVIDER?: string;
+  /** Who hosts the team mailbox that receives form submissions and emails (pending owner). */
+  MAILBOX_PROVIDER?: string;
   /** False while WEB_SITE_URL is unset, i.e. the canonical origin is the provisional domain (a release blocker). */
   SITE_URL_CONFIGURED: boolean;
 }
@@ -103,6 +107,7 @@ export function siteConfigFrom(values: Record<string, string | undefined>): Site
     GOVERNING_LAW: values.WEB_GOVERNING_LAW?.trim() || undefined,
     HOSTING_PROVIDER: values.WEB_HOSTING_PROVIDER?.trim() || undefined,
     EMAIL_PROVIDER: values.WEB_EMAIL_PROVIDER?.trim() || undefined,
+    MAILBOX_PROVIDER: values.WEB_MAILBOX_PROVIDER?.trim() || undefined,
     SITE_URL_CONFIGURED: Boolean(values.WEB_SITE_URL?.trim()),
   };
   for (const [key, value] of [
@@ -134,6 +139,7 @@ export const {
   GOVERNING_LAW,
   HOSTING_PROVIDER,
   EMAIL_PROVIDER,
+  MAILBOX_PROVIDER,
 } = siteConfig;
 export const COPYRIGHT_HOLDER = ORG_NAME ?? 'Logbird contributors';
 
