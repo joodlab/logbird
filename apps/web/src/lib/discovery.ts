@@ -32,6 +32,10 @@ export const CONSOLE_PATHS = [
   '/account',
   '/p/',
   '/projects',
+  '/brand/',
+  '/health',
+  '/livez',
+  '/readyz',
 ];
 const sharesOrigin = (config: SiteConfig) => Boolean(config.APP_URL && new URL(config.APP_URL).origin === new URL(config.SITE_URL).origin);
 /** Disallow everything while a release blocker is open (see release.ts). */

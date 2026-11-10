@@ -11,6 +11,9 @@ export default defineEventHandler(async (event) => {
     // URL/FastURL normalize dot segments. Retain the incoming path for the site's ambiguity guard.
     const pathname = event.req.url.match(/^[^:]+:\/\/[^/?#]+([^?#]*)/)?.[1] || '/';
     const request = { pathname, method: event.req.method, cookie: event.req.headers.get('cookie') };
+    // `/` depends on the session cookie (site when signed out, console when signed in): never cache one for the other.
+    const cookieDependent = url.pathname === '/';
+    if (cookieDependent) event.res.headers.append('vary', 'Cookie');
     if (siteDecision(request) !== 'site') {
       if (siteDecision({ ...request, method: 'GET' }) === 'site') {
         const methods = url.pathname.startsWith('/site-api/') ? siteApiMethods : siteMethods;
@@ -40,6 +43,7 @@ export default defineEventHandler(async (event) => {
       // Nitro stages routeRules headers on event.res. H3 merges those OVER the returned proxy response, so remove
       // them only after a successful site response. The upstream owns all response policies, including its hashed CSP.
       for (const name of [...event.res.headers.keys()]) event.res.headers.delete(name);
+      if (cookieDependent) response.headers.append('vary', 'Cookie');
       return response;
     } catch {
       if (url.pathname === '/') return;

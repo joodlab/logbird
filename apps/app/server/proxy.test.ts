@@ -149,6 +149,19 @@ describe('optional marketing upstream', () => {
   beforeEach(() => {
     vi.stubEnv('LOGBIRD_SITE_URL', 'http://site.logbird.test:4620');
   });
+  it('marks `/` as varying by Cookie, whether the site or the console answers it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('site home', { status: 200, headers: siteHeaders })),
+    );
+    const site = await request('/');
+    expect(site.headers.get('content-security-policy')).toBe(policy);
+    expect(site.headers.get('vary')).toMatch(/cookie/i);
+    const consolePage = await request('/', 'GET', '__Secure-logbird.session_token=fixture');
+    expect(await consolePage.text()).toBe('console page');
+    expect(consolePage.headers.get('vary')).toMatch(/cookie/i);
+    expect((await request('/product')).headers.get('vary') ?? '').not.toMatch(/cookie/i);
+  });
   it('preserves existing behavior when unset, even for unsupported site methods', async () => {
     vi.stubEnv('LOGBIRD_SITE_URL', '');
     for (const path of ['/', '/product', '/site-assets/a.js']) {

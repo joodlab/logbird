@@ -92,9 +92,13 @@ setting the console's `LOGBIRD_SITE_URL` and redeploying the console.
 The forwarding ships in the console image, so `LOGBIRD_SITE_URL` takes effect only
 from the first release that contains it; older console images ignore the variable.
 The site is not a release image: Coolify builds it from the selected revision, so
-copy changes deploy without a release. The site reads the published release list
-when it builds, so redeploy it after each release (and build it first after the
-release that introduces the forwarding). Rolling back means clearing
+copy changes deploy without a release. Point the site resource at `master` once the
+release that introduces the forwarding is live: redeploying it then picks up merged
+copy changes and the latest CHANGELOG.md. The site reads the published release
+list when it builds, so after each release redeploy it **without cache** (an
+unchanged source would otherwise reuse the cached build and keep the old list).
+The site joins the stack's network, so recreating the `logbird` resource (new UUID)
+means updating `LOGBIRD_STACK_NETWORK` and redeploying the site. Rolling back means clearing
 `LOGBIRD_SITE_URL` and redeploying the console; `/` then signs visitors in again.
 
 After a deploy, check the shared origin with

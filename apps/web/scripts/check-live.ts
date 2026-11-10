@@ -22,7 +22,7 @@ import { prerenderPaths } from '../src/lib/site-map';
  * only the paths the console routes to the site get the site checks (apps/app/server/site-paths.ts decides), and
  * console-owned paths (sign-in, API, unknown paths) must answer from the console, never with a site page.
  *
- *   SHARED_ORIGIN=1 BASE_URL=https://logbird.joodlab.com tsx scripts/check-live.ts
+ *   SHARED_ORIGIN=1 BASE_URL=https://<console origin> tsx scripts/check-live.ts
  */
 const base = process.env.BASE_URL ?? 'http://127.0.0.1:4620';
 const shared = process.env.SHARED_ORIGIN === '1';
@@ -138,6 +138,9 @@ for (const path of consoleOwned) {
   const body = await response.text();
   if (body.includes(SITE_MARKER) || body.includes('No event at this address.')) {
     problems.push(`${path}: answered with a site page on a shared origin; the console must keep this path`);
+  }
+  if (response.status >= 500) {
+    problems.push(`${path}: the console answered ${response.status}`);
   }
   rows.push({ path: `console ${path}`, status: response.status, inline: '-', uncovered: '-', url: response.headers.get('content-type') ?? '-' });
 }

@@ -24,6 +24,14 @@
         "$TURBO_ROOT$/CHANGELOG.md"
       ],
       "passThroughEnv": ["GITHUB_TOKEN"]
+    },
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/app/server/site-paths.ts",
+        "$TURBO_ROOT$/apps/app/public/brand/**",
+        "$TURBO_ROOT$/CHANGELOG.md"
+      ]
     }
   }
 }
