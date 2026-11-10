@@ -35,7 +35,8 @@ export default defineConfig(async ({ mode, command }) => {
       'import.meta.env.NITRO_PRESET': JSON.stringify(preset),
     },
     server: { port: 4620, strictPort: true },
-    preview: { port: 4620, strictPort: true },
+    // 127.0.0.1, not localhost: in Linux containers localhost may resolve to ::1 while the prerenderer fetches 127.0.0.1.
+    preview: { host: '127.0.0.1', port: 4620, strictPort: true },
     build: { manifest: 'site-assets/manifest.json', assetsDir: 'site-assets' },
     plugins: [
       tailwindcss(),
@@ -77,7 +78,7 @@ export default defineConfig(async ({ mode, command }) => {
         name: 'logbird-preview-port',
         enforce: 'post',
         // Start passes port 0 to Vite during prerender. Keep every preview on our assigned port.
-        config: () => ({ preview: { port: 4620, strictPort: true } }),
+        config: () => ({ preview: { host: '127.0.0.1', port: 4620, strictPort: true } }),
       },
       {
         name: 'logbird-discovery',

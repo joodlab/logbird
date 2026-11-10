@@ -92,5 +92,12 @@ setting the console's `LOGBIRD_SITE_URL` and redeploying the console.
 The forwarding ships in the console image, so `LOGBIRD_SITE_URL` takes effect only
 from the first release that contains it; older console images ignore the variable.
 The site is not a release image: Coolify builds it from the selected revision, so
-copy changes deploy without a release. Rolling back means clearing
+copy changes deploy without a release. The site reads the published release list
+when it builds, so redeploy it after each release (and build it first after the
+release that introduces the forwarding). Rolling back means clearing
 `LOGBIRD_SITE_URL` and redeploying the console; `/` then signs visitors in again.
+
+After a deploy, check the shared origin with
+`SHARED_ORIGIN=1 BASE_URL=https://<console origin> pnpm --filter @logbird/web check:live`:
+the forwarded paths must carry the site's own security headers, and console paths
+(sign-in, unknown pages) must never answer with a site page.

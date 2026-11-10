@@ -15,6 +15,7 @@ pnpm --filter @logbird/web build              # media + OG + prerender + pre-com
 pnpm --filter @logbird/web serve:static       # serves .output/public like Cloudflare (compression, real 404) on 4620
 pnpm --filter @logbird/web check:source-state  # after a build: fails if a public build says the source is closed, or a private one says it's open or links to it
 BASE_URL=http://127.0.0.1:4620 pnpm --filter @logbird/web check:live  # against a running site: every HTML response's CSP covers its own inline scripts
+SHARED_ORIGIN=1 BASE_URL=http://127.0.0.1:4629 pnpm --filter @logbird/web check:live  # through a console with LOGBIRD_SITE_URL: site paths only, console paths stay the console's
 pnpm --filter @logbird/web start              # the Node server (needed for /site-api/waitlist) on 4620
 pnpm --filter @logbird/web build:cloudflare   # the public build; refuses interim media or localhost URLs
 ```
