@@ -237,12 +237,19 @@ try {
   for (const owned of [project])
     await withProjectLock(owned, async () => {
       await purgeProjectEvents(owned);
-      if (indexExists)
+      // Verified locally (older checkouts lack deleteAndVerify): a concurrent mutation can be skipped (ClickHouse#124167).
+      for (let attempt = 1; indexExists; attempt++) {
         await clickhouse.command({
           query: 'DELETE FROM event_ids WHERE project_id={p:String}',
           query_params: { p: owned },
           clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
         });
+        const left = await read<{ n: number }>(clickhouse, 'SELECT count() n FROM (SELECT 1 FROM event_ids WHERE project_id={p:String} LIMIT 1)', {
+          p: owned,
+        });
+        if (!Number(left[0]?.n ?? 0)) break;
+        if (attempt === 3) throw new Error(`event_ids cleanup left rows for ${owned}`);
+      }
     });
   await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS ${table}`);
   await prisma.organization.deleteMany({ where: { id: org } });
