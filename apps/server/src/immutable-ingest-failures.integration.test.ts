@@ -24,7 +24,7 @@ afterEach(async () => {
   await f.cleanup();
 });
 const input = { id: 'same', action: 'error.original', occurredAt: new Date().toISOString(), context: {}, metadata: {} };
-it.each(['6', '27', '38', '41', '53', '69', '72', '60', '62', '81', '164', '497', '516', '241', '159', '252'])(
+it.each(['6', '25', '27', '38', '41', '53', '69', '72', '60', '62', '81', '164', '497', '516', '241', '159', '252'])(
   'classifies server code %s after consuming the body',
   async (code) => {
     vi.spyOn(clickhouse, 'exec').mockImplementationOnce(async (params) => {
@@ -35,7 +35,13 @@ it.each(['6', '27', '38', '41', '53', '69', '72', '60', '62', '81', '164', '497'
     });
     const response = await f.post(input);
     const ambiguous = ['241', '159', '252'].includes(code);
-    expect(response.status).toBe(['6', '27', '38', '41', '53', '69', '72'].includes(code) ? 422 : 503);
+    const parseRejection = ['6', '25', '27', '38', '41', '53', '69', '72'].includes(code);
+    expect(response.status).toBe(parseRejection ? 202 : 503);
+    if (parseRejection)
+      expect(await response.json()).toMatchObject({
+        accepted: 0,
+        rejected: [{ index: 0, code: 'invalid_event', reason: expect.stringMatching(/^invalid_event:/) }],
+      });
     expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(ambiguous ? 1 : 0);
     if (ambiguous) {
       expect((await response.json()).error.code).toBe('ingest_pending');
@@ -60,7 +66,7 @@ it('releases claims after a real UInt16 ClickHouse parse failure', async () => {
       for (const line of chunk.toString().trimEnd().split('\n')) rows.push({ ...JSON.parse(line), job_attempt: 'not-an-integer' });
     return insert({ ...params, values: Readable.from(rows.map((row) => `${JSON.stringify(row)}\n`)) });
   });
-  expect((await f.post(input)).status).toBe(422);
+  expect((await f.post(input)).status).toBe(202);
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(0);
   expect(await f.count()).toBe(0);
 });
@@ -115,7 +121,7 @@ it('pending competing conflicts wait for the actual parse-failure release path',
     expect(response.status).toBe(503);
     expect((await response.json()).error.code).toBe('ingest_pending');
     release();
-    expect((await first).status).toBe(422);
+    expect((await first).status).toBe(202);
     expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(0);
     expect((await f.post({ ...input, action: 'different' })).status).toBe(202);
   } finally {

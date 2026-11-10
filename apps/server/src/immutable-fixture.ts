@@ -7,9 +7,9 @@ import { app } from './app';
 import { clickhouse, purgeProjectEvents } from './clickhouse';
 import { generateApiKey } from './keys';
 
-export async function immutableFixture() {
+export async function immutableFixture(prefix = 'qa-immutable') {
   const org = randomUUID(),
-    project = `qa-immutable-${randomUUID()}`;
+    project = `${prefix}-${randomUUID()}`;
   const key = generateApiKey('ingest');
   let userId: string | undefined;
   let cookie = '';

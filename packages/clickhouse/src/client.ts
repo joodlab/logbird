@@ -31,7 +31,8 @@ function configuredClient(env: NodeJS.ProcessEnv, requestTimeout: number, maxExe
 export const INGEST_CLAIM_LEASE_MS = 60_000;
 export const ASYNC_INSERT_FLUSH_BOUND_MS = 10_000;
 const INSERT_MAX_EXECUTION_SECONDS = 30;
-export const CLICKHOUSE_PARSE_ERROR_CODES = new Set(['6', '27', '38', '41', '53', '69', '72']);
+export const INSERT_LEASE_BUDGET_MS = INSERT_MAX_EXECUTION_SECONDS * 1000 + ASYNC_INSERT_FLUSH_BOUND_MS;
+export const CLICKHOUSE_PARSE_ERROR_CODES = new Set(['6', '25', '27', '38', '41', '53', '69', '72']);
 // Authentication/query rejection is definite; resource limits and async-wait timeouts are not.
 export const CLICKHOUSE_PREWRITE_ERROR_CODES = new Set([...CLICKHOUSE_PARSE_ERROR_CODES, '60', '62', '81', '164', '497', '516']);
 export class AmbiguousInsertError extends Error {
@@ -39,6 +40,24 @@ export class AmbiguousInsertError extends Error {
     super('Storage acknowledgement is unresolved after sending the body');
     this.name = 'AmbiguousInsertError';
   }
+}
+export function isPrewriteParseError(error: unknown) {
+  return (
+    !(error instanceof AmbiguousInsertError) &&
+    error !== null &&
+    typeof error === 'object' &&
+    'code' in error &&
+    CLICKHOUSE_PARSE_ERROR_CODES.has(String(error.code)) &&
+    !isViewFailure(error)
+  );
+}
+
+function isViewFailure(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return (
+    /(?:^|[(:]\s*|\n\s*)while pushing to (?:materialized )?view\b/i.test(error.message) ||
+    ('code' in error && String(error.code) === '60' && /^Target table .+ of view .+ (?:doesn't|does not) exists?\b/i.test(error.message))
+  );
 }
 export async function insertEvents(ch: ClickHouseClient, rows: EventRow[], leaseExpiresAt = Date.now() + INGEST_CLAIM_LEASE_MS) {
   if (!rows.length) return;
@@ -49,8 +68,7 @@ export async function insertEvents(ch: ClickHouseClient, rows: EventRow[], lease
     read() {
       try {
         const body = `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`;
-        if (Date.now() + INSERT_MAX_EXECUTION_SECONDS * 1000 + ASYNC_INSERT_FLUSH_BOUND_MS > leaseExpiresAt)
-          throw new Error('Insert lease lacks time to finish before expiry');
+        if (Date.now() + INSERT_LEASE_BUDGET_MS > leaseExpiresAt) throw new Error('Insert lease lacks time to finish before expiry');
         bodySent = true;
         this.push(body);
         this.push(null);
@@ -80,11 +98,7 @@ export async function insertEvents(ch: ClickHouseClient, rows: EventRow[], lease
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
     // The same parse code can originate inside a failing MV after the source row was written.
-    const viewFailure =
-      error instanceof Error &&
-      (/(?:^|[(:]\s*|\n\s*)while pushing to (?:materialized )?view\b/i.test(error.message) ||
-        (code === '60' && /^Target table .+ of view .+ (?:doesn't|does not) exists?\b/i.test(error.message)));
-    const definite = CLICKHOUSE_PREWRITE_ERROR_CODES.has(code) && !viewFailure;
+    const definite = CLICKHOUSE_PREWRITE_ERROR_CODES.has(code) && !isViewFailure(error);
     if (bodySent && !definite) throw new AmbiguousInsertError();
     throw error;
   } finally {

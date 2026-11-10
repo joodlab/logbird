@@ -184,6 +184,12 @@ Use a current timestamp when creating an event. Send a single event, an array or
 `{ "events": [...] }` with at most 1000 entries. Limits are 256 KB per event and
 5 MB per request (256 * 1024 and 5 * 1024 * 1024 bytes). Inspect even a 202 response:
 `rejected` lists individual failures and `warnings` reports normalization.
+Definite native storage parse failures are isolated into `invalid_event` rejections
+with zero-based indices and code-first reasons. Healthy siblings remain accepted;
+an all-rejected batch still returns 202 with `accepted: 0`. Isolation is bounded; if
+it runs out of budget, the events it could not check are rejected with a reason asking
+you to resend them in a smaller batch. An ambiguous sibling instead returns 503
+pending with those settled fields.
 A `503 ingest_pending` response means some immutable event IDs are still being
 settled. Its `details` include the settled 202 response fields plus pending
 `indices` (zero-based batch positions) and `eventIds`; every index outside

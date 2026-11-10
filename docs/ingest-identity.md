@@ -320,13 +320,44 @@ is consumed before confirmation. Server socket timeout 209 remains ambiguous
 after handoff, even if that exception reports no written rows.
 Failures proven to precede any write release this attempt's claims. This includes
 before-body transport errors and an explicit server-code allowlist: parse codes
-6,27,38,41,53,69,72 (422 invalid_event), and unknown table/database, syntax,
+6,25,27,38,41,53,69,72 (per-index invalid_event), and unknown table/database, syntax,
 readonly, ACL/auth codes 60,62,81,164,497,516 (503 ingest_unavailable). A code wrapped
 by an MV failure is ambiguous even if its underlying code is on that list.
 All other errors after handoff retain the claim, including timeout 159, memory
 limit 241, and client timeout/reset. A server exception can follow a committed
 raw write or only some materialized destinations. Identity-read errors return
 503 ingest_unavailable with Retry-After, including timeout and memory exhaustion.
+
+A definite parser failure is bisected under the original claims and lease, with
+at most 64 extra statements. Each child uses the same lazy body/lease checks.
+Singleton failures become `rejected[]` entries with `code: invalid_event` and a
+code-first reason; acknowledged children alone are confirmed. If the statement
+cap or remaining 40-second finish budget is exhausted, the still-unsent rows
+proved absent by their parent are rejected per index with `invalid_event` and a
+reason asking the sender to resend them in a smaller batch. They do not become
+pending, and the response stays 202 so stored siblings are reported as accepted
+(a whole-batch 4xx would make SDKs drop events that were stored). The server logs
+`ingest.parse_isolation_limited` with the unresolved count. An ambiguous sibling
+takes precedence as 503 pending, including those parse rejections. Isolation
+returns 202 even when all events are rejected (`accepted: 0`).
+
+An ambiguous child is never split or retried within the attempt. Its claims stay
+leased while other children settle; `503 ingest_pending` composes confirmed ids,
+per-index rejections and pending indices. A confirmation failure preserves every
+acknowledged child's claim. Exact retries skip confirmed writes and preserve the
+original partition tree, charging even skipped child statements to keep the hard
+cap boundary stable. Lease exhaustion remains timing-dependent; retrying after a
+budget fallback may resolve more rows when storage responds faster.
+
+Real JSONEachRow probes found code 25 for lone surrogates in indexed strings and
+attribute keys; [ClickHouse async parsing](https://clickhouse.com/docs/best-practices/asynchronous-inserts)
+rejects an entire query payload before flushing it on a parse/type error. A mixed
+request was verified absent from raw events, identity index and every rollup before
+isolation. View-wrapped code 25 remains ambiguous. Search text caps avoid splitting
+valid Unicode pairs; raw payload and v1 identity remain unchanged. Unusable dates
+already fall back with warnings and job attempts already clamp to UInt16. Native
+invalid Unicode is rejected rather than silently replacing indexed strings or
+colliding attribute keys; original input should be corrected by the sender.
 
 An exact retry or hourly worker recovers per project after the lease plus a
 conservative ten-second async flush bound. Candidate fingerprints are checked
@@ -470,10 +501,9 @@ separately scheduled acceptance gate. Run `scripts/benchmark-ingest-identity.ts`
 with the fourth argument `immutable`, under a documented memory and concurrency budget. Small real-service proofs are not
 10M/day capacity evidence.
 
-Other scoped follow-ups: [#90](https://github.com/joodlab/logbird/issues/90) covers
-the shared ingest/recovery dependency boundary, and
-[#91](https://github.com/joodlab/logbird/issues/91) covers per-event isolation of a
-definite storage parse failure. Neither changes ambiguity classification here.
+Other scoped follow-up: [#90](https://github.com/joodlab/logbird/issues/90) covers
+the shared ingest/recovery dependency boundary. Per-event storage parse isolation
+([#91](https://github.com/joodlab/logbird/issues/91)) preserves ambiguity classification.
 
 Removal of pre-merge compatibility after safe shared-DB reconciliation is tracked
 in [#94](https://github.com/joodlab/logbird/issues/94).

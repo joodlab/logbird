@@ -12,7 +12,10 @@ function uuidv7() {
 
 const object = (v: unknown): Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
-const text = (v: unknown, cap = 512): string => (typeof v === 'string' ? v.trim().slice(0, cap) : '');
+// A valid pair straddling a cap must not become a native JSONEachRow parse rejection.
+const capText = (s: string, cap: number) =>
+  s.slice(0, /[\uD800-\uDBFF]/u.test(s.charAt(cap - 1)) && /[\uDC00-\uDFFF]/u.test(s.charAt(cap)) ? cap - 1 : cap);
+const text = (v: unknown, cap = 512): string => (typeof v === 'string' ? capText(v.trim(), cap) : '');
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
 export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string }) {
   // Search normalization is intentionally lossy. Identity v1 hashes canonical raw input, NOT these columns.
@@ -76,7 +79,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   // Only `action` is required: a bad occurredAt never drops the event. It is stored at receive time, the original value
   // is kept in attributes['logbird.occurredAt.rejected'] (and in payload), and the caller gets a warning.
   const { timestamp: date, problem: occurredAtProblem, valid: occurredAtValid } = resolveTimestamp(e.occurredAt, ctx.receivedAt);
-  if (occurredAtProblem) attributes['logbird.occurredAt.rejected'] = value(e.occurredAt).slice(0, 256);
+  if (occurredAtProblem) attributes['logbird.occurredAt.rejected'] = capText(value(e.occurredAt), 256);
   const warning =
     [
       occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,

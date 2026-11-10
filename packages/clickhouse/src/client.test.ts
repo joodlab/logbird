@@ -6,6 +6,8 @@ import { normalizeEvent } from './normalize';
 
 it.each([
   ['6', "Cannot parse value 'page.view'", false],
+  ['25', 'Cannot parse escape sequence: missing second part of surrogate pair', false],
+  ['25', 'Cannot parse escape sequence (while pushing to view logbird.events_mv)', true],
   ['60', 'Unknown table events', false],
   ['209', 'Timeout reading from socket', true],
   ['6', 'Parse failed: while pushing to view logbird.events_mv', true],

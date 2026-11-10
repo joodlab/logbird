@@ -125,6 +125,17 @@ Semantics worth documenting to users:
   never releases unresolved receipts. After confirmed retention deletion and cleanup,
   an id may be used again. Unsafe ids (NUL, lone surrogates or >256 trimmed UTF-16 units)
   are per-event `invalid_event_id` rejections, so healthy siblings can proceed.
+- A definite storage parser rejection is isolated per event by bounded bisection.
+  Healthy siblings return in `ids`; offending indices appear in `rejected` with
+  `code: invalid_event` and a code-first reason, including when every event is rejected
+  (202 with `accepted: 0`). Only errors proved to precede writes may be split.
+  Ambiguous source/view/async outcomes remain `503 ingest_pending`, with acknowledged
+  siblings confirmed and parse rejections included in the settled details. The
+  original lease and a 64-extra-statement cap bound isolation. When either budget is
+  exhausted, the still-unchecked rows (proved unwritten) are also rejected per index
+  with `invalid_event` and a reason asking to resend them in a smaller batch; the
+  response stays 202 with every stored sibling in `ids`. If another child is ambiguous,
+  503 pending takes precedence with those same rejections.
 - **actor = who caused it** (person, API key, scheduler…); **executor = who performed it** (api, worker, job,
   attempt). A worker doing work requested by Lina has `actor=Lina`, `executor=crm-worker`. Scheduled runs use
   `actor.type=system`.

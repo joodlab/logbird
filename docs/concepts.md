@@ -151,7 +151,7 @@ Rejection codes appear in `rejected[].code`; retryable HTTP codes appear in
 
 | Code | Meaning | What to do / expected timing |
 | --- | --- | --- |
-| `invalid_event` | Invalid event fields. | Fix the reported event. A native parse error may return 422 for the batch. |
+| `invalid_event` | Invalid event fields or a definite native storage parse failure. | Fix the reported indices in `rejected`. Healthy siblings are accepted (202); all rejected gives `accepted: 0`. If the isolation budget runs out, unchecked events are rejected with a reason asking to resend them in a smaller batch. |
 | `invalid_event_id` | Unsafe or oversized string id. | Use valid Unicode without NUL, at most 256 UTF-16 units after trimming. |
 | `duplicate_id_conflict` | The id belongs to different content. | Keep the original; send corrections with a new id and context.parentEventId. |
 | `stored_event_unreadable` | Retained evidence cannot be compared. | Keep the evidence. Send a correction with a new id; ask the operator to inspect storage. |

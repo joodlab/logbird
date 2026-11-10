@@ -1,7 +1,5 @@
 import {
-  AmbiguousInsertError,
   ASYNC_INSERT_FLUSH_BOUND_MS,
-  CLICKHOUSE_PARSE_ERROR_CODES,
   type EventRow,
   eventFingerprint,
   existingEventIdentities,
@@ -25,6 +23,7 @@ import {
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
+import { isolateIngestRows, STORAGE_PARSE_REJECTION, STORAGE_PARSE_UNRESOLVED } from './ingest-parse-isolation';
 
 export type IngestCandidate = { index: number; input: unknown; row: EventRow };
 export const DUPLICATE_ID_CONFLICT =
@@ -208,40 +207,39 @@ function classifyCandidates(
 }
 
 /** Insert owns release before send and on definite failure. Unproven write outcomes retain the lease. */
-async function persistRows(projectId: string, rows: EventRow[], owned: Map<string, IngestReceipt>, fingerprint: (row: EventRow) => string) {
+async function persistRows(
+  projectId: string,
+  rows: EventRow[],
+  partitionRows: EventRow[],
+  owned: Map<string, IngestReceipt>,
+  fingerprint: (row: EventRow) => string,
+) {
   if (!rows.length) {
     await releaseClaims(projectId, owned);
-    return;
+    return { written: [], rejected: [], pending: [], unavailable: [], unresolved: [], limited: false };
   }
-  let keepClaims = false;
+  const releasable = new Map(owned);
   try {
     const expiresAt = Math.min(
       ...[...owned.values()].filter((c) => !c.confirmedAt).map((c) => (c.claimedAt?.getTime() ?? 0) + INGEST_CLAIM_LEASE_MS),
     );
-    try {
-      await insertEvents(clickhouse, rows, expiresAt);
-    } catch (error) {
-      if (error instanceof AmbiguousInsertError) {
-        keepClaims = true;
-        throw new ApiError(503, 'ingest_pending', 'Storage acknowledgement is unresolved. Retry this batch.');
-      }
-      if (error && typeof error === 'object' && 'code' in error && CLICKHOUSE_PARSE_ERROR_CODES.has(String(error.code)))
-        throw new ApiError(422, 'invalid_event', 'Storage could not parse this batch. Check event field types and timestamps.');
-      throw new ApiError(503, 'ingest_unavailable', 'Storage rejected this write. Retry this batch.');
-    }
+    const freshIds = new Set(rows.map((row) => row.event_id));
+    const settledIds = new Set(partitionRows.filter((row) => !freshIds.has(row.event_id)).map((row) => row.event_id));
+    const outcome = await isolateIngestRows(partitionRows, expiresAt, (part, lease) => insertEvents(clickhouse, part, lease), settledIds);
     // After acknowledgement, a Postgres failure must preserve the claim for a visibility retry.
-    keepClaims = true;
+    for (const row of [...outcome.written, ...outcome.pending]) releasable.delete(row.event_id);
     await confirmIngestReceipts(
       projectId,
-      rows.map((row) => ({
+      outcome.written.map((row) => ({
         eventId: row.event_id,
         fingerprint: fingerprint(row),
         receivedAt: new Date(row.received_at),
         eventAt: new Date(row.timestamp),
       })),
     );
+    return outcome;
   } finally {
-    if (!keepClaims) await releaseClaims(projectId, owned);
+    await releaseClaims(projectId, releasable);
   }
 }
 
@@ -266,36 +264,51 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
     await releaseClaims(projectId, owned);
     throw error;
   }
-  try {
-    await persistRows(projectId, result.rows, owned, fingerprint);
-  } catch (error) {
-    if (error instanceof ApiError && error.code === 'ingest_pending') {
-      const pendingIds = new Set([...result.pending.map((p) => p.eventId), ...result.rows.map((r) => r.event_id)]);
-      const pending = candidates.filter((c) => pendingIds.has(c.row.event_id));
-      const ids = result.ids.filter((id) => !pendingIds.has(id));
-      const unsettled = new Set(pending.map((c) => c.index));
-      throw await pendingError(
-        projectId,
-        error.message,
-        ids,
-        result.rejected.filter((r) => !unsettled.has(r.index)),
-        pending.map((c) => ({ index: c.index, eventId: c.row.event_id })),
-        receipts,
-      );
-    }
-    throw error;
+  // Keep the original partition tree (and charge its virtual statements) on an exact retry.
+  // Omitting confirmed siblings from the tree would shift the hard-cap rejection boundary.
+  const freshRows = new Map(result.rows.map((row) => [row.event_id, row]));
+  const acceptedIds = new Set(result.ids);
+  const partitionRows = new Map<string, EventRow>();
+  for (const candidate of candidates)
+    if (acceptedIds.has(candidate.row.event_id) && !partitionRows.has(candidate.row.event_id))
+      partitionRows.set(candidate.row.event_id, freshRows.get(candidate.row.event_id) ?? candidate.row);
+  const outcome = await persistRows(projectId, result.rows, [...partitionRows.values()], owned, fingerprint);
+  const unresolvedIds = new Set(outcome.unresolved.map((row) => row.event_id));
+  const rejectedIds = new Set([...outcome.rejected.map((row) => row.event_id), ...unresolvedIds]);
+  const pendingIds = new Set([...result.pending.map((p) => p.eventId), ...outcome.pending.map((row) => row.event_id)]);
+  const unavailableIds = new Set(outcome.unavailable.map((row) => row.event_id));
+  // Classification rejections (including conflicts with another index of the same id) stay settled.
+  const classifiedRejections = new Set(result.rejected.map((r) => r.index));
+  for (const candidate of candidates) {
+    if (classifiedRejections.has(candidate.index)) continue;
+    const id = candidate.row.event_id;
+    if (rejectedIds.has(id))
+      result.rejected.push({
+        index: candidate.index,
+        code: 'invalid_event',
+        reason: unresolvedIds.has(id) ? STORAGE_PARSE_UNRESOLVED : STORAGE_PARSE_REJECTION,
+      });
   }
+  const ids = result.ids.filter((id) => !rejectedIds.has(id) && !pendingIds.has(id) && !unavailableIds.has(id));
   // Healthy siblings are already durable; an identical batch retry will not insert them again.
-  if (result.pending.length)
+  if (pendingIds.size) {
+    for (const id of unavailableIds) pendingIds.add(id);
     throw await pendingError(
       projectId,
       'Some event ids have unresolved writes. Retry this batch; listed indices are unresolved.',
-      result.ids,
+      ids,
       result.rejected,
-      result.pending,
+      candidates
+        .filter((c) => pendingIds.has(c.row.event_id) && !classifiedRejections.has(c.index))
+        .map((c) => ({ index: c.index, eventId: c.row.event_id })),
       receipts,
     );
-  return { ids: result.ids, rejected: result.rejected };
+  }
+  if (unavailableIds.size) throw new ApiError(503, 'ingest_unavailable', 'Storage rejected this write. Retry this batch.');
+  // Budget exhaustion still settles the batch: stored siblings are accepted, unchecked rows are rejected per index.
+  if (outcome.limited)
+    console.warn(JSON.stringify({ level: 'warn', event: 'ingest.parse_isolation_limited', projectId, unresolved: unresolvedIds.size }));
+  return { ids, rejected: result.rejected };
 }
 
 async function pendingError(
