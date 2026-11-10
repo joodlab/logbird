@@ -15,6 +15,11 @@ export const TEST_PUBLIC_ENV = {
   WEB_ORG_NAME: '',
   WEB_SECURITY_EMAIL: 'security@example.test',
   WEB_CONTACT_EMAIL: 'hello@example.test',
+  WEB_PRIVACY_EMAIL: '',
+  WEB_LEGAL_ADDRESS: '',
+  WEB_GOVERNING_LAW: '',
+  WEB_HOSTING_PROVIDER: '',
+  WEB_EMAIL_PROVIDER: '',
 };
 
 export default defineConfig({

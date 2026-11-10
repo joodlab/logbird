@@ -80,7 +80,11 @@ no public domain or host ports. Set its `WEB_*` build variables (the site URL is
 `https://logbird.joodlab.com`, and so is `WEB_APP_URL`: the console origin, the site
 links `/login` itself), SMTP settings and
 `WEB_TRUST_PROXY` for the actual proxy chain. The named `/data` volume holds waitlist
-submissions; preserve it across redeploys.
+submissions; preserve it across redeploys. The privacy policy and terms name the
+operator from `WEB_ORG_NAME`, `WEB_PRIVACY_EMAIL`, `WEB_LEGAL_ADDRESS`,
+`WEB_GOVERNING_LAW`, `WEB_HOSTING_PROVIDER` and `WEB_EMAIL_PROVIDER`; the site stays
+noindex until the publisher name and the privacy mailbox are set (see
+`marketing/copy/legal-privacy.md`).
 
 Set `LOGBIRD_STACK_NETWORK` to the existing Logbird Compose resource's network name,
 usually its Coolify resource UUID. On the destination host, use `docker network ls`

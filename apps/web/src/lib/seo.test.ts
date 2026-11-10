@@ -6,6 +6,20 @@ import { LEGAL_PAGES } from './release';
 import { articleLd, breadcrumbLd, faqLd, organizationLd, pageHead, pageMeta, softwareLd, websiteLd } from './seo';
 import { getPage, publishedPages, staticPages } from './site-map';
 
+// Page heads read the build's own configuration, which in tests names no publisher or privacy contact (both release
+// blockers). These tests exercise an indexable site, so the gate is evaluated against the released fixture instead.
+vi.mock('./release', async (original) => {
+  const actual = await original<typeof import('./release')>();
+  const { siteConfigFrom } = await import('../env');
+  const { RELEASED_ENV } = await import('../test/launch-ready');
+  const released = siteConfigFrom(RELEASED_ENV);
+  return {
+    ...actual,
+    siteIndexable: (config = released) => actual.siteIndexable(config),
+    pageIndexable: (page: Parameters<typeof actual.pageIndexable>[0], config = released) => actual.pageIndexable(page, config),
+  };
+});
+
 // Chosen from the manifest so these tests survive each page PR flipping `ready`.
 const unready = staticPages.find((page) => !page.ready && !page.path.startsWith('/legal/'));
 // These tests exercise an indexable site: the legal pages as they'll be at launch (release.test.ts covers the gate).

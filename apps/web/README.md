@@ -30,7 +30,8 @@ Stop the server's whole process tree when done. Never start the console or its s
   Internal `ButtonLink`s to them render nothing. Each page PR flips its own flag.
 - `src/lib/release.ts` closes the whole site while any media entry is `interim`, `WEB_SITE_URL` is unset (provisional
   domain), `WEB_SECURITY_EMAIL` or `WEB_CONTACT_EMAIL` is unset (no mailbox is ever derived from the provisional domain),
-  or `/legal/privacy` or `/legal/terms` is still a placeholder (`ready: false`): every page is `noindex`, `robots.txt`
+  `WEB_ORG_NAME` or `WEB_PRIVACY_EMAIL` is unset (the privacy policy must name who is responsible and how to reach them), or
+  `/legal/privacy` or `/legal/terms` is taken back to `ready: false`: every page is `noindex`, `robots.txt`
   is `Disallow: /`, and `build:cloudflare` fails unless `LOGBIRD_WEB_ALLOW_INTERIM=1` (local previews only).
 
 ## Configuration
@@ -49,6 +50,9 @@ domain, and no site source may contain the company or design-partner names (test
 | `WEB_ORG_NAME` | © holder and JSON-LD Organization (pending owner) | unset → "Logbird contributors", no Organization |
 | `WEB_SECURITY_EMAIL` | Vulnerability-report mailbox. **No default**: unset renders `SECURITY.md`'s "ask the maintainers for a private channel" wording | unset (release blocker) |
 | `WEB_CONTACT_EMAIL` | General contact mailbox. **No default**: unset, the form's messages name no address | unset (release blocker) |
+| `WEB_PRIVACY_EMAIL` | Privacy-request mailbox named in the privacy policy. **No default**: unset, the policy points to the form's "A privacy request" topic | unset (release blocker) |
+| `WEB_LEGAL_ADDRESS`, `WEB_GOVERNING_LAW` | The operator's postal address and the terms' governing-law clause (e.g. "the laws of <country>") | unset → omitted / neutral wording (pending owner) |
+| `WEB_HOSTING_PROVIDER`, `WEB_EMAIL_PROVIDER` | Server provider (and region) and email delivery provider named in the privacy policy | unset → "our server provider" / "our email delivery provider" (pending owner) |
 | `SMTP_*`, `MAIL_FROM`, `WAITLIST_NOTIFY_TO` | Server-only waitlist notification (Mailpit locally). `MAIL_FROM` and `WAITLIST_NOTIFY_TO` have **no defaults**: with SMTP on and either missing, notifications are off (one `waitlist.notify_disabled` warning, no personal data) and submissions are still stored | — |
 | `WAITLIST_FILE` | Node adapter's JSONL file | `apps/web/.data/waitlist.jsonl` when run from `apps/web` |
 | `WEB_TRUST_PROXY` | Reverse proxies in front of the Node server that append to `X-Forwarded-For`; the client is that many entries from the right. 0 (default) ignores forwarding headers, so behind an untrusted or unset proxy every visitor shares one limiter bucket: set this, or enforce the per-client limit at the proxy | 0 |

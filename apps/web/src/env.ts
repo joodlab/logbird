@@ -13,6 +13,11 @@
  *   WEB_ORG_NAME       legal name for © and JSON-LD (pending owner) default unset → "Logbird contributors", no Organization
  *   WEB_SECURITY_EMAIL vulnerability-report mailbox; NO default     unset → SECURITY.md's "request a private channel" wording
  *   WEB_CONTACT_EMAIL  general contact mailbox; NO default          unset → "use the form" wording
+ *   WEB_PRIVACY_EMAIL  privacy-request mailbox; NO default          unset → the form's "A privacy request" topic (blocker)
+ *   WEB_LEGAL_ADDRESS  the operator's postal address (legal pages)  unset → no address shown (pending owner)
+ *   WEB_GOVERNING_LAW  e.g. "the laws of <country>" (terms)          unset → neutral wording (pending owner)
+ *   WEB_HOSTING_PROVIDER  server provider and region (privacy)      unset → "our server provider" (pending owner)
+ *   WEB_EMAIL_PROVIDER    email delivery provider (privacy)          unset → "our email delivery provider" (pending owner)
  */
 /** The only variables the build passes to the site (vite.config.ts) and that Turbo hashes (turbo.json). */
 export const PUBLIC_ENV_KEYS = [
@@ -23,6 +28,11 @@ export const PUBLIC_ENV_KEYS = [
   'WEB_ORG_NAME',
   'WEB_SECURITY_EMAIL',
   'WEB_CONTACT_EMAIL',
+  'WEB_PRIVACY_EMAIL',
+  'WEB_LEGAL_ADDRESS',
+  'WEB_GOVERNING_LAW',
+  'WEB_HOSTING_PROVIDER',
+  'WEB_EMAIL_PROVIDER',
 ] as const;
 
 declare const __SITE_ENV__: Record<string, string | undefined> | undefined;
@@ -47,6 +57,19 @@ export interface SiteConfig {
   SECURITY_EMAIL?: string;
   /** General contact mailbox. No default, for the same reason; unset renders "use the form" wording (release blocker). */
   CONTACT_EMAIL?: string;
+  /**
+   * Where people send privacy requests (access, correction, deletion). No default; unset, the privacy policy points to
+   * the contact form's "A privacy request" topic, which reaches the same team (release blocker until set).
+   */
+  PRIVACY_EMAIL?: string;
+  /** The operator's postal address for the legal pages (pending owner); unset, no address is printed. */
+  LEGAL_ADDRESS?: string;
+  /** The governing-law clause of the terms, e.g. "the laws of <country>" (pending owner). */
+  GOVERNING_LAW?: string;
+  /** The server provider and region named in the privacy policy (pending owner), e.g. "<provider> (<country>)". */
+  HOSTING_PROVIDER?: string;
+  /** The email delivery provider named in the privacy policy (pending owner). */
+  EMAIL_PROVIDER?: string;
   /** False while WEB_SITE_URL is unset, i.e. the canonical origin is the provisional domain (a release blocker). */
   SITE_URL_CONFIGURED: boolean;
 }
@@ -75,11 +98,17 @@ export function siteConfigFrom(values: Record<string, string | undefined>): Site
     ORG_NAME: values.WEB_ORG_NAME?.trim() || undefined,
     SECURITY_EMAIL: values.WEB_SECURITY_EMAIL?.trim() || undefined,
     CONTACT_EMAIL: values.WEB_CONTACT_EMAIL?.trim() || undefined,
+    PRIVACY_EMAIL: values.WEB_PRIVACY_EMAIL?.trim() || undefined,
+    LEGAL_ADDRESS: values.WEB_LEGAL_ADDRESS?.trim() || undefined,
+    GOVERNING_LAW: values.WEB_GOVERNING_LAW?.trim() || undefined,
+    HOSTING_PROVIDER: values.WEB_HOSTING_PROVIDER?.trim() || undefined,
+    EMAIL_PROVIDER: values.WEB_EMAIL_PROVIDER?.trim() || undefined,
     SITE_URL_CONFIGURED: Boolean(values.WEB_SITE_URL?.trim()),
   };
   for (const [key, value] of [
     ['WEB_SECURITY_EMAIL', config.SECURITY_EMAIL],
     ['WEB_CONTACT_EMAIL', config.CONTACT_EMAIL],
+    ['WEB_PRIVACY_EMAIL', config.PRIVACY_EMAIL],
   ] as const) {
     if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
       throw new Error(`${key} must be an email address.`);
@@ -92,7 +121,20 @@ export function siteConfigFrom(values: Record<string, string | undefined>): Site
 }
 
 export const siteConfig = siteConfigFrom(source);
-export const { SITE_URL, APP_URL, GITHUB_PUBLIC, GITHUB_URL, ORG_NAME, SECURITY_EMAIL, CONTACT_EMAIL } = siteConfig;
+export const {
+  SITE_URL,
+  APP_URL,
+  GITHUB_PUBLIC,
+  GITHUB_URL,
+  ORG_NAME,
+  SECURITY_EMAIL,
+  CONTACT_EMAIL,
+  PRIVACY_EMAIL,
+  LEGAL_ADDRESS,
+  GOVERNING_LAW,
+  HOSTING_PROVIDER,
+  EMAIL_PROVIDER,
+} = siteConfig;
 export const COPYRIGHT_HOLDER = ORG_NAME ?? 'Logbird contributors';
 
 const LOCAL = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0)$/i;

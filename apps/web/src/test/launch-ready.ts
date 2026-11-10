@@ -26,4 +26,6 @@ export const RELEASED_ENV = {
   WEB_SITE_URL: 'https://site.example.test',
   WEB_SECURITY_EMAIL: 'security@example.test',
   WEB_CONTACT_EMAIL: 'hello@example.test',
+  WEB_ORG_NAME: 'Example Publisher',
+  WEB_PRIVACY_EMAIL: 'privacy@example.test',
 } as const;

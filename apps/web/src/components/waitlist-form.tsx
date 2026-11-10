@@ -43,6 +43,7 @@ const INTERESTS = [
   { value: 'updates', label: 'Product updates only' },
   { value: 'correction', label: 'A correction to one of our pages' },
   { value: 'other', label: 'A question, or support and enterprise' },
+  { value: 'privacy', label: 'A privacy request (access, correction or deletion)' },
 ] as const;
 
 /**
@@ -171,13 +172,20 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
       </div>
       <div className="flex flex-col gap-3">
         <button
+          aria-describedby="form-privacy"
           className="inline-flex h-12 items-center justify-center rounded-md bg-primary px-5 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/80 disabled:opacity-60 sm:self-start"
           disabled={sending}
           type="submit"
         >
           {sending ? 'Sending…' : 'Send'}
         </button>
-        <p className="text-muted-foreground text-xs">We store your email to contact you about Logbird. No trackers.</p>
+        <p className="text-muted-foreground text-xs" id="form-privacy">
+          We use these details to reply to you, and send product updates only if you choose them. No trackers. By sending, you confirm you've read the{' '}
+          <a className="text-link" href="/legal/privacy">
+            privacy policy
+          </a>
+          .
+        </p>
       </div>
       <div aria-atomic="true" aria-live="polite">
         {current ? (
