@@ -53,6 +53,17 @@ it('drains each kind in guarded batches with its own grace period, taking turns,
   const calls = execute.mock.calls.map(([statement]) => statement);
   expect(calls.filter((_, index) => index % 2 === 0).every((statement) => statement === AUTH_RECORD_SWEEP_GUARD)).toBe(true);
   expect(transaction).toHaveBeenCalledTimes(4);
+  // Each transaction is bounded: at most 1 s to start, 6 s in total.
+  for (const [, options] of transaction.mock.calls) expect(options).toEqual({ maxWait: 1000, timeout: 6000 });
+  // The guard caps each statement at 5 s and pins the plan to the expiresAt index, for this transaction only.
+  const guard = AUTH_RECORD_SWEEP_GUARD.text.replace(/\s+/g, ' ');
+  for (const setting of [
+    "'statement_timeout','5s',true",
+    "'enable_seqscan','off',true",
+    "'enable_bitmapscan','off',true",
+    "'enable_sort','off',true",
+  ])
+    expect(guard).toContain(`set_config(${setting})`);
   const batches = calls.filter((_, index) => index % 2 === 1);
   // One batch per kind per turn; drained kinds drop out.
   expect(batches.map(kindOf)).toEqual(['session', 'verification', 'invitation', 'session']);
