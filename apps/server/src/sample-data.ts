@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   ASYNC_INSERT_FLUSH_BOUND_MS,
+  deleteAndVerify,
   INGEST_CLAIM_LEASE_MS,
   normalizeEvent,
   projectMaintenance,
@@ -30,10 +31,9 @@ export async function removeSampleData(projectId: string) {
     'SELECT DISTINCT event_id FROM events WHERE project_id={p:String} AND source IN {source:Array(String)}',
     { p: projectId, source: SAMPLE_DATA_SOURCES },
   );
-  await clickhouse.command({
-    query: 'DELETE FROM events WHERE project_id={p:String} AND source IN {source:Array(String)}',
-    query_params: { p: projectId, source: SAMPLE_DATA_SOURCES },
-    clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
+  await deleteAndVerify(clickhouse, 'events', 'project_id={p:String} AND source IN {source:Array(String)}', {
+    p: projectId,
+    source: SAMPLE_DATA_SOURCES,
   });
   // Remove only identities whose raw rows were intentionally deleted, while writers remain excluded.
   for (let offset = 0; offset < removed.length; offset += 1000) {

@@ -614,20 +614,28 @@ export async function hasExpiredEvents(ch: ClickHouseClient, p: string, before: 
   return Number(rows[0]?.n ?? 0) > 0;
 }
 
-async function deleteAndVerify(ch: ClickHouseClient, table: string, predicate: string, params: Params) {
-  await ch.command({
-    query: `DELETE FROM ${table} WHERE ${predicate}`,
-    query_params: params,
-    clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-  });
-  // Native-restored parts can outrank the new database's mutation sequence.
-  // A completed mutation alone does not prove that the rows disappeared.
-  const rows = await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`, params);
-  if (Number(rows[0]?.n ?? 0) !== 0) {
-    throw Object.assign(new Error(`Delete left visible rows in ${table}; stop writers and follow the ClickHouse restore normalization procedure.`), {
-      code: 'LOGBIRD_DELETE_INCOMPLETE',
+/** Internal maintenance SQL: table/predicate are trusted code; params.p is the project id. */
+export async function deleteAndVerify(client: ClickHouseClient, table: string, predicate: string, params: Params & { p: string }) {
+  const ch = projectMaintenance(client, params.p);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await ch.command({
+      query: `DELETE FROM ${table} WHERE ${predicate}`,
+      query_params: params,
+      clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
     });
+    // Concurrent non-replicated mutations can register out of order and skip rows.
+    // Retry with a fresh mutation version, but still fail closed for restored parts
+    // that outrank every attempt. Completion alone never proves deletion.
+    const rows = await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`, params);
+    if (Number(rows[0]?.n ?? 0) === 0) return;
+    if (attempt < 3) {
+      console.warn(JSON.stringify({ code: 'clickhouse.delete_retry', table, projectId: params.p, attempt: attempt + 1 }));
+      await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+    }
   }
+  throw Object.assign(new Error(`Delete left visible rows in ${table}; stop writers and follow the ClickHouse restore normalization procedure.`), {
+    code: 'LOGBIRD_DELETE_INCOMPLETE',
+  });
 }
 
 export async function purgeProject(client: ClickHouseClient, p: string, before?: Date) {

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ClickHouseClient } from './client';
 import { projectMaintenance } from './maintenance-tag';
 import { type EventRow, normalizeEvent } from './normalize';
-import { read } from './queries';
+import { deleteAndVerify, read } from './queries';
 import { resolveTimestamp } from './timestamp';
 
 function sorted(value: unknown): unknown {
@@ -142,11 +142,7 @@ export async function repairEventIndex(client: ClickHouseClient, projectId: stri
   const ch = projectMaintenance(client, projectId);
   const absent = ids.filter((id) => !stored.has(id));
   if (absent.length)
-    await ch.command({
-      query: 'DELETE FROM event_ids WHERE project_id={project:String} AND event_id IN {ids:Array(String)}',
-      query_params: { project: projectId, ids: absent },
-      clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-    });
+    await deleteAndVerify(ch, 'event_ids', 'project_id={p:String} AND event_id IN {ids:Array(String)}', { p: projectId, ids: absent });
   if (stored.size)
     await ch.insert({
       table: 'event_ids',

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { insertEvents, normalizeEvent, read, searchEvents, toEvent, where } from '@logbird/clickhouse';
+import { deleteAndVerify, insertEvents, normalizeEvent, read, searchEvents, toEvent, where } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma, withProjectLock } from '@logbird/database';
 import { clickhouse, purgeProjectEvents } from '../apps/server/src/clickhouse';
 
@@ -237,12 +237,7 @@ try {
   for (const owned of [project])
     await withProjectLock(owned, async () => {
       await purgeProjectEvents(owned);
-      if (indexExists)
-        await clickhouse.command({
-          query: 'DELETE FROM event_ids WHERE project_id={p:String}',
-          query_params: { p: owned },
-          clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-        });
+      if (indexExists) await deleteAndVerify(clickhouse, 'event_ids', 'project_id={p:String}', { p: owned });
     });
   await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS ${table}`);
   await prisma.organization.deleteMany({ where: { id: org } });

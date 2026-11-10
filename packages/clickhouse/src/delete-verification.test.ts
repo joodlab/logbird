@@ -1,6 +1,75 @@
-import { expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ClickHouseClient } from './client';
-import { purgeProject, rebuildProjectRollups } from './queries';
+import { repairEventIndex } from './identity';
+import { maintenanceQueryPrefix, projectMaintenance } from './maintenance-tag';
+import { deleteAndVerify, purgeProject, rebuildProjectRollups } from './queries';
+
+beforeEach(() => {
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+});
+afterEach(() => vi.restoreAllMocks());
+
+it.each([
+  { visible: [0], attempts: 1 },
+  { visible: [1, 0], attempts: 2 },
+  { visible: [1, 1, 1], attempts: 3 },
+])('verifies deletion after $attempts attempt(s), failing closed when all probes see rows', async ({ visible, attempts }) => {
+  const command = vi.fn().mockResolvedValue({});
+  const query = vi.fn();
+  for (const n of visible) query.mockResolvedValueOnce({ json: async () => [{ n }] });
+  const ch = projectMaintenance({ command, query } as unknown as ClickHouseClient, 'qa95-retry');
+  const result = deleteAndVerify(ch, 'entities', 'project_id={p:String} AND entity_id IN {ids:Array(String)}', {
+    p: 'qa95-retry',
+    ids: ['private-value-not-for-logs'],
+  });
+  if (visible.at(-1) === 0) await expect(result).resolves.toBeUndefined();
+  else
+    await expect(result).rejects.toMatchObject({
+      code: 'LOGBIRD_DELETE_INCOMPLETE',
+      message: 'Delete left visible rows in entities; stop writers and follow the ClickHouse restore normalization procedure.',
+    });
+  expect(command).toHaveBeenCalledTimes(attempts);
+  expect(query).toHaveBeenCalledTimes(attempts);
+  for (const [args] of command.mock.calls) {
+    expect(args.query).toBe('DELETE FROM entities WHERE project_id={p:String} AND entity_id IN {ids:Array(String)}');
+    expect(args.query_params).toEqual({ p: 'qa95-retry', ids: ['private-value-not-for-logs'] });
+    expect(args.clickhouse_settings).toEqual({ mutations_sync: '2', lightweight_deletes_sync: '2' });
+    expect(args.query_id.startsWith(maintenanceQueryPrefix('qa95-retry'))).toBe(true);
+  }
+  expect(new Set(command.mock.calls.map(([args]) => args.query_id)).size).toBe(attempts);
+  expect(console.warn).toHaveBeenCalledTimes(attempts - 1);
+  for (let i = 0; i < attempts - 1; i++)
+    expect(console.warn).toHaveBeenNthCalledWith(
+      i + 1,
+      JSON.stringify({ code: 'clickhouse.delete_retry', table: 'entities', projectId: 'qa95-retry', attempt: i + 2 }),
+    );
+});
+
+it.each(['command', 'query'])('propagates %s errors without retrying or proceeding', async (method) => {
+  const failure = new Error('storage unavailable');
+  const command = vi.fn().mockResolvedValue({});
+  const query = vi.fn().mockResolvedValue({ json: async () => [{ n: 0 }] });
+  (method === 'command' ? command : query).mockRejectedValue(failure);
+  await expect(purgeProject({ command, query } as unknown as ClickHouseClient, 'qa95-errors')).rejects.toBe(failure);
+  expect(command).toHaveBeenCalledTimes(1);
+  expect(console.warn).not.toHaveBeenCalled();
+});
+
+it('refuses identity-index inserts when absent identities remain visible after all deletes', async () => {
+  const command = vi.fn().mockResolvedValue({});
+  const query = vi.fn().mockResolvedValue({ json: async () => [{ n: 1 }] });
+  const insert = vi.fn();
+  await expect(
+    repairEventIndex(
+      { command, query, insert } as unknown as ClickHouseClient,
+      'qa95-index',
+      ['absent', 'stored'],
+      new Map([['stored', { fingerprint: 'f', legacyFingerprint: 'legacy-f', receivedAt: new Date(), eventAt: new Date() }]]),
+    ),
+  ).rejects.toMatchObject({ code: 'LOGBIRD_DELETE_INCOMPLETE' });
+  expect(command).toHaveBeenCalledTimes(3);
+  expect(insert).not.toHaveBeenCalled();
+});
 
 it.each(['events_by_minute', 'entities', 'attribute_keys'])('refuses to rebuild when completed deletes leave rows in %s', async (table) => {
   const command = vi.fn().mockResolvedValue({});
@@ -17,7 +86,7 @@ it('refuses further rollup writes when a raw-event delete leaves visible rows', 
   const query = vi.fn().mockResolvedValue({ json: async () => [{ n: 1 }] });
   const ch = { command, query } as unknown as ClickHouseClient;
   await expect(purgeProject(ch, 'qa-restored')).rejects.toMatchObject({ code: 'LOGBIRD_DELETE_INCOMPLETE' });
-  expect(command).toHaveBeenCalledTimes(1);
+  expect(command).toHaveBeenCalledTimes(3);
 });
 
 it('refuses selective rollup inserts when a scoped delete leaves visible rows', async () => {
@@ -27,7 +96,7 @@ it('refuses selective rollup inserts when a scoped delete leaves visible rows', 
   }));
   const ch = { command, query } as unknown as ClickHouseClient;
   await expect(purgeProject(ch, 'qa-restored', new Date())).rejects.toMatchObject({ code: 'LOGBIRD_DELETE_INCOMPLETE' });
-  expect(command.mock.calls.filter(([args]) => args.query.startsWith('DELETE FROM'))).toHaveLength(3);
+  expect(command.mock.calls.filter(([args]) => args.query.startsWith('DELETE FROM'))).toHaveLength(5);
   expect(command.mock.calls.some(([args]) => /^INSERT INTO (events_by_minute|entities|attribute_keys)\b/.test(args.query))).toBe(false);
 });
 
@@ -39,7 +108,7 @@ it('refuses further writes when the identity-index delete leaves visible rows', 
   await expect(purgeProject({ command, query } as unknown as ClickHouseClient, 'qa-restored')).rejects.toMatchObject({
     code: 'LOGBIRD_DELETE_INCOMPLETE',
   });
-  expect(command).toHaveBeenCalledTimes(2);
+  expect(command).toHaveBeenCalledTimes(4);
   expect(command.mock.calls.every(([args]) => args.query.startsWith('DELETE FROM'))).toBe(true);
 });
 

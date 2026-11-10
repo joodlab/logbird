@@ -19,7 +19,7 @@
  * go through `purgeProject` (the same code retention and project deletion use).
  */
 import { parseArgs } from 'node:util';
-import { createClickHouseClient, purgeProject } from '@logbird/clickhouse';
+import { createClickHouseClient, deleteAndVerify, purgeProject } from '@logbird/clickhouse';
 import { prisma, withProjectLock } from '@logbird/database';
 
 export const THROWAWAY_EMAIL = /^(newcomer|ui-smoke|smoke|e2e|invite|invited|foundation|qa)-[\w.+-]*@(logbird\.local|example\.test)$/i;
@@ -117,11 +117,7 @@ try {
     if (values.orphans) for (const r of orphans) await purge(r.project_id);
     for (const a of activity) {
       if (!a.n) continue;
-      await ch.command({
-        query: `DELETE FROM events WHERE ${a.where}`,
-        query_params: a.params,
-        clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-      });
+      await deleteAndVerify(ch, 'events', a.where, a.params);
     }
     if (dropInvitations.length) await prisma.invitation.deleteMany({ where: { id: { in: dropInvitations.map((i) => i.id) } } });
     if (users.length) {
