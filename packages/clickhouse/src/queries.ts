@@ -618,8 +618,13 @@ export const DELETE_ATTEMPTS = 3;
 /**
  * Project-scoped maintenance DELETE that proves its effect. `table` and `predicate` are trusted code, never input;
  * every statement is tagged as `projectId`'s maintenance so project deletion can stop it.
+ *
+ * Callers hold the project's exclusive lock, so no new matching rows can arrive between attempts: a retry only
+ * re-applies a mutation that ClickHouse skipped (ClickHouse#124167). Without that lock, a retry could also delete
+ * rows written after the first attempt.
  */
 export async function deleteAndVerify(client: ClickHouseClient, projectId: string, table: string, predicate: string, params: Params) {
+  if ('p' in params && params.p !== projectId) throw new Error('deleteAndVerify: params.p must match projectId');
   const ch = projectMaintenance(client, projectId);
   for (let attempt = 1; attempt <= DELETE_ATTEMPTS; attempt++) {
     await ch.command({

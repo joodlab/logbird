@@ -12,6 +12,8 @@ import { deleteAndVerify, read } from './queries';
 const TABLE = 'qa95_mutation_race';
 const CONCURRENCY = 16;
 const ROUNDS = Number(process.env.LOGBIRD_MUTATION_RACE_ROUNDS ?? 20);
+// Bounded so a run always finishes (and drops its table) inside the test timeout; the owner-approved cap is 20.
+if (!Number.isInteger(ROUNDS) || ROUNDS < 1 || ROUNDS > 20) throw new Error('LOGBIRD_MUTATION_RACE_ROUNDS must be an integer from 1 to 20');
 const ROWS_PER_PROJECT = 200;
 const MAX_PENDING_MUTATIONS = 100;
 
@@ -64,7 +66,14 @@ it.runIf(process.env.LOGBIRD_MUTATION_RACE_STRESS === '1' && process.env.CLICKHO
         );
         const retryEvents = warn.mock.calls
           .slice(before)
-          .map(([message]) => (typeof message === 'string' && message.startsWith('{') ? JSON.parse(message) : null))
+          .map(([message]) => {
+            if (typeof message !== 'string' || !message.startsWith('{')) return null;
+            try {
+              return JSON.parse(message);
+            } catch {
+              return null;
+            }
+          })
           .filter((entry) => entry?.event === 'clickhouse.delete_retry' && projects.includes(entry.projectId));
         // A retry with attempt 2 means the project's first DELETE completed but its rows stayed visible: a skip.
         rounds.push({

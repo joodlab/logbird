@@ -17,8 +17,9 @@
  * The demo user, the "Acme" workspace and its StayDesk / Ledger demo projects are protected: the script refuses to
  * run if the plan would touch them, and it never changes retention. ClickHouse deletes are always project-scoped and
  * run under the project lock: whole projects go through `purgeProject` (the same code retention and project deletion
- * use); activity rows in kept workspaces use the same verified delete (`deleteAndVerify`). That targeted delete does
- * not rebuild the workspace's rollups, so entity/attribute counts there can stay slightly high.
+ * use); activity rows in kept workspaces use the same verified delete (`deleteAndVerify`) on raw events only. That
+ * targeted delete keeps the rows' event_ids pointers and ingest receipts (harmless: lookups fall back to raw rows) and
+ * does not rebuild the workspace's rollups, so entity/attribute counts there can stay slightly high.
  */
 import { parseArgs } from 'node:util';
 import { createClickHouseClient, deleteAndVerify, purgeProject } from '@logbird/clickhouse';

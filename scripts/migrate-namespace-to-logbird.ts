@@ -126,6 +126,7 @@ try {
         for (let attempt = 1; attempt <= 3; attempt++) {
           await target.command({ query: update, clickhouse_settings: { mutations_sync: '2' } });
           if (!Number((await rows<{ n: string }>(remaining))[0]?.n ?? 0)) return;
+          console.warn(`Update left matching rows after attempt ${attempt}; re-running (${remaining})`);
         }
         throw new Error(`Update left matching rows (${remaining}); preserve backups and journal, stop and investigate`);
       };

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ClickHouseClient } from './client';
 import { repairEventIndex } from './identity';
-import { maintenanceQueryPrefix, projectMaintenance } from './maintenance-tag';
+import { maintenanceQueryPrefix } from './maintenance-tag';
 import { deleteAndVerify, purgeProject, rebuildProjectRollups } from './queries';
 
 beforeEach(() => {
@@ -33,7 +33,8 @@ it.each([
   const command = vi.fn().mockResolvedValue({});
   const query = vi.fn();
   for (const n of visible) query.mockResolvedValueOnce({ json: async () => [{ n }] });
-  const ch = projectMaintenance({ command, query } as unknown as ClickHouseClient, 'qa95-retry');
+  // An untagged client: deleteAndVerify must tag every statement itself (demo-clean passes a plain client).
+  const ch = { command, query } as unknown as ClickHouseClient;
   const result = settle(
     deleteAndVerify(ch, 'qa95-retry', 'entities', 'project_id={p:String} AND entity_id IN {ids:Array(String)}', {
       p: 'qa95-retry',

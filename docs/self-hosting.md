@@ -421,10 +421,13 @@ See the [ClickHouse backup reference](https://clickhouse.com/docs/concepts/featu
 pinned ClickHouse 26.9.27.3 can restore parts with mutation versions higher than
 new delete mutations. A mutation may report success while rows remain. The source
 guard checks deletion and raises `LOGBIRD_DELETE_INCOMPLETE` before reinsertion.
-Transient [concurrent-mutation skips](https://github.com/ClickHouse/ClickHouse/pull/124167) are retried automatically with a fresh DELETE,
-up to three total attempts (logged as `clickhouse.delete_retry`). If the error still
-appears, retry the operation (retention runs again on its own). Only a failure that
-persists on a natively restored database needs the normalization procedure below.
+Transient [concurrent-mutation skips](https://github.com/ClickHouse/ClickHouse/pull/124167)
+are retried automatically with a fresh DELETE, up to three total attempts (logged as
+`clickhouse.delete_retry`). If the error still appears, retry the operation (retention
+runs again on its own). Only a failure that persists on a natively restored database
+needs the normalization procedure below. Sample-data removal now fails closed with the
+same error instead of reporting success, and ingest recovery logs
+`clickhouse.event_index_stale_pointers` when it cannot delete stale identity pointers.
 The pinned 26.9 line has no upstream fix for that race; ClickHouse 26.10 and later include it.
 Moving the pin is tracked in [#147](https://github.com/joodlab/logbird/issues/147).
 **Live verification of the packaged guard and retry after normalization is pending
@@ -520,11 +523,14 @@ docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/recove
 docker compose --env-file .env.restore -p logbird-restore exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /tmp/recovery-gate.sql'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep 'retention.run_failed'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep '"errorCode":"LOGBIRD_DELETE_INCOMPLETE"'
+docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.event_index_stale_pointers"'
 ```
 
 The receipt table is Prisma's `"RetentionRun"`. Wait until each restored project's
 latest run is `completed`, started after GATE_STARTED, and the missing count is
-zero. A running receipt needs more time; a failure or guard log blocks cutover.
+zero. A running receipt needs more time; a failure or guard log blocks cutover. So does
+`clickhouse.event_index_stale_pointers`: ingest recovery could not delete identity pointers,
+which on restored data means normalization did not take effect.
 Inspect `retention.completed` too; a queue job completion alone does not establish
 every project receipt. Repeat the receipt query until the cycle ends.
 
