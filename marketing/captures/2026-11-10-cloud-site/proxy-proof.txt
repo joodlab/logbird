@@ -1,0 +1,21 @@
+PASS anonymous / -> site home (200), byte-identical, site's hashed CSP only
+PASS /product -> site (200), identical body and CSP
+PASS /cloud -> site (200), identical body and CSP
+PASS /changelog -> site (200), identical body and CSP
+PASS /self-hosting -> site (200), identical body and CSP
+PASS /robots.txt -> site (200), identical body and CSP
+PASS /sitemap.xml -> site (200), identical body and CSP
+PASS /compare/bemi -> site (200), identical body and CSP
+PASS /legal/privacy -> site (200), identical body and CSP
+PASS /compare/no-such -> site 404 page (404)
+PASS /site-assets/styles-CmxN2JN4.css -> site, identical bytes, cache-control "public, max-age=31536000, immutable"
+PASS / with __Secure-logbird.session_token -> console (200), console CSP
+PASS / with logbird.session_token -> console (200), console CSP
+PASS / with an empty session cookie -> site
+PASS /login -> console (200)
+PASS /api/x -> API proxy (502; no API running), never the site
+PASS POST /v1/events -> API proxy (502), never the site
+PASS POST /product -> 405 Allow: GET, HEAD
+PASS /product/..%2Fapi -> console (404), not forwarded
+PASS POST /site-api/waitlist (access request) -> site (200), stored; no Set-Cookie relayed
+PASS POST /site-api/waitlist with an empty body -> the site's own JSON error (400) passes through
