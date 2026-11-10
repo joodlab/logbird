@@ -17,7 +17,8 @@ to `/` to a private site container (`docker-compose.site.yml`); API, sign-in,
 invitation and session paths keep their existing handling, and the site keeps
 its own per-page security headers. The site lists published GitHub releases on
 `/changelog`, pins the self-host quickstart to the latest release's images, and
-stays noindex until its publisher name and privacy contact are configured.
+stays noindex until its publisher name, privacy contact, security mailbox and
+contact mailbox are configured (`apps/web/src/lib/release.ts`).
 
 Release notes are built from Conventional Commit titles by changelogithub behind
 a policy wrapper: git parses co-author trailers, identities pass through
