@@ -44,8 +44,8 @@ Development dependencies and production deployment are documented in [self-hosti
 
 **Architecture decisions** that shape self-hosting, releases and hosting are recorded in [decisions.md](decisions.md). As of
 2026-11-08: the public origin proxies the read-only `/docs` and `/openapi.json` reference (and no other new server
-path); role images are named `ghcr.io/joodlab/logbird-<role>` but nothing is published until the repository is
-open-sourced; the hosted instance's transactional email will use Postmark SMTP with required STARTTLS (self-hosters
+path); role images are published as `ghcr.io/joodlab/logbird-<role>` by the tag-driven release workflow; the
+hosted instance's transactional email will use Postmark SMTP with required STARTTLS (self-hosters
 choose their own SMTP provider).
 
 The hosted instance is planned on Coolify behind Cloudflare at `logbird.joodlab.com` after the repository is open-sourced. Provisioning and deployment remain separate steps.
