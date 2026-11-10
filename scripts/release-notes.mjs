@@ -22,9 +22,9 @@ const excludedName =
 // Release and dependency automation, whatever account type GitHub reports (semantic-release-bot is a User account).
 // Any name, login or address local part with "bot" as a whole word counts too: release-bot, Release Bot, ci.bot@.
 const automationLogin =
-  /^(?:renovate|renovate-bot|semantic-release-bot|greenkeeper(?:io)?|snyk-bot|imgbot|mergify|allcontributors|pre-commit-ci|release-please|web-flow|github-actions|dependabot(?:-preview)?)$/i;
+  /^(?:renovate|renovate-bot|semantic-release-bot|greenkeeper(?:io)?|snyk-bot|imgbot|imgbotapp|mergify|allcontributors|pre-commit-ci|release-please|web-flow|github-actions|dependabot(?:-preview)?)$/i;
 const automationAddress =
-  /^(?:semantic-release-bot@martynus\.net|bot@renovateapp\.com|noreply@github\.com|support@greenkeeper\.io|.+@(?:[\w-]+\.)*(?:renovateapp|mergify)\.(?:com|io))$/i;
+  /^(?:semantic-release-bot@martynus\.net|bot@renovateapp\.com|noreply@github\.com|support@greenkeeper\.io|imgbothelp@gmail\.com|.+@(?:[\w-]+\.)*(?:renovateapp|mergify)\.(?:com|io))$/i;
 const botWord = (text) => text.split(/[\s._+\-[\]@]+/).some((token) => token.toLowerCase() === 'bot');
 
 // Reserved documentation/test domains (RFC 2606/6761, e.g. history-scrubbed addresses) never identify a real contributor.

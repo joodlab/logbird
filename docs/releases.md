@@ -125,11 +125,14 @@ type are checked against one set of rules:
 - release and dependency automation whatever its account type (semantic-release,
   Renovate, Greenkeeper, Snyk, ImgBot, Mergify, all-contributors, pre-commit.ci,
   release-please, GitHub's web-flow), and any name, login or address local part
-  with `bot` as a whole word (`release-bot`, `Release Bot`, `ci.bot@`);
+  with `bot` as a whole word (`release-bot`, `Release Bot`, `ci.bot@`). This also
+  skips a real person whose surname is Bot; that trade-off is deliberate;
 - known automation and AI logins and noreply addresses (Dependabot, GitHub
   Actions, Codex, Claude, Copilot, Cursor, Devin, Gemini Code Assist, Jules, Amp,
   OpenHands);
-- agent mailboxes on any domain, such as `claude@`, `codex@` or `cursor-agent@`;
+- agent mailboxes on any domain, such as `claude@`, `codex@` or `cursor-agent@`
+  (a person who really uses such a mailbox should commit under another address,
+  mapped to their identity with `.mailmap`);
 - every address at, or under, openai.com, anthropic.com, cursor.com,
   githubcopilot.com, aider.chat, ampcode.com, all-hands.dev, codeium.com,
   windsurf.com and augmentcode.com, so employees committing from those domains

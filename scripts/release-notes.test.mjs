@@ -681,6 +681,7 @@ test('.mailmap cannot turn a GitHub Bot or an excluded login into human credit, 
 });
 
 test('Copilot and other accounts GitHub will not describe neither stop the notes nor get credit', () => {
+  // Copilot is excluded before any profile lookup; ghost-agent exercises the 404 → Unavailable branch.
   const commits = [
     commit('feat: copilot pair', [
       person('Human', 'human@users.noreply.github.com'),
@@ -734,6 +735,7 @@ test('release and dependency automation is never credited, even as a GitHub User
     { name: 'CI', email: 'ci.bot@users.noreply.github.com' },
     { name: 'GitHub', email: 'noreply@github.com', login: 'web-flow', type: 'User' },
     { name: 'mergify', email: 'x@mergify.com' },
+    { name: 'ImgBotApp', email: 'ImgBotHelp@gmail.com', login: 'ImgBotApp', type: 'User' },
     { name: 'Maintainer', email: 'm@users.noreply.github.com', login: 'acme-bot', type: 'User' },
   ])
     assert.equal(isPerson(identity), false, JSON.stringify(identity));
