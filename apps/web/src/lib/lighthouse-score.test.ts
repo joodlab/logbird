@@ -29,6 +29,32 @@ describe('Lighthouse SEO pass mark', () => {
     expect(robotsAllowsCrawling('')).toBe(false);
   });
 
+  it('reads robots.txt behind a CDN that prepends its own groups (Cloudflare managed content signals)', () => {
+    const cloudflare = [
+      '# As a condition of accessing this website, you agree to abide by the following',
+      '# BEGIN Cloudflare Managed content',
+      '',
+      'User-agent: *',
+      'Content-Signal: search=yes,ai-train=no,use=reference',
+      'Allow: /',
+      '',
+      '# Training crawlers',
+      'User-agent: GPTBot',
+      'Disallow: /',
+      '',
+      'User-agent: CCBot',
+      'Disallow: /',
+      '',
+      '# END Cloudflare Managed Content',
+      '',
+    ].join('\r\n');
+    const released = robotsTxt(siteConfigFrom({ ...RELEASED_ENV, WEB_APP_URL: RELEASED_ENV.WEB_SITE_URL }));
+    // Named AI crawlers being blocked does not make an indexable site look gated...
+    expect(robotsAllowsCrawling(cloudflare + released)).toBe(true);
+    // ...and the CDN's `Allow: /` for everyone does not hide the site's own gate.
+    expect(robotsAllowsCrawling(cloudflare + robotsTxt(siteConfigFrom({})))).toBe(false);
+  });
+
   it('keeps crawlers off console and API paths only when the console shares the origin', () => {
     const shared = robotsTxt(siteConfigFrom({ ...RELEASED_ENV, WEB_APP_URL: RELEASED_ENV.WEB_SITE_URL }));
     expect(robotsAllowsCrawling(shared)).toBe(true);

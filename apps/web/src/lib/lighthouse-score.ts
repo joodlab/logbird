@@ -17,8 +17,37 @@ export function seoWithoutCrawlable(lhr: LighthouseResult): number {
   return weight ? Math.round((refs.reduce((sum, ref) => sum + ref.weight * (lhr.audits[ref.id]?.score ?? 0), 0) / weight) * 100) : 0;
 }
 
+/**
+ * The Allow/Disallow rules of every `User-agent: *` group. A CDN may add its own groups to the served file (Cloudflare's
+ * managed content signals prepend `Allow: /` for everyone plus `Disallow: /` for named AI crawlers), so rules for named
+ * crawlers must not count. A group is its consecutive User-agent lines and the rules after them (RFC 9309).
+ */
+export function wildcardRobotsRules(robots: string) {
+  const rules: string[] = [];
+  let agents: string[] = [];
+  let inRules = false;
+  for (const raw of robots.split(/\r?\n/)) {
+    const [, name, rest] = /^([^:#]+):([^#]*)/.exec(raw.trim()) ?? [];
+    if (name === undefined || rest === undefined) continue;
+    const field = name.trim().toLowerCase();
+    const value = rest.trim();
+    if (field === 'user-agent') {
+      if (inRules) agents = [];
+      inRules = false;
+      agents.push(value);
+    } else {
+      inRules = true;
+      if (agents.includes('*') && (field === 'allow' || field === 'disallow')) rules.push(`${field}: ${value}`);
+    }
+  }
+  return rules;
+}
+
 /** True when the served robots.txt is the indexable one (discovery.ts): every release blocker is closed. */
-export const robotsAllowsCrawling = (robots: string) => /^Allow:\s*\/\s*$/m.test(robots) && !/^Disallow:\s*\/\s*$/m.test(robots);
+export const robotsAllowsCrawling = (robots: string) => {
+  const rules = wildcardRobotsRules(robots);
+  return rules.includes('allow: /') && !rules.includes('disallow: /');
+};
 
 /** Paths that must be crawlable on an indexable site: ready static pages and published posts. */
 export const indexedPaths = () => new Set([...publishedPages().map((page) => page.path), ...posts.map(postPath)]);
