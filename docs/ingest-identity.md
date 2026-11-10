@@ -319,7 +319,7 @@ in the HTTP pipeline. The client socket budget is 60 seconds; the response strea
 is consumed before confirmation. Server socket timeout 209 remains ambiguous
 after handoff, even if that exception reports no written rows.
 Failures proven to precede any write release this attempt's claims. This includes
-before-body transport errors and an explicit server-code allowlist: parse codes
+before-body transport errors and an explicit server-code allowlist: async-proven parse codes
 6,25,27,38,41,53,69,72 (per-index invalid_event), and unknown table/database, syntax,
 readonly, ACL/auth codes 60,62,81,164,497,516 (503 ingest_unavailable). A code wrapped
 by an MV failure is ambiguous even if its underlying code is on that list.
@@ -328,36 +328,59 @@ limit 241, and client timeout/reset. A server exception can follow a committed
 raw write or only some materialized destinations. Identity-read errors return
 503 ingest_unavailable with Retry-After, including timeout and memory exhaustion.
 
-A definite parser failure is bisected under the original claims and lease, with
-at most 64 extra statements. Each child uses the same lazy body/lease checks.
-Singleton failures become `rejected[]` entries with `code: invalid_event` and a
-code-first reason; acknowledged children alone are confirmed. If the statement
-cap or remaining 40-second finish budget is exhausted, the still-unsent rows
-proved absent by their parent are rejected per index with `invalid_event` and a
-reason asking the sender to resend them in a smaller batch. They do not become
-pending, and the response stays 202 so stored siblings are reported as accepted
-(a whole-batch 4xx would make SDKs drop events that were stored). The server logs
-`ingest.parse_isolation_limited` with the unresolved count. An ambiguous sibling
-takes precedence as 503 pending, including those parse rejections. Isolation
-returns 202 even when all events are rejected (`accepted: 0`).
+A parser code alone does not prove that nothing was written. Each insert pins
+`async_insert_max_data_size=67108864` (64 MiB), `min_insert_block_size_bytes=268402944`,
+`min_insert_block_size_rows=1048449` and `max_insert_block_size=1048449` at query
+level. Realistic 5 MiB requests normalize to at most about 15 MiB (duplicated
+changes, twice-escaped payload); 64 MiB adds headroom without letting the async
+queue buffer gigabytes. Only an absurd body (hundreds of flattened attribute paths
+repeating a huge key prefix) can exceed it, and then a parse error is treated as
+ambiguous rather than isolated. Block pins prevent partial synchronous fallback
+writes within that bound. Ordinary user profiles cannot lower query-level pins.
+A parse error is proven pre-write only when the serialized body fits the async
+pin, its error names `WaitForAsyncInsert`, and it is not a view failure. A server
+constraint that rejects settings before body handoff is unavailable; clamping
+that forces synchronous fallback, changed error wording, oversize internal
+statements and view failures remain ambiguous after handoff, retaining claims
+for recovery. See [self-hosting](self-hosting.md#ingest-insert-settings).
 
-An ambiguous child is never split or retried within the attempt. Its claims stay
-leased while other children settle; `503 ingest_pending` composes confirmed ids,
-per-index rejections and pending indices. A confirmation failure preserves every
-acknowledged child's claim. Exact retries skip confirmed writes and preserve the
-original partition tree, charging even skipped child statements to keep the hard
-cap boundary stable. Lease exhaustion remains timing-dependent; retrying after a
-budget fallback may resolve more rows when storage responds faster.
+Isolation uses the native 1-based `(at row N)` to reject exactly that event,
+then resends the remainder under the original claims and lease: k+1 statements
+for k bad rows. Missing/out-of-range row reports use bisection; a written left
+sibling proves the right contains a failure, so it is split without resending
+that known-failing body. No identical body is sent twice within an attempt.
+Only individual proven failures become `invalid_event`, including a 202 with
+`accepted: 0` when every row is rejected. A definite non-parse failure returns
+503 `ingest_unavailable`, with acknowledged siblings confirmed and listed in ids.
 
-Real JSONEachRow probes found code 25 for lone surrogates in indexed strings and
-attribute keys; [ClickHouse async parsing](https://clickhouse.com/docs/best-practices/asynchronous-inserts)
-rejects an entire query payload before flushing it on a parse/type error. A mixed
-request was verified absent from raw events, identity index and every rollup before
-isolation. View-wrapped code 25 remains ambiguous. Search text caps avoid splitting
-valid Unicode pairs; raw payload and v1 identity remain unchanged. Unusable dates
-already fall back with warnings and job attempts already clamp to UInt16. Native
-invalid Unicode is rejected rather than silently replacing indexed strings or
-colliding attribute keys; original input should be corrected by the sender.
+A 64-extra-statement cap, a ten-second isolation wall clock and the original
+lease's remaining 40-second finish budget bound the work. Typed pre-body lease
+exhaustion or either cap leaves unchecked rows retryable: `503 ingest_pending`
+includes settled `{accepted,ids,rejected,warnings}` plus their `indices` and
+`eventIds`. Claims for these proven-unwritten rows are released. Only truly
+ambiguous/competing claim-held ids determine Retry-After; unresolved-only
+responses use one second. The server logs `ingest.parse_isolation_limited`
+immediately after isolation, even when another failure takes response precedence.
+
+Ambiguous children are never split or retried within an attempt. Their claims
+stay leased while siblings settle; confirmation failures also preserve every
+acknowledged child's claim. Retries are convergent as confirmed rows leave the
+work set; there is no virtual partition-tree charge. A client can retry only the
+unresolved indices after honoring settled rejections. An identical batch with
+more poison rows than one attempt can isolate can repeatedly hit the same cap:
+the SDK eventually reports retry exhaustion through `onError`. Send smaller
+batches in that case. The SDK reports individually rejected rows through `onDrop`
+once per send, including settled rejections in a retryable 503; healthy rows are
+never dropped because isolation ran out of budget.
+
+Search strings use `toWellFormed()` to replace lone surrogates with U+FFFD,
+including targets, changes and `logbird.occurredAt.rejected`. Caps do not split
+valid surrogate pairs. Attribute values already replace invalid Unicode through
+UTF-8 encoding. Attribute keys remain verbatim: replacing them could collide
+distinct keys and silently lose data. A malformed key therefore remains a native
+per-event parser rejection. Raw `payload` and v1 identity keep the original input;
+search normalization is intentionally lossy. Invalid dates still fall back with
+warnings and job attempts clamp to UInt16.
 
 An exact retry or hourly worker recovers per project after the lease plus a
 conservative ten-second async flush bound. Candidate fingerprints are checked
@@ -403,7 +426,7 @@ Healthy siblings commit before 503 ingest_pending. Its details are a superset of
 the 202 response: `{accepted,ids,rejected,warnings,indices,eventIds}`. Each rejected
 entry includes `code` and a code-first explanatory `reason`. Every input index
 outside `indices` is settled, including permanent rejections; retrying the entire
-identical batch is safe. Retry-After reflects the longest remaining pending lease
+identical batch is safe. Retry-After reflects only truly pending claims: the longest remaining lease
 plus flush bound. Ready receipts report the remaining ten-minute grace, and
 throttled flushes report the remaining minute, with a one-second minimum. A different-content retry against
 an unresolved claimant stays pending until the original outcome is known. The

@@ -1,13 +1,15 @@
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { expect, it, vi } from 'vitest';
-import { AmbiguousInsertError, type ClickHouseClient, insertEvents } from './client';
+import { AmbiguousInsertError, type ClickHouseClient, INGEST_INSERT_SETTINGS, InsertLeaseExhaustedError, insertEvents } from './client';
 import { normalizeEvent } from './normalize';
 
 it.each([
-  ['6', "Cannot parse value 'page.view'", false],
-  ['25', 'Cannot parse escape sequence: missing second part of surrogate pair', false],
+  ['6', "Cannot parse value 'page.view': While executing WaitForAsyncInsert.", false],
+  ['25', 'Cannot parse escape sequence: While executing WaitForAsyncInsert.', false],
   ['25', 'Cannot parse escape sequence (while pushing to view logbird.events_mv)', true],
+  ['25', 'Cannot parse escape sequence: While executing JSONEachRowRowInputFormat.', true],
+  ['25', 'Cannot parse escape sequence: unknown future wording', true],
   ['60', 'Unknown table events', false],
   ['209', 'Timeout reading from socket', true],
   ['6', 'Parse failed: while pushing to view logbird.events_mv', true],
@@ -71,7 +73,7 @@ it('writes one serialized byte body under backpressure and consumes the acknowle
       .split('\n')
       .map((line) => JSON.parse(line)),
   ).toEqual(rows);
-  expect(exec.mock.calls[0]?.[0]).toMatchObject({ query: 'INSERT INTO events FORMAT JSONEachRow' });
+  expect(exec.mock.calls[0]?.[0]).toMatchObject({ query: 'INSERT INTO events FORMAT JSONEachRow', clickhouse_settings: INGEST_INSERT_SETTINGS });
   expect(acknowledged).toBe(true);
 });
 it.each([21_000, 61_000])('refuses body handoff after a %i ms socket-acquisition pause', async (pause) => {
@@ -85,7 +87,7 @@ it.each([21_000, 61_000])('refuses body handoff after a %i ms socket-acquisition
       for await (const _chunk of params.values) sent = true;
       return { stream: Readable.from([]) };
     });
-    await expect(insertEvents({ exec } as unknown as ClickHouseClient, [n.row])).rejects.toThrow('Insert lease lacks time');
+    await expect(insertEvents({ exec } as unknown as ClickHouseClient, [n.row])).rejects.toBeInstanceOf(InsertLeaseExhaustedError);
     expect(sent).toBe(false);
   } finally {
     vi.useRealTimers();
@@ -97,4 +99,12 @@ it('preserves a transport refusal before consuming any body', async () => {
   const error = new Error('connect ECONNREFUSED');
   const exec = vi.fn().mockRejectedValue(error);
   await expect(insertEvents({ exec } as unknown as ClickHouseClient, [n.row])).rejects.toBe(error);
+});
+
+it('throws a typed lease error before acquiring a socket', async () => {
+  const n = normalizeEvent({ action: 'expired' }, { projectId: 'qa91', receivedAt: new Date() });
+  if (!n.ok) throw new Error(n.reason);
+  const exec = vi.fn();
+  await expect(insertEvents({ exec } as unknown as ClickHouseClient, [n.row], Date.now() - 1)).rejects.toBeInstanceOf(InsertLeaseExhaustedError);
+  expect(exec).not.toHaveBeenCalled();
 });

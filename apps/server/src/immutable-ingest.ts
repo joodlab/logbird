@@ -23,11 +23,11 @@ import {
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
-import { isolateIngestRows, STORAGE_PARSE_REJECTION, STORAGE_PARSE_UNRESOLVED } from './ingest-parse-isolation';
+import { isolateIngestRows, STORAGE_PARSE_REJECTION } from './ingest-parse-isolation';
 
 export type IngestCandidate = { index: number; input: unknown; row: EventRow };
 export const DUPLICATE_ID_CONFLICT =
-  'duplicate_id_conflict: id already belongs to different content; the original is kept. Send corrections with a new id and context.parentEventId.';
+  'duplicate_id_conflict: id conflicts with different content in this request or stored history. Send corrections with a new id and context.parentEventId.';
 
 async function lookup(projectId: string, ids: string[]) {
   try {
@@ -207,13 +207,7 @@ function classifyCandidates(
 }
 
 /** Insert owns release before send and on definite failure. Unproven write outcomes retain the lease. */
-async function persistRows(
-  projectId: string,
-  rows: EventRow[],
-  partitionRows: EventRow[],
-  owned: Map<string, IngestReceipt>,
-  fingerprint: (row: EventRow) => string,
-) {
+async function persistRows(projectId: string, rows: EventRow[], owned: Map<string, IngestReceipt>, fingerprint: (row: EventRow) => string) {
   if (!rows.length) {
     await releaseClaims(projectId, owned);
     return { written: [], rejected: [], pending: [], unavailable: [], unresolved: [], limited: false };
@@ -223,9 +217,9 @@ async function persistRows(
     const expiresAt = Math.min(
       ...[...owned.values()].filter((c) => !c.confirmedAt).map((c) => (c.claimedAt?.getTime() ?? 0) + INGEST_CLAIM_LEASE_MS),
     );
-    const freshIds = new Set(rows.map((row) => row.event_id));
-    const settledIds = new Set(partitionRows.filter((row) => !freshIds.has(row.event_id)).map((row) => row.event_id));
-    const outcome = await isolateIngestRows(partitionRows, expiresAt, (part, lease) => insertEvents(clickhouse, part, lease), settledIds);
+    const outcome = await isolateIngestRows(rows, expiresAt, (part) => insertEvents(clickhouse, part, expiresAt));
+    if (outcome.limited)
+      console.warn(JSON.stringify({ level: 'warn', event: 'ingest.parse_isolation_limited', projectId, unresolved: outcome.unresolved.length }));
     // After acknowledgement, a Postgres failure must preserve the claim for a visibility retry.
     for (const row of [...outcome.written, ...outcome.pending]) releasable.delete(row.event_id);
     await confirmIngestReceipts(
@@ -264,17 +258,19 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
     await releaseClaims(projectId, owned);
     throw error;
   }
-  // Keep the original partition tree (and charge its virtual statements) on an exact retry.
-  // Omitting confirmed siblings from the tree would shift the hard-cap rejection boundary.
-  const freshRows = new Map(result.rows.map((row) => [row.event_id, row]));
-  const acceptedIds = new Set(result.ids);
-  const partitionRows = new Map<string, EventRow>();
-  for (const candidate of candidates)
-    if (acceptedIds.has(candidate.row.event_id) && !partitionRows.has(candidate.row.event_id))
-      partitionRows.set(candidate.row.event_id, freshRows.get(candidate.row.event_id) ?? candidate.row);
-  const outcome = await persistRows(projectId, result.rows, [...partitionRows.values()], owned, fingerprint);
+  const outcome = await persistRows(projectId, result.rows, owned, fingerprint);
+  return composeIngestOutcome(projectId, candidates, result, outcome, receipts);
+}
+
+async function composeIngestOutcome(
+  projectId: string,
+  candidates: IngestCandidate[],
+  result: ReturnType<typeof classifyCandidates>,
+  outcome: Awaited<ReturnType<typeof persistRows>>,
+  receipts: Map<string, IngestReceipt>,
+) {
   const unresolvedIds = new Set(outcome.unresolved.map((row) => row.event_id));
-  const rejectedIds = new Set([...outcome.rejected.map((row) => row.event_id), ...unresolvedIds]);
+  const rejectedIds = new Set(outcome.rejected.map((row) => row.event_id));
   const pendingIds = new Set([...result.pending.map((p) => p.eventId), ...outcome.pending.map((row) => row.event_id)]);
   const unavailableIds = new Set(outcome.unavailable.map((row) => row.event_id));
   // Classification rejections (including conflicts with another index of the same id) stay settled.
@@ -286,38 +282,37 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
       result.rejected.push({
         index: candidate.index,
         code: 'invalid_event',
-        reason: unresolvedIds.has(id) ? STORAGE_PARSE_UNRESOLVED : STORAGE_PARSE_REJECTION,
+        reason: STORAGE_PARSE_REJECTION,
       });
   }
-  const ids = result.ids.filter((id) => !rejectedIds.has(id) && !pendingIds.has(id) && !unavailableIds.has(id));
+  const ids = result.ids.filter((id) => !rejectedIds.has(id) && !pendingIds.has(id) && !unavailableIds.has(id) && !unresolvedIds.has(id));
   // Healthy siblings are already durable; an identical batch retry will not insert them again.
-  if (pendingIds.size) {
-    for (const id of unavailableIds) pendingIds.add(id);
+  const retryableIds = new Set([...pendingIds, ...unavailableIds, ...unresolvedIds]);
+  if (retryableIds.size) {
+    const retryable = candidates
+      .filter((c) => retryableIds.has(c.row.event_id) && !classifiedRejections.has(c.index))
+      .map((c) => ({ index: c.index, eventId: c.row.event_id }));
     throw await pendingError(
       projectId,
-      'Some event ids have unresolved writes. Retry this batch; listed indices are unresolved.',
       ids,
       result.rejected,
-      candidates
-        .filter((c) => pendingIds.has(c.row.event_id) && !classifiedRejections.has(c.index))
-        .map((c) => ({ index: c.index, eventId: c.row.event_id })),
+      retryable,
       receipts,
+      pendingIds,
+      pendingIds.size || unresolvedIds.size ? 'ingest_pending' : 'ingest_unavailable',
     );
   }
-  if (unavailableIds.size) throw new ApiError(503, 'ingest_unavailable', 'Storage rejected this write. Retry this batch.');
-  // Budget exhaustion still settles the batch: stored siblings are accepted, unchecked rows are rejected per index.
-  if (outcome.limited)
-    console.warn(JSON.stringify({ level: 'warn', event: 'ingest.parse_isolation_limited', projectId, unresolved: unresolvedIds.size }));
   return { ids, rejected: result.rejected };
 }
 
 async function pendingError(
   projectId: string,
-  message: string,
   ids: string[],
   rejected: { index: number; reason: string; code: string }[],
   pending: { index: number; eventId: string }[],
   receipts: Map<string, IngestReceipt>,
+  pendingIds: ReadonlySet<string>,
+  code: 'ingest_pending' | 'ingest_unavailable',
 ) {
   const details = ingestPendingDetailsSchema.parse({
     accepted: ids.length,
@@ -328,10 +323,11 @@ async function pendingError(
     eventIds: pending.map((p) => p.eventId),
   });
   const now = Date.now();
+  const held = pending.filter((p) => pendingIds.has(p.eventId));
   const retryAfter = Math.max(
     1,
-    pending.some((p) => receipts.get(p.eventId)?.claimedAt) ? await ingestRecoveryRetryAfter(projectId) : 0,
-    ...pending.map((p) => {
+    held.some((p) => receipts.get(p.eventId)?.claimedAt) ? await ingestRecoveryRetryAfter(projectId) : 0,
+    ...held.map((p) => {
       const receipt = receipts.get(p.eventId);
       if (!receipt) return 1;
       const settlesAt = receipt.claimedAt
@@ -340,5 +336,11 @@ async function pendingError(
       return Math.ceil((settlesAt - now) / 1000);
     }),
   );
-  return new ApiError(503, 'ingest_pending', message, details, retryAfter);
+  return new ApiError(
+    503,
+    code,
+    'Some events need a retry; listed indices are unresolved. Send smaller batches if isolation repeatedly reaches its limit.',
+    details,
+    retryAfter,
+  );
 }

@@ -1,57 +1,65 @@
-import { AmbiguousInsertError, type EventRow, INSERT_LEASE_BUDGET_MS, isPrewriteParseError } from '@logbird/clickhouse';
+import { AmbiguousInsertError, type EventRow, INSERT_LEASE_BUDGET_MS, InsertLeaseExhaustedError, isPrewriteParseError } from '@logbird/clickhouse';
 
-// At most 64 extra statements after the original rejection, including healthy halves.
+// Extra statements after the original failure; exact row reports need k+1 total for k bad rows.
 export const MAX_PARSE_ISOLATION_STATEMENTS = 64;
+export const MAX_PARSE_ISOLATION_MS = 10_000;
 export const STORAGE_PARSE_REJECTION = 'invalid_event: Storage could not parse this event. Check event field types, Unicode and timestamps.';
-// Proved unwritten, but not isolated before the statement or lease budget ran out.
-export const STORAGE_PARSE_UNRESOLVED =
-  'invalid_event: Storage could not parse this batch and isolation stopped before this event was checked. Resend it in a smaller batch.';
 
-/** Only a proved pre-write rejection permits splitting. Every child keeps the original lease. */
-export async function isolateIngestRows(
-  rows: EventRow[],
-  leaseExpiresAt: number,
-  insert: (rows: EventRow[], leaseExpiresAt: number) => Promise<void>,
-  settledIds: ReadonlySet<string> = new Set(),
-) {
+/** Every insert closes over the original lease; only proven-unwritten partitions may be split. */
+export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number, insert: (rows: EventRow[]) => Promise<void>) {
   const written: EventRow[] = [],
     rejected: EventRow[] = [],
     pending: EventRow[] = [],
     unavailable: EventRow[] = [],
     unresolved: EventRow[] = [];
-  let extraStatements = 0;
+  let statements = 0;
+  let isolationDeadline = Number.POSITIVE_INFINITY;
   let limited = false;
-  async function visit(part: EventRow[], provedPrewrite = false): Promise<void> {
-    const fresh = part.filter((row) => !settledIds.has(row.event_id));
-    if (provedPrewrite) {
-      if (extraStatements >= MAX_PARSE_ISOLATION_STATEMENTS || Date.now() + INSERT_LEASE_BUDGET_MS > leaseExpiresAt) {
-        // The parent proved these unsent rows absent. Keep the old parse rejection fallback.
-        if (fresh.length) limited = true;
-        unresolved.push(...fresh);
-        return;
-      }
-      extraStatements++;
+  function defer(part: EventRow[]) {
+    limited = true;
+    unresolved.push(...part);
+  }
+  async function parseFailure(part: EventRow[], error?: unknown): Promise<void> {
+    if (part.length === 1) {
+      rejected.push(...part);
+      return;
     }
-    if (!fresh.length) return;
+    const match = error instanceof Error ? /\(at row (\d+)\)/i.exec(error.message) : null;
+    const index = match ? Number(match[1]) - 1 : -1;
+    if (Number.isSafeInteger(index) && index >= 0 && index < part.length) {
+      rejected.push(part[index] as EventRow);
+      await visit(part.filter((_, i) => i !== index));
+      return;
+    }
+    const middle = Math.floor(part.length / 2);
+    const leftWritten = await visit(part.slice(0, middle));
+    const right = part.slice(middle);
+    // The failed parent contains a bad row. A written left proves the right contains it:
+    // split the right directly instead of resending a body already known to fail.
+    if (leftWritten) await parseFailure(right);
+    else await visit(right);
+  }
+  async function visit(part: EventRow[]): Promise<boolean> {
+    if (!part.length) return true;
+    if (statements > MAX_PARSE_ISOLATION_STATEMENTS || Date.now() >= isolationDeadline || Date.now() + INSERT_LEASE_BUDGET_MS > leaseExpiresAt) {
+      defer(part);
+      return false;
+    }
+    statements++;
     try {
-      await insert(fresh, leaseExpiresAt);
-      written.push(...fresh);
+      await insert(part);
+      written.push(...part);
+      return true;
     } catch (error) {
-      if (error instanceof AmbiguousInsertError) pending.push(...fresh);
+      if (error instanceof AmbiguousInsertError) pending.push(...part);
+      else if (error instanceof InsertLeaseExhaustedError) defer(part);
       else if (isPrewriteParseError(error)) {
-        if (part.length === 1) rejected.push(...fresh);
-        else {
-          const middle = Math.floor(part.length / 2);
-          await visit(part.slice(0, middle), true);
-          await visit(part.slice(middle), true);
-        }
-      } else if (provedPrewrite && Date.now() + INSERT_LEASE_BUDGET_MS > leaseExpiresAt) {
-        // Socket acquisition can consume the remaining lease before a child body is sent.
-        limited = true;
-        unresolved.push(...fresh);
-      } else unavailable.push(...fresh);
+        isolationDeadline = Math.min(isolationDeadline, Date.now() + MAX_PARSE_ISOLATION_MS);
+        await parseFailure(part, error);
+      } else unavailable.push(...part);
+      return false;
     }
   }
-  if (rows.length) await visit(rows);
+  await visit(rows);
   return { written, rejected, pending, unavailable, unresolved, limited };
 }

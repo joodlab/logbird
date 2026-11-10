@@ -1,9 +1,10 @@
-import { AmbiguousInsertError, type EventRow, INGEST_CLAIM_LEASE_MS, normalizeEvent } from '@logbird/clickhouse';
+import { AmbiguousInsertError, type EventRow, INGEST_CLAIM_LEASE_MS, InsertLeaseExhaustedError, normalizeEvent } from '@logbird/clickhouse';
 import { afterEach, expect, it, vi } from 'vitest';
-import { isolateIngestRows, MAX_PARSE_ISOLATION_STATEMENTS } from './ingest-parse-isolation';
+import { isolateIngestRows, MAX_PARSE_ISOLATION_MS, MAX_PARSE_ISOLATION_STATEMENTS } from './ingest-parse-isolation';
 
 afterEach(() => vi.useRealTimers());
-const parseError = () => Object.assign(new Error('Cannot parse fixture'), { code: '25' });
+const parseError = (row?: number) =>
+  Object.assign(new Error(`Cannot parse fixture ${row === undefined ? '' : `(at row ${row})`}: While executing WaitForAsyncInsert.`), { code: '25' });
 function rows(n: number) {
   return Array.from({ length: n }, (_, index) => {
     const normalized = normalizeEvent({ id: `row-${index}`, action: 'qa91.unit' }, { projectId: 'qa91-unit', receivedAt: new Date() });
@@ -11,94 +12,111 @@ function rows(n: number) {
     return normalized.row;
   });
 }
-
-it('bounds sparse-error bisection and passes the same lease to every statement', async () => {
-  const input = rows(1000);
-  const bad = input[501];
-  const lease = Date.now() + INGEST_CLAIM_LEASE_MS;
-  const insert = vi.fn(async (part: EventRow[], expires: number) => {
-    expect(expires).toBe(lease);
-    if (part.includes(bad as EventRow)) throw parseError();
-  });
-  const result = await isolateIngestRows(input, lease, insert);
-  expect(result.rejected).toEqual([bad]);
-  expect(result.written).toHaveLength(999);
-  expect(result.pending).toEqual([]);
-  expect(result.limited).toBe(false);
-  expect(insert.mock.calls.length).toBeLessThanOrEqual(1 + 2 * Math.ceil(Math.log2(input.length)));
-});
-
-it('caps extra statements and preserves the same cap boundary on exact retries', async () => {
-  const input = rows(1000);
+const lease = () => Date.now() + INGEST_CLAIM_LEASE_MS;
+function uniqueBodies(insert: ReturnType<typeof vi.fn>) {
+  const bodies = insert.mock.calls.map(([part]) => JSON.stringify(part));
+  expect(new Set(bodies).size).toBe(bodies.length);
+}
+it('removes exactly the reported body row and uses k+1 statements for k failures', async () => {
+  const input = rows(1000),
+    bad = new Set([input[5], input[500], input[998]]);
   const insert = vi.fn(async (part: EventRow[]) => {
-    if (part.some((r) => Number(r.event_id.slice(4)) % 2)) throw parseError();
+    const index = part.findIndex((r) => bad.has(r));
+    if (index >= 0) throw parseError(index + 1);
   });
-  const result = await isolateIngestRows(input, Date.now() + INGEST_CLAIM_LEASE_MS, insert);
+  const result = await isolateIngestRows(input, lease(), insert);
+  expect(result.rejected).toEqual([...bad]);
+  expect(result.written).toEqual(input.filter((r) => !bad.has(r)));
+  expect(insert).toHaveBeenCalledTimes(4);
+  uniqueBodies(insert);
+});
+it.each([undefined, 0, 1001])('falls back for row %s and infers an unwritten right sibling without sending it', async (row) => {
+  const input = rows(8),
+    bad = input[7];
+  const insert = vi.fn(async (part: EventRow[]) => {
+    if (part.includes(bad!)) throw parseError(row);
+  });
+  const result = await isolateIngestRows(input, lease(), insert);
+  expect(result.rejected).toEqual([bad]);
+  expect(result.written).toHaveLength(7);
+  expect(insert.mock.calls.map(([part]) => part.length)).toEqual([8, 4, 2, 1]);
+  uniqueBodies(insert);
+});
+it('caps statements, never rejects unchecked healthy rows, and retries make progress', async () => {
+  const input = rows(1000),
+    bad = new Set(input.filter((_, i) => i % 2));
+  const insert = vi.fn(async (part: EventRow[]) => {
+    const i = part.findIndex((r) => bad.has(r));
+    if (i >= 0) throw parseError(i + 1);
+  });
+  const result = await isolateIngestRows(input, lease(), insert);
   expect(insert).toHaveBeenCalledTimes(1 + MAX_PARSE_ISOLATION_STATEMENTS);
-  expect(result.rejected.length + result.unresolved.length).toBeGreaterThan(500);
-  expect(result.unresolved.length).toBeGreaterThan(0);
-  expect(result.written.length + result.rejected.length + result.unresolved.length).toBe(1000);
-  expect(result.pending).toEqual([]);
+  expect(result.rejected).toHaveLength(65);
+  expect(result.rejected.every((r) => bad.has(r))).toBe(true);
+  expect(result.unresolved).toHaveLength(935);
   expect(result.limited).toBe(true);
+  uniqueBodies(insert);
   insert.mockClear();
-  const retry = await isolateIngestRows(input, Date.now() + INGEST_CLAIM_LEASE_MS, insert, new Set(result.written.map((r) => r.event_id)));
-  expect(retry.rejected).toEqual(result.rejected);
-  expect(retry.unresolved).toEqual(result.unresolved);
-  expect(retry.written).toEqual([]);
-  expect(insert.mock.calls.every(([part]) => part.every((r) => !result.written.includes(r)))).toBe(true);
+  const retry = await isolateIngestRows(result.unresolved, lease(), insert);
+  expect(retry.rejected).toHaveLength(65);
+  expect(retry.unresolved).toHaveLength(870);
 });
-
-it('reports unsent rows as unresolved when the original lease budget is exhausted', async () => {
+it.each(['lease', 'wall clock'] as const)('leaves unchecked rows retryable at the %s cap', async (cap) => {
   vi.useFakeTimers({ toFake: ['Date'] });
-  const input = rows(4);
-  const lease = Date.now() + INGEST_CLAIM_LEASE_MS;
+  const input = rows(8),
+    expires = lease();
   const insert = vi.fn(async () => {
-    vi.setSystemTime(Date.now() + 21_000);
-    throw parseError();
+    vi.setSystemTime(Date.now() + (cap === 'lease' ? 21_000 : MAX_PARSE_ISOLATION_MS));
+    throw parseError(1);
   });
-  const result = await isolateIngestRows(input, lease, insert);
-  expect(insert).toHaveBeenCalledTimes(1);
-  expect(result.rejected).toEqual([]);
-  expect(result.unresolved).toEqual(input);
-  expect(result.pending).toEqual([]);
+  const result = await isolateIngestRows(input, expires, insert);
   expect(result.limited).toBe(true);
+  expect(result.rejected).toEqual(cap === 'lease' ? [input[0]] : [input[0], input[1]]);
+  expect(result.unresolved).toEqual(input.slice(cap === 'lease' ? 1 : 2));
+  uniqueBodies(insert);
 });
-
-it('never subdivides or retries an ambiguous child and continues settling siblings', async () => {
+it('only a typed pre-body lease error becomes unresolved; a definite error near expiry stays unavailable', async () => {
+  const input = rows(2);
+  const typed = await isolateIngestRows(input, lease(), async () => {
+    throw new InsertLeaseExhaustedError();
+  });
+  expect(typed.unresolved).toEqual(input);
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const expires = lease();
+  const other = await isolateIngestRows(input, expires, async () => {
+    vi.setSystemTime(Date.now() + 21_000);
+    throw Object.assign(new Error('Unknown table'), { code: '60' });
+  });
+  expect(other.unavailable).toEqual(input);
+  expect(other.unresolved).toEqual([]);
+});
+it('never retries an ambiguous child and continues with its sibling', async () => {
   const input = rows(4);
   const insert = vi.fn(async (part: EventRow[]) => {
     if (part.length === 4) throw parseError();
     if (part[0] === input[0]) throw new AmbiguousInsertError();
   });
-  const result = await isolateIngestRows(input, Date.now() + INGEST_CLAIM_LEASE_MS, insert);
-  expect(insert.mock.calls.map(([part]) => part.map((r) => r.event_id))).toEqual([
-    ['row-0', 'row-1', 'row-2', 'row-3'],
-    ['row-0', 'row-1'],
-    ['row-2', 'row-3'],
-  ]);
+  const result = await isolateIngestRows(input, lease(), insert);
   expect(result.pending).toEqual(input.slice(0, 2));
   expect(result.written).toEqual(input.slice(2));
-  expect(result.rejected).toEqual([]);
+  expect(insert).toHaveBeenCalledTimes(3);
+  uniqueBodies(insert);
 });
-
-it('does not split an ambiguous original statement', async () => {
-  const input = rows(8);
-  const insert = vi.fn(async () => {
-    throw new AmbiguousInsertError();
-  });
-  const result = await isolateIngestRows(input, Date.now() + INGEST_CLAIM_LEASE_MS, insert);
+it('never splits an ambiguous original', async () => {
+  const input = rows(8),
+    insert = vi.fn(async () => {
+      throw new AmbiguousInsertError();
+    });
+  expect((await isolateIngestRows(input, lease(), insert)).pending).toEqual(input);
   expect(insert).toHaveBeenCalledTimes(1);
-  expect(result.pending).toEqual(input);
 });
-
-it('releases a definite non-parse child failure without discarding acknowledged siblings', async () => {
-  const input = rows(2);
+it('preserves written siblings beside a definite unavailable child', async () => {
+  const input = rows(4);
   const insert = vi.fn(async (part: EventRow[]) => {
-    if (part.length === 2) throw parseError();
-    if (part[0] === input[1]) throw Object.assign(new Error('Unknown table'), { code: '60' });
+    if (part.length === 4) throw parseError();
+    if (part[0] === input[0]) throw Object.assign(new Error('Unknown table'), { code: '60' });
   });
-  const result = await isolateIngestRows(input, Date.now() + INGEST_CLAIM_LEASE_MS, insert);
-  expect(result.written).toEqual(input.slice(0, 1));
-  expect(result.unavailable).toEqual(input.slice(1));
-  expect(result.pending).toEqual([]);
+  const result = await isolateIngestRows(input, lease(), insert);
+  expect(result.unavailable).toEqual(input.slice(0, 2));
+  expect(result.written).toEqual(input.slice(2));
 });

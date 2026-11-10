@@ -31,7 +31,7 @@ it.each(['6', '25', '27', '38', '41', '53', '69', '72', '60', '62', '81', '164',
       for await (const _row of ('values' in params ? params.values : []) as AsyncIterable<unknown>) {
         /* body consumed */
       }
-      throw Object.assign(new Error('fictional server exception'), { code });
+      throw Object.assign(new Error('fictional server exception: While executing WaitForAsyncInsert.'), { code });
     });
     const response = await f.post(input);
     const ambiguous = ['241', '159', '252'].includes(code);
@@ -112,7 +112,7 @@ it('pending competing conflicts wait for the actual parse-failure release path',
     }
     entered();
     await gate;
-    throw Object.assign(new Error('fictional pre-write parse failure'), { code: '6' });
+    throw Object.assign(new Error('fictional pre-write parse failure: While executing WaitForAsyncInsert.'), { code: '6' });
   });
   const first = f.post(input);
   try {

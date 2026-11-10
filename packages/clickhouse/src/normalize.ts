@@ -12,10 +12,14 @@ function uuidv7() {
 
 const object = (v: unknown): Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+const isHigh = (code: number) => code >= 0xd8_00 && code <= 0xdb_ff;
+const isLow = (code: number) => code >= 0xdc_00 && code <= 0xdf_ff;
 // A valid pair straddling a cap must not become a native JSONEachRow parse rejection.
-const capText = (s: string, cap: number) =>
-  s.slice(0, /[\uD800-\uDBFF]/u.test(s.charAt(cap - 1)) && /[\uDC00-\uDFFF]/u.test(s.charAt(cap)) ? cap - 1 : cap);
-const text = (v: unknown, cap = 512): string => (typeof v === 'string' ? capText(v.trim(), cap) : '');
+const capText = (s: string, cap: number) => s.slice(0, isHigh(s.charCodeAt(cap - 1)) && isLow(s.charCodeAt(cap)) ? cap - 1 : cap);
+// Search columns are lossy by design: a lone surrogate (which ClickHouse rejects as invalid UTF-8, code 25) becomes
+// U+FFFD, like String.prototype.toWellFormed. The raw payload and v1 identity keep the original input.
+const wellFormed = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '�');
+const text = (v: unknown, cap = 512): string => (typeof v === 'string' ? capText(wellFormed(v.trim()), cap) : '');
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
 export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string }) {
   // Search normalization is intentionally lossy. Identity v1 hashes canonical raw input, NOT these columns.
@@ -79,7 +83,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   // Only `action` is required: a bad occurredAt never drops the event. It is stored at receive time, the original value
   // is kept in attributes['logbird.occurredAt.rejected'] (and in payload), and the caller gets a warning.
   const { timestamp: date, problem: occurredAtProblem, valid: occurredAtValid } = resolveTimestamp(e.occurredAt, ctx.receivedAt);
-  if (occurredAtProblem) attributes['logbird.occurredAt.rejected'] = capText(value(e.occurredAt), 256);
+  if (occurredAtProblem) attributes['logbird.occurredAt.rejected'] = capText(wellFormed(value(e.occurredAt)), 256);
   const warning =
     [
       occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,
@@ -116,8 +120,8 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     target_ids: targets.map((t) => text(t.id, 256)),
     target_names: targets.map((t) => text(t.name)),
     changes_fields: changes.map((c) => text(c.field, 256)),
-    changes_before: changes.map((c) => value(c.before)),
-    changes_after: changes.map((c) => value(c.after)),
+    changes_before: changes.map((c) => wellFormed(value(c.before))),
+    changes_after: changes.map((c) => wellFormed(value(c.after))),
     operation_id: text(context.operationId, 256),
     parent_event_id: text(context.parentEventId, 256),
     request_id: text(context.requestId, 256),

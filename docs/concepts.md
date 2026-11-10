@@ -125,7 +125,7 @@ be reordered recursively; array order and string contents must stay identical.
 Identity includes the full input, including values outside indexing caps, and the
 resolved timestamp. Omitted or invalid `occurredAt` keeps the first receipt's clock.
 
-The SDK generates ids and timestamps once before queuing. If you use deterministic
+The SDK generates ids and timestamps once before queuing. If you use convergent
 ids across separate `track()` calls, resend identical content, including `occurredAt`
 and `executor.attempt`; a new call otherwise gets a fresh timestamp. A different
 event with the same id is rejected with `duplicate_id_conflict: ...`; the original
@@ -151,14 +151,21 @@ Rejection codes appear in `rejected[].code`; retryable HTTP codes appear in
 
 | Code | Meaning | What to do / expected timing |
 | --- | --- | --- |
-| `invalid_event` | Invalid event fields or a definite native storage parse failure. | Fix the reported indices in `rejected`. Healthy siblings are accepted (202); all rejected gives `accepted: 0`. If the isolation budget runs out, unchecked events are rejected with a reason asking to resend them in a smaller batch. |
+| `invalid_event` | Invalid event fields or a definite native storage parse failure. | Fix the reported indices in `rejected`. Healthy siblings are accepted (202); all rejected gives `accepted: 0`. If isolation reaches its statement, wall-clock or lease limit, unchecked rows stay retryable in `503 ingest_pending` indices, never in `rejected`. |
 | `invalid_event_id` | Unsafe or oversized string id. | Use valid Unicode without NUL, at most 256 UTF-16 units after trimming. |
 | `duplicate_id_conflict` | The id belongs to different content. | Keep the original; send corrections with a new id and context.parentEventId. |
 | `stored_event_unreadable` | Retained evidence cannot be compared. | Keep the evidence. Send a correction with a new id; ask the operator to inspect storage. |
-| `ingest_pending (503)` | Some writes remain unresolved. | Retry the identical batch with Retry-After: about 70 seconds for ambiguity, up to 10 minutes for a ready claim. |
+| `ingest_pending (503)` | Some writes remain unresolved. | Honor Retry-After: one second for unchecked, proven-unwritten rows; about 70 seconds for ambiguity; up to 10 minutes for a ready claim. |
 | `ingest_unavailable (503)` | Identity lookup or storage is unavailable. | Retry the identical batch with Retry-After; the operator may need to restore service. |
 | `project_busy (503)` | A project maintenance lock is held. | Retry with Retry-After after the current operation releases its lock. |
 | `retention_unavailable (503)` | Project data is being rebuilt. | Retry reads with Retry-After. Interrupted repairs resume through the worker; the hourly sweep is the fallback. |
 
 Automatic recovery also runs hourly. Persistent service or permission errors must
 be fixed before recovery can settle the claim; honor the server's Retry-After.
+
+Search normalization uses `toWellFormed()` for indexed strings, target arrays,
+changes values and rejected occurredAt copies; raw payload and v1 identity keep
+original Unicode. Malformed attribute keys remain per-event failures to avoid key
+collisions. Retries skip confirmed rows and are convergent. Pathological batches
+with more bad rows than one attempt can isolate can exhaust SDK retries (`onError`);
+send smaller batches or retry only unresolved indices after honoring settled drops.

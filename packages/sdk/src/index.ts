@@ -149,6 +149,15 @@ export class Logbird {
   }
   private async send(batch: EventInput[]) {
     const body = JSON.stringify({ events: batch });
+    const rejectedIndices = new Set<number>();
+    const reject = (rejections?: { index: number; reason: string }[]) => {
+      const fresh = (rejections ?? []).filter((r) => Number.isInteger(r.index) && batch[r.index] && !rejectedIndices.has(r.index));
+      for (const rejection of fresh) {
+        rejectedIndices.add(rejection.index);
+        this.drop(batch[rejection.index]!);
+      }
+      if (fresh.length) this.report(new Error(`${fresh.length} events rejected by Logbird: ${fresh.map((r) => r.reason).join('; ')}`));
+    };
     for (let attempt = 0; ; attempt++) {
       let response: Response | undefined, error: unknown;
       try {
@@ -163,14 +172,16 @@ export class Logbird {
       }
       if (response?.ok) {
         const result = (await response.json()) as { rejected?: { index: number; reason: string }[] };
-        if (result.rejected?.length) {
-          for (const rejection of result.rejected) {
-            const event = batch[rejection.index];
-            if (event) this.drop(event);
-          }
-          this.report(new Error(`${result.rejected.length} events rejected by Logbird: ${result.rejected.map((r) => r.reason).join('; ')}`));
-        }
+        reject(result.rejected);
         return;
+      }
+      if (response?.status === 503) {
+        // A retryable ingest response can already settle individual poison rows.
+        // Keep the wire body identical across retries and report each drop only once.
+        const result = (await response.json().catch(() => null)) as {
+          error?: { code?: string; details?: { rejected?: { index: number; reason: string }[] } };
+        } | null;
+        if (result?.error?.code === 'ingest_pending' || result?.error?.code === 'ingest_unavailable') reject(result.error.details?.rejected);
       }
       const retry = !response || response.status === 429 || response.status >= 500;
       if (!retry) {
@@ -178,7 +189,12 @@ export class Logbird {
         this.report(new Error(`Logbird HTTP ${response?.status}; batch dropped`));
         return;
       }
-      if (attempt >= this.retries) throw error ?? new Error(`Logbird HTTP ${response?.status}`);
+      if (attempt >= this.retries) {
+        // flush requeues retryable rows, never the individually settled rejections.
+        const remaining = batch.filter((_, index) => !rejectedIndices.has(index));
+        batch.splice(0, batch.length, ...remaining);
+        throw error ?? new Error(`Logbird HTTP ${response?.status}`);
+      }
       const retryAfter = response?.headers.get('Retry-After');
       const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
       const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** attempt) * (0.5 + Math.random());

@@ -176,7 +176,7 @@ export async function requireProjectReadable(projectId: string) {
 }
 
 function settledDetails(error: ApiError, rejected: { index: number; reason: string; code: string }[], warnings: { index: number; reason: string }[]) {
-  if (error.code !== 'ingest_pending') return error;
+  if (!['ingest_pending', 'ingest_unavailable'].includes(error.code) || !error.details) return error;
   const details = ingestPendingDetailsSchema.parse(error.details);
   return new ApiError(
     503,

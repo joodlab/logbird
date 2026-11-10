@@ -125,17 +125,18 @@ Semantics worth documenting to users:
   never releases unresolved receipts. After confirmed retention deletion and cleanup,
   an id may be used again. Unsafe ids (NUL, lone surrogates or >256 trimmed UTF-16 units)
   are per-event `invalid_event_id` rejections, so healthy siblings can proceed.
-- A definite storage parser rejection is isolated per event by bounded bisection.
-  Healthy siblings return in `ids`; offending indices appear in `rejected` with
-  `code: invalid_event` and a code-first reason, including when every event is rejected
-  (202 with `accepted: 0`). Only errors proved to precede writes may be split.
-  Ambiguous source/view/async outcomes remain `503 ingest_pending`, with acknowledged
-  siblings confirmed and parse rejections included in the settled details. The
-  original lease and a 64-extra-statement cap bound isolation. When either budget is
-  exhausted, the still-unchecked rows (proved unwritten) are also rejected per index
-  with `invalid_event` and a reason asking to resend them in a smaller batch; the
-  response stays 202 with every stored sibling in `ids`. If another child is ambiguous,
-  503 pending takes precedence with those same rejections.
+- A storage parser rejection proven to precede writes is isolated per event using
+  the native body row number, with sibling-inference bisection as a fallback.
+  Healthy siblings return in `ids`; individually proven offending indices appear
+  in `rejected` with `code: invalid_event`, including a 202 with `accepted: 0` when
+  all events fail. A 64-extra-statement cap, ten-second wall clock and original
+  lease bound isolation. Unchecked, proven-unwritten rows release their claims and
+  return retryable `503 ingest_pending` with settled 202 fields and unresolved
+  `indices`/`eventIds`; they are never `invalid_event`. Unresolved-only Retry-After
+  is one second. Ambiguous writes keep their claims and determine lease-aware
+  Retry-After; definite non-parse errors return `503 ingest_unavailable` with settled
+  siblings. Retries skip confirmed rows and are convergent; pathological identical
+  batches can exhaust SDK retries (`onError`) and should be sent in smaller batches.
 - **actor = who caused it** (person, API key, scheduler…); **executor = who performed it** (api, worker, job,
   attempt). A worker doing work requested by Lina has `actor=Lina`, `executor=crm-worker`. Scheduled runs use
   `actor.type=system`.
@@ -145,10 +146,11 @@ Semantics worth documenting to users:
   after:"[redacted]"}` to record that a secret changed.
 
 Normalization rules (server):
-- Lift recognized fields into columns. Strings are trimmed/capped; non-string `before/after` are JSON-stringified.
+- Lift recognized fields into columns. Search strings replace lone surrogates with `toWellFormed()` and are trimmed/capped; non-string `before/after` are JSON-stringified.
 - Every other top-level key and everything under `metadata` (and unknown keys inside actor/tenant/executor/
   targets/context) is flattened to `attributes` with dot paths (`metadata.plan.tier`), max depth 6, max 256 keys,
   values stringified and capped at 2 KB. Arrays become JSON strings.
+- Attribute keys remain verbatim to avoid replacement collisions; malformed Unicode keys can be isolated as `invalid_event`. Changes values, target arrays and rejected occurredAt search copies also use `toWellFormed()`; raw input and v1 identity are unchanged.
 - Raw document (as received, ≤ 256 KB) is stored in `payload` (ZSTD).
 - `conformance` = % of {occurredAt, actor.id, actor.type, outcome, targets[≥1], tenant.id, executor.type,
   context.operationId|requestId, description} present.

@@ -187,16 +187,26 @@ Use a current timestamp when creating an event. Send a single event, an array or
 Definite native storage parse failures are isolated into `invalid_event` rejections
 with zero-based indices and code-first reasons. Healthy siblings remain accepted;
 an all-rejected batch still returns 202 with `accepted: 0`. Isolation is bounded; if
-it runs out of budget, the events it could not check are rejected with a reason asking
-you to resend them in a smaller batch. An ambiguous sibling instead returns 503
-pending with those settled fields.
+it runs out of its 64-extra-statement, ten-second wall-clock or lease budget,
+unchecked events return retryable `503 ingest_pending` indices, with settled 202
+fields. Their claims are released; unresolved-only Retry-After is one second.
+Ambiguous siblings keep their claims and determine lease-aware Retry-After.
 A `503 ingest_pending` response means some immutable event IDs are still being
 settled. Its `details` include the settled 202 response fields plus pending
 `indices` (zero-based batch positions) and `eventIds`; every index outside
 `indices` is settled. Retry the saved body on transient errors and honor
 `Retry-After`; do not mark pending outbox entries delivered. The SDK retries the
 identical serialized batch, including settled siblings, safely. Fix permanent validation
-failures instead of retrying indefinitely.
+failures instead of retrying indefinitely. Retries are convergent because confirmed
+rows leave the work set. A pathological identical batch with more bad rows than
+one attempt can isolate ends in SDK retry exhaustion (`onError`); send smaller
+batches. The SDK sends individually rejected rows to `onDrop` once per send,
+including settled rejections on a 503, and never drops unchecked healthy rows.
+
+Search columns use `toWellFormed()` to replace invalid Unicode, including changes,
+target arrays and rejected occurredAt copies. Payload and v1 identity retain raw
+input. Attribute keys remain unchanged to avoid key collisions; malformed keys
+can therefore be isolated as per-event `invalid_event`.
 
 Verify the event in the console by ID, actor, target and operation ID. Exercise
 repeated delivery, an outage and shutdown with fictional data. If customers read
