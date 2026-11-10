@@ -221,7 +221,7 @@ app.get(
   routeDoc('OpenAPI document', { hide: true }, 'none'),
   openAPIRouteHandler(app, {
     documentation: {
-      info: { title: 'Logbird API', version: '0.1.0' },
+      info: { title: 'Logbird API', version: '0.1.1' },
       servers: [{ url: env.APP_URL, description: 'This Logbird instance' }],
       components: {
         securitySchemes: {

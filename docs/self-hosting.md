@@ -3,13 +3,13 @@
 ## Five-minute quickstart
 
 Install Docker Engine and Compose >=2.24.4 (Linux containers). The default stack
-pulls the four published GHCR images for `LOGBIRD_VERSION=0.1.0`; it does not
+pulls the four published GHCR images for `LOGBIRD_VERSION=0.1.1`; it does not
 compile source. Images are available only after the corresponding tagged release
 finishes publishing. Check the [release page](https://github.com/joodlab/logbird/releases)
 before installing; release preparation in Git is not proof of registry availability.
 
 ```sh
-git clone --branch v0.1.0 https://github.com/joodlab/logbird.git
+git clone --branch v0.1.1 https://github.com/joodlab/logbird.git
 cd logbird
 sh scripts/selfhost-init.sh
 # Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
@@ -93,7 +93,7 @@ One .env.example serves source development and containers. Empty URL overrides l
 | AUTH_RATE_LIMIT_PER_MINUTE / PUBLIC_RATE_LIMIT_PER_MINUTE | 30 / 600 per client: sign-in requests and failed public-API authentications |
 | INGEST_RATE_LIMIT_PER_MINUTE / READ_RATE_LIMIT_PER_MINUTE | 3000 / 1200 per project key (shared Redis limits) |
 | LOGBIRD_BIND / LOGBIRD_HTTP_PORT | 127.0.0.1 / 4600; only app is published |
-| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / 0.1.0; pulls `<registry>/logbird-<role>:<version>` |
+| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / 0.1.1; pulls `<registry>/logbird-<role>:<version>` |
 | LOGBIRD_SOURCE_VERSION | local; only the source-build override uses this tag |
 | LOGBIRD_DOMAIN / ACME_EMAIL | TLS hostname / optional ACME email |
 | NODE_ENV / PORT | Source development / 4601; containers force production and service ports |
