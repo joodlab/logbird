@@ -8,14 +8,14 @@ import { prerenderPaths } from '../src/lib/site-map';
  * inline script in that very body, plus the other security headers; unknown paths must be the 404 page with status
  * 404, except the one documented redirect (Cloudflare's asset router decodes `%2F` and redirects
  * `/x%2f..%2fabout%2findex.html` to `/about/`, where the Node server answers 404; either is a static page with its own
- * policy); unknown /api/* paths must answer JSON. Use it against `pnpm start`, `pnpm serve:static`, `wrangler dev` and a
+ * policy); unknown /site-api/* paths must answer JSON. Use it against `pnpm start`, `pnpm serve:static`, `wrangler dev` and a
  * deploy, so a target that renders pages on demand (fresh, unhashed inline scripts) fails here, not in a browser.
  *
  * POST to a page path must be a 405 on every target.
  *
  *   BASE_URL=http://127.0.0.1:4620 [NO_API=1] tsx scripts/check-live.ts
  *
- * NO_API=1 skips the API checks (serve-static has no /api).
+ * NO_API=1 skips the API checks (serve-static has no /site-api).
  */
 const base = process.env.BASE_URL ?? 'http://127.0.0.1:4620';
 const unknown = [
@@ -25,9 +25,9 @@ const unknown = [
   '/foo.bar',
   '/x.js',
   '/blog/no-such-post.md',
-  '/assets/missing.js',
+  '/site-assets/missing.js',
   '/x%2f..%2fabout%2findex.html',
-  '/api',
+  '/site-api',
   '/_headers',
   // Case variants of real files and pages: hosts with case-insensitive file systems must not serve or render them.
   '/ROBOTS.TXT',
@@ -42,7 +42,7 @@ const unknown = [
  * missing pages to a real page fails.
  */
 const DOCUMENTED_REDIRECTS: Record<string, string> = { '/x%2f..%2fabout%2findex.html': '/about' };
-const api = process.env.NO_API === '1' ? [] : ['/api/no-such-endpoint', '/api/waitlist/x'];
+const api = process.env.NO_API === '1' ? [] : ['/site-api/no-such-endpoint', '/site-api/waitlist/x'];
 const problems: string[] = [];
 const rows: Record<string, string | number>[] = [];
 
@@ -102,7 +102,7 @@ for (const path of api) {
   }
   rows.push({ path, status: response.status, inline: '-', uncovered: '-', url: type });
 }
-// Pages are static on every target: another method than GET/HEAD outside /api/ is a 405 and never a rendered page.
+// Pages are static on every target: another method than GET/HEAD outside /site-api/ is a 405 and never a rendered page.
 // Node and serve-static answer it themselves (with Allow: GET, HEAD); Cloudflare's asset router answers 405 with an
 // empty body before the Worker (server/method-guard.ts is the Worker's own guard if that ever changes).
 for (const path of ['/about/', '/no-such-page']) {

@@ -1,7 +1,7 @@
 import { defineEventHandler } from 'nitro/h3';
 
 /**
- * Every /api/* path without its own route (only /api/waitlist has one) answers a JSON 404, so no API URL falls through to
+ * Every /site-api/* path without its own route (only /site-api/waitlist has one) answers a JSON 404, so no API URL falls through to
  * TanStack Start's on-demand page renderer, whose inline scripts no build-time CSP hash covers. Registered after the
  * real routes in vite.config.ts; the more specific route wins.
  */

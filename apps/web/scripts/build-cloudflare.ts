@@ -52,7 +52,7 @@ if (!pages.includes('index.html') || !pages.includes('404.html')) {
 const assets = new Set<string>();
 for (const page of pages) {
   const html = await readFile(resolve(publicDir, page), 'utf8');
-  for (const match of html.matchAll(/(?:src|href)="(\/assets\/[^"?]+)"/g)) {
+  for (const match of html.matchAll(/(?:src|href)="(\/site-assets\/[^"?]+)"/g)) {
     if (match[1]) {
       assets.add(match[1].slice(1));
     }

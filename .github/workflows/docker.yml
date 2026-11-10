@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'apps/**/Dockerfile'
+      - 'apps/web/Dockerfile.dockerignore'
       - 'docker-compose*.yml'
       - '.dockerignore'
       - '.github/workflows/docker.yml'
@@ -29,6 +30,17 @@ jobs:
           - {role: worker, dockerfile: apps/worker/Dockerfile, target: runtime}
           - {role: app, dockerfile: apps/app/Dockerfile, target: runtime}
           - {role: migrate, dockerfile: apps/server/Dockerfile, target: migrate}
+          - role: site
+            dockerfile: apps/web/Dockerfile
+            target: runtime
+            build-args: |
+              WEB_SITE_URL=https://site.example.com
+              WEB_APP_URL=https://console.example.com
+              WEB_GITHUB_URL=https://github.com/example/logbird
+              WEB_GITHUB_PUBLIC=false
+              WEB_ORG_NAME=Example
+              WEB_SECURITY_EMAIL=security@example.com
+              WEB_CONTACT_EMAIL=hello@example.com
     steps:
       - uses: actions/checkout@v7
         with:
@@ -40,6 +52,7 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
+          build-args: ${{ matrix.build-args }}
           platforms: linux/amd64
           push: false
           outputs: type=oci,dest=${{ runner.temp }}/logbird-${{ matrix.role }}.tar

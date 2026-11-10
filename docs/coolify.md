@@ -66,3 +66,25 @@ Checked official documentation on 2026-11-05 for magic names, URL/FQDN semantics
 - [Compose build pack](https://coolify.io/docs/applications/build-packs/docker-compose), now redirecting to [the current reference](https://coolify.io/docs/applications/builds/docker-compose).
 
 Static validation uses `docker compose --env-file .env.coolify-test -f docker-compose.coolify.yml config -q` with simulated magic values. A disposable runtime simulation is pending in #77; its local-only override will publish a loopback app port, since this file has none. Coolify itself, GitHub App access, dashboard secrets, domain routing, public ACME, hosted upgrades and recovery remain unverified. No Coolify screenshots are claimed.
+
+## Hosted marketing site (logbird.joodlab.com only)
+
+The console remains the public front door. Set `LOGBIRD_SITE_URL=http://logbird-site:4620`
+to forward marketing pages, `/site-assets/`, `/site-api/`, media and discovery files
+to a private site server. Anonymous `/` visits see the site; a non-empty Logbird
+session cookie keeps `/` on the console. API, sign-in and invitation routes stay on
+the console. Self-hosters leave `LOGBIRD_SITE_URL` empty for the existing behavior.
+
+Create a separate Docker Compose resource using `/docker-compose.site.yml`, with
+no public domain or host ports. Set its `WEB_*` build variables (the site URL is
+`https://logbird.joodlab.com`, and so is `WEB_APP_URL`: the console origin, the site
+links `/login` itself), SMTP settings and
+`WEB_TRUST_PROXY` for the actual proxy chain. The named `/data` volume holds waitlist
+submissions; preserve it across redeploys.
+
+Set `LOGBIRD_STACK_NETWORK` to the existing Logbird Compose resource's network name,
+usually its Coolify resource UUID. On the destination host, use `docker network ls`
+and match the Logbird resource UUID shown in Coolify; confirm with
+`docker network inspect <uuid>`. The site joins that external network as
+`logbird-site`, so the console can reach it privately. Deploy the site before
+setting the console's `LOGBIRD_SITE_URL` and redeploying the console.

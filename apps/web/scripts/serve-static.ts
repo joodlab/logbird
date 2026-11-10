@@ -3,7 +3,7 @@
  * .br/.gz variants when the client accepts them, each page with its own hashed Content-Security-Policy from
  * `.output/csp.json` (scripts/csp.ts), and `404.html` with status 404 for everything else. Requests are routed by the
  * same rules as the Node server (src/lib/page-response.ts), so escaped or traversing paths are 404s here too.
- * Use it for Lighthouse and captures of what actually ships. There is no /api here (the waitlist needs `pnpm start`).
+ * Use it for Lighthouse and captures of what actually ships. There is no /site-api here (the waitlist needs `pnpm start`).
  *
  *   PORT=4620 tsx scripts/serve-static.ts
  */
@@ -48,8 +48,8 @@ createServer(async (request, response) => {
     return;
   }
   const notFound = decidePage({ method: 'GET', pathname: '/__no-such-page__', manifest });
-  // `pass` is a canonical public file or /api/*; there is no /api here, so that's the 404 page.
-  const page = decision.kind === 'page' ? decision : url.pathname.startsWith('/api/') ? notFound : null;
+  // `pass` is a canonical public file or /site-api/*; there is no /site-api here, so that's the 404 page.
+  const page = decision.kind === 'page' ? decision : url.pathname.startsWith('/site-api/') ? notFound : null;
   const found = page && page.kind === 'page' ? { file: resolve(root, page.file), status: page.status, policy: page.policy } : null;
   const target = found?.file ?? resolve(root, `.${decodeURIComponent(url.pathname)}`);
   const headers: Record<string, string> = {
@@ -59,7 +59,7 @@ createServer(async (request, response) => {
     Vary: 'Accept-Encoding',
     'Cache-Control': found
       ? PAGE_CACHE
-      : url.pathname.startsWith('/assets/')
+      : url.pathname.startsWith('/site-assets/')
         ? ASSET_CACHE
         : url.pathname.startsWith('/media/')
           ? MEDIA_CACHE

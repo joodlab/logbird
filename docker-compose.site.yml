@@ -1,0 +1,52 @@
+# Separate Coolify Compose resource; only the console receives a public domain.
+services:
+  logbird-site:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        WEB_SITE_URL: ${WEB_SITE_URL:?}
+        WEB_APP_URL: ${WEB_APP_URL:-}
+        WEB_GITHUB_URL: ${WEB_GITHUB_URL:?}
+        WEB_GITHUB_PUBLIC: ${WEB_GITHUB_PUBLIC:?}
+        WEB_ORG_NAME: ${WEB_ORG_NAME:-}
+        WEB_SECURITY_EMAIL: ${WEB_SECURITY_EMAIL:-}
+        WEB_CONTACT_EMAIL: ${WEB_CONTACT_EMAIL:-}
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4620
+      WAITLIST_FILE: /data/waitlist.jsonl
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      WAITLIST_NOTIFY_TO: ${WAITLIST_NOTIFY_TO:-}
+      WEB_TRUST_PROXY: ${WEB_TRUST_PROXY:-}
+      WEB_ALLOWED_ORIGINS: ${WEB_ALLOWED_ORIGINS:-}
+    volumes:
+      - site-data:/data
+    networks:
+      default:
+      logbird-stack:
+        aliases:
+          - logbird-site
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4620/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  site-data:
+
+networks:
+  default:
+  logbird-stack:
+    external: true
+    name: ${LOGBIRD_STACK_NETWORK:?}
