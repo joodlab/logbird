@@ -85,9 +85,10 @@ operator from `WEB_ORG_NAME`, `WEB_PRIVACY_EMAIL`, `WEB_LEGAL_ADDRESS`,
 `WEB_GOVERNING_LAW`, `WEB_HOSTING_PROVIDER`, `WEB_EMAIL_PROVIDER` and
 `WEB_MAILBOX_PROVIDER`; the site stays
 noindex until the publisher name and the privacy mailbox are set (see
-`marketing/copy/legal-privacy.md`). Set `WEB_GOVERNING_LAW` (or a `WEB_LEGAL_ADDRESS`
-that names the country) before indexing too: otherwise the terms' governing-law
-clause can't be pinned to a country. The privacy policy says each form submission is
+`marketing/copy/legal-privacy.md`); nothing else gates indexing. Setting
+`WEB_GOVERNING_LAW` (or a `WEB_LEGAL_ADDRESS` that names the country) is
+recommended before indexing, not required: until then the terms' governing-law
+clause isn't pinned to a country. Add them whenever they're known. The privacy policy says each form submission is
 emailed to the team, and until `WEB_PRIVACY_EMAIL` exists the form is the channel
 for privacy requests, so on the hosted site `SMTP_*`, `MAIL_FROM` and
 `WAITLIST_NOTIFY_TO` are required, not optional: test them with one submission
