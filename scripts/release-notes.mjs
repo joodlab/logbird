@@ -12,7 +12,7 @@ const excludedEmail =
 const excludedLogin = /^(?:codex|claude|copilot|cursor(?:agent)?|devin-ai-integration)$/i;
 
 // Reserved documentation/test domains (RFC 2606/6761, e.g. history-scrubbed addresses) never identify a real contributor.
-const placeholderEmail = /@(?:[\w-]+\.)*(?:example\.(?:com|net|org)|example|invalid|localhost)$/i;
+const placeholderEmail = /@(?:[\w-]+\.)*(?:example\.(?:com|net|org)|example|invalid|localhost|test)$/i;
 
 export function isPerson({ name = '', email = '', login = '', type }) {
   return (
@@ -35,6 +35,11 @@ export function highlights(markdown, version) {
   return text;
 }
 
+// changelogen and changelogithub look scopes and types up in plain objects, so a name like `constructor` or
+// `__proto__` resolves to an Object.prototype member and crashes rendering. Such scopes move into the description.
+const prototypeKey = (key) => key in Object.prototype;
+const breakingFooter = /^BREAKING[ -]CHANGE:/m;
+
 export function parseLog(log, config) {
   return log
     .split('\x1e')
@@ -43,10 +48,15 @@ export function parseLog(log, config) {
       const [sha, name, email, ...parts] = record.trim().split('\x1f');
       const [message, ...body] = parts.join('\x1f').split('\n');
       const raw = { shortHash: sha, message, body: body.join('\n'), author: { name, email } };
+      const scope = message.match(/^\w+\(([^)]+)\)!?: /)?.[1];
+      if (scope && prototypeKey(scope)) raw.message = message.replace(`(${scope})`, '');
       // Changelogen drops non-conventional messages. Preserve our existing Other changes guarantee.
       if (!/^\w+(?:\([^)]+\))?!?: /.test(message)) raw.message = `other: ${message}`;
       const commit = parseCommits([raw], config)[0] ?? parseCommits([{ ...raw, message: `other: ${message}` }], config)[0];
-      if (!config.types[commit.type]) commit.type = 'other';
+      if (!Object.hasOwn(config.types, commit.type)) commit.type = 'other';
+      if (scope && prototypeKey(scope)) commit.description = `${scope}: ${commit.description}`;
+      // Conventional Commits also mark breaking changes with a footer, which changelogen ignores.
+      if (breakingFooter.test(raw.body)) commit.isBreaking = true;
       return commit;
     });
 }

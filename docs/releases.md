@@ -99,15 +99,17 @@ Non-conventional commits remain in Other changes rather than silently disappeari
 Performance, `refactor` → Refactoring, `docs` → Documentation, `build` → Build,
 `ci` → CI, `test` → Tests, `chore` → Maintenance and `revert` → Reverts (`style` →
 Style). The squash-merge PR title is the commit subject and changelog line; use
-scopes such as `server` or `sdk` to group related entries. A `!` before the colon
-puts the change in its own Breaking changes section.
+scopes such as `server` or `sdk` to group related entries. A `!` before the colon,
+or a `BREAKING CHANGE:` footer in the commit body, puts the change in its own
+Breaking changes section.
 
 The wrapper retains the stricter contributor policy because changelogithub's
 native name-only bot filter does not cover AI email/login identities. It checks
 git authors, `Co-Authored-By` trailers, GitHub logins and account types against
 the same exclusion rules: `[bot]`/Bot, known automation and AI accounts (including
 Codex, Claude, Copilot, Cursor and Devin), OpenAI addresses, Anthropic/Cursor/Copilot
-noreply addresses and reserved placeholder domains. Exclusions apply to inline
+noreply addresses and reserved placeholder domains (`example.*`, `.test`,
+`.example`, `.invalid`, `localhost`). Exclusions apply to inline
 credits, contributor totals and thank-you entries. Missing/truncated identity
 responses or an excluded identity reaching rendering abort notes generation before
 any notes are emitted. Invalid Highlights or failed preflight likewise prevent
