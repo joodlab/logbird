@@ -6,7 +6,7 @@ import { WaitlistForm } from './waitlist-form';
 it('renders a native form and static no-JS feedback targets', () => {
   const html = renderToStaticMarkup(createElement(WaitlistForm));
   expect(html).toContain('method="post"');
-  expect(html).toContain('action="/api/waitlist"');
+  expect(html).toContain('action="/site-api/waitlist"');
   expect(html).toContain('<noscript>');
   expect(html).toContain('id="waitlist-ok"');
   expect(html).toContain('id="waitlist-error"');

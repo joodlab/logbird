@@ -20,8 +20,10 @@
         ".env*",
         "$TURBO_ROOT$/.env*",
         "$TURBO_ROOT$/marketing/media/**",
-        "$TURBO_ROOT$/docs/media/**"
-      ]
+        "$TURBO_ROOT$/docs/media/**",
+        "$TURBO_ROOT$/CHANGELOG.md"
+      ],
+      "passThroughEnv": ["GITHUB_TOKEN"]
     }
   }
 }

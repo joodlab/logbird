@@ -21,8 +21,10 @@ path: /changelog
 
 - **id:** `releases`
 - **heading:** Releases
-- **body:** Rendered from `CHANGELOG.md`. Each entry links to the pull requests it came from once the repository is
-  public.
+- **body:** One entry per GitHub Release (stable `vX.Y.Z`, published), newest first, with the `### Highlights`
+  bullets of its `CHANGELOG.md` section and, once the repository is public, a link to its full release notes. The
+  build reads the list from the GitHub API and falls back to `apps/web/src/lib/releases.snapshot.ts`; run
+  `pnpm --filter @logbird/web releases:sync` after each release.
 - **empty state (until the first release):** Nothing has been released yet. The first release, 0.1.0, is in progress
   and will list everything since the start of the project. (Said once, here; there's no separate status line.)
 - **visual:** none

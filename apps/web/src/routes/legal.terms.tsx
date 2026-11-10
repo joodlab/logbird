@@ -7,7 +7,7 @@ export const Route = createFileRoute('/legal/terms')({
   head: () => pageHead('/legal/terms'),
   component: () => (
     <LegalPlaceholder
-      summary="These terms cover use of this website. The Logbird software is licensed separately under the MIT licence, which is included in the repository. Logbird Cloud isn't open yet and will have its own terms before it is."
+      summary="These terms cover use of this website. The Logbird software is licensed separately under the MIT licence, which is included in the repository. Logbird Cloud will have its own terms."
       title="Terms"
     />
   ),

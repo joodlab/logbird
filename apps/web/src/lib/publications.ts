@@ -1,3 +1,5 @@
+export { type Release, releases } from './releases';
+
 /**
  * Public changelog and blog entries. Maintainers add an entry when the change or post is published,
  * following marketing/README.md. The page that lists it becomes `ready` with its first entry (site-map.ts).
@@ -17,17 +19,6 @@ export interface BuildLogEntry {
   media?: string;
 }
 
-export interface Release {
-  version: string;
-  date: string;
-  /** Upgrade steps first, as CHANGELOG.md lists them. */
-  upgrade?: string[];
-  added?: string[];
-  fixed?: string[];
-  changed?: string[];
-  security?: string[];
-}
-
 export interface Post {
   slug: string;
   title: string;
@@ -41,7 +32,6 @@ export interface Post {
 }
 
 export const buildLog: BuildLogEntry[] = [];
-export const releases: Release[] = [];
 export const posts: Post[] = [];
 
 /** "7 November 2026", fixed to UTC so the prerendered date never depends on the build machine. */

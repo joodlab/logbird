@@ -2,7 +2,8 @@ import { type Theme, useTheme } from '@logbird/ui/theme';
 import { Link, rootRouteId, useRouterState } from '@tanstack/react-router';
 import { MenuIcon, MonitorIcon, MoonIcon, SunIcon, XIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { APP_URL, COPYRIGHT_HOLDER, GITHUB_PUBLIC, GITHUB_URL } from '../env';
+import { COPYRIGHT_HOLDER, GITHUB_PUBLIC, GITHUB_URL } from '../env';
+import { ACCESS_CTA, SIGN_IN_URL } from '../lib/cloud';
 import { siteMap } from '../lib/site-map';
 import { ButtonLink } from './marketing/button-link';
 import { BilingualWordmark, Wordmark } from './marketing/wordmark';
@@ -89,12 +90,12 @@ export function SiteHeader() {
         ) : null}
         <div className="ms-auto hidden items-center gap-2 lg:flex">
           <ThemeSwitch />
-          {APP_URL ? (
-            <a className="nav-link" href={APP_URL}>
+          {SIGN_IN_URL ? (
+            <a className="nav-link" href={SIGN_IN_URL}>
               Sign in
             </a>
           ) : null}
-          <ButtonLink to="/contact">Join the waitlist</ButtonLink>
+          <ButtonLink to="/contact">{ACCESS_CTA}</ButtonLink>
         </div>
         <details className="mobile-menu ms-auto lg:hidden" ref={menu}>
           <summary aria-label="Menu" className="inline-flex size-11 items-center justify-center rounded-md border bg-background text-foreground">
@@ -119,10 +120,10 @@ export function SiteHeader() {
             ) : null}
             <div className="container-site flex flex-col gap-3 border-t py-4">
               <ButtonLink className="w-full" onClick={closeMenu} size="lg" to="/contact">
-                Join the waitlist
+                {ACCESS_CTA}
               </ButtonLink>
-              {APP_URL ? (
-                <ButtonLink className="w-full" href={APP_URL} size="lg" variant="outline">
+              {SIGN_IN_URL ? (
+                <ButtonLink className="w-full" href={SIGN_IN_URL} size="lg" variant="outline">
                   Sign in
                 </ButtonLink>
               ) : null}

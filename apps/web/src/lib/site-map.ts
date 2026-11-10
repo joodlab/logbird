@@ -1,4 +1,5 @@
 import { GITHUB_PUBLIC } from '../env';
+import { CLOUD_OPEN } from './cloud';
 import { buildLog, postPath, posts, releases } from './publications';
 
 export interface SitePage {
@@ -75,7 +76,9 @@ export const siteMap: SitePage[] = [
   {
     path: '/cloud',
     title: 'Cloud',
-    description: "Logbird Cloud will run the same open-source codebase for you. It isn't open yet. Join the waitlist. Pricing isn't set yet.",
+    description: CLOUD_OPEN
+      ? "Logbird Cloud runs the same open-source codebase for you. Early access for invited teams: request access or sign in. Pricing isn't set yet."
+      : "Logbird Cloud will run the same open-source codebase for you. It isn't open yet. Join the waitlist. Pricing isn't set yet.",
     section: 'product',
     priority: 0.9,
     changefreq: 'weekly',
@@ -227,7 +230,7 @@ export const siteMap: SitePage[] = [
   {
     path: '/contact',
     title: 'Contact',
-    description: 'Join the Logbird Cloud waitlist or send us a question. We store your email only to contact you about Logbird. No trackers.',
+    description: `${CLOUD_OPEN ? 'Request access to Logbird Cloud' : 'Join the Logbird Cloud waitlist'} or send us a question. We store your email only to contact you about Logbird. No trackers.`,
     section: 'company',
     priority: 0.7,
     changefreq: 'monthly',

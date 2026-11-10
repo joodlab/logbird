@@ -29,6 +29,16 @@ describe('Lighthouse SEO pass mark', () => {
     expect(robotsAllowsCrawling('')).toBe(false);
   });
 
+  it('keeps crawlers off console and API paths only when the console shares the origin', () => {
+    const shared = robotsTxt(siteConfigFrom({ ...RELEASED_ENV, WEB_APP_URL: RELEASED_ENV.WEB_SITE_URL }));
+    expect(robotsAllowsCrawling(shared)).toBe(true);
+    for (const path of ['/api/', '/v1/', '/login', '/p/', '/docs']) {
+      expect(shared).toContain(`\nDisallow: ${path}\n`);
+    }
+    const separate = robotsTxt(siteConfigFrom({ ...RELEASED_ENV, WEB_APP_URL: 'https://console.example.test' }));
+    expect(separate).not.toContain('Disallow');
+  });
+
   it('keeps is-crawlable in the mark for ready pages once the site is indexable', () => {
     // An accidental noindex on a ready page: full SEO 66, everything else perfect.
     const noindexed = { path: '/about', seo: 66, 'seo-content': 100 };

@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { legalPagesReady, RELEASED_ENV } from '../test/launch-ready';
-import type { Post } from './publications';
+import type { Post, Release } from './publications';
 
 const post: Post = {
   slug: 'qa-first-post',
@@ -19,9 +19,13 @@ const post: Post = {
  * everything that reads them (site-map readiness, prerender paths, discovery, findPost and the route loader) sees the
  * same data. Modules that derive from the lists at load time are imported afterwards.
  */
-async function withPublications(fixtures: { posts?: Post[]; buildLog?: { date: string; title: string; summary: string }[] } = {}) {
+async function withPublications(
+  fixtures: { posts?: Post[]; buildLog?: { date: string; title: string; summary: string }[]; releases?: Release[] } = {},
+) {
   vi.resetModules();
   const publications = await import('./publications');
+  // Releases default to none here, so each test states the published versions it relies on.
+  publications.releases.splice(0, Number.POSITIVE_INFINITY, ...(fixtures.releases ?? []));
   publications.posts.push(...(fixtures.posts ?? []));
   publications.buildLog.push(...(fixtures.buildLog ?? []));
   await legalPagesReady();
@@ -63,6 +67,13 @@ describe('publications', () => {
     expect(head.links[0]?.href).toMatch(/\/blog\/qa-first-post$/);
     expect(head.meta).toContainEqual({ property: 'og:type', content: 'article' });
     expect(head.scripts[0]?.children).toContain('"@type":"BlogPosting"');
+  });
+
+  it('a published release makes the changelog ready and lists it', async () => {
+    const release: Release = { version: '9.8.7', date: '2026-11-08', highlights: ['Fictional highlight for QA.'] };
+    const { siteMap, discovery, released } = await withPublications({ releases: [release] });
+    expect(siteMap.getPage('/changelog').ready).toBe(true);
+    expect(discovery.sitemapXml(released)).toContain('<loc>https://site.example.test/changelog</loc>');
   });
 
   it('a build-log entry makes the changelog ready', async () => {

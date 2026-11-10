@@ -6,6 +6,15 @@ path: /cloud
 
 # Cloud and pricing
 
+> **Cloud open (`WEB_APP_URL` set, see README § Cloud CTA rule).** Hero body: "Logbird Cloud runs the same open-source
+> codebase you can self-host. We run the servers, the upgrades and the backups. It's in early access: sign-ups are
+> limited to invited teams for now. Request access, or sign in if you've been invited." CTAs: Request access → `/contact`
+> · Sign in → `<WEB_APP_URL>/login`. Status panel: Logbird Cloud — Early access · Invited teams; Pricing — Isn't set yet ·
+> Published before sign-ups open. Cloud card: "Early access" / "We run it for you. Open to invited teams for now." FAQ:
+> "When can everyone sign up?" (no date; request access); region: "We'll publish the hosting region with the Cloud's
+> launch terms. Ask us before you send production data. If your data must stay in a particular place, self-host
+> Logbird." Closing band: "Want early access?" The waitlist variants below apply while `WEB_APP_URL` is unset.
+
 ## hero
 
 - **id:** `hero`

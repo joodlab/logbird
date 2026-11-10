@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { ACCESS_CTA } from '../../lib/cloud';
 import { ButtonLink } from './button-link';
 import { LogStack } from './log-stack';
 import { CTA_BODY, SelfHostCta } from './self-host-cta';
@@ -17,7 +18,7 @@ export function CtaBand({ title = 'Start with one event.', body = CTA_BODY, note
             <p className="lead">{body}</p>
             <div className="flex flex-wrap gap-3 pt-2">
               <ButtonLink size="lg" to="/contact">
-                Join the waitlist
+                {ACCESS_CTA}
               </ButtonLink>
               <SelfHostCta />
             </div>

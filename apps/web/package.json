@@ -15,6 +15,7 @@
     "test": "vitest run",
     "media": "tsx scripts/media.ts",
     "og": "tsx scripts/og.ts",
+    "releases:sync": "tsx scripts/releases.ts && biome format --write src/lib/releases.snapshot.ts",
     "lighthouse": "node --import tsx scripts/lighthouse.mjs",
     "capture": "node --import tsx scripts/capture.mjs",
     "clean": "git clean -xdf .cache .turbo .output .nitro .tanstack .tmp public/media public/og node_modules",

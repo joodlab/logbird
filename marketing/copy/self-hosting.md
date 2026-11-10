@@ -6,6 +6,12 @@ path: /self-hosting
 
 # Self-hosting
 
+> **Published images (since 0.1.0).** With `WEB_GITHUB_PUBLIC=true` the quickstart clones the latest release tag and
+> runs `docker compose pull` + `docker compose up -d --no-build` (`apps/web/src/lib/selfhost.ts`, checked against
+> docs/self-hosting.md); the version comes from the published release list. Building from source is linked, not shown.
+> "Published images" is no longer in "Not there yet". Coolify note: "Upgrades and restores through Coolify are
+> documented but not yet verified end to end."
+
 ## hero
 
 - **id:** `hero`

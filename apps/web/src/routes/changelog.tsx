@@ -2,19 +2,16 @@ import { createFileRoute } from '@tanstack/react-router';
 import { ScreenshotFrame } from '../components/marketing/frame';
 import { Rich } from '../components/marketing/rich';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
-import { buildLog, publicationDate as longDate, newestFirst, type Release, releases } from '../lib/publications';
+import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
+import { buildLog, publicationDate as longDate, newestFirst } from '../lib/publications';
+import { byVersionDesc, type Release, releases, releaseUrl } from '../lib/releases';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/changelog')({ head: () => pageHead('/changelog'), component: ChangelogPage });
 
-// Copy: marketing/copy/changelog.md. Maintainers add published entries to publications.ts.
-const releaseGroups: { key: keyof Omit<Release, 'version' | 'date'>; title: string }[] = [
-  { key: 'upgrade', title: 'Upgrade notes' },
-  { key: 'security', title: 'Security' },
-  { key: 'added', title: 'Added' },
-  { key: 'changed', title: 'Changed' },
-  { key: 'fixed', title: 'Fixed' },
-];
+// Copy: marketing/copy/changelog.md. Releases come from GitHub and CHANGELOG.md (src/lib/releases.ts); the build log from
+// publications.ts.
+const releaseNotesHref = (release: Release) => (GITHUB_PUBLIC && GITHUB_URL ? releaseUrl(GITHUB_URL, release) : undefined);
 
 function Empty({ children }: { children: string }) {
   return <p className="panel mt-8 p-6 text-muted-foreground">{children}</p>;
@@ -26,7 +23,7 @@ function ChangelogPage() {
       <PageHero
         eyebrow="Changelog"
         lead={
-          <Rich text="Two lists live here. **Releases** follow the repository's `CHANGELOG.md`: what changed in each version, and anything you must do to upgrade. The **build log** is a short post for each day of work, showing what we shipped with a real capture from the product." />
+          <Rich text="Two lists live here. **Releases** are the versions published on GitHub, with the highlights from the repository's `CHANGELOG.md`; each links to its full notes and upgrade steps. The **build log** is a short post for each day of work, showing what we shipped with a real capture from the product." />
         }
         title="What changed, and when."
       />
@@ -35,36 +32,42 @@ function ChangelogPage() {
         <SectionHeader id="releases-title" title="Releases" />
         {releases.length ? (
           <ol className="mt-8 flex flex-col gap-6">
-            {newestFirst(releases).map((release) => (
-              <li className="panel flex flex-col gap-4 p-5 md:p-6" key={release.version}>
-                <h3 className="font-semibold text-xl">
-                  {release.version}{' '}
-                  <time className="ms-2 font-normal text-base text-muted-foreground" dateTime={release.date}>
-                    {longDate(release.date)}
-                  </time>
-                </h3>
-                {releaseGroups.map((group) =>
-                  release[group.key]?.length ? (
-                    <div className="flex flex-col gap-2" key={group.key}>
-                      <h4 className="font-semibold text-sm uppercase tracking-wider">{group.title}</h4>
-                      <ul className="flex list-disc flex-col gap-1 ps-5 text-muted-foreground">
-                        {release[group.key]?.map((item, index) => (
-                          // biome-ignore lint/suspicious/noArrayIndexKey: items are positional and may repeat; the list never reorders
-                          <li key={index}>
-                            <Rich text={item} />
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null,
-                )}
-              </li>
-            ))}
+            {[...releases].sort(byVersionDesc).map((release, index) => {
+              const href = releaseNotesHref(release);
+              return (
+                <li className="panel flex flex-col gap-4 p-5 md:p-6" key={release.version}>
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <h3 className="font-semibold text-xl">
+                      <span className="sr-only">Version </span>
+                      {release.version}
+                    </h3>
+                    <time className="text-base text-muted-foreground" dateTime={release.date}>
+                      {longDate(release.date)}
+                    </time>
+                    {index === 0 ? <span className="rounded-full border px-2 py-0.5 font-mono text-muted-foreground text-xs">Latest</span> : null}
+                  </div>
+                  {release.highlights.length ? (
+                    <ul className="flex list-disc flex-col gap-1 ps-5 text-muted-foreground">
+                      {release.highlights.map((item) => (
+                        <li key={item}>
+                          <Rich text={item} />
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {href ? (
+                    <p className="text-sm">
+                      <a className="text-link" href={href}>
+                        Full release notes, upgrade steps and images for {release.version}
+                      </a>
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
           </ol>
         ) : (
-          <Empty>
-            Nothing has been released yet. The first release, 0.1.0, is in progress and will list everything since the start of the project.
-          </Empty>
+          <Empty>Nothing has been released yet. The first release will list everything since the start of the project.</Empty>
         )}
       </Section>
 
