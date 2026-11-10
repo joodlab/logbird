@@ -52,10 +52,10 @@ const coAuthorValue = /^(.+?)[ \t]*<[ \t]*([^>\n]+?)[ \t]*>[ \t]*$/;
 /**
  * The `git log` format parseLog reads. Git itself parses the trailer block (`%(trailers)`, the same rules as
  * `git interpret-trailers`), so a co-author named in prose, a fenced example or above a `---` divider is never
- * credited, and one after `(cherry picked from commit …)` or among `Signed-off-by:` lines is. Authors go through the
- * repository's `.mailmap` (`%aN`/`%aE`); co-authors do too, via applyMailmap().
+ * credited, and one after `(cherry picked from commit …)` or among `Signed-off-by:` lines is. Identities stay raw
+ * here; applyMailmap() then maps authors and co-authors alike through the repository's `.mailmap`.
  */
-export const LOG_FORMAT = '%H%x1f%aN%x1f%aE%x1f%(trailers:key=Co-authored-by,valueonly,unfold,separator=%x1d)%x1f%B%x1e';
+export const LOG_FORMAT = '%H%x1f%an%x1f%ae%x1f%(trailers:key=Co-authored-by,valueonly,unfold,separator=%x1d)%x1f%B%x1e';
 
 /** The message's final paragraph, where Conventional Commits footers such as `BREAKING CHANGE:` live. */
 const lastParagraph = (body) =>
@@ -105,10 +105,16 @@ export function parseLog(log, config) {
     });
 }
 
+// GitHub reports the address a commit was made with; logins are found by that raw address or the .mailmap one.
 function identity(person, logins, accountTypes) {
-  const login = logins.get(person.email.toLowerCase());
+  const login = logins.get(person.email.toLowerCase()) ?? (person.rawEmail && logins.get(person.rawEmail.toLowerCase()));
   return { ...person, login, type: accountTypes.get(login), key: login?.toLowerCase() ?? person.email.toLowerCase() };
 }
+
+// Both the identity as committed and its .mailmap identity must pass: a mailmap line can't turn an agent mailbox's
+// work into a human's credit.
+const credited = (person) =>
+  isPerson(person) && (person.rawEmail === undefined || isPerson({ ...person, name: person.rawName, email: person.rawEmail }));
 
 // Display names keep letters, digits and a little punctuation; nothing that markdown or HTML could interpret.
 const safeName = (name) => name.replace(/[^\p{L}\p{N} .'-]/gu, '').trim();
@@ -118,7 +124,7 @@ export function summarize(commits, previous, logins, accountTypes = new Map()) {
   const peopleFor = (commit) =>
     commit.authors
       .map((person) => identity(person, logins, accountTypes))
-      .filter((person) => isPerson(person) && (person.login || safeName(person.name)));
+      .filter((person) => credited(person) && (person.login || safeName(person.name)));
   // Identities merge only by verified GitHub login (several emails, one account) or by the repository's .mailmap,
   // never by display name: two people can share one. Inline credits and Thank you use the same keys.
   const unique = (people) => [...new Map(people.map((person) => [person.key, person])).values()];
@@ -129,7 +135,11 @@ export function summarize(commits, previous, logins, accountTypes = new Map()) {
   // Nobody is a "first-time contributor" in the very first release.
   const firstRelease = previous.length === 0;
   return {
-    changes: commits.filter((commit) => isPerson(identity(commit.authors[0], logins, accountTypes))).length,
+    // A change counts when its author is credited, by the same rule as the credits themselves.
+    changes: commits.filter((commit) => {
+      const author = identity(commit.authors[0], logins, accountTypes);
+      return credited(author) && (author.login || safeName(author.name));
+    }).length,
     contributors: [...people.values()]
       .map((person) => ({
         ...person,
@@ -155,7 +165,7 @@ function escapeMarkdown(text) {
 export function compose({ version, intro, commits, summary, config }) {
   // Validate both places changelogithub/wrapper can credit identities, before producing any output.
   for (const person of [...commits.flatMap((commit) => commit.resolvedAuthors ?? []), ...summary.contributors]) {
-    if (!isPerson(person) || (person.login ? !/^[a-z\d-]+$/i.test(person.login) : !safeName(person.name)))
+    if (!credited(person) || (person.login ? !/^[a-z\d-]+$/i.test(person.login) : !safeName(person.name)))
       throw new Error('Excluded or invalid contributor reached release notes; refusing to emit notes.');
   }
   const safeCommits = commits.map((commit) => ({
@@ -180,31 +190,31 @@ export function compose({ version, intro, commits, summary, config }) {
 }
 
 /**
- * Maps every co-author through the repository's .mailmap (`git check-mailmap`), the explicit alias list for a person
- * who commits under several addresses. Authors are already mapped by LOG_FORMAT's `%aN`/`%aE`.
+ * Maps every author and co-author through the repository's .mailmap, the explicit alias list for a person who
+ * commits under several addresses, keeping the identity as committed in `rawName`/`rawEmail`. `check` takes
+ * `Name <email>` contacts and returns one mapped contact per line (`git check-mailmap --stdin`, so names beginning
+ * with `-` and long batches are safe).
  */
-export function applyMailmap(commits, gitCommand = (...args) => run('git', args)) {
-  const contacts = [...new Set(commits.flatMap((commit) => commit.authors.slice(1).map((person) => `${person.name} <${person.email}>`)))];
+export function applyMailmap(commits, check = (contacts) => run('git', ['check-mailmap', '--stdin'], `${contacts.join('\n')}\n`)) {
+  const contact = (person) => `${person.name} <${person.email}>`;
+  const contacts = [...new Set(commits.flatMap((commit) => commit.authors.map(contact)))];
   const mapped = new Map();
-  for (let offset = 0; offset < contacts.length; offset += 100) {
-    const batch = contacts.slice(offset, offset + 100);
-    const lines = gitCommand('check-mailmap', ...batch)
-      .split('\n')
-      .filter(Boolean);
-    if (lines.length !== batch.length) throw new Error('git check-mailmap returned an unexpected number of identities.');
-    for (const [index, contact] of batch.entries()) mapped.set(contact, lines[index]);
+  if (contacts.length) {
+    const lines = check(contacts).split('\n').filter(Boolean);
+    if (lines.length !== contacts.length) throw new Error('git check-mailmap returned an unexpected number of identities.');
+    for (const [index, value] of contacts.entries()) mapped.set(value, lines[index]);
   }
   for (const commit of commits) {
-    commit.authors = commit.authors.map((person, index) => {
-      if (index === 0) return person;
-      const [, name, email] = mapped.get(`${person.name} <${person.email}>`)?.match(/^(.*?)\s*<([^>]*)>$/) ?? [];
-      return name === undefined ? person : { name: name.trim(), email: email.trim() };
+    commit.authors = commit.authors.map((person) => {
+      const [, name, email] = mapped.get(contact(person))?.match(/^(.*?)\s*<([^>]*)>$/) ?? [];
+      if (name === undefined) throw new Error(`git check-mailmap returned no identity for ${contact(person)}.`);
+      return { name: name.trim(), email: email.trim(), rawName: person.name, rawEmail: person.email };
     });
   }
   return commits;
 }
 
-const run = (command, args) => execFileSync(command, args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+const run = (command, args, input) => execFileSync(command, args, { encoding: 'utf8', input, maxBuffer: 32 * 1024 * 1024 });
 const git = (...args) => run('git', args).trim();
 
 export function previousTag(to, gitCommand = git) {
@@ -218,10 +228,16 @@ export function previousTag(to, gitCommand = git) {
 export function resolveLogins(allCommits, repo, gh = (...args) => run('gh', args)) {
   const logins = new Map();
   const [owner, name] = repo.split('/');
-  // One commit per new email is enough: GitHub maps an address to the same account on every commit.
+  // One commit per new address as committed is enough: GitHub maps an address to the same account on every commit.
+  // Its answer is keyed by that raw address, and also by the address's .mailmap identity.
   const seen = new Set();
+  const mailmapped = new Map(
+    allCommits.flatMap((commit) =>
+      commit.authors.filter((person) => person.rawEmail).map((person) => [person.rawEmail.toLowerCase(), person.email.toLowerCase()]),
+    ),
+  );
   const commits = allCommits.filter((commit) => {
-    const fresh = commit.authors.map((person) => person.email.toLowerCase()).filter((email) => !seen.has(email));
+    const fresh = commit.authors.map((person) => (person.rawEmail ?? person.email).toLowerCase()).filter((email) => !seen.has(email));
     for (const email of fresh) seen.add(email);
     return fresh.length > 0;
   });
@@ -241,7 +257,11 @@ export function resolveLogins(allCommits, repo, gh = (...args) => run('gh', args
       for (const author of commit.authors.nodes) {
         if (typeof author.email !== 'string' || (author.user && typeof author.user.login !== 'string'))
           throw new Error('Incomplete GitHub author lookup.');
-        if (author.user) logins.set(author.email.toLowerCase(), author.user.login);
+        if (author.user) {
+          logins.set(author.email.toLowerCase(), author.user.login);
+          const canonical = mailmapped.get(author.email.toLowerCase());
+          if (canonical && !logins.has(canonical)) logins.set(canonical, author.user.login);
+        }
       }
     }
   }

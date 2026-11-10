@@ -129,15 +129,19 @@ type are checked against one set of rules:
 - agent display names such as "Claude Opus 5.5", "Cursor Agent" or "Gemini CLI",
   except for a person GitHub resolves to a User account;
 - names that sanitize to nothing;
-- reserved placeholder domains (`example.*`, `.test`, `.example`, `.invalid`,
-  `localhost`).
+- reserved placeholder domains: `example.com`, `example.net`, `example.org`
+  and the `.example`, `.test`, `.invalid` and `localhost` domains, with any
+  subdomain.
 
 The list names known agents: an agent with an unknown address and name would be
 credited, so extend the rules (and their tests) when a new one appears. Identities
 merge only by a verified GitHub login or by the repository's `.mailmap`, which
 also applies to co-author trailers (`git check-mailmap`); two people who share a
 display name are never merged. Someone who commits under an address GitHub can't
-map should add a `.mailmap` line pointing it at their canonical identity. Exclusions apply to inline
+map should add a `.mailmap` line pointing it at their canonical identity; GitHub
+logins are still looked up by the address each commit was made with. Both the
+identity as committed and its `.mailmap` identity must pass the rules above, so a
+`.mailmap` line can never turn an agent's commits or trailers into human credit. Exclusions apply to inline
 credits, contributor totals and thank-you entries. Missing/truncated identity
 responses or an excluded identity reaching rendering abort notes generation before
 any notes are emitted. Invalid Highlights or failed preflight likewise prevent

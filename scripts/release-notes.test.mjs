@@ -264,11 +264,22 @@ test('.mailmap maps co-authors (and LOG_FORMAT authors) to one canonical identit
       '-F',
       join(directory, 'message.txt'),
     );
-    const commits = applyMailmap(parseLog(git('log', `--format=${LOG_FORMAT}`), config), git);
-    assert.deepEqual(commits[0].authors, [
-      { name: 'Owner Name', email: 'owner@users.noreply.github.com' },
-      { name: 'Owner Name', email: 'owner@users.noreply.github.com' },
-    ]);
+    const check = (contacts) =>
+      execFileSync('git', ['check-mailmap', '--stdin'], { cwd: directory, encoding: 'utf8', input: `${contacts.join('\n')}\n` });
+    const commits = applyMailmap(parseLog(git('log', `--format=${LOG_FORMAT}`), config), check);
+    assert.deepEqual(
+      commits[0].authors.map(({ name, email }) => ({ name, email })),
+      [
+        { name: 'Owner Name', email: 'owner@users.noreply.github.com' },
+        { name: 'Owner Name', email: 'owner@users.noreply.github.com' },
+      ],
+    );
+    assert.deepEqual(
+      commits[0].authors.map((person) => person.rawName),
+      ['Old Name', 'Owner Name'],
+    );
+    // A co-author name beginning with "-" is data, not an option.
+    assert.equal(check(['-k <dash@users.noreply.github.com>']).trim(), '-k <dash@users.noreply.github.com>');
     const summary = summarize(commits, [], new Map([['owner@users.noreply.github.com', 'owner']]));
     assert.deepEqual(credits(summary), [{ label: '@owner', first: false }]);
     assert.deepEqual(
@@ -572,4 +583,51 @@ test('identity lookups ask GitHub once per new email', () => {
   assert.equal(queries.length, 1);
   assert.equal((queries[0].match(/object\(oid/g) ?? []).length, 1);
   assert.equal(logins.get('alice@users.noreply.github.com'), 'alice');
+});
+
+test('.mailmap aliases keep the GitHub login GitHub reports for the address as committed', () => {
+  // Pat's newest commit used an unlinked laptop address; the older one the linked address. .mailmap joins them.
+  const commits = [
+    { ...commit('feat: newer'), shortHash: 'n'.repeat(7) },
+    { ...commit('fix: older'), shortHash: 'o'.repeat(7) },
+  ];
+  commits[0].authors = [{ name: 'Pat', email: 'pat@linked.dev', rawName: 'Pat', rawEmail: 'pat@laptop.local' }];
+  commits[1].authors = [{ name: 'Pat', email: 'pat@linked.dev', rawName: 'Pat', rawEmail: 'pat@linked.dev' }];
+  const answers = { nnnnnnn: { email: 'pat@laptop.local', user: null }, ooooooo: { email: 'pat@linked.dev', user: { login: 'pat' } } };
+  const gh = (...args) => {
+    if (args[1] !== 'graphql') return JSON.stringify({ type: 'User' });
+    const oids = [...args.at(-1).matchAll(/oid: "(\w+)"/g)].map((match) => match[1]);
+    return JSON.stringify({
+      data: {
+        repository: Object.fromEntries(
+          oids.map((oid, index) => [`c${index}`, { authors: { nodes: [answers[oid]], pageInfo: { hasNextPage: false } } }]),
+        ),
+      },
+    });
+  };
+  const { logins, accountTypes } = resolveLogins(commits, 'acme/logbird', gh);
+  assert.equal(logins.get('pat@linked.dev'), 'pat');
+  const summary = summarize(commits, [], logins, accountTypes);
+  assert.deepEqual(credits(summary), [{ label: '@pat', first: false }]);
+  assert.deepEqual(
+    commits.map((entry) => entry.resolvedAuthors.map((person) => person.login)),
+    [['pat'], ['pat']],
+  );
+});
+
+test('a .mailmap line cannot launder an agent identity into human credit', () => {
+  const commits = [commit('feat: pair')];
+  commits[0].authors = [
+    { name: 'Human', email: 'human@users.noreply.github.com', rawName: 'Human', rawEmail: 'human@users.noreply.github.com' },
+    { name: 'Human', email: 'human@users.noreply.github.com', rawName: 'Raed Bahri', rawEmail: 'claude@joodlab.com' },
+  ];
+  const summary = summarize(commits, [], new Map());
+  assert.equal(commits[0].resolvedAuthors.length, 1);
+  assert.equal(summary.changes, 1);
+  // An agent-authored commit, even mailmapped to a human, is neither credited nor counted as a human change.
+  const agentCommit = [commit('fix: by agent')];
+  agentCommit[0].authors = [{ name: 'Human', email: 'human@users.noreply.github.com', rawName: 'Codex', rawEmail: 'codex@users.noreply.github.com' }];
+  const agentSummary = summarize(agentCommit, [], new Map());
+  assert.equal(agentSummary.changes, 0);
+  assert.deepEqual(agentSummary.contributors, []);
 });
