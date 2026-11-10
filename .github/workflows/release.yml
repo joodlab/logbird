@@ -37,8 +37,8 @@ jobs:
         run: echo "version=$(node scripts/check-version-consistency.mjs "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
       - uses: pnpm/action-setup@v4
       - name: Install release tooling
-        # Only the root package: the release tooling needs changelogithub, not the workspace apps.
-        run: pnpm install --frozen-lockfile --ignore-scripts --filter .
+        # No lifecycle scripts run in this job, which holds GH_TOKEN.
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Verify release tooling
         run: node --test scripts/release-notes.test.mjs scripts/release-preflight.test.mjs
       - name: Generate reviewed release notes

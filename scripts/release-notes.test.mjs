@@ -355,3 +355,66 @@ test('the summary line pluralizes changes', () => {
     /· 1 change from 1 contributor\n/,
   );
 });
+
+test('padded identities are trimmed before the exclusion rules run', () => {
+  const commits = parseLog(
+    record('feat: pair', 'Body.\n\nCo-authored-by:  Assistant  < cursoragent@cursor.com >\nCo-authored-by: QA <assistant@example.test >', [
+      ' Human ',
+      ' human@users.noreply.github.com ',
+    ]),
+    config,
+  );
+  assert.deepEqual(commits[0].authors, [
+    { name: 'Human', email: 'human@users.noreply.github.com' },
+    { name: 'Assistant', email: 'cursoragent@cursor.com' },
+    { name: 'QA', email: 'assistant@example.test' },
+  ]);
+  const summary = summarize(commits, [], new Map());
+  assert.deepEqual(
+    summary.contributors.map((person) => person.label),
+    ['Human'],
+  );
+  assert.doesNotMatch(compose({ version: 'v0.1.0', intro: '- Ship.', commits, summary, config }), /Assistant|QA/);
+});
+
+test('CRLF messages keep their type, scope, breaking marks and trailers', () => {
+  const [commit] = parseLog(
+    record('feat(sdk)!: remove old API', 'Details.\r\n\r\nBREAKING CHANGE: gone\r\nCo-authored-by: Jane <jane@users.noreply.github.com>').replace(
+      'remove old API\n\n',
+      'remove old API\r\n\r\n',
+    ),
+    config,
+  );
+  assert.deepEqual([commit.type, commit.scope, commit.description, commit.isBreaking], ['feat', 'sdk', 'remove old API', true]);
+  assert.deepEqual(
+    commit.authors.map((person) => person.name),
+    ['Human', 'Jane'],
+  );
+});
+
+test('an unknown type keeps its breaking mark under Other changes', () => {
+  const [commit] = parseLog(record('security(sdk)!: remove unsafe mode'), config);
+  assert.deepEqual([commit.type, commit.description, commit.isBreaking], ['other', 'security(sdk)!: remove unsafe mode', true]);
+});
+
+test('co-authors come only from the trailer block, matching git interpret-trailers', () => {
+  const bodies = {
+    trailers: 'Body.\n\nCo-authored-by: Jane <jane@users.noreply.github.com>\nSigned-off-by: Human <human@users.noreply.github.com>',
+    fencedThenProse: 'Example:\n\n```\nCo-authored-by: Jane Doe <jane@acme.io>\n```\n\nThat is how pairing is credited.',
+    fencedLast: 'Example:\n\n```\nCo-authored-by: Jane Doe <jane@acme.io>\n```',
+    mixedLastParagraph: 'Body.\n\nCo-authored-by: Jane <jane@users.noreply.github.com>\nand then some prose',
+    proseOnly: 'Use co-authored-by: Jane Doe <jane@acme.io> in prose.',
+    githubSquash: '* fix: a\n\n* fix: b\n\n---------\n\nCo-authored-by: Jane <jane@users.noreply.github.com>',
+  };
+  const expected = { trailers: ['Jane'], fencedThenProse: [], fencedLast: [], mixedLastParagraph: [], proseOnly: [], githubSquash: ['Jane'] };
+  for (const [key, body] of Object.entries(bodies)) {
+    const [commit] = parseLog(record('fix: x', body), config);
+    assert.deepEqual(
+      commit.authors.slice(1).map((person) => person.name),
+      expected[key],
+      key,
+    );
+    const parsed = execFileSync('git', ['interpret-trailers', '--parse'], { input: `fix: x\n\n${body}\n`, encoding: 'utf8' });
+    assert.equal(/^Co-authored-by: /im.test(parsed), expected[key].length > 0, `${key}: git interpret-trailers disagrees`);
+  }
+});

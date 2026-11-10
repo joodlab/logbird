@@ -42,8 +42,20 @@ export function highlights(markdown, version) {
 
 const conventional = /^([a-z]+)(?:\(([^)]+)\))?(!)?: (.+)$/i;
 const breakingFooter = /^BREAKING[ -]CHANGE:/m;
-// Only real trailer lines count: a co-author mentioned in prose is never credited.
-const coAuthorTrailer = /^Co-authored-by:[ \t]*(.+?)[ \t]*<([^>\n]+)>[ \t]*$/gim;
+const coAuthor = /^Co-authored-by:[ \t]*(.+?)[ \t]*<[ \t]*([^>\n]+?)[ \t]*>[ \t]*$/i;
+// Git trailer tokens have no spaces; Conventional Commits also allow a `BREAKING CHANGE:` footer among them.
+const trailerLine = /^(?:[A-Za-z0-9-]+|BREAKING CHANGE):/;
+
+/**
+ * Trailer lines, as `git interpret-trailers --parse` finds them: the message's last paragraph, and only when every
+ * line in it is a `Token: value` trailer (or an indented continuation). A co-author mentioned in prose, in a fenced
+ * example or anywhere before the final paragraph is never credited.
+ */
+export function trailers(body) {
+  const paragraphs = body.trim().split(/\n[ \t]*\n/);
+  const last = paragraphs.length && paragraphs.at(-1).trim() ? paragraphs.at(-1).split('\n') : [];
+  return last.length && last.every((line) => trailerLine.test(line) || /^[ \t]+\S/.test(line)) ? last : [];
+}
 // changelogen and changelogithub look scopes up in plain objects, so `constructor` or `__proto__` would resolve to an
 // Object.prototype member and crash rendering. Such scopes move into the description instead.
 const prototypeKey = (key) => key in Object.prototype;
@@ -58,8 +70,10 @@ export function parseLog(log, config) {
     .split('\x1e')
     .filter((record) => record.trim())
     .map((record) => {
-      const [sha, name, email, ...parts] = record.trim().split('\x1f');
-      const [message, ...lines] = parts.join('\x1f').split('\n');
+      const [sha, rawName, rawEmail, ...parts] = record.trim().split('\x1f');
+      // Identities are compared trimmed, so padding never slips an address past the exclusion rules.
+      const [name, email] = [rawName.trim(), rawEmail.trim()];
+      const [message, ...lines] = parts.join('\x1f').replace(/\r\n?/g, '\n').split('\n');
       const body = lines.join('\n');
       const match = message.match(conventional);
       const type = match?.[1].toLowerCase();
@@ -70,9 +84,14 @@ export function parseLog(log, config) {
       if (!commit || commit.type !== (known ? type : 'other')) throw new Error(`Could not parse commit ${sha}.`);
       commit.scope = prototypeKey(scope) ? '' : scope;
       if (scope && prototypeKey(scope)) commit.description = `${scope}: ${commit.description}`;
-      commit.authors = [{ name, email }, ...[...body.matchAll(coAuthorTrailer)].map(([, coName, coEmail]) => ({ name: coName, email: coEmail }))];
-      // Conventional Commits also mark breaking changes with a footer.
-      if (breakingFooter.test(body)) commit.isBreaking = true;
+      const coAuthors = trailers(body)
+        .map((line) => line.match(coAuthor))
+        .filter(Boolean)
+        .map(([, coName, coEmail]) => ({ name: coName.trim(), email: coEmail.trim() }));
+      commit.authors = [{ name, email }, ...coAuthors];
+      // `!` marks a breaking change whatever the type (an unknown type keeps it under Other changes), and so does a
+      // Conventional Commits `BREAKING CHANGE:` footer.
+      if (match?.[3] || breakingFooter.test(body)) commit.isBreaking = true;
       return commit;
     });
 }

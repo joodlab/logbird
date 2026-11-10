@@ -102,13 +102,15 @@ Style). The squash-merge PR title is the commit subject and changelog line; use
 scopes such as `server` or `sdk`; a section groups entries under a scope once that
 scope has more than one entry. A `!` before the colon, or a `BREAKING CHANGE:`
 footer in the commit body, puts the change in its own Breaking changes section.
-Subjects with an unknown or malformed type stay whole under Other changes, and `@`
-in a subject is defused so it never mentions an account.
+Subjects with an unknown or malformed type stay whole under Other changes (a `!`
+still marks them breaking), and `@` in a subject is defused so it never mentions an
+account. CRLF messages are normalized first.
 
 The wrapper retains the stricter contributor policy because changelogithub's
 native name-only bot filter does not cover AI email/login identities. It parses
-git authors and line-anchored `Co-authored-by:` trailers itself (a co-author
-named in prose is never credited), then checks them, their GitHub logins and
+git authors and `Co-authored-by:` lines from the message's trailer block itself,
+the final paragraph as `git interpret-trailers --parse` sees it (a co-author named
+in prose or a fenced example is never credited), trims every identity, then checks them, their GitHub logins and
 account types against one set of rules: `[bot]`/Bot; known automation and AI
 accounts and logins (Dependabot, GitHub Actions, Codex, Claude, Copilot, Cursor,
 Devin, Gemini Code Assist, Jules); every address at openai.com, anthropic.com,
