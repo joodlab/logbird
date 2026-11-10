@@ -6,6 +6,16 @@ Git tags include `v`; package versions, image tags and `LOGBIRD_VERSION` omit it
 The first release is prepared as 0.1.0; the workflow must finish before its images
 or GitHub Release can be treated as available.
 
+## Choosing the version
+
+While Logbird is below 1.0, bump the **patch** number (0.1.0 → 0.1.1 → 0.1.2) for
+every release, including new features, fixes and optional new settings. Bump the
+**minor** number (0.1.x → 0.2.0) only for a breaking change: something a self-hoster
+or API client must act on, such as a removed or renamed setting, an API or SDK change
+that breaks existing callers, or a migration that can't run unattended. Say which
+it is in the release PR. A `!` or `BREAKING CHANGE:` commit since the last tag means
+the next release is a minor bump.
+
 ## Prepare a release
 
 1. Start a release PR from master. Add `## X.Y.Z` to CHANGELOG.md with one to
@@ -41,7 +51,7 @@ or GitHub Release can be treated as available.
 
    To simulate the next release, put its version and reviewed Highlights in a
    scratch Markdown file, then use `--changelog .tmp/next-changelog.md --version
-   v0.2.0 --to origin/master --from v0.1.0`. This does not edit CHANGELOG.md or tags.
+   v0.1.1 --to origin/master --from v0.1.0`. This does not edit CHANGELOG.md or tags.
 4. Build all four images locally (below), validate both Compose configurations,
    and prove fresh install, SMTP login, workspace/project/key creation, ingest/read,
    exports, retention and matched fresh-storage restore using fictional data.

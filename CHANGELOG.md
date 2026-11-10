@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.2.0
+## 0.1.1
 
 ### Highlights
 
@@ -27,7 +27,7 @@ GitHub reports them as users.
 
 ### Upgrade and known limits
 
-- No migrations. Self-hosters update `LOGBIRD_VERSION` to `0.2.0` (the Compose
+- No migrations. Self-hosters update `LOGBIRD_VERSION` to `0.1.1` (the Compose
   default) and redeploy; leave `LOGBIRD_SITE_URL` empty.
 - The marketing site image is not a release artifact; the hosted instance builds it
   from `docker-compose.site.yml` (see [Coolify](docs/coolify.md)).

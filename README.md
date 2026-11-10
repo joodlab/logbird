@@ -25,15 +25,15 @@ Send events through HTTP or the TypeScript SDK. Search who did what, inspect bef
 
 ## Quick start
 
-Requires Docker Engine with Docker Compose and an SMTP provider for sign-in codes. The release ships `ghcr.io/joodlab/logbird-{app,server,worker,migrate}:0.2.0`.
+Requires Docker Engine with Docker Compose and an SMTP provider for sign-in codes. The release ships `ghcr.io/joodlab/logbird-{app,server,worker,migrate}:0.1.1`.
 
 ```sh
 git clone https://github.com/joodlab/logbird.git
 cd logbird
 sh scripts/selfhost-init.sh
 # Configure APP_URL and SMTP in .env before starting.
-LOGBIRD_VERSION=0.2.0 docker compose pull
-LOGBIRD_VERSION=0.2.0 docker compose up -d
+LOGBIRD_VERSION=0.1.1 docker compose pull
+LOGBIRD_VERSION=0.1.1 docker compose up -d
 ```
 
 Open <http://localhost:4600>, sign in with the emailed code, and create a workspace and project. Keep the API and data services private; expose the console origin only. Read the [self-hosting guide](docs/self-hosting.md) for TLS, backups and upgrades.

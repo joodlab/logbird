@@ -88,7 +88,7 @@ GitHub Actions runs the required `Quality` check, PR-title lint and Gitleaks on 
 
 ## Releases and changelog
 
-Releases are tag-driven: a maintainer updates `CHANGELOG.md` with 1–3 `### Highlights` bullets, bumps versions and pushes a stable `vX.Y.Z` tag. Preflight generates notes with changelogithub before publishing multi-arch images; the GitHub Release follows only when all four images succeed.
+Releases are tag-driven: a maintainer updates `CHANGELOG.md` with 1–3 `### Highlights` bullets, bumps versions and pushes a stable `vX.Y.Z` tag. Below 1.0, every release bumps the patch number (0.1.0 → 0.1.1); only a breaking change bumps the minor number (0.1.x → 0.2.0), see [choosing the version](docs/releases.md#choosing-the-version). Preflight generates notes with changelogithub before publishing multi-arch images; the GitHub Release follows only when all four images succeed.
 
 The squash-merge PR title becomes the commit subject and the changelog line. Use a concise description of the resulting behavior. Add a scope for the affected area, such as `fix(server): handle retries`; related changes are grouped by scope. Add `!` before the colon for a breaking change, such as `feat(sdk)!: require project keys`, to put it in **Breaking changes**.
 

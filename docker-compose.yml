@@ -41,7 +41,7 @@ services:
   # Published roles are pulled by default; docker-compose.build.yml opts into source builds.
   migrate:
     pull_policy: always
-    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-migrate:${LOGBIRD_VERSION:-0.2.0}
+    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-migrate:${LOGBIRD_VERSION:-0.1.1}
     environment: &runtime
       NODE_ENV: production
       APP_URL: ${APP_URL:-http://localhost:4600}
@@ -78,7 +78,7 @@ services:
     restart: 'no'
   server:
     pull_policy: always
-    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-server:${LOGBIRD_VERSION:-0.2.0}
+    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-server:${LOGBIRD_VERSION:-0.1.1}
     environment:
       <<: *runtime
       PORT: '4601'
@@ -88,7 +88,7 @@ services:
     stop_grace_period: 45s
   worker:
     pull_policy: always
-    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-worker:${LOGBIRD_VERSION:-0.2.0}
+    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-worker:${LOGBIRD_VERSION:-0.1.1}
     environment: *runtime
     depends_on:
       migrate: {condition: service_completed_successfully}
@@ -97,7 +97,7 @@ services:
     stop_grace_period: 5m
   app:
     pull_policy: always
-    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-app:${LOGBIRD_VERSION:-0.2.0}
+    image: ${LOGBIRD_IMAGE_REGISTRY:-ghcr.io/joodlab}/logbird-app:${LOGBIRD_VERSION:-0.1.1}
     environment:
       PORT: '4600'
       HOST: '0.0.0.0'
