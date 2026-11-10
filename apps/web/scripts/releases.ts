@@ -63,19 +63,28 @@ export async function fetchGitHubReleases(
   repo: string,
   { token, fetchImpl = fetch }: { token?: string; fetchImpl?: typeof fetch } = {},
 ): Promise<Omit<Release, 'highlights'>[]> {
-  const response = await fetchImpl(`https://api.github.com/repos/${repo}/releases?per_page=100`, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'logbird-web-build',
-      'X-GitHub-Api-Version': '2022-11-28',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) {
-    throw new Error(`GitHub answered ${response.status}`);
+  // Follow GitHub's `Link: rel="next"` pagination (at most 20 pages of 100), so no release silently drops off.
+  const body: GitHubRelease[] = [];
+  let next: string | undefined = `https://api.github.com/repos/${repo}/releases?per_page=100`;
+  for (let page = 0; next && page < 20; page++) {
+    const response: Response = await fetchImpl(next, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'logbird-web-build',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      throw new Error(`GitHub answered ${response.status}`);
+    }
+    body.push(...((await response.json()) as GitHubRelease[]));
+    next = response.headers.get('link')?.match(/<([^>]+)>;\s*rel="next"/)?.[1];
   }
-  const body = (await response.json()) as GitHubRelease[];
+  if (next) {
+    throw new Error('GitHub has more than 2,000 releases; raise the page limit.');
+  }
   return body.flatMap((release) => {
     const version = release.tag_name.match(STABLE_TAG)?.[1];
     if (!version || release.draft || release.prerelease || !release.published_at) {

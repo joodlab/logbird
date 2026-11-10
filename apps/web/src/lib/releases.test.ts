@@ -72,6 +72,19 @@ describe('release list', () => {
     expect(fetchImpl).toHaveBeenCalledWith('https://api.github.com/repos/example-org/example/releases?per_page=100', expect.anything());
   });
 
+  it('follows pagination so older releases never drop off', async () => {
+    const first = 'https://api.github.com/repos/example-org/example/releases?per_page=100';
+    const second = 'https://api.github.com/repos/example-org/example/releases?per_page=100&page=2';
+    const fetchImpl = vi.fn(async (url: string) =>
+      url === first
+        ? new Response(JSON.stringify([githubRelease('v9.9.0')]), { headers: { link: `<${second}>; rel="next", <${second}>; rel="last"` } })
+        : Response.json([githubRelease('v9.8.0')]),
+    ) as unknown as typeof fetch;
+    const releases = await loadReleases({ githubUrl: 'https://github.com/example-org/example', githubPublic: true, changelog, fetchImpl });
+    expect(releases.map((release) => release.version)).toEqual(['9.9.0', '9.8.0']);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it('falls back to the snapshot when GitHub fails, and never asks GitHub for a private repository', async () => {
     const log = vi.fn();
     const failing = respond({ message: 'rate limited' }, 403);
