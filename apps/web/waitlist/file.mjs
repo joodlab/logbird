@@ -8,9 +8,9 @@
 // (development) it is a loopback TCP port derived from the file's path (20000-29999); if an unrelated program happens to hold that
 // port, writes wait and then fail with an error, never proceed unlocked.
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, readdir, readFile, readlink, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { retentionExpiry } from './expiry.mjs';
 
 export { retentionExpiry };
@@ -72,14 +72,38 @@ async function acquire(file) {
   }
 }
 
+/**
+ * The file's real path, symlinks resolved, so every alias of one file shares one lock, and a rewrite renames over
+ * the file that holds the records rather than replacing a symlink and leaving the records in its target.
+ */
+async function canonical(file) {
+  const absolute = resolve(file);
+  try {
+    return await realpath(absolute);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      throw error;
+    }
+  }
+  // Not there yet. A dangling symlink points at the file appends will create.
+  const link = await lstat(absolute).catch(() => undefined);
+  const target = link?.isSymbolicLink() ? resolve(dirname(absolute), await readlink(absolute)) : absolute;
+  const parent = await realpath(dirname(target)).catch(() => dirname(target));
+  return join(parent, basename(target));
+}
+
 let local = Promise.resolve();
 
-/** Runs `task` while holding the file's lock: queued within this process, exclusive across processes. */
+/**
+ * Runs `task` with the file's real path while holding its lock: queued within this process, exclusive across
+ * processes. Every read and write inside `task` must use the path it is given.
+ */
 export function withWaitlistLock(file, task) {
   const run = local.then(async () => {
-    const lock = await acquire(file);
+    const path = await canonical(file);
+    const lock = await acquire(path);
     try {
-      return await task();
+      return await task(path);
     } finally {
       await new Promise((done) => lock.close(() => done()));
     }
@@ -93,9 +117,9 @@ export function withWaitlistLock(file, task) {
 
 /** Appends one record as a JSONL line. */
 export function appendWaitlistRecord(file, record) {
-  return withWaitlistLock(file, async () => {
-    await mkdir(dirname(file), { recursive: true });
-    await appendFile(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+  return withWaitlistLock(file, async (path) => {
+    await mkdir(dirname(path), { recursive: true });
+    await appendFile(path, `${JSON.stringify(record)}\n`, { mode: 0o600 });
   });
 }
 
@@ -108,15 +132,15 @@ const TEMPORARY = '.rewrite-';
  * lock, so any that exists now is a leftover) is deleted first, so no copy of a deleted record survives.
  */
 export function rewriteWaitlist(file, keep) {
-  return withWaitlistLock(file, async () => {
-    const prefix = `${basename(file)}${TEMPORARY}`;
-    const leftovers = await readdir(dirname(file)).catch(() => []);
+  return withWaitlistLock(file, async (path) => {
+    const prefix = `${basename(path)}${TEMPORARY}`;
+    const leftovers = await readdir(dirname(path)).catch(() => []);
     for (const name of leftovers.filter((entry) => entry.startsWith(prefix))) {
-      await rm(join(dirname(file), name), { force: true });
+      await rm(join(dirname(path), name), { force: true });
     }
     let text;
     try {
-      text = await readFile(file, 'utf8');
+      text = await readFile(path, 'utf8');
     } catch (error) {
       if (error?.code === 'ENOENT') {
         return { kept: 0, removed: 0 };
@@ -133,10 +157,10 @@ export function rewriteWaitlist(file, keep) {
     });
     const removed = lines.length - kept.length;
     if (removed) {
-      const temporary = join(dirname(file), `${prefix}${randomUUID()}`);
+      const temporary = join(dirname(path), `${prefix}${randomUUID()}`);
       try {
         await writeFile(temporary, kept.map((line) => `${line}\n`).join(''), { mode: 0o600, flag: 'wx' });
-        await rename(temporary, file);
+        await rename(temporary, path);
       } catch (error) {
         await rm(temporary, { force: true });
         throw error;

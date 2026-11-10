@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -83,6 +83,29 @@ it('removes a temporary copy left by a crashed rewrite, so a deleted record has 
   await writeFile(leftover, `${JSON.stringify(record('forget-me@example.test', '2026-11-01T00:00:00.000Z'))}\n`);
   expect(await forgetWaitlistEmail(file, 'forget-me@example.test')).toEqual({ kept: 0, removed: 1 });
   expect(await readdir(dir)).toEqual(['waitlist.jsonl']);
+});
+
+it('works on the real file behind a symlinked WAITLIST_FILE, and keeps the symlink', async (context) => {
+  const target = join(dir, 'real', 'waitlist.jsonl');
+  const link = join(dir, 'link.jsonl');
+  await mkdir(join(dir, 'real'));
+  await writeFile(target, '');
+  try {
+    await symlink(target, link, 'file');
+  } catch (error) {
+    // Windows allows file symlinks only with Developer Mode or elevation.
+    if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+      context.skip();
+    }
+    throw error;
+  }
+  await appendWaitlistRecord(link, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
+  await appendWaitlistRecord(target, record('keep-me@example.test', '2026-11-02T00:00:00.000Z'));
+  expect(await forgetWaitlistEmail(link, 'forget-me@example.test')).toEqual({ kept: 1, removed: 1 });
+  // The record is gone from the file that held it, and the symlink still points there.
+  expect((await lstat(link)).isSymbolicLink()).toBe(true);
+  expect(await readFile(target, 'utf8')).not.toContain('forget-me');
+  expect(await readFile(link, 'utf8')).toContain('keep-me');
 });
 
 it('forgets every submission from one address, ignoring case and spaces', async () => {

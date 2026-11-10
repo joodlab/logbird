@@ -155,3 +155,10 @@ with `wrangler kv key get --binding WAITLIST_KV --remote <key>` and delete the
 expired ones with `wrangler kv key delete --binding WAITLIST_KV --remote <key>`.
 Without `--remote`, Wrangler 4 acts on local development storage only. On request,
 delete the keys whose value has that email address the same way.
+
+A KV record keeps the expiry it was written with. If you **lower**
+`WEB_FORM_RETENTION_MONTHS` on the Cloudflare build, existing records still expire
+on the old date, so after redeploying, delete those the new period has ended for.
+Each key starts with the time it was received (`waitlist:<ISO time>:<id>`), so the
+list above shows which. The Node server needs no such step: its cleanup checks every
+record against the current period.

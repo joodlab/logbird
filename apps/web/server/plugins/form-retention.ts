@@ -3,11 +3,16 @@ import { definePlugin } from 'nitro';
 /**
  * Starts the form-submission retention cleanup (src/server/waitlist-retention.ts), only in a production Node server
  * whose submissions file is configured explicitly: the site image sets WAITLIST_FILE at runtime. Never in `vite dev`,
- * never while the build prerenders pages, never for the source default (apps/web/.data), and never on Cloudflare,
- * which stores submissions in KV with an expiry instead. The timer stops when the server closes.
+ * never while the build prerenders pages (TanStack Start prerenders through this same Node server and marks it with
+ * TSS_PRERENDERING=true; Nitro's own prerender preset sets import.meta.prerender), never for the source default
+ * (apps/web/.data), and never on Cloudflare, which stores submissions in KV with an expiry instead. The timer stops when
+ * the server closes.
  */
 export default definePlugin((nitroApp) => {
   if (import.meta.dev || import.meta.prerender || import.meta.env.NITRO_PRESET === 'cloudflare-module') {
+    return;
+  }
+  if (process.env.TSS_PRERENDERING === 'true') {
     return;
   }
   const configured = process.env.WAITLIST_FILE?.trim();

@@ -2,7 +2,7 @@ export interface WaitlistRewrite {
   kept: number;
   removed: number;
 }
-export function withWaitlistLock<T>(file: string, task: () => Promise<T>): Promise<T>;
+export function withWaitlistLock<T>(file: string, task: (path: string) => Promise<T>): Promise<T>;
 export function appendWaitlistRecord(file: string, record: unknown): Promise<void>;
 export function rewriteWaitlist(file: string, keep: (record: unknown) => boolean): Promise<WaitlistRewrite>;
 export { retentionExpiry } from './expiry.mjs';
