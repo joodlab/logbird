@@ -86,7 +86,11 @@ receiptWorker.on('failed', (job, error) =>
       level: 'error',
       event: job?.name === 'auth-records.sweep' ? 'auth.records_sweep_failed' : 'ingest.receipt_sweep_failed',
       jobId: job?.id,
-      reason: String(error?.message ?? error).slice(0, 300),
+      // Prisma prefixes its own preamble, so keep the end of the message, where the database's reason is.
+      code: (error as { code?: unknown } | undefined)?.code,
+      reason: String(error?.message ?? error)
+        .trim()
+        .slice(-300),
     }),
   ),
 );
