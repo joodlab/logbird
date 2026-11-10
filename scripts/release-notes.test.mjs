@@ -72,7 +72,12 @@ test('counts human changes, credits human co-authors and merges aliases without 
     commit('chore: dependencies', [person('dependency[bot]', 'bot@users.noreply.github.com'), person('Bob', 'bob@users.noreply.github.com')]),
     commit('chore: service', [person('Service', 'automation@users.noreply.github.com')]),
   ];
-  const summary = summarize(commits, [commit('feat: initial', [person('Alice', 'old@users.noreply.github.com')])], logins, new Map([['service', 'Bot']]));
+  const summary = summarize(
+    commits,
+    [commit('feat: initial', [person('Alice', 'old@users.noreply.github.com')])],
+    logins,
+    new Map([['service', 'Bot']]),
+  );
   assert.equal(summary.changes, 2);
   assert.deepEqual(credits(summary), [
     { label: '@alice', first: false },
@@ -182,7 +187,18 @@ test('first release includes the root commit; later releases select the nearest 
   const directory = mkdtempSync(join(tmpdir(), 'logbird-notes-test-'));
   const git = (...args) => execFileSync('git', args, { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const addCommit = (message) =>
-    git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@users.noreply.github.com', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', message);
+    git(
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@users.noreply.github.com',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '--allow-empty',
+      '-m',
+      message,
+    );
   try {
     git('init');
     addCommit('feat: first');
