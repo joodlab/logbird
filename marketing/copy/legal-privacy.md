@@ -84,6 +84,6 @@ moves there, rewrite the form section first.
 
 ## form-line
 
-The form shows, under its button: "We use these details to reply to you, and send product updates only if you choose
+The form shows, under its button: "We use these details to reply to you and handle access requests, and send product updates only if you choose
 "Product updates only". No trackers. By sending, you confirm you've read the privacy policy." The topic list ends with "A privacy
 request (access, deletion or another right)".

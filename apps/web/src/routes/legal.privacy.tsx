@@ -52,8 +52,8 @@ const sections: LegalSection[] = [
           Every request passes through Cloudflare, our content delivery network, and reaches our servers. Like any web server, they process your IP
           address, browser details and the page you ask for, to deliver and protect the site; Cloudflare and our server provider may keep access logs
           of these requests. The request logs of our API record the method, path, status and duration of each request, not your IP address or browser.
-          The API reference page (<code>/docs</code>) loads its viewer script from jsDelivr, a public content network: on that page your browser
-          connects to jsDelivr directly, which receives your IP address.
+          Logbird Cloud's API reference page (<code>/docs</code>) loads its viewer script from jsDelivr, a public content network: on that page your
+          browser connects to jsDelivr directly, which receives your IP address.
         </p>
         <p>We do this because we have a legitimate interest in running a secure, working website.</p>
       </>
@@ -65,10 +65,10 @@ const sections: LegalSection[] = [
     body: (
       <>
         <p>
-          When you send the form we store your email address, the topic you choose, and the name, company and message if you give them, with the time
-          you sent it. We don't store your IP address or browser details with it. To stop the form being flooded, the server keeps a count of
-          submissions per IP address in memory only. The form never writes the address to disk or to its own logs, and each count is dropped after its
-          one-minute window (on a later request) or when the server restarts.
+          Only your email address is required; without it we can't reply. When you send the form we store your email address, the topic you choose,
+          and the name, company and message if you give them, with the time you sent it. We don't store your IP address or browser details with it. To
+          stop the form being flooded, the server keeps a count of submissions per IP address in memory only. The form never writes the address to
+          disk or to its own logs, and each count is dropped after its one-minute window (on a later request) or when the server restarts.
         </p>
         <p>
           We keep submissions on our server, and our server emails each one to our team's mailbox, where we answer them. We use them to reply, to

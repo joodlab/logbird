@@ -128,7 +128,7 @@ const sections: LegalSection[] = [
     body: (
       <p>
         Logbird Cloud is free during early access. Before we introduce any fees we'll tell account holders at least {FEE_NOTICE_DAYS} days in advance,
-        and you can export your data and close your account before they apply.
+        and you can export your data (if your role allows) and ask us to close your account before they apply.
       </p>
     ),
   },

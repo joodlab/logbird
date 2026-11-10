@@ -28,21 +28,23 @@ path: /contact
 
   | Field | Label | Help text | Validation message |
   | --- | --- | --- | --- |
-  | `email` (required) | Work email | We'll only use it to contact you about Logbird. | Enter a valid email address. |
+    | `email` (required) | Email | | Enter a valid email address. |
   | `name` (optional) | Name | | |
   | `company` (optional) | Company | | |
   | `topic` (required, radio) | What's this about? | | Choose one. |
-  | `message` (optional; required when topic is "A question") | Message | What are you building, and what do you need from an audit log? | Add a message so we know how to help. |
+    | `message` (optional) | Message | What are you building, and what do you need from an audit log? For a privacy request, tell us what you'd like us to do. | |
 
 - **topic options:**
-  - `waitlist` — Logbird Cloud waitlist (default)
-  - `self-host` — "Self-hosting, when the source opens" (once `WEB_GITHUB_PUBLIC=true`: "Self-hosting")
-  - `support` — Support or enterprise
-  - `question` — A question
+    - `cloud` — "Access to Logbird Cloud" once `WEB_APP_URL` is set, otherwise "The Logbird Cloud waitlist" (default)
+  - `self-host` — "Self-hosting" (before `WEB_GITHUB_PUBLIC=true`: "Self-hosting, when the source opens")
+  - `updates` — Product updates only
+  - `correction` — A correction to one of our pages
+  - `other` — A question, or support and enterprise
+  - `privacy` — A privacy request (access, deletion or another right)
 - **placeholder for email:** `you@example.test`
 - **submit button:** Send
-- **privacy note (under the button):** We store your email to contact you about Logbird. No trackers.
-  Privacy policy → `/legal/privacy`
+- **privacy note (under the button, `aria-describedby` on Send):** the line recorded in `legal-privacy.md` § form-line,
+  linking the privacy policy → `/legal/privacy`.
 - **visual:** none
 
 ## states
@@ -52,8 +54,7 @@ path: /contact
   - **Sending (button label):** Sending…
   - **Success (every topic):** Thanks, we've got it. We'll reply by email. (One message for every topic, so a privacy
     request is never told it joined a waitlist.)
-  - **Success, other topics:** Thanks. We've got your message and will reply by email.
-  - **Already on the list:** You're already on the list. We'll email you when Logbird Cloud opens.
+  
   - **Error (validation, from the server):** Something in the form needs fixing. Check the highlighted fields.
   - **Error (network or server):** We couldn't send that. Check your connection and try again.
   - **Too many attempts:** Too many attempts. Wait a minute, then try again.

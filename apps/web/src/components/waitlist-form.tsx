@@ -126,7 +126,6 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
           type="email"
           {...field('email')}
         />
-
         {fieldError('email')}
       </div>
       <div className="grid gap-5 sm:grid-cols-2">
@@ -178,8 +177,8 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
           {sending ? 'Sending…' : 'Send'}
         </button>
         <p className="text-muted-foreground text-xs" id="form-privacy">
-          We use these details to reply to you, and send product updates only if you choose "Product updates only". No trackers. By sending, you
-          confirm you've read the{' '}
+          We use these details to reply to you and handle access requests, and send product updates only if you choose "Product updates only". No
+          trackers. By sending, you confirm you've read the{' '}
           <a className="text-link" href="/legal/privacy">
             privacy policy
           </a>
