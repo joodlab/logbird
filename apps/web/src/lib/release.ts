@@ -10,8 +10,10 @@ import { getPage, type SitePage } from './site-map';
  * - provisional domain: WEB_SITE_URL is unset, so canonicals point at a domain that isn't ours yet;
  * - security contact: WEB_SECURITY_EMAIL is unset, so the site can't name a vulnerability-report mailbox;
  * - contact mailbox: WEB_CONTACT_EMAIL is unset, so the site can't name a general address;
- * - legal placeholder: /legal/privacy or /legal/terms isn't ready, so the site would collect emails without a published
- *   privacy policy and terms (they stay placeholders until counsel-reviewed text replaces them).
+ * - publisher: WEB_ORG_NAME is unset, so the privacy policy and terms can't name who is responsible for your data;
+ * - privacy contact: WEB_PRIVACY_EMAIL is unset, so privacy requests go through the contact form instead of a mailbox;
+ * - legal page not ready: /legal/privacy or /legal/terms is marked `ready: false`, so the site would collect emails
+ *   without a published privacy policy and terms.
  *
  * No mailbox is ever derived from the provisional domain.
  */
@@ -22,7 +24,9 @@ export function releaseBlockers(config: SiteConfig = siteConfig): string[] {
     ...(config.SITE_URL_CONFIGURED ? [] : ['provisional domain: set WEB_SITE_URL']),
     ...(config.SECURITY_EMAIL ? [] : ['security contact: set WEB_SECURITY_EMAIL']),
     ...(config.CONTACT_EMAIL ? [] : ['contact mailbox: set WEB_CONTACT_EMAIL']),
-    ...LEGAL_PAGES.filter((path) => !getPage(path).ready).map((path) => `legal placeholder: ${path} needs counsel-reviewed text`),
+    ...(config.ORG_NAME ? [] : ['publisher: set WEB_ORG_NAME']),
+    ...(config.PRIVACY_EMAIL ? [] : ['privacy contact: set WEB_PRIVACY_EMAIL']),
+    ...LEGAL_PAGES.filter((path) => !getPage(path).ready).map((path) => `legal page not ready: ${path} is marked ready: false`),
   ];
 }
 export const siteIndexable = (config: SiteConfig = siteConfig) => releaseBlockers(config).length === 0;

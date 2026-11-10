@@ -242,12 +242,11 @@ export const siteMap: SitePage[] = [
   {
     path: '/legal/privacy',
     title: 'Privacy',
-    description: 'How the Logbird website handles your data. Placeholder until counsel-reviewed text replaces it before launch.',
+    description: 'What the Logbird website and Logbird Cloud collect, why, who processes it, how long it is kept and how to exercise your rights.',
     section: 'legal',
     priority: 0.3,
     changefreq: 'yearly',
-    // Placeholder copy: ready only once counsel-reviewed text replaces it.
-    ready: false,
+    ready: true,
     ogSlug: 'privacy',
     inNav: false,
     inFooter: true,
@@ -255,12 +254,12 @@ export const siteMap: SitePage[] = [
   {
     path: '/legal/terms',
     title: 'Terms',
-    description: 'Terms of use for the Logbird website. Placeholder until counsel-reviewed text replaces it before launch.',
+    description:
+      'The terms for using the Logbird website and Logbird Cloud during early access. The open-source software stays under the MIT licence.',
     section: 'legal',
     priority: 0.3,
     changefreq: 'yearly',
-    // Placeholder copy: ready only once counsel-reviewed text replaces it.
-    ready: false,
+    ready: true,
     ogSlug: 'terms',
     inNav: false,
     inFooter: true,

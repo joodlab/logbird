@@ -11,6 +11,12 @@
         "WEB_ORG_NAME",
         "WEB_SECURITY_EMAIL",
         "WEB_CONTACT_EMAIL",
+        "WEB_PRIVACY_EMAIL",
+        "WEB_LEGAL_ADDRESS",
+        "WEB_GOVERNING_LAW",
+        "WEB_HOSTING_PROVIDER",
+        "WEB_EMAIL_PROVIDER",
+        "WEB_MAILBOX_PROVIDER",
         "NITRO_PRESET",
         "LOGBIRD_WEB_ALLOW_INTERIM"
       ],

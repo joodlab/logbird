@@ -6,7 +6,7 @@ import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import { ACCESS_CTA, CLOUD_OPEN, SIGN_IN_URL } from '../lib/cloud';
 import { pageHead } from '../lib/seo';
 
-const INTERESTS = new Set(['cloud', 'self-host', 'updates', 'correction', 'other']);
+const INTERESTS = new Set(['cloud', 'self-host', 'updates', 'correction', 'other', 'privacy']);
 
 export const Route = createFileRoute('/contact')({
   head: () => pageHead('/contact'),

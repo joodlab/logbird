@@ -46,19 +46,29 @@ const faq: FaqItem[] = [
       ? "We'll document how to migrate before sign-ups open to everyone. There's no migration tool today."
       : "We'll document how to migrate before the cloud opens. There's no migration tool today.",
   },
-  { q: 'How much will it cost?', a: "Pricing isn't set yet. Self-hosting is free under the MIT licence." },
-  { q: 'Will there be an SLA?', a: "We'll publish service levels and limits together with the cloud's launch terms." },
+  {
+    q: 'How much will it cost?',
+    a: CLOUD_OPEN
+      ? "Logbird Cloud is free during early access, and pricing for later isn't set yet. Self-hosting is free under the MIT licence."
+      : "Pricing isn't set yet. Self-hosting is free under the MIT licence.",
+  },
+  {
+    q: 'Will there be an SLA?',
+    a: CLOUD_OPEN
+      ? "Not during early access. We'll publish service levels and limits when Logbird Cloud launches."
+      : "We'll publish service levels and limits together with the cloud's launch terms.",
+  },
   {
     q: CLOUD_OPEN ? 'What do you do with the email I give you?' : 'What do you do with my waitlist email?',
     // The privacy notice is referenced only once /legal/privacy is ready (site-map), here and in the FAQ JSON-LD.
     a: privacyReady
-      ? 'We store it to contact you about Logbird. No trackers. See the privacy notice.'
+      ? 'We store it to contact you about Logbird. No trackers. See the privacy policy.'
       : 'We store it to contact you about Logbird. No trackers.',
     body: privacyReady ? (
       <>
         We store it to contact you about Logbird. No trackers. See the{' '}
         <Link className="text-link" to="/legal/privacy">
-          privacy notice
+          privacy policy
         </Link>
         .
       </>

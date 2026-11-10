@@ -1,53 +1,89 @@
 ---
-title: Privacy — Logbird
-description: How the Logbird website handles your data. Placeholder until counsel-reviewed text replaces it before launch.
+title: Privacy policy — Logbird
+description: What the Logbird website and Logbird Cloud collect, why, who processes it, how long it is kept and how to exercise your rights.
 path: /legal/privacy
 ---
 
-# Privacy policy (placeholder)
+# Privacy policy
 
-## banner
+The page text lives in `apps/web/src/routes/legal.privacy.tsx`, which renders real text whether or not the operator
+facts below are set. **Every statement must stay true to the code.** This file records where each one comes from;
+re-check the source before you change a sentence, and update the effective date (`EFFECTIVE_DATE` in
+`apps/web/src/lib/legal-facts.tsx`) with every substantive edit.
 
-- **id:** `placeholder-banner`
-- **body (shown at the top of the page, prominent):** Placeholder — to be replaced by counsel-reviewed text before
-  launch.
-- **visual:** none
-- **site:** the page renders the banner and the summary only, and stays `ready: false` (noindex, not in the footer or
-  sitemap) until counsel-reviewed text replaces it.
+## Owner facts (settings, not copy)
 
-## summary
+| Fact | Setting | Unset wording |
+| --- | --- | --- |
+| Publisher / controller name | `WEB_ORG_NAME` | "The operator of Logbird Cloud" (release blocker) |
+| Privacy mailbox | `WEB_PRIVACY_EMAIL` | the contact form's "A privacy request" topic (release blocker) |
+| Postal address | `WEB_LEGAL_ADDRESS` | no address printed |
+| Server provider and region | `WEB_HOSTING_PROVIDER` | "our server provider" |
+| Team mailbox host (receives form submissions and emails) | `WEB_MAILBOX_PROVIDER` | "our mailbox provider" |
+| Email delivery provider | `WEB_EMAIL_PROVIDER` | Postmark (Logbird Cloud's transactional provider, confirmed by the master 2026-11-10) |
 
-- **id:** `summary`
-- **heading (H1):** Privacy
-- **body:** This website collects the details you type into the waitlist and contact form, and we use them to contact
-  you about Logbird. Like any web server, it also processes your IP address: in memory to rate-limit the form, and it
-  may appear in our host's request logs. The site uses no trackers, no analytics cookies and no third-party advertising scripts.
-  <!-- source: apps/web/server/waitlist.ts and src/server/waitlist.ts (the IP keys an in-memory limiter only; it is
-  not written to the waitlist file) -->
-- **visual:** none
+The site stays noindex (robots `Disallow: /`) until the publisher name and the privacy mailbox are set
+(`apps/web/src/lib/release.ts`). Without a privacy mailbox, rights requests go through the form's "A privacy
+request" topic, stored like any submission and emailed to `WAITLIST_NOTIFY_TO`. That only works when the site's
+`SMTP_*`, `MAIL_FROM` and `WAITLIST_NOTIFY_TO` are set (`apps/web/src/server/env.ts`): they are required on the
+hosted site (docs/coolify.md). The Cloudflare build stores submissions in KV and sends no email; if the site ever
+moves there, rewrite the form section first.
 
-## must-cover
+## Owner to confirm before relying on the text
 
-- **id:** `must-cover`
-- **heading:** What the final policy must cover (for counsel; remove this section before launch)
-- **bullets:**
-  - **Who the controller is:** the publisher's legal entity name, address and contact details (owner to provide; `WEB_ORG_NAME`).
-  - **Data collected by the site:** waitlist and contact form only — email (required); name, company, topic and
-    message (optional). Server logs, if the host keeps any, and for how long.
-  - **IP addresses:** used in memory to rate-limit the form (never stored with the waitlist entry); the host or CDN
-    (Cloudflare) may log them with each request. The owner confirms the host's log retention.
-  - **Purpose and legal basis:** contacting the person about Logbird; whether consent or legitimate interest applies
-    in each jurisdiction where we sell (Saudi Arabia, the UAE and other GCC states, Egypt, Tunisia) and where
-    visitors are (EU, UK, US).
-  - **No trackers:** the statement that the site sets no tracking cookies and loads no analytics or ad scripts. The
-    engineer must confirm this matches the build, including fonts and embeds.
-  - **Processors:** where form submissions are stored and which email provider sends replies (owner to decide).
-  - **Retention:** how long waitlist entries are kept, and when they're deleted.
-  - **Rights:** how to see, correct or delete your data, and how to withdraw from the waitlist.
-  - **International transfers**, if the storage or email provider is outside the visitor's country.
-  - **Contact:** a privacy contact address (owner to provide; there is no default mailbox, and the domain isn't bought
-    yet).
-  - **Scope:** this policy covers the website only. Self-hosted Logbird installations are run by their operators;
-    Logbird Cloud will have its own terms and data processing terms before it opens.
-  - **Changes:** how and when the policy is updated, with a "last updated" date.
-- **visual:** none
+- The legal entity, its country and address.
+- The hosting provider and region of the Coolify server (`WEB_HOSTING_PROVIDER`, set at rollout). Transactional email
+  is Postmark (server `logbird`; joodlab.com's own mailboxes on Zoho are unrelated). Keep Postmark's open and link
+  tracking off: the policy says emails carry no tracking.
+- Backups: provider, location, encryption and how long they're kept (the Cloud hero and the policy say backups exist;
+  the policy says "stored with our server provider or a storage provider we choose").
+- The team mailbox host (`WEB_MAILBOX_PROVIDER`) and the SMTP relay the site uses for form notifications (expected to
+  mirror the console's Postmark settings).
+- Closed accounts and workspaces deleted within `CLOSURE_DELETION_DAYS` (30) days of closing: a manual commitment.
+- Keeping a closed account's entries in the activity of workspaces that still exist (the policy says so; nothing
+  removes them today), rather than removing or anonymising them on request.
+- The form retention period: `FORM_RETENTION` ("24 months after our last exchange"). Nothing deletes submissions
+  automatically, so this is a manual commitment (a calendar reminder, or a cleanup job later).
+- That the 30-day answer time for rights requests is workable.
+- That production runs `AUTH_SIGNUP=restricted` (the terms say sign-ups are limited; the default is `open`).
+- What access logs Cloudflare and the server provider keep, and for how long (the policy says they may keep them).
+- That transfers rely on the providers' safeguards such as standard contractual clauses.
+- A lawyer's review is recommended, not required to ship.
+
+## Code facts behind each section
+
+- **Website**: no cookies; theme in localStorage `logbird.site.theme` (`apps/web/src/routes/__root.tsx`). Fonts are
+  self-hosted (`@fontsource`). The CSP allows only the site's own origin (`apps/web/src/lib/security-headers.ts`). The
+  API's request log records method, path, status and duration (`apps/server/src/app.ts`); the site and console
+  servers keep no request log of their own. HTTPS covers public connections only; internal hops (console → API,
+  console → site, ClickHouse, Redis) are plain HTTP on the private network, so the policy says no more. `/docs` loads the Scalar bundle
+  from jsDelivr (`apps/server/src/api-reference.ts`).
+- **Form**: fields in `apps/web/src/lib/waitlist-schema.ts`; stored as JSONL with mode 600
+  (`apps/web/src/server/waitlist-node.ts`, `/data` volume in `docker-compose.site.yml`); no IP or user agent stored;
+  the rate limiter keeps IPs only in memory, each for a 60 s window, swept on later requests or at restart
+  (`apps/web/src/server/waitlist.ts`); SMTP notification to `WAITLIST_NOTIFY_TO`.
+- **Accounts**: `User`, `Session` (ipAddress, userAgent), `Verification` in `packages/database/prisma/schema.prisma`;
+  `emailHash` (`packages/auth/src/sign-in-audit.ts`); 6-digit hashed codes, 10 minutes, 3 attempts
+  (`packages/auth/src/server.ts`); session cookie `__Secure-logbird.session_token`, 7 days, renewed daily
+  (better-auth defaults); `sidebar_state` cookie (`packages/ui`). better-auth deletes an expired session or code
+  when it next looks it up, but nothing sweeps them on a schedule (#129). `Verification` rows aren't linked to an
+  account and invitations belong to the inviting workspace, so neither is bounded by an account's lifetime.
+- **Workspace activity**: actor, IP and user agent on management, sign-in and failed sign-in records
+  (`docs/workspace-audit.md`); readable by every member. Raw records end at the 3650-day ClickHouse TTL; the rollup
+  tables (`002_rollups.sql`: names and attribute samples) and undelivered or quarantined Postgres outbox rows have no
+  automatic limit (#131).
+- **Customer data**: stored as sent (`packages/clickhouse/migrations/001_events.sql`); per-project retention
+  7–3650 days, default 90 (`packages/contracts/src/api.ts`, `packages/database/prisma/schema.prisma`), permanent
+  deletion verified (`packages/clickhouse/src/queries.ts`); project deletion
+  purges events.
+- **Rights**: no self-service account deletion or personal-data export (`apps/server/src/route-authorization.matrix.ts`,
+  #130), so those are handled by request. Self-service today: display name (Account settings), project event export
+  and project deletion (role permitting), session revoke endpoints (no UI).
+- **No telemetry**: no analytics or tracking code anywhere; transactional emails have no pixels or tracked links
+  (`packages/email`).
+
+## form-line
+
+The form shows, under its button: "We use these details to reply to you and handle access requests, and send product updates only if you choose
+"Product updates only". No trackers. By sending, you confirm you've read the privacy policy." The topic list ends with "A privacy
+request (access, deletion or another right)".

@@ -17,6 +17,12 @@ describe('public configuration', () => {
       ORG_NAME: undefined,
       SECURITY_EMAIL: 'security@example.test',
       CONTACT_EMAIL: 'hello@example.test',
+      PRIVACY_EMAIL: undefined,
+      LEGAL_ADDRESS: undefined,
+      GOVERNING_LAW: undefined,
+      HOSTING_PROVIDER: undefined,
+      EMAIL_PROVIDER: undefined,
+      MAILBOX_PROVIDER: undefined,
       SITE_URL_CONFIGURED: true,
     });
   });

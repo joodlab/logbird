@@ -1,43 +1,40 @@
 ---
-title: Terms — Logbird
-description: Terms of use for the Logbird website. Placeholder until counsel-reviewed text replaces it before launch.
+title: Terms of service — Logbird
+description: The terms for using the Logbird website and Logbird Cloud during early access. The open-source software stays under the MIT licence.
 path: /legal/terms
 ---
 
-# Terms of use (placeholder)
+# Terms of service
 
-## banner
+The page text lives in `apps/web/src/routes/legal.terms.tsx` and covers the website and Logbird Cloud during early
+access. The open-source software is MIT-licensed and the terms say they don't limit anything the licence allows.
 
-- **id:** `placeholder-banner`
-- **body (shown at the top of the page, prominent):** Placeholder — to be replaced by counsel-reviewed text before
-  launch.
-- **visual:** none
-- **site:** the page renders the banner and the summary only, and stays `ready: false` (noindex, not in the footer or
-  sitemap) until counsel-reviewed text replaces it.
+## Owner facts (settings, not copy)
 
-## summary
+| Fact | Setting | Unset wording |
+| --- | --- | --- |
+| Operator name | `WEB_ORG_NAME` | "the operator of Logbird Cloud" |
+| Postal address | `WEB_LEGAL_ADDRESS` | omitted |
+| Governing law | `WEB_GOVERNING_LAW` (e.g. "the laws of <country>") | "the laws of the country where the operator is established" |
+| Contact | `WEB_CONTACT_EMAIL` | the contact form |
 
-- **id:** `summary`
-- **heading (H1):** Terms
-- **body:** These terms cover use of this website. The Logbird software is licensed separately under the MIT licence,
-  which is included in the repository. Logbird Cloud isn't open yet and will have its own terms before it is.
-  <!-- source: LICENSE -->
-- **visual:** none
+## Owner to confirm
 
-## must-cover
+- Governing law and courts; the entity and its address.
+- "Free during early access" and the `FEE_NOTICE_DAYS` (30) notice before fees (`apps/web/src/lib/legal-facts.tsx`).
+- The liability wording: as-is during early access; total liability for all claims capped at the greater of fees
+  paid in the 12 months before the claim and 100 euros; consumer rights preserved.
+- Deletion within `CLOSURE_DELETION_DAYS` (30) days after the agreement ends, via the privacy contact.
+- That a data processing agreement can be offered on request.
+- A lawyer's review is recommended, not required to ship.
 
-- **id:** `must-cover`
-- **heading:** What the final terms must cover (for counsel; remove this section before launch)
-- **bullets:**
-  - **Who we are:** the publisher's legal entity, address and contact (owner to provide; `WEB_ORG_NAME`).
-  - **Scope:** website terms only. The software is under MIT. Cloud terms, an acceptable use policy and data
-    processing terms come separately, before the cloud opens.
-  - **The waitlist:** joining it creates no contract, no reservation and no promise of price, date or availability.
-  - **No warranty for site content:** docs and comparisons are provided as is. Comparison pages state the date each
-    fact was checked.
-  - **Trademarks:** Logbird, لوغبيرد and the bird mark are the publisher's (see `docs/brand.md` for public brand guidance). Third-party product names are used only to identify those products.
-  - **Liability limits and governing law:** for counsel to set, given where the publisher is established.
-  - **Changes to the terms**, with a "last updated" date.
-  - **Contact:** a legal contact address (owner to provide; there is no default mailbox, and the domain isn't bought
-    yet).
-- **visual:** none
+## Code facts behind the terms
+
+- Early access with restricted sign-up: `AUTH_SIGNUP=restricted` (`packages/auth/src/signup-policy.ts`).
+- No billing or plan code exists; site copy says pricing isn't set (`apps/web/src/routes/cloud.tsx`).
+- Customers choose retention per project and can export events (CSV, JSONL) from the console
+  (`apps/server/src/data-routes.ts`).
+- Account deletion and complete workspace-data deletion are handled by request (#130). An owner-only
+  organization-delete endpoint is reachable (`apps/server/src/route-authorization.matrix.ts`), but it removes Postgres
+  records without purging ClickHouse (`docs/cloud-accounts-design.md`), so it isn't a complete deletion path.
+- No SLA anywhere in code or copy; backups exist per the owner.

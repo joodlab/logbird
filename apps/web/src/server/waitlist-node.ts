@@ -61,7 +61,8 @@ export async function notifyWaitlist(record: WaitlistRecord) {
       // notificationSettings() guarantees both are set before this is called.
       from: env.MAIL_FROM as string,
       to: env.WAITLIST_NOTIFY_TO as string,
-      subject: 'Logbird waitlist submission',
+      // The topic leads the subject, so privacy requests (answered within 30 days) stand out in the team mailbox.
+      subject: `Logbird form: ${record.interest}`,
       text: Object.entries(record)
         .map(([key, value]) => `${key}: ${value ?? ''}`)
         .join('\n'),

@@ -13,12 +13,8 @@ const mail = CONTACT_EMAIL ? (
   </a>
 ) : null;
 export const STATUS_MESSAGES: Record<string, { tone: 'ok' | 'error'; text: ReactNode }> = {
-  ok: {
-    tone: 'ok',
-    text: CLOUD_OPEN
-      ? "Thanks. We'll email you about access, and if you asked something we'll reply by email."
-      : "Thanks. You're on the list, and if you asked something we'll reply by email.",
-  },
+  // One message for every topic: a privacy request must not be told it joined a waitlist.
+  ok: { tone: 'ok', text: "Thanks, we've got it. We'll reply by email." },
   validation_error: { tone: 'error', text: 'Something in the form needs fixing. Check the email address and try again.' },
   invalid_body: { tone: 'error', text: 'Something in the form needs fixing. Check the email address and try again.' },
   rate_limited: { tone: 'error', text: 'Too many attempts. Wait a minute, then try again.' },
@@ -43,6 +39,7 @@ const INTERESTS = [
   { value: 'updates', label: 'Product updates only' },
   { value: 'correction', label: 'A correction to one of our pages' },
   { value: 'other', label: 'A question, or support and enterprise' },
+  { value: 'privacy', label: 'A privacy request (access, deletion or another right)' },
 ] as const;
 
 /**
@@ -118,7 +115,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
         ))}
       </noscript>
       <div className="form-field">
-        <Label htmlFor="email">Work email</Label>
+        <Label htmlFor="email">Email</Label>
         <Input
           autoComplete="email"
           id="email"
@@ -129,7 +126,6 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
           type="email"
           {...field('email')}
         />
-        <p className="text-muted-foreground text-xs">We'll only use it to contact you about Logbird.</p>
         {fieldError('email')}
       </div>
       <div className="grid gap-5 sm:grid-cols-2">
@@ -162,7 +158,9 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
       <div className="form-field">
         <Label htmlFor="message">Message</Label>
         <Textarea id="message" maxLength={2000} name="message" rows={4} {...field('message')} />
-        <p className="text-muted-foreground text-xs">What are you building, and what do you need from an audit log?</p>
+        <p className="text-muted-foreground text-xs">
+          What are you building, and what do you need from an audit log? For a privacy request, tell us what you'd like us to do.
+        </p>
         {fieldError('message')}
       </div>
       <div aria-hidden="true" className="honeypot">
@@ -171,13 +169,21 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
       </div>
       <div className="flex flex-col gap-3">
         <button
+          aria-describedby="form-privacy"
           className="inline-flex h-12 items-center justify-center rounded-md bg-primary px-5 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/80 disabled:opacity-60 sm:self-start"
           disabled={sending}
           type="submit"
         >
           {sending ? 'Sending…' : 'Send'}
         </button>
-        <p className="text-muted-foreground text-xs">We store your email to contact you about Logbird. No trackers.</p>
+        <p className="text-muted-foreground text-xs" id="form-privacy">
+          We use these details to reply to you and handle access requests, and send product updates only if you choose "Product updates only". No
+          trackers. By sending, you confirm you've read the{' '}
+          <a className="text-link" href="/legal/privacy">
+            privacy policy
+          </a>
+          .
+        </p>
       </div>
       <div aria-atomic="true" aria-live="polite">
         {current ? (

@@ -1,8 +1,7 @@
 /**
- * Test fixture: the legal pages as they'll be at launch, with counsel-reviewed text and `ready: true`. While they're
- * placeholders the release gate keeps the whole site noindex (release.ts), so tests that exercise an indexable site
- * mark them ready first. Everything that reads `ready` does so when called (release gate, publishedPages(), sitemap,
- * llms.txt, page heads), so the flip has the same effect as the launch edit. It imports site-map dynamically, so it
+ * Test fixture: both legal pages marked `ready: true`, as they ship. A page taken back to `ready: false` keeps the
+ * whole site noindex (release.ts), so tests that exercise an indexable site make sure they're ready first. Everything that reads `ready` does so when called (release gate, publishedPages(), sitemap,
+ * llms.txt, page heads), so the flip takes effect everywhere at once. It imports site-map dynamically, so it
  * patches the same module instance as the test's own imports, including after vi.resetModules(). Returns an undo for
  * afterAll/afterEach.
  */
@@ -26,4 +25,6 @@ export const RELEASED_ENV = {
   WEB_SITE_URL: 'https://site.example.test',
   WEB_SECURITY_EMAIL: 'security@example.test',
   WEB_CONTACT_EMAIL: 'hello@example.test',
+  WEB_ORG_NAME: 'Example Publisher',
+  WEB_PRIVACY_EMAIL: 'privacy@example.test',
 } as const;
