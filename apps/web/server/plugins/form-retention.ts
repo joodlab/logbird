@@ -1,34 +1,29 @@
+import { resolve } from 'node:path';
 import { definePlugin } from 'nitro';
 
 /**
  * Starts the form-submission retention cleanup (src/server/waitlist-retention.ts), only in a production Node server
- * whose submissions file is configured explicitly: the site image sets WAITLIST_FILE at runtime. Never in `vite dev`,
- * never while the build prerenders pages (TanStack Start prerenders through this same Node server and marks it with
- * TSS_PRERENDERING=true; Nitro's own prerender preset sets import.meta.prerender), never for the source default
- * (apps/web/.data), and never on Cloudflare, which stores submissions in KV with an expiry instead. The timer stops when
- * the server closes.
+ * whose submissions file is configured explicitly: the site image sets WAITLIST_FILE at runtime. vite.config.ts
+ * registers this plugin for the Node build only (Cloudflare stores submissions in KV with an expiry instead). Never in
+ * `vite dev`, never while the build prerenders pages (TanStack Start prerenders through this same Node server and marks
+ * it with TSS_PRERENDERING=true; Nitro's own prerender preset sets import.meta.prerender), and never for the source
+ * default (apps/web/.data). The timers stop when the server closes.
  */
 export default definePlugin((nitroApp) => {
-  if (import.meta.dev || import.meta.prerender || import.meta.env.NITRO_PRESET === 'cloudflare-module') {
-    return;
-  }
-  if (process.env.TSS_PRERENDERING === 'true') {
+  if (import.meta.dev || import.meta.prerender || process.env.TSS_PRERENDERING === 'true') {
     return;
   }
   const configured = process.env.WAITLIST_FILE?.trim();
   if (!configured || process.env.NODE_ENV !== 'production') {
     return;
   }
-  const started = (async () => {
-    const [{ waitlistFile }, { scheduleWaitlistRetention }] = await Promise.all([
-      import('../../src/server/waitlist-node'),
-      import('../../src/server/waitlist-retention'),
-    ]);
-    const file = waitlistFile(configured);
-    return file ? scheduleWaitlistRetention(file) : undefined;
-  })().catch((error: unknown) => {
-    console.error(JSON.stringify({ level: 'error', event: 'waitlist.retention_failed', reason: error instanceof Error ? error.message : 'unknown' }));
-  });
+  const started = import('../../src/server/waitlist-retention')
+    .then(({ scheduleWaitlistRetention }) => scheduleWaitlistRetention(resolve(configured)))
+    .catch((error: unknown) => {
+      console.error(
+        JSON.stringify({ level: 'error', event: 'waitlist.retention_failed', reason: error instanceof Error ? error.message : 'unknown' }),
+      );
+    });
   nitroApp.hooks.hook('close', async () => {
     (await started)?.();
   });

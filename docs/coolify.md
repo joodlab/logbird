@@ -127,11 +127,18 @@ The site keeps each contact and early-access submission in `/data/waitlist.jsonl
 for `WEB_FORM_RETENTION_MONTHS` calendar months (a build variable, default 24,
 1–120): a submission sent on 31 March with one month expires on 30 April. The
 privacy policy states the same period. The site deletes expired submissions itself,
-when it starts and then every six hours, logging `waitlist.retention` with counts
-only. The cleanup runs only in the production server with `WAITLIST_FILE` set, which
-the site image does; never in `vite dev`, while a build prerenders pages, or for the
-source default file. To change the period, set the variable and redeploy the site;
-the policy text and the cleanup change together.
+ten minutes after it starts and then every six hours, logging `waitlist.retention`
+with counts only. A `warn` level means the file has lines that aren't valid JSON
+(say, from a crash mid-write): they are never deleted automatically, so check the
+file and remove them by hand. The cleanup runs only in the production server with
+`WAITLIST_FILE` set, which the site image does; never in `vite dev`, while a build
+prerenders pages, or for the source default file. To change the period, set the
+variable and redeploy the site; the policy text and the cleanup change together.
+
+Run **one** site container per `site-data` volume. Writers take a lock that only
+works inside one container. The first cleanup waits ten minutes, so the brief
+overlap of a rolling deploy (new container up, old one stopping) ends before the new
+container rewrites the file. Don't scale the site service beyond one replica.
 
 To delete one person's submissions on request, run this in the site container:
 
@@ -144,7 +151,9 @@ notification emails for that address from the team mailbox. From a source checko
 `pnpm --filter @logbird/web waitlist:forget someone@example.com` does the same for
 the `WAITLIST_FILE` in the root `.env` (default `apps/web/.data/waitlist.jsonl`).
 Writes to the file (new submissions, the cleanup and this command) take one lock,
-so running the command while the site serves traffic never loses a submission.
+so running the command in the site's container while it serves traffic never loses a
+submission. Run it as the image's default `node` user, as above; if you do run it as
+root, the rewritten file keeps its original owner, so the site can still write to it.
 
 The Cloudflare build (not used by the hosted site) stores submissions in the
 `WAITLIST_KV` namespace with the same lifetime as a KV expiry. Keys written before

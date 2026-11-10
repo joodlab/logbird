@@ -8,7 +8,7 @@
 // (development) it is a loopback TCP port derived from the file's path (20000-29999); if an unrelated program happens to hold that
 // port, writes wait and then fail with an error, never proceed unlocked.
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFile, lstat, mkdir, readdir, readFile, readlink, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, stat } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { basename, dirname, join, resolve } from 'node:path';
 import { retentionExpiry } from './expiry.mjs';
@@ -68,7 +68,8 @@ async function acquire(file) {
     if (Date.now() > deadline) {
       throw new Error('The form submissions file stayed locked for 30 s.');
     }
-    await new Promise((done) => setTimeout(done, 20));
+    // A little jitter, so waiting processes take turns rather than retrying in step.
+    await new Promise((done) => setTimeout(done, 10 + Math.random() * 20));
   }
 }
 
@@ -139,11 +140,40 @@ export function appendWaitlistRecord(file, record) {
 
 const TEMPORARY = '.rewrite-';
 
+/** Writes `text` to a new file and flushes it to disk, so a rename that follows never exposes an empty file. */
+async function writeDurably(path, text, owner) {
+  const handle = await open(path, 'wx', 0o600);
+  try {
+    await handle.writeFile(text);
+    if (owner) {
+      await handle.chown(owner.uid, owner.gid);
+    }
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Flushes a directory entry change (the rename) to disk where the platform allows it. */
+async function syncDirectory(path) {
+  if (process.platform === 'win32') {
+    return;
+  }
+  const handle = await open(path, 'r').catch(() => undefined);
+  await handle
+    ?.sync()
+    .catch(() => undefined)
+    .finally(() => handle.close());
+}
+
 /**
- * Rewrites the file keeping only the records `keep` accepts: a new, uniquely named mode-600 file renamed over the
- * old one, so a reader sees either the old file or the new one. Lines that aren't JSON are kept: this never deletes
- * what it can't read. A failed rewrite removes its temporary file; one left by a crash (rewrites only happen under the
- * lock, so any that exists now is a leftover) is deleted first, so no copy of a deleted record survives.
+ * Rewrites the file keeping only the records `keep` accepts: a new, uniquely named mode-600 file, flushed to disk,
+ * renamed over the old one, so a reader (or a reboot after a power cut) sees either the old file or the new one.
+ * Lines that aren't JSON are kept, because this never deletes what it can't read, and counted as `unreadable` so an
+ * operator can deal with them. Run as root (say `docker exec -u root`), the new file keeps the old one's owner, so
+ * the site can still append to it. A failed rewrite removes its temporary file; one left by a crash (rewrites only
+ * happen under the lock, so any that exists now is a leftover) is deleted first, so no copy of a deleted record
+ * survives.
  */
 export function rewriteWaitlist(file, keep) {
   return withWaitlistLock(file, async (path) => {
@@ -157,30 +187,37 @@ export function rewriteWaitlist(file, keep) {
       text = await readFile(path, 'utf8');
     } catch (error) {
       if (error?.code === 'ENOENT') {
-        return { kept: 0, removed: 0 };
+        return { kept: 0, removed: 0, unreadable: 0 };
       }
       throw error;
     }
     const lines = text.split('\n').filter((line) => line.trim());
+    let unreadable = 0;
     const kept = lines.filter((line) => {
+      let record;
       try {
-        return keep(JSON.parse(line));
+        record = JSON.parse(line);
       } catch {
+        unreadable += 1;
         return true;
       }
+      return keep(record);
     });
     const removed = lines.length - kept.length;
     if (removed) {
       const temporary = join(dirname(path), `${prefix}${randomUUID()}`);
+      const current = await stat(path);
+      const owner = process.getuid?.() === 0 ? { uid: current.uid, gid: current.gid } : undefined;
       try {
-        await writeFile(temporary, kept.map((line) => `${line}\n`).join(''), { mode: 0o600, flag: 'wx' });
+        await writeDurably(temporary, kept.map((line) => `${line}\n`).join(''), owner);
         await rename(temporary, path);
       } catch (error) {
         await rm(temporary, { force: true });
         throw error;
       }
+      await syncDirectory(dirname(path));
     }
-    return { kept: kept.length, removed };
+    return { kept: kept.length, removed, unreadable };
   });
 }
 

@@ -77,9 +77,9 @@ const sections: LegalSection[] = [
         </p>
         <p>
           We reply because you asked us to (steps you request before any contract, and our legitimate interest in answering). Product updates rely on
-          your consent, which you can withdraw at any time by replying to any update or through <PrivacyContact />. We keep submissions for{' '}
-          {FORM_RETENTION}, or delete them sooner if you ask. Our server deletes its copy automatically once it is {FORM_RETENTION_MONTHS} months old,
-          usually within a few hours.
+          your consent, which you can withdraw at any time by replying to any update or through <PrivacyContact />. Our server deletes its copy of a
+          submission automatically once it is {FORM_RETENTION_MONTHS} months old, usually within a few hours. The copy in our mailbox and our emails
+          with you are kept for {FORM_RETENTION}. We delete any of them sooner if you ask.
         </p>
       </>
     ),
@@ -203,8 +203,8 @@ const sections: LegalSection[] = [
     body: (
       <LegalList>
         <li>
-          Form submissions, their copies in our mailbox, and our emails with you: {FORM_RETENTION}, or until you ask us to delete them. Our server
-          deletes its copy of each submission automatically once it is {FORM_RETENTION_MONTHS} months old, usually within a few hours.
+          Form submissions on our server: deleted automatically once they are {FORM_RETENTION_MONTHS} months old, usually within a few hours. Their
+          copies in our mailbox and our emails with you: {FORM_RETENTION}. Either sooner if you ask us to delete them.
         </li>
         <li>
           Closed accounts: deleted within {CLOSURE_DELETION_DAYS} days of closing, together with each workspace where the account was the only owner

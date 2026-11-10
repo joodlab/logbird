@@ -1,6 +1,8 @@
 export interface WaitlistRewrite {
   kept: number;
   removed: number;
+  /** Lines that are not JSON: kept, never deleted, so an operator can deal with them. */
+  unreadable: number;
 }
 export function withWaitlistLock<T>(file: string, task: (path: string) => Promise<T>): Promise<T>;
 export function appendWaitlistRecord(file: string, record: unknown): Promise<void>;

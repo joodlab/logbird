@@ -6,8 +6,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { appendWaitlistRecord, forgetWaitlistEmail, pruneWaitlist, resolveWaitlistPath, retentionExpiry } from '../../waitlist/file.mjs';
-import { createCloudflareStore, retentionSeconds } from './waitlist-cloudflare';
-import { sweepWaitlist } from './waitlist-retention';
+import { createCloudflareStore, retentionDeadline } from './waitlist-cloudflare';
+import { scheduleWaitlistRetention, sweepWaitlist } from './waitlist-retention';
 
 const fileModule = pathToFileURL(fileURLToPath(new URL('../../waitlist/file.mjs', import.meta.url))).href;
 let dir = '';
@@ -54,7 +54,7 @@ it('deletes submissions whose retention period has ended and keeps the rest, log
   const lines: string[] = [];
   const now = at('2026-11-10T12:00:00.000Z');
   const result = await sweepWaitlist(file, { now, months: 24, log: (line) => lines.push(line) });
-  expect(result).toEqual({ kept: 3, removed: 2 });
+  expect(result).toEqual({ kept: 3, removed: 2, unreadable: 1 });
   // What it can't read, it keeps.
   expect(await readFile(file, 'utf8')).toContain('not json');
   expect(
@@ -64,24 +64,37 @@ it('deletes submissions whose retention period has ended and keeps the rest, log
       .slice(0, 2)
       .map((line) => JSON.parse(line).email),
   ).toEqual(['just-inside@example.test', 'new@example.test']);
-  expect(lines).toEqual([JSON.stringify({ level: 'info', event: 'waitlist.retention', removed: 2, kept: 3, months: 24 })]);
+  // The unreadable line is kept, so the log line is a warning that says so.
+  expect(lines).toEqual([JSON.stringify({ level: 'warn', event: 'waitlist.retention', removed: 2, kept: 3, unreadable: 1, months: 24 })]);
   if (process.platform !== 'win32') {
     expect((await stat(file)).mode & 0o777).toBe(0o600);
   }
-  // Nothing to do: the file is left alone and nothing is logged.
-  expect(await sweepWaitlist(file, { now, months: 24, log: (line) => lines.push(line) })).toEqual({ kept: 3, removed: 0 });
+  // With nothing to delete and nothing unreadable, nothing is logged.
+  await writeFile(file, (await readFile(file, 'utf8')).replace('not json\n', ''));
+  expect(await sweepWaitlist(file, { now, months: 24, log: (line) => lines.push(line) })).toEqual({ kept: 2, removed: 0, unreadable: 0 });
   expect(lines).toHaveLength(1);
 });
 
+it('waits before the first cleanup (so a rolling deploy can stop the old container first), then sweeps', async () => {
+  await appendWaitlistRecord(file, record('old@example.test', '2020-01-01T00:00:00.000Z'));
+  const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  const stop = scheduleWaitlistRetention(file, { firstAfterMs: 300 });
+  await new Promise((done) => setTimeout(done, 100));
+  expect(await emails()).toEqual(['old@example.test']);
+  await vi.waitFor(async () => expect(await readFile(file, 'utf8')).toBe(''), { timeout: 5000 });
+  stop();
+  log.mockRestore();
+});
+
 it('treats a missing file as empty', async () => {
-  expect(await pruneWaitlist(file, Date.now(), 24)).toEqual({ kept: 0, removed: 0 });
+  expect(await pruneWaitlist(file, Date.now(), 24)).toEqual({ kept: 0, removed: 0, unreadable: 0 });
 });
 
 it('removes a temporary copy left by a crashed rewrite, so a deleted record has no other copy', async () => {
   await appendWaitlistRecord(file, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
   const leftover = `${file}.rewrite-crashed`;
   await writeFile(leftover, `${JSON.stringify(record('forget-me@example.test', '2026-11-01T00:00:00.000Z'))}\n`);
-  expect(await forgetWaitlistEmail(file, 'forget-me@example.test')).toEqual({ kept: 0, removed: 1 });
+  expect(await forgetWaitlistEmail(file, 'forget-me@example.test')).toEqual({ kept: 0, removed: 1, unreadable: 0 });
   expect(await readdir(dir)).toEqual(['waitlist.jsonl']);
 });
 
@@ -101,7 +114,7 @@ it('works on the real file behind a symlinked WAITLIST_FILE, and keeps the symli
   }
   await appendWaitlistRecord(link, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
   await appendWaitlistRecord(target, record('keep-me@example.test', '2026-11-02T00:00:00.000Z'));
-  expect(await forgetWaitlistEmail(link, 'forget-me@example.test')).toEqual({ kept: 1, removed: 1 });
+  expect(await forgetWaitlistEmail(link, 'forget-me@example.test')).toEqual({ kept: 1, removed: 1, unreadable: 0 });
   // The record is gone from the file that held it, and the symlink still points there.
   expect((await lstat(link)).isSymbolicLink()).toBe(true);
   expect(await readFile(target, 'utf8')).not.toContain('forget-me');
@@ -154,6 +167,7 @@ it('loses nothing when processes create the file through different aliases at on
     running = false;
   });
   while (running) {
+    await new Promise((done) => setTimeout(done, 5));
     await forgetWaitlistEmail(paths[0] as string, 'nobody@example.test');
   }
   expect(await finished).toEqual([0, 0]);
@@ -165,7 +179,7 @@ it('forgets every submission from one address, ignoring case and spaces', async 
   await appendWaitlistRecord(file, record('Someone@Example.test', '2026-11-01T00:00:00.000Z'));
   await appendWaitlistRecord(file, record('other@example.test', '2026-11-02T00:00:00.000Z'));
   await appendWaitlistRecord(file, record('someone@example.test', '2026-11-03T00:00:00.000Z'));
-  expect(await forgetWaitlistEmail(file, ' SOMEONE@example.test ')).toEqual({ kept: 1, removed: 2 });
+  expect(await forgetWaitlistEmail(file, ' SOMEONE@example.test ')).toEqual({ kept: 1, removed: 2, unreadable: 0 });
   expect(await emails()).toEqual(['other@example.test']);
   await expect(forgetWaitlistEmail(file, '  ')).rejects.toThrow(/required/);
 });
@@ -187,6 +201,7 @@ it('never loses a submission another process writes while this one rewrites the 
     running = false;
   });
   while (running) {
+    await new Promise((done) => setTimeout(done, 5));
     await pruneWaitlist(file, Date.now(), 24);
     await forgetWaitlistEmail(file, `old-${rewrites}@example.test`);
     rewrites += 1;
@@ -270,10 +285,10 @@ it('the admin script deletes one address and prints counts only', async () => {
 
 it('the Cloudflare store gives each record the same lifetime as a KV expiry', async () => {
   const receivedAt = '2026-03-31T12:00:00.000Z';
-  expect(retentionSeconds(at(receivedAt), 1)).toBe((at('2026-04-30T12:00:00.000Z') - at(receivedAt)) / 1000);
+  expect(retentionDeadline(at(receivedAt), 1)).toBe(at('2026-04-30T12:00:00.000Z') / 1000);
   const put = vi.fn(async () => undefined);
   await createCloudflareStore({ WAITLIST_KV: { put } }, 24)({ email: 'kv@example.test', interest: 'cloud', receivedAt });
   expect(put).toHaveBeenCalledWith(expect.stringMatching(/^waitlist:2026-03-31T12:00:00\.000Z:/), expect.any(String), {
-    expirationTtl: retentionSeconds(at(receivedAt), 24),
+    expiration: at('2028-03-31T12:00:00.000Z') / 1000,
   });
 });
