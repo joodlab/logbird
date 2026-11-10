@@ -25,7 +25,8 @@ const LOCK_WAIT_MS = 30_000;
 function lockAddresses(file) {
   const id = createHash('sha256').update(file).digest();
   if (process.platform === 'linux') {
-    return [{ path: `\0logbird-waitlist-${id.toString('hex').slice(0, 32)}` }];
+    // exclusive: cluster workers (Node cluster, PM2) must not share one listening handle, or both would hold the lock.
+    return [{ path: `\0logbird-waitlist-${id.toString('hex').slice(0, 32)}`, exclusive: true }];
   }
   const first = id.readUInt32BE(0) % 10_000;
   return Array.from({ length: 50 }, (_, step) => ({ host: '127.0.0.1', port: 20_000 + ((first + step * 197) % 10_000), exclusive: true }));

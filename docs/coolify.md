@@ -148,7 +148,10 @@ so running the command while the site serves traffic never loses a submission.
 
 The Cloudflare build (not used by the hosted site) stores submissions in the
 `WAITLIST_KV` namespace with the same lifetime as a KV expiry. Keys written before
-that expiry existed have none: list them with
-`wrangler kv key list --binding WAITLIST_KV --prefix waitlist:` and delete the
-expired ones with `wrangler kv key delete --binding WAITLIST_KV <key>`. On request,
+that expiry existed have none. From `apps/web` (its `wrangler.jsonc` names the
+binding), list them with
+`wrangler kv key list --binding WAITLIST_KV --remote --prefix waitlist:`, read one
+with `wrangler kv key get --binding WAITLIST_KV --remote <key>` and delete the
+expired ones with `wrangler kv key delete --binding WAITLIST_KV --remote <key>`.
+Without `--remote`, Wrangler 4 acts on local development storage only. On request,
 delete the keys whose value has that email address the same way.

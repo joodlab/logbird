@@ -140,6 +140,43 @@ it('waits while another process holds the lock, and gets it as soon as that proc
   expect(await emails()).toEqual(['after-crash@example.test']);
 }, 30_000);
 
+it('never lets two cluster workers hold the lock at once (they must not share one listening handle)', async () => {
+  // Workers re-run the primary's script, so the program must be a file rather than `node -e`.
+  const script = join(dir, 'cluster.mjs');
+  await writeFile(
+    script,
+    `import * as waitlist from ${JSON.stringify(fileModule)};
+    import cluster from 'node:cluster';
+    const file = ${JSON.stringify(file)};
+    if (cluster.isPrimary) {
+      const spans = [];
+      for (let i = 0; i < 2; i++) cluster.fork().on('message', (span) => spans.push(span));
+      let exited = 0;
+      cluster.on('exit', () => { if (++exited === 2) console.log(JSON.stringify(spans)); });
+    } else {
+      for (let round = 0; round < 3; round++) {
+        await waitlist.withWaitlistLock(file, async () => {
+          const start = Date.now();
+          await new Promise((done) => setTimeout(done, 150));
+          process.send({ start, end: Date.now() });
+        });
+      }
+      process.disconnect();
+    }`,
+  );
+  const program = spawn(process.execPath, [script], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  program.stdout.on('data', (data: Buffer) => {
+    output += data.toString();
+  });
+  await new Promise((done) => program.on('exit', done));
+  const spans = (JSON.parse(output) as { start: number; end: number }[]).sort((a, b) => a.start - b.start);
+  expect(spans).toHaveLength(6);
+  for (let index = 1; index < spans.length; index += 1) {
+    expect(spans[index]?.start).toBeGreaterThanOrEqual(spans[index - 1]?.end ?? Number.POSITIVE_INFINITY);
+  }
+}, 60_000);
+
 it('the admin script deletes one address and prints counts only', async () => {
   await appendWaitlistRecord(file, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
   await appendWaitlistRecord(file, record('keep-me@example.test', '2026-11-02T00:00:00.000Z'));

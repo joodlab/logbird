@@ -3,7 +3,8 @@
 /**
  * When a submission received at `receivedAt` (ms) expires: the same day and time `months` calendar months later, or
  * the last day of that month when it is shorter (31 January + 1 month is 28 or 29 February). The Node cleanup and
- * the Cloudflare KV expiry both use this, so both keep a submission exactly as long as the privacy policy says.
+ * the Cloudflare KV expiry both use this rule. The Node cleanup deletes a record on its first run after this moment
+ * (it runs every six hours); KV removes it on its own schedule after the expiry.
  */
 export function retentionExpiry(receivedAt, months) {
   const start = new Date(receivedAt);
