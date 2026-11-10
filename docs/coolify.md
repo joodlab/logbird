@@ -83,11 +83,13 @@ links `/login` itself), SMTP settings and
 submissions; preserve it across redeploys. The privacy policy and terms name the
 operator from `WEB_ORG_NAME`, `WEB_PRIVACY_EMAIL`, `WEB_LEGAL_ADDRESS`,
 `WEB_GOVERNING_LAW`, `WEB_HOSTING_PROVIDER`, `WEB_EMAIL_PROVIDER` and
-`WEB_MAILBOX_PROVIDER`; the site stays
-noindex until the publisher name and the privacy mailbox are set (see
-`marketing/copy/legal-privacy.md`); nothing else gates indexing. Setting
-`WEB_GOVERNING_LAW` (or a `WEB_LEGAL_ADDRESS` that names the country) is
-recommended before indexing, not required: until then the terms' governing-law
+`WEB_MAILBOX_PROVIDER`. The site stays noindex while any release blocker in
+`apps/web/src/lib/release.ts` is open: among them `WEB_SITE_URL`,
+`WEB_SECURITY_EMAIL`, `WEB_CONTACT_EMAIL`, the publisher name (`WEB_ORG_NAME`)
+and the privacy mailbox (`WEB_PRIVACY_EMAIL`); see also
+`marketing/copy/legal-privacy.md`. `WEB_GOVERNING_LAW` and `WEB_LEGAL_ADDRESS`
+are not blockers. Setting one of them (a legal address that names the country
+will do) is recommended before indexing: until then the terms' governing-law
 clause isn't pinned to a country. Add them whenever they're known. The privacy policy says each form submission is
 emailed to the team, and until `WEB_PRIVACY_EMAIL` exists the form is the channel
 for privacy requests, so on the hosted site `SMTP_*`, `MAIL_FROM` and

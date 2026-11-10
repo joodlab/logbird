@@ -55,6 +55,13 @@ describe('Lighthouse SEO pass mark', () => {
     expect(robotsAllowsCrawling(cloudflare + robotsTxt(siteConfigFrom({})))).toBe(false);
   });
 
+  it('does not let extension records such as Sitemap split a user-agent group (RFC 9309 §2.2.4)', () => {
+    // One group for both crawlers: the Sitemap line sits between its User-agent lines.
+    expect(robotsAllowsCrawling('User-agent: *\nSitemap: https://example.test/sitemap.xml\nUser-agent: GPTBot\nAllow: /\n')).toBe(true);
+    // A Sitemap line after a group's rules doesn't end it, and rules before any User-agent apply to no one.
+    expect(robotsAllowsCrawling('Disallow: /\nUser-agent: *\nAllow: /\nSitemap: https://example.test/sitemap.xml\nDisallow: /private\n')).toBe(true);
+  });
+
   it('keeps crawlers off console and API paths only when the console shares the origin', () => {
     const shared = robotsTxt(siteConfigFrom({ ...RELEASED_ENV, WEB_APP_URL: RELEASED_ENV.WEB_SITE_URL }));
     expect(robotsAllowsCrawling(shared)).toBe(true);

@@ -20,7 +20,8 @@ export function seoWithoutCrawlable(lhr: LighthouseResult): number {
 /**
  * The Allow/Disallow rules of every `User-agent: *` group. A CDN may add its own groups to the served file (Cloudflare's
  * managed content signals prepend `Allow: /` for everyone plus `Disallow: /` for named AI crawlers), so rules for named
- * crawlers must not count. A group is its consecutive User-agent lines and the rules after them (RFC 9309).
+ * crawlers must not count. A group is its consecutive User-agent lines and the rules after them (RFC 9309); other
+ * records (Sitemap, Content-Signal) are not rules and don't split or end a group (RFC 9309 §2.2.4).
  */
 export function wildcardRobotsRules(robots: string) {
   const rules: string[] = [];
@@ -35,9 +36,9 @@ export function wildcardRobotsRules(robots: string) {
       if (inRules) agents = [];
       inRules = false;
       agents.push(value);
-    } else {
+    } else if (field === 'allow' || field === 'disallow') {
       inRules = true;
-      if (agents.includes('*') && (field === 'allow' || field === 'disallow')) rules.push(`${field}: ${value}`);
+      if (agents.includes('*')) rules.push(`${field}: ${value}`);
     }
   }
   return rules;
