@@ -22,32 +22,34 @@ it.runIf(process.env.LOGBIRD_MUTATION_RACE_STRESS === '1' && process.env.CLICKHO
     const run = randomUUID().slice(0, 8);
     const projects = Array.from({ length: CONCURRENCY }, (_, i) => `qa95-race-${run}-${i}`);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const pending = async (scope: 'server' | 'table') =>
+    const pending = async (scope: 'others' | 'table') =>
       Number(
         (
           await read<{ n: number }>(
             ch,
-            scope === 'server'
-              ? 'SELECT count() n FROM system.mutations WHERE NOT is_done'
+            scope === 'others'
+              ? 'SELECT count() n FROM system.mutations WHERE NOT is_done AND NOT (database=currentDatabase() AND table={t:String})'
               : 'SELECT count() n FROM system.mutations WHERE NOT is_done AND database=currentDatabase() AND table={t:String}',
             { t: TABLE },
           )
         )[0]?.n ?? 0,
       );
-    const stale = await read<{ n: number }>(
-      ch,
-      'SELECT count() n FROM system.mutations WHERE NOT is_done AND create_time < now() - INTERVAL 60 SECOND AND NOT (database=currentDatabase() AND table={t:String})',
-      { t: TABLE },
-    );
-    if (Number(stale[0]?.n ?? 0) > 0) throw new Error('Another database has mutations pending for over 60 s; not starting.');
-    await ch.command({
-      query: `CREATE TABLE IF NOT EXISTS ${TABLE} (project_id String, n UInt32, payload String) ENGINE = MergeTree ORDER BY (project_id, n)`,
-    });
     const rounds: { round: number; skipped: number; retries: number }[] = [];
+    let created = false;
     try {
+      // Precondition: the server's mutation pool is idle. Never add a burst on top of someone else's mutations.
+      if ((await pending('others')) > 0) throw new Error('Other mutations are pending on the server; not starting.');
+      // Plain CREATE (no IF NOT EXISTS): a leftover or concurrently running table is never adopted, and cleanup only
+      // drops the table this run created.
+      await ch.command({
+        query: `CREATE TABLE ${TABLE} (project_id String, n UInt32, payload String) ENGINE = MergeTree ORDER BY (project_id, n)`,
+      });
+      created = true;
       for (let round = 0; round < ROUNDS; round++) {
-        const serverPending = await pending('server');
-        if (serverPending > MAX_PENDING_MUTATIONS) throw new Error(`Aborting: ${serverPending} pending mutations on the server.`);
+        const others = await pending('others');
+        if (others > 0) throw new Error(`Aborting: ${others} other mutations appeared on the server.`);
+        const own = await pending('table');
+        if (own > MAX_PENDING_MUTATIONS) throw new Error(`Aborting: ${own} pending mutations on ${TABLE}.`);
         // One insert puts every fictional project into the same part, so all DELETEs mutate that part concurrently.
         await ch.insert({
           table: TABLE,
@@ -91,9 +93,11 @@ it.runIf(process.env.LOGBIRD_MUTATION_RACE_STRESS === '1' && process.env.CLICKHO
         }),
       );
       try {
-        for (let i = 0; i < 60 && (await pending('table')) > 0; i++) await new Promise((resolve) => setTimeout(resolve, 1000));
-        console.info(JSON.stringify({ event: 'qa95.mutation_race_cleanup', pendingTableMutations: await pending('table') }));
-        await ch.command({ query: `DROP TABLE IF EXISTS ${TABLE} SYNC` });
+        if (created) {
+          for (let i = 0; i < 60 && (await pending('table')) > 0; i++) await new Promise((resolve) => setTimeout(resolve, 1000));
+          console.info(JSON.stringify({ event: 'qa95.mutation_race_cleanup', pendingTableMutations: await pending('table') }));
+          await ch.command({ query: `DROP TABLE ${TABLE} SYNC` });
+        }
       } catch (error) {
         console.error(JSON.stringify({ event: 'qa95.mutation_race_cleanup_failed', error: String(error) }));
       } finally {
