@@ -56,16 +56,20 @@ export interface AuthRecordSweepDb {
 
 /**
  * Deletes expired records in batches. The budget is checked between batches, so a run can overshoot it by one batch:
- * up to 1 s waiting to start its transaction (`maxWait`) plus the 6 s transaction timeout.
+ * up to 1 s waiting to start its transaction (`maxWait`) plus the 6 s transaction timeout. Kinds take turns, one batch
+ * each, until each is drained, so a large backlog of one kind (say sessions) can't use every run's budget and starve
+ * the others.
  */
 export async function sweepExpiredAuthRecords(now = Date.now(), db: AuthRecordSweepDb = prisma): Promise<AuthRecordSweepResult> {
   const started = Date.now();
   const removed: Record<AuthRecordKind, number> = { session: 0, verification: 0, invitation: 0 };
   let batches = 0;
-  for (const kind of KINDS) {
-    const cutoff = new Date(now - AUTH_RECORD_GRACE_MS[kind]);
-    for (;;) {
+  let pending = [...KINDS];
+  while (pending.length) {
+    const drained: AuthRecordKind[] = [];
+    for (const kind of pending) {
       if (Date.now() - started >= AUTH_RECORD_SWEEP_BUDGET_MS) return { removed, batches, limited: true };
+      const cutoff = new Date(now - AUTH_RECORD_GRACE_MS[kind]);
       const count = await db.$transaction(
         async (tx) => {
           await tx.$executeRaw(AUTH_RECORD_SWEEP_GUARD);
@@ -75,9 +79,10 @@ export async function sweepExpiredAuthRecords(now = Date.now(), db: AuthRecordSw
       );
       removed[kind] += count;
       batches++;
-      if (count < AUTH_RECORD_SWEEP_BATCH_SIZE) break;
-      await pause(10);
+      if (count < AUTH_RECORD_SWEEP_BATCH_SIZE) drained.push(kind);
     }
+    pending = pending.filter((kind) => !drained.includes(kind));
+    if (pending.length) await pause(10);
   }
   return { removed, batches, limited: false };
 }

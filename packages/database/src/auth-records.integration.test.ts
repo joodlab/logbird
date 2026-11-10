@@ -29,7 +29,7 @@ async function dropStaleSchemas() {
   const leftovers = await prisma.$queryRaw<{ name: string }[]>`SELECT nspname AS name FROM pg_namespace WHERE nspname LIKE 'qa\\_129\\_%'`;
   for (const { name } of leftovers) {
     const created = Number(/^qa_129_(\d{13})_[0-9a-f]{32}$/.exec(name)?.[1]);
-    if (created && Date.now() - created > STALE_AFTER_MS) await prisma.$executeRawUnsafe(`DROP SCHEMA "${name}" CASCADE`);
+    if (created && Date.now() - created > STALE_AFTER_MS) await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${name}" CASCADE`);
   }
 }
 

@@ -33,37 +33,61 @@ it('batch statements target only expired rows of one table, oldest first, bounde
   }
 });
 
-it('drains each kind in guarded batches with its own grace period, and reports what it removed', async () => {
+/** The table a batch statement deletes from. */
+const kindOf = (statement: { text: string }) => /DELETE FROM "(\w+)"/.exec(statement.text)?.[1];
+/** Answers each kind's batches from its own queue of row counts (empty queue: nothing left). */
+const answer = (counts: Record<string, number[]>, onBatch: () => void = () => undefined) =>
+  execute.mockImplementation((statement) => {
+    if (statement === AUTH_RECORD_SWEEP_GUARD) return Promise.resolve(0);
+    onBatch();
+    return Promise.resolve(counts[kindOf(statement) ?? '']?.shift() ?? 0);
+  });
+
+it('drains each kind in guarded batches with its own grace period, taking turns, and reports what it removed', async () => {
   const now = Date.parse('2026-11-10T12:00:00Z');
   // session: one full batch then a partial one; verification: partial; invitation: nothing.
-  const counts = [AUTH_RECORD_SWEEP_BATCH_SIZE, 7, 3, 0];
-  execute.mockImplementation((statement) => Promise.resolve(statement === AUTH_RECORD_SWEEP_GUARD ? 0 : (counts.shift() ?? 0)));
+  answer({ session: [AUTH_RECORD_SWEEP_BATCH_SIZE, 7], verification: [3], invitation: [0] });
   const result = await sweepExpiredAuthRecords(now);
   expect(result).toEqual({ removed: { session: AUTH_RECORD_SWEEP_BATCH_SIZE + 7, verification: 3, invitation: 0 }, batches: 4, limited: false });
   // Every batch runs right after the guard, inside its own transaction.
   const calls = execute.mock.calls.map(([statement]) => statement);
   expect(calls.filter((_, index) => index % 2 === 0).every((statement) => statement === AUTH_RECORD_SWEEP_GUARD)).toBe(true);
   expect(transaction).toHaveBeenCalledTimes(4);
-  const cutoffs = calls.filter((_, index) => index % 2 === 1).map((statement) => statement.values[0]);
-  expect(cutoffs).toEqual([
-    new Date(now - AUTH_RECORD_GRACE_MS.session).toISOString(),
+  const batches = calls.filter((_, index) => index % 2 === 1);
+  // One batch per kind per turn; drained kinds drop out.
+  expect(batches.map(kindOf)).toEqual(['session', 'verification', 'invitation', 'session']);
+  expect(batches.map((statement) => statement.values[0])).toEqual([
     new Date(now - AUTH_RECORD_GRACE_MS.session).toISOString(),
     new Date(now - AUTH_RECORD_GRACE_MS.verification).toISOString(),
     new Date(now - AUTH_RECORD_GRACE_MS.invitation).toISOString(),
+    new Date(now - AUTH_RECORD_GRACE_MS.session).toISOString(),
   ]);
 });
 
 it('stops at the time budget and says so; the next run continues', async () => {
   let clock = 0;
   vi.spyOn(Date, 'now').mockImplementation(() => clock);
-  execute.mockImplementation((statement) => {
-    if (statement !== AUTH_RECORD_SWEEP_GUARD) clock += AUTH_RECORD_SWEEP_BUDGET_MS / 2;
-    return Promise.resolve(statement === AUTH_RECORD_SWEEP_GUARD ? 0 : AUTH_RECORD_SWEEP_BATCH_SIZE);
+  const full = () => Array(10).fill(AUTH_RECORD_SWEEP_BATCH_SIZE);
+  answer({ session: full(), verification: full(), invitation: full() }, () => {
+    clock += AUTH_RECORD_SWEEP_BUDGET_MS / 2;
   });
   const result = await sweepExpiredAuthRecords(0);
-  expect(result.limited).toBe(true);
-  expect(result.batches).toBe(2);
-  expect(result.removed.session).toBe(2 * AUTH_RECORD_SWEEP_BATCH_SIZE);
+  expect(result).toEqual({
+    removed: { session: AUTH_RECORD_SWEEP_BATCH_SIZE, verification: AUTH_RECORD_SWEEP_BATCH_SIZE, invitation: 0 },
+    batches: 2,
+    limited: true,
+  });
+});
+
+it('a backlog of one kind cannot starve the others: every kind progresses within one budget', async () => {
+  let clock = 0;
+  vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  // Sessions never run out; each batch costs a quarter of the budget, so the run fits four batches.
+  answer({ session: Array(100).fill(AUTH_RECORD_SWEEP_BATCH_SIZE), verification: [4], invitation: [2] }, () => {
+    clock += AUTH_RECORD_SWEEP_BUDGET_MS / 4;
+  });
+  const result = await sweepExpiredAuthRecords(0);
+  expect(result).toEqual({ removed: { session: 2 * AUTH_RECORD_SWEEP_BATCH_SIZE, verification: 4, invitation: 2 }, batches: 4, limited: true });
 });
 
 it('a failed batch rejects the run instead of reporting a partial success', async () => {
