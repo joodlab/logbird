@@ -42,7 +42,7 @@ describe('release gate', () => {
     expect(siteIndexable(released)).toBe(true);
     // A legal page taken back to unready blocks release again.
     getPage('/legal/terms').ready = false;
-    expect(releaseBlockers(released)).toEqual(['legal placeholder: /legal/terms needs counsel-reviewed text']);
+    expect(releaseBlockers(released)).toEqual(['legal page not ready: /legal/terms is marked ready: false']);
     getPage('/legal/terms').ready = true;
   });
   it('blocks release while the domain or the security mailbox is provisional', async () => {

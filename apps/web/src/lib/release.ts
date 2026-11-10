@@ -12,8 +12,8 @@ import { getPage, type SitePage } from './site-map';
  * - contact mailbox: WEB_CONTACT_EMAIL is unset, so the site can't name a general address;
  * - publisher: WEB_ORG_NAME is unset, so the privacy policy and terms can't name who is responsible for your data;
  * - privacy contact: WEB_PRIVACY_EMAIL is unset, so privacy requests go through the contact form instead of a mailbox;
- * - legal placeholder: /legal/privacy or /legal/terms isn't ready, so the site would collect emails without a published
- *   privacy policy and terms (they stay placeholders until counsel-reviewed text replaces them).
+ * - legal page not ready: /legal/privacy or /legal/terms is marked `ready: false`, so the site would collect emails
+ *   without a published privacy policy and terms.
  *
  * No mailbox is ever derived from the provisional domain.
  */
@@ -26,7 +26,7 @@ export function releaseBlockers(config: SiteConfig = siteConfig): string[] {
     ...(config.CONTACT_EMAIL ? [] : ['contact mailbox: set WEB_CONTACT_EMAIL']),
     ...(config.ORG_NAME ? [] : ['publisher: set WEB_ORG_NAME']),
     ...(config.PRIVACY_EMAIL ? [] : ['privacy contact: set WEB_PRIVACY_EMAIL']),
-    ...LEGAL_PAGES.filter((path) => !getPage(path).ready).map((path) => `legal placeholder: ${path} needs counsel-reviewed text`),
+    ...LEGAL_PAGES.filter((path) => !getPage(path).ready).map((path) => `legal page not ready: ${path} is marked ready: false`),
   ];
 }
 export const siteIndexable = (config: SiteConfig = siteConfig) => releaseBlockers(config).length === 0;

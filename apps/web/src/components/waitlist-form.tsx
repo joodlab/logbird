@@ -43,7 +43,7 @@ const INTERESTS = [
   { value: 'updates', label: 'Product updates only' },
   { value: 'correction', label: 'A correction to one of our pages' },
   { value: 'other', label: 'A question, or support and enterprise' },
-  { value: 'privacy', label: 'A privacy request (access, correction or deletion)' },
+  { value: 'privacy', label: 'A privacy request (access, deletion or another right)' },
 ] as const;
 
 /**

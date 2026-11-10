@@ -60,7 +60,7 @@ export interface SiteConfig {
   /** General contact mailbox. No default, for the same reason; unset renders "use the form" wording (release blocker). */
   CONTACT_EMAIL?: string;
   /**
-   * Where people send privacy requests (access, correction, deletion). No default; unset, the privacy policy points to
+   * Where people send privacy requests (access, deletion or another right). No default; unset, the privacy policy points to
    * the contact form's "A privacy request" topic, which reaches the same team (release blocker until set).
    */
   PRIVACY_EMAIL?: string;

@@ -29,7 +29,7 @@ export const FEE_NOTICE_DAYS = 30;
 export const HOSTING_PROVIDER_TEXT = HOSTING_PROVIDER ?? 'our server provider';
 /** Logbird Cloud's transactional email goes through Postmark (operator configuration); WEB_EMAIL_PROVIDER overrides it. */
 export const EMAIL_PROVIDER_TEXT = EMAIL_PROVIDER ?? 'Postmark';
-export const MAILBOX_PROVIDER_TEXT = MAILBOX_PROVIDER ?? 'our email host';
+export const MAILBOX_PROVIDER_TEXT = MAILBOX_PROVIDER ?? 'our email provider';
 export const GOVERNING_LAW_TEXT = GOVERNING_LAW ?? 'the laws of the country where the operator is established';
 export { LEGAL_ADDRESS };
 

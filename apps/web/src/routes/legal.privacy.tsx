@@ -26,9 +26,9 @@ const sections: LegalSection[] = [
     body: (
       <>
         <p>
-          {OPERATOR_SENTENCE_START} ("we") runs this website and Logbird Cloud, the hosted Logbird console. We decide how the personal data described
-          here is used, so we are its controller.{LEGAL_ADDRESS ? ` Our address: ${LEGAL_ADDRESS}.` : ''} To contact us about privacy, use{' '}
-          <PrivacyContact />.
+          {OPERATOR_SENTENCE_START} ("we") runs this website and Logbird Cloud, the hosted Logbird console. For the personal data described here,
+          except the data you send to Logbird Cloud (see below), we decide how it is used, so we are its controller.
+          {LEGAL_ADDRESS ? ` Our address: ${LEGAL_ADDRESS}.` : ''} To contact us about privacy, use <PrivacyContact />.
         </p>
         <p>
           This policy covers the website, the contact and early-access form, and Logbird Cloud accounts. It doesn't cover Logbird installations that
@@ -67,8 +67,8 @@ const sections: LegalSection[] = [
         <p>
           When you send the form we store your email address, the topic you choose, and the name, company and message if you give them, with the time
           you sent it. We don't store your IP address or browser details with it. To stop the form being flooded, the server counts submissions per IP
-          address in its memory only: an address is never written to disk or logs, and is dropped from memory after its one-minute window, at the
-          latest when the server next cleans up or restarts.
+          address in its memory only: an address is never written to disk or logs, and is removed once its one-minute window has passed, on a later
+          request or when the server restarts.
         </p>
         <p>
           We keep submissions on our server, and our server emails each one to our team's mailbox, where we answer them. We use them to reply, to
@@ -155,7 +155,8 @@ const sections: LegalSection[] = [
             <strong>Server hosting</strong>: {HOSTING_PROVIDER_TEXT} runs the servers that store Logbird Cloud data and form submissions.
           </li>
           <li>
-            <strong>Email delivery</strong>: {EMAIL_PROVIDER_TEXT} sends Logbird Cloud's sign-in codes, invitations and notices.
+            <strong>Email delivery</strong>: {EMAIL_PROVIDER_TEXT} sends Logbird Cloud's sign-in codes, invitations and notices. Form submissions
+            reach our team's mailbox through our email delivery provider.
           </li>
           <li>
             <strong>Our mailbox</strong>: {MAILBOX_PROVIDER_TEXT} hosts the team mailbox that receives form submissions and the emails you send us.

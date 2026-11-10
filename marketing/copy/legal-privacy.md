@@ -19,7 +19,7 @@ re-check the source before you change a sentence, and update the effective date 
 | Privacy mailbox | `WEB_PRIVACY_EMAIL` | the contact form's "A privacy request" topic (release blocker) |
 | Postal address | `WEB_LEGAL_ADDRESS` | no address printed |
 | Server provider and region | `WEB_HOSTING_PROVIDER` | "our server provider" |
-| Team mailbox host (receives form submissions and emails) | `WEB_MAILBOX_PROVIDER` | "our email host" |
+| Team mailbox host (receives form submissions and emails) | `WEB_MAILBOX_PROVIDER` | "our email provider" |
 | Email delivery provider | `WEB_EMAIL_PROVIDER` | Postmark (Logbird Cloud's transactional provider, confirmed by the master 2026-11-10) |
 
 The site stays noindex (robots `Disallow: /`) until the publisher name and the privacy mailbox are set
@@ -82,5 +82,5 @@ moves there, rewrite the form section first.
 ## form-line
 
 The form shows, under its button: "We use these details to reply to you, and send product updates only if you choose
-them. No trackers. By sending, you confirm you've read the privacy policy." The topic list ends with "A privacy
-request (access, correction or deletion)".
+"Product updates only". No trackers. By sending, you confirm you've read the privacy policy." The topic list ends with "A privacy
+request (access, deletion or another right)".

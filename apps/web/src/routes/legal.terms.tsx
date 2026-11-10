@@ -113,8 +113,8 @@ const sections: LegalSection[] = [
         </p>
         <p>
           You choose each project's retention period, and you can export events from the console at any time. We don't look at your data except to
-          operate and secure the service, to help when you ask us to, or when the law requires it. If you need a data processing agreement, contact
-          us.
+          operate and secure the service, to help when you ask us to, or when the law requires it. If you need a data processing agreement, contact us
+          through <Contact />.
         </p>
       </>
     ),

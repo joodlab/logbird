@@ -1,6 +1,6 @@
 # Privacy policy, terms and the form's privacy line
 
-Captured 2026-11-10 (retaken after the review fixes, at the text of this commit) from a local production build of the site (`apps/web/.output/server/index.mjs` on 127.0.0.1:4628),
+Captured 2026-11-10 at commit 1ec09fa (later commits only reword a few sentences) from a local production build of the site (`apps/web/.output/server/index.mjs` on 127.0.0.1:4628),
 built with `WEB_SITE_URL=WEB_APP_URL=https://logbird.joodlab.com`, `WEB_GITHUB_PUBLIC=true` and the owner facts
 (`WEB_ORG_NAME`, `WEB_PRIVACY_EMAIL`, `WEB_LEGAL_ADDRESS`, `WEB_GOVERNING_LAW`, `WEB_HOSTING_PROVIDER`,
 `WEB_EMAIL_PROVIDER`) unset. That is what ships until the owner provides them: neutral wording, and privacy requests via
