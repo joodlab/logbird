@@ -99,25 +99,42 @@ Non-conventional commits remain in Other changes rather than silently disappeari
 Performance, `refactor` → Refactoring, `docs` → Documentation, `build` → Build,
 `ci` → CI, `test` → Tests, `chore` → Maintenance and `revert` → Reverts (`style` →
 Style). The squash-merge PR title is the commit subject and changelog line; use
-scopes such as `server` or `sdk`; a section groups entries under a scope once that
-scope has more than one entry. A `!` before the colon, or a `BREAKING CHANGE:`
-footer in the commit body, puts the change in its own Breaking changes section.
-Subjects with an unknown or malformed type stay whole under Other changes (a `!`
-still marks them breaking), and `@` in a subject is defused so it never mentions an
-account. CRLF messages are normalized first.
+scopes such as `server` or `sdk`. Within a section, entries are grouped under their
+scopes once any scope there has more than one entry. A `!` before the colon, or a
+`BREAKING CHANGE:` footer in the message's final paragraph, puts the change in its
+own Breaking changes section. A subject with an unknown or malformed type is kept
+whole: under Other changes, or under Breaking changes when it has a `!`. `@` in a
+subject is defused so it never mentions an account; changelogithub still turns
+`#123` into an issue link and `:emoji:` codes into emoji. CRLF messages are
+normalized first. Run notes from anywhere in the repository; the script always
+loads the root `changelogithub.config.ts`.
 
 The wrapper retains the stricter contributor policy because changelogithub's
-native name-only bot filter does not cover AI email/login identities. It parses
-git authors and `Co-authored-by:` lines from the message's trailer block itself,
-the final paragraph as `git interpret-trailers --parse` sees it (a co-author named
-in prose or a fenced example is never credited), trims every identity, then checks them, their GitHub logins and
-account types against one set of rules: `[bot]`/Bot; known automation and AI
-accounts and logins (Dependabot, GitHub Actions, Codex, Claude, Copilot, Cursor,
-Devin, Gemini Code Assist, Jules); every address at openai.com, anthropic.com,
-cursor.com and githubcopilot.com; Aider and Gemini/Jules addresses; agent display
-names such as "Claude Opus 5.5", "Cursor Agent" or "Gemini CLI"; names that
-sanitize to nothing; and reserved placeholder domains (`example.*`, `.test`,
-`.example`, `.invalid`, `localhost`). Exclusions apply to inline
+native name-only bot filter does not cover AI email/login identities. Git itself
+parses each commit's trailer block (`%(trailers:key=Co-authored-by)`, the rules of
+`git interpret-trailers`), so a co-author named in prose or a fenced example is
+never credited. Every identity is trimmed, then it and its GitHub login and account
+type are checked against one set of rules:
+- `[bot]` names and Bot accounts;
+- known automation and AI logins and noreply addresses (Dependabot, GitHub
+  Actions, Codex, Claude, Copilot, Cursor, Devin, Gemini Code Assist, Jules, Amp,
+  OpenHands);
+- agent mailboxes on any domain, such as `claude@`, `codex@` or `cursor-agent@`;
+- every address at, or under, openai.com, anthropic.com, cursor.com,
+  githubcopilot.com, aider.chat, ampcode.com, all-hands.dev, codeium.com,
+  windsurf.com and augmentcode.com, so employees committing from those domains
+  are not credited either;
+- Gemini/Jules addresses at google.com;
+- agent display names such as "Claude Opus 5.5", "Cursor Agent" or "Gemini CLI",
+  except for a person GitHub resolves to a User account;
+- names that sanitize to nothing;
+- reserved placeholder domains (`example.*`, `.test`, `.example`, `.invalid`,
+  `localhost`).
+
+The list names known agents: an agent with an unknown address and name would be
+credited, so extend the rules (and their tests) when a new one appears. An
+unresolved name that matches a resolved contributor is credited as that login, in
+inline credits and in Thank you alike. Exclusions apply to inline
 credits, contributor totals and thank-you entries. Missing/truncated identity
 responses or an excluded identity reaching rendering abort notes generation before
 any notes are emitted. Invalid Highlights or failed preflight likewise prevent

@@ -7,13 +7,17 @@ import { generateMarkdown, parseCommits, resolveConfig } from 'changelogithub';
 
 // AI coding agents and automation sign commits with these addresses; GitHub can map some of them to real
 // accounts (e.g. codex@users.noreply.github.com resolves to @codex), so match the address, not the login.
-// Whole vendor domains are excluded because agents sign with several addresses there (noreply@, claude-code@, …).
-const excludedEmail =
-  /@(?:openai|anthropic|cursor|githubcopilot)\.com$|^noreply@aider\.chat$|^(?:gemini|jules)[\w.+-]*@google\.com$|^(?:\d+\+)?(?:dependabot|github-actions|codex|claude|copilot|cursor(?:agent)?|devin-ai-integration|gemini-code-assist|google-labs-jules)(?:\[bot\])?@(?:users\.noreply\.github\.com|github\.com)$/i;
-const excludedLogin = /^(?:codex|claude|copilot|cursor(?:agent)?|devin-ai-integration|gemini-code-assist|google-labs-jules)$/i;
-// Agent display names, alone or with a product/model suffix ("Claude Opus 5.5", "Cursor Agent", "Gemini CLI").
+// Whole vendor domains (and their subdomains) are excluded because agents sign with several addresses there.
+const agentDomain =
+  /@(?:[\w-]+\.)*(?:openai\.com|anthropic\.com|cursor\.com|githubcopilot\.com|aider\.chat|ampcode\.com|all-hands\.dev|codeium\.com|windsurf\.com|augmentcode\.com)$/i;
+// Agent accounts on any domain (e.g. a team's claude@ or codex@ mailbox), and GitHub's bot/agent noreply addresses.
+const agentAddress =
+  /^(?:\d+\+)?(?:claude|codex|copilot|cursor|cursoragent|aider|amp|openhands|windsurf|devin-ai-integration|gemini-code-assist|google-labs-jules)(?:[-_](?:code|agent|ai|bot|cli))?(?:\[bot\])?@|^(?:\d+\+)?(?:dependabot|github-actions)(?:\[bot\])?@(?:users\.noreply\.github\.com|github\.com)$|^(?:gemini|jules)[\w.+-]*@google\.com$/i;
+const excludedLogin = /^(?:codex|claude|copilot|cursor(?:agent)?|devin-ai-integration|gemini-code-assist|google-labs-jules|amp|openhands)$/i;
+// Agent display names, alone or with a product/model suffix ("Claude Opus 5.5", "Cursor Agent", "Gemini CLI"). A person
+// whose git name happens to be "Claude" still gets credit once GitHub resolves them to a User account.
 const excludedName =
-  /^(?:claude|codex|copilot|cursor|devin|gemini|jules|aider)(?:[ -](?:code|agent|cli|ai|bot|assistant|opus|sonnet|haiku|\d[\w.]*))*$/i;
+  /^(?:claude|codex|copilot|cursor|devin|gemini|jules|aider|amp|openhands|windsurf|augment)(?:[ -](?:code|agent|cli|ai|bot|assistant|opus|sonnet|haiku|\d[\w.]*))*$/i;
 
 // Reserved documentation/test domains (RFC 2606/6761, e.g. history-scrubbed addresses) never identify a real contributor.
 const placeholderEmail = /@(?:[\w-]+\.)*(?:example\.(?:com|net|org)|example|invalid|localhost|test)$/i;
@@ -22,9 +26,10 @@ export function isPerson({ name = '', email = '', login = '', type }) {
   return (
     type !== 'Bot' &&
     !/\[bot\]/i.test(`${name} ${email} ${login}`) &&
-    !excludedEmail.test(email) &&
+    !agentDomain.test(email) &&
+    !agentAddress.test(email) &&
     !excludedLogin.test(login) &&
-    !excludedName.test(name.trim()) &&
+    !(excludedName.test(name.trim()) && !(login && type === 'User')) &&
     !placeholderEmail.test(email)
   );
 }
@@ -42,20 +47,22 @@ export function highlights(markdown, version) {
 
 const conventional = /^([a-z]+)(?:\(([^)]+)\))?(!)?: (.+)$/i;
 const breakingFooter = /^BREAKING[ -]CHANGE:/m;
-const coAuthor = /^Co-authored-by:[ \t]*(.+?)[ \t]*<[ \t]*([^>\n]+?)[ \t]*>[ \t]*$/i;
-// Git trailer tokens have no spaces; Conventional Commits also allow a `BREAKING CHANGE:` footer among them.
-const trailerLine = /^(?:[A-Za-z0-9-]+|BREAKING CHANGE):/;
+const coAuthorValue = /^(.+?)[ \t]*<[ \t]*([^>\n]+?)[ \t]*>[ \t]*$/;
 
 /**
- * Trailer lines, as `git interpret-trailers --parse` finds them: the message's last paragraph, and only when every
- * line in it is a `Token: value` trailer (or an indented continuation). A co-author mentioned in prose, in a fenced
- * example or anywhere before the final paragraph is never credited.
+ * The `git log` format parseLog reads. Git itself parses the trailer block (`%(trailers)`, the same rules as
+ * `git interpret-trailers`), so a co-author named in prose, a fenced example or above a `---` divider is never
+ * credited, and one after `(cherry picked from commit …)` or among `Signed-off-by:` lines is.
  */
-export function trailers(body) {
-  const paragraphs = body.trim().split(/\n[ \t]*\n/);
-  const last = paragraphs.length && paragraphs.at(-1).trim() ? paragraphs.at(-1).split('\n') : [];
-  return last.length && last.every((line) => trailerLine.test(line) || /^[ \t]+\S/.test(line)) ? last : [];
-}
+export const LOG_FORMAT = '%H%x1f%an%x1f%ae%x1f%(trailers:key=Co-authored-by,valueonly,unfold,separator=%x1d)%x1f%B%x1e';
+
+/** The message's final paragraph, where Conventional Commits footers such as `BREAKING CHANGE:` live. */
+const lastParagraph = (body) =>
+  body
+    .trim()
+    .split(/\n[ \t]*\n/)
+    .at(-1) ?? '';
+
 // changelogen and changelogithub look scopes up in plain objects, so `constructor` or `__proto__` would resolve to an
 // Object.prototype member and crash rendering. Such scopes move into the description instead.
 const prototypeKey = (key) => key in Object.prototype;
@@ -70,7 +77,7 @@ export function parseLog(log, config) {
     .split('\x1e')
     .filter((record) => record.trim())
     .map((record) => {
-      const [sha, rawName, rawEmail, ...parts] = record.trim().split('\x1f');
+      const [sha, rawName, rawEmail, coAuthorField = '', ...parts] = record.trim().split('\x1f');
       // Identities are compared trimmed, so padding never slips an address past the exclusion rules.
       const [name, email] = [rawName.trim(), rawEmail.trim()];
       const [message, ...lines] = parts.join('\x1f').replace(/\r\n?/g, '\n').split('\n');
@@ -84,14 +91,15 @@ export function parseLog(log, config) {
       if (!commit || commit.type !== (known ? type : 'other')) throw new Error(`Could not parse commit ${sha}.`);
       commit.scope = prototypeKey(scope) ? '' : scope;
       if (scope && prototypeKey(scope)) commit.description = `${scope}: ${commit.description}`;
-      const coAuthors = trailers(body)
-        .map((line) => line.match(coAuthor))
+      const coAuthors = coAuthorField
+        .split('\x1d')
+        .map((value) => value.trim().match(coAuthorValue))
         .filter(Boolean)
         .map(([, coName, coEmail]) => ({ name: coName.trim(), email: coEmail.trim() }));
       commit.authors = [{ name, email }, ...coAuthors];
       // `!` marks a breaking change whatever the type (an unknown type keeps it under Other changes), and so does a
       // Conventional Commits `BREAKING CHANGE:` footer.
-      if (match?.[3] || breakingFooter.test(body)) commit.isBreaking = true;
+      if (match?.[3] || breakingFooter.test(lastParagraph(body))) commit.isBreaking = true;
       return commit;
     });
 }
@@ -110,12 +118,18 @@ export function summarize(commits, previous, logins, accountTypes = new Map()) {
     commit.authors
       .map((person) => identity(person, logins, accountTypes))
       .filter((person) => isPerson(person) && (person.login || safeName(person.name)));
-  for (const commit of commits) commit.resolvedAuthors = peopleFor(commit);
-  const old = new Set(previous.flatMap(peopleFor).map((person) => person.key));
-  const people = new Map(commits.flatMap(peopleFor).map((person) => [person.key, person]));
-  // The same human can appear under a GitHub login and as a bare name/email; keep the login entry.
-  const loginNames = new Set([...people.values()].filter((person) => person.login).map((person) => person.name.toLowerCase()));
-  for (const [key, person] of people) if (!person.login && loginNames.has(person.name.toLowerCase())) people.delete(key);
+  // The same human can appear under a GitHub login and as a bare name/email. Every unresolved entry whose name
+  // matches a resolved one becomes that login, inline and in Thank you alike, then each list is deduplicated.
+  const byName = new Map();
+  for (const person of [...previous, ...commits].flatMap(peopleFor)) {
+    if (person.login && !byName.has(person.name.toLowerCase())) byName.set(person.name.toLowerCase(), person);
+  }
+  const canonical = (person) => (person.login ? person : (byName.get(person.name.toLowerCase()) ?? person));
+  const unique = (people) => [...new Map(people.map((person) => [person.key, person])).values()];
+  const creditsFor = (commit) => unique(peopleFor(commit).map(canonical));
+  for (const commit of commits) commit.resolvedAuthors = creditsFor(commit);
+  const old = new Set(previous.flatMap(creditsFor).map((person) => person.key));
+  const people = new Map(commits.flatMap(creditsFor).map((person) => [person.key, person]));
   // Nobody is a "first-time contributor" in the very first release.
   const firstRelease = previous.length === 0;
   return {
@@ -180,9 +194,16 @@ export function previousTag(to, gitCommand = git) {
   return previous.length ? gitCommand('describe', '--tags', '--abbrev=0', ...previous.flatMap((tag) => ['--match', tag]), to) : undefined;
 }
 
-export function resolveLogins(commits, repo, gh = (...args) => run('gh', args)) {
+export function resolveLogins(allCommits, repo, gh = (...args) => run('gh', args)) {
   const logins = new Map();
   const [owner, name] = repo.split('/');
+  // One commit per new email is enough: GitHub maps an address to the same account on every commit.
+  const seen = new Set();
+  const commits = allCommits.filter((commit) => {
+    const fresh = commit.authors.map((person) => person.email.toLowerCase()).filter((email) => !seen.has(email));
+    for (const email of fresh) seen.add(email);
+    return fresh.length > 0;
+  });
   for (let offset = 0; offset < commits.length; offset += 30) {
     const objects = commits
       .slice(offset, offset + 30)
@@ -224,6 +245,9 @@ async function main() {
     },
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
   });
+  const changelogPath = resolve(values.changelog);
+  // changelogithub loads changelogithub.config.ts from the working directory: always use the repository's.
+  process.chdir(git('rev-parse', '--show-toplevel'));
   const version = values.version ?? process.env.GITHUB_REF_NAME;
   if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version ?? '')) throw new Error('Use --version vX.Y.Z.');
   const to = git('rev-parse', '--verify', `${values.to}^{commit}`);
@@ -233,11 +257,11 @@ async function main() {
     .replace(/^.*github.com[:/]/, '')
     .replace(/\.git$/, '');
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('Origin must be a GitHub repository.');
-  const intro = highlights(readFileSync(values.changelog, 'utf8'), version);
+  const intro = highlights(readFileSync(changelogPath, 'utf8'), version);
   // Use only changelogithub's output APIs: never its CLI, sendRelease or uploadAssets.
   const config = await resolveConfig({ dry: true, from: from || to, to: version, repo });
   config.from = from ?? '';
-  const readLog = (range) => parseLog(run('git', ['log', '--no-merges', '--format=%H%x1f%an%x1f%ae%x1f%B%x1e', range]), config);
+  const readLog = (range) => parseLog(run('git', ['log', '--no-merges', `--format=${LOG_FORMAT}`, range]), config);
   const commits = readLog(from ? `${from}..${to}` : to);
   const previous = from ? readLog(from) : [];
   const { logins, accountTypes } = resolveLogins([...commits, ...previous], repo);
