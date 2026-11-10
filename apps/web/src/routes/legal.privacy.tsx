@@ -118,8 +118,9 @@ const sections: LegalSection[] = [
           </li>
         </LegalList>
         <p>
-          We need this to provide the service you signed up for (performance of a contract). We keep sign-in, session and activity records because we
-          have a legitimate interest in keeping accounts secure and making changes accountable.
+          We need this to provide the service you signed up for (performance of a contract). For people invited to a workspace, we rely on our and the
+          workspace's legitimate interest in sending the invitation. We keep sign-in, session and activity records because we have a legitimate
+          interest in keeping accounts secure and making changes accountable.
         </p>
       </>
     ),
@@ -200,7 +201,10 @@ const sections: LegalSection[] = [
     body: (
       <LegalList>
         <li>Form submissions, their copies in our mailbox, and our emails with you: {FORM_RETENTION}, or until you ask us to delete them.</li>
-        <li>Closed accounts and workspaces: deleted within {CLOSURE_DELETION_DAYS} days of closing, including their projects and events.</li>
+        <li>
+          Closed accounts: deleted within {CLOSURE_DELETION_DAYS} days of closing, together with each workspace where the account was the only owner
+          (including its projects and events). Workspaces with other owners stay.
+        </li>
         <li>
           Account details: while your account exists. Invitations: for as long as the workspace that sent them exists. Sessions and sign-in codes:
           they stop working when they expire (7 days and 10 minutes). Expired ones are deleted when they're next looked up, but there is no scheduled

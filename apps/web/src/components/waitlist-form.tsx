@@ -13,12 +13,8 @@ const mail = CONTACT_EMAIL ? (
   </a>
 ) : null;
 export const STATUS_MESSAGES: Record<string, { tone: 'ok' | 'error'; text: ReactNode }> = {
-  ok: {
-    tone: 'ok',
-    text: CLOUD_OPEN
-      ? "Thanks. We'll email you about access, and if you asked something we'll reply by email."
-      : "Thanks. You're on the list, and if you asked something we'll reply by email.",
-  },
+  // One message for every topic: a privacy request must not be told it joined a waitlist.
+  ok: { tone: 'ok', text: "Thanks, we've got it. We'll reply by email." },
   validation_error: { tone: 'error', text: 'Something in the form needs fixing. Check the email address and try again.' },
   invalid_body: { tone: 'error', text: 'Something in the form needs fixing. Check the email address and try again.' },
   rate_limited: { tone: 'error', text: 'Too many attempts. Wait a minute, then try again.' },

@@ -141,8 +141,8 @@ const sections: LegalSection[] = [
         only owner. We may suspend your access if you break these terms, and end it if you seriously or repeatedly break them or if we stop offering
         the service. Unless we must act at once (for example, for abuse or a legal requirement), we'll give you notice and time to export your data
         before ending your access. Once your account is closed, at your request or ours, we delete it, and each workspace where you were the only
-        owner with its projects and events, within {CLOSURE_DELETION_DAYS} days. In a workspace that has other owners, we only remove you. Copies in
-        backups expire on their regular rotation.
+        owner with its projects and events, within {CLOSURE_DELETION_DAYS} days. In any other workspace, we only remove you. If others still use a
+        workspace you own alone, make one of them an owner before you close your account. Copies in backups expire on their regular rotation.
       </p>
     ),
   },
