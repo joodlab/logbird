@@ -7,6 +7,7 @@ const boolean = z.enum(['true', 'false']).transform((value) => value === 'true')
 export const serverEnv = createEnv({
   server: {
     SMTP_HOST: z.string().optional(),
+    /** 1025 is Mailpit for local development; docker-compose.site.yml defaults to 587 like the console's Compose files. */
     SMTP_PORT: z.coerce.number().int().min(1).max(65_535).default(1025),
     SMTP_SECURE: boolean.default(false),
     /** With SMTP_SECURE=false: require STARTTLS (fail closed when the server does not offer it). */
