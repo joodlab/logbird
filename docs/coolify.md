@@ -88,3 +88,9 @@ and match the Logbird resource UUID shown in Coolify; confirm with
 `docker network inspect <uuid>`. The site joins that external network as
 `logbird-site`, so the console can reach it privately. Deploy the site before
 setting the console's `LOGBIRD_SITE_URL` and redeploying the console.
+
+The forwarding ships in the console image, so `LOGBIRD_SITE_URL` takes effect only
+from the first release that contains it; older console images ignore the variable.
+The site is not a release image: Coolify builds it from the selected revision, so
+copy changes deploy without a release. Rolling back means clearing
+`LOGBIRD_SITE_URL` and redeploying the console; `/` then signs visitors in again.
