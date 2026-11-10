@@ -106,8 +106,9 @@ own Breaking changes section. A subject with an unknown or malformed type is kep
 whole: under Other changes, or under Breaking changes when it has a `!`. `@` in a
 subject is defused so it never mentions an account; changelogithub still turns
 `#123` into an issue link and `:emoji:` codes into emoji. CRLF messages are
-normalized first. Run notes from anywhere in the repository; the script always
-loads the root `changelogithub.config.ts`.
+normalized first. Run notes from anywhere in the repository: explicit `--changelog`/`--output`
+paths are relative to where you run it, and the script always loads the root
+`changelogithub.config.ts` and, by default, the root `CHANGELOG.md`.
 
 The wrapper retains the stricter contributor policy because changelogithub's
 native name-only bot filter does not cover AI email/login identities. Git itself
@@ -132,9 +133,11 @@ type are checked against one set of rules:
   `localhost`).
 
 The list names known agents: an agent with an unknown address and name would be
-credited, so extend the rules (and their tests) when a new one appears. An
-unresolved name that matches a resolved contributor is credited as that login, in
-inline credits and in Thank you alike. Exclusions apply to inline
+credited, so extend the rules (and their tests) when a new one appears. Identities
+merge only by a verified GitHub login or by the repository's `.mailmap`, which
+also applies to co-author trailers (`git check-mailmap`); two people who share a
+display name are never merged. Someone who commits under an address GitHub can't
+map should add a `.mailmap` line pointing it at their canonical identity. Exclusions apply to inline
 credits, contributor totals and thank-you entries. Missing/truncated identity
 responses or an excluded identity reaching rendering abort notes generation before
 any notes are emitted. Invalid Highlights or failed preflight likewise prevent

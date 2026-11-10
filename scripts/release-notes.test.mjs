@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { resolveConfig } from 'changelogithub';
-import { compose, highlights, isPerson, LOG_FORMAT, parseLog, previousTag, resolveLogins, summarize } from './release-notes.mjs';
+import { applyMailmap, compose, highlights, isPerson, LOG_FORMAT, parseLog, previousTag, resolveLogins, summarize } from './release-notes.mjs';
 
 const config = await resolveConfig({ from: 'v0.0.1', to: 'v0.1.0', repo: 'acme/logbird', dry: true });
 const person = (name, email) => ({ name, email });
@@ -228,12 +228,56 @@ test('first release includes the root commit; later releases select the nearest 
   }
 });
 
-test('merges a login with bare-name aliases and flags nobody first in the first release', () => {
+test('never merges people by display name; only a verified login or .mailmap joins identities', () => {
   const commits = [
-    commit('feat: a', [person('Owner Name', 'owner@users.noreply.github.com'), person('Owner Name', 'owner@example.com')]),
-    commit('fix: b', [person('Owner Name', 'personal@users.noreply.github.com')]),
+    commit('feat: a', [person('Alex Smith', 'alex.one@users.noreply.github.com')]),
+    commit('fix: b', [person('Alex Smith', 'alex.two@users.noreply.github.com')]),
   ];
-  assert.deepEqual(credits(summarize(commits, [], new Map([['owner@users.noreply.github.com', 'owner']]))), [{ label: '@owner', first: false }]);
+  const summary = summarize(commits, [], new Map([['alex.one@users.noreply.github.com', 'alex-one']]));
+  assert.deepEqual(credits(summary), [
+    { label: '@alex-one', first: false },
+    { label: 'Alex Smith', first: false },
+  ]);
+  assert.deepEqual(
+    commits[1].resolvedAuthors.map((entry) => entry.login ?? entry.name),
+    ['Alex Smith'],
+  );
+});
+
+test('.mailmap maps co-authors (and LOG_FORMAT authors) to one canonical identity', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'logbird-mailmap-test-'));
+  const git = (...args) => execFileSync('git', args, { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    git('init', '-q');
+    writeFileSync(join(directory, '.mailmap'), 'Owner Name <owner@users.noreply.github.com> <personal@users.noreply.github.com>\n');
+    writeFileSync(join(directory, 'message.txt'), 'feat: pair\n\nBody.\n\nCo-authored-by: Owner Name <personal@users.noreply.github.com>\n');
+    git(
+      '-c',
+      'user.name=Old Name',
+      '-c',
+      'user.email=personal@users.noreply.github.com',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-F',
+      join(directory, 'message.txt'),
+    );
+    const commits = applyMailmap(parseLog(git('log', `--format=${LOG_FORMAT}`), config), git);
+    assert.deepEqual(commits[0].authors, [
+      { name: 'Owner Name', email: 'owner@users.noreply.github.com' },
+      { name: 'Owner Name', email: 'owner@users.noreply.github.com' },
+    ]);
+    const summary = summarize(commits, [], new Map([['owner@users.noreply.github.com', 'owner']]));
+    assert.deepEqual(credits(summary), [{ label: '@owner', first: false }]);
+    assert.deepEqual(
+      commits[0].resolvedAuthors.map((entry) => entry.login),
+      ['owner'],
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('reserved .test addresses are never credited, with or without a GitHub login', () => {
@@ -451,25 +495,61 @@ test('more agent vendors, subdomains and team agent mailboxes are excluded; a re
   assert.equal(isPerson(person('Claude', 'claude.dupont@users.noreply.github.com')), false);
 });
 
-test('inline credits and Thank you agree: an agent mailbox is dropped and a bare-name alias becomes the login', () => {
+test('the real #70 agent mailbox trailer is dropped from inline credits and Thank you', () => {
   const commits = parseLog(
-    record(
-      'feat(sdk): pair (#70)',
-      'Body.',
-      ['Raed Bahri', 'raed@users.noreply.github.com'],
-      ['Raed Bahri <claude@joodlab.com>', 'Raed Bahri <personal@users.noreply.github.com>'],
-    ),
+    record('feat(sdk): pair (#70)', 'Body.', ['Raed Bahri', 'raed@users.noreply.github.com'], ['Raed Bahri <claude@joodlab.com>']),
     config,
   );
   const summary = summarize(commits, [], new Map([['raed@users.noreply.github.com', 'raedbahri']]), new Map([['raedbahri', 'User']]));
   assert.deepEqual(
-    commits[0].resolvedAuthors.map((person) => person.login ?? person.name),
+    commits[0].resolvedAuthors.map((entry) => entry.login ?? entry.name),
     ['raedbahri'],
   );
   const output = compose({ version: 'v0.1.0', intro: '- Ship.', commits, summary, config });
   assert.match(output, /by @raedbahri/);
   assert.doesNotMatch(output, /\*\*Raed Bahri\*\*|claude/i);
   assert.match(output, /### Thank you\n\n- @raedbahri\n/);
+});
+
+test('relative --output and --changelog paths resolve from where the command runs; the default changelog from the root', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'logbird-paths-test-'));
+  const git = (...args) => execFileSync('git', args, { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    git('init', '-q');
+    git(
+      '-c',
+      'user.name=Human',
+      '-c',
+      'user.email=human@users.noreply.github.com',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'feat: first',
+    );
+    git('remote', 'add', 'origin', 'https://github.com/acme/logbird.git');
+    mkdirSync(join(directory, 'apps', 'app'), { recursive: true });
+    writeFileSync(join(directory, 'CHANGELOG.md'), '## 0.1.0\n\n### Highlights\n');
+    const script = fileURLToPath(new URL('./release-notes.mjs', import.meta.url));
+    // Run from a subdirectory: the root CHANGELOG.md is found (and rejected for its empty Highlights), not apps/app's.
+    const fromSubdirectory = spawnSync(process.execPath, [script, '--dry', '--version', 'v0.1.0'], {
+      cwd: join(directory, 'apps', 'app'),
+      encoding: 'utf8',
+    });
+    assert.match(fromSubdirectory.stderr, /1–3 highlight bullets/);
+    // An explicit relative changelog resolves against the caller's directory.
+    writeFileSync(join(directory, 'apps', 'app', 'NOTES.md'), '## 0.1.0\n\n### Highlights\n\n<!-- todo -->\n');
+    const explicit = spawnSync(process.execPath, [script, '--dry', '--version', 'v0.1.0', '--changelog', 'NOTES.md'], {
+      cwd: join(directory, 'apps', 'app'),
+      encoding: 'utf8',
+    });
+    assert.match(explicit.stderr, /1–3 highlight bullets/);
+    assert.doesNotMatch(explicit.stderr, /ENOENT/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('identity lookups ask GitHub once per new email', () => {

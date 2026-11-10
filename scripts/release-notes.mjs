@@ -52,9 +52,10 @@ const coAuthorValue = /^(.+?)[ \t]*<[ \t]*([^>\n]+?)[ \t]*>[ \t]*$/;
 /**
  * The `git log` format parseLog reads. Git itself parses the trailer block (`%(trailers)`, the same rules as
  * `git interpret-trailers`), so a co-author named in prose, a fenced example or above a `---` divider is never
- * credited, and one after `(cherry picked from commit …)` or among `Signed-off-by:` lines is.
+ * credited, and one after `(cherry picked from commit …)` or among `Signed-off-by:` lines is. Authors go through the
+ * repository's `.mailmap` (`%aN`/`%aE`); co-authors do too, via applyMailmap().
  */
-export const LOG_FORMAT = '%H%x1f%an%x1f%ae%x1f%(trailers:key=Co-authored-by,valueonly,unfold,separator=%x1d)%x1f%B%x1e';
+export const LOG_FORMAT = '%H%x1f%aN%x1f%aE%x1f%(trailers:key=Co-authored-by,valueonly,unfold,separator=%x1d)%x1f%B%x1e';
 
 /** The message's final paragraph, where Conventional Commits footers such as `BREAKING CHANGE:` live. */
 const lastParagraph = (body) =>
@@ -118,15 +119,10 @@ export function summarize(commits, previous, logins, accountTypes = new Map()) {
     commit.authors
       .map((person) => identity(person, logins, accountTypes))
       .filter((person) => isPerson(person) && (person.login || safeName(person.name)));
-  // The same human can appear under a GitHub login and as a bare name/email. Every unresolved entry whose name
-  // matches a resolved one becomes that login, inline and in Thank you alike, then each list is deduplicated.
-  const byName = new Map();
-  for (const person of [...previous, ...commits].flatMap(peopleFor)) {
-    if (person.login && !byName.has(person.name.toLowerCase())) byName.set(person.name.toLowerCase(), person);
-  }
-  const canonical = (person) => (person.login ? person : (byName.get(person.name.toLowerCase()) ?? person));
+  // Identities merge only by verified GitHub login (several emails, one account) or by the repository's .mailmap,
+  // never by display name: two people can share one. Inline credits and Thank you use the same keys.
   const unique = (people) => [...new Map(people.map((person) => [person.key, person])).values()];
-  const creditsFor = (commit) => unique(peopleFor(commit).map(canonical));
+  const creditsFor = (commit) => unique(peopleFor(commit));
   for (const commit of commits) commit.resolvedAuthors = creditsFor(commit);
   const old = new Set(previous.flatMap(creditsFor).map((person) => person.key));
   const people = new Map(commits.flatMap(creditsFor).map((person) => [person.key, person]));
@@ -181,6 +177,31 @@ export function compose({ version, intro, commits, summary, config }) {
   ]
     .join('\n\n')
     .concat('\n');
+}
+
+/**
+ * Maps every co-author through the repository's .mailmap (`git check-mailmap`), the explicit alias list for a person
+ * who commits under several addresses. Authors are already mapped by LOG_FORMAT's `%aN`/`%aE`.
+ */
+export function applyMailmap(commits, gitCommand = (...args) => run('git', args)) {
+  const contacts = [...new Set(commits.flatMap((commit) => commit.authors.slice(1).map((person) => `${person.name} <${person.email}>`)))];
+  const mapped = new Map();
+  for (let offset = 0; offset < contacts.length; offset += 100) {
+    const batch = contacts.slice(offset, offset + 100);
+    const lines = gitCommand('check-mailmap', ...batch)
+      .split('\n')
+      .filter(Boolean);
+    if (lines.length !== batch.length) throw new Error('git check-mailmap returned an unexpected number of identities.');
+    for (const [index, contact] of batch.entries()) mapped.set(contact, lines[index]);
+  }
+  for (const commit of commits) {
+    commit.authors = commit.authors.map((person, index) => {
+      if (index === 0) return person;
+      const [, name, email] = mapped.get(`${person.name} <${person.email}>`)?.match(/^(.*?)\s*<([^>]*)>$/) ?? [];
+      return name === undefined ? person : { name: name.trim(), email: email.trim() };
+    });
+  }
+  return commits;
 }
 
 const run = (command, args) => execFileSync(command, args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
@@ -241,13 +262,16 @@ async function main() {
       version: { type: 'string' },
       dry: { type: 'boolean' },
       output: { type: 'string' },
-      changelog: { type: 'string', default: 'CHANGELOG.md' },
+      changelog: { type: 'string' },
     },
     args: process.argv.slice(2).filter((arg) => arg !== '--'),
   });
-  const changelogPath = resolve(values.changelog);
-  // changelogithub loads changelogithub.config.ts from the working directory: always use the repository's.
+  // Explicit paths are relative to where the command runs; then work from the repository root, where changelogithub
+  // loads changelogithub.config.ts and where the default CHANGELOG.md lives.
+  const changelogArgument = values.changelog && resolve(values.changelog);
+  const outputPath = values.output && resolve(values.output);
   process.chdir(git('rev-parse', '--show-toplevel'));
+  const changelogPath = changelogArgument ?? resolve('CHANGELOG.md');
   const version = values.version ?? process.env.GITHUB_REF_NAME;
   if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version ?? '')) throw new Error('Use --version vX.Y.Z.');
   const to = git('rev-parse', '--verify', `${values.to}^{commit}`);
@@ -261,7 +285,7 @@ async function main() {
   // Use only changelogithub's output APIs: never its CLI, sendRelease or uploadAssets.
   const config = await resolveConfig({ dry: true, from: from || to, to: version, repo });
   config.from = from ?? '';
-  const readLog = (range) => parseLog(run('git', ['log', '--no-merges', `--format=${LOG_FORMAT}`, range]), config);
+  const readLog = (range) => applyMailmap(parseLog(run('git', ['log', '--no-merges', `--format=${LOG_FORMAT}`, range]), config));
   const commits = readLog(from ? `${from}..${to}` : to);
   const previous = from ? readLog(from) : [];
   const { logins, accountTypes } = resolveLogins([...commits, ...previous], repo);
@@ -272,7 +296,7 @@ async function main() {
     summary: summarize(commits, previous, logins, accountTypes),
     config,
   });
-  if (values.output) writeFileSync(values.output, body);
+  if (outputPath) writeFileSync(outputPath, body);
   process.stdout.write(body);
   console.error(`${values.dry ? 'Dry run' : 'Notes generated'}: no release was created or edited.`);
 }
