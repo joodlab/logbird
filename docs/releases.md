@@ -26,6 +26,10 @@ or GitHub Release can be treated as available.
    ```
 
    Authenticate with `gh auth login` first (or provide `GH_TOKEN`/`GITHUB_TOKEN`).
+   Every commit in the range must already be on GitHub (identity lookups query
+   GitHub; an unpushed commit fails as an incomplete lookup), and `CHANGELOG.md`
+   needs the version's Highlights; for a preview before that, pass `--changelog`
+   with a scratch file.
    The wrapper uses changelogithub's output APIs and read-only GitHub identity
    lookups. It never creates/edits a release, including without `--dry`. The first
    release includes all non-merge history, including the root commit; later releases

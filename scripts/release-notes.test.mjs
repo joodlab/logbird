@@ -679,3 +679,49 @@ test('.mailmap cannot turn a GitHub Bot or an excluded login into human credit, 
   };
   assert.throws(() => compose({ version: 'v0.1.0', intro: '- Ship.', commits: [forged], summary, config }), /refusing to emit notes/);
 });
+
+test('Copilot and other accounts GitHub will not describe neither stop the notes nor get credit', () => {
+  const commits = [
+    commit('feat: copilot pair', [
+      person('Human', 'human@users.noreply.github.com'),
+      person('Copilot', '198982749+Copilot@users.noreply.github.com'),
+    ]),
+  ];
+  const looked = [];
+  const gh = (...args) => {
+    if (args[1] === 'graphql') {
+      return JSON.stringify({
+        data: {
+          repository: {
+            c0: {
+              authors: {
+                nodes: [
+                  { email: 'human@users.noreply.github.com', user: { login: 'human' } },
+                  { email: '198982749+Copilot@users.noreply.github.com', user: { login: 'Copilot' } },
+                  { email: 'ghost@users.noreply.github.com', user: { login: 'ghost-agent' } },
+                ],
+                pageInfo: { hasNextPage: false },
+              },
+            },
+          },
+        },
+      });
+    }
+    looked.push(args[1]);
+    if (args[1] === 'users/ghost-agent') throw Object.assign(new Error('gh: Not Found (HTTP 404)'), { stderr: 'HTTP 404' });
+    return JSON.stringify({ type: 'User' });
+  };
+  const { logins, accountTypes } = resolveLogins(commits, 'acme/logbird', gh);
+  assert.deepEqual(looked.sort(), ['users/ghost-agent', 'users/human']);
+  assert.equal(accountTypes.get('Copilot'), 'Excluded');
+  assert.equal(accountTypes.get('ghost-agent'), 'Unavailable');
+  assert.equal(isPerson({ name: 'Ghost', email: 'ghost@users.noreply.github.com', login: 'ghost-agent', type: 'Unavailable' }), false);
+  const summary = summarize(commits, [], logins, accountTypes);
+  assert.deepEqual(credits(summary), [{ label: '@human', first: false }]);
+  // Any other lookup failure still stops the notes.
+  const failing = (...args) => {
+    if (args[1] === 'graphql') return gh(...args);
+    throw Object.assign(new Error('gh: HTTP 502'), { stderr: 'HTTP 502' });
+  };
+  assert.throws(() => resolveLogins(commits, 'acme/logbird', failing), /HTTP 502/);
+});

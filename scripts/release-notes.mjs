@@ -24,7 +24,9 @@ const placeholderEmail = /@(?:[\w-]+\.)*(?:example\.(?:com|net|org)|example|inva
 
 export function isPerson({ name = '', email = '', login = '', type }) {
   return (
-    type !== 'Bot' &&
+    // A resolved GitHub account is credited only as a User: Bot, Organization and accounts GitHub won't describe
+    // (e.g. the Copilot coding agent, whose users/Copilot lookup is a 404) never are.
+    !(type && type !== 'User') &&
     !/\[bot\]/i.test(`${name} ${email} ${login}`) &&
     !agentDomain.test(email) &&
     !agentAddress.test(email) &&
@@ -272,7 +274,20 @@ export function resolveLogins(allCommits, repo, gh = (...args) => run('gh', args
   }
   const accountTypes = new Map();
   for (const login of new Set(logins.values())) {
-    const account = JSON.parse(gh('api', `users/${login}`));
+    // Excluded logins are never credited, whatever their type; don't ask GitHub about them.
+    if (excludedLogin.test(login)) {
+      accountTypes.set(login, 'Excluded');
+      continue;
+    }
+    let account;
+    try {
+      account = JSON.parse(gh('api', `users/${login}`));
+    } catch (error) {
+      // GitHub's agent identities (e.g. Copilot) appear as commit authors but have no users/ profile. Any other
+      // failure stops the notes rather than dropping a real person's credit.
+      if (!/HTTP 404|Not Found/i.test(`${error?.message ?? ''} ${error?.stderr ?? ''}`)) throw error;
+      account = { type: 'Unavailable' };
+    }
     if (!account.type) throw new Error(`Missing GitHub account type for ${login}.`);
     accountTypes.set(login, account.type);
   }
@@ -280,7 +295,8 @@ export function resolveLogins(allCommits, repo, gh = (...args) => run('gh', args
   // resolves to a Bot never lends its account to the canonical identity.
   for (const [raw, canonical] of mailmapped) {
     const login = logins.get(raw);
-    if (login && !logins.has(canonical) && accountTypes.get(login) === 'User') logins.set(canonical, login);
+    if (login && !logins.has(canonical) && isPerson({ login, type: accountTypes.get(login) }) && accountTypes.get(login) === 'User')
+      logins.set(canonical, login);
   }
   return { logins, accountTypes };
 }
