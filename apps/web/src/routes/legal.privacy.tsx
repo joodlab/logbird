@@ -46,9 +46,9 @@ const sections: LegalSection[] = [
         </p>
         <p>
           Every request passes through Cloudflare, our content delivery network, and reaches our servers. Like any web server, they process your IP
-          address, browser details and the page you ask for, to deliver and protect the site. Our own request logs record the method, path, status and
-          duration of each request, not your IP address or browser. The API reference page (<code>/docs</code>) loads its viewer script from jsDelivr,
-          so on that page your browser also connects to jsDelivr.
+          address, browser details and the page you ask for, to deliver and protect the site; Cloudflare and our server provider may keep access logs
+          of these requests. The request logs of our API record the method, path, status and duration of each request, not your IP address or browser.
+          The API reference page (<code>/docs</code>) loads its viewer script from jsDelivr, so on that page your browser also connects to jsDelivr.
         </p>
         <p>We do this because we have a legitimate interest in running a secure, working website.</p>
       </>
@@ -61,12 +61,13 @@ const sections: LegalSection[] = [
       <>
         <p>
           When you send the form we store your email address, the topic you choose, and the name, company and message if you give them, with the time
-          you sent it. We don't store your IP address or browser details with it. Your IP address is held in memory for about a minute to stop the
-          form being flooded, then forgotten.
+          you sent it. We don't store your IP address or browser details with it. To stop the form being flooded, the server counts submissions per IP
+          address in its memory only: an address is never written to disk or logs, and is dropped from memory after its one-minute window, at the
+          latest when the server next cleans up or restarts.
         </p>
         <p>
-          We keep submissions on our server and forward them by email to the team that answers them. We use them to reply, to decide on access to
-          Logbird Cloud and, if you chose "Product updates only", to send you product updates.
+          We keep submissions on our server, and our server emails each one to the team that answers them. We use them to reply, to decide on access
+          to Logbird Cloud and, if you chose "Product updates only", to send you product updates.
         </p>
         <p>
           We reply because you asked us to (steps you request before any contract, and our legitimate interest in answering). Product updates rely on
@@ -191,10 +192,14 @@ const sections: LegalSection[] = [
       <LegalList>
         <li>Form submissions: {FORM_RETENTION}, or until you ask us to delete them.</li>
         <li>
-          Account details, invitations and session records: while your account exists. Expired sessions and sign-in codes stop working at once but
-          stay in the database with your account.
+          Account details: while your account exists. Invitations: with the workspace that sent them. Sessions and sign-in codes: they stop working
+          when they expire (7 days and 10 minutes). Expired ones are deleted when they're next looked up, but there is no scheduled cleanup yet, so
+          some can stay in the database longer.
         </li>
-        <li>Workspace activity: up to 10 years. There is no shorter setting for it yet.</li>
+        <li>
+          Workspace activity: activity records are deleted after 10 years at the latest; there is no shorter setting yet. Copies kept to power search
+          filters (names and sample values) and records still waiting to be delivered have no automatic limit yet.
+        </li>
         <li>
           Data you send to Logbird Cloud: as long as each project's retention setting says, from 7 days to 10 years (90 days by default). Expired
           events, and every event in a deleted project, are permanently deleted from the live database.
@@ -214,9 +219,9 @@ const sections: LegalSection[] = [
           and to withdraw consent you gave. You can also complain to your data protection authority.
         </p>
         <p>
-          You can change your display name in the console's account settings. Everything else, including deleting your account, is handled by request
-          for now: write to <PrivacyContact /> from the address on your account, or tell us which address the request is about so we can verify it. We
-          answer within 30 days.
+          In the console you can change your display name, and, if your role allows, export or delete a project's data. Deleting your account and
+          getting a copy of your personal account data are handled by request for now: write to <PrivacyContact /> from the address on your account,
+          or tell us which address the request is about so we can verify it. We answer within 30 days.
         </p>
       </>
     ),
@@ -226,8 +231,8 @@ const sections: LegalSection[] = [
     title: 'Security',
     body: (
       <p>
-        All traffic is encrypted in transit. Session cookies are HTTP-only and secure, sign-in codes are stored as hashes, sign-in and form requests
-        are rate-limited, and every project's data is isolated from other projects. The{' '}
+        Connections to this website and to Logbird Cloud are encrypted with HTTPS. Session cookies are HTTP-only and secure, sign-in codes are stored
+        as hashes, sign-in and form requests are rate-limited, and every project's data is isolated from other projects. The{' '}
         <Link className="text-link" to="/security">
           security page
         </Link>{' '}

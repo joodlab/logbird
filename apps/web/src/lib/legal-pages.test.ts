@@ -41,7 +41,7 @@ describe('legal pages', () => {
     for (const fact of [
       '__Secure-logbird.session_token',
       'expires after 10 minutes',
-      'up to 10 years',
+      'deleted after 10 years at the latest',
       'from 7 days to 10 years',
       'jsDelivr',
       'Cloudflare',

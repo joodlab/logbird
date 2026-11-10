@@ -53,8 +53,8 @@ const sections: LegalSection[] = [
     title: 'Early access',
     body: (
       <p>
-        Logbird Cloud is in early access: sign-ups are limited to invited teams and approved email domains. Features, limits and these terms may
-        change as the service develops. Sending the contact form doesn't create an account or a contract.
+        Logbird Cloud is in early access: we limit sign-ups to invited teams and approved email domains. Features, limits and these terms may change
+        as the service develops. Sending the contact form doesn't create an account or a contract.
       </p>
     ),
   },
