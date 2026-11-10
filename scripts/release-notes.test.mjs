@@ -631,3 +631,51 @@ test('a .mailmap line cannot launder an agent identity into human credit', () =>
   assert.equal(agentSummary.changes, 0);
   assert.deepEqual(agentSummary.contributors, []);
 });
+
+test('.mailmap cannot turn a GitHub Bot or an excluded login into human credit, as author or co-author', () => {
+  const maintainer = { name: 'Pat', email: 'pat@linked.dev' };
+  const logins = new Map([
+    ['pat@linked.dev', 'pat'],
+    ['release@company.dev', 'release-automation'],
+    ['agent@company.dev', 'codex'],
+  ]);
+  const types = new Map([
+    ['pat', 'User'],
+    ['release-automation', 'Bot'],
+    ['codex', 'User'],
+  ]);
+  const make = (subject, authors) => ({ ...commit(subject), authors });
+  const commits = [
+    make('fix: bot authored', [{ ...maintainer, rawName: 'Release Automation', rawEmail: 'release@company.dev' }]),
+    make('fix: agent authored', [{ ...maintainer, rawName: 'Agent', rawEmail: 'agent@company.dev' }]),
+    make('feat: human with mapped bot co-author', [
+      { ...maintainer, rawName: 'Pat', rawEmail: 'pat@linked.dev' },
+      { ...maintainer, rawName: 'Release Automation', rawEmail: 'release@company.dev' },
+    ]),
+  ];
+  const summary = summarize(commits, [], logins, types);
+  assert.equal(summary.changes, 1);
+  assert.deepEqual(
+    commits.map((entry) => entry.resolvedAuthors.map((person) => person.login)),
+    [[], [], ['pat']],
+  );
+  assert.deepEqual(credits(summary), [{ label: '@pat', first: false }]);
+  const output = compose({ version: 'v0.1.0', intro: '- Ship.', commits, summary, config });
+  assert.match(output, /· 1 change from 1 contributor/);
+  // compose's guard also checks the identity as committed.
+  const forged = {
+    ...commits[0],
+    resolvedAuthors: [
+      {
+        ...maintainer,
+        login: 'pat',
+        type: 'User',
+        rawName: 'Release Automation',
+        rawEmail: 'release@company.dev',
+        rawLogin: 'release-automation',
+        rawType: 'Bot',
+      },
+    ],
+  };
+  assert.throws(() => compose({ version: 'v0.1.0', intro: '- Ship.', commits: [forged], summary, config }), /refusing to emit notes/);
+});

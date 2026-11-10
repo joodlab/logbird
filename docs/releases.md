@@ -140,8 +140,10 @@ also applies to co-author trailers (`git check-mailmap`); two people who share a
 display name are never merged. Someone who commits under an address GitHub can't
 map should add a `.mailmap` line pointing it at their canonical identity; GitHub
 logins are still looked up by the address each commit was made with. Both the
-identity as committed and its `.mailmap` identity must pass the rules above, so a
-`.mailmap` line can never turn an agent's commits or trailers into human credit. Exclusions apply to inline
+identity as committed (with its own GitHub login and account type) and its
+`.mailmap` identity must pass the rules above, so a `.mailmap` line can never turn
+an agent's or a Bot account's commits or trailers into human credit, and an alias
+lends its login to a canonical address only when it is a User account. Exclusions apply to inline
 credits, contributor totals and thank-you entries. Missing/truncated identity
 responses or an excluded identity reaching rendering abort notes generation before
 any notes are emitted. Invalid Highlights or failed preflight likewise prevent

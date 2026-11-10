@@ -105,16 +105,25 @@ export function parseLog(log, config) {
     });
 }
 
-// GitHub reports the address a commit was made with; logins are found by that raw address or the .mailmap one.
+// GitHub reports the address a commit was made with. The identity as committed keeps its own login and account type
+// (`rawLogin`/`rawType`); the credited login is the .mailmap address's, else the committed one's.
 function identity(person, logins, accountTypes) {
-  const login = logins.get(person.email.toLowerCase()) ?? (person.rawEmail && logins.get(person.rawEmail.toLowerCase()));
-  return { ...person, login, type: accountTypes.get(login), key: login?.toLowerCase() ?? person.email.toLowerCase() };
+  const rawLogin = person.rawEmail === undefined ? undefined : logins.get(person.rawEmail.toLowerCase());
+  const login = logins.get(person.email.toLowerCase()) ?? rawLogin;
+  return {
+    ...person,
+    login,
+    type: accountTypes.get(login),
+    ...(person.rawEmail === undefined ? {} : { rawLogin, rawType: accountTypes.get(rawLogin) }),
+    key: login?.toLowerCase() ?? person.email.toLowerCase(),
+  };
 }
 
-// Both the identity as committed and its .mailmap identity must pass: a mailmap line can't turn an agent mailbox's
-// work into a human's credit.
+// Both the identity as committed (with its own GitHub login and account type) and its .mailmap identity must pass, so
+// a mailmap line can't turn an agent's or a Bot account's work into a human's credit.
 const credited = (person) =>
-  isPerson(person) && (person.rawEmail === undefined || isPerson({ ...person, name: person.rawName, email: person.rawEmail }));
+  isPerson(person) &&
+  (person.rawEmail === undefined || isPerson({ name: person.rawName, email: person.rawEmail, login: person.rawLogin, type: person.rawType }));
 
 // Display names keep letters, digits and a little punctuation; nothing that markdown or HTML could interpret.
 const safeName = (name) => name.replace(/[^\p{L}\p{N} .'-]/gu, '').trim();
@@ -257,11 +266,7 @@ export function resolveLogins(allCommits, repo, gh = (...args) => run('gh', args
       for (const author of commit.authors.nodes) {
         if (typeof author.email !== 'string' || (author.user && typeof author.user.login !== 'string'))
           throw new Error('Incomplete GitHub author lookup.');
-        if (author.user) {
-          logins.set(author.email.toLowerCase(), author.user.login);
-          const canonical = mailmapped.get(author.email.toLowerCase());
-          if (canonical && !logins.has(canonical)) logins.set(canonical, author.user.login);
-        }
+        if (author.user) logins.set(author.email.toLowerCase(), author.user.login);
       }
     }
   }
@@ -270,6 +275,12 @@ export function resolveLogins(allCommits, repo, gh = (...args) => run('gh', args
     const account = JSON.parse(gh('api', `users/${login}`));
     if (!account.type) throw new Error(`Missing GitHub account type for ${login}.`);
     accountTypes.set(login, account.type);
+  }
+  // A .mailmap address GitHub never saw directly takes the login of an alias, but only a User's: an alias that
+  // resolves to a Bot never lends its account to the canonical identity.
+  for (const [raw, canonical] of mailmapped) {
+    const login = logins.get(raw);
+    if (login && !logins.has(canonical) && accountTypes.get(login) === 'User') logins.set(canonical, login);
   }
   return { logins, accountTypes };
 }
