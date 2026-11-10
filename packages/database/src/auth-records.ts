@@ -1,5 +1,6 @@
 import { setTimeout as pause } from 'node:timers/promises';
 import { Prisma, prisma } from './index';
+import { SWEEP_GUARD } from './ingest-receipts';
 
 /**
  * Scheduled cleanup of expired authentication records (#129). better-auth removes expired rows only as a side effect of
@@ -25,13 +26,11 @@ export type AuthRecordKind = keyof typeof AUTH_RECORD_GRACE_MS;
 const KINDS = Object.keys(AUTH_RECORD_GRACE_MS) as AuthRecordKind[];
 
 /**
- * Each batch runs under a short statement timeout, so one slow statement can't hold row locks for long, and with the
- * same planner pins as the receipt sweep (`SWEEP_GUARD`): batches walk the `expiresAt` index, so a stale or bloated
- * estimate after a large drain can't turn ORDER BY/LIMIT into a full scan plus sort.
+ * Each batch runs under the receipt sweep's guard (`SWEEP_GUARD`): a 5 s statement timeout, so one slow statement can't
+ * hold row locks for long, and planner pins, so batches walk the `expiresAt` index and a stale or bloated estimate
+ * after a large drain can't turn ORDER BY/LIMIT into a full scan plus sort. One constant, so the two can't drift.
  */
-export const AUTH_RECORD_SWEEP_GUARD = Prisma.sql`SELECT set_config('statement_timeout','5s',true), set_config('enable_seqscan','off',true),
-  set_config('enable_bitmapscan','off',true), set_config('enable_sort','off',true),
-  set_config('enable_incremental_sort','off',true), set_config('jit','off',true)`;
+export const AUTH_RECORD_SWEEP_GUARD = SWEEP_GUARD;
 
 /** One bounded batch: the oldest expired rows, skipping rows another transaction holds (e.g. a sign-in in progress). */
 export function authRecordBatchSql(kind: AuthRecordKind, cutoff: Date) {

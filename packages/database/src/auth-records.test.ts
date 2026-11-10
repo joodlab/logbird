@@ -78,7 +78,7 @@ it('drains each kind in guarded batches with its own grace period, taking turns,
 it('stops at the time budget and says so; the next run continues', async () => {
   let clock = 0;
   vi.spyOn(Date, 'now').mockImplementation(() => clock);
-  const full = () => Array(10).fill(AUTH_RECORD_SWEEP_BATCH_SIZE);
+  const full = () => Array.from({ length: 10 }, () => AUTH_RECORD_SWEEP_BATCH_SIZE);
   answer({ session: full(), verification: full(), invitation: full() }, () => {
     clock += AUTH_RECORD_SWEEP_BUDGET_MS / 2;
   });
@@ -94,7 +94,7 @@ it('a backlog of one kind cannot starve the others: every kind progresses within
   let clock = 0;
   vi.spyOn(Date, 'now').mockImplementation(() => clock);
   // Sessions never run out; each batch costs a quarter of the budget, so the run fits four batches.
-  answer({ session: Array(100).fill(AUTH_RECORD_SWEEP_BATCH_SIZE), verification: [4], invitation: [2] }, () => {
+  answer({ session: Array.from({ length: 100 }, () => AUTH_RECORD_SWEEP_BATCH_SIZE), verification: [4], invitation: [2] }, () => {
     clock += AUTH_RECORD_SWEEP_BUDGET_MS / 4;
   });
   const result = await sweepExpiredAuthRecords(0);

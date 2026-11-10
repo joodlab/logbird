@@ -89,6 +89,10 @@ it('deletes only records past expiry plus grace, and keeps live and recently exp
       expiresAt,
     );
 
+  // The copies carry the base tables' indexes, so this fails on a database without the expiresAt migration.
+  const indexes = await prisma.$queryRaw<{ name: string }[]>`SELECT indexname AS name FROM pg_indexes WHERE schemaname = ${schema}`;
+  for (const kind of KINDS) expect(indexes.map((row) => row.name)).toContainEqual(expect.stringMatching(new RegExp(`^${kind}_expiresAt_idx`)));
+
   const result = await sweepExpiredAuthRecords(now, isolated);
   expect(result).toEqual({ removed: { session: 1, verification: 1, invitation: 2 }, batches: 3, limited: false });
   expect({ session: await ids('session'), verification: await ids('verification'), invitation: await ids('invitation') }).toEqual({

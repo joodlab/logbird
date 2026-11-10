@@ -86,7 +86,7 @@ receiptWorker.on('failed', (job, error) =>
       level: 'error',
       event: job?.name === 'auth-records.sweep' ? 'auth.records_sweep_failed' : 'ingest.receipt_sweep_failed',
       jobId: job?.id,
-      reason: error?.message.slice(0, 300),
+      reason: String(error?.message ?? error).slice(0, 300),
     }),
   ),
 );
