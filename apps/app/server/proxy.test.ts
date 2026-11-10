@@ -220,7 +220,7 @@ describe('optional marketing upstream', () => {
     }
     expect(captured).toHaveLength(2);
   });
-  it.each(['unreachable', '500', '503'])('falls back only at root for %s', async (failure) => {
+  it.each(['unreachable', '500', '503'])('falls back at root for %s; elsewhere relays site errors, 502 only when unreachable', async (failure) => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
@@ -233,9 +233,16 @@ describe('optional marketing upstream', () => {
     expect(root.headers.get('content-security-policy')).toBe('console policy');
     for (const path of ['/product', '/site-api/waitlist', '/site-assets/x.js']) {
       const response = await request(path);
-      expect(response.status).toBe(502);
-      expect(response.headers.get('content-type')).toBe('text/plain; charset=utf-8');
-      expect(await response.text()).toBe('Bad Gateway');
+      if (failure === 'unreachable') {
+        expect(response.status).toBe(502);
+        expect(response.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+        expect(await response.text()).toBe('Bad Gateway');
+      } else {
+        // The site's own error (and its policy) passes through, so the page can react to its error code.
+        expect(response.status).toBe(Number(failure));
+        expect(await response.text()).toBe('site error');
+        expect(response.headers.get('content-security-policy')).toBe(policy);
+      }
       expect(response.headers.getSetCookie()).toEqual([]);
     }
   });

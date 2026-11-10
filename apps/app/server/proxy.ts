@@ -30,10 +30,11 @@ export default defineEventHandler(async (event) => {
         locationRewrite: false,
         timeout: 5000,
       });
-      if ((response.status ?? 200) >= 500) {
+      // A failing site never blocks sign-in: `/` falls back to the console. Elsewhere the site's own error response
+      // (e.g. the form's JSON `waitlist_unavailable`, which the page turns into a mailto) reaches the browser as is.
+      if (url.pathname === '/' && (response.status ?? 200) >= 500) {
         if (response.body instanceof ReadableStream) await response.body.cancel();
-        if (url.pathname === '/') return;
-        return new Response('Bad Gateway', { status: 502, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+        return;
       }
       response.headers.delete('set-cookie');
       // Nitro stages routeRules headers on event.res. H3 merges those OVER the returned proxy response, so remove
