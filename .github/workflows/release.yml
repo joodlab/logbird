@@ -25,6 +25,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # Third-party release tooling runs in this job; don't leave the token in .git/config.
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
@@ -35,6 +37,10 @@ jobs:
       - name: Resolve version
         id: version
         run: echo "version=$(node scripts/check-version-consistency.mjs "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@v4
+      - name: Install release tooling
+        # No lifecycle scripts run in this job, which holds GH_TOKEN.
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Verify release tooling
         run: node --test scripts/release-notes.test.mjs scripts/release-preflight.test.mjs
       - name: Generate reviewed release notes

@@ -21,16 +21,27 @@ or GitHub Release can be treated as available.
    ```sh
    pnpm install --frozen-lockfile
    pnpm release:check
+   mkdir -p .tmp
    pnpm release:notes:dry -- --version v0.1.0 --to HEAD --output .tmp/release-notes.md
    ```
 
-   The notes command reads Git history and GitHub author identities through an
-   authenticated `gh` session. It never creates/edits a release, including without
-   `--dry`. The first release includes all non-merge history; later releases use the
-   nearest preceding reachable stable version tag. `--from vX.Y.Z` overrides the
-   baseline and must be an ancestor. Highlights must exist in the exact version
-   section; missing/empty/comment-only or more than three bullets fail closed.
-   Preview output belongs in the release PR for review.
+   Authenticate with `gh auth login` first (or provide `GH_TOKEN`/`GITHUB_TOKEN`).
+   Every commit in the range must already be on GitHub (identity lookups query
+   GitHub; an unpushed commit fails as an incomplete lookup), and `CHANGELOG.md`
+   needs the version's Highlights; for a preview before that, pass `--changelog`
+   with a scratch file.
+   The wrapper uses changelogithub's output APIs and read-only GitHub identity
+   lookups. It never creates/edits a release, including without `--dry`. The first
+   release includes all non-merge history, including the root commit; later releases
+   use the nearest preceding reachable stable `vX.Y.Z` tag, ignoring prereleases.
+   `--from vX.Y.Z` overrides the baseline and must be an ancestor. Compare links
+   use the baseline and new version; first releases link the full commit history.
+   Highlights must exist in the exact version section; missing/empty/comment-only
+   or more than three bullets fail closed. Preview output belongs in the release PR.
+
+   To simulate the next release, put its version and reviewed Highlights in a
+   scratch Markdown file, then use `--changelog .tmp/next-changelog.md --version
+   v0.2.0 --to origin/master --from v0.1.0`. This does not edit CHANGELOG.md or tags.
 4. Build all four images locally (below), validate both Compose configurations,
    and prove fresh install, SMTP login, workspace/project/key creation, ingest/read,
    exports, retention and matched fresh-storage restore using fictional data.
@@ -87,6 +98,68 @@ first-time contributors. Unresolved humans use names without fabricated mentions
 GitHub Bot accounts, [bot] identities, known automation addresses and AI noreply
 identities are excluded from contributor credit and human-authored change counts.
 Non-conventional commits remain in Other changes rather than silently disappearing.
+
+`changelogithub.config.ts` maps `feat` → Features, `fix` → Bug fixes, `perf` →
+Performance, `refactor` → Refactoring, `docs` → Documentation, `build` → Build,
+`ci` → CI, `test` → Tests, `chore` → Maintenance and `revert` → Reverts (`style` →
+Style). The squash-merge PR title is the commit subject and changelog line; use
+scopes such as `server` or `sdk`. Within a section, entries are grouped under their
+scopes once any scope there has more than one entry. A `!` before the colon, or a
+`BREAKING CHANGE:` footer in the message's final paragraph, puts the change in its
+own Breaking changes section. A subject with an unknown or malformed type is kept
+whole: under Other changes, or under Breaking changes when it has a `!`. `@` in a
+subject is defused so it never mentions an account; changelogithub still turns
+`#123` into an issue link and `:emoji:` codes into emoji. CRLF messages are
+normalized first. Run notes from anywhere in the repository: explicit `--changelog`/`--output`
+paths are relative to where you run it, and the script always loads the root
+`changelogithub.config.ts` and, by default, the root `CHANGELOG.md`.
+
+The wrapper retains the stricter contributor policy because changelogithub's
+native name-only bot filter does not cover AI email/login identities. Git itself
+parses each commit's trailer block (`%(trailers:key=Co-authored-by)`, the rules of
+`git interpret-trailers`), so a co-author named in prose or a fenced example is
+never credited. Every identity is trimmed, then it and its GitHub login and account
+type are checked against one set of rules:
+- `[bot]` names and Bot accounts, and any resolved account GitHub doesn't report
+  as a User (Copilot's agent login has no profile and is never credited);
+- release and dependency automation whatever its account type (semantic-release,
+  Renovate, Greenkeeper, Snyk, ImgBot, Mergify, all-contributors, pre-commit.ci,
+  release-please, GitHub's web-flow), and any name, login or address local part
+  with `bot` as a whole word (`release-bot`, `Release Bot`, `ci.bot@`). This also
+  skips a real person whose surname is Bot; that trade-off is deliberate;
+- known automation and AI logins and noreply addresses (Dependabot, GitHub
+  Actions, Codex, Claude, Copilot, Cursor, Devin, Gemini Code Assist, Jules, Amp,
+  OpenHands);
+- agent mailboxes on any domain, such as `claude@`, `codex@` or `cursor-agent@`
+  (a person who really uses such a mailbox should commit under another address,
+  mapped to their identity with `.mailmap`);
+- every address at, or under, openai.com, anthropic.com, cursor.com,
+  githubcopilot.com, aider.chat, ampcode.com, all-hands.dev, codeium.com,
+  windsurf.com and augmentcode.com, so employees committing from those domains
+  are not credited either;
+- Gemini/Jules addresses at google.com;
+- agent display names such as "Claude Opus 5.5", "Cursor Agent" or "Gemini CLI",
+  except for a person GitHub resolves to a User account;
+- names that sanitize to nothing;
+- reserved placeholder domains: `example.com`, `example.net`, `example.org`
+  and the `.example`, `.test`, `.invalid` and `localhost` domains, with any
+  subdomain.
+
+The list names known agents: an agent with an unknown address and name would be
+credited, so extend the rules (and their tests) when a new one appears. Identities
+merge only by a verified GitHub login or by the repository's `.mailmap`, which
+also applies to co-author trailers (`git check-mailmap`); two people who share a
+display name are never merged. Someone who commits under an address GitHub can't
+map should add a `.mailmap` line pointing it at their canonical identity; GitHub
+logins are still looked up by the address each commit was made with. Both the
+identity as committed (with its own GitHub login and account type) and its
+`.mailmap` identity must pass the rules above, so a `.mailmap` line can never turn
+an agent's or a Bot account's commits or trailers into human credit, and an alias
+lends its login to a canonical address only when it is a User account. Exclusions apply to inline
+credits, contributor totals and thank-you entries. Missing/truncated identity
+responses or an excluded identity reaching rendering abort notes generation before
+any notes are emitted. Invalid Highlights or failed preflight likewise prevent
+image publishing and release creation. Fix the cause and rerun; do not bypass it.
 
 Release concurrency serializes publications. Partial image-job failure may leave
 some version tags pushed without a release: inspect the run/digests, fix the cause,

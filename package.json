@@ -46,6 +46,7 @@
     "@logbird/sdk": "workspace:*",
     "@logbird/seed": "workspace:*",
     "@logbird/tsconfig": "workspace:*",
+    "changelogithub": "13.16.1",
     "tsx": "4.23.13",
     "turbo": "^2.10.12",
     "typescript": "^7.0.2",
