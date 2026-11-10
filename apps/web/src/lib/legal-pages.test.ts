@@ -30,7 +30,7 @@ describe('legal pages', () => {
     const [privacy, terms] = await renderPages(['/legal/privacy', '/legal/terms']);
     for (const page of [privacy, terms]) {
       expect(text(page?.html ?? '')).not.toMatch(/placeholder|counsel-reviewed|lorem/i);
-      expect(page?.html).toContain('dateTime="2026-11-10"');
+      expect(page?.html).toContain('dateTime="2026-11-11"');
     }
     const privacyText = text(privacy?.html ?? '');
     expect(privacyText).toContain('The operator of Logbird Cloud ("we")');

@@ -19,7 +19,7 @@ import { publicationDate } from './publications';
  */
 
 /** The date the current texts took effect. Change it with every substantive edit. */
-export const EFFECTIVE_DATE = '2026-11-10';
+export const EFFECTIVE_DATE = '2026-11-11';
 export const effectiveDateLabel = publicationDate(EFFECTIVE_DATE);
 
 /** Who "we" are. Unset, the texts name the role instead of a company (the publisher name is a release blocker). */
