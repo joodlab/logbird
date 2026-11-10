@@ -56,7 +56,7 @@ LABEL org.opencontainers.image.source="https://github.com/joodlab/logbird" org.o
 RUN mkdir /data && chown node:node /data
 COPY --from=build --chown=node:node /workspace/apps/web/.output ./.output
 # `node waitlist/admin.mjs forget <email>` deletes one person's form submissions (docs/coolify.md).
-COPY --from=build --chown=node:node /workspace/apps/web/waitlist/admin.mjs /workspace/apps/web/waitlist/file.mjs ./waitlist/
+COPY --from=build --chown=node:node /workspace/apps/web/waitlist/admin.mjs /workspace/apps/web/waitlist/file.mjs /workspace/apps/web/waitlist/expiry.mjs ./waitlist/
 USER node
 EXPOSE 4620
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD node -e 'fetch("http://127.0.0.1:"+(process.env.PORT||"4620")+"/").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'

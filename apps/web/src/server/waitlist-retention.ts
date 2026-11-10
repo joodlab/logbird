@@ -1,4 +1,4 @@
-import { pruneWaitlist, retentionCutoff } from '../../waitlist/file.mjs';
+import { pruneWaitlist } from '../../waitlist/file.mjs';
 import { siteConfig } from '../env';
 
 /**
@@ -16,7 +16,7 @@ export async function sweepWaitlist(
 ): Promise<{ kept: number; removed: number }> {
   const months = options.months ?? siteConfig.FORM_RETENTION_MONTHS;
   const log = options.log ?? ((line: string) => console.log(line));
-  const result = await pruneWaitlist(file, retentionCutoff(options.now ?? Date.now(), months));
+  const result = await pruneWaitlist(file, options.now ?? Date.now(), months);
   if (result.removed) {
     log(JSON.stringify({ level: 'info', event: 'waitlist.retention', removed: result.removed, kept: result.kept, months }));
   }

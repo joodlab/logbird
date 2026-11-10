@@ -124,11 +124,14 @@ the forwarded paths must carry the site's own security headers, and console path
 ### Form submissions
 
 The site keeps each contact and early-access submission in `/data/waitlist.jsonl`
-for `WEB_FORM_RETENTION_MONTHS` months (a build variable, default 24, 1–120). The
-privacy policy states the same period. The site deletes older submissions itself:
-when it starts, then every six hours, logging `waitlist.retention` with counts only.
-To change the period, set the variable and redeploy the site; the policy text and
-the cleanup change together.
+for `WEB_FORM_RETENTION_MONTHS` calendar months (a build variable, default 24,
+1–120): a submission sent on 31 March with one month expires on 30 April. The
+privacy policy states the same period. The site deletes expired submissions itself,
+when it starts and then every six hours, logging `waitlist.retention` with counts
+only. The cleanup runs only in the production server with `WAITLIST_FILE` set, which
+the site image does; never in `vite dev`, while a build prerenders pages, or for the
+source default file. To change the period, set the variable and redeploy the site;
+the policy text and the cleanup change together.
 
 To delete one person's submissions on request, run this in the site container:
 
@@ -139,4 +142,13 @@ docker exec <site container> node waitlist/admin.mjs forget someone@example.com
 It prints how many submissions it removed, never their contents. Also delete the
 notification emails for that address from the team mailbox. From a source checkout,
 `pnpm --filter @logbird/web waitlist:forget someone@example.com` does the same for
-`WAITLIST_FILE` (default `apps/web/.data/waitlist.jsonl`).
+the `WAITLIST_FILE` in the root `.env` (default `apps/web/.data/waitlist.jsonl`).
+Writes to the file (new submissions, the cleanup and this command) take one lock,
+so running the command while the site serves traffic never loses a submission.
+
+The Cloudflare build (not used by the hosted site) stores submissions in the
+`WAITLIST_KV` namespace with the same lifetime as a KV expiry. Keys written before
+that expiry existed have none: list them with
+`wrangler kv key list --binding WAITLIST_KV --prefix waitlist:` and delete the
+expired ones with `wrangler kv key delete --binding WAITLIST_KV <key>`. On request,
+delete the keys whose value has that email address the same way.

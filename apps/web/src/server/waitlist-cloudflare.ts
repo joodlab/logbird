@@ -1,3 +1,4 @@
+import { retentionExpiry } from '../../waitlist/expiry.mjs';
 import { siteConfig } from '../env';
 import type { WaitlistRecord } from '../lib/waitlist-schema';
 /** Enable a KV namespace named WAITLIST_KV in wrangler.jsonc to opt in to storage. */
@@ -5,11 +6,9 @@ export interface WaitlistBindings {
   WAITLIST_KV?: { put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void> };
 }
 
-/** Seconds from `now` until the same moment `months` calendar months later: how long KV keeps a submission. */
-export function retentionSeconds(now: number, months: number) {
-  const until = new Date(now);
-  until.setUTCMonth(until.getUTCMonth() + months);
-  return Math.ceil((until.getTime() - now) / 1000);
+/** Seconds until a submission received at `receivedAt` expires (the same calendar rule as the Node cleanup). */
+export function retentionSeconds(receivedAt: number, months: number) {
+  return Math.ceil((retentionExpiry(receivedAt, months) - receivedAt) / 1000);
 }
 
 export function createCloudflareStore(bindings: WaitlistBindings, months = siteConfig.FORM_RETENTION_MONTHS) {
