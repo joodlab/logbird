@@ -40,6 +40,8 @@ moves there, rewrite the form section first.
 - The team mailbox host (`WEB_MAILBOX_PROVIDER`) and the SMTP relay the site uses for form notifications (expected to
   mirror the console's Postmark settings).
 - Closed accounts and workspaces deleted within `CLOSURE_DELETION_DAYS` (30) days of closing: a manual commitment.
+- Keeping a closed account's entries in the activity of workspaces that still exist (the policy says so; nothing
+  removes them today), rather than removing or anonymising them on request.
 - The form retention period: `FORM_RETENTION` ("24 months after our last exchange"). Nothing deletes submissions
   automatically, so this is a manual commitment (a calendar reminder, or a cleanup job later).
 - That the 30-day answer time for rights requests is workable.

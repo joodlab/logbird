@@ -1,15 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { LegalDocument, LegalList, type LegalSection } from '../components/marketing/legal-document';
 import { CONTACT_EMAIL, GITHUB_PUBLIC, GITHUB_URL } from '../env';
-import {
-  CLOSURE_DELETION_DAYS,
-  FEE_NOTICE_DAYS,
-  GOVERNING_LAW_TEXT,
-  LEGAL_ADDRESS,
-  OPERATOR,
-  OPERATOR_SENTENCE_START,
-  PrivacyContact,
-} from '../lib/legal-facts';
+import { CLOSURE_DELETION_DAYS, FEE_NOTICE_DAYS, GOVERNING_LAW_TEXT, LEGAL_ADDRESS, OPERATOR, PrivacyContact } from '../lib/legal-facts';
 import { pageHead } from '../lib/seo';
 
 // Copy: marketing/copy/legal-terms.md lists the code facts behind these terms and the owner facts to confirm.
@@ -145,10 +137,10 @@ const sections: LegalSection[] = [
     title: 'Ending the agreement',
     body: (
       <p>
-        You can stop using Logbird Cloud at any time and ask us to delete your account and workspaces through <PrivacyContact />. We may end or
-        suspend your access if you break these terms or if we stop offering the service. Unless we must act at once (for example, for abuse or a legal
-        requirement), we'll give you notice and time to export your data first. After that, we delete your account and your workspaces, including
-        their projects and events, within {CLOSURE_DELETION_DAYS} days; copies in backups expire on their regular rotation.
+        You can stop using Logbird Cloud at any time and ask us to delete your account and the workspaces you own through <PrivacyContact />. We may
+        end or suspend your access if you break these terms or if we stop offering the service. Unless we must act at once (for example, for abuse or
+        a legal requirement), we'll give you notice and time to export your data first. After that, we delete your account and your workspaces,
+        including their projects and events, within {CLOSURE_DELETION_DAYS} days; copies in backups expire on their regular rotation.
       </p>
     ),
   },
@@ -171,12 +163,7 @@ const sections: LegalSection[] = [
   {
     id: 'changes',
     title: 'Changes to these terms',
-    body: (
-      <p>
-        {OPERATOR_SENTENCE_START} may update these terms. We'll change the effective date above and tell account holders about material changes before
-        they apply.
-      </p>
-    ),
+    body: <p>We may update these terms. We'll change the effective date above and tell account holders about material changes before they apply.</p>,
   },
   {
     id: 'law',

@@ -72,7 +72,8 @@ export function PrivacyRequestHow() {
       <Link className="text-link" search={{ interest: 'privacy' }} to="/contact">
         contact form
       </Link>
-      , choose "A privacy request" and enter the address on your account
+      , choose "A privacy request" and enter the address on your account (if you no longer have access to it, say so in your message and we'll find
+      another way to check the account is yours)
     </>
   );
 }

@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { LegalDocument, LegalList, type LegalSection } from '../components/marketing/legal-document';
-import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
+import { GITHUB_PUBLIC, GITHUB_URL, PRIVACY_EMAIL } from '../env';
 import {
   CLOSURE_DELETION_DAYS,
   EMAIL_PROVIDER_TEXT,
@@ -199,7 +199,7 @@ const sections: LegalSection[] = [
     title: 'How long we keep data',
     body: (
       <LegalList>
-        <li>Form submissions: {FORM_RETENTION}, or until you ask us to delete them.</li>
+        <li>Form submissions, their copies in our mailbox, and our emails with you: {FORM_RETENTION}, or until you ask us to delete them.</li>
         <li>Closed accounts and workspaces: deleted within {CLOSURE_DELETION_DAYS} days of closing, including their projects and events.</li>
         <li>
           Account details: while your account exists. Invitations: for as long as the workspace that sent them exists. Sessions and sign-in codes:
@@ -207,8 +207,9 @@ const sections: LegalSection[] = [
           cleanup yet, so some can stay in the database longer.
         </li>
         <li>
-          Workspace activity: activity records are deleted after 10 years at the latest; there is no shorter setting yet. Copies kept to power search
-          filters (names and sample values) and records still waiting to be delivered have no automatic limit yet.
+          Workspace activity: activity records are deleted after 10 years at the latest; there is no shorter setting yet. If you close your account,
+          records of what you did in workspaces that still exist stay in their activity, so changes remain accountable, within the same limit. Copies
+          kept to power search filters (names and sample values) and records still waiting to be delivered have no automatic limit yet.
         </li>
         <li>
           Data you send to Logbird Cloud: as long as each project's retention setting says, from 7 days to 10 years (90 days by default). Expired
@@ -230,9 +231,9 @@ const sections: LegalSection[] = [
         </p>
         <p>
           In the console you can change your display name, and, if your role allows, export or delete a project's data. Deleting your account and
-          getting a copy of your personal account data are handled by request for now. To make a request, <PrivacyRequestHow />. If you can't use that
-          address, tell us which one the request is about and we'll check that it's yours. We answer within 30 days, and handle these requests to meet
-          our legal obligations.
+          getting a copy of your personal account data are handled by request for now. To make a request, <PrivacyRequestHow />.{' '}
+          {PRIVACY_EMAIL ? "If you can't use that address, tell us which one the request is about and we'll check that it's yours. " : ''}We answer
+          within 30 days, and handle these requests to meet our legal obligations.
         </p>
       </>
     ),
