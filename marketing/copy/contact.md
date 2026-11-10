@@ -6,6 +6,12 @@ path: /contact
 
 # Contact
 
+> **Cloud open (`WEB_APP_URL` set).** H1 "Request access, or ask us anything."; lead "Logbird Cloud is in early access,
+> with sign-ups limited to invited teams. Leave your email to request access. If you have a question about self-hosting,
+> support or something else, choose it below."; form heading "Request access"; interest "Access to Logbird Cloud";
+> success "Thanks. We'll email you about access, and if you asked something we'll reply by email."; an "Already
+> invited? Sign in to Logbird Cloud" row; "Source and issues" links the repository and its issues.
+
 ## intro
 
 - **id:** `intro`

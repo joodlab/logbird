@@ -9,7 +9,7 @@ import { PAGE_CACHE, securityHeaders } from '../src/lib/security-headers';
  * Node server only (vite.config.ts registers it for node-server builds, never in dev or on Cloudflare). Answers every
  * request the way Cloudflare's static assets do (src/lib/page-response.ts): the prerendered page with its own hashed
  * Content-Security-Policy from `.output/csp.json` and the other security headers, a canonical build-time public file
- * through Nitro, /api/* through Nitro (JSON only), and 404.html (status 404, the 404 page's policy) for every other
+ * through Nitro, /site-api/* through Nitro (JSON only), and 404.html (status 404, the 404 page's policy) for every other
  * path: unknown, dotted, escaped, traversing or post-build.
  *
  * Nitro's own static handler can't serve the pages: its asset list is fixed before TanStack Start prerenders, so the

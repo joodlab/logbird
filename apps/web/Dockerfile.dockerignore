@@ -1,0 +1,54 @@
+node_modules
+**/node_modules
+.git
+.env
+.env.*
+!.env.example
+AGENTS.local.md
+CLAUDE.local.md
+.tmp
+# Local database archives must never reach build layers or remote builders.
+# Intentional archive assets need an explicit reviewed negation here and in .gitignore.
+/backups/
+**/*.dump
+**/*.zip
+**/dist
+**/.output
+**/.nitro
+**/.turbo
+**/src/generated
+# Docs stay out, except the reviewed walkthrough capture the site's media manifest encodes.
+docs/*
+!docs/media
+experiments
+examples/*/node_modules
+**/coverage
+**/test-results
+**/playwright-report
+**/.cache
+**/.tanstack
+output
+dogfood-output
+*.log
+
+# Runtime data and PII never enter a build context (apps/web waitlist submissions, any package's .data).
+**/.data
+**/.data/**
+**/waitlist*.jsonl
+# Regenerate media and OG cards from the reviewed sources during the build.
+apps/web/public/media
+apps/web/public/og
+
+examples/**
+!examples/**/package.json
+.pnpm-store
+# Only the reviewed marketing inputs are needed for this image.
+marketing/*
+!marketing/media
+**/.env*
+**/secrets
+**/secrets/**
+**/*.pem
+**/*.key
+**/backups
+**/dumps

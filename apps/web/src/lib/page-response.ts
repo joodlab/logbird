@@ -8,11 +8,11 @@ export interface PageManifest {
 }
 
 export type PageDecision =
-  /** Nitro answers: a build-time public file through its static handler, or an /api/* route (JSON, never HTML). */
+  /** Nitro answers: a build-time public file through its static handler, or an /site-api/* route (JSON, never HTML). */
   | { kind: 'pass' }
   /** Serve this prerendered HTML file with its own hashed policy. */
   | { kind: 'page'; file: string; status: 200 | 404; policy: string }
-  /** A method other than GET/HEAD outside /api/: 405, as static files can't take it (and the renderer mustn't). */
+  /** A method other than GET/HEAD outside /site-api/: 405, as static files can't take it (and the renderer mustn't). */
   | { kind: 'method-not-allowed' };
 
 // The manifest's public files as a Set, built once per manifest object.
@@ -29,12 +29,12 @@ const publicSet = (manifest: PageManifest) => {
 /**
  * How the Node server answers a request, mirroring Cloudflare's static assets (wrangler.jsonc):
  *
- * - `/api/…` (the raw path, exactly as Nitro routes it) goes to Nitro, whose `/api/**` routes answer JSON only
+ * - `/site-api/…` (the raw path, exactly as Nitro routes it) goes to Nitro, whose `/site-api/**` routes answer JSON only
  *   (server/waitlist.ts, server/api-not-found.ts);
  * - a prerendered page, by its URL or its file name, is served with its own hashed policy;
  * - a build-time public file goes to Nitro's static handler, but only when the canonical path (no `%2F`/`%5C`,
  *   `.`/`..` segments, `//` or backslashes) is in the manifest's case-exact list: the key that handler looks up.
- *   Filesystem existence is never consulted, since Windows and macOS ignore case (`/ASSETS/app.js`);
+ *   Filesystem existence is never consulted, since Windows and macOS ignore case (`/SITE-ASSETS/app.js`);
  * - everything else (unknown, dotted, escaped, traversing, case-variant or post-build paths) is 404.html with status
  *   404 and the 404 page's policy. Nothing reaches the on-demand renderer, whose inline scripts no build-time hash
  *   covers.
@@ -53,7 +53,7 @@ export function decidePage({
   if (!notFound) {
     throw new Error('The CSP manifest has no /404 page. Rebuild: pnpm build ends with scripts/csp.ts.');
   }
-  if (pathname.startsWith('/api/')) {
+  if (pathname.startsWith('/site-api/')) {
     return { kind: 'pass' };
   }
   if (method !== 'GET' && method !== 'HEAD') {

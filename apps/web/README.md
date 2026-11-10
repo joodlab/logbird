@@ -15,7 +15,8 @@ pnpm --filter @logbird/web build              # media + OG + prerender + pre-com
 pnpm --filter @logbird/web serve:static       # serves .output/public like Cloudflare (compression, real 404) on 4620
 pnpm --filter @logbird/web check:source-state  # after a build: fails if a public build says the source is closed, or a private one says it's open or links to it
 BASE_URL=http://127.0.0.1:4620 pnpm --filter @logbird/web check:live  # against a running site: every HTML response's CSP covers its own inline scripts
-pnpm --filter @logbird/web start              # the Node server (needed for /api/waitlist) on 4620
+SHARED_ORIGIN=1 BASE_URL=http://127.0.0.1:4629 pnpm --filter @logbird/web check:live  # through a console with LOGBIRD_SITE_URL: site paths only, console paths stay the console's
+pnpm --filter @logbird/web start              # the Node server (needed for /site-api/waitlist) on 4620
 pnpm --filter @logbird/web build:cloudflare   # the public build; refuses interim media or localhost URLs
 ```
 
@@ -57,7 +58,7 @@ A `cloudflare-module` build fails if any public URL is localhost.
 
 ## Waitlist
 
-`POST /api/waitlist` takes JSON or a URL-encoded form: zod validation, 8 KB streaming cap, honeypot, origin allowlist
+`POST /site-api/waitlist` takes JSON or a URL-encoded form: zod validation, 8 KB streaming cap, honeypot, origin allowlist
 (the site's origin, `WEB_ALLOWED_ORIGINS`, and the request origin in local development), five requests per client per
 minute (per process / per isolate, with a bounded client table). Native form posts redirect to
 `/contact?status=<code>#waitlist-<code>`, and a `:target` message for that exact code shows without JavaScript.
@@ -105,7 +106,7 @@ OG cards (`scripts/og.ts`, Satori + Resvg, local fonts) render one 1200×630 PNG
   each HTML response carries one CSP without `'unsafe-inline'` that covers that body's inline scripts, plus nosniff,
   HSTS, referrer and permissions policies. Unknown paths, including case variants of real files and pages
   (`/ROBOTS.TXT`, `/About/index.html`), must be the 404 page; the only redirect allowed is the documented Cloudflare
-  one below, and only to `/about/`. Unknown `/api/*` paths must be a JSON 404 (`NO_API=1` for `serve:static`), and a
+  one below, and only to `/about/`. Unknown `/site-api/*` paths must be a JSON 404 (`NO_API=1` for `serve:static`), and a
   POST to a page path an empty 405. Run it against `pnpm start`, `pnpm serve:static`, `wrangler dev` and a deploy.
 - `scripts/capture.mjs` takes 1440×900 and 390×844 stills in both themes (`PATHS`, `OUT_DIR`, `VIDEO=1` for scroll clips)
   with Playwright's bundled Chromium only, and fails on console errors or failed requests.
@@ -119,7 +120,7 @@ cd apps/web && npx wrangler deploy --config wrangler.jsonc
 
 The wrapper prerenders with the Node preset, checks every hashed asset the HTML references, then packages the Worker.
 `_headers` sets the CSP, nosniff, referrer policy, HSTS (no `includeSubDomains` until the domain is decided) and a
-restrictive permissions policy. Hashed `/assets/*` are immutable for a year; `/media/*` for a day.
+restrictive permissions policy. Hashed `/site-assets/*` are immutable for a year; `/media/*` for a day.
 
 ### Content-Security-Policy
 
@@ -134,20 +135,20 @@ changes with every build) and writes:
   and 2,000-character lines, and the build fails past either (one rule per page: about 95 pages and posts fit).
 - `.output/csp.json`: the same hashes for `pnpm start` and `pnpm serve:static`, which route requests by the same rules
   (`src/lib/page-response.ts`). `server/static-pages.ts` serves each prerendered page with its policy and the other
-  security headers; `/api/*` goes to Nitro, where every route answers JSON (`/api/waitlist`, and a JSON 404 for the
+  security headers; `/site-api/*` goes to Nitro, where every route answers JSON (`/site-api/waitlist`, and a JSON 404 for the
   rest); a build-time public file goes to Nitro's static handler, but only when its canonical path is in the manifest's
   case-exact list of public files (`publicFiles`), the key that handler looks up. The file system is never asked:
-  Windows and macOS ignore case, so `/ASSETS/app.js` would exist there while Nitro has no such asset. Every other
+  Windows and macOS ignore case, so `/SITE-ASSETS/app.js` would exist there while Nitro has no such asset. Every other
   GET/HEAD is 404.html with status 404 and the 404 policy: unknown and dotted paths, case variants, escaped separators
   (`%2F`, `%5C`), `.`/`..` segments, `//`, and files written after Nitro listed its assets (`*.br`, `*.gz`, `_headers`).
-  Other methods outside `/api/` get 405 (`server/method-guard.ts`, on every preset). So no page or 404 is rendered on
+  Other methods outside `/site-api/` get 405 (`server/method-guard.ts`, on every preset). So no page or 404 is rendered on
   demand.
 
-On Cloudflare, `run_worker_first` sends only `/api/*` to the Worker; the static asset router answers everything else,
+On Cloudflare, `run_worker_first` sends only `/site-api/*` to the Worker; the static asset router answers everything else,
 with `not_found_handling: "404-page"` serving 404.html under the `/*` rule. Checked locally with
 `npx wrangler@4.152.0 dev --config wrangler.jsonc --local --port 4621` on a `build:cloudflare` output (2026-11-08):
 `check:live` passes for all 37 responses. Unknown, dotted, escaped and case-variant paths get the static 404 with its
-hashed policy (the asset router is case-sensitive), none reaches the Worker, and unknown `/api/*` paths get the JSON
+hashed policy (the asset router is case-sensitive), none reaches the Worker, and unknown `/site-api/*` paths get the JSON
 404. A POST, PUT or DELETE to a page path gets an empty 405 from the asset router itself, before the Worker;
 `server/method-guard.ts` is the Worker's own guard should that routing change. One difference from the Node server:
 Cloudflare decodes `%2F` and redirects `/x%2f..%2fabout%2findex.html` to `/about/`, the static About page with its own
@@ -161,3 +162,19 @@ not-found page; `src/lib/hydration.test.ts` compares the renders.
 The step then re-reads the final HTML and fails the build if any inline script isn't covered by the policy each target
 serves. `vite dev` renders on demand and injects HMR scripts, so only the dev server keeps `'unsafe-inline'`.
 `style-src 'unsafe-inline'` stays until the runtime styles are reviewed separately.
+
+## Node container
+
+`apps/web/Dockerfile` builds the Node preset, including media, OG cards and
+`.output/csp.json`. All seven public `WEB_*` values are build arguments; changing
+them requires a rebuild. Fonts come from installed packages; media comes from
+`marketing/media` (materialized Git LFS files), with no build-time font download.
+The runtime runs as `node` on port 4620 and appends waitlist entries under `/data`.
+Empty `WEB_APP_URL`, `WEB_ORG_NAME`, `WEB_SECURITY_EMAIL` and `WEB_CONTACT_EMAIL`
+build arguments keep the documented unset behavior.
+
+Use `docker-compose.site.yml` as a separate private Coolify resource; see
+[Coolify](../../docs/coolify.md#hosted-marketing-site-logbirdjoodlabcom-only).
+The console forwards marketing pages when `LOGBIRD_SITE_URL` is set. The site's
+`/site-api/` and hashed `/site-assets/` namespaces avoid the console's `/api/` and
+`/assets/`. Shared `/brand/` files stay on the console and must remain identical.

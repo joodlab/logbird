@@ -13,12 +13,12 @@ import { securityHeaders } from '../lib/security-headers';
  */
 const page = (name: string) =>
   `<!DOCTYPE html><html><head><script>document.documentElement.className='light'</script></head><body>${name}` +
-  `<script class="$tsr">self.$_TSR={page:"${name}",id:"__root__\0"}</script><script type="module" src="/assets/app.js"></script></body></html>`;
+  `<script class="$tsr">self.$_TSR={page:"${name}",id:"__root__\0"}</script><script type="module" src="/site-assets/app.js"></script></body></html>`;
 const files: Record<string, string> = {
   'index.html': page('Home'),
   'about/index.html': page('About'),
   '404.html': page('Not found'),
-  'assets/app.js': 'console.log("app")',
+  'site-assets/app.js': 'console.log("app")',
   'robots.txt': 'User-agent: *\nDisallow: /\n',
   // Written after Nitro listed its assets (compress-html, scripts/csp.ts): never served as files.
   'about/index.html.br': 'not really brotli',
@@ -95,34 +95,34 @@ describe('Node server pages', () => {
       '/x.js',
       '/blog/no-such-post.md',
       '/no-such-page.ext',
-      '/assets/missing.js',
-      '/assets/',
+      '/site-assets/missing.js',
+      '/site-assets/',
       '/%E0%A4%A',
       '/..%2F..%2Fpackage.json',
       '/about/index.html/x',
       // Escaped separators and traversal that would resolve back to a real page or asset: Nitro looks these up
       // verbatim and would hand them to the renderer.
       '/x%2f..%2fabout%2findex.html',
-      '/x%2F..%2Fassets%2Fapp.js',
-      '/assets%2fapp.js',
-      '/assets%5capp.js',
+      '/x%2F..%2Fsite-assets%2Fapp.js',
+      '/site-assets%2fapp.js',
+      '/site-assets%5capp.js',
       '/x/%2e%2e%2fabout',
-      '//assets/app.js',
-      '/assets//app.js',
-      '/assets/app.js%00',
-      // API look-alikes that Nitro doesn't route to /api/**.
-      '/api',
-      '/api%2fwaitlist',
-      '/API/waitlist',
+      '//site-assets/app.js',
+      '/site-assets//app.js',
+      '/site-assets/app.js%00',
+      // API look-alikes that Nitro doesn't route to /site-api/**.
+      '/site-api',
+      '/site-api%2fwaitlist',
+      '/SITE-API/waitlist',
       '/%61pi/waitlist',
       // Post-build files.
       '/_headers',
       '/about/index.html.br',
       '/sitemap.xml.gz',
       // Case variants: Windows and macOS file systems would find these files, Nitro's case-exact asset table doesn't.
-      '/ASSETS/app.js',
-      '/assets/APP.JS',
-      '/Assets/App.js',
+      '/SITE-ASSETS/app.js',
+      '/site-assets/APP.JS',
+      '/Site-assets/App.js',
       '/ROBOTS.TXT',
       '/About/index.html',
       '/ABOUT/INDEX.HTML',
@@ -135,15 +135,15 @@ describe('Node server pages', () => {
     }
   });
 
-  it('leaves canonical build-time public files and /api/* to Nitro', async () => {
+  it('leaves canonical build-time public files and /site-api/* to Nitro', async () => {
     for (const [path, method] of [
-      ['/assets/app.js', 'GET'],
-      ['/assets/app.js', 'HEAD'],
+      ['/site-assets/app.js', 'GET'],
+      ['/site-assets/app.js', 'HEAD'],
       ['/robots.txt', 'GET'],
-      ['/api/waitlist', 'GET'],
-      ['/api/waitlist', 'POST'],
-      ['/api/no-such-endpoint', 'GET'],
-      ['/api/no-such-endpoint', 'DELETE'],
+      ['/site-api/waitlist', 'GET'],
+      ['/site-api/waitlist', 'POST'],
+      ['/site-api/no-such-endpoint', 'GET'],
+      ['/site-api/no-such-endpoint', 'DELETE'],
     ] as const) {
       const response = await request(path, method);
       expect(response.body, `${method} ${path}`).toBeUndefined();
@@ -171,17 +171,27 @@ describe('Node server pages', () => {
 describe('decidePage', () => {
   const manifest = {
     pages: { '/': { file: 'index.html', scriptHashes: ['sha256-a='] }, '/404': { file: '404.html', scriptHashes: ['sha256-b='] } },
-    publicFiles: ['/assets/app.js', '/robots.txt'],
+    publicFiles: ['/site-assets/app.js', '/robots.txt'],
   };
   const decide = (pathname: string, method = 'GET') => decidePage({ method, pathname, manifest });
-  it('passes only case-exact listed public files and the raw /api/ prefix', () => {
-    expect(decide('/assets/app.js')).toEqual({ kind: 'pass' });
-    expect(decide('/assets/app.js/')).toEqual({ kind: 'pass' });
-    expect(decide('/assets/app%2Ejs')).toEqual({ kind: 'pass' });
-    for (const path of ['/ASSETS/app.js', '/assets/App.js', '/Robots.txt', '/x.y', '/x%2Fy.js', '/assets/./app.js', '/api', '/apix', '/INDEX.HTML']) {
+  it('passes only case-exact listed public files and the raw /site-api/ prefix', () => {
+    expect(decide('/site-assets/app.js')).toEqual({ kind: 'pass' });
+    expect(decide('/site-assets/app.js/')).toEqual({ kind: 'pass' });
+    expect(decide('/site-assets/app%2Ejs')).toEqual({ kind: 'pass' });
+    for (const path of [
+      '/SITE-ASSETS/app.js',
+      '/site-assets/App.js',
+      '/Robots.txt',
+      '/x.y',
+      '/x%2Fy.js',
+      '/site-assets/./app.js',
+      '/site-api',
+      '/site-apix',
+      '/INDEX.HTML',
+    ]) {
       expect(decide(path), path).toMatchObject({ kind: 'page', status: 404, file: '404.html' });
     }
-    expect(decide('/api/x')).toEqual({ kind: 'pass' });
+    expect(decide('/site-api/x')).toEqual({ kind: 'pass' });
     expect(decide('/', 'POST')).toEqual({ kind: 'method-not-allowed' });
     expect(() => decidePage({ method: 'GET', pathname: '/', manifest: { pages: {}, publicFiles: [] } })).toThrow('no /404 page');
   });
@@ -190,12 +200,12 @@ describe('decidePage', () => {
 describe('build manifest public files', () => {
   it('lists every build-time file with its exact case, and nothing written after Nitro listed its assets', async () => {
     const manifest = JSON.parse(await readFile(join(output, 'csp.json'), 'utf8'));
-    expect(manifest.publicFiles).toEqual(['/assets/app.js', '/robots.txt']);
+    expect(manifest.publicFiles).toEqual(['/robots.txt', '/site-assets/app.js']);
   });
 });
 
 describe('method guard (every preset)', () => {
-  it('answers 405 for other methods outside /api/, and lets GET, HEAD and /api/* through', async () => {
+  it('answers 405 for other methods outside /site-api/, and lets GET, HEAD and /site-api/* through', async () => {
     const guard = handlerOf((await import('../../server/method-guard')) as unknown as { default: Handler | { handler: Handler } });
     const call = (path: string, method: string) => {
       const url = new URL(path, 'http://127.0.0.1:4621');
@@ -209,12 +219,12 @@ describe('method guard (every preset)', () => {
     }
     expect(await call('/about/', 'GET')).toBeUndefined();
     expect(await call('/about/', 'HEAD')).toBeUndefined();
-    expect(await call('/api/waitlist', 'POST')).toBeUndefined();
+    expect(await call('/site-api/waitlist', 'POST')).toBeUndefined();
   });
 });
 
 describe('API catch-all', () => {
-  it('answers unknown /api/* paths with JSON, never HTML', async () => {
+  it('answers unknown /site-api/* paths with JSON, never HTML', async () => {
     const apiHandler = handlerOf((await import('../../server/api-not-found')) as unknown as { default: Handler | { handler: Handler } });
     const response = (await apiHandler({})) as Response;
     expect(response.status).toBe(404);

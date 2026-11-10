@@ -3,6 +3,7 @@ import { Label } from '@logbird/ui/components/ui/label';
 import { Textarea } from '@logbird/ui/components/ui/textarea';
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { CONTACT_EMAIL, GITHUB_PUBLIC } from '../env';
+import { CLOUD_OPEN } from '../lib/cloud';
 
 // Copy: marketing/copy/contact.md (form, states).
 // No mailbox is named unless WEB_CONTACT_EMAIL is configured (never a guessed address).
@@ -12,7 +13,12 @@ const mail = CONTACT_EMAIL ? (
   </a>
 ) : null;
 export const STATUS_MESSAGES: Record<string, { tone: 'ok' | 'error'; text: ReactNode }> = {
-  ok: { tone: 'ok', text: "Thanks. You're on the list, and if you asked something we'll reply by email." },
+  ok: {
+    tone: 'ok',
+    text: CLOUD_OPEN
+      ? "Thanks. We'll email you about access, and if you asked something we'll reply by email."
+      : "Thanks. You're on the list, and if you asked something we'll reply by email.",
+  },
   validation_error: { tone: 'error', text: 'Something in the form needs fixing. Check the email address and try again.' },
   invalid_body: { tone: 'error', text: 'Something in the form needs fixing. Check the email address and try again.' },
   rate_limited: { tone: 'error', text: 'Too many attempts. Wait a minute, then try again.' },
@@ -32,7 +38,7 @@ export const STATUS_MESSAGES: Record<string, { tone: 'ok' | 'error'; text: React
 const messageFor = (code: string | undefined) => (code ? (STATUS_MESSAGES[code] ?? STATUS_MESSAGES.error) : undefined);
 
 const INTERESTS = [
-  { value: 'cloud', label: 'The Logbird Cloud waitlist' },
+  { value: 'cloud', label: CLOUD_OPEN ? 'Access to Logbird Cloud' : 'The Logbird Cloud waitlist' },
   { value: 'self-host', label: GITHUB_PUBLIC ? 'Self-hosting' : 'Self-hosting, when the source opens' },
   { value: 'updates', label: 'Product updates only' },
   { value: 'correction', label: 'A correction to one of our pages' },
@@ -103,7 +109,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
       </p>
     ) : null;
   return (
-    <form action="/api/waitlist" className="waitlist-form" method="post" onSubmit={submit} ref={formRef}>
+    <form action="/site-api/waitlist" className="waitlist-form" method="post" onSubmit={submit} ref={formRef}>
       <noscript>
         {Object.entries(STATUS_MESSAGES).map(([key, value]) => (
           <p className="native-status rounded-lg border px-4 py-3 text-sm" id={`waitlist-${key}`} key={key} tabIndex={-1}>

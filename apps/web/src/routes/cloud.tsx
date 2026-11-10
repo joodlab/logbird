@@ -7,6 +7,7 @@ import { type FaqItem, FaqList } from '../components/marketing/faq';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { GITHUB_PUBLIC } from '../env';
+import { ACCESS_CTA, CLOUD_OPEN, SIGN_IN_URL } from '../lib/cloud';
 import { cx } from '../lib/cx';
 import { faqLd, pageHead } from '../lib/seo';
 import { getPage } from '../lib/site-map';
@@ -15,12 +16,19 @@ import { getPage } from '../lib/site-map';
 const privacyReady = getPage('/legal/privacy').ready;
 
 const faq: FaqItem[] = [
-  { q: 'When does Logbird Cloud open?', a: "We haven't set a date. People on the waitlist hear first." },
+  CLOUD_OPEN
+    ? {
+        q: 'When can everyone sign up?',
+        a: "We haven't set a date. Logbird Cloud is in early access: sign-ups are limited to invited teams while we onboard them. Request access and we'll be in touch.",
+      }
+    : { q: 'When does Logbird Cloud open?', a: "We haven't set a date. People on the waitlist hear first." },
   {
     q: 'Where will my data be stored?',
-    a: GITHUB_PUBLIC
-      ? "Not decided yet. We'll publish the hosting region before the cloud opens. If your data must stay in a particular place today, self-host Logbird."
-      : "Not decided yet. We'll publish the hosting region before the cloud opens. If your data must stay in a particular place, self-hosting is an option once the source opens.",
+    a: CLOUD_OPEN
+      ? "We'll publish the hosting region with the Cloud's launch terms. Ask us before you send production data. If your data must stay in a particular place, self-host Logbird."
+      : GITHUB_PUBLIC
+        ? "Not decided yet. We'll publish the hosting region before the cloud opens. If your data must stay in a particular place today, self-host Logbird."
+        : "Not decided yet. We'll publish the hosting region before the cloud opens. If your data must stay in a particular place, self-hosting is an option once the source opens.",
   },
   {
     q: 'Is the cloud a different product?',
@@ -34,12 +42,14 @@ const faq: FaqItem[] = [
   },
   {
     q: 'Can I move between self-host and cloud?',
-    a: "We'll document how to migrate before the cloud opens. There's no migration tool today.",
+    a: CLOUD_OPEN
+      ? "We'll document how to migrate before sign-ups open to everyone. There's no migration tool today."
+      : "We'll document how to migrate before the cloud opens. There's no migration tool today.",
   },
   { q: 'How much will it cost?', a: "Pricing isn't set yet. Self-hosting is free under the MIT licence." },
   { q: 'Will there be an SLA?', a: "We'll publish service levels and limits together with the cloud's launch terms." },
   {
-    q: 'What do you do with my waitlist email?',
+    q: CLOUD_OPEN ? 'What do you do with the email I give you?' : 'What do you do with my waitlist email?',
     // The privacy notice is referenced only once /legal/privacy is ready (site-map), here and in the FAQ JSON-LD.
     a: privacyReady
       ? 'We store it to contact you about Logbird. No trackers. See the privacy notice.'
@@ -86,10 +96,10 @@ const plans: {
   {
     id: 'cloud',
     name: 'Cloud',
-    status: 'Waitlist',
-    body: 'We run it for you. Waitlist only for now.',
+    status: CLOUD_OPEN ? 'Early access' : 'Waitlist',
+    body: CLOUD_OPEN ? 'We run it for you. Open to invited teams for now.' : 'We run it for you. Waitlist only for now.',
     icon: <CloudIcon className="size-4" />,
-    cta: { label: 'Join the waitlist', to: '/contact', primary: true },
+    cta: { label: ACCESS_CTA, to: '/contact', primary: true },
   },
   {
     id: 'support',
@@ -103,8 +113,10 @@ const plans: {
 
 function StatusPanel() {
   const rows = [
-    { label: 'Logbird Cloud', value: 'Not open yet', note: 'Waitlist' },
-    { label: 'Pricing', value: "Isn't set yet", note: 'Published before launch' },
+    CLOUD_OPEN
+      ? { label: 'Logbird Cloud', value: 'Early access', note: 'Invited teams' }
+      : { label: 'Logbird Cloud', value: 'Not open yet', note: 'Waitlist' },
+    { label: 'Pricing', value: "Isn't set yet", note: CLOUD_OPEN ? 'Published before sign-ups open' : 'Published before launch' },
     GITHUB_PUBLIC
       ? { label: 'Self-host', value: 'Available today', note: 'Free, MIT' }
       : { label: 'Self-host', value: 'When the source opens', note: 'Free, MIT' },
@@ -136,14 +148,24 @@ function CloudPage() {
         actions={
           <>
             <ButtonLink size="lg" to="/contact">
-              Join the waitlist
+              {ACCESS_CTA}
             </ButtonLink>
-            <SelfHostCta />
+            {SIGN_IN_URL ? (
+              <ButtonLink href={SIGN_IN_URL} size="lg" variant="outline">
+                Sign in
+              </ButtonLink>
+            ) : (
+              <SelfHostCta />
+            )}
           </>
         }
         aside={<StatusPanel />}
         eyebrow="Logbird Cloud"
-        lead={`Logbird Cloud will run the same open-source codebase you${GITHUB_PUBLIC ? ' can' : "'ll be able to"} self-host. We'll run the servers, the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.`}
+        lead={
+          CLOUD_OPEN
+            ? `Logbird Cloud runs the same open-source codebase you${GITHUB_PUBLIC ? ' can' : "'ll be able to"} self-host. We run the servers, the upgrades and the backups. It's in early access: sign-ups are limited to invited teams for now. Request access, or sign in if you've been invited.`
+            : `Logbird Cloud will run the same open-source codebase you${GITHUB_PUBLIC ? ' can' : "'ll be able to"} self-host. We'll run the servers, the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.`
+        }
         title="The same Logbird, run by us."
       />
 
@@ -151,7 +173,11 @@ function CloudPage() {
         <SectionHeader
           eyebrow="Pricing"
           id="pricing-title"
-          lead="We'll publish prices before Logbird Cloud opens. Here is the shape we're planning. Nothing here is final."
+          lead={
+            CLOUD_OPEN
+              ? "We'll publish prices before sign-ups open to everyone. Here is the shape we're planning. Nothing here is final."
+              : "We'll publish prices before Logbird Cloud opens. Here is the shape we're planning. Nothing here is final."
+          }
           title="Pricing isn't set yet."
         />
         <ul className="mt-12 grid gap-4 md:grid-cols-3">
@@ -185,7 +211,7 @@ function CloudPage() {
         </div>
       </Section>
 
-      <CtaBand title="Be first to hear when it opens." />
+      <CtaBand title={CLOUD_OPEN ? 'Want early access?' : 'Be first to hear when it opens.'} />
     </>
   );
 }

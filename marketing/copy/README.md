@@ -113,6 +113,18 @@ Nobody outside the team can self-host until the repository is public (no publish
 - Quickstart blocks become "Available when the repository opens." with the same link.
 - "Self-host it" → `/self-hosting` and "Self-host today" return automatically once `WEB_GITHUB_PUBLIC=true`.
 
+## Cloud CTA rule
+
+`WEB_APP_URL` set means the hosted console takes sign-ins (`apps/web/src/lib/cloud.ts`). Sign-ups there stay restricted
+to invited teams and approved domains, so the site never promises an account:
+
+- Primary CTA: **"Request access"** → `/contact` (the same form; interest "Access to Logbird Cloud"). Unset: "Join the
+  waitlist".
+- "Sign in" (header, mobile menu, Cloud hero, contact page) → `<WEB_APP_URL>/login`, never the console root: when the
+  site and the console share an origin, a signed-out `/` is the marketing home page.
+- Status wording: "early access", "invited teams". No dates, prices, limits or SLAs; "before sign-ups open to
+  everyone" replaces "before launch".
+
 ## Owner-gated copy
 
 **Marker:** an owner-gated variant is written only inside an HTML comment that starts with `<!-- owner-gated: <topic>`.

@@ -10,8 +10,10 @@ import { LogStack } from '../components/marketing/log-stack';
 import { Eyebrow, Feature, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { Architecture, Steps } from '../components/marketing/steps';
-import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
+import { GITHUB_PUBLIC } from '../env';
+import { ACCESS_CTA, CLOUD_STATUS_LINE, SIGN_IN_URL } from '../lib/cloud';
 import { DESIGN_PARTNER_LINE } from '../lib/copy-flags';
+import { SELF_HOST_VERSION, selfHostQuickstart } from '../lib/selfhost';
 import { pageHead } from '../lib/seo';
 import { isReady } from '../lib/site-map';
 
@@ -49,16 +51,6 @@ new Worker('refunds', async (job) => {
   });
   await audit.pending();
 });`;
-
-// Only rendered once the repository is public (GITHUB_PUBLIC); the URL comes from config.
-const selfHost = `git clone ${GITHUB_URL}.git
-cd logbird
-sh scripts/selfhost-init.sh
-docker compose build migrate
-docker compose build server
-docker compose build worker
-docker compose build app
-docker compose up -d --no-build`;
 
 function HomePage() {
   return (
@@ -206,13 +198,17 @@ function HomePage() {
             <SectionHeader
               eyebrow="Open source"
               id="oss-title"
-              lead="The whole product is in one repository: the API, the console, the retention worker, the SDK and the integrations. Self-hosting builds it from source on your server, so your events stay on your infrastructure. No images are published yet."
+              lead={
+                GITHUB_PUBLIC
+                  ? 'The whole product is in one repository: the API, the console, the retention worker, the SDK and the integrations. Self-hosting runs the published, versioned images on your server, so your events stay on your infrastructure.'
+                  : 'The whole product is in one repository: the API, the console, the retention worker, the SDK and the integrations. Self-hosting runs it on your server, so your events stay on your infrastructure.'
+              }
               title={<>MIT-licensed. Runs with Docker Compose.</>}
             />
             <ul className="flex flex-col gap-3 text-sm">
               <li className="flex gap-3">
                 <span aria-hidden="true" className="mt-2 size-1.5 shrink-0 rounded-full bg-brand" />
-                Bundled Docker Compose, a Coolify build, or your own Postgres, ClickHouse and Redis.
+                Bundled Docker Compose, Coolify, or your own Postgres, ClickHouse and Redis.
               </li>
               <li className="flex gap-3">
                 <span aria-hidden="true" className="mt-2 size-1.5 shrink-0 rounded-full bg-brand" />
@@ -235,7 +231,7 @@ function HomePage() {
           </div>
           {GITHUB_PUBLIC ? (
             <div className="flex min-w-0 flex-col gap-3">
-              <SiteCode code={selfHost} language="bash" title="Self-host quickstart" />
+              <SiteCode code={selfHostQuickstart} language="bash" title={`Self-host ${SELF_HOST_VERSION}`} />
               <p className="text-muted-foreground text-sm">
                 Then open <code>http://localhost:4600</code>, sign in with the emailed code and create a project. Configure SMTP first, or enable
                 sign-in codes in the server log.
@@ -312,12 +308,22 @@ function Hero() {
           </p>
           <div className="flex flex-wrap gap-3">
             <ButtonLink size="lg" to="/contact">
-              Join the waitlist
+              {ACCESS_CTA}
             </ButtonLink>
             <SelfHostCta />
           </div>
           <p className="text-muted-foreground text-sm">
-            {GITHUB_PUBLIC ? 'Logbird Cloud is not open yet.' : 'Source on GitHub — coming soon. Logbird Cloud is not open yet.'}
+            {GITHUB_PUBLIC ? CLOUD_STATUS_LINE : `Source on GitHub — coming soon. ${CLOUD_STATUS_LINE}`}
+            {SIGN_IN_URL ? (
+              <>
+                {' '}
+                Already invited?{' '}
+                <a className="text-link" href={SIGN_IN_URL}>
+                  Sign in
+                </a>
+                .
+              </>
+            ) : null}
           </p>
         </div>
         <div className="flex min-w-0 flex-col gap-4">

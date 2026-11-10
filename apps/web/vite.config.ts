@@ -4,12 +4,13 @@ import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
 import { defineConfig } from 'vite';
 import { loadPublicEnv } from './scripts/public-env';
+import { loadReleases } from './scripts/releases';
 import { localPublicUrls, siteConfigFrom } from './src/env';
 import { llmsTxt, robotsTxt, sitemapXml } from './src/lib/discovery';
 import { ASSET_CACHE, DEV_CONTENT_SECURITY_POLICY, MEDIA_CACHE, securityHeaders } from './src/lib/security-headers';
 import { prerenderPaths } from './src/lib/site-map';
 
-export default defineConfig(({ mode, command }) => {
+export default defineConfig(async ({ mode, command }) => {
   // Only WEB_* variables reach the site, so the console's APP_URL (localhost in the shared .env) never leaks in.
   // Resolved once and passed to the bundle and the discovery files alike.
   const publicEnv = loadPublicEnv(mode);
@@ -27,26 +28,32 @@ export default defineConfig(({ mode, command }) => {
   return {
     // One React for the site and @logbird/ui (which resolves React from the workspace root).
     resolve: { tsconfigPaths: true, dedupe: ['react', 'react-dom'] },
-    define: { __SITE_ENV__: JSON.stringify(publicEnv), 'import.meta.env.NITRO_PRESET': JSON.stringify(preset) },
+    define: {
+      __SITE_ENV__: JSON.stringify(publicEnv),
+      // Published releases for /changelog and the self-host quickstart, resolved once per build (scripts/releases.ts).
+      __RELEASES__: JSON.stringify(await loadReleases({ githubUrl: config.GITHUB_URL, githubPublic: config.GITHUB_PUBLIC })),
+      'import.meta.env.NITRO_PRESET': JSON.stringify(preset),
+    },
     server: { port: 4620, strictPort: true },
-    preview: { port: 4620, strictPort: true },
-    build: { manifest: true },
+    // 127.0.0.1, not localhost: in Linux containers localhost may resolve to ::1 while the prerenderer fetches 127.0.0.1.
+    preview: { host: '127.0.0.1', port: 4620, strictPort: true },
+    build: { manifest: 'site-assets/manifest.json', assetsDir: 'site-assets' },
     plugins: [
       tailwindcss(),
       nitro({
         preset,
         handlers: [
-          { route: '/api/waitlist', handler: './server/waitlist.ts' },
-          // Any other /api/* path: a JSON 404, never an on-demand page.
-          { route: '/api/**', handler: './server/api-not-found.ts' },
-          // Pages are static: other methods than GET/HEAD outside /api/ get 405, on every preset.
+          { route: '/site-api/waitlist', handler: './server/waitlist.ts' },
+          // Any other /site-api/* path: a JSON 404, never an on-demand page.
+          { route: '/site-api/**', handler: './server/api-not-found.ts' },
+          // Pages are static: other methods than GET/HEAD outside /site-api/ get 405, on every preset.
           ...(command === 'build' ? [{ route: '/**', middleware: true, handler: './server/method-guard.ts' }] : []),
           // The Node server serves the prerendered pages with their hashed CSP (Cloudflare does this with _headers).
           ...(command === 'build' && preset === 'node-server' ? [{ route: '/**', middleware: true, handler: './server/static-pages.ts' }] : []),
         ],
         routeRules: {
           '/**': { headers },
-          '/assets/**': { headers: { 'Cache-Control': ASSET_CACHE } },
+          '/site-assets/**': { headers: { 'Cache-Control': ASSET_CACHE } },
           // Media keeps stable names (a replaced capture reuses its URL), so it is never immutable.
           '/media/**': { headers: { 'Cache-Control': MEDIA_CACHE } },
         },
@@ -71,7 +78,7 @@ export default defineConfig(({ mode, command }) => {
         name: 'logbird-preview-port',
         enforce: 'post',
         // Start passes port 0 to Vite during prerender. Keep every preview on our assigned port.
-        config: () => ({ preview: { port: 4620, strictPort: true } }),
+        config: () => ({ preview: { host: '127.0.0.1', port: 4620, strictPort: true } }),
       },
       {
         name: 'logbird-discovery',

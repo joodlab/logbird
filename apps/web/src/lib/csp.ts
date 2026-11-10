@@ -20,9 +20,9 @@ export interface CspManifest {
   /** URL path (no trailing slash; `/` for the home page, `/404` for the not-found page) → its HTML file and hashes. */
   pages: Record<string, { file: string; scriptHashes: string[] }>;
   /**
-   * Every other file a request may fetch, as exact, case-sensitive URL paths (`/assets/index-abc.js`): what Nitro's
+   * Every other file a request may fetch, as exact, case-sensitive URL paths (`/site-assets/index-abc.js`): what Nitro's
    * static handler serves. The Node server and serve-static admit a public file only by this list, never by filesystem
-   * existence, which ignores case on Windows and macOS (`/ASSETS/app.js` would otherwise reach Nitro's renderer).
+   * existence, which ignores case on Windows and macOS (`/SITE-ASSETS/app.js` would otherwise reach Nitro's renderer).
    */
   publicFiles: string[];
 }
@@ -113,7 +113,7 @@ export function headersFile(manifest: CspManifest) {
       '/*',
       Object.entries(fallback).map(([key, value]) => `${key}: ${value}`),
     ),
-    block('/assets/*', [`Cache-Control: ${ASSET_CACHE}`]),
+    block('/site-assets/*', [`Cache-Control: ${ASSET_CACHE}`]),
     block('/media/*', [`Cache-Control: ${MEDIA_CACHE}`]),
     ...Object.entries(manifest.pages)
       .filter(([path]) => path !== NOT_FOUND_PAGE)

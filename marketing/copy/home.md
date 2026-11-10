@@ -6,6 +6,10 @@ path: /
 
 # Home
 
+> **Cloud open (`WEB_APP_URL` set).** Primary CTA "Request access"; the line under the hero actions reads "Logbird Cloud
+> is in early access: sign-ups are limited to invited teams for now. Already invited? Sign in." The open-source
+> quickstart pulls the published images of the latest release (see self-hosting.md).
+
 ## hero
 
 - **id:** `hero`

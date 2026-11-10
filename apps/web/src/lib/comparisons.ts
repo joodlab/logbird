@@ -7,6 +7,7 @@
  */
 
 import { GITHUB_PUBLIC } from '../env';
+import { CLOUD_OPEN } from './cloud';
 
 export const ACCESSED = '2026-11-07';
 
@@ -63,13 +64,13 @@ const range = (prefix: string, from: number, to: number) => Array.from({ length:
 
 // Nobody can self-host before the source opens, so the cell says so until WEB_GITHUB_PUBLIC=true.
 const LOGBIRD_SELF_HOST = GITHUB_PUBLIC
-  ? 'Yes: Docker Compose or Coolify, built from source'
+  ? 'Yes: Docker Compose or Coolify, with published images'
   : 'Planned: Docker Compose or Coolify, when the source opens';
 // Licence and hosting cells follow the same availability state.
 const LOGBIRD_SOURCE = GITHUB_PUBLIC ? 'MIT; source on GitHub' : 'MIT; source opens publicly soon';
-const LOGBIRD_HOSTING = GITHUB_PUBLIC
-  ? 'Self-hosted, MIT; Logbird Cloud waitlist'
-  : 'Self-hosted when the source opens (MIT); Logbird Cloud waitlist';
+const LOGBIRD_CLOUD = CLOUD_OPEN ? 'Logbird Cloud early access (invited teams)' : 'Logbird Cloud waitlist';
+const LOGBIRD_HOSTING = GITHUB_PUBLIC ? `Self-hosted, MIT; ${LOGBIRD_CLOUD}` : `Self-hosted when the source opens (MIT); ${LOGBIRD_CLOUD}`;
+const LOGBIRD_HOSTED_OFFERING = CLOUD_OPEN ? 'Logbird Cloud: early access for invited teams' : 'Logbird Cloud: waitlist only';
 const LOGBIRD_PRICING = 'Self-host free (MIT); Cloud pricing not set';
 const LOGBIRD_VIEWER = 'None yet; read API plus headless Vue helpers';
 const LOGBIRD_READ = '`GET /v1/events` with a project read key';
@@ -93,7 +94,7 @@ const retraced: Comparison = {
       them: 'Yes: Docker Compose; also documented for DigitalOcean, AWS and Skaffold; the Kubernetes docs page says "Coming soon"',
       sourceIds: ['S6', 'S7'],
     },
-    { label: 'Hosted offering', logbird: 'Logbird Cloud: waitlist only', them: 'None found', sourceIds: ['S8'] },
+    { label: 'Hosted offering', logbird: LOGBIRD_HOSTED_OFFERING, them: 'None found', sourceIds: ['S8'] },
     {
       label: 'Required event fields',
       logbird: '`action` only; any other shape accepted',
@@ -480,7 +481,7 @@ const bemi: Comparison = {
       them: 'Open-source version "designed for evaluation and non-critical workloads"; a licensed Self-Hosting Enterprise edition for production',
       sourceIds: ['B9'],
     },
-    { label: 'Hosted offering', logbird: 'Logbird Cloud: waitlist only', them: 'Bemi Cloud', sourceIds: ['B9'] },
+    { label: 'Hosted offering', logbird: LOGBIRD_HOSTED_OFFERING, them: 'Bemi Cloud', sourceIds: ['B9'] },
     {
       label: 'Data model',
       logbird: 'Recommended envelope: actor, executor, tenant, targets, changes, operation',

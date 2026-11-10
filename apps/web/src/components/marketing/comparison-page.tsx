@@ -1,5 +1,6 @@
 import { CheckIcon, ExternalLinkIcon, InfoIcon, LayersIcon } from 'lucide-react';
 import { Fragment, type ReactNode } from 'react';
+import { ACCESS_CTA } from '../../lib/cloud';
 import { type Comparison, type ComparisonSource, longDate, TRADEMARK_LINE } from '../../lib/comparisons';
 import { ButtonLink } from './button-link';
 import { Callout } from './callout';
@@ -153,7 +154,7 @@ export function ComparisonPage({ comparison, figure }: { comparison: Comparison;
             <div className="mt-auto flex flex-wrap gap-3 pt-2">
               <SelfHostCta size="default" />
               <ButtonLink to="/contact" variant="ghost">
-                Join the waitlist
+                {ACCESS_CTA}
               </ButtonLink>
             </div>
           </section>

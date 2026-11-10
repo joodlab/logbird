@@ -60,6 +60,9 @@ or GitHub Release can be treated as available.
    git push origin v0.1.0
    ```
 
+   After the GitHub Release exists, refresh the site's fallback list with
+   `pnpm --filter @logbird/web releases:sync` in a follow-up PR, and redeploy the
+   hosted site without cache ([Coolify](coolify.md#hosted-marketing-site-logbirdjoodlabcom-only)).
    Do not move/reuse a published version tag. Release automation is publication,
    not a production deployment or authorization to bypass acceptance.
 
@@ -168,8 +171,12 @@ existing GitHub Release blocks a full rerun in preflight; retrying only release
 creation fails rather than replacing its reviewed notes. No Coolify deployment
 runs automatically.
 
-`.github/workflows/docker.yml` separately builds all four amd64 targets on PRs
+`.github/workflows/docker.yml` separately builds all four amd64 targets, plus the
+marketing site image (`apps/web/Dockerfile`, fictional build arguments), on PRs
 changing Dockerfiles, Compose, Docker context exclusions or the image workflows.
+The site image is not a release artifact: tags publish only the four roles above,
+and the hosted instance builds the site from `docker-compose.site.yml` (see
+[Coolify](coolify.md#hosted-marketing-site-logbirdjoodlabcom-only)).
 It has read-only repository permissions, no registry login and never pushes.
 The owner explicitly authorized these PR builds and tag-driven publication.
 

@@ -3,7 +3,7 @@ import { gzipSync } from 'node:zlib';
 import { prerenderPaths } from '../src/lib/site-map';
 
 const root = '.output/public';
-const manifest = JSON.parse(await readFile(`${root}/.vite/manifest.json`, 'utf8')) as Record<string, { file: string; imports?: string[] }>;
+const manifest = JSON.parse(await readFile(`${root}/site-assets/manifest.json`, 'utf8')) as Record<string, { file: string; imports?: string[] }>;
 const byFile = new Map(Object.values(manifest).map((entry) => [entry.file, entry]));
 const report: { path: string; gzipBytes: number; files: string[] }[] = [];
 for (const path of [...prerenderPaths, '/404']) {
@@ -22,7 +22,7 @@ for (const path of [...prerenderPaths, '/404']) {
       }
     }
   }
-  for (const match of html.matchAll(/(?:src|href)="\/(assets\/[^"?]+\.js)"/g)) {
+  for (const match of html.matchAll(/(?:src|href)="\/(site-assets\/[^"?]+\.js)"/g)) {
     if (match[1]) {
       visit(match[1]);
     }

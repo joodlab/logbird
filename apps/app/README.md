@@ -35,3 +35,15 @@ node scripts/qa-shoot.mjs login demo@logbird.local            # saves a session 
 node scripts/qa-shoot.mjs shoot ./out dark 1440x900 /p/<id>/events  # screenshots + console/HTTP problems
 node apps/app/scripts/capture-media.mjs # from repo root; see docs/media/README.md
 ```
+
+## Hosted marketing routes
+
+`LOGBIRD_SITE_URL` optionally points at the private marketing Node server (for
+example `http://logbird-site:4620`). The console remains the public origin; API,
+auth and invitation routes keep their existing forwarding and cookie behavior.
+Marketing pages and `/site-assets/`, `/site-api/`, `/media/`, `/og/` go to the site
+without credentials. Anonymous `/` requests see marketing; either non-empty
+Logbird session cookie keeps `/` on the console. If the site fails, only `/`
+falls back to the console; elsewhere the site's own responses (errors included) pass
+through, and only an unreachable site becomes 502. Leave the variable empty
+for the existing self-hosted behavior. See [Coolify](../../docs/coolify.md).

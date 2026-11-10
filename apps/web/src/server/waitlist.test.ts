@@ -10,7 +10,7 @@ import { createNodeStore } from './waitlist-node';
 const origin = 'https://site.example.test';
 const valid = { email: 'test-waitlist@example.test', interest: 'cloud', name: 'Fictional Tester' };
 const req = (input: unknown = valid, headers: Record<string, string> = {}) =>
-  new Request(`${origin}/api/waitlist`, {
+  new Request(`${origin}/site-api/waitlist`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Origin: origin, ...headers },
     body: JSON.stringify(input),
@@ -47,7 +47,7 @@ describe('waitlist boundary', () => {
     expect((await handleWaitlist(req({ ...valid, message: '\u00e9'.repeat(4200) }), dependencies())).status).toBe(413);
   });
   it('rejects malformed JSON', async () => {
-    const request = new Request(`${origin}/api/waitlist`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' });
+    const request = new Request(`${origin}/site-api/waitlist`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' });
     expect((await handleWaitlist(request, dependencies())).status).toBe(400);
   });
   it('enforces five submissions per IP and resets the window', async () => {
@@ -66,7 +66,7 @@ describe('waitlist boundary', () => {
       ['test-waitlist@example.test', 'ok'],
       ['invalid', 'validation_error'],
     ]) {
-      const request = new Request(`${origin}/api/waitlist`, {
+      const request = new Request(`${origin}/site-api/waitlist`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: origin },
         body: new URLSearchParams({ email: email ?? '', interest: 'self-host' }),
@@ -91,7 +91,7 @@ describe('waitlist boundary', () => {
   });
   it('accepts only the listed origins', async () => {
     const response = await handleWaitlist(
-      new Request(`${origin}/api/waitlist`, {
+      new Request(`${origin}/site-api/waitlist`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Origin: 'https://elsewhere.example.test' },
         body: JSON.stringify({ email: 'test-waitlist@example.test', interest: 'cloud' }),

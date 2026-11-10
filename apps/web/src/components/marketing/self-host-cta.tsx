@@ -1,4 +1,5 @@
 import { GITHUB_PUBLIC } from '../../env';
+import { CLOUD_OPEN } from '../../lib/cloud';
 import { ButtonLink } from './button-link';
 
 /**
@@ -21,5 +22,7 @@ export function SelfHostCta({ size = 'lg', variant = 'outline' }: { size?: 'defa
 }
 
 export const CTA_BODY = GITHUB_PUBLIC
-  ? 'Self-host Logbird today, or join the waitlist for Logbird Cloud.'
+  ? CLOUD_OPEN
+    ? 'Self-host Logbird today, or request access to Logbird Cloud, where sign-ups are limited to invited teams for now.'
+    : 'Self-host Logbird today, or join the waitlist for Logbird Cloud.'
   : 'The source opens soon. Join the waitlist to hear when you can self-host Logbird, and when Logbird Cloud opens.';

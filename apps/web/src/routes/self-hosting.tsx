@@ -6,23 +6,14 @@ import { FeatureRow } from '../components/marketing/feature-row';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { Steps } from '../components/marketing/steps';
-import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
+import { GITHUB_PUBLIC } from '../env';
+import { CLOUD_OPEN } from '../lib/cloud';
+import { IMAGE_NAMESPACE, repoFile, SELF_HOST_VERSION, selfHostQuickstart } from '../lib/selfhost';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/self-hosting')({ head: () => pageHead('/self-hosting'), component: SelfHostingPage });
 
 // Copy: marketing/copy/self-hosting.md. Commands are checked against docs/self-hosting.md and docs/coolify.md.
-// Only rendered once the repository is public (WEB_GITHUB_PUBLIC); the URL comes from config.
-const quickstart = `git clone ${GITHUB_URL}.git
-cd logbird
-sh scripts/selfhost-init.sh   # creates .env and generates secrets
-# Set SMTP in .env, or set AUTH_LOG_SIGN_IN_CODES=true for a first test.
-# Build the four roles one at a time (less peak memory), then start without rebuilding.
-docker compose build migrate
-docker compose build server
-docker compose build worker
-docker compose build app
-docker compose up -d --no-build`;
 
 const firstEvent = `curl http://localhost:4600/v1/events \\
   -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" \\
@@ -85,7 +76,7 @@ function SelfHostingPage() {
               </ButtonLink>
             )}
             <ButtonLink size="lg" to="/contact" variant="outline">
-              Join the Cloud waitlist
+              {CLOUD_OPEN ? 'Request Cloud access' : 'Join the Cloud waitlist'}
             </ButtonLink>
           </>
         }
@@ -97,13 +88,14 @@ function SelfHostingPage() {
               title="One Compose project runs the console, API, worker, Postgres, ClickHouse and Redis."
             />
             <p className="text-muted-foreground text-sm">
-              {GITHUB_PUBLIC ? 'Self-hosting builds from source' : 'Source on GitHub — coming soon. Self-hosting builds from source'}; no images are
-              published yet.
+              {GITHUB_PUBLIC
+                ? `Compose pulls the published ${SELF_HOST_VERSION} images for amd64 and arm64 from ${IMAGE_NAMESPACE}.`
+                : 'Source on GitHub — coming soon. Self-hosting builds from source; no images are published yet.'}
             </p>
           </div>
         }
         eyebrow="Self-hosting"
-        lead="Logbird is MIT-licensed and self-hosts with Docker Compose. Run it on one VM and your events stay on your own servers. It's the same codebase Logbird Cloud will run."
+        lead={`Logbird is MIT-licensed and self-hosts with Docker Compose. Run it on one VM and your events stay on your own servers. It's the same codebase Logbird Cloud ${CLOUD_OPEN ? 'runs' : 'will run'}.`}
         title="Your audit log, on your servers."
       />
 
@@ -114,7 +106,7 @@ function SelfHostingPage() {
               <SectionHeader
                 eyebrow="Quickstart"
                 id="quickstart-title"
-                lead="You need Docker Engine and Docker Compose 2.24.4 or newer. The first build takes longer, depending on your CPU and network."
+                lead="You need Docker Engine and Docker Compose 2.24.4 or newer. Compose pulls four published images; nothing is compiled on your server."
                 title="From clone to your first event."
               />
               <ol className="flex flex-col gap-4 text-sm leading-relaxed">
@@ -143,12 +135,19 @@ function SelfHostingPage() {
               <ul className="flex flex-col gap-2 border-t pt-6 text-muted-foreground text-sm leading-relaxed">
                 <li>The init script generates the secrets it needs and never overwrites values you've set.</li>
                 <li>
+                  Need unreleased code or a custom build? The{' '}
+                  <a className="text-link" href={`${repoFile('docs/self-hosting.md')}#build-from-source`}>
+                    self-hosting guide
+                  </a>{' '}
+                  covers building from source, every setting, TLS, backups and restores.
+                </li>
+                <li>
                   <code>/livez</code> checks the API process; <code>/readyz</code> checks Postgres, ClickHouse and Redis.
                 </li>
               </ul>
             </div>
             <div className="flex min-w-0 flex-col gap-3">
-              <SiteCode code={quickstart} language="bash" title="On your server" />
+              <SiteCode code={selfHostQuickstart} language="bash" title="On your server" />
               <SiteCode code={firstEvent} language="bash" title="Your first event" />
             </div>
           </div>
@@ -181,11 +180,11 @@ function SelfHostingPage() {
             ['HTTPS', 'A domain and ports 80 and 443 if you want automatic HTTPS.'],
             [
               'Starting size',
-              '4 vCPU, 8 GB RAM and SSD storage. That is an initial allocation, not measured capacity. Building from source needs more headroom: build the roles one at a time, and leave disk for images and build cache as well as your data, ClickHouse merges and backups.',
+              '4 vCPU, 8 GB RAM and SSD storage. That is an initial allocation, not measured capacity. Leave disk for images as well as your data, ClickHouse merges and backups; building from source needs more headroom still.',
             ],
             [
               'Access',
-              'Sign-up is open: anyone who can reach the console can create an account and a workspace. Keep it private while you evaluate, or restrict who can reach it.',
+              'Sign-up is open by default: anyone who can reach the console can create an account. On an internet-facing instance, set AUTH_SIGNUP=restricted with your email domains; invitations keep working.',
             ],
           ].map(([term, detail]) => (
             <div className="panel flex flex-col gap-2 p-5" key={term}>
@@ -220,8 +219,8 @@ function SelfHostingPage() {
               title: 'Coolify',
               body: (
                 <>
-                  Point Coolify's Docker Compose build pack at <code>docker-compose.coolify.yml</code>. Coolify generates the secrets and routes your
-                  domain to the console. Builds run from source.
+                  Point Coolify's Docker Compose build pack at <code>docker-compose.coolify.yml</code>. Coolify generates the secrets, pulls the
+                  published images and routes your domain to the console.
                 </>
               ),
               stack: (
@@ -259,7 +258,16 @@ function SelfHostingPage() {
           ))}
         </div>
         <p className="mt-6 border-s-2 ps-3 text-muted-foreground text-sm">
-          Coolify setup is documented and checked against a local simulation. It hasn't been tested on a live Coolify server yet.
+          {GITHUB_PUBLIC ? (
+            <>
+              Step by step in the{' '}
+              <a className="text-link" href={repoFile('docs/coolify.md')}>
+                Coolify guide
+              </a>
+              .{' '}
+            </>
+          ) : null}
+          Upgrades and restores through Coolify are documented but not yet verified end to end.
         </p>
       </Section>
 
@@ -293,19 +301,19 @@ function SelfHostingPage() {
           <section aria-labelledby="upgrades-title" className="flex flex-col gap-6" id="upgrades">
             <p className="eyebrow">Upgrades and backups</p>
             <h3 className="h2" id="upgrades-title">
-              Upgrade with a pinned revision, after a backup.
+              Upgrade to a pinned release, after a backup.
             </h3>
             <Steps
               items={[
                 { title: 'Stop writes', body: 'Block ingress and stop the console, server and worker; the worker finishes its current job first.' },
                 {
                   title: 'Back up',
-                  body: 'With writers stopped: matched Postgres (pg_dump) and ClickHouse (BACKUP DATABASE) backups and a SHA-256 checksum file. Keep the original .env; record the Git revision and image IDs.',
+                  body: 'With writers stopped: matched Postgres (pg_dump) and ClickHouse (BACKUP DATABASE) backups and a SHA-256 checksum file. Keep the original .env; record the release version and image digests.',
                 },
-                { title: 'Switch revision', body: 'Check out a tested revision.' },
+                { title: 'Pin the new version', body: 'Check out the new release tag; its Compose file pins the matching images.' },
                 {
-                  title: 'Build, then start',
-                  body: "Build the four roles one at a time, then docker compose up -d --no-build. Migrations run first; if one fails, the new version doesn't start.",
+                  title: 'Pull, then start',
+                  body: "docker compose pull, then docker compose up -d --no-build. Migrations run first; if one fails, the new version doesn't start.",
                 },
                 { title: 'Verify', body: 'Readiness, sign-in, your events, settings and keys, and the retention runs, before you reopen ingress.' },
               ]}
@@ -325,7 +333,6 @@ function SelfHostingPage() {
         <SectionHeader eyebrow="Not there yet" id="not-yet-title" title="What self-hosting doesn't include today." />
         <dl className="mt-10 grid gap-x-10 gap-y-2 md:grid-cols-2">
           {[
-            ['Published images', 'You build from source; publishing to a registry is still being decided. Smaller runtime images are in progress.'],
             ['High availability', 'The Compose setup is a single VM. It has no failover.'],
             ['Published capacity numbers', "We haven't published load-test results yet. Size from your own measurements."],
             ['SSO', 'Sign-in is by emailed code only. SSO is on the roadmap.'],
@@ -338,7 +345,14 @@ function SelfHostingPage() {
         </dl>
       </Section>
 
-      <CtaBand body="Logbird Cloud will run the same codebase for you. It isn't open yet." title="Rather not run it yourself?" />
+      <CtaBand
+        body={
+          CLOUD_OPEN
+            ? "Logbird Cloud runs the same codebase for you. It's in early access, with sign-ups limited to invited teams."
+            : "Logbird Cloud will run the same codebase for you. It isn't open yet."
+        }
+        title="Rather not run it yourself?"
+      />
     </>
   );
 }

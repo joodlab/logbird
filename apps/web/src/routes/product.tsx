@@ -6,6 +6,7 @@ import { FeatureRow, MiniFeature } from '../components/marketing/feature-row';
 import { ClipFrame, ScreenshotFrame } from '../components/marketing/frame';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
+import { ACCESS_CTA } from '../lib/cloud';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/product')({ head: () => pageHead('/product'), component: ProductPage });
@@ -50,7 +51,7 @@ function ProductPage() {
         actions={
           <>
             <ButtonLink size="lg" to="/contact">
-              Join the waitlist
+              {ACCESS_CTA}
             </ButtonLink>
             <SelfHostCta />
           </>

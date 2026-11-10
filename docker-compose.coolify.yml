@@ -105,6 +105,7 @@ services:
       HOST: '0.0.0.0'
       NODE_ENV: production
       LOGBIRD_SERVER_URL: ${LOGBIRD_SERVER_URL:-http://server:4601}
+      LOGBIRD_SITE_URL: ${LOGBIRD_SITE_URL:-}
       # Declared on the service that receives the domain, as in Coolify's examples: routes the public URL to app:4600.
       SERVICE_URL_APP_4600: ${SERVICE_URL_APP_4600}
     depends_on:

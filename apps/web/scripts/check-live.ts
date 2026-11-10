@@ -1,3 +1,4 @@
+import { siteDecision } from '../../app/server/site-paths';
 import { inlineScripts, scriptHash, scriptSources } from '../src/lib/csp';
 import { securityHeaders } from '../src/lib/security-headers';
 import { prerenderPaths } from '../src/lib/site-map';
@@ -8,26 +9,34 @@ import { prerenderPaths } from '../src/lib/site-map';
  * inline script in that very body, plus the other security headers; unknown paths must be the 404 page with status
  * 404, except the one documented redirect (Cloudflare's asset router decodes `%2F` and redirects
  * `/x%2f..%2fabout%2findex.html` to `/about/`, where the Node server answers 404; either is a static page with its own
- * policy); unknown /api/* paths must answer JSON. Use it against `pnpm start`, `pnpm serve:static`, `wrangler dev` and a
+ * policy); unknown /site-api/* paths must answer JSON. Use it against `pnpm start`, `pnpm serve:static`, `wrangler dev` and a
  * deploy, so a target that renders pages on demand (fresh, unhashed inline scripts) fails here, not in a browser.
  *
  * POST to a page path must be a 405 on every target.
  *
  *   BASE_URL=http://127.0.0.1:4620 [NO_API=1] tsx scripts/check-live.ts
  *
- * NO_API=1 skips the API checks (serve-static has no /api).
+ * NO_API=1 skips the API checks (serve-static has no /site-api).
+ *
+ * SHARED_ORIGIN=1 checks a console that forwards the site (LOGBIRD_SITE_URL, docs/coolify.md), e.g. production:
+ * only the paths the console routes to the site get the site checks (apps/app/server/site-paths.ts decides), and
+ * console-owned paths (sign-in, API, unknown paths) must answer from the console, never with a site page.
+ *
+ *   SHARED_ORIGIN=1 BASE_URL=https://<console origin> tsx scripts/check-live.ts
  */
 const base = process.env.BASE_URL ?? 'http://127.0.0.1:4620';
-const unknown = [
+const shared = process.env.SHARED_ORIGIN === '1';
+const routedToSite = (path: string) => !shared || siteDecision({ pathname: path, method: 'GET', cookie: '' }) === 'site';
+const allUnknown = [
   '/no-such-page',
   '/product/no-such-page',
   '/compare/bemi/no-such-page',
   '/foo.bar',
   '/x.js',
   '/blog/no-such-post.md',
-  '/assets/missing.js',
+  '/site-assets/missing.js',
   '/x%2f..%2fabout%2findex.html',
-  '/api',
+  '/site-api',
   '/_headers',
   // Case variants of real files and pages: hosts with case-insensitive file systems must not serve or render them.
   '/ROBOTS.TXT',
@@ -42,7 +51,12 @@ const unknown = [
  * missing pages to a real page fails.
  */
 const DOCUMENTED_REDIRECTS: Record<string, string> = { '/x%2f..%2fabout%2findex.html': '/about' };
-const api = process.env.NO_API === '1' ? [] : ['/api/no-such-endpoint', '/api/waitlist/x'];
+const unknown = allUnknown.filter(routedToSite);
+/** Paths the console keeps: on a shared origin none of them may answer with a site page. */
+const consoleOwned = shared ? ['/login', '/no-such-page', '/ABOUT', '/site-api', '/x%2f..%2fabout%2findex.html'] : [];
+/** An inline script only the site's pages carry (its theme bootstrap). */
+const SITE_MARKER = 'logbird.site.theme';
+const api = process.env.NO_API === '1' ? [] : ['/site-api/no-such-endpoint', '/site-api/waitlist/x'];
 const problems: string[] = [];
 const rows: Record<string, string | number>[] = [];
 
@@ -102,10 +116,10 @@ for (const path of api) {
   }
   rows.push({ path, status: response.status, inline: '-', uncovered: '-', url: type });
 }
-// Pages are static on every target: another method than GET/HEAD outside /api/ is a 405 and never a rendered page.
+// Pages are static on every target: another method than GET/HEAD outside /site-api/ is a 405 and never a rendered page.
 // Node and serve-static answer it themselves (with Allow: GET, HEAD); Cloudflare's asset router answers 405 with an
 // empty body before the Worker (server/method-guard.ts is the Worker's own guard if that ever changes).
-for (const path of ['/about/', '/no-such-page']) {
+for (const path of ['/about/', '/no-such-page'].filter(routedToSite)) {
   const response = await fetch(new URL(path, base), { method: 'POST', redirect: 'manual' });
   const body = await response.text();
   if (response.status !== 405 || /<script|<html/i.test(body)) {
@@ -118,6 +132,17 @@ for (const path of ['/about/', '/no-such-page']) {
     uncovered: '-',
     url: `allow: ${response.headers.get('allow') ?? '-'}, ${body.length} bytes`,
   });
+}
+for (const path of consoleOwned) {
+  const response = await fetch(new URL(path, base), { redirect: 'manual' });
+  const body = await response.text();
+  if (body.includes(SITE_MARKER) || body.includes('No event at this address.')) {
+    problems.push(`${path}: answered with a site page on a shared origin; the console must keep this path`);
+  }
+  if (response.status >= 500) {
+    problems.push(`${path}: the console answered ${response.status}`);
+  }
+  rows.push({ path: `console ${path}`, status: response.status, inline: '-', uncovered: '-', url: response.headers.get('content-type') ?? '-' });
 }
 console.table(rows);
 if (problems.length) {

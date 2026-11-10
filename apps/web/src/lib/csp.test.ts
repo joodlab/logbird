@@ -22,7 +22,7 @@ const page = (data: string) =>
   `<!DOCTYPE html><html lang="en"><head><script>(function(){document.documentElement.classList.add('dark')})()</script>` +
   `<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"${data}"}</script></head>` +
   `<body><main>${data}</main><script class="$tsr">self.$_TSR={page:"${data}"};document.currentScript.remove()</script>` +
-  '<script type="module" async="" src="/assets/index-abc123.js"></script></body></html>';
+  '<script type="module" async="" src="/site-assets/index-abc123.js"></script></body></html>';
 
 describe('inline script hashes', () => {
   it('hashes every inline script (JSON-LD included) and skips external ones', () => {
@@ -91,7 +91,7 @@ describe('build output', () => {
     expect(cloudflareHeadersFor(rules, '/missing').get('content-security-policy')).toBe(contentSecurityPolicy(manifest.pages['/404'].scriptHashes));
     // The other headers still apply everywhere.
     expect(cloudflareHeadersFor(rules, '/about/').get('x-content-type-options')).toBe('nosniff');
-    expect(cloudflareHeadersFor(rules, '/assets/index-abc123.js').get('cache-control')).toContain('immutable');
+    expect(cloudflareHeadersFor(rules, '/site-assets/index-abc123.js').get('cache-control')).toContain('immutable');
   });
 
   it('fails when a page changes after hashing, or a page rule stops detaching the catch-all policy', async () => {
