@@ -44,5 +44,6 @@ auth and invitation routes keep their existing forwarding and cookie behavior.
 Marketing pages and `/site-assets/`, `/site-api/`, `/media/`, `/og/` go to the site
 without credentials. Anonymous `/` requests see marketing; either non-empty
 Logbird session cookie keeps `/` on the console. If the site fails, only `/`
-falls back to the console; other site requests get 502. Leave the variable empty
+falls back to the console; elsewhere the site's own responses (errors included) pass
+through, and only an unreachable site becomes 502. Leave the variable empty
 for the existing self-hosted behavior. See [Coolify](../../docs/coolify.md).

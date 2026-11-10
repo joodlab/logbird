@@ -96,7 +96,11 @@ copy changes deploy without a release. Point the site resource at `master` once 
 release that introduces the forwarding is live: redeploying it then picks up merged
 copy changes and the latest CHANGELOG.md. The site reads the published release
 list when it builds, so after each release redeploy it **without cache** (an
-unchanged source would otherwise reuse the cached build and keep the old list).
+unchanged source would otherwise reuse the cached build and keep the old list), then
+confirm `/changelog` lists the new version. A new top-level site path needs a console
+release first (`apps/app/server/site-paths.ts`); until then it is a console 404.
+Same origin also means shared trust: site scripts run on the console's origin, so
+keep the site's strict per-page CSP.
 The site joins the stack's network, so recreating the `logbird` resource (new UUID)
 means updating `LOGBIRD_STACK_NETWORK` and redeploying the site. Rolling back means clearing
 `LOGBIRD_SITE_URL` and redeploying the console; `/` then signs visitors in again.

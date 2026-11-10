@@ -280,7 +280,8 @@ describe('optional marketing upstream', () => {
     );
     const response = await request('/site-api/waitlist', 'POST');
     expect(response.status).toBe(303);
-    expect(response.headers.get('location')).toBe('http://site.logbird.test:4620/contact?status=ok');
+    // An absolute redirect to the private site address becomes a path on the console origin.
+    expect(response.headers.get('location')).toBe('/contact?status=ok');
     expect(response.headers.get('content-security-policy')).toBe(policy);
     expect(response.headers.getSetCookie()).toEqual([]);
   });

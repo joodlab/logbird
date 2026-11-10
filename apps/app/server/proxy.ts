@@ -40,6 +40,9 @@ export default defineEventHandler(async (event) => {
         return;
       }
       response.headers.delete('set-cookie');
+      // Never reveal the private site address: an absolute redirect to it becomes a path on this origin.
+      const location = response.headers.get('location');
+      if (location?.startsWith(target.origin)) response.headers.set('location', location.slice(target.origin.length) || '/');
       // Nitro stages routeRules headers on event.res. H3 merges those OVER the returned proxy response, so remove
       // them only after a successful site response. The upstream owns all response policies, including its hashed CSP.
       for (const name of [...event.res.headers.keys()]) event.res.headers.delete(name);

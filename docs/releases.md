@@ -60,6 +60,9 @@ or GitHub Release can be treated as available.
    git push origin v0.1.0
    ```
 
+   After the GitHub Release exists, refresh the site's fallback list with
+   `pnpm --filter @logbird/web releases:sync` in a follow-up PR, and redeploy the
+   hosted site without cache ([Coolify](coolify.md#hosted-marketing-site-logbirdjoodlabcom-only)).
    Do not move/reuse a published version tag. Release automation is publication,
    not a production deployment or authorization to bypass acceptance.
 
