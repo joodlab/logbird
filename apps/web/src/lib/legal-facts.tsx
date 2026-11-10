@@ -29,7 +29,7 @@ export const FEE_NOTICE_DAYS = 30;
 export const HOSTING_PROVIDER_TEXT = HOSTING_PROVIDER ?? 'our server provider';
 /** Logbird Cloud's transactional email goes through Postmark (operator configuration); WEB_EMAIL_PROVIDER overrides it. */
 export const EMAIL_PROVIDER_TEXT = EMAIL_PROVIDER ?? 'Postmark';
-export const MAILBOX_PROVIDER_TEXT = MAILBOX_PROVIDER ?? 'our email provider';
+export const MAILBOX_PROVIDER_TEXT = MAILBOX_PROVIDER ?? 'our mailbox provider';
 export const GOVERNING_LAW_TEXT = GOVERNING_LAW ?? 'the laws of the country where the operator is established';
 export { LEGAL_ADDRESS };
 
@@ -62,7 +62,7 @@ export function PrivacyRequestHow() {
         <a className="text-link" href={`mailto:${PRIVACY_EMAIL}`}>
           {PRIVACY_EMAIL}
         </a>{' '}
-        from the address on your account
+        from the address the request is about (your account's, or the one you gave in the form)
       </>
     );
   }
@@ -72,8 +72,8 @@ export function PrivacyRequestHow() {
       <Link className="text-link" search={{ interest: 'privacy' }} to="/contact">
         contact form
       </Link>
-      , choose "A privacy request" and enter the address on your account (if you no longer have access to it, say so in your message and we'll find
-      another way to check the account is yours)
+      , choose "A privacy request" and enter the address the request is about (if you no longer have access to it, say so in your message and we'll
+      find another way to check it's yours)
     </>
   );
 }

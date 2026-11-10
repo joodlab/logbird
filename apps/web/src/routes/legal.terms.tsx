@@ -53,8 +53,8 @@ const sections: LegalSection[] = [
     title: 'Early access',
     body: (
       <p>
-        Logbird Cloud is in early access: we limit sign-ups to invited teams and approved email domains. Features, limits and these terms may change
-        as the service develops. Sending the contact form doesn't create an account or a contract.
+        Logbird Cloud is in early access: we limit sign-ups to invited teams: people with an invitation or an approved email domain. Features, limits
+        and these terms may change as the service develops. Sending the contact form doesn't create an account or a contract.
       </p>
     ),
   },
@@ -104,9 +104,9 @@ const sections: LegalSection[] = [
           explains. You're responsible for having a lawful basis to send it and for telling your users.
         </p>
         <p>
-          You choose each project's retention period, and you can export events from the console at any time. We don't look at your data except to
-          operate and secure the service, to help when you ask us to, or when the law requires it. If you need a data processing agreement, contact us
-          through <Contact />.
+          You choose each project's retention period, and you can export events from the console at any time if your role allows. We don't look at
+          your data except to operate and secure the service, to help when you ask us to, or when the law requires it. If you need a data processing
+          agreement, contact us through <Contact />.
         </p>
       </>
     ),
@@ -137,10 +137,11 @@ const sections: LegalSection[] = [
     title: 'Ending the agreement',
     body: (
       <p>
-        You can stop using Logbird Cloud at any time and ask us to delete your account and the workspaces you own through <PrivacyContact />. We may
-        end or suspend your access if you break these terms or if we stop offering the service. Unless we must act at once (for example, for abuse or
-        a legal requirement), we'll give you notice and time to export your data first. After that, we delete your account and your workspaces,
-        including their projects and events, within {CLOSURE_DELETION_DAYS} days; copies in backups expire on their regular rotation.
+        You can stop using Logbird Cloud at any time and ask us, through <PrivacyContact />, to delete your account and the workspaces you own. We may
+        suspend your access if you break these terms, and end it if you seriously or repeatedly break them or if we stop offering the service. Unless
+        we must act at once (for example, for abuse or a legal requirement), we'll give you notice and time to export your data before ending your
+        access. Once your account is closed, at your request or ours, we delete it and the workspaces you own, including their projects and events,
+        within {CLOSURE_DELETION_DAYS} days; copies in backups expire on their regular rotation.
       </p>
     ),
   },

@@ -18,7 +18,7 @@
  *   WEB_GOVERNING_LAW  e.g. "the laws of <country>" (terms)          unset → neutral wording (pending owner)
  *   WEB_HOSTING_PROVIDER  server provider and region (privacy)      unset → "our server provider" (pending owner)
  *   WEB_EMAIL_PROVIDER    email delivery provider (privacy)          unset → Postmark, Logbird Cloud's provider
- *   WEB_MAILBOX_PROVIDER  host of the team mailbox (privacy)         unset → "our email provider" (pending owner)
+ *   WEB_MAILBOX_PROVIDER  host of the team mailbox (privacy)         unset → "our mailbox provider" (pending owner)
  */
 /** The only variables the build passes to the site (vite.config.ts) and that Turbo hashes (turbo.json). */
 export const PUBLIC_ENV_KEYS = [

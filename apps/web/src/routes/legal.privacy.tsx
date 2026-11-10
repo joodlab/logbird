@@ -45,8 +45,8 @@ const sections: LegalSection[] = [
       <>
         <p>
           The website sets no cookies of its own and loads no analytics, advertising or tracking scripts. Cloudflare may set a strictly necessary
-          security cookie to filter bots. Its fonts are served from our own origin. Your browser stores one preference, your colour theme, in its
-          local storage; it never leaves your device.
+          security cookie to filter bots. The site's fonts are served from our own origin. Your browser stores one preference, your colour theme, in
+          its local storage; it never leaves your device.
         </p>
         <p>
           Every request passes through Cloudflare, our content delivery network, and reaches our servers. Like any web server, they process your IP
@@ -67,8 +67,8 @@ const sections: LegalSection[] = [
         <p>
           When you send the form we store your email address, the topic you choose, and the name, company and message if you give them, with the time
           you sent it. We don't store your IP address or browser details with it. To stop the form being flooded, the server counts submissions per IP
-          address in its memory only: an address is never written to disk or logs, and is removed once its one-minute window has passed, on a later
-          request or when the server restarts.
+          address in its memory only: the form never writes an address to disk or to its own logs, and is removed once its one-minute window has
+          passed, on a later request or when the server restarts.
         </p>
         <p>
           We keep submissions on our server, and our server emails each one to our team's mailbox, where we answer them. We use them to reply, to
@@ -108,9 +108,9 @@ const sections: LegalSection[] = [
             member of that workspace can see its activity.
           </li>
           <li>
-            <strong>Invitations and notices</strong>: when someone invites you we store your email address with the invitation, and we email you
-            sign-in codes, invitations, and notices when someone joins a workspace or your role changes. These emails contain no tracking pixels or
-            tracked links.
+            <strong>Invitations and notices</strong>: when someone invites you we store your email address with the invitation and in that workspace's
+            activity, and we email you sign-in codes, invitations, and notices when someone joins a workspace or your role changes. These emails
+            contain no tracking pixels or tracked links.
           </li>
           <li>
             <strong>Preferences</strong>: the console keeps your theme, sidebar state, last project and recent queries in your browser's storage and
