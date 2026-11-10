@@ -21,6 +21,7 @@ export const TEST_PUBLIC_ENV = {
   WEB_HOSTING_PROVIDER: '',
   WEB_EMAIL_PROVIDER: '',
   WEB_MAILBOX_PROVIDER: '',
+  WEB_FORM_RETENTION_MONTHS: '',
 };
 
 export default defineConfig({

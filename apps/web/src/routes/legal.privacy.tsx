@@ -5,6 +5,7 @@ import {
   CLOSURE_DELETION_DAYS,
   EMAIL_PROVIDER_TEXT,
   FORM_RETENTION,
+  FORM_RETENTION_MONTHS,
   HOSTING_PROVIDER_TEXT,
   LEGAL_ADDRESS,
   MAILBOX_PROVIDER_TEXT,
@@ -77,7 +78,8 @@ const sections: LegalSection[] = [
         <p>
           We reply because you asked us to (steps you request before any contract, and our legitimate interest in answering). Product updates rely on
           your consent, which you can withdraw at any time by replying to any update or through <PrivacyContact />. We keep submissions for{' '}
-          {FORM_RETENTION}, or delete them sooner if you ask.
+          {FORM_RETENTION}, or delete them sooner if you ask. Our server deletes its copy automatically {FORM_RETENTION_MONTHS} months after you send
+          it.
         </p>
       </>
     ),
@@ -200,7 +202,10 @@ const sections: LegalSection[] = [
     title: 'How long we keep data',
     body: (
       <LegalList>
-        <li>Form submissions, their copies in our mailbox, and our emails with you: {FORM_RETENTION}, or until you ask us to delete them.</li>
+        <li>
+          Form submissions, their copies in our mailbox, and our emails with you: {FORM_RETENTION}, or until you ask us to delete them. Our server
+          deletes its copy of each submission automatically {FORM_RETENTION_MONTHS} months after it was sent.
+        </li>
         <li>
           Closed accounts: deleted within {CLOSURE_DELETION_DAYS} days of closing, together with each workspace where the account was the only owner
           (including its projects and events). Workspaces with other owners stay.

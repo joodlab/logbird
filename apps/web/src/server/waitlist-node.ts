@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { appendFile, mkdir } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import nodemailer from 'nodemailer';
+import { appendWaitlistRecord } from '../../waitlist/file.mjs';
 import type { WaitlistRecord } from '../lib/waitlist-schema';
 import { serverEnv as env } from './env';
 /**
@@ -33,13 +33,8 @@ export function createNodeStore(
     }
   };
   return async (record: WaitlistRecord) => {
-    await mkdir(dirname(file), { recursive: true });
-    await appendFile(
-      file,
-      `${JSON.stringify(record)}
-`,
-      { mode: 0o600 },
-    );
+    // Under the file's lock, so the retention cleanup or an operator's deletion never drops a new line.
+    await appendWaitlistRecord(file, record);
     if (notify) {
       void deliver(record);
     }

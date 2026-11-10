@@ -120,3 +120,23 @@ After a deploy, check the shared origin with
 `SHARED_ORIGIN=1 BASE_URL=https://<console origin> pnpm --filter @logbird/web check:live`:
 the forwarded paths must carry the site's own security headers, and console paths
 (sign-in, unknown pages) must never answer with a site page.
+
+### Form submissions
+
+The site keeps each contact and early-access submission in `/data/waitlist.jsonl`
+for `WEB_FORM_RETENTION_MONTHS` months (a build variable, default 24, 1–120). The
+privacy policy states the same period. The site deletes older submissions itself:
+when it starts, then every six hours, logging `waitlist.retention` with counts only.
+To change the period, set the variable and redeploy the site; the policy text and
+the cleanup change together.
+
+To delete one person's submissions on request, run this in the site container:
+
+```sh
+docker exec <site container> node waitlist/admin.mjs forget someone@example.com
+```
+
+It prints how many submissions it removed, never their contents. Also delete the
+notification emails for that address from the team mailbox. From a source checkout,
+`pnpm --filter @logbird/web waitlist:forget someone@example.com` does the same for
+`WAITLIST_FILE` (default `apps/web/.data/waitlist.jsonl`).

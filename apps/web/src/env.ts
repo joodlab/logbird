@@ -19,6 +19,7 @@
  *   WEB_HOSTING_PROVIDER  server provider and region (privacy)      unset → "our server provider" (pending owner)
  *   WEB_EMAIL_PROVIDER    email delivery provider (privacy)          unset → Postmark, Logbird Cloud's provider
  *   WEB_MAILBOX_PROVIDER  host of the team mailbox (privacy)         unset → "our mailbox provider" (pending owner)
+ *   WEB_FORM_RETENTION_MONTHS  months the site keeps a form submission  default 24 (privacy policy and the cleanup)
  */
 /** The only variables the build passes to the site (vite.config.ts) and that Turbo hashes (turbo.json). */
 export const PUBLIC_ENV_KEYS = [
@@ -35,6 +36,7 @@ export const PUBLIC_ENV_KEYS = [
   'WEB_HOSTING_PROVIDER',
   'WEB_EMAIL_PROVIDER',
   'WEB_MAILBOX_PROVIDER',
+  'WEB_FORM_RETENTION_MONTHS',
 ] as const;
 
 declare const __SITE_ENV__: Record<string, string | undefined> | undefined;
@@ -74,8 +76,26 @@ export interface SiteConfig {
   EMAIL_PROVIDER?: string;
   /** Who hosts the team mailbox that receives form submissions and emails (pending owner). */
   MAILBOX_PROVIDER?: string;
+  /**
+   * How many months the site keeps a form submission: the privacy policy states it and the site's cleanup applies it
+   * (src/server/waitlist-retention.ts), so the two can't disagree. Default 24.
+   */
+  FORM_RETENTION_MONTHS: number;
   /** False while WEB_SITE_URL is unset, i.e. the canonical origin is the provisional domain (a release blocker). */
   SITE_URL_CONFIGURED: boolean;
+}
+
+/** WEB_FORM_RETENTION_MONTHS: a whole number of months from 1 to 120; unset or empty means 24. */
+function formRetentionMonths(value: string | undefined): number {
+  const text = value?.trim();
+  if (!text) {
+    return 24;
+  }
+  const months = Number(text);
+  if (!(Number.isInteger(months) && months >= 1 && months <= 120)) {
+    throw new Error('WEB_FORM_RETENTION_MONTHS must be a whole number of months from 1 to 120.');
+  }
+  return months;
 }
 
 /**
@@ -108,6 +128,7 @@ export function siteConfigFrom(values: Record<string, string | undefined>): Site
     HOSTING_PROVIDER: values.WEB_HOSTING_PROVIDER?.trim() || undefined,
     EMAIL_PROVIDER: values.WEB_EMAIL_PROVIDER?.trim() || undefined,
     MAILBOX_PROVIDER: values.WEB_MAILBOX_PROVIDER?.trim() || undefined,
+    FORM_RETENTION_MONTHS: formRetentionMonths(values.WEB_FORM_RETENTION_MONTHS),
     SITE_URL_CONFIGURED: Boolean(values.WEB_SITE_URL?.trim()),
   };
   for (const [key, value] of [
@@ -140,6 +161,7 @@ export const {
   HOSTING_PROVIDER,
   EMAIL_PROVIDER,
   MAILBOX_PROVIDER,
+  FORM_RETENTION_MONTHS,
 } = siteConfig;
 export const COPYRIGHT_HOLDER = ORG_NAME ?? 'Logbird contributors';
 

@@ -42,6 +42,8 @@ export default defineConfig(async ({ mode, command }) => {
       tailwindcss(),
       nitro({
         preset,
+        // Deletes form submissions older than the privacy policy's retention period (Node server only).
+        plugins: ['./server/plugins/form-retention.ts'],
         handlers: [
           { route: '/site-api/waitlist', handler: './server/waitlist.ts' },
           // Any other /site-api/* path: a JSON 404, never an on-demand page.

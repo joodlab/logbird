@@ -1,12 +1,21 @@
 import { Link } from '@tanstack/react-router';
-import { EMAIL_PROVIDER, GOVERNING_LAW, HOSTING_PROVIDER, LEGAL_ADDRESS, MAILBOX_PROVIDER, ORG_NAME, PRIVACY_EMAIL } from '../env';
+import {
+  EMAIL_PROVIDER,
+  FORM_RETENTION_MONTHS,
+  GOVERNING_LAW,
+  HOSTING_PROVIDER,
+  LEGAL_ADDRESS,
+  MAILBOX_PROVIDER,
+  ORG_NAME,
+  PRIVACY_EMAIL,
+} from '../env';
 import { publicationDate } from './publications';
 
 /**
  * The facts the privacy policy and terms depend on. Facts only the owner can supply (the legal entity, its address,
  * governing law, the server and email providers, a privacy mailbox) come from WEB_* settings, and each has wording
- * that stays true while it is unset. Promises that are policy rather than code (the request-access retention period,
- * the notice before fees) are constants here, listed for the owner to confirm in marketing/copy/legal-privacy.md.
+ * that stays true while it is unset. Promises that are policy rather than code (the notice before fees) are constants
+ * here, listed for the owner to confirm in marketing/copy/legal-privacy.md.
  */
 
 /** The date the current texts took effect. Change it with every substantive edit. */
@@ -17,8 +26,13 @@ export const effectiveDateLabel = publicationDate(EFFECTIVE_DATE);
 export const OPERATOR = ORG_NAME ?? 'the operator of Logbird Cloud';
 export const OPERATOR_SENTENCE_START = ORG_NAME ?? 'The operator of Logbird Cloud';
 
-/** Request-access and contact submissions: nothing deletes them automatically, so this is a manual commitment. */
-export const FORM_RETENTION = '24 months after our last exchange with you';
+/**
+ * How long we keep form submissions and the emails about them (WEB_FORM_RETENTION_MONTHS, default 24). The site's own
+ * copy is deleted automatically that long after it was sent (src/server/waitlist-retention.ts, or a KV expiry); the
+ * mailbox copies are a manual commitment.
+ */
+export { FORM_RETENTION_MONTHS };
+export const FORM_RETENTION = `${FORM_RETENTION_MONTHS} months after our last exchange with you`;
 
 /** How long after an account or workspace is closed we delete it (manual commitment). */
 export const CLOSURE_DELETION_DAYS = 30;
