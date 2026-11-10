@@ -27,7 +27,8 @@ export function wildcardRobotsRules(robots: string) {
   const rules: string[] = [];
   let agents: string[] = [];
   let inRules = false;
-  for (const raw of robots.split(/\r?\n/)) {
+  // RFC 9309 allows CRLF, LF or a bare CR as the line end.
+  for (const raw of robots.split(/\r\n|\r|\n/)) {
     const [, name, rest] = /^([^:#]+):([^#]*)/.exec(raw.trim()) ?? [];
     if (name === undefined || rest === undefined) continue;
     const field = name.trim().toLowerCase();

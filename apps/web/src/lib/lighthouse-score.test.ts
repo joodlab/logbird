@@ -72,6 +72,11 @@ describe('Lighthouse SEO pass mark', () => {
     expect(separate).not.toContain('Disallow');
   });
 
+  it('reads robots.txt with any RFC 9309 line ending, bare CR included', () => {
+    expect(robotsAllowsCrawling('User-agent: *\rAllow: /\r')).toBe(true);
+    expect(robotsAllowsCrawling('User-agent: *\rAllow: /\rDisallow: /\r')).toBe(false);
+  });
+
   it('keeps is-crawlable in the mark for ready pages once the site is indexable', () => {
     // An accidental noindex on a ready page: full SEO 66, everything else perfect.
     const noindexed = { path: '/about', seo: 66, 'seo-content': 100 };
