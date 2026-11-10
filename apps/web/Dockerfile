@@ -16,6 +16,7 @@ RUN pnpm install --frozen-lockfile --child-concurrency="$BUILD_CONCURRENCY" --ne
 COPY --from=prune /source/out/full/ .
 # Turbo prune excludes these build-time inputs; media and release notes read them from the repository root.
 COPY --from=prune /source/marketing/media ./marketing/media
+COPY --from=prune /source/docs/media ./docs/media
 COPY --from=prune /source/CHANGELOG.md ./CHANGELOG.md
 ARG WEB_SITE_URL
 ARG WEB_APP_URL

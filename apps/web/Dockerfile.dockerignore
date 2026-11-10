@@ -17,9 +17,9 @@ CLAUDE.local.md
 **/.nitro
 **/.turbo
 **/src/generated
-docs/media
-
-docs
+# Docs stay out, except the reviewed walkthrough capture the site's media manifest encodes.
+docs/*
+!docs/media
 experiments
 examples/*/node_modules
 **/coverage
