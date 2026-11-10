@@ -37,6 +37,8 @@ describe('legal pages', () => {
     // Without a privacy mailbox, rights requests go through the form's privacy topic.
     expect(privacy?.html).toContain('href="/contact?interest=privacy"');
     expect(privacyText).toContain('our server provider runs the servers');
+    // The retention period comes from WEB_FORM_RETENTION_MONTHS (default 24), the same value the cleanup applies.
+    expect(privacyText).toContain('Form submissions on our server: deleted automatically once they are 24 months old');
     // Logbird Cloud's transactional email provider, unless WEB_EMAIL_PROVIDER says otherwise.
     expect(privacyText).toContain("Postmark sends Logbird Cloud's sign-in codes");
     for (const fact of [

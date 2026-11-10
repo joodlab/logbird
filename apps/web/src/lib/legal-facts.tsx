@@ -32,7 +32,9 @@ export const OPERATOR_SENTENCE_START = ORG_NAME ?? 'The operator of Logbird Clou
  * mailbox copies are a manual commitment.
  */
 export { FORM_RETENTION_MONTHS };
-export const FORM_RETENTION = `${FORM_RETENTION_MONTHS} months after our last exchange with you`;
+/** The retention period as words: "24 months", or "1 month". */
+export const FORM_RETENTION_PERIOD = FORM_RETENTION_MONTHS === 1 ? '1 month' : `${FORM_RETENTION_MONTHS} months`;
+export const FORM_RETENTION = `${FORM_RETENTION_PERIOD} after our last exchange with you`;
 
 /** How long after an account or workspace is closed we delete it (manual commitment). */
 export const CLOSURE_DELETION_DAYS = 30;
