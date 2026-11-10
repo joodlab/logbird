@@ -7,9 +7,11 @@ import { AUTH_RECORD_GRACE_MS, type AuthRecordSweepDb, prisma, sweepExpiredAuthR
  * sweep runs in a private schema holding copies of `session`, `verification` and `invitation` (same columns, defaults
  * and indexes, no foreign keys), so neither another developer's rows, better-auth's own cleanup during a concurrent
  * sign-in, nor a running worker's hourly sweep can interfere. The schema is dropped afterwards; schemas left by a killed
- * run (`qa_129_*`) are dropped first.
+ * run are dropped first, but only once they are an hour old (the name carries its creation time and a run takes
+ * seconds), so a colleague's run in progress is never touched.
  */
-const schema = `qa_129_${randomUUID().replaceAll('-', '')}`;
+const STALE_AFTER_MS = 60 * 60 * 1000;
+const schema = `qa_129_${Date.now()}_${randomUUID().replaceAll('-', '')}`;
 const now = Date.now();
 const at = (msFromNow: number) => new Date(now + msFromNow);
 const KINDS = ['session', 'verification', 'invitation'] as const;
@@ -24,8 +26,11 @@ const isolated: AuthRecordSweepDb = {
 };
 
 async function dropStaleSchemas() {
-  const stale = await prisma.$queryRaw<{ name: string }[]>`SELECT nspname AS name FROM pg_namespace WHERE nspname LIKE 'qa\\_129\\_%'`;
-  for (const { name } of stale) await prisma.$executeRawUnsafe(`DROP SCHEMA "${name}" CASCADE`);
+  const leftovers = await prisma.$queryRaw<{ name: string }[]>`SELECT nspname AS name FROM pg_namespace WHERE nspname LIKE 'qa\\_129\\_%'`;
+  for (const { name } of leftovers) {
+    const created = Number(/^qa_129_(\d{13})_[0-9a-f]{32}$/.exec(name)?.[1]);
+    if (created && Date.now() - created > STALE_AFTER_MS) await prisma.$executeRawUnsafe(`DROP SCHEMA "${name}" CASCADE`);
+  }
 }
 
 beforeAll(async () => {

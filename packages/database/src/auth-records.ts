@@ -55,8 +55,8 @@ export interface AuthRecordSweepDb {
 }
 
 /**
- * Deletes expired records in batches. The budget is checked between batches, so a run can overshoot it by at most one
- * batch (6 s transaction timeout).
+ * Deletes expired records in batches. The budget is checked between batches, so a run can overshoot it by one batch:
+ * up to 1 s waiting to start its transaction (`maxWait`) plus the 6 s transaction timeout.
  */
 export async function sweepExpiredAuthRecords(now = Date.now(), db: AuthRecordSweepDb = prisma): Promise<AuthRecordSweepResult> {
   const started = Date.now();
