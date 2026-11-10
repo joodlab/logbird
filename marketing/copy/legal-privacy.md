@@ -19,7 +19,7 @@ re-check the source before you change a sentence, and update the effective date 
 | Privacy mailbox | `WEB_PRIVACY_EMAIL` | the contact form's "A privacy request" topic (release blocker) |
 | Postal address | `WEB_LEGAL_ADDRESS` | no address printed |
 | Server provider and region | `WEB_HOSTING_PROVIDER` | "our server provider" |
-| Email delivery provider | `WEB_EMAIL_PROVIDER` | "our email delivery provider" |
+| Email delivery provider | `WEB_EMAIL_PROVIDER` | Postmark (Logbird Cloud's transactional provider, confirmed by the master 2026-11-10) |
 
 The site stays noindex (robots `Disallow: /`) until the publisher name and the privacy mailbox are set
 (`apps/web/src/lib/release.ts`). Without a privacy mailbox, rights requests still work: the form's "A privacy
@@ -28,9 +28,9 @@ request" topic is stored like any submission and forwarded to `WAITLIST_NOTIFY_T
 ## Owner to confirm before relying on the text
 
 - The legal entity, its country and address.
-- The hosting provider and region of the Coolify server, and the email provider (DNS shows mail on Zoho; Postmark is
-  the decided transactional provider in `docs/decisions.md` but isn't visible in DNS yet). If the provider has
-  open/link tracking options, keep them off: the policy says emails carry no tracking.
+- The hosting provider and region of the Coolify server (`WEB_HOSTING_PROVIDER`, set at rollout). Transactional email
+  is Postmark (server `logbird`; joodlab.com's own mailboxes on Zoho are unrelated). Keep Postmark's open and link
+  tracking off: the policy says emails carry no tracking.
 - Backups: provider, location, encryption and how long they're kept (the Cloud hero and the policy say backups exist).
 - The form retention period: `FORM_RETENTION` ("24 months after our last exchange"). Nothing deletes submissions
   automatically, so this is a manual commitment (a calendar reminder, or a cleanup job later).

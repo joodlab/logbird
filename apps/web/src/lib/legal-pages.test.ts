@@ -36,7 +36,8 @@ describe('legal pages', () => {
     // Without a privacy mailbox, rights requests go through the form's privacy topic.
     expect(privacy?.html).toContain('href="/contact?interest=privacy"');
     expect(privacyText).toContain('our server provider runs the servers');
-    expect(privacyText).toContain('our email delivery provider sends sign-in codes');
+    // Logbird Cloud's transactional email provider, unless WEB_EMAIL_PROVIDER says otherwise.
+    expect(privacyText).toContain('Postmark sends sign-in codes');
     for (const fact of [
       '__Secure-logbird.session_token',
       'expires after 10 minutes',

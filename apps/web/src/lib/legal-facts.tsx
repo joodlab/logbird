@@ -24,7 +24,8 @@ export const FORM_RETENTION = '24 months after our last exchange with you';
 export const FEE_NOTICE_DAYS = 30;
 
 export const HOSTING_PROVIDER_TEXT = HOSTING_PROVIDER ?? 'our server provider';
-export const EMAIL_PROVIDER_TEXT = EMAIL_PROVIDER ?? 'our email delivery provider';
+/** Logbird Cloud's transactional email goes through Postmark (operator configuration); WEB_EMAIL_PROVIDER overrides it. */
+export const EMAIL_PROVIDER_TEXT = EMAIL_PROVIDER ?? 'Postmark';
 export const GOVERNING_LAW_TEXT = GOVERNING_LAW ?? 'the laws of the country where the operator is established';
 export { LEGAL_ADDRESS };
 

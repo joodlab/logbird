@@ -17,7 +17,7 @@
  *   WEB_LEGAL_ADDRESS  the operator's postal address (legal pages)  unset → no address shown (pending owner)
  *   WEB_GOVERNING_LAW  e.g. "the laws of <country>" (terms)          unset → neutral wording (pending owner)
  *   WEB_HOSTING_PROVIDER  server provider and region (privacy)      unset → "our server provider" (pending owner)
- *   WEB_EMAIL_PROVIDER    email delivery provider (privacy)          unset → "our email delivery provider" (pending owner)
+ *   WEB_EMAIL_PROVIDER    email delivery provider (privacy)          unset → Postmark, Logbird Cloud's provider
  */
 /** The only variables the build passes to the site (vite.config.ts) and that Turbo hashes (turbo.json). */
 export const PUBLIC_ENV_KEYS = [
@@ -68,7 +68,7 @@ export interface SiteConfig {
   GOVERNING_LAW?: string;
   /** The server provider and region named in the privacy policy (pending owner), e.g. "<provider> (<country>)". */
   HOSTING_PROVIDER?: string;
-  /** The email delivery provider named in the privacy policy (pending owner). */
+  /** The email delivery provider named in the privacy policy; unset, Logbird Cloud's provider (Postmark). */
   EMAIL_PROVIDER?: string;
   /** False while WEB_SITE_URL is unset, i.e. the canonical origin is the provisional domain (a release blocker). */
   SITE_URL_CONFIGURED: boolean;
