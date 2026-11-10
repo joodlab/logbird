@@ -120,7 +120,12 @@ parses each commit's trailer block (`%(trailers:key=Co-authored-by)`, the rules 
 `git interpret-trailers`), so a co-author named in prose or a fenced example is
 never credited. Every identity is trimmed, then it and its GitHub login and account
 type are checked against one set of rules:
-- `[bot]` names and Bot accounts;
+- `[bot]` names and Bot accounts, and any resolved account GitHub doesn't report
+  as a User (Copilot's agent login has no profile and is never credited);
+- release and dependency automation whatever its account type (semantic-release,
+  Renovate, Greenkeeper, Snyk, ImgBot, Mergify, all-contributors, pre-commit.ci,
+  release-please, GitHub's web-flow), and any name, login or address local part
+  with `bot` as a whole word (`release-bot`, `Release Bot`, `ci.bot@`);
 - known automation and AI logins and noreply addresses (Dependabot, GitHub
   Actions, Codex, Claude, Copilot, Cursor, Devin, Gemini Code Assist, Jules, Amp,
   OpenHands);

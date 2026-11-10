@@ -725,3 +725,39 @@ test('Copilot and other accounts GitHub will not describe neither stop the notes
   };
   assert.throws(() => resolveLogins(commits, 'acme/logbird', failing), /HTTP 502/);
 });
+
+test('release and dependency automation is never credited, even as a GitHub User account', () => {
+  for (const identity of [
+    { name: 'semantic-release-bot', email: 'semantic-release-bot@martynus.net', login: 'semantic-release-bot', type: 'User' },
+    { name: 'Renovate Bot', email: 'bot@renovateapp.com' },
+    { name: 'Release Bot', email: 'releases@users.noreply.github.com', login: 'acme-release', type: 'User' },
+    { name: 'CI', email: 'ci.bot@users.noreply.github.com' },
+    { name: 'GitHub', email: 'noreply@github.com', login: 'web-flow', type: 'User' },
+    { name: 'mergify', email: 'x@mergify.com' },
+    { name: 'Maintainer', email: 'm@users.noreply.github.com', login: 'acme-bot', type: 'User' },
+  ])
+    assert.equal(isPerson(identity), false, JSON.stringify(identity));
+  for (const name of ['Abbott Lee', 'Bothwell', 'Robot Fan Club']) assert.equal(isPerson(person(name, 'h@users.noreply.github.com')), true, name);
+
+  const human = person('Human', 'human@users.noreply.github.com');
+  const releaseBot = person('semantic-release-bot', 'semantic-release-bot@martynus.net');
+  const commits = [commit('chore(release): 1.2.0', [releaseBot]), commit('feat: pair', [human, releaseBot])];
+  const logins = new Map([
+    ['human@users.noreply.github.com', 'human'],
+    ['semantic-release-bot@martynus.net', 'semantic-release-bot'],
+  ]);
+  const summary = summarize(
+    commits,
+    [],
+    logins,
+    new Map([
+      ['human', 'User'],
+      ['semantic-release-bot', 'User'],
+    ]),
+  );
+  assert.equal(summary.changes, 1);
+  assert.deepEqual(credits(summary), [{ label: '@human', first: false }]);
+  const output = compose({ version: 'v0.1.0', intro: '- Ship.', commits, summary, config });
+  assert.doesNotMatch(output, /semantic-release/);
+  assert.match(output, /· 1 change from 1 contributor/);
+});

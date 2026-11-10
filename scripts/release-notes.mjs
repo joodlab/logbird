@@ -19,6 +19,14 @@ const excludedLogin = /^(?:codex|claude|copilot|cursor(?:agent)?|devin-ai-integr
 const excludedName =
   /^(?:claude|codex|copilot|cursor|devin|gemini|jules|aider|amp|openhands|windsurf|augment)(?:[ -](?:code|agent|cli|ai|bot|assistant|opus|sonnet|haiku|\d[\w.]*))*$/i;
 
+// Release and dependency automation, whatever account type GitHub reports (semantic-release-bot is a User account).
+// Any name, login or address local part with "bot" as a whole word counts too: release-bot, Release Bot, ci.bot@.
+const automationLogin =
+  /^(?:renovate|renovate-bot|semantic-release-bot|greenkeeper(?:io)?|snyk-bot|imgbot|mergify|allcontributors|pre-commit-ci|release-please|web-flow|github-actions|dependabot(?:-preview)?)$/i;
+const automationAddress =
+  /^(?:semantic-release-bot@martynus\.net|bot@renovateapp\.com|noreply@github\.com|support@greenkeeper\.io|.+@(?:[\w-]+\.)*(?:renovateapp|mergify)\.(?:com|io))$/i;
+const botWord = (text) => text.split(/[\s._+\-[\]@]+/).some((token) => token.toLowerCase() === 'bot');
+
 // Reserved documentation/test domains (RFC 2606/6761, e.g. history-scrubbed addresses) never identify a real contributor.
 const placeholderEmail = /@(?:[\w-]+\.)*(?:example\.(?:com|net|org)|example|invalid|localhost|test)$/i;
 
@@ -28,6 +36,11 @@ export function isPerson({ name = '', email = '', login = '', type }) {
     // (e.g. the Copilot coding agent, whose users/Copilot lookup is a 404) never are.
     !(type && type !== 'User') &&
     !/\[bot\]/i.test(`${name} ${email} ${login}`) &&
+    !botWord(name) &&
+    !botWord(login) &&
+    !botWord(email.split('@')[0] ?? '') &&
+    !automationLogin.test(login) &&
+    !automationAddress.test(email) &&
     !agentDomain.test(email) &&
     !agentAddress.test(email) &&
     !excludedLogin.test(login) &&
@@ -275,7 +288,7 @@ export function resolveLogins(allCommits, repo, gh = (...args) => run('gh', args
   const accountTypes = new Map();
   for (const login of new Set(logins.values())) {
     // Excluded logins are never credited, whatever their type; don't ask GitHub about them.
-    if (excludedLogin.test(login)) {
+    if (!isPerson({ login })) {
       accountTypes.set(login, 'Excluded');
       continue;
     }
