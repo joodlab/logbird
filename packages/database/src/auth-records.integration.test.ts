@@ -5,7 +5,9 @@ import { AUTH_RECORD_GRACE_MS, prisma, sweepExpiredAuthRecords } from './index';
 /**
  * Runs against the real Postgres in DATABASE_URL (shared in development). Every fixture row expires in the year 2000
  * and the sweep runs with its clock in January 2000, so its cutoffs fall before any real row: it can only ever match
- * these fictional rows, never another developer's sessions, codes or invitations.
+ * these fictional rows, never another developer's sessions, codes or invitations. Before sweeping it checks that no
+ * other row falls under those cutoffs and stops if one does. Don't run two copies at once: each would sweep the
+ * other's expired fixtures and its exact counts would fail (only fictional rows are lost).
  */
 const now = Date.parse('2000-01-10T12:00:00Z');
 const at = (msFromNow: number) => new Date(now + msFromNow);
@@ -58,6 +60,16 @@ it('deletes only records past expiry plus grace, and keeps live and recently exp
         inviterId: userId,
       },
     });
+
+  // The sweep is global, so refuse to run if anything other than this run's fixtures falls under its cutoffs: a real
+  // row expiring before 2000 would be a broken database, and deleting it is not this test's call.
+  const before = (ms: number) => ({ lt: new Date(now - ms) });
+  const strangers = await Promise.all([
+    prisma.session.count({ where: { expiresAt: before(AUTH_RECORD_GRACE_MS.session), NOT: { userId } } }),
+    prisma.verification.count({ where: { expiresAt: before(AUTH_RECORD_GRACE_MS.verification), NOT: { identifier: { contains: run } } } }),
+    prisma.invitation.count({ where: { expiresAt: before(AUTH_RECORD_GRACE_MS.invitation), NOT: { organizationId: orgId } } }),
+  ]);
+  if (strangers.some(Boolean)) throw new Error(`refusing to sweep: ${strangers.join('/')} non-fixture rows expired before 2000`);
 
   const result = await sweepExpiredAuthRecords(now);
   expect(result.limited).toBe(false);

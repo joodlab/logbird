@@ -206,9 +206,9 @@ const sections: LegalSection[] = [
           (including its projects and events). Workspaces with other owners stay.
         </li>
         <li>
-          Account details: while your account exists. Invitations: deleted 30 days after they expire, or with the workspace that sent them. Sessions
-          and sign-in codes: they stop working when they expire (7 days and 10 minutes); an hourly cleanup deletes expired sessions a day later and
-          expired codes an hour later.
+          Account details: while your account exists. Sessions and sign-in codes: they stop working when they expire (7 days and 10 minutes). An
+          hourly cleanup deletes sessions on its first run after they've been expired for a day, codes after an hour and invitations after 30 days.
+          Invitations are also deleted with the workspace that sent them.
         </li>
         <li>
           Workspace activity: activity records are deleted after 10 years at the latest; there is no shorter setting yet. If you close your account,

@@ -46,6 +46,7 @@ model Session {
   activeOrganizationId String?
 
   @@index([userId])
+  @@index([expiresAt])
   @@map("session")
 }
 
@@ -78,6 +79,7 @@ model Verification {
   updatedAt  DateTime @updatedAt
 
   @@index([identifier])
+  @@index([expiresAt])
   @@map("verification")
 }
 
@@ -125,6 +127,7 @@ model Invitation {
 
   @@index([organizationId])
   @@index([email])
+  @@index([expiresAt])
   @@map("invitation")
 }
 

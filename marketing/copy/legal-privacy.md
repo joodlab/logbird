@@ -66,8 +66,9 @@ moves there, rewrite the form section first.
   `emailHash` (`packages/auth/src/sign-in-audit.ts`); 6-digit hashed codes, 10 minutes, 3 attempts
   (`packages/auth/src/server.ts`); session cookie `__Secure-logbird.session_token`, 7 days, renewed daily
   (better-auth defaults); `sidebar_state` cookie (`packages/ui`). better-auth deletes an expired session or code
-  when it next looks it up, and the worker's hourly sweep (`packages/database/src/auth-records.ts`, #129) deletes
-  sessions a day after expiry, codes an hour after and invitations 30 days after. `Verification` rows aren't linked to an
+  when it next looks it up. The worker's hourly sweep (`packages/database/src/auth-records.ts`, #129) deletes sessions
+  on its first run after they've been expired for a day, codes after an hour and invitations after 30 days; a backlog
+  or a failed run only moves that to a later run. `Verification` rows aren't linked to an
   account and invitations belong to the inviting workspace, so neither is bounded by an account's lifetime.
 - **Workspace activity**: actor, IP and user agent on management, sign-in and failed sign-in records
   (`docs/workspace-audit.md`); readable by every member. Raw records end at the 3650-day ClickHouse TTL; the rollup
