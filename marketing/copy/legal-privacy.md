@@ -73,7 +73,8 @@ moves there, rewrite the form section first.
   tables (`002_rollups.sql`: names and attribute samples) and undelivered or quarantined Postgres outbox rows have no
   automatic limit (#131).
 - **Customer data**: stored as sent (`packages/clickhouse/migrations/001_events.sql`); per-project retention
-  7–3650 days, default 90, permanent deletion verified (`packages/clickhouse/src/queries.ts`); project deletion
+  7–3650 days, default 90 (`packages/contracts/src/api.ts`, `packages/database/prisma/schema.prisma`), permanent
+  deletion verified (`packages/clickhouse/src/queries.ts`); project deletion
   purges events.
 - **Rights**: no self-service account deletion or personal-data export (`apps/server/src/route-authorization.matrix.ts`,
   #130), so those are handled by request. Self-service today: display name (Account settings), project event export
