@@ -39,7 +39,6 @@
     "release:notes:dry": "node scripts/release-notes.mjs --dry"
   },
   "devDependencies": {
-    "changelogithub": "13.16.1",
     "@biomejs/biome": "2.5.11",
     "@logbird/clickhouse": "workspace:*",
     "@logbird/contracts": "workspace:*",
@@ -47,6 +46,7 @@
     "@logbird/sdk": "workspace:*",
     "@logbird/seed": "workspace:*",
     "@logbird/tsconfig": "workspace:*",
+    "changelogithub": "13.16.1",
     "tsx": "4.23.13",
     "turbo": "^2.10.12",
     "typescript": "^7.0.2",

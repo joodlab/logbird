@@ -282,3 +282,76 @@ test('a BREAKING CHANGE footer puts the commit under Breaking changes', () => {
   assert.match(breaking, /tidy/);
   assert.doesNotMatch(breaking, /unrelated/);
 });
+
+const record = (subject, body = '', author = ['Human', 'human@users.noreply.github.com']) =>
+  `abc1234\x1f${author[0]}\x1f${author[1]}\x1f${subject}${body ? `\n\n${body}` : ''}\x1e`;
+
+test('only Co-authored-by trailer lines credit co-authors, never prose', () => {
+  const [prose] = parseLog(record('docs: explain trailers', 'Example: use co-authored-by: Jane Doe <jane@acme.io> in prose.'), config);
+  assert.deepEqual(prose.authors, [{ name: 'Human', email: 'human@users.noreply.github.com' }]);
+  const [trailer] = parseLog(record('feat: pair work', 'Body.\n\nCo-authored-by: Jane Doe <jane@users.noreply.github.com>'), config);
+  assert.deepEqual(
+    trailer.authors.map((person) => person.name),
+    ['Human', 'Jane Doe'],
+  );
+});
+
+test('agent identities are excluded by vendor domain, known address and display name', () => {
+  for (const [name, email] of [
+    ['Cursor Agent', 'cursoragent@cursor.com'],
+    ['Claude', 'claude-code@anthropic.com'],
+    ['Gemini', 'gemini-cli@google.com'],
+    ['Aider', 'noreply@aider.chat'],
+    ['Claude Opus 5.5', 'someone@users.noreply.github.com'],
+    ['Gemini CLI', 'someone@users.noreply.github.com'],
+    ['Jules', 'someone@users.noreply.github.com'],
+  ])
+    assert.equal(isPerson(person(name, email)), false, `${name} <${email}>`);
+  for (const name of ['Claude Human', 'Claudette', 'Jules Verne']) assert.equal(isPerson(person(name, 'h@users.noreply.github.com')), true, name);
+});
+
+test('@ mentions in subjects never notify accounts', () => {
+  const commits = parseLog(record('fix(api): thanks @codex and bump @types/node (#7)'), config);
+  const output = compose({ version: 'v0.1.0', intro: '- Ship.', commits, summary: summarize(commits, [], new Map()), config });
+  assert.doesNotMatch(output, /@codex|@types/);
+  assert.match(output, /@\u200bcodex/);
+});
+
+test('identities whose names sanitize to nothing are not credited, and compose refuses them', () => {
+  const commits = parseLog(record('fix: x', 'Co-authored-by: *** <stars@users.noreply.github.com>'), config);
+  const summary = summarize(commits, [], new Map());
+  assert.deepEqual(
+    summary.contributors.map((person) => person.label),
+    ['Human'],
+  );
+  assert.doesNotMatch(compose({ version: 'v0.1.0', intro: '- Ship.', commits, summary, config }), /by \*\*\*\*|^- $/m);
+  assert.throws(
+    () =>
+      compose({
+        version: 'v0.1.0',
+        intro: '- Ship.',
+        commits,
+        summary: { ...summary, contributors: [{ name: '***', email: 'stars@users.noreply.github.com', label: '' }] },
+        config,
+      }),
+    /refusing to emit notes/,
+  );
+});
+
+test('scopes are parsed non-greedily and unknown or malformed types stay whole under Other changes', () => {
+  const [greedy, underscore, unknown] = parseLog(
+    record('fix(ui): handle (retry): ok') + record('fix_up: lost prefix') + record('wip(sdk): spike'),
+    config,
+  );
+  assert.deepEqual([greedy.type, greedy.scope, greedy.description], ['fix', 'ui', 'handle (retry): ok']);
+  assert.deepEqual([underscore.type, underscore.description], ['other', 'fix_up: lost prefix']);
+  assert.deepEqual([unknown.type, unknown.description], ['other', 'wip(sdk): spike']);
+});
+
+test('the summary line pluralizes changes', () => {
+  const commits = parseLog(record('fix: one'), config);
+  assert.match(
+    compose({ version: 'v0.1.0', intro: '- Ship.', commits, summary: summarize(commits, [], new Map()), config }),
+    /· 1 change from 1 contributor\n/,
+  );
+});

@@ -7,9 +7,13 @@ import { generateMarkdown, parseCommits, resolveConfig } from 'changelogithub';
 
 // AI coding agents and automation sign commits with these addresses; GitHub can map some of them to real
 // accounts (e.g. codex@users.noreply.github.com resolves to @codex), so match the address, not the login.
+// Whole vendor domains are excluded because agents sign with several addresses there (noreply@, claude-code@, …).
 const excludedEmail =
-  /@openai\.com$|^noreply@(?:anthropic\.com|cursor\.com|githubcopilot\.com)$|^(?:\d+\+)?(?:dependabot|github-actions|codex|claude|copilot|cursor(?:agent)?|devin-ai-integration)(?:\[bot\])?@(?:users\.noreply\.github\.com|github\.com)$/i;
-const excludedLogin = /^(?:codex|claude|copilot|cursor(?:agent)?|devin-ai-integration)$/i;
+  /@(?:openai|anthropic|cursor|githubcopilot)\.com$|^noreply@aider\.chat$|^(?:gemini|jules)[\w.+-]*@google\.com$|^(?:\d+\+)?(?:dependabot|github-actions|codex|claude|copilot|cursor(?:agent)?|devin-ai-integration|gemini-code-assist|google-labs-jules)(?:\[bot\])?@(?:users\.noreply\.github\.com|github\.com)$/i;
+const excludedLogin = /^(?:codex|claude|copilot|cursor(?:agent)?|devin-ai-integration|gemini-code-assist|google-labs-jules)$/i;
+// Agent display names, alone or with a product/model suffix ("Claude Opus 5.5", "Cursor Agent", "Gemini CLI").
+const excludedName =
+  /^(?:claude|codex|copilot|cursor|devin|gemini|jules|aider)(?:[ -](?:code|agent|cli|ai|bot|assistant|opus|sonnet|haiku|\d[\w.]*))*$/i;
 
 // Reserved documentation/test domains (RFC 2606/6761, e.g. history-scrubbed addresses) never identify a real contributor.
 const placeholderEmail = /@(?:[\w-]+\.)*(?:example\.(?:com|net|org)|example|invalid|localhost|test)$/i;
@@ -20,6 +24,7 @@ export function isPerson({ name = '', email = '', login = '', type }) {
     !/\[bot\]/i.test(`${name} ${email} ${login}`) &&
     !excludedEmail.test(email) &&
     !excludedLogin.test(login) &&
+    !excludedName.test(name.trim()) &&
     !placeholderEmail.test(email)
   );
 }
@@ -35,28 +40,39 @@ export function highlights(markdown, version) {
   return text;
 }
 
-// changelogen and changelogithub look scopes and types up in plain objects, so a name like `constructor` or
-// `__proto__` resolves to an Object.prototype member and crashes rendering. Such scopes move into the description.
-const prototypeKey = (key) => key in Object.prototype;
+const conventional = /^([a-z]+)(?:\(([^)]+)\))?(!)?: (.+)$/i;
 const breakingFooter = /^BREAKING[ -]CHANGE:/m;
+// Only real trailer lines count: a co-author mentioned in prose is never credited.
+const coAuthorTrailer = /^Co-authored-by:[ \t]*(.+?)[ \t]*<([^>\n]+)>[ \t]*$/gim;
+// changelogen and changelogithub look scopes up in plain objects, so `constructor` or `__proto__` would resolve to an
+// Object.prototype member and crash rendering. Such scopes move into the description instead.
+const prototypeKey = (key) => key in Object.prototype;
 
+/**
+ * Parses `git log` records with our own subject and trailer rules, and hands changelogen only `type!: description`
+ * (it still extracts PR and commit references). Its greedy scope regex, Object-backed scope lookups and unanchored
+ * co-author regex never see the raw message. Unknown and non-conventional subjects stay whole under Other changes.
+ */
 export function parseLog(log, config) {
   return log
     .split('\x1e')
     .filter((record) => record.trim())
     .map((record) => {
       const [sha, name, email, ...parts] = record.trim().split('\x1f');
-      const [message, ...body] = parts.join('\x1f').split('\n');
-      const raw = { shortHash: sha, message, body: body.join('\n'), author: { name, email } };
-      const scope = message.match(/^\w+\(([^)]+)\)!?: /)?.[1];
-      if (scope && prototypeKey(scope)) raw.message = message.replace(`(${scope})`, '');
-      // Changelogen drops non-conventional messages. Preserve our existing Other changes guarantee.
-      if (!/^\w+(?:\([^)]+\))?!?: /.test(message)) raw.message = `other: ${message}`;
-      const commit = parseCommits([raw], config)[0] ?? parseCommits([{ ...raw, message: `other: ${message}` }], config)[0];
-      if (!Object.hasOwn(config.types, commit.type)) commit.type = 'other';
+      const [message, ...lines] = parts.join('\x1f').split('\n');
+      const body = lines.join('\n');
+      const match = message.match(conventional);
+      const type = match?.[1].toLowerCase();
+      const known = Boolean(type && type !== 'other' && Object.hasOwn(config.types, type));
+      const scope = known ? (match?.[2]?.trim() ?? '') : '';
+      const subject = known ? `${type}${match?.[3] ?? ''}: ${match?.[4]}` : `other: ${message}`;
+      const [commit] = parseCommits([{ shortHash: sha, message: subject, body, author: { name, email } }], config);
+      if (!commit || commit.type !== (known ? type : 'other')) throw new Error(`Could not parse commit ${sha}.`);
+      commit.scope = prototypeKey(scope) ? '' : scope;
       if (scope && prototypeKey(scope)) commit.description = `${scope}: ${commit.description}`;
-      // Conventional Commits also mark breaking changes with a footer, which changelogen ignores.
-      if (breakingFooter.test(raw.body)) commit.isBreaking = true;
+      commit.authors = [{ name, email }, ...[...body.matchAll(coAuthorTrailer)].map(([, coName, coEmail]) => ({ name: coName, email: coEmail }))];
+      // Conventional Commits also mark breaking changes with a footer.
+      if (breakingFooter.test(body)) commit.isBreaking = true;
       return commit;
     });
 }
@@ -66,8 +82,15 @@ function identity(person, logins, accountTypes) {
   return { ...person, login, type: accountTypes.get(login), key: login?.toLowerCase() ?? person.email.toLowerCase() };
 }
 
+// Display names keep letters, digits and a little punctuation; nothing that markdown or HTML could interpret.
+const safeName = (name) => name.replace(/[^\p{L}\p{N} .'-]/gu, '').trim();
+
 export function summarize(commits, previous, logins, accountTypes = new Map()) {
-  const peopleFor = (commit) => commit.authors.map((person) => identity(person, logins, accountTypes)).filter(isPerson);
+  // An unresolved identity whose name sanitizes to nothing can't be credited legibly, so it isn't credited.
+  const peopleFor = (commit) =>
+    commit.authors
+      .map((person) => identity(person, logins, accountTypes))
+      .filter((person) => isPerson(person) && (person.login || safeName(person.name)));
   for (const commit of commits) commit.resolvedAuthors = peopleFor(commit);
   const old = new Set(previous.flatMap(peopleFor).map((person) => person.key));
   const people = new Map(commits.flatMap(peopleFor).map((person) => [person.key, person]));
@@ -81,7 +104,7 @@ export function summarize(commits, previous, logins, accountTypes = new Map()) {
     contributors: [...people.values()]
       .map((person) => ({
         ...person,
-        label: person.login ? `@${person.login}` : person.name.replace(/[^\p{L}\p{N} .'-]/gu, ''),
+        label: person.login ? `@${person.login}` : safeName(person.name),
         first: !firstRelease && !old.has(person.key),
       }))
       .sort((a, b) => a.label.localeCompare(b.label)),
@@ -89,31 +112,35 @@ export function summarize(commits, previous, logins, accountTypes = new Map()) {
 }
 
 function escapeMarkdown(text) {
-  return text
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replace(/([\\`*_[\]])/g, '\\$1');
+  return (
+    text
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replace(/([\\`*_[\]])/g, '\\$1')
+      // A zero-width space after @ keeps subjects like "thanks @codex" or "bump @types/node" from mentioning accounts.
+      .replaceAll('@', '@\u200b')
+  );
 }
 
 export function compose({ version, intro, commits, summary, config }) {
   // Validate both places changelogithub/wrapper can credit identities, before producing any output.
   for (const person of [...commits.flatMap((commit) => commit.resolvedAuthors ?? []), ...summary.contributors]) {
-    if (!isPerson(person) || (person.login && !/^[a-z\d-]+$/i.test(person.login)))
+    if (!isPerson(person) || (person.login ? !/^[a-z\d-]+$/i.test(person.login) : !safeName(person.name)))
       throw new Error('Excluded or invalid contributor reached release notes; refusing to emit notes.');
   }
   const safeCommits = commits.map((commit) => ({
     ...commit,
     description: escapeMarkdown(commit.description),
     scope: escapeMarkdown(commit.scope),
-    resolvedAuthors: commit.resolvedAuthors?.map((person) => ({ ...person, name: person.name.replace(/[^\p{L}\p{N} .'-]/gu, '') })),
+    resolvedAuthors: commit.resolvedAuthors?.map((person) => ({ ...person, name: safeName(person.name) })),
   }));
   let changelog = generateMarkdown(safeCommits, config);
   // There is no compare baseline on the first release. Include the root commit and link its full history.
   if (!config.from) changelog = changelog.replace(`/compare/...${config.to}`, `/commits/${config.to}`);
   return [
     `### Highlights\n\n${intro}`,
-    `**${version}** · ${summary.changes} changes from ${summary.contributors.length} contributor${summary.contributors.length === 1 ? '' : 's'}`,
+    `**${version}** · ${summary.changes} change${summary.changes === 1 ? '' : 's'} from ${summary.contributors.length} contributor${summary.contributors.length === 1 ? '' : 's'}`,
     `<details>\n<summary>Full changelog</summary>\n\n${changelog}\n\n</details>`,
     '### Thank you',
     summary.contributors.map((person) => `- ${person.label}${person.first ? ' (first-time contributor)' : ''}`).join('\n') ||
@@ -207,4 +234,9 @@ async function main() {
   console.error(`${values.dry ? 'Dry run' : 'Notes generated'}: no release was created or edited.`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main();
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}

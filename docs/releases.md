@@ -99,16 +99,22 @@ Non-conventional commits remain in Other changes rather than silently disappeari
 Performance, `refactor` → Refactoring, `docs` → Documentation, `build` → Build,
 `ci` → CI, `test` → Tests, `chore` → Maintenance and `revert` → Reverts (`style` →
 Style). The squash-merge PR title is the commit subject and changelog line; use
-scopes such as `server` or `sdk` to group related entries. A `!` before the colon,
-or a `BREAKING CHANGE:` footer in the commit body, puts the change in its own
-Breaking changes section.
+scopes such as `server` or `sdk`; a section groups entries under a scope once that
+scope has more than one entry. A `!` before the colon, or a `BREAKING CHANGE:`
+footer in the commit body, puts the change in its own Breaking changes section.
+Subjects with an unknown or malformed type stay whole under Other changes, and `@`
+in a subject is defused so it never mentions an account.
 
 The wrapper retains the stricter contributor policy because changelogithub's
-native name-only bot filter does not cover AI email/login identities. It checks
-git authors, `Co-Authored-By` trailers, GitHub logins and account types against
-the same exclusion rules: `[bot]`/Bot, known automation and AI accounts (including
-Codex, Claude, Copilot, Cursor and Devin), OpenAI addresses, Anthropic/Cursor/Copilot
-noreply addresses and reserved placeholder domains (`example.*`, `.test`,
+native name-only bot filter does not cover AI email/login identities. It parses
+git authors and line-anchored `Co-authored-by:` trailers itself (a co-author
+named in prose is never credited), then checks them, their GitHub logins and
+account types against one set of rules: `[bot]`/Bot; known automation and AI
+accounts and logins (Dependabot, GitHub Actions, Codex, Claude, Copilot, Cursor,
+Devin, Gemini Code Assist, Jules); every address at openai.com, anthropic.com,
+cursor.com and githubcopilot.com; Aider and Gemini/Jules addresses; agent display
+names such as "Claude Opus 5.5", "Cursor Agent" or "Gemini CLI"; names that
+sanitize to nothing; and reserved placeholder domains (`example.*`, `.test`,
 `.example`, `.invalid`, `localhost`). Exclusions apply to inline
 credits, contributor totals and thank-you entries. Missing/truncated identity
 responses or an excluded identity reaching rendering abort notes generation before

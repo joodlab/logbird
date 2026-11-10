@@ -20,5 +20,7 @@ export default defineConfig({
   emoji: false,
   capitalize: false,
   contributors: true,
+  // scripts/release-notes.mjs always passes an explicit baseline (previousTag); this keeps the changelogithub CLI on
+  // the same stable-tags-only rule if someone runs it directly.
   tagFilter: (tag) => /^v\d+\.\d+\.\d+$/.test(tag),
 });
