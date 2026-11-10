@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it } from 'vitest';
 import { AUTH_RECORD_GRACE_MS, prisma, sweepExpiredAuthRecords } from './index';
 
 /**
@@ -7,7 +7,8 @@ import { AUTH_RECORD_GRACE_MS, prisma, sweepExpiredAuthRecords } from './index';
  * and the sweep runs with its clock in January 2000, so its cutoffs fall before any real row: it can only ever match
  * these fictional rows, never another developer's sessions, codes or invitations. Before sweeping it checks that no
  * other row falls under those cutoffs and stops if one does. Don't run two copies at once: each would sweep the
- * other's expired fixtures and its exact counts would fail (only fictional rows are lost).
+ * other's expired fixtures and its exact counts would fail (only fictional rows are lost). Fixtures left by a killed run
+ * are removed first; their ids and addresses all start with `qa-129-`, so nothing else can match.
  */
 const now = Date.parse('2000-01-10T12:00:00Z');
 const at = (msFromNow: number) => new Date(now + msFromNow);
@@ -16,14 +17,20 @@ const userId = `qa-129-user-${run}`;
 const orgId = `qa-129-org-${run}`;
 const identifier = (label: string) => `sign-in-otp-qa-129-${label}-${run}@example.test`;
 
-afterAll(async () => {
-  await prisma.verification.deleteMany({ where: { identifier: { contains: run } } });
-  await prisma.organization.deleteMany({ where: { id: orgId } });
-  await prisma.user.deleteMany({ where: { id: userId } });
-  await prisma.$disconnect();
-});
+/** Deleting the user and the organization cascades to their sessions and invitations. */
+async function removeFixtures(prefix: string) {
+  await prisma.verification.deleteMany({ where: { identifier: { startsWith: 'sign-in-otp-qa-129-', contains: prefix, endsWith: '@example.test' } } });
+  await prisma.organization.deleteMany({ where: { id: { startsWith: `qa-129-org-${prefix}` } } });
+  await prisma.user.deleteMany({ where: { id: { startsWith: `qa-129-user-${prefix}` } } });
+}
 
-it('deletes only records past expiry plus grace, and keeps live and recently expired ones', async () => {
+beforeAll(() => removeFixtures(''), 60_000);
+afterAll(async () => {
+  await removeFixtures(run);
+  await prisma.$disconnect();
+}, 60_000);
+
+it('deletes only records past expiry plus grace, and keeps live and recently expired ones', { timeout: 120_000 }, async () => {
   await prisma.user.create({ data: { id: userId, name: 'QA Purge', email: `qa-129-${run}@example.test` } });
   await prisma.organization.create({ data: { id: orgId, name: 'QA Purge', slug: orgId, createdAt: at(-90 * 86_400_000) } });
   const sessions = {

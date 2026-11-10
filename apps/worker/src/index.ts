@@ -80,12 +80,13 @@ const receiptWorker = new Worker(
   },
   { connection, prefix: env.BULLMQ_PREFIX, concurrency: 1 },
 );
-receiptWorker.on('failed', (job) =>
+receiptWorker.on('failed', (job, error) =>
   console.error(
     JSON.stringify({
       level: 'error',
       event: job?.name === 'auth-records.sweep' ? 'auth.records_sweep_failed' : 'ingest.receipt_sweep_failed',
       jobId: job?.id,
+      reason: error?.message.slice(0, 300),
     }),
   ),
 );

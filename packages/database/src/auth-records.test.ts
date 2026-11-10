@@ -26,10 +26,10 @@ it('batch statements target only expired rows of one table, oldest first, bounde
   for (const kind of ['session', 'verification', 'invitation'] as const) {
     const statement = authRecordBatchSql(kind, cutoff);
     const sql = statement.text.replace(/\s+/g, ' ');
-    expect(sql).toContain(`FROM "${kind}" WHERE "expiresAt" < $1`);
+    expect(sql).toContain(`FROM "${kind}" WHERE "expiresAt" < $1::timestamp`);
     expect(sql).toContain('ORDER BY "expiresAt" LIMIT $2 FOR UPDATE SKIP LOCKED');
     expect(sql).toContain(`DELETE FROM "${kind}" AS t USING expired`);
-    expect(statement.values).toEqual([cutoff, AUTH_RECORD_SWEEP_BATCH_SIZE]);
+    expect(statement.values).toEqual([cutoff.toISOString(), AUTH_RECORD_SWEEP_BATCH_SIZE]);
   }
 });
 
@@ -46,10 +46,10 @@ it('drains each kind in guarded batches with its own grace period, and reports w
   expect(transaction).toHaveBeenCalledTimes(4);
   const cutoffs = calls.filter((_, index) => index % 2 === 1).map((statement) => statement.values[0]);
   expect(cutoffs).toEqual([
-    new Date(now - AUTH_RECORD_GRACE_MS.session),
-    new Date(now - AUTH_RECORD_GRACE_MS.session),
-    new Date(now - AUTH_RECORD_GRACE_MS.verification),
-    new Date(now - AUTH_RECORD_GRACE_MS.invitation),
+    new Date(now - AUTH_RECORD_GRACE_MS.session).toISOString(),
+    new Date(now - AUTH_RECORD_GRACE_MS.session).toISOString(),
+    new Date(now - AUTH_RECORD_GRACE_MS.verification).toISOString(),
+    new Date(now - AUTH_RECORD_GRACE_MS.invitation).toISOString(),
   ]);
 });
 

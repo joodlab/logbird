@@ -23,14 +23,20 @@ export const AUTH_RECORD_GRACE_MS = {
 export type AuthRecordKind = keyof typeof AUTH_RECORD_GRACE_MS;
 const KINDS = Object.keys(AUTH_RECORD_GRACE_MS) as AuthRecordKind[];
 
-/** Each batch runs under a short statement timeout, so one slow statement can't hold row locks for long. */
-export const AUTH_RECORD_SWEEP_GUARD = Prisma.sql`SELECT set_config('statement_timeout','5s',true), set_config('jit','off',true)`;
+/**
+ * Each batch runs under a short statement timeout, so one slow statement can't hold row locks for long, and with the
+ * same planner pins as the receipt sweep (`SWEEP_GUARD`): batches walk the `expiresAt` index, so a stale or bloated
+ * estimate after a large drain can't turn ORDER BY/LIMIT into a full scan plus sort.
+ */
+export const AUTH_RECORD_SWEEP_GUARD = Prisma.sql`SELECT set_config('statement_timeout','5s',true), set_config('enable_seqscan','off',true),
+  set_config('enable_bitmapscan','off',true), set_config('enable_sort','off',true),
+  set_config('enable_incremental_sort','off',true), set_config('jit','off',true)`;
 
 /** One bounded batch: the oldest expired rows, skipping rows another transaction holds (e.g. a sign-in in progress). */
 export function authRecordBatchSql(kind: AuthRecordKind, cutoff: Date) {
   const table = Prisma.raw(`"${kind}"`);
   return Prisma.sql`WITH expired AS MATERIALIZED
-    (SELECT "id" FROM ${table} WHERE "expiresAt" < ${cutoff}
+    (SELECT "id" FROM ${table} WHERE "expiresAt" < ${cutoff.toISOString()}::timestamp
      ORDER BY "expiresAt" LIMIT ${AUTH_RECORD_SWEEP_BATCH_SIZE} FOR UPDATE SKIP LOCKED)
     DELETE FROM ${table} AS t USING expired WHERE t."id" = expired."id"`;
 }
