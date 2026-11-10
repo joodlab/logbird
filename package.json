@@ -39,6 +39,7 @@
     "release:notes:dry": "node scripts/release-notes.mjs --dry"
   },
   "devDependencies": {
+    "changelogithub": "13.16.1",
     "@biomejs/biome": "2.5.11",
     "@logbird/clickhouse": "workspace:*",
     "@logbird/contracts": "workspace:*",

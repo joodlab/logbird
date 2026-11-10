@@ -21,16 +21,23 @@ or GitHub Release can be treated as available.
    ```sh
    pnpm install --frozen-lockfile
    pnpm release:check
+   mkdir -p .tmp
    pnpm release:notes:dry -- --version v0.1.0 --to HEAD --output .tmp/release-notes.md
    ```
 
-   The notes command reads Git history and GitHub author identities through an
-   authenticated `gh` session. It never creates/edits a release, including without
-   `--dry`. The first release includes all non-merge history; later releases use the
-   nearest preceding reachable stable version tag. `--from vX.Y.Z` overrides the
-   baseline and must be an ancestor. Highlights must exist in the exact version
-   section; missing/empty/comment-only or more than three bullets fail closed.
-   Preview output belongs in the release PR for review.
+   Authenticate with `gh auth login` first (or provide `GH_TOKEN`/`GITHUB_TOKEN`).
+   The wrapper uses changelogithub's output APIs and read-only GitHub identity
+   lookups. It never creates/edits a release, including without `--dry`. The first
+   release includes all non-merge history, including the root commit; later releases
+   use the nearest preceding reachable stable `vX.Y.Z` tag, ignoring prereleases.
+   `--from vX.Y.Z` overrides the baseline and must be an ancestor. Compare links
+   use the baseline and new version; first releases link the full commit history.
+   Highlights must exist in the exact version section; missing/empty/comment-only
+   or more than three bullets fail closed. Preview output belongs in the release PR.
+
+   To simulate the next release, put its version and reviewed Highlights in a
+   scratch Markdown file, then use `--changelog .tmp/next-changelog.md --version
+   v0.2.0 --to origin/master --from v0.1.0`. This does not edit CHANGELOG.md or tags.
 4. Build all four images locally (below), validate both Compose configurations,
    and prove fresh install, SMTP login, workspace/project/key creation, ingest/read,
    exports, retention and matched fresh-storage restore using fictional data.
@@ -87,6 +94,24 @@ first-time contributors. Unresolved humans use names without fabricated mentions
 GitHub Bot accounts, [bot] identities, known automation addresses and AI noreply
 identities are excluded from contributor credit and human-authored change counts.
 Non-conventional commits remain in Other changes rather than silently disappearing.
+
+`changelogithub.config.ts` maps `feat` → Features, `fix` → Bug fixes, `perf` →
+Performance, `refactor` → Refactoring, `docs` → Documentation, `build` → Build,
+`ci` → CI, `test` → Tests, `chore` → Maintenance and `revert` → Reverts (`style` →
+Style). The squash-merge PR title is the commit subject and changelog line; use
+scopes such as `server` or `sdk` to group related entries. A `!` before the colon
+puts the change in its own Breaking changes section.
+
+The wrapper retains the stricter contributor policy because changelogithub's
+native name-only bot filter does not cover AI email/login identities. It checks
+git authors, `Co-Authored-By` trailers, GitHub logins and account types against
+the same exclusion rules: `[bot]`/Bot, known automation and AI accounts (including
+Codex, Claude, Copilot, Cursor and Devin), OpenAI addresses, Anthropic/Cursor/Copilot
+noreply addresses and reserved placeholder domains. Exclusions apply to inline
+credits, contributor totals and thank-you entries. Missing/truncated identity
+responses or an excluded identity reaching rendering abort notes generation before
+any notes are emitted. Invalid Highlights or failed preflight likewise prevent
+image publishing and release creation. Fix the cause and rerun; do not bypass it.
 
 Release concurrency serializes publications. Partial image-job failure may leave
 some version tags pushed without a release: inspect the run/digests, fix the cause,
