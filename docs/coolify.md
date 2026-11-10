@@ -157,8 +157,17 @@ Without `--remote`, Wrangler 4 acts on local development storage only. On reques
 delete the keys whose value has that email address the same way.
 
 A KV record keeps the expiry it was written with. If you **lower**
-`WEB_FORM_RETENTION_MONTHS` on the Cloudflare build, existing records still expire
-on the old date, so after redeploying, delete those the new period has ended for.
-Each key starts with the time it was received (`waitlist:<ISO time>:<id>`), so the
-list above shows which. The Node server needs no such step: its cleanup checks every
-record against the current period.
+`WEB_FORM_RETENTION_MONTHS` on the Cloudflare build, every existing record still has
+the old, later expiry, so after redeploying, go through **all** of them. Each key
+starts with the time it was received (`waitlist:<ISO time>:<id>`); its new deadline
+is that time plus the new number of calendar months (on a shorter month's last day
+when the day doesn't exist).
+
+- If the deadline has passed, delete the key (`wrangler kv key delete … --remote`).
+- Otherwise, write the record again with the new deadline:
+  `wrangler kv key get --binding WAITLIST_KV --remote <key>`, then
+  `wrangler kv key put --binding WAITLIST_KV --remote <key> '<value>' --expiration <deadline in Unix seconds>`.
+
+Raising the period needs the same pass if existing records should be kept longer.
+The Node server needs neither: its cleanup checks every record against the current
+period.

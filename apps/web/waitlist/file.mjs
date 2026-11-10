@@ -74,22 +74,36 @@ async function acquire(file) {
 
 /**
  * The file's real path, symlinks resolved, so every alias of one file shares one lock, and a rewrite renames over
- * the file that holds the records rather than replacing a symlink and leaving the records in its target.
+ * the file that holds the records rather than replacing a symlink and leaving the records in its target. It gives
+ * the same answer before and after the file or its directories exist: the nearest existing ancestor is resolved and
+ * the missing rest appended, and a dangling symlink (or a chain of them) is followed to the path it will create.
  */
-async function canonical(file) {
-  const absolute = resolve(file);
-  try {
-    return await realpath(absolute);
-  } catch (error) {
-    if (error?.code !== 'ENOENT') {
-      throw error;
+export async function resolveWaitlistPath(file) {
+  let path = resolve(file);
+  for (let hops = 0; hops <= 40; hops += 1) {
+    const missing = [];
+    let existing = path;
+    let info = await lstat(existing).catch(() => undefined);
+    while (!info) {
+      const parent = dirname(existing);
+      if (parent === existing) {
+        return path;
+      }
+      missing.unshift(basename(existing));
+      existing = parent;
+      info = await lstat(existing).catch(() => undefined);
     }
+    try {
+      return join(await realpath(existing), ...missing);
+    } catch (error) {
+      if (error?.code !== 'ENOENT' || !info.isSymbolicLink()) {
+        throw error;
+      }
+    }
+    // A dangling symlink: follow one hop and resolve again.
+    path = join(resolve(dirname(existing), await readlink(existing)), ...missing);
   }
-  // Not there yet. A dangling symlink points at the file appends will create.
-  const link = await lstat(absolute).catch(() => undefined);
-  const target = link?.isSymbolicLink() ? resolve(dirname(absolute), await readlink(absolute)) : absolute;
-  const parent = await realpath(dirname(target)).catch(() => dirname(target));
-  return join(parent, basename(target));
+  throw new Error('Too many symbolic links in the form submissions path.');
 }
 
 let local = Promise.resolve();
@@ -100,7 +114,7 @@ let local = Promise.resolve();
  */
 export function withWaitlistLock(file, task) {
   const run = local.then(async () => {
-    const path = await canonical(file);
+    const path = await resolveWaitlistPath(file);
     const lock = await acquire(path);
     try {
       return await task(path);

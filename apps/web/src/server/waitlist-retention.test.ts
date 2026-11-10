@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { appendWaitlistRecord, forgetWaitlistEmail, pruneWaitlist, retentionExpiry } from '../../waitlist/file.mjs';
+import { appendWaitlistRecord, forgetWaitlistEmail, pruneWaitlist, resolveWaitlistPath, retentionExpiry } from '../../waitlist/file.mjs';
 import { createCloudflareStore, retentionSeconds } from './waitlist-cloudflare';
 import { sweepWaitlist } from './waitlist-retention';
 
@@ -107,6 +107,59 @@ it('works on the real file behind a symlinked WAITLIST_FILE, and keeps the symli
   expect(await readFile(target, 'utf8')).not.toContain('forget-me');
   expect(await readFile(link, 'utf8')).toContain('keep-me');
 });
+
+it('resolves every alias of a file to one path, before and after its directory exists', async (context) => {
+  const real = join(dir, 'real');
+  const alias = join(dir, 'alias');
+  await mkdir(real);
+  // A directory junction needs no privileges on Windows; elsewhere the type is ignored.
+  await symlink(real, alias, 'junction');
+  const viaAlias = join(alias, 'new', 'waitlist.jsonl');
+  const viaReal = join(real, 'new', 'waitlist.jsonl');
+  const expected = await resolveWaitlistPath(viaReal);
+  expect(await resolveWaitlistPath(viaAlias)).toBe(expected);
+  await mkdir(join(real, 'new'));
+  expect(await resolveWaitlistPath(viaAlias)).toBe(expected);
+  await writeFile(viaReal, '');
+  expect(await resolveWaitlistPath(viaAlias)).toBe(expected);
+  // A chain of dangling symlinks resolves to the file appends will create.
+  const end = join(real, 'later', 'waitlist.jsonl');
+  try {
+    await symlink(end, join(dir, 'second.jsonl'), 'file');
+    await symlink(join(dir, 'second.jsonl'), join(dir, 'first.jsonl'), 'file');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+      context.skip();
+    }
+    throw error;
+  }
+  expect(await resolveWaitlistPath(join(dir, 'first.jsonl'))).toBe(await resolveWaitlistPath(end));
+});
+
+it('loses nothing when processes create the file through different aliases at once', async () => {
+  const real = join(dir, 'real');
+  const alias = join(dir, 'alias');
+  await mkdir(real);
+  await symlink(real, alias, 'junction');
+  // The directory doesn't exist yet: the first writer creates it while the others are already writing.
+  const paths = [join(alias, 'new', 'waitlist.jsonl'), join(real, 'new', 'waitlist.jsonl')];
+  const writers = paths.map((path, writer) =>
+    child(
+      `for (let i = 0; i < 30; i++) await waitlist.appendWaitlistRecord(${JSON.stringify(path)}, { email: 'w${writer}-' + i + '@example.test', interest: 'cloud', receivedAt: new Date().toISOString() });`,
+    ),
+  );
+  const finished = Promise.all(writers.map((writer) => new Promise((done) => writer.on('exit', done))));
+  let running = true;
+  void finished.then(() => {
+    running = false;
+  });
+  while (running) {
+    await forgetWaitlistEmail(paths[0] as string, 'nobody@example.test');
+  }
+  expect(await finished).toEqual([0, 0]);
+  const stored = (await readFile(paths[1] as string, 'utf8')).split('\n').filter(Boolean);
+  expect(stored).toHaveLength(60);
+}, 60_000);
 
 it('forgets every submission from one address, ignoring case and spaces', async () => {
   await appendWaitlistRecord(file, record('Someone@Example.test', '2026-11-01T00:00:00.000Z'));
