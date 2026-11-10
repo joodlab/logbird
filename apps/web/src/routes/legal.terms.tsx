@@ -53,7 +53,7 @@ const sections: LegalSection[] = [
     title: 'Early access',
     body: (
       <p>
-        Logbird Cloud is in early access: we limit sign-ups to invited teams: people with an invitation or an approved email domain. Features, limits
+        Logbird Cloud is in early access: we limit sign-ups to invited teams (people with an invitation or an approved email domain). Features, limits
         and these terms may change as the service develops. Sending the contact form doesn't create an account or a contract.
       </p>
     ),
@@ -137,11 +137,12 @@ const sections: LegalSection[] = [
     title: 'Ending the agreement',
     body: (
       <p>
-        You can stop using Logbird Cloud at any time and ask us, through <PrivacyContact />, to delete your account and the workspaces you own. We may
-        suspend your access if you break these terms, and end it if you seriously or repeatedly break them or if we stop offering the service. Unless
-        we must act at once (for example, for abuse or a legal requirement), we'll give you notice and time to export your data before ending your
-        access. Once your account is closed, at your request or ours, we delete it and the workspaces you own, including their projects and events,
-        within {CLOSURE_DELETION_DAYS} days; copies in backups expire on their regular rotation.
+        You can stop using Logbird Cloud at any time and ask us, through <PrivacyContact />, to delete your account and any workspace where you're the
+        only owner. We may suspend your access if you break these terms, and end it if you seriously or repeatedly break them or if we stop offering
+        the service. Unless we must act at once (for example, for abuse or a legal requirement), we'll give you notice and time to export your data
+        before ending your access. Once your account is closed, at your request or ours, we delete it, and each workspace where you were the only
+        owner with its projects and events, within {CLOSURE_DELETION_DAYS} days. In a workspace that has other owners, we only remove you. Copies in
+        backups expire on their regular rotation.
       </p>
     ),
   },

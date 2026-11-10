@@ -66,9 +66,9 @@ const sections: LegalSection[] = [
       <>
         <p>
           When you send the form we store your email address, the topic you choose, and the name, company and message if you give them, with the time
-          you sent it. We don't store your IP address or browser details with it. To stop the form being flooded, the server counts submissions per IP
-          address in its memory only: the form never writes an address to disk or to its own logs, and is removed once its one-minute window has
-          passed, on a later request or when the server restarts.
+          you sent it. We don't store your IP address or browser details with it. To stop the form being flooded, the server keeps a count of
+          submissions per IP address in memory only. The form never writes the address to disk or to its own logs, and each count is dropped after its
+          one-minute window (on a later request) or when the server restarts.
         </p>
         <p>
           We keep submissions on our server, and our server emails each one to our team's mailbox, where we answer them. We use them to reply, to
@@ -113,8 +113,8 @@ const sections: LegalSection[] = [
             contain no tracking pixels or tracked links.
           </li>
           <li>
-            <strong>Preferences</strong>: the console keeps your theme, sidebar state, last project and recent queries in your browser's storage and
-            one functional cookie (<code>sidebar_state</code>).
+            <strong>Preferences</strong>: the console keeps your theme, sidebar state, last project, recent queries and similar view settings in your
+            browser's storage and one functional cookie (<code>sidebar_state</code>).
           </li>
         </LegalList>
         <p>
@@ -233,7 +233,7 @@ const sections: LegalSection[] = [
           In the console you can change your display name, and, if your role allows, export or delete a project's data. Deleting your account and
           getting a copy of your personal account data are handled by request for now. To make a request, <PrivacyRequestHow />.{' '}
           {PRIVACY_EMAIL ? "If you can't use that address, tell us which one the request is about and we'll check that it's yours. " : ''}We answer
-          within 30 days, and handle these requests to meet our legal obligations.
+          within 30 days, and use the details in your request only to handle it (a legal obligation).
         </p>
       </>
     ),
