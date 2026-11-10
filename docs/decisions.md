@@ -23,13 +23,15 @@ whose `script-src` allows exactly that bundle URL plus Scalar's inline init scri
 ### Container image registry ([#88](https://github.com/joodlab/logbird/issues/88))
 
 Role images are named **`ghcr.io/joodlab/logbird-<role>`** (`migrate`, `server`, `worker`, `app`).
-`LOGBIRD_IMAGE_REGISTRY` defaults to `ghcr.io/joodlab`. **Nothing is published until the repository is open-sourced**,
-and publication is a manual maintainer release step. No CI workflow builds or pushes images.
+`LOGBIRD_IMAGE_REGISTRY` defaults to `ghcr.io/joodlab`. The Docker Hub `logbird` namespace is not used.
 
-Source installs build these names locally and never pull a runnable role implicitly: the four roles keep
-`pull_policy: build`, so bare `up` builds from the checkout and `up --no-build` with a missing image fails. Only the documented release flow pulls, explicitly, an accepted version. The Docker Hub
-`logbird` namespace is not the default. Fresh-install, upgrade and restore acceptance
-for published images must run on the target host before release.
+**Update (v0.1.0, after open-sourcing):** the GHCR packages are public and published only by the tag-driven
+release workflow (`v*` tags, multi-arch; see [releases](releases.md)). Pull requests build the images without
+pushing. Both Compose files reference the published `${LOGBIRD_VERSION}` tag with `pull_policy: always`, so the
+default install runs exactly the released images. Source builds go through `docker-compose.build.yml`, which uses
+separate `logbird-source/<role>` names with `pull_policy: build`. A local build therefore never shadows a
+published tag, and a published pull never replaces a local build. Fresh-install, upgrade and restore acceptance
+on the target host is tracked in [#77](https://github.com/joodlab/logbird/issues/77).
 
 ### Transactional email: Postmark SMTP ([#59](https://github.com/joodlab/logbird/issues/59))
 
