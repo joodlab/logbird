@@ -4,6 +4,7 @@ import viteReact from '@vitejs/plugin-react';
 import { nitro } from 'nitro/vite';
 import { defineConfig } from 'vite';
 import { apiReferenceContentSecurityPolicy, proxiedRoutePatterns } from './server/proxy-paths';
+import { siteRoutePatterns } from './server/site-paths';
 
 /**
  * The console talks to exactly one origin. The Nitro middleware (server/proxy.ts) forwards `/api` (better-auth +
@@ -22,7 +23,7 @@ import { apiReferenceContentSecurityPolicy, proxiedRoutePatterns } from './serve
  * assets in dev and never reach the API. Normalized traversal to other paths (`/v1/../internal`) matches no explicit
  * route and stays on the console. In production the global middleware already handles every request first.
  */
-export default defineConfig(() => {
+export default defineConfig(({ command }) => {
   return {
     resolve: { tsconfigPaths: true },
     // Pre-bundle the heavy client deps up front so the first visit never hits a mid-session
@@ -72,6 +73,7 @@ export default defineConfig(() => {
         handlers: [
           { route: '/**', handler: './server/proxy.ts', middleware: true },
           ...proxiedRoutePatterns.map((route) => ({ route, handler: './server/proxy.ts' })),
+          ...(command === 'serve' ? siteRoutePatterns.map((route) => ({ route, handler: './server/proxy.ts' })) : []),
         ],
         routeRules: {
           '/**': {
