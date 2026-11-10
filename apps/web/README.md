@@ -171,7 +171,7 @@ serves. `vite dev` renders on demand and injects HMR scripts, so only the dev se
 ## Node container
 
 `apps/web/Dockerfile` builds the Node preset, including media, OG cards and
-`.output/csp.json`. All seven public `WEB_*` values are build arguments; changing
+`.output/csp.json`. All public `WEB_*` values (`PUBLIC_ENV_KEYS` in `src/env.ts`) are build arguments; changing
 them requires a rebuild. Fonts come from installed packages; media comes from
 `marketing/media` (materialized Git LFS files), with no build-time font download.
 The runtime runs as `node` on port 4620 and appends waitlist entries under `/data`.

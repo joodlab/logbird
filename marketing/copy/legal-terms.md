@@ -34,5 +34,7 @@ access. The open-source software is MIT-licensed and the terms say they don't li
 - No billing or plan code exists; site copy says pricing isn't set (`apps/web/src/routes/cloud.tsx`).
 - Customers choose retention per project and can export events (CSV, JSONL) from the console
   (`apps/server/src/data-routes.ts`).
-- Account and workspace deletion are handled by request (no self-service yet).
+- Account deletion and complete workspace-data deletion are handled by request (#130). An owner-only
+  organization-delete endpoint is reachable (`apps/server/src/route-authorization.matrix.ts`), but it removes Postgres
+  records without purging ClickHouse (`docs/cloud-accounts-design.md`), so it isn't a complete deletion path.
 - No SLA anywhere in code or copy; backups exist per the owner.
