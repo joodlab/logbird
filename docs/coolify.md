@@ -137,16 +137,31 @@ every six hours, logging `waitlist.retention` with counts only.
   submission goes on time or up to a day later, never early.
 - The older single file is trimmed record by record. A `warn` level means that file
   has lines that aren't valid JSON (say, from a crash mid-write). They are never
-  deleted automatically, so check the file and remove them by hand.
+  deleted automatically, so check the file and remove them by hand. In day files
+  such lines go with their day.
 - The cleanup never touches today's file, the only one new submissions go into, so
-  it can't lose one, even while a deploy briefly runs two containers on the volume.
+  it can't lose one, even if two site containers ever shared the volume.
 - It runs only in the production server with `WAITLIST_FILE` set, which the site
   image does: never in `vite dev`, while a build prerenders pages, or for the source
   default file.
 
+A crash or a full disk mid-write can leave a torn line; the next submission then
+starts on a new line, so it stays readable. A failed write answers 503 and logs
+`waitlist.store_failed` with the error code only. Writes aren't flushed to disk one
+by one, so a power cut right after a submission can lose it. The notification
+email to the team is its second copy.
+
 To change the period, set the variable and redeploy the site; the policy text and
 the cleanup change together. Run one site container per `site-data` volume, and
 don't scale the site service beyond one replica.
+
+Redeploys don't overlap containers. The site is a Docker Compose resource, and
+[Coolify doesn't do rolling updates for Compose](https://coolify.io/docs/applications/deployments/rolling-updates):
+it runs `docker compose up`, and Compose recreates the service, stopping the old
+container before it starts the new one. So the old and new sites never write to the
+volume at the same time, and the site is briefly unavailable during a deploy. On the
+first deploy of day files, the old version's last submissions are in
+`/data/waitlist.jsonl`, which the cleanup trims record by record.
 
 To delete one person's submissions on request, run this in the container that
 serves the site:
@@ -156,11 +171,11 @@ docker exec <site container> node waitlist/admin.mjs forget someone@example.com
 ```
 
 It removes that address from every day's file and the older file, and prints how
-many submissions it removed, never their contents. It rewrites files new
-submissions may still go into. It shares a lock with the site's writers in that
-container, so it never loses a submission. Don't run it from another container, or
-while a deploy has two site containers running. On failure it prints one of two
-messages:
+many submissions it removed, never their contents. Lines that aren't valid JSON
+are removed too when they contain the address; any others are counted, so check
+them by hand. It rewrites files new submissions may still go into. It shares a lock
+with the site's writers in that container, so it never loses a submission. Don't
+run it from another container. On failure it prints one of two messages:
 
 - "Nothing was deleted: …" when nothing changed.
 - "The submissions were removed, but the result may not be on disk yet: …" when

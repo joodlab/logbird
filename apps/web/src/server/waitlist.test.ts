@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -143,6 +143,24 @@ describe('storage adapters', () => {
       const record = JSON.parse((await readFile(day, 'utf8')).trim());
       expect(record).toEqual({ ...valid, receivedAt: '1970-01-01T00:00:01.000Z' });
       expect(record).not.toHaveProperty('website');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+  it('answers 503 when the submission cannot be stored, and logs why without personal data', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'logbird-web-'));
+    try {
+      // A regular file where the store's directory should be: every append fails.
+      await writeFile(join(directory, 'blocker'), '');
+      const lines: string[] = [];
+      const notify = vi.fn(async () => undefined);
+      const store = createNodeStore(join(directory, 'blocker', 'waitlist.jsonl'), notify, { log: (line) => lines.push(line) });
+      const response = await handleWaitlist(req({ ...valid, website: '' }), { ...dependencies(), store });
+      expect(response.status).toBe(503);
+      expect(notify).not.toHaveBeenCalled();
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ level: 'error', event: 'waitlist.store_failed', reason: expect.any(String) });
+      expect(lines[0]).not.toContain(valid.email);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

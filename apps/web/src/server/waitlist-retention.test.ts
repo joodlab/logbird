@@ -129,10 +129,49 @@ it('waits before the first cleanup, then sweeps', async () => {
   const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
   const stop = scheduleWaitlistRetention(file, { firstAfterMs: 300 });
   await new Promise((done) => setTimeout(done, 100));
+  expect(log).not.toHaveBeenCalled();
   expect(await emails()).toEqual(['old@example.test']);
-  await vi.waitFor(async () => expect(await emails()).toEqual([]), { timeout: 5000 });
+  // Wait for the sweep's own log line rather than polling the files, which a running sweep may be replacing.
+  await vi.waitFor(() => expect(log).toHaveBeenCalledWith(expect.stringContaining('"event":"waitlist.retention"')), { timeout: 5000 });
   stop();
   log.mockRestore();
+  expect(await emails()).toEqual([]);
+});
+
+it('starts a new line after a torn last line, so the next submission stays readable', async () => {
+  await appendWaitlistRecord(file, record('first@example.test', '2026-11-01T00:00:00.000Z'));
+  // A crash or a full disk mid-append: half a record, no newline.
+  await writeFile(join(waitlistDays(file), '2026-11-01.jsonl'), '{"email":"torn@exa', { flag: 'a' });
+  await appendWaitlistRecord(file, record('next@example.test', '2026-11-01T01:00:00.000Z'));
+  const text = await readFile(join(waitlistDays(file), '2026-11-01.jsonl'), 'utf8');
+  expect(text.split('\n')).toEqual([
+    JSON.stringify(record('first@example.test', '2026-11-01T00:00:00.000Z')),
+    '{"email":"torn@exa',
+    JSON.stringify(record('next@example.test', '2026-11-01T01:00:00.000Z')),
+    '',
+  ]);
+  // kept counts the torn line too: it is kept (it doesn't contain the address) and reported as unreadable.
+  expect(await forgetWaitlistEmail(file, 'next@example.test')).toEqual({ kept: 2, removed: 1, unreadable: 1 });
+});
+
+it('forget deletes an unreadable line that contains the address, and reports the unreadable lines left', async () => {
+  await appendWaitlistRecord(file, record('keep@example.test', '2026-11-01T00:00:00.000Z'));
+  const day = join(waitlistDays(file), '2026-11-01.jsonl');
+  await writeFile(day, '{"email":"forget-me@example.test","interest":"cl\n{"email":"someone-el\n', { flag: 'a' });
+  expect(await forgetWaitlistEmail(file, 'Forget-Me@example.test')).toEqual({ kept: 2, removed: 1, unreadable: 1 });
+  const text = await readFile(day, 'utf8');
+  expect(text).not.toContain('forget-me');
+  expect(text).toContain('someone-el');
+});
+
+it('rewrites bytes as they are: a kept line that is not valid UTF-8 comes back unchanged', async () => {
+  const day = join(waitlistDays(file), '2026-11-01.jsonl');
+  await appendWaitlistRecord(file, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
+  // A record whose name holds a byte that isn't valid UTF-8 (0xff): JSON still parses it, with a replacement character.
+  const odd = Buffer.concat([Buffer.from('{"email":"odd@example.test","interest":"cloud","name":"'), Buffer.from([0xff]), Buffer.from('"}\n')]);
+  await writeFile(day, odd, { flag: 'a' });
+  await forgetWaitlistEmail(file, 'forget-me@example.test');
+  expect((await readFile(day)).equals(odd)).toBe(true);
 });
 
 it('removes temporary copies left by a crashed rewrite, so a deleted record has no other copy', async () => {

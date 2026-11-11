@@ -16,8 +16,12 @@ if (command !== 'forget' || !email) {
   process.exit(2);
 }
 try {
-  const { removed, kept } = await forgetWaitlistEmail(file, email);
+  const { removed, kept, unreadable } = await forgetWaitlistEmail(file, email);
   console.log(`Removed ${removed} submission(s) for that address; ${kept} other submission(s) kept in ${file} and its day files.`);
+  if (unreadable) {
+    // None of these contains the address (those were removed), but they can't be read, so a person should look.
+    console.log(`${unreadable} line(s) that aren't valid JSON remain; none contains that address. Check them by hand.`);
+  }
   console.log('Also delete the notification emails for that address from the team mailbox.');
 } catch (error) {
   const reason = error instanceof Error ? error.message : String(error);

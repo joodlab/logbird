@@ -167,11 +167,29 @@ async function storeFiles(path) {
 export function appendWaitlistRecord(file, record) {
   return withWaitlistLock(file, async (path) => {
     await mkdir(waitlistDays(path), { recursive: true, mode: 0o700 });
-    await appendFile(dayFile(path, record), `${JSON.stringify(record)}\n`, { mode: 0o600 });
+    const handle = await open(dayFile(path, record), 'a+', 0o600);
+    try {
+      // A crash or a full disk mid-append can leave a last line without its newline. Start a new line then, so the
+      // torn line stays alone and this record stays readable instead of being glued onto it.
+      const { size } = await handle.stat();
+      let prefix = '';
+      if (size > 0) {
+        const last = Buffer.alloc(1);
+        await handle.read(last, 0, 1, size - 1);
+        prefix = last[0] === NEWLINE ? '' : '\n';
+      }
+      // Not flushed to disk per record: a power cut right after the response can lose the latest submissions; the
+      // notification email is their second copy (docs/coolify.md).
+      await handle.appendFile(`${prefix}${JSON.stringify(record)}\n`);
+    } finally {
+      await handle.close();
+    }
   });
 }
 
 const TEMPORARY = '.rewrite-';
+const NEWLINE = 0x0a;
+const LINE_END = Buffer.from('\n');
 
 /** Writes `text` to a new file and flushes it to disk, so a rename that follows never exposes an empty file. */
 async function writeDurably(path, text, owner) {
@@ -231,23 +249,40 @@ async function removeLeftovers(directory) {
  * root (say `docker exec -u root`), the new file keeps the old one's owner, so the site can still append to it. A
  * failed rewrite removes its temporary file. Must run under the store's lock.
  */
-async function rewriteFile(path, keep) {
-  let text;
+/** The non-blank lines of a file, as the bytes they hold (no decoding, so nothing is altered when written back). */
+function splitLines(bytes) {
+  const lines = [];
+  for (let start = 0; start < bytes.length; ) {
+    const end = bytes.indexOf(NEWLINE, start);
+    const line = bytes.subarray(start, end === -1 ? bytes.length : end);
+    if (line.toString('utf8').trim()) {
+      lines.push(line);
+    }
+    start = end === -1 ? bytes.length : end + 1;
+  }
+  return lines;
+}
+
+async function rewriteFile(path, keep, dropUnreadable = () => false) {
+  let bytes;
   try {
-    text = await readFile(path, 'utf8');
+    bytes = await readFile(path);
   } catch (error) {
     if (error?.code === 'ENOENT') {
       return { kept: 0, removed: 0, unreadable: 0 };
     }
     throw error;
   }
-  const lines = text.split('\n').filter((line) => line.trim());
+  const lines = splitLines(bytes);
   let unreadable = 0;
   const kept = lines.filter((line) => {
     let record;
     try {
-      record = JSON.parse(line);
+      record = JSON.parse(line.toString('utf8'));
     } catch {
+      if (dropUnreadable(line)) {
+        return false;
+      }
       unreadable += 1;
       return true;
     }
@@ -261,7 +296,7 @@ async function rewriteFile(path, keep) {
   const current = await stat(path);
   const owner = process.getuid?.() === 0 ? { uid: current.uid, gid: current.gid } : undefined;
   try {
-    await writeDurably(temporary, kept.map((line) => `${line}\n`).join(''), owner);
+    await writeDurably(temporary, Buffer.concat(kept.flatMap((line) => [line, LINE_END])), owner);
     await rename(temporary, path);
   } catch (error) {
     await rm(temporary, { force: true });
@@ -322,8 +357,10 @@ export function pruneWaitlist(file, now, months) {
 
 /**
  * Deletes every record sent from `email` (case and surrounding spaces ignored), from every day file and the legacy
- * file. It rewrites files that new submissions may still go into, so it must run where every writer shares the lock:
- * in the site's own container.
+ * file. A line that isn't valid JSON (a torn write) is deleted too when it contains the address anywhere, since it may
+ * hold that person's data; other unreadable lines are kept and counted, so the operator can check them. It rewrites
+ * files that new submissions may still go into, so it must run where every writer shares the lock: in the site's own
+ * container.
  */
 export async function forgetWaitlistEmail(file, email) {
   const target = email.trim().toLowerCase();
@@ -343,6 +380,7 @@ export async function forgetWaitlistEmail(file, email) {
             String(record?.email ?? '')
               .trim()
               .toLowerCase() !== target,
+          (line) => line.toString('utf8').toLowerCase().includes(target),
         );
       } catch (error) {
         // Files already rewritten stay changed: say so, even when this one failed before replacing anything.

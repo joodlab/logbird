@@ -33,8 +33,15 @@ export function createNodeStore(
     }
   };
   return async (record: WaitlistRecord) => {
-    // Under the file's lock, so the retention cleanup or an operator's deletion never drops a new line.
-    await appendWaitlistRecord(file, record);
+    // Under the store's lock, so an operator's deletion never drops a new line.
+    try {
+      await appendWaitlistRecord(file, record);
+    } catch (error) {
+      // The visitor gets a 503 and may retry; the log says why, with no personal data (a code such as ENOSPC).
+      const reason = (error as NodeJS.ErrnoException)?.code ?? (error instanceof Error ? error.name : 'unknown');
+      log(JSON.stringify({ level: 'error', event: 'waitlist.store_failed', reason }));
+      throw error;
+    }
     if (notify) {
       void deliver(record);
     }
