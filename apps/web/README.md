@@ -28,8 +28,8 @@ Stop the server's whole process tree when done. Never start the console or its s
 
 - `ready: false` pages render a placeholder, are `noindex`, and stay out of the nav, footer, sitemap and `llms.txt`.
   Internal `ButtonLink`s to them render nothing. Each page PR flips its own flag.
-- `src/lib/release.ts` closes the whole site while any media entry is `interim`, `WEB_SITE_URL` is unset (provisional
-  domain), `WEB_SECURITY_EMAIL` or `WEB_CONTACT_EMAIL` is unset (no mailbox is ever derived from the provisional domain),
+- `src/lib/release.ts` closes the whole site while any media entry is `interim`, `WEB_SITE_URL` is unset (the
+  build relies on the default domain), `WEB_SECURITY_EMAIL` or `WEB_CONTACT_EMAIL` is unset (no mailbox is ever derived from the domain),
   `WEB_ORG_NAME` or `WEB_PRIVACY_EMAIL` is unset (the privacy policy must name who is responsible and how to reach them), or
   `/legal/privacy` or `/legal/terms` is taken back to `ready: false`: every page is `noindex`, `robots.txt`
   is `Disallow: /`, and `build:cloudflare` fails unless `LOGBIRD_WEB_ALLOW_INTERIM=1` (local previews only).
@@ -39,12 +39,12 @@ Stop the server's whole process tree when done. Never start the console or its s
 Only `WEB_*` variables reach the site (`src/env.ts` lists them; Turbo hashes them and every env file the loader reads, root `.env*` and `apps/web/.env*`, in `apps/web/turbo.json`, and a test keeps the list complete), so the
 console's `APP_URL` in the root `.env` can't leak in. `scripts/public-env.ts` resolves them once per build (root `.env*`,
 then `apps/web/.env*`, then the process environment) and the bundle, sitemap, robots, `llms.txt` and OG cards all use
-that one result, so their origins always agree. `src/env.ts` is the only file allowed to contain the provisional
-domain, and no site source may contain the company or design-partner names (tests enforce both).
+that one result, so their origins always agree. `src/env.ts` is the only file allowed to contain the default
+domain (`logbird.joodlab.com`), and no site source may contain the company or design-partner names, apart from that domain (tests enforce both).
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
-| `WEB_SITE_URL` | Canonical origin (canonicals, sitemap, OG, JSON-LD, form origin) | provisional domain, pending owner |
+| `WEB_SITE_URL` | Canonical origin (canonicals, sitemap, OG, JSON-LD, form origin) | `https://logbird.joodlab.com`; unset is a release blocker |
 | `WEB_APP_URL` | Console sign-in; unset hides "Sign in" | unset (Cloud is waitlist-only) |
 | `WEB_GITHUB_PUBLIC`, `WEB_GITHUB_URL` | Repository link and self-host quickstarts | false / unset |
 | `WEB_ORG_NAME` | © holder and JSON-LD Organization (pending owner) | unset → "Logbird contributors", no Organization |
