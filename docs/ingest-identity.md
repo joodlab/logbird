@@ -69,9 +69,14 @@ Receipt phase failures log `ingest.receipt_phase_failed` with `phase: claim|conf
 and only the error name, code and adapter kind. After an acknowledged insert,
 even a programming error is logged and reported as `ingest_pending`, keeping claims.
 A failed release logs `ingest.claim_release_failed`, including the original error's
-metadata when present. It preserves an existing `ApiError`; otherwise infrastructure
-release failures return retryable `503 ingest_unavailable`. Unreleased claims remain
-held until abandoned-claim recovery. Nothing on
+metadata when present, and the response depends on where it happened:
+- **Before any outcome** (claim or classification failure): the original error stands. An
+  infrastructure failure or receipt conflict is the usual retryable 503, an `ApiError` keeps
+  its status, and a programming error surfaces as a server error instead of a retry loop.
+- **After parse isolation:** the composed outcome stands; retryable rows whose claims
+  couldn't be released are reported as pending, with a lease-aware Retry-After.
+- **With nothing to insert:** every row is already settled, so the settled response stands.
+Unreleased claims remain held until abandoned-claim recovery. Nothing on
 today's request path writes the same receipt concurrently, so a retry is an
 anomaly, not a normal branch.
 
@@ -279,7 +284,9 @@ same project/event can therefore raise a unique violation (23505). With Prisma 7
 adapter-pg the raw claim query surfaces it as P2010 with
 `meta.driverAdapterError.cause.originalCode = '23505'`; `isUniqueViolation` also accepts
 P2002 and bare 23505, and a real-Postgres test proves the adapter shape. The atomic claim statement rolls back, so this attempt
-holds no claims. Logbird returns retryable `503 ingest_unavailable` with `Retry-After: 1`.
+holds no claims. (A connection lost after a claim commits but before its acknowledgement
+can still leave claims the request doesn't know about; a retry sees them as pending until
+recovery settles them after their lease.) Logbird returns retryable `503 ingest_unavailable` with `Retry-After: 1`.
 
 The regular-table `receipt-index-maintenance.integration` fixtures use a unique
 private `qa_compaction_<creation-ms>_<uuid>` schema and drop it in `finally`. They exercise

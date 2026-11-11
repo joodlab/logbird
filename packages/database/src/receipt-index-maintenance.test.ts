@@ -215,6 +215,9 @@ it('skips a rebuild that an older open transaction would fail after building, an
   expect(check?.[0]).toContain('pid <> pg_backend_pid()');
   expect(check?.[0]).toContain("backend_type NOT IN ('autovacuum worker', 'autovacuum launcher')");
   expect(check?.[0]).toContain('AND (backend_xmin IS NOT NULL OR pid IN (SELECT pid FROM pg_locks WHERE relation = to_regclass($2)))');
+  // Prepared transactions hold snapshots and locks without a pg_stat_activity row.
+  expect(check?.[0]).toContain('FROM pg_prepared_xacts');
+  expect(check?.[0]).toContain('database = current_database()');
   expect(check?.[1]).toEqual([RECEIPT_INDEX_COMPACTION.lockTimeoutMs, '"qa_current"."IngestReceipt"']);
   expect(big.calls.at(-1)).toContain('pg_advisory_unlock');
 });
@@ -252,6 +255,8 @@ it('cancels only the managed backend on shutdown, waits for 57014 and drops the 
   expect(cancelConnection.query).toHaveBeenCalledWith('SET statement_timeout = 5000');
   expect(cancelConnection.query).toHaveBeenCalledWith(expect.stringMatching(OWN_REINDEX_CANCEL), [12_345]);
   expect(cancelConnection.options).toMatchObject({ connectionTimeoutMillis: 5000, query_timeout: 5000 });
+  // pg never calls back a connect() that end() interrupted, so connect must time out on its own before the deadline.
+  expect(cancelConnection.options.connectionTimeoutMillis).toBeLessThan(RECEIPT_INDEX_CANCEL_TIMEOUT_MS);
   expect(cancelConnection.end).toHaveBeenCalledTimes(1);
   expect(connection.end).toHaveBeenCalledTimes(1);
   expect(query.mock.calls.filter(([sql]) => sql.includes('NOT i.indisvalid'))).toHaveLength(2);

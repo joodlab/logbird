@@ -452,7 +452,7 @@ it('returns a retryable error when targeted expiry fails before a claim', async 
 });
 
 it.each([
-  ['classification fails before any outcome', 'classify'],
+  ['a programming error happens before any outcome', 'classify'],
   ['nothing is left to insert', 'settled'],
 ] as const)('handles a model-query cancellation in releaseClaims deleteMany when %s', async (_label, site) => {
   const database = await import('@logbird/database');
@@ -480,10 +480,10 @@ it.each([
   try {
     const response = await f.post(original);
     if (site === 'classify') {
-      // No outcome exists yet: the release failure is the retryable response itself.
-      expect(response.status).toBe(503);
-      expect(response.headers.get('Retry-After')).toBe('1');
-      expect(await response.json()).toMatchObject({ error: { code: 'ingest_unavailable' } });
+      // A programming error before any outcome surfaces as a server error, not a retryable 503 a client would repeat;
+      // the claim the failed release left behind stays held for recovery.
+      expect(response.status).toBe(500);
+      expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, eventId: original.id, confirmedAt: null } })).toBe(1);
     } else {
       // Nothing to insert: the row is already settled (terminally rejected), so the settled response stands and the
       // held claim is left for recovery after its lease.

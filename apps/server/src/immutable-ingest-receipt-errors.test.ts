@@ -184,11 +184,12 @@ it.each(['claim', 'classify', 'empty', 'insert'] as const)('handles and logs a f
   }
   const batch = site === 'claim' ? [...candidates, { ...candidates[0], row: { ...candidates[0]?.row, event_id: 'qa-competitor' } }] : candidates;
   const error = await insertImmutableEvents('qa-project', 'qa-org', batch as IngestCandidate[]).catch((error: unknown) => error);
-  // Once an outcome exists, a failed release keeps it. After an insert, the row whose claim stays held is pending, with a
-  // lease-aware Retry-After. With nothing to insert, every row is settled, so the settled response stands. Before any
-  // outcome exists (claim, classification), the release failure is the retryable 503 itself.
+  // A failed release never replaces the outcome. After an insert, the row whose claim stays held is pending, with a
+  // lease-aware Retry-After. With nothing to insert, the settled response stands. Before any outcome, the original
+  // error stands: an infrastructure claim failure is the retryable 503, and a programming error surfaces as one.
   if (site === 'insert') expect(error).toMatchObject({ status: 503, code: 'ingest_pending', retryAfter: 90, details: { indices: [3] } });
   else if (site === 'empty') expect(error).toEqual({ ids: [], rejected: [expect.objectContaining({ index: 3, code: 'stored_event_unreadable' })] });
+  else if (site === 'classify') expect(error).not.toBeInstanceOf(ApiError);
   else expect(error).toMatchObject({ status: 503, code: 'ingest_unavailable', retryAfter: 1 });
   expect(fake.release).toHaveBeenCalledTimes(1);
   expect(console.error).toHaveBeenCalledWith(
@@ -207,9 +208,10 @@ it('preserves the original ApiError when classification and release both fail an
   expect(console.error).toHaveBeenCalledWith(expect.stringContaining('"original":{"name":"Error","code":"project_busy"}'));
 });
 
-it.each(['57014', '55P03'])('maps the real P2039 model-query wrapper at releaseClaims/deleteMany (%s) to retryable unavailable', async (sqlstate) => {
-  // A classification failure releases before any outcome exists, so the release failure is the response itself.
-  fake.claim.mockResolvedValueOnce([{ ...receipt, eventAt: new Date(Number.NaN) }]);
+it.each(['57014', '55P03'])('treats the real P2039 model-query wrapper at releaseClaims/deleteMany (%s) as infrastructure', async (sqlstate) => {
+  // A definite storage refusal leaves the row unwritten; releasing its claim then fails. Because the wrapper is
+  // classified as infrastructure, the claim counts as held and the row is reported pending with its lease.
+  fake.insert.mockRejectedValueOnce({ code: '516' });
   fake.release.mockRejectedValueOnce(
     new PrismaClientKnownRequestError('qa database failure', {
       code: 'P2039',
@@ -225,9 +227,8 @@ it.each(['57014', '55P03'])('maps the real P2039 model-query wrapper at releaseC
   );
   const error = await insertImmutableEvents('qa-project', 'qa-org', candidates).catch((error: unknown) => error);
   expect(error).toBeInstanceOf(ApiError);
-  expect(error).toMatchObject({ status: 503, code: 'ingest_unavailable', retryAfter: 1 });
+  expect(error).toMatchObject({ status: 503, code: 'ingest_pending', retryAfter: 90, details: { indices: [3], eventIds: ['qa-event'] } });
   expect(fake.release).toHaveBeenCalledExactlyOnceWith({ where: { projectId: 'qa-project', eventId: { in: ['qa-event'] }, confirmedAt: null } });
-  expect(fake.insert).not.toHaveBeenCalled();
 });
 
 it('surfaces a plain Error from targeted expiry without mapping it to 503', async () => {

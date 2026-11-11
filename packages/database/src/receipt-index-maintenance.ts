@@ -288,10 +288,13 @@ export async function compactIngestReceiptIndex({
     // the rebuild would fail after building a full copy, every hour; skip instead. Best effort: a role without
     // pg_read_all_stats sees xact_start only for its own sessions.
     const { rows: old } = await client.query<{ n: number }>(
-      `SELECT count(*)::int n FROM pg_stat_activity
-       WHERE pid <> pg_backend_pid() AND backend_type NOT IN ('autovacuum worker', 'autovacuum launcher') AND datname = current_database()
-         AND xact_start < clock_timestamp() - make_interval(secs => $1::float8 / 1000)
-         AND (backend_xmin IS NOT NULL OR pid IN (SELECT pid FROM pg_locks WHERE relation = to_regclass($2)))`,
+      // Prepared (two-phase) transactions hold snapshots and locks without a pg_stat_activity row: count them too.
+      `SELECT (SELECT count(*) FROM pg_stat_activity
+         WHERE pid <> pg_backend_pid() AND backend_type NOT IN ('autovacuum worker', 'autovacuum launcher') AND datname = current_database()
+           AND xact_start < clock_timestamp() - make_interval(secs => $1::float8 / 1000)
+           AND (backend_xmin IS NOT NULL OR pid IN (SELECT pid FROM pg_locks WHERE relation = to_regclass($2))))::int
+       + (SELECT count(*) FROM pg_prepared_xacts
+         WHERE database = current_database() AND prepared < clock_timestamp() - make_interval(secs => $1::float8 / 1000))::int n`,
       [RECEIPT_INDEX_COMPACTION.lockTimeoutMs, `${quote(target.schema)}.${quote(target.table)}`],
     );
     if (Number(old[0]?.n ?? 0) > 0) return { action: 'skipped_old_transactions', indexPages: pages, neededPages, ratio, droppedInvalid };

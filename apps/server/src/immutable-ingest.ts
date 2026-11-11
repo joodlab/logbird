@@ -63,8 +63,10 @@ async function releaseClaimsSafely(projectId: string, owned: Map<string, IngestR
     await releaseClaims(projectId, owned);
   } catch (error) {
     logClaimReleaseFailure(error, originalError);
-    // Keep the more informative request outcome, even when cleanup also failed.
-    if (originalError instanceof ApiError) throw originalError;
+    // Keep the original outcome, even when cleanup also failed: an ApiError or infrastructure failure is mapped by its
+    // caller (claimEvents, app.onError), and a programming error must surface as one, not as a retryable 503 that a
+    // client would repeat every second. The claims stay held until recovery settles them.
+    if (originalError !== undefined) throw originalError;
     if (isDatabaseFailure(error))
       throw new ApiError(503, 'ingest_unavailable', 'Event identity claims could not be released. Retry this batch.', undefined, 1);
     throw error;
@@ -326,7 +328,9 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
     if (!isDatabaseFailure(error)) throw error;
     // Those claims stay held until their lease lets recovery settle them. Keep the composed outcome (indices,
     // settled results) and report the affected retryable rows as pending, so Retry-After follows the held lease.
-    // Proven-bad rows stay rejected: their outcome is terminal whatever happens to the claim.
+    // Proven-bad rows stay rejected: their outcome is terminal whatever happens to the claim. While Postgres is failing,
+    // this also turns #150's terminal unverified_after_parse_failure into a retry for old clients; that is bounded by
+    // the lease and returns to normal once the database does.
     const held = (row: EventRow) => releasable.has(row.event_id);
     persisted = {
       ...persisted,
