@@ -15,7 +15,6 @@ path: /
 - **id:** `hero`
 - **eyebrow:** Open-source audit logs · MIT
 - **heading (H1):** Retrace every step.
-- **sub-heading (bilingual line, optional):** تتبّع كل خطوة. — see `arabic-notes.md`
 - **body:** Logbird is the audit log for your product. Send who-did-what events over HTTP or the SDK. Search them,
   follow any user, customer account or record, and run it on your own servers.
 - **cta (primary):** Join the waitlist → `/contact`

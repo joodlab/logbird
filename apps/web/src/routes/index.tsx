@@ -298,9 +298,6 @@ function Hero() {
           <Eyebrow>Open-source audit logs · MIT</Eyebrow>
           <h1 className="display" id="hero-title">
             Retrace every step.
-            <span className="mt-3 block text-left font-medium text-[0.42em] text-muted-foreground tracking-normal" dir="rtl" lang="ar">
-              تتبّع كل خطوة.
-            </span>
           </h1>
           <p className="lead max-w-xl">
             Logbird is the audit log for your product. Send who-did-what events over HTTP or the SDK. Search them, follow any user, customer account

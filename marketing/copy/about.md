@@ -55,11 +55,11 @@ path: /about
 
 - **id:** `name`
 - **eyebrow:** The name
-- **heading:** Logbird · لوغبيرد
-- **body:** The bird that carries every event home. We chose a name that anyone who hears it once can spell, in Arabic
-  or English.
+- **heading:** Logbird
+- **body:** The bird that carries every event home. We chose a short name made of two words you already know, so anyone
+  who hears it once can spell it.
   <!-- source: docs/brand.md §1 -->
-- **visual:** `apps/app/public/brand/logbird-wordmark-bilingual-light.svg` (dark: `-dark.svg`)
+- **visual:** `apps/app/public/brand/logbird-wordmark-light.svg` (dark: `-dark.svg`)
 
 ## build-in-public
 

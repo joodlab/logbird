@@ -2,6 +2,10 @@
 
 Use these name, voice and visual guidelines consistently across Logbird materials.
 
+**Language:** the product (console, docs, emails) and the marketing site are **English-only for now**. Don't show Arabic
+next to the English copy, in the UI, on social cards or in the README. The Arabic name, tagline and assets below stay
+documented as the reference for a future Arabic localization (see [§8](#8-localization)).
+
 ## 1. The name
 
 **Logbird · لوغبيرد**: the bird that carries every event home.
@@ -15,12 +19,12 @@ whether they speak Arabic or English.**
 
 ### Arabic spelling
 
-Use **لوغبيرد** everywhere. It follows the standard Arabic rendering of "g" as غ. Some Egyptian and Saudi readers write
+When Arabic ships, use **لوغبيرد** everywhere. It follows the standard Arabic rendering of "g" as غ. Some Egyptian and Saudi readers write
 "g" as ج (لوجبيرد); treat that as a misspelling to redirect, not as a second official spelling.
 
 ## 2. Positioning and voice
 
-> **Retrace every step.** · **تتبّع كل خطوة.**
+> **Retrace every step.**
 >
 > Logbird is the open-source audit log for your product. Send who-did-what events over HTTP or the SDK, search them in
 > seconds, and run it on your own servers or ours.
@@ -33,13 +37,14 @@ Use **لوغبيرد** everywhere. It follows the standard Arabic rendering of "
 
 ### Voice
 
-Write like an operator talking to a colleague on call, in English and in Arabic.
+Write like an operator talking to a colleague on call.
 
 - **Plain and precise.** "Retention permanently deletes expired events," not "smart data lifecycle".
 - **Give the guarantee and the limit together.** "Delivery is at least once; counts may include duplicates."
 - **Use short sentences and real verbs.** Avoid "seamless", "blazing", "AI-powered" and exclamation marks.
 - **Show the command.** A curl line beats a paragraph.
-- **Casing:** `logbird` in lower case in code, the CLI and the wordmark; "Logbird" in prose; لوغبيرد in Arabic.
+- **Casing:** `logbird` in lower case in code, the CLI and the wordmark; "Logbird" in prose; لوغبيرد in Arabic copy, once
+  it exists.
 
 ## 3. Logo
 
@@ -52,7 +57,7 @@ event the bird just brought in.
 **The wordmarks:**
 
 - Latin: Geist SemiBold, tracking −2.5 %.
-- Arabic: IBM Plex Sans Arabic SemiBold.
+- Arabic (reserved for the localization): IBM Plex Sans Arabic SemiBold.
 - Both are outlined to paths, so they render the same everywhere. Both fonts are SIL OFL, which allows logos built from
   their outlines.
 
@@ -64,12 +69,12 @@ The files are in `apps/app/public/brand/`:
 | `logbird-favicon.svg` | Follows `prefers-color-scheme` |
 | `logbird-apple-touch-icon.png` | 180 px home-screen icon |
 | `logbird-wordmark-light.svg` / `-dark.svg` | Mark and "logbird" |
-| `logbird-wordmark-bilingual-light.svg` / `-dark.svg` | Mark, "logbird" and لوغبيرد |
+| `logbird-wordmark-bilingual-light.svg` / `-dark.svg` | Mark, "logbird" and لوغبيرد (reserved; not rendered today) |
 | `logbird-wordmark-text.svg` | "logbird" in `currentColor` |
-| `logbird-wordmark-arabic-text.svg` | لوغبيرد in `currentColor` |
+| `logbird-wordmark-arabic-text.svg` | لوغبيرد in `currentColor` (reserved; not rendered today) |
 | `logbird-og.png` | 1200×630 social card |
 
-![Wordmarks](../apps/app/public/brand/logbird-wordmark-bilingual-light.svg)
+![Wordmark](../apps/app/public/brand/logbird-wordmark-light.svg)
 
 **Rules:**
 
@@ -77,7 +82,7 @@ The files are in `apps/app/public/brand/`:
 - The minimum size is 16 px for the mark and 80 px wide for the Latin lockup.
 - Don't recolour the newest-entry segment anything but brand indigo.
 - Don't add gradients or shadows, flip the bird, or set the wordmark in another font.
-- In Arabic-first layouts, put لوغبيرد first, then the separator, then "logbird", with the mark on the right.
+- Once Arabic ships, in Arabic-first layouts put لوغبيرد first, then the separator, then "logbird", with the mark on the right.
 
 ## 4. Colour tokens
 
@@ -96,12 +101,12 @@ apart.
 ## 5. Typography
 
 - **Latin:** Geist for the UI and headings; Geist Mono for code, event names and log rows. Both ship in the console.
-- **Arabic:** IBM Plex Sans Arabic, at weights 500 and 600.
+- **Arabic (reserved for the localization):** IBM Plex Sans Arabic, at weights 500 and 600.
 
 ## 6. Social card, favicon and app icon
 
-The social card shows the bilingual lockup, the line "Retrace every step." with تتبّع كل خطوة., the descriptor, a stack
-of log rows with the newest one highlighted, and the domain.
+The social card shows the English wordmark, the line "Retrace every step.", the descriptor, a stack of log rows with
+the newest one highlighted, and the domain. The marketing site renders its per-page cards with `apps/web/scripts/og.ts`.
 
 ![Logbird social card](../apps/app/public/brand/logbird-og.png)
 
@@ -110,10 +115,20 @@ of log rows with the newest one highlighted, and the domain.
 ```html
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="apps/app/public/brand/logbird-wordmark-bilingual-dark.svg">
-    <img alt="Logbird · لوغبيرد" src="apps/app/public/brand/logbird-wordmark-bilingual-light.svg" height="56">
+    <source media="(prefers-color-scheme: dark)" srcset="apps/app/public/brand/logbird-wordmark-dark.svg">
+    <img alt="Logbird" src="apps/app/public/brand/logbird-wordmark-light.svg" height="56">
   </picture>
 </p>
-<p align="center"><b>Retrace every step.</b> · <b dir="rtl">تتبّع كل خطوة.</b><br>Open-source audit logs you can self-host. Send who-did-what events, search them in seconds.</p>
+<p align="center"><b>Retrace every step.</b><br>Open-source audit logs you can self-host. Send who-did-what events, search them in seconds.</p>
 <p align="center"><a href="#quickstart">Quickstart</a> · <a href="docs/self-hosting.md">Self-hosting</a> · <a href="docs/concepts.md">Docs</a></p>
 ```
+
+## 8. Localization
+
+Arabic will come later as a real localization, not as Arabic lines beside the English copy. When it ships, use
+Paraglide JS (inlang) for the messages and add a language switcher; the compiled output (`**/src/paraglide`) is already
+in `.gitignore`. Until then, the reference copy is:
+
+- Name: **لوغبيرد** (see [§1](#1-the-name)).
+- Tagline: **تتبّع كل خطوة.** for "Retrace every step." Keep the shadda on تتبّع and the final full stop.
+- Assets: the bilingual and Arabic wordmarks in `apps/app/public/brand/` (see [§3](#3-logo)), and IBM Plex Sans Arabic.

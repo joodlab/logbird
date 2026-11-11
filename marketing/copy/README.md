@@ -35,7 +35,7 @@ sourced web research dated 2026-11-07 (see `compare/`). The voice follows `docs/
 | [`legal-privacy.md`](legal-privacy.md) | Privacy (placeholder) | `/legal/privacy` |
 | [`legal-terms.md`](legal-terms.md) | Terms (placeholder) | `/legal/terms` |
 | [`404.md`](404.md) | Not found | `*` |
-| [`arabic-notes.md`](arabic-notes.md) | Notes on Arabic and bilingual moments | (not a page) |
+| [`arabic-notes.md`](arabic-notes.md) | Reference Arabic strings for the future localization | (not a page) |
 
 ### How each page file is laid out
 
@@ -53,7 +53,7 @@ Then one `##` block per section, in page order:
 
 ### Tagline
 
-**Retrace every step.** · **تتبّع كل خطوة.** <!-- source: docs/brand.md §2 -->
+**Retrace every step.** <!-- source: docs/brand.md §2 -->
 
 ### One-line positioning
 
