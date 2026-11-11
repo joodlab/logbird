@@ -4,6 +4,9 @@ TanStack Start (React 19) on **:4600**. Every route renders in the browser (`def
 `src/start.ts`); the Start/Nitro server only ships the shell and proxies `/api` + `/v1` (plus the health checks and the
 read-only `/docs` + `/openapi.json`; see `server/proxy-paths.ts`) to the Hono server, in dev and production alike
 (`http://127.0.0.1:4601`, override with `LOGBIRD_SERVER_URL`), so the better-auth cookie stays first-party.
+The sign-in screen links the operator's terms and privacy policy from runtime settings (`src/lib/legal-links.ts`, read by a
+server function): `LOGBIRD_TERMS_URL` / `LOGBIRD_PRIVACY_URL`, or the forwarded site's `/legal/*` pages when
+`LOGBIRD_SITE_URL` is set. With neither, no line is shown.
 The console always talks to a real `apps/server` — run `pnpm dev` at the repo root to start server, worker and app.
 
 ```bash
