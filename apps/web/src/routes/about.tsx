@@ -3,7 +3,7 @@ import { ButtonLink } from '../components/marketing/button-link';
 import { CtaBand } from '../components/marketing/cta-band';
 import { Rich } from '../components/marketing/rich';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
-import { BilingualWordmark } from '../components/marketing/wordmark';
+import { Wordmark } from '../components/marketing/wordmark';
 import { GITHUB_PUBLIC, ORG_NAME } from '../env';
 import { DESIGN_PARTNER_LINE } from '../lib/copy-flags';
 import { pageHead } from '../lib/seo';
@@ -85,18 +85,11 @@ function AboutPage() {
           <SectionHeader
             eyebrow="The name"
             id="name-title"
-            lead="The bird that carries every event home. We chose a name that anyone who hears it once can spell, in Arabic or English."
-            title={
-              <>
-                Logbird ·{' '}
-                <span dir="rtl" lang="ar">
-                  لوغبيرد
-                </span>
-              </>
-            }
+            lead="The bird that carries every event home. We chose a short name made of two words you already know, so anyone who hears it once can spell it."
+            title="Logbird"
           />
           <div className="panel flex items-center justify-center px-6 py-12">
-            <BilingualWordmark className="h-14 w-auto max-w-full" />
+            <Wordmark className="h-14 w-auto max-w-full" />
           </div>
         </div>
       </Section>

@@ -27,9 +27,10 @@ export function RankList({
 }) {
   if (loading) {
     return (
-      <div className="flex flex-col gap-1 p-2">
+      // The loaded list's padding, gap and row height: each row lands where its placeholder was.
+      <div className="flex flex-col gap-px p-1.5">
         {placeholderKeys(rows).map((k, i) => (
-          <Skeleton className="h-7 w-full" key={k} style={{ opacity: 1 - i * 0.12 }} />
+          <Skeleton className="h-8 w-full" key={k} style={{ opacity: 1 - i * 0.12 }} />
         ))}
       </div>
     );

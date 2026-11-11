@@ -155,8 +155,8 @@ path: /security
   <!-- site rule: the site names only the security email, never a GitHub reporting flow -->
   <!-- source: SECURITY.md -->
 - **contact:** `WEB_SECURITY_EMAIL`, with **no default**. Until the owner sets it, say what `SECURITY.md` says: ask the
-  maintainers for a private channel (through the contact form), and don't include details. A missing mailbox or the
-  provisional domain is a release blocker (`apps/web/src/lib/release.ts`).
+  maintainers for a private channel (through the contact form), and don't include details. A missing mailbox or an unset
+  `WEB_SITE_URL` is a release blocker (`apps/web/src/lib/release.ts`).
 - **visual:** none
 
 ## dont-claim

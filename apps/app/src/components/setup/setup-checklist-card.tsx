@@ -1,4 +1,5 @@
 import type { ProjectSetup, SetupStep } from '@logbird/contracts';
+import { StableText } from '@logbird/ui/components/stable-text';
 import { Button } from '@logbird/ui/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@logbird/ui/components/ui/collapsible';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
@@ -98,7 +99,9 @@ export function SetupChecklistCard({ projectId, projectName }: { projectId: stri
               </Button>
             ) : null}
             <CollapsibleTrigger render={<Button aria-label={expanded ? 'Collapse checklist' : 'Show all steps'} size="sm" variant="ghost" />}>
-              <span className="hidden md:inline">{expanded ? 'Less' : 'All steps'}</span>
+              <StableText className="hidden md:inline-grid" reserve={['All steps', 'Less']}>
+                {expanded ? 'Less' : 'All steps'}
+              </StableText>
               <ChevronDownIcon className={cn('transition-transform', expanded && 'rotate-180')} />
             </CollapsibleTrigger>
             {canDismiss ? (

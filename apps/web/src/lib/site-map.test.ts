@@ -26,8 +26,9 @@ it('keeps route files and manifest paths in exact parity', () => {
     'Compare',
   ]);
 });
-it('defines the provisional domain only in env.ts', () => {
-  const literal = ['logbird', 'dev'].join('.');
+it('defines the default domain only in env.ts, and never the old provisional one', () => {
+  const literal = ['logbird', 'joodlab', 'com'].join('.');
+  const retired = ['logbird', 'dev'].join('.');
   const files = [
     ...readdirSync('src', { recursive: true })
       .map(String)
@@ -38,6 +39,7 @@ it('defines the provisional domain only in env.ts', () => {
   ].filter((name) => /\.(ts|tsx|mjs)$/.test(name));
   const occurrences = files.filter((file) => readFileSync(file, 'utf8').includes(literal));
   expect(occurrences).toEqual([resolve('src/env.ts')]);
+  expect(files.filter((file) => readFileSync(file, 'utf8').includes(retired))).toEqual([]);
 });
 it('keeps company and design-partner names out of public site source', () => {
   const files = [
@@ -49,7 +51,9 @@ it('keeps company and design-partner names out of public site source', () => {
     .filter((name) => /\.(ts|tsx|mjs)$/.test(name))
     .filter((name) => !name.endsWith('site-map.test.ts'));
   const pattern = new RegExp(['jo', 'od'].join(''), 'i');
-  expect(files.filter((file) => pattern.test(readFileSync(file, 'utf8')))).toEqual([]);
+  // The default domain is the one allowed exception, and only env.ts may contain it (see the test above).
+  const domain = ['logbird', 'joodlab', 'com'].join('.');
+  expect(files.filter((file) => pattern.test(readFileSync(file, 'utf8').replaceAll(domain, '')))).toEqual([]);
 });
 it('hashes every public variable and every env file the loader reads in Turbo', () => {
   const build = JSON.parse(readFileSync('turbo.json', 'utf8')).tasks.build;

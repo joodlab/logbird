@@ -1,5 +1,6 @@
 import type { Project, RetentionStatus } from '@logbird/contracts';
 import { OutcomeDot } from '@logbird/ui/components/badges';
+import { StableText } from '@logbird/ui/components/stable-text';
 import { ErrorState } from '@logbird/ui/components/states';
 import {
   AlertDialog,
@@ -97,12 +98,12 @@ function RetentionForm({ project }: { project: Project }) {
               ) : null}
               <Button
                 disabled={!changed || save.isPending}
+                loading={save.isPending && !lowering}
                 onClick={() => (lowering ? setConfirmOpen(true) : save.mutate(undefined))}
                 size="sm"
                 variant={lowering ? 'destructive' : 'default'}
               >
-                {save.isPending && !lowering ? <Loader2Icon className="animate-spin" /> : null}
-                {lowering ? 'Lower retention…' : 'Save retention'}
+                <StableText reserve={['Save retention', 'Lower retention…']}>{lowering ? 'Lower retention…' : 'Save retention'}</StableText>
               </Button>
             </>
           ) : undefined
@@ -315,8 +316,7 @@ function LowerRetentionDialog({
           />
           <AlertDialogFooter>
             <AlertDialogCancel type="button">Keep {formatRetention(project.retentionDays)}</AlertDialogCancel>
-            <Button disabled={!matches || pending} type="submit" variant="destructive">
-              {pending ? <Loader2Icon className="animate-spin" /> : null}
+            <Button disabled={!matches} loading={pending} type="submit" variant="destructive">
               Delete and lower to {formatRetention(days)}
             </Button>
           </AlertDialogFooter>

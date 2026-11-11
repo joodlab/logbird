@@ -122,7 +122,7 @@ function OperationPage() {
             <GitBranchIcon className="size-3.5" /> Operation
           </span>
           <h1 className="line-clamp-2 font-semibold text-xl tracking-tight" title={nodes[0] ? eventSentence(nodes[0].event) : undefined}>
-            {nodes[0] ? eventSentence(nodes[0].event) : <Skeleton className="h-6 w-80" />}
+            {nodes[0] ? eventSentence(nodes[0].event) : <Skeleton className="h-7 w-80" />}
           </h1>
           <CopyValue className="text-muted-foreground" value={operationId} />
         </div>
@@ -154,7 +154,7 @@ function OperationPage() {
                 label === 'Problems' && failures > 0 && 'text-outcome-failure',
               )}
             >
-              {op.isPending ? <Skeleton className="h-6 w-16" /> : value}
+              {op.isPending ? <Skeleton className="h-7 w-16" /> : value}
             </dd>
           </div>
         ))}
