@@ -340,6 +340,7 @@ async function composeIngestOutcome(
       pendingIds,
       pendingIds.size || unresolvedIds.size ? 'ingest_pending' : 'ingest_unavailable',
       outcome.limited,
+      unavailableIds.size > 0,
     );
   }
   return { ids, rejected: result.rejected };
@@ -354,6 +355,7 @@ async function pendingError(
   pendingIds: ReadonlySet<string>,
   code: 'ingest_pending' | 'ingest_unavailable',
   limited = false,
+  storageRefused = code === 'ingest_unavailable',
 ) {
   const details = ingestPendingDetailsSchema.parse({
     accepted: ids.length,
@@ -366,7 +368,8 @@ async function pendingError(
   const now = Date.now();
   const held = pending.filter((p) => pendingIds.has(p.eventId));
   const retryAfter = Math.max(
-    !held.length && code === 'ingest_unavailable' ? 5 : 1,
+    // Storage definitely refused some rows: don't retry it every second, even when unchecked rows ride along.
+    !held.length && storageRefused ? 5 : 1,
     held.some((p) => receipts.get(p.eventId)?.claimedAt) ? await ingestRecoveryRetryAfter(projectId) : 0,
     ...held.map((p) => {
       const receipt = receipts.get(p.eventId);

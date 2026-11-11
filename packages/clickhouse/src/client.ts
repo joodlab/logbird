@@ -94,31 +94,33 @@ export const LOGBIRD_MATERIALIZED_VIEWS = [
   'event_ids_v3_mv',
   'events_by_minute_mv',
 ] as const;
-const MATERIALIZED_VIEW_NAME = new RegExp(String.raw`\b\w+\.\w+_mv\b|\b(?:${LOGBIRD_MATERIALIZED_VIEWS.join('|')})\b`, 'i');
-// ClickHouse quotes the offending input in single quotes ("Cannot parse value '...'", "before: '...'"), escaping
-// backslashes, quotes and control characters. Bounded so a hostile message can't cost more than a few body scans.
-const QUOTED_SPAN = /'((?:[^'\\]|\\.){0,1024})'/g;
-const MAX_QUOTED_SPANS = 8;
+// A database qualifier may be backtick-quoted when it needs it (`my-db`.custom_mv).
+const QUALIFIED_VIEW_NAME = /(?:\b\w+|`[^`\s]+`)\.`?\w+_mv\b/;
+const MATERIALIZED_VIEW_NAME = new RegExp(`${QUALIFIED_VIEW_NAME.source}|\\b(?:${LOGBIRD_MATERIALIZED_VIEWS.join('|')})\\b`, 'i');
+const VIEW_PUSH_PHRASE = /(?:^|[(:]\s*|\n\s*)while pushing to (?:materialized )?view\b/i;
+// ClickHouse prints the offending input in single quotes after these fixed markers, escaping backslashes, quotes and
+// control characters. Only such excerpts are treated as input; a quoted span in any other context (an identifier in
+// unfamiliar failure wording, say) stays in the message. Bounded so a hostile message costs at most a few body scans.
+const INPUT_EXCERPT = /(before:\s*|Cannot parse (?:value|string)\s+|parsed text:\s*)'((?:[^'\\]|\\.){0,1024})'/gi;
+const MAX_INPUT_EXCERPTS = 8;
 const CONTROL_ESCAPES: Record<string, string> = { n: '\n', r: '\r', t: '\t' };
 const unescapeQuoted = (text: string) => text.replace(/\\(.)/g, (_, c: string) => CONTROL_ESCAPES[c] ?? c);
-function namesView(message: string, body?: string) {
-  let spans = 0;
-  // Only a quoted span whose text occurs in our own body is provably row input; mask it. A view name anywhere else,
-  // including failure context that happens to repeat a value from the body, still names a view: ambiguous, fail safe.
-  const outsideInput =
-    body === undefined
-      ? message
-      : message.replace(QUOTED_SPAN, (span, text: string) =>
-          ++spans <= MAX_QUOTED_SPANS && (body.includes(text) || body.includes(unescapeQuoted(text))) ? "''" : span,
-        );
-  return MATERIALIZED_VIEW_NAME.test(outsideInput);
+/** The message without input excerpts that provably come from our own body. */
+function withoutBodyExcerpts(message: string, body?: string) {
+  if (body === undefined) return message;
+  let excerpts = 0;
+  return message.replace(INPUT_EXCERPT, (span, marker: string, text: string) =>
+    ++excerpts <= MAX_INPUT_EXCERPTS && (body.includes(text) || body.includes(unescapeQuoted(text))) ? `${marker}''` : span,
+  );
 }
 function isViewFailure(error: unknown, body?: string) {
   if (!(error instanceof Error)) return false;
+  // Both view markers are checked outside body excerpts, so row input can neither hide nor impersonate them.
+  const context = withoutBodyExcerpts(error.message, body);
   return (
-    /(?:^|[(:]\s*|\n\s*)while pushing to (?:materialized )?view\b/i.test(error.message) ||
+    VIEW_PUSH_PHRASE.test(context) ||
     ('code' in error && String(error.code) === '60' && /^Target table .+ of view .+ (?:doesn't|does not) exists?\b/i.test(error.message)) ||
-    namesView(error.message, body)
+    MATERIALIZED_VIEW_NAME.test(context)
   );
 }
 export async function insertEvents(

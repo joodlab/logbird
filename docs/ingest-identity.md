@@ -340,8 +340,9 @@ the size bound in #159 lands. Block pins prevent partial synchronous fallback
 writes within that bound. Ordinary user profiles cannot lower query-level pins.
 A parse error is proven pre-write only when the serialized body fits the async
 pin, its error names `WaitForAsyncInsert`, and it is not a materialized-view failure
-("while pushing to view", or a view name outside a quoted excerpt of the statement body; quoted row
-values such as `'page.view'` or `'analytics.events_by_minute_mv'` don't count). A server
+("while pushing to view", or a view name, outside ClickHouse's input excerpts of the statement body;
+row values such as `'page.view'` or `'analytics.events_by_minute_mv'` quoted after `before:` or
+`Cannot parse value` don't count, and can't impersonate either marker). A server
 constraint rejects the whole query before reading data (code 452), returning
 `503 ingest_unavailable` and releasing unwritten claims. Client-side overrides
 that force synchronous fallback, changed error wording, oversize internal

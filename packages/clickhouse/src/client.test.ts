@@ -95,6 +95,22 @@ it.each<[string, string, (body: string) => string, boolean]>([
   ],
   // A quoted name that is not from our body (another body in the same flush, or a view) still counts.
   ['6', 'unrelated', (_body: string) => "Cannot parse value 'analytics.events_by_minute_mv': While executing WaitForAsyncInsert.", true],
+  // Only input excerpts are masked: a quoted view name in other wording still counts, even if the body repeats it.
+  [
+    '25',
+    'logbird.events_by_minute_mv',
+    (_body: string) => "Parse failed in 'logbird.events_by_minute_mv': While executing WaitForAsyncInsert.",
+    true,
+  ],
+  // Input can't impersonate the push phrase either: inside an input excerpt it is masked.
+  [
+    '6',
+    'x(while pushing to view logbird.events_by_minute_mv)',
+    (_body: string) => "Cannot parse value 'x(while pushing to view logbird.events_by_minute_mv)': While executing WaitForAsyncInsert.",
+    false,
+  ],
+  // A self-hoster's view in a database whose name needs backticks.
+  ['25', 'unrelated', (_body: string) => 'Parse failed in `my-db`.audit_copy_mv: While executing WaitForAsyncInsert.', true],
 ])('classifies code %s with event value %j quoted in the error', async (code, value, render, ambiguous) => {
   const row = normalizeEvent({ id: 'quoted', action: 'qa.quoted', metadata: { source: value } }, { projectId: 'fictional', receivedAt: new Date() });
   if (!row.ok) throw new Error(row.reason);
@@ -122,7 +138,7 @@ it('knows every materialized view this package creates', () => {
   ];
   const created = new Set<string>();
   for (const file of sources) {
-    for (const [, name] of readFileSync(file, 'utf8').matchAll(/CREATE MATERIALIZED VIEW (?:IF NOT EXISTS )?(\w+)\s+(?:TO|AS)\b/g))
+    for (const [, name] of readFileSync(file, 'utf8').matchAll(/CREATE MATERIALIZED VIEW (?:IF NOT EXISTS )?(?:`?\w+`?\.)?`?(\w+)`?\s+(?:TO|AS)\b/g))
       created.add(name!);
   }
   expect(created.size).toBeGreaterThan(0);

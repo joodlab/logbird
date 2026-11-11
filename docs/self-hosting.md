@@ -881,12 +881,14 @@ rejects the entire query with code 452 (`SETTING_CONSTRAINT_VIOLATION`) before
 reading data if a pin violates a constraint; ingest returns retryable
 `503 ingest_unavailable` and releases the unwritten claims. A parse code is isolated only
 when the serialized body fits the pinned async limit, its error names
-`WaitForAsyncInsert`, and it is not a materialized-view failure: "while pushing to view" doesn't
-appear in it, and neither does a view name (one of Logbird's nine views, or any
-`database.name_mv`) outside the quoted input. ClickHouse quotes the offending input in single
-quotes, escaping only backslashes, quotes and control characters. A quoted span whose text occurs
-in the statement body is row input, so values such as `'page.view'` or
-`'analytics.events_by_minute_mv'` don't count; a view name anywhere else does.
+`WaitForAsyncInsert`, and it is not a materialized-view failure: neither "while pushing to view"
+nor a view name (one of Logbird's nine views, or any `database.name_mv`, with the database
+optionally in backticks) appears outside the input excerpts. ClickHouse prints the offending input
+in single quotes after fixed markers (`before:`, `Cannot parse value`, `Cannot parse string`,
+`parsed text:`), escaping only backslashes, quotes and control characters. Such an excerpt whose
+text occurs in the statement body is row input, so values such as `'page.view'` or
+`'analytics.events_by_minute_mv'` don't count and can't impersonate a view failure. A view name or
+the phrase anywhere else, quoted or not, makes the failure ambiguous (the safe direction).
 If a ClickHouse upgrade changes the `WaitForAsyncInsert` wording, parse failures
 become ambiguous and can loop through pending/recovery until the incompatibility is fixed.
 Do not infer pre-write safety from the

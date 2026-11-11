@@ -66,6 +66,25 @@ it.each(['452', '60', '62', '81', '164', '497', '516', 'parse', 'mixed', 'held']
   expect(prisma.ingestReceipt.deleteMany).toHaveBeenCalledTimes(failure === 'held' ? 0 : 1);
 });
 
+it('waits 5 s when storage refused rows, even with unchecked rows in the same response', async () => {
+  const input = candidates();
+  vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
+    values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+  );
+  vi.spyOn(isolation, 'isolateIngestRows').mockResolvedValue({
+    written: [input[0]!.row],
+    rejected: [input[1]!.row],
+    unresolved: [input[2]!.row],
+    pending: [],
+    unavailable: [input[3]!.row],
+    limited: true,
+    limitReason: 'bytes',
+  });
+  const result = await insertImmutableEvents('qa91-unit', 'qa91-org', input, true).catch((error: unknown) => error);
+  expect(result).toMatchObject({ status: 503, code: 'ingest_pending', retryAfter: 5, details: { indices: [2, 3] } });
+  expect(ingestRecoveryRetryAfter).not.toHaveBeenCalled();
+});
+
 function candidates() {
   return ['written', 'bad', 'unchecked', 'pending'].map((id, index) => {
     const input = { id, action: 'qa91.composition' };
