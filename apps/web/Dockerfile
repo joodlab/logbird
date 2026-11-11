@@ -31,6 +31,7 @@ ARG WEB_GOVERNING_LAW
 ARG WEB_HOSTING_PROVIDER
 ARG WEB_EMAIL_PROVIDER
 ARG WEB_MAILBOX_PROVIDER
+ARG WEB_FORM_RETENTION_MONTHS
 # Empty optional arguments remain empty; siteConfigFrom treats them as unset and keeps its documented wording.
 ENV WEB_SITE_URL=${WEB_SITE_URL}
 ENV WEB_APP_URL=${WEB_APP_URL}
@@ -45,6 +46,7 @@ ENV WEB_GOVERNING_LAW=${WEB_GOVERNING_LAW}
 ENV WEB_HOSTING_PROVIDER=${WEB_HOSTING_PROVIDER}
 ENV WEB_EMAIL_PROVIDER=${WEB_EMAIL_PROVIDER}
 ENV WEB_MAILBOX_PROVIDER=${WEB_MAILBOX_PROVIDER}
+ENV WEB_FORM_RETENTION_MONTHS=${WEB_FORM_RETENTION_MONTHS}
 RUN pnpm --workspace-concurrency="$BUILD_CONCURRENCY" --filter @logbird/web... build
 
 FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS runtime
@@ -53,6 +55,8 @@ ENV NODE_ENV=production HOST=0.0.0.0 PORT=4620 WAITLIST_FILE=/data/waitlist.json
 LABEL org.opencontainers.image.source="https://github.com/joodlab/logbird" org.opencontainers.image.licenses="MIT" org.opencontainers.image.title="Logbird site"
 RUN mkdir /data && chown node:node /data
 COPY --from=build --chown=node:node /workspace/apps/web/.output ./.output
+# `node waitlist/admin.mjs forget <email>` deletes one person's form submissions (docs/coolify.md).
+COPY --from=build --chown=node:node /workspace/apps/web/waitlist/admin.mjs /workspace/apps/web/waitlist/file.mjs /workspace/apps/web/waitlist/expiry.mjs ./waitlist/
 USER node
 EXPOSE 4620
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD node -e 'fetch("http://127.0.0.1:"+(process.env.PORT||"4620")+"/").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'
