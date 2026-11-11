@@ -34,25 +34,22 @@ it.each([
   // Prisma 7 + adapter-pg raw query shape (rethrowAsUserFacingRawError).
   { code: 'P2010', meta: { driverAdapterError: { cause: { kind: 'UniqueConstraintViolation', originalCode: '23505' } } } },
   { code: 'P2010', meta: { driverAdapterError: { cause: { originalCode: '23505' } } } },
-])(
-  'turns claim uniqueness failures into retryable receipt conflicts (%j)',
-  async (error) => {
-    query.mockRejectedValueOnce(error);
-    await expect(
-      claimIngestReceipts('qa-project', 'qa-org', [
-        {
-          eventId: 'qa-event',
-          fingerprint: 'v1:qa',
-          receivedAt: new Date(0),
-          eventAt: new Date(0),
-          confirmedAt: null,
-          claimedAt: new Date(0),
-        },
-      ]),
-    ).rejects.toMatchObject({ code: 'LOGBIRD_INGEST_RECEIPT_CONFLICT', operation: 'claim' });
-    expect(query).toHaveBeenCalledTimes(1);
-  },
-);
+])('turns claim uniqueness failures into retryable receipt conflicts (%j)', async (error) => {
+  query.mockRejectedValueOnce(error);
+  await expect(
+    claimIngestReceipts('qa-project', 'qa-org', [
+      {
+        eventId: 'qa-event',
+        fingerprint: 'v1:qa',
+        receivedAt: new Date(0),
+        eventAt: new Date(0),
+        confirmedAt: null,
+        claimedAt: new Date(0),
+      },
+    ]),
+  ).rejects.toMatchObject({ code: 'LOGBIRD_INGEST_RECEIPT_CONFLICT', operation: 'claim' });
+  expect(query).toHaveBeenCalledTimes(1);
+});
 
 it.each([
   { code: 'P2010', meta: { code: '57014' } },

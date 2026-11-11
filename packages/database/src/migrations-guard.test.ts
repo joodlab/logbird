@@ -15,7 +15,7 @@ const migrations = readdirSync(dir, { withFileTypes: true })
 it.each(RAW_ONLY_INDEXES)('keeps the raw-SQL-only index $name: created once and never dropped later', ({ name, createdIn }) => {
   expect(migrations).toContain(createdIn);
   const sql = (migration: string) => readFileSync(join(dir, migration, 'migration.sql'), 'utf8');
-  expect(sql(createdIn)).toMatch(new RegExp(`CREATE INDEX IF NOT EXISTS "${name}"[\s\S]*WHERE`));
+  expect(sql(createdIn)).toMatch(new RegExp(`CREATE INDEX IF NOT EXISTS "${name}"[\\s\\S]*WHERE`));
   for (const migration of migrations.filter((m) => m > createdIn))
     expect(sql(migration), `${migration} must not drop ${name}`).not.toMatch(new RegExp(`DROP INDEX[^;]*"${name}"`, 'i'));
 });
