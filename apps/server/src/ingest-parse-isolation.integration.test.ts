@@ -212,14 +212,15 @@ it('keeps acknowledged child claims if Postgres confirmation fails', async () =>
 });
 
 const badEvent = (id: string) => ({ ...event(id), metadata: { fixture: 'qa91', '\ud800': 'bad' } });
-it.each([5, 20, 80])('isolates a real 1000-row body with %i bad keys without rejecting a healthy row', async (badCount) => {
+it.each([3, 20, 80])('isolates a real 1000-row body with %i bad keys without rejecting a healthy row', async (badCount) => {
   const batch = Array.from({ length: 1000 }, (_, i) => (i < badCount ? badEvent(`bad-${i}`) : event(`healthy-${i}`)));
   const writes = vi.spyOn(clickhouse, 'exec');
+  const warnings = vi.spyOn(console, 'warn');
   const response = await f.post(batch);
   const wire = await response.json();
   const details = response.status === 202 ? wire : wire.error.details;
   expect(details.rejected.every((r: { index: number }) => r.index < badCount)).toBe(true);
-  if (badCount <= 20) {
+  if (badCount === 3) {
     expect(response.status).toBe(202);
     expect(details.rejected).toHaveLength(badCount);
     expect(writes).toHaveBeenCalledTimes(badCount + 1);
@@ -231,10 +232,26 @@ it.each([5, 20, 80])('isolates a real 1000-row body with %i bad keys without rej
     expect(wire.error.code).toBe('ingest_pending');
     expect(details.indices.length).toBeGreaterThan(0);
     expect(response.headers.get('Retry-After')).toBe('1');
+    expect(
+      warnings.mock.calls.some(([line]) => {
+        const warning = JSON.parse(String(line));
+        return warning.event === 'ingest.parse_isolation_limited' && warning.projectId === f.project && warning.reason === 'bytes';
+      }),
+    ).toBe(true);
     expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(0);
     // Respect settled per-index results when resubmitting the unfinished work.
-    const remaining = details.indices.map((i: number) => batch[i]);
-    expect((await f.post(remaining)).status).toBe(202);
+    let remaining = details.indices.map((i: number) => batch[i]);
+    // The byte budget may require several attempts. Only resubmit the unresolved indices from each response.
+    for (let attempt = 0; ; attempt++) {
+      expect(attempt).toBeLessThan(badCount);
+      const retry = await f.post(remaining);
+      const retryBody = await retry.json();
+      if (retry.status === 202) break;
+      expect(retry.status).toBe(503);
+      expect(retryBody.error.code).toBe('ingest_pending');
+      expect(retryBody.error.details.rejected.length).toBeGreaterThan(0);
+      remaining = retryBody.error.details.indices.map((i: number) => remaining[i]);
+    }
     await assertHealthy(batch.slice(badCount).map((e) => e.id));
     expect((await f.post(batch)).status).toBe(503);
     await assertHealthy(batch.slice(badCount).map((e) => e.id));
@@ -262,7 +279,84 @@ it('verifies the native row number identifies the first of several bad rows', as
   ).rejects.toMatchObject({ code: '25', message: expect.stringMatching(/\(at row 2\).*WaitForAsyncInsert/s) });
   expect((await destinationCounts()).events).toBe(0);
 });
-it('reproduces sync partial writes, fails safe under clamped pins, and prevents writes with pinned blocks', async () => {
+it('reports a statement-relative row number when two concurrent bodies share one async flush', async () => {
+  const healthy = Array.from({ length: 500 }, (_, i) => event(`qa91-shared-healthy-${i}`));
+  const poison = [event('qa91-shared-a'), event('qa91-shared-b'), badEvent('qa91-shared-bad'), event('qa91-shared-c')];
+  const healthyQuery = `${f.project}-healthy`,
+    poisonQuery = `${f.project}-poison`;
+  const settings: ClickHouseSettings = {
+    ...INGEST_INSERT_SETTINGS,
+    async_insert: 1,
+    wait_for_async_insert: 1,
+    max_execution_time: 30,
+    wait_for_async_insert_timeout: 40,
+    async_insert_use_adaptive_busy_timeout: 0,
+    async_insert_busy_timeout_ms: 5000,
+    async_insert_busy_timeout_max_ms: 5000,
+  };
+  const native = async (batch: ReturnType<typeof event>[], queryId: string) => {
+    const body = batch.map((input) => `${JSON.stringify(f.row(input))}\n`).join('');
+    const result = await clickhouse.exec({
+      query: 'INSERT INTO events FORMAT JSONEachRow',
+      query_id: queryId,
+      values: Readable.from([body]),
+      clickhouse_settings: settings,
+    });
+    for await (const _chunk of result.stream) {
+      /* consume acknowledgement */
+    }
+  };
+  const first = native(healthy, healthyQuery);
+  const pending = [first];
+  // Attach handlers immediately, including if queue inspection fails; cleanup must wait for every INSERT.
+  void first.catch(() => {
+    /* The result is asserted below and awaited again before fixture cleanup. */
+  });
+  try {
+    await vi.waitFor(
+      async () => {
+        expect(
+          await read(clickhouse, 'SELECT count() n FROM system.asynchronous_inserts WHERE has(entries.query_id, {q:String})', { q: healthyQuery }),
+        ).toEqual([{ n: 1 }]);
+      },
+      { timeout: 3000, interval: 50 },
+    );
+    const second = native(poison, poisonQuery);
+    pending.push(second);
+    const [good, bad] = await Promise.allSettled([first, second]);
+    expect(good!.status).toBe('fulfilled');
+    expect(bad!.status).toBe('rejected');
+    if (bad!.status !== 'rejected') throw new Error('Expected the qa91 poison statement to fail');
+    expect(bad.reason).toMatchObject({ code: '25', message: expect.stringMatching(/\(at row 3\).*WaitForAsyncInsert/s) });
+    for (const table of ['events', 'event_ids']) {
+      expect(
+        await read(clickhouse, `SELECT event_id id,count() n FROM ${table} WHERE project_id={p:String} GROUP BY event_id ORDER BY event_id`, {
+          p: f.project,
+        }),
+      ).toEqual(healthy.map((input) => ({ id: input.id, n: 1 })).sort((a, b) => a.id.localeCompare(b.id)));
+    }
+    expect(await read(clickhouse, 'SELECT sum(events) n FROM events_by_minute WHERE project_id={p:String}', { p: f.project })).toEqual([{ n: 500 }]);
+    // See https://clickhouse.com/docs/operations/system-tables/asynchronous_insert_log.
+    // Require the same flush ID: merely overlapping request lifetimes would not prove shared parsing.
+    // The test environment must enable asynchronous_insert_log; wait for its normal log flush, without SYSTEM commands.
+    await vi.waitFor(
+      async () => {
+        const entries = await read<{ query_id: string; flush_query_id: string }>(
+          clickhouse,
+          'SELECT query_id,flush_query_id FROM system.asynchronous_insert_log WHERE query_id IN {ids:Array(String)} ORDER BY query_id',
+          { ids: [healthyQuery, poisonQuery] },
+        );
+        expect(entries.map((entry) => entry.query_id).sort()).toEqual([healthyQuery, poisonQuery].sort());
+        expect(entries[0]!.flush_query_id).not.toBe('');
+        expect(entries[1]!.flush_query_id).toBe(entries[0]!.flush_query_id);
+      },
+      { timeout: 20_000, interval: 250 },
+    );
+  } finally {
+    await Promise.allSettled(pending);
+  }
+}, 60_000);
+it('reproduces sync partial writes under client-side pin overrides and prevents writes with pinned blocks', async () => {
   const rows = Array.from({ length: 3000 }, (_, i) => f.row(i === 2499 ? badEvent(`sync-${i}`) : event(`sync-${i}`)));
   const body = `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`;
   const low: ClickHouseSettings = {
@@ -287,13 +381,13 @@ it('reproduces sync partial writes, fails safe under clamped pins, and prevents 
   expect(partial.event_ids).toBeGreaterThan(0);
   await f.cleanup();
   expect(await destinationCounts()).toEqual({ events: 0, event_ids: 0, events_by_minute: 0, entities: 0, attribute_keys: 0 });
-  // Emulate a server constraint clamping both async and block pins, without changing any profile.
+  // Override pins on the client, without changing a server profile. A real server constraint rejects with code 452.
   vi.spyOn(clickhouse, 'exec').mockImplementation((params) => exec({ ...params, clickhouse_settings: { ...params.clickhouse_settings, ...low } }));
   await expect(insertEvents(clickhouse, rows)).rejects.toBeInstanceOf(AmbiguousInsertError);
   expect((await destinationCounts()).events).toBeGreaterThan(0);
   vi.restoreAllMocks();
   await f.cleanup();
-  // A lowered async constraint still falls back to sync; query-level block pins keep it unwritten.
+  // A client-side lowered async pin still falls back to sync; query-level block pins keep it unwritten.
   vi.spyOn(clickhouse, 'exec').mockImplementation((params) =>
     exec({ ...params, clickhouse_settings: { ...low, ...params.clickhouse_settings, async_insert_max_data_size: '1000' } }),
   );

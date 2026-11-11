@@ -5,6 +5,117 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
+const settledResponse = (code = 'ingest_pending') =>
+  new Response(
+    JSON.stringify({
+      error: {
+        code,
+        details: {
+          accepted: 1,
+          ids: ['qa91-accepted'],
+          rejected: [{ index: 1, reason: 'invalid_event: bad Unicode' }],
+          indices: [0],
+          eventIds: ['qa91-unresolved'],
+          warnings: [],
+        },
+      },
+    }),
+    { status: 503, headers: { 'Retry-After': '0' } },
+  );
+
+it.each(['ingest_pending', 'ingest_unavailable'])('requeues only unsettled events under concurrent capacity pressure after %s', async (code) => {
+  let respond!: (response: Response) => void;
+  const fetcher = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          respond = resolve;
+        }),
+    )
+    .mockImplementation(async () => new Response('{}', { status: 202 }));
+  vi.stubGlobal('fetch', fetcher);
+  const onDrop = vi.fn();
+  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', maxQueueSize: 3, maxRetries: 0, onDrop });
+  for (const id of ['qa91-unresolved', 'qa91-bad', 'qa91-accepted']) sdk.track({ id, action: 'qa91.sdk' });
+  const flushing = sdk.flush();
+  sdk.track({ id: 'qa91-new1', action: 'qa91.sdk' });
+  sdk.track({ id: 'qa91-new2', action: 'qa91.sdk' });
+  respond(settledResponse(code));
+  await expect(flushing).rejects.toThrow('Logbird HTTP 503');
+  expect(sdk.queueSize).toBe(3);
+  expect(sdk.dropped).toBe(1);
+  expect(onDrop.mock.calls.map(([event]) => event.id)).toEqual(['qa91-bad']);
+  await sdk.shutdown();
+  expect(JSON.parse(fetcher.mock.calls[1]?.[1].body).events.map((event: { id: string }) => event.id)).toEqual([
+    'qa91-unresolved',
+    'qa91-new1',
+    'qa91-new2',
+  ]);
+});
+
+it('does not drop settled indices twice when a partial 503 is followed by 401', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(settledResponse())
+    .mockResolvedValueOnce(new Response('', { status: 401 }));
+  vi.stubGlobal('fetch', fetcher);
+  const onDrop = vi.fn();
+  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', maxRetries: 1, onDrop });
+  for (const id of ['qa91-unresolved', 'qa91-bad', 'qa91-accepted']) sdk.track({ id, action: 'qa91.sdk' });
+  const flushing = sdk.flush();
+  await vi.advanceTimersByTimeAsync(0);
+  await flushing;
+  expect(onDrop.mock.calls.map(([event]) => event.id)).toEqual(['qa91-bad', 'qa91-unresolved']);
+  expect(sdk.dropped).toBe(2);
+  expect(sdk.queueSize).toBe(0);
+  expect(fetcher.mock.calls[0]?.[1].body).toBe(fetcher.mock.calls[1]?.[1].body);
+  await sdk.shutdown();
+});
+
+it('reports each rejection once across identical 503 retries and requeues only unresolved events', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn().mockImplementation(async () => settledResponse());
+  vi.stubGlobal('fetch', fetcher);
+  const onDrop = vi.fn(),
+    onError = vi.fn();
+  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', maxRetries: 1, onDrop, onError });
+  for (const id of ['qa91-unresolved', 'qa91-bad', 'qa91-accepted']) sdk.track({ id, action: 'qa91.sdk' });
+  const failed = expect(sdk.flush()).rejects.toThrow('Logbird HTTP 503');
+  await vi.advanceTimersByTimeAsync(0);
+  await failed;
+  expect(sdk.queueSize).toBe(1);
+  expect(sdk.dropped).toBe(1);
+  expect(onDrop).toHaveBeenCalledTimes(1);
+  expect(onError).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls[0]?.[1].body).toBe(fetcher.mock.calls[1]?.[1].body);
+  fetcher.mockImplementation(async () => new Response('{}', { status: 202 }));
+  await sdk.shutdown();
+  expect(JSON.parse(fetcher.mock.calls[2]?.[1].body).events.map((event: { id: string }) => event.id)).toEqual(['qa91-unresolved']);
+});
+
+it('prunes settled events on an exceptional exit after a 503 and malformed 202', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(settledResponse())
+    .mockResolvedValueOnce(new Response('{', { status: 202 }))
+    .mockImplementation(async () => new Response('{}', { status: 202 }));
+  vi.stubGlobal('fetch', fetcher);
+  const onDrop = vi.fn();
+  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', maxRetries: 1, onDrop });
+  for (const id of ['qa91-unresolved', 'qa91-bad', 'qa91-accepted']) sdk.track({ id, action: 'qa91.sdk' });
+  const failed = expect(sdk.flush()).rejects.toThrow();
+  await vi.advanceTimersByTimeAsync(0);
+  await failed;
+  expect(sdk.queueSize).toBe(1);
+  expect(sdk.dropped).toBe(1);
+  expect(fetcher.mock.calls[0]?.[1].body).toBe(fetcher.mock.calls[1]?.[1].body);
+  await sdk.shutdown();
+  expect(JSON.parse(fetcher.mock.calls[2]?.[1].body).events.map((event: { id: string }) => event.id)).toEqual(['qa91-unresolved']);
+  expect(onDrop).toHaveBeenCalledTimes(1);
+});
 it('retries ingest_pending 503 after Retry-After with identical ids and body', async () => {
   vi.useFakeTimers();
   const fetch = vi

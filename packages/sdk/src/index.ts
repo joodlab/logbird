@@ -149,56 +149,89 @@ export class Logbird {
   }
   private async send(batch: EventInput[]) {
     const body = JSON.stringify({ events: batch });
-    const rejectedIndices = new Set<number>();
+    const settledIndices = new Set<number>();
     const reject = (rejections?: { index: number; reason: string }[]) => {
-      const fresh = (rejections ?? []).filter((r) => Number.isInteger(r.index) && batch[r.index] && !rejectedIndices.has(r.index));
-      for (const rejection of fresh) {
-        rejectedIndices.add(rejection.index);
+      const fresh: { index: number; reason: string }[] = [];
+      for (const rejection of rejections ?? []) {
+        if (!Number.isInteger(rejection.index) || !batch[rejection.index] || settledIndices.has(rejection.index)) continue;
+        settledIndices.add(rejection.index);
+        fresh.push(rejection);
         this.drop(batch[rejection.index]!);
       }
       if (fresh.length) this.report(new Error(`${fresh.length} events rejected by Logbird: ${fresh.map((r) => r.reason).join('; ')}`));
     };
-    for (let attempt = 0; ; attempt++) {
-      let response: Response | undefined, error: unknown;
-      try {
-        response = await fetch(`${this.options.endpoint!.replace(/\/$/, '')}/v1/events`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${this.options.apiKey}`, 'Content-Type': 'application/json', 'X-Logbird-SDK': 'typescript/0.2.0' },
-          body,
-          signal: AbortSignal.timeout(30_000),
-        });
-      } catch (e) {
-        error = e;
+    try {
+      for (let attempt = 0; ; attempt++) {
+        let response: Response | undefined, error: unknown;
+        try {
+          response = await fetch(`${this.options.endpoint!.replace(/\/$/, '')}/v1/events`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${this.options.apiKey}`, 'Content-Type': 'application/json', 'X-Logbird-SDK': 'typescript/0.2.0' },
+            body,
+            signal: AbortSignal.timeout(30_000),
+          });
+        } catch (e) {
+          error = e;
+        }
+        if (response?.ok) {
+          const result = (await response.json()) as { rejected?: { index: number; reason: string }[] };
+          reject(result.rejected);
+          return;
+        }
+        if (response?.status === 503) {
+          // Keep the wire body identical across retries; settled indices only affect later requeuing.
+          const result = (await response.json().catch(() => null)) as {
+            error?: {
+              code?: string;
+              details?: {
+                accepted?: number;
+                ids?: string[];
+                rejected?: { index: number; reason: string }[];
+                indices?: number[];
+                eventIds?: string[];
+                warnings?: unknown[];
+              };
+            };
+          } | null;
+          if (result?.error?.code === 'ingest_pending' || result?.error?.code === 'ingest_unavailable') {
+            const details = result.error.details;
+            reject(details?.rejected);
+            if (
+              details &&
+              Array.isArray(details.ids) &&
+              details.accepted === details.ids.length &&
+              Array.isArray(details.rejected) &&
+              Array.isArray(details.indices) &&
+              Array.isArray(details.eventIds) &&
+              details.indices.length === details.eventIds.length &&
+              Array.isArray(details.warnings)
+            ) {
+              const accepted = new Set(details.ids);
+              const unresolved = new Set(details.indices);
+              batch.forEach((event, index) => {
+                if (!unresolved.has(index) && event.id && accepted.has(event.id)) settledIndices.add(index);
+              });
+            }
+          }
+        }
+        const retry = !response || response.status === 429 || response.status >= 500;
+        if (!retry) {
+          batch.forEach((event, index) => {
+            if (!settledIndices.has(index)) this.drop(event);
+          });
+          this.report(new Error(`Logbird HTTP ${response?.status}; batch dropped`));
+          return;
+        }
+        if (attempt >= this.retries) throw error ?? new Error(`Logbird HTTP ${response?.status}`);
+        const retryAfter = response?.headers.get('Retry-After');
+        const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
+        const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** attempt) * (0.5 + Math.random());
+        await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(60_000, delay))));
       }
-      if (response?.ok) {
-        const result = (await response.json()) as { rejected?: { index: number; reason: string }[] };
-        reject(result.rejected);
-        return;
-      }
-      if (response?.status === 503) {
-        // A retryable ingest response can already settle individual poison rows.
-        // Keep the wire body identical across retries and report each drop only once.
-        const result = (await response.json().catch(() => null)) as {
-          error?: { code?: string; details?: { rejected?: { index: number; reason: string }[] } };
-        } | null;
-        if (result?.error?.code === 'ingest_pending' || result?.error?.code === 'ingest_unavailable') reject(result.error.details?.rejected);
-      }
-      const retry = !response || response.status === 429 || response.status >= 500;
-      if (!retry) {
-        for (const event of batch) this.drop(event);
-        this.report(new Error(`Logbird HTTP ${response?.status}; batch dropped`));
-        return;
-      }
-      if (attempt >= this.retries) {
-        // flush requeues retryable rows, never the individually settled rejections.
-        const remaining = batch.filter((_, index) => !rejectedIndices.has(index));
-        batch.splice(0, batch.length, ...remaining);
-        throw error ?? new Error(`Logbird HTTP ${response?.status}`);
-      }
-      const retryAfter = response?.headers.get('Retry-After');
-      const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
-      const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** attempt) * (0.5 + Math.random());
-      await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(60_000, delay))));
+    } finally {
+      // On every exceptional exit, flush can requeue only events not already accepted or rejected.
+      const remaining = batch.filter((_, index) => !settledIndices.has(index));
+      batch.splice(0, batch.length, ...remaining);
     }
   }
   flush(): Promise<void> {

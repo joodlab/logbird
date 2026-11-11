@@ -125,7 +125,7 @@ be reordered recursively; array order and string contents must stay identical.
 Identity includes the full input, including values outside indexing caps, and the
 resolved timestamp. Omitted or invalid `occurredAt` keeps the first receipt's clock.
 
-The SDK generates ids and timestamps once before queuing. If you use convergent
+The SDK generates ids and timestamps once before queuing. If you use deterministic
 ids across separate `track()` calls, resend identical content, including `occurredAt`
 and `executor.attempt`; a new call otherwise gets a fresh timestamp. A different
 event with the same id is rejected with `duplicate_id_conflict: ...`; the original
@@ -151,7 +151,7 @@ Rejection codes appear in `rejected[].code`; retryable HTTP codes appear in
 
 | Code | Meaning | What to do / expected timing |
 | --- | --- | --- |
-| `invalid_event` | Invalid event fields or a definite native storage parse failure. | Fix the reported indices in `rejected`. Healthy siblings are accepted (202); all rejected gives `accepted: 0`. If isolation reaches its statement, wall-clock or lease limit, unchecked rows stay retryable in `503 ingest_pending` indices, never in `rejected`. |
+| `invalid_event` | Invalid event fields or a definite native storage parse failure. | Fix the reported indices in `rejected`. Healthy siblings are accepted (202); all rejected gives `accepted: 0`. If isolation reaches its statement, byte, wall-clock or lease limit, unchecked rows stay retryable in `503 ingest_pending` indices, never in `rejected`. |
 | `invalid_event_id` | Unsafe or oversized string id. | Use valid Unicode without NUL, at most 256 UTF-16 units after trimming. |
 | `duplicate_id_conflict` | The id belongs to different content. | Keep the original; send corrections with a new id and context.parentEventId. |
 | `stored_event_unreadable` | Retained evidence cannot be compared. | Keep the evidence. Send a correction with a new id; ask the operator to inspect storage. |

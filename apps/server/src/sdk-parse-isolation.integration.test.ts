@@ -18,7 +18,7 @@ afterEach(async () => {
   }
   expect(await prisma.ingestReceipt.count({ where: { projectId: fixture.project } })).toBe(0);
 });
-it.each([5, 80])('drives the real in-process ingest app with %i poison events and never drops healthy input', async (badCount) => {
+it.each([3, 80])('drives the real in-process ingest app with %i poison events and never drops healthy input', async (badCount) => {
   // A fixed occurredAt keeps the SDK-prepared content identical across instances (it fills occurredAt with "now").
   const occurredAt = new Date(Date.now() - 60_000).toISOString();
   const batch = Array.from({ length: 1000 }, (_, i) => ({
@@ -56,12 +56,12 @@ it.each([5, 80])('drives the real in-process ingest app with %i poison events an
     onError: (e) => errors.push(e),
   });
   for (const e of batch) sdk.track(e);
-  if (badCount === 5) {
+  if (badCount === 3) {
     await sdk.flush();
     expect(responses.map((r) => r.status)).toEqual([202]);
-    expect(dropped).toEqual(batch.slice(0, 5).map((e) => e.id));
+    expect(dropped).toEqual(batch.slice(0, badCount).map((e) => e.id));
     expect(sdk.queueSize).toBe(0);
-    expect(await fixture.count()).toBe(995);
+    expect(await fixture.count()).toBe(1000 - badCount);
     await sdk.shutdown();
   } else {
     await expect(sdk.flush()).rejects.toThrow('Logbird HTTP 503');
@@ -72,7 +72,7 @@ it.each([5, 80])('drives the real in-process ingest app with %i poison events an
     expect(dropped).toEqual(first.error.details.rejected.map((r) => batch[r.index]!.id));
     expect(dropped.length).toBeGreaterThan(0);
     expect(dropped.length).toBeLessThanOrEqual(65);
-    expect(sdk.queueSize).toBe(1000 - dropped.length);
+    expect(sdk.queueSize).toBe(1000 - dropped.length - seeded.length);
     expect(await fixture.count()).toBe(10);
     expect(first.error.details.ids).toEqual(seeded.map((e) => e.id));
   }

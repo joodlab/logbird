@@ -339,8 +339,9 @@ ambiguous rather than isolated. Block pins prevent partial synchronous fallback
 writes within that bound. Ordinary user profiles cannot lower query-level pins.
 A parse error is proven pre-write only when the serialized body fits the async
 pin, its error names `WaitForAsyncInsert`, and it is not a view failure. A server
-constraint that rejects settings before body handoff is unavailable; clamping
-that forces synchronous fallback, changed error wording, oversize internal
+constraint rejects the whole query before reading data (code 452), returning
+`503 ingest_unavailable` and releasing unwritten claims. Client-side overrides
+that force synchronous fallback, changed error wording, oversize internal
 statements and view failures remain ambiguous after handoff, retaining claims
 for recovery. See [self-hosting](self-hosting.md#ingest-insert-settings).
 
@@ -353,14 +354,17 @@ Only individual proven failures become `invalid_event`, including a 202 with
 `accepted: 0` when every row is rejected. A definite non-parse failure returns
 503 `ingest_unavailable`, with acknowledged siblings confirmed and listed in ids.
 
-A 64-extra-statement cap, a ten-second isolation wall clock and the original
-lease's remaining 40-second finish budget bound the work. Typed pre-body lease
-exhaustion or either cap leaves unchecked rows retryable: `503 ingest_pending`
+A 64-extra-statement cap, an isolation byte budget of four times the original
+statement's UTF-8 bytes (excluding that original statement), a ten-second isolation
+wall clock and the original lease's remaining 40-second finish budget bound the work.
+Rows are serialized once; subsets join cached JSON lines. Typed pre-body lease
+exhaustion or any cap leaves unchecked rows retryable: `503 ingest_pending`
 includes settled `{accepted,ids,rejected,warnings}` plus their `indices` and
 `eventIds`. Claims for these proven-unwritten rows are released. Only truly
 ambiguous/competing claim-held ids determine Retry-After; unresolved-only
 responses use one second. The server logs `ingest.parse_isolation_limited`
-immediately after isolation, even when another failure takes response precedence.
+with the limiting reason immediately after isolation, even when another failure
+takes response precedence.
 
 Ambiguous children are never split or retried within an attempt. Their claims
 stay leased while siblings settle; confirmation failures also preserve every

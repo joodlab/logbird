@@ -872,10 +872,10 @@ A statement larger than 64 MiB (only possible with absurd flattened attribute pa
 is never isolated: its parse error is treated as ambiguous and reconciled by recovery.
 
 Query-level pins win over ordinary user profiles. Operators should allow these
-settings for the writer and avoid server constraints that clamp them. A setting
-rejection before handoff returns retryable `ingest_unavailable`; a clamped pin
-that forces synchronous parsing makes a parse failure ambiguous after handoff
-(`503 ingest_pending`, claims kept for recovery). A parse code is isolated only
+settings for the writer and avoid server constraints that reject them. ClickHouse
+rejects the entire query with code 452 (`SETTING_CONSTRAINT_VIOLATION`) before
+reading data if a pin violates a constraint; ingest returns retryable
+`503 ingest_unavailable` and releases the unwritten claims. A parse code is isolated only
 when the serialized body fits the pinned async limit, its error names
 `WaitForAsyncInsert`, and it is not a materialized-view failure. Changed server
 wording fails safe as pending/recovery. Do not infer pre-write safety from the

@@ -187,7 +187,8 @@ Use a current timestamp when creating an event. Send a single event, an array or
 Definite native storage parse failures are isolated into `invalid_event` rejections
 with zero-based indices and code-first reasons. Healthy siblings remain accepted;
 an all-rejected batch still returns 202 with `accepted: 0`. Isolation is bounded; if
-it runs out of its 64-extra-statement, ten-second wall-clock or lease budget,
+it runs out of its 64-extra-statement, four-original-body byte budget for additional
+statements, ten-second wall-clock or lease budget,
 unchecked events return retryable `503 ingest_pending` indices, with settled 202
 fields. Their claims are released; unresolved-only Retry-After is one second.
 Ambiguous siblings keep their claims and determine lease-aware Retry-After.

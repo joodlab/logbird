@@ -217,9 +217,17 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
     const expiresAt = Math.min(
       ...[...owned.values()].filter((c) => !c.confirmedAt).map((c) => (c.claimedAt?.getTime() ?? 0) + INGEST_CLAIM_LEASE_MS),
     );
-    const outcome = await isolateIngestRows(rows, expiresAt, (part) => insertEvents(clickhouse, part, expiresAt));
+    const outcome = await isolateIngestRows(rows, expiresAt, (part, body) => insertEvents(clickhouse, part, expiresAt, body));
     if (outcome.limited)
-      console.warn(JSON.stringify({ level: 'warn', event: 'ingest.parse_isolation_limited', projectId, unresolved: outcome.unresolved.length }));
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          event: 'ingest.parse_isolation_limited',
+          projectId,
+          unresolved: outcome.unresolved.length,
+          reason: outcome.limitReason,
+        }),
+      );
     // After acknowledgement, a Postgres failure must preserve the claim for a visibility retry.
     for (const row of [...outcome.written, ...outcome.pending]) releasable.delete(row.event_id);
     await confirmIngestReceipts(

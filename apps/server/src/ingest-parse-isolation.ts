@@ -3,10 +3,11 @@ import { AmbiguousInsertError, type EventRow, INSERT_LEASE_BUDGET_MS, InsertLeas
 // Extra statements after the original failure; exact row reports need k+1 total for k bad rows.
 export const MAX_PARSE_ISOLATION_STATEMENTS = 64;
 export const MAX_PARSE_ISOLATION_MS = 10_000;
+export const MAX_PARSE_ISOLATION_BYTE_MULTIPLIER = 4;
 export const STORAGE_PARSE_REJECTION = 'invalid_event: Storage could not parse this event. Check event field types, Unicode and timestamps.';
 
 /** Every insert closes over the original lease; only proven-unwritten partitions may be split. */
-export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number, insert: (rows: EventRow[]) => Promise<void>) {
+export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number, insert: (rows: EventRow[], body: string) => Promise<void>) {
   const written: EventRow[] = [],
     rejected: EventRow[] = [],
     pending: EventRow[] = [],
@@ -15,8 +16,22 @@ export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number
   let statements = 0;
   let isolationDeadline = Number.POSITIVE_INFINITY;
   let limited = false;
-  function defer(part: EventRow[]) {
-    limited = true;
+  let limitReason: 'statements' | 'bytes' | 'wall_clock' | 'lease' | undefined;
+  // Rows are immutable for this attempt. Cache JSON and UTF-8 lengths once, including each newline.
+  const serialized = new Map(
+    rows.map((row) => {
+      const line = `${JSON.stringify(row)}\n`;
+      return [row, { line, bytes: Buffer.byteLength(line) }] as const;
+    }),
+  );
+  const bytes = (part: EventRow[]) => part.reduce((total, row) => total + serialized.get(row)!.bytes, 0);
+  const isolationByteBudget = bytes(rows) * MAX_PARSE_ISOLATION_BYTE_MULTIPLIER;
+  let isolationBytes = 0;
+  function defer(part: EventRow[], reason: NonNullable<typeof limitReason>) {
+    if (Number.isFinite(isolationDeadline)) {
+      limited = true;
+      limitReason ??= reason;
+    }
     unresolved.push(...part);
   }
   async function parseFailure(part: EventRow[], error?: unknown): Promise<void> {
@@ -41,18 +56,31 @@ export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number
   }
   async function visit(part: EventRow[]): Promise<boolean> {
     if (!part.length) return true;
-    if (statements > MAX_PARSE_ISOLATION_STATEMENTS || Date.now() >= isolationDeadline || Date.now() + INSERT_LEASE_BUDGET_MS > leaseExpiresAt) {
-      defer(part);
+    const isolating = Number.isFinite(isolationDeadline);
+    const partBytes = bytes(part);
+    const reason =
+      statements > MAX_PARSE_ISOLATION_STATEMENTS
+        ? 'statements'
+        : Date.now() >= isolationDeadline
+          ? 'wall_clock'
+          : Date.now() + INSERT_LEASE_BUDGET_MS > leaseExpiresAt
+            ? 'lease'
+            : isolating && isolationBytes + partBytes > isolationByteBudget
+              ? 'bytes'
+              : undefined;
+    if (reason) {
+      defer(part, reason);
       return false;
     }
     statements++;
+    if (isolating) isolationBytes += partBytes;
     try {
-      await insert(part);
+      await insert(part, part.map((row) => serialized.get(row)!.line).join(''));
       written.push(...part);
       return true;
     } catch (error) {
       if (error instanceof AmbiguousInsertError) pending.push(...part);
-      else if (error instanceof InsertLeaseExhaustedError) defer(part);
+      else if (error instanceof InsertLeaseExhaustedError) defer(part, 'lease');
       else if (isPrewriteParseError(error)) {
         isolationDeadline = Math.min(isolationDeadline, Date.now() + MAX_PARSE_ISOLATION_MS);
         await parseFailure(part, error);
@@ -61,5 +89,5 @@ export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number
     }
   }
   await visit(rows);
-  return { written, rejected, pending, unavailable, unresolved, limited };
+  return { written, rejected, pending, unavailable, unresolved, limited, limitReason };
 }

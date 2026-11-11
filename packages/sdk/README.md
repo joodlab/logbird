@@ -180,7 +180,8 @@ honoring `Retry-After`. Healthy siblings commit before a pending response and re
 idempotent on retry. Pending details include `accepted`, `ids`, `rejected`, `warnings`,
 `indices` and `eventIds`. Every index outside `indices` is settled. Each rejected
 entry has a `code` plus a code-first explanation in `reason`. The SDK retries these
-responses; after its retry budget, the batch stays queued and `flush()` rejects.
+responses with an identical wire body; rejections call `onDrop` once. After its
+retry budget, only unsettled events stay queued and `flush()` rejects.
 Retry `flush()` later. Unresolved writes recover automatically per project after a
 bounded lease and ClickHouse queue drain. An id containing NUL, a lone surrogate,
 or more than 256 UTF-16 code units after trimming is rejected individually as
@@ -194,7 +195,7 @@ Rejection codes appear in `rejected[].code`; retryable HTTP codes appear in
 
 | Code | Meaning | What to do / expected timing |
 | --- | --- | --- |
-| `invalid_event` | Invalid event fields. | Fix the reported event. A native parse error may return 422 for the batch. |
+| `invalid_event` | Invalid event fields or a proven storage parse failure. | Fix the reported indices in `rejected`. Healthy siblings are accepted (202); all rejected gives `accepted: 0`. Isolation limits leave unchecked indices retryable in `503 ingest_pending`. |
 | `invalid_event_id` | Unsafe or oversized string id. | Use valid Unicode without NUL, at most 256 UTF-16 units after trimming. |
 | `duplicate_id_conflict` | The id belongs to different content. | Keep the original; send corrections with a new id and context.parentEventId. |
 | `stored_event_unreadable` | Retained evidence cannot be compared. | Keep the evidence. Send a correction with a new id; ask the operator to inspect storage. |

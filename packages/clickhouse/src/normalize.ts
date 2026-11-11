@@ -18,7 +18,7 @@ const isLow = (code: number) => code >= 0xdc_00 && code <= 0xdf_ff;
 const capText = (s: string, cap: number) => s.slice(0, isHigh(s.charCodeAt(cap - 1)) && isLow(s.charCodeAt(cap)) ? cap - 1 : cap);
 // Search columns are lossy by design: a lone surrogate (which ClickHouse rejects as invalid UTF-8, code 25) becomes
 // U+FFFD, like String.prototype.toWellFormed. The raw payload and v1 identity keep the original input.
-const wellFormed = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '�');
+const wellFormed = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
 const text = (v: unknown, cap = 512): string => (typeof v === 'string' ? capText(wellFormed(v.trim()), cap) : '');
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
 export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string }) {

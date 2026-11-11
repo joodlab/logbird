@@ -49,7 +49,7 @@ export const INGEST_INSERT_SETTINGS = {
 } as const;
 export const CLICKHOUSE_PARSE_ERROR_CODES = new Set(['6', '25', '27', '38', '41', '53', '69', '72']);
 // Authentication/query rejection is definite; resource limits and async-wait timeouts are not.
-export const CLICKHOUSE_PREWRITE_ERROR_CODES = new Set([...CLICKHOUSE_PARSE_ERROR_CODES, '60', '62', '81', '164', '497', '516']);
+export const CLICKHOUSE_PREWRITE_ERROR_CODES = new Set([...CLICKHOUSE_PARSE_ERROR_CODES, '60', '62', '81', '164', '452', '497', '516']);
 export class AmbiguousInsertError extends Error {
   constructor() {
     super('Storage acknowledgement is unresolved after sending the body');
@@ -79,7 +79,12 @@ function isViewFailure(error: unknown) {
     ('code' in error && String(error.code) === '60' && /^Target table .+ of view .+ (?:doesn't|does not) exists?\b/i.test(error.message))
   );
 }
-export async function insertEvents(ch: ClickHouseClient, rows: EventRow[], leaseExpiresAt = Date.now() + INGEST_CLAIM_LEASE_MS) {
+export async function insertEvents(
+  ch: ClickHouseClient,
+  rows: EventRow[],
+  leaseExpiresAt = Date.now() + INGEST_CLAIM_LEASE_MS,
+  serializedBody?: string,
+) {
   if (!rows.length) return;
   let bodySent = false;
   let bodyBytes = 0;
@@ -88,7 +93,7 @@ export async function insertEvents(ch: ClickHouseClient, rows: EventRow[], lease
   const values = new Readable({
     read() {
       try {
-        const body = `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`;
+        const body = serializedBody ?? `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`;
         bodyBytes = Buffer.byteLength(body);
         if (Date.now() + INSERT_LEASE_BUDGET_MS > leaseExpiresAt) throw new InsertLeaseExhaustedError();
         bodySent = true;

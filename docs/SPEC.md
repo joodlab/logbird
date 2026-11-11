@@ -129,8 +129,10 @@ Semantics worth documenting to users:
   the native body row number, with sibling-inference bisection as a fallback.
   Healthy siblings return in `ids`; individually proven offending indices appear
   in `rejected` with `code: invalid_event`, including a 202 with `accepted: 0` when
-  all events fail. A 64-extra-statement cap, ten-second wall clock and original
-  lease bound isolation. Unchecked, proven-unwritten rows release their claims and
+  all events fail. A 64-extra-statement cap, a four-original-body UTF-8 byte budget
+  for additional statements, ten-second wall clock and original lease bound
+  isolation. Rows are serialized once; subset statements join cached lines.
+  Unchecked, proven-unwritten rows release their claims and
   return retryable `503 ingest_pending` with settled 202 fields and unresolved
   `indices`/`eventIds`; they are never `invalid_event`. Unresolved-only Retry-After
   is one second. Ambiguous writes keep their claims and determine lease-aware

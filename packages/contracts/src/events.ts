@@ -101,7 +101,7 @@ export const ingestResponseSchema = z.object({
   warnings: z.array(z.object({ index: z.number().int(), reason: z.string() })).default([]),
 });
 export type IngestResponse = z.infer<typeof ingestResponseSchema>;
-/** 503 ingest_pending: siblings commit first. Every index outside indices is settled; retry the identical batch with Retry-After. */
+/** 503 ingest_pending / ingest_unavailable: siblings commit first. Every index outside indices is settled; retry the identical batch with Retry-After. */
 export const ingestPendingDetailsSchema = ingestResponseSchema.extend({
   indices: z.array(z.number().int().nonnegative()),
   eventIds: z.array(z.string()),

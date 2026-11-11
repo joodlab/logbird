@@ -2,7 +2,10 @@ import { AmbiguousInsertError, type EventRow, INGEST_CLAIM_LEASE_MS, InsertLease
 import { afterEach, expect, it, vi } from 'vitest';
 import { isolateIngestRows, MAX_PARSE_ISOLATION_MS, MAX_PARSE_ISOLATION_STATEMENTS } from './ingest-parse-isolation';
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 const parseError = (row?: number) =>
   Object.assign(new Error(`Cannot parse fixture ${row === undefined ? '' : `(at row ${row})`}: While executing WaitForAsyncInsert.`), { code: '25' });
 function rows(n: number) {
@@ -42,9 +45,11 @@ it.each([undefined, 0, 1001])('falls back for row %s and infers an unwritten rig
   expect(insert.mock.calls.map(([part]) => part.length)).toEqual([8, 4, 2, 1]);
   uniqueBodies(insert);
 });
-it('caps statements, never rejects unchecked healthy rows, and retries make progress', async () => {
+it('caps statements without rejecting unchecked healthy rows when bytes are below budget', async () => {
   const input = rows(1000),
-    bad = new Set(input.filter((_, i) => i % 2));
+    bad = new Set(input.filter((_, i) => i === 0 || i % 2));
+  // Removing the large first poison row makes subsequent statements small enough to reach the statement cap.
+  input[0]!.payload = 'x'.repeat(20_000_000);
   const insert = vi.fn(async (part: EventRow[]) => {
     const i = part.findIndex((r) => bad.has(r));
     if (i >= 0) throw parseError(i + 1);
@@ -56,10 +61,36 @@ it('caps statements, never rejects unchecked healthy rows, and retries make prog
   expect(result.unresolved).toHaveLength(935);
   expect(result.limited).toBe(true);
   uniqueBodies(insert);
-  insert.mockClear();
-  const retry = await isolateIngestRows(result.unresolved, lease(), insert);
-  expect(retry.rejected).toHaveLength(65);
-  expect(retry.unresolved).toHaveLength(870);
+  expect(result.limitReason).toBe('statements');
+});
+it('serializes each row once and caps isolation UTF-8 bytes at four original bodies', async () => {
+  const input = rows(100);
+  for (const row of input) row.description = 'qa91-€'.repeat(100);
+  const stringify = vi.spyOn(JSON, 'stringify');
+  const insert = vi.fn(async (_part: EventRow[], _body: string) => {
+    throw parseError(1);
+  });
+  const result = await isolateIngestRows(input, lease(), insert);
+  for (const row of input) expect(stringify.mock.calls.filter(([value]) => value === row)).toHaveLength(1);
+  const originalBytes = Buffer.byteLength(insert.mock.calls[0]![1]);
+  const isolationBytes = insert.mock.calls.slice(1).reduce((total, [, body]) => total + Buffer.byteLength(body), 0);
+  expect(insert).toHaveBeenCalledTimes(5);
+  expect(isolationBytes).toBeLessThanOrEqual(4 * originalBytes);
+  const nextBody = result.unresolved.map((row) => `${JSON.stringify(row)}\n`).join('');
+  expect(isolationBytes + Buffer.byteLength(nextBody)).toBeGreaterThan(4 * originalBytes);
+  expect(result.rejected).toEqual(input.slice(0, 5));
+  expect(result.unresolved).toEqual(input.slice(5));
+  expect(result.written).toEqual([]);
+  expect(result).toMatchObject({ limited: true, limitReason: 'bytes' });
+  uniqueBodies(insert);
+});
+it('does not log an isolation limit when the lease expires before the original statement', async () => {
+  const input = rows(2),
+    insert = vi.fn();
+  const result = await isolateIngestRows(input, Date.now(), insert);
+  expect(result.unresolved).toEqual(input);
+  expect(result).toMatchObject({ limited: false, limitReason: undefined });
+  expect(insert).not.toHaveBeenCalled();
 });
 it.each(['lease', 'wall clock'] as const)('leaves unchecked rows retryable at the %s cap', async (cap) => {
   vi.useFakeTimers({ toFake: ['Date'] });

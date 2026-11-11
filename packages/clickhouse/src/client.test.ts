@@ -11,6 +11,7 @@ it.each([
   ['25', 'Cannot parse escape sequence: While executing JSONEachRowRowInputFormat.', true],
   ['25', 'Cannot parse escape sequence: unknown future wording', true],
   ['60', 'Unknown table events', false],
+  ['452', 'Setting async_insert_max_data_size should not be greater than 1000: SETTING_CONSTRAINT_VIOLATION', false],
   ['209', 'Timeout reading from socket', true],
   ['6', 'Parse failed: while pushing to view logbird.events_mv', true],
   ['60', 'Target missing: while pushing to view logbird.event_ids_mv', true],
@@ -107,4 +108,22 @@ it('throws a typed lease error before acquiring a socket', async () => {
   const exec = vi.fn();
   await expect(insertEvents({ exec } as unknown as ClickHouseClient, [n.row], Date.now() - 1)).rejects.toBeInstanceOf(InsertLeaseExhaustedError);
   expect(exec).not.toHaveBeenCalled();
+});
+it('sends a cached JSONEachRow body without serializing its rows again', async () => {
+  const normalized = normalizeEvent({ id: 'qa91-cache', action: 'qa91.cache' }, { projectId: 'qa91-cache', receivedAt: new Date() });
+  if (!normalized.ok) throw new Error(normalized.reason);
+  const body = `${JSON.stringify(normalized.row)}\n`;
+  const stringify = vi.spyOn(JSON, 'stringify');
+  const chunks: Buffer[] = [];
+  const exec = vi.fn(async (params: { values: Readable }) => {
+    for await (const chunk of params.values) chunks.push(Buffer.from(chunk));
+    return { stream: Readable.from([]) };
+  });
+  try {
+    await insertEvents({ exec } as unknown as ClickHouseClient, [normalized.row], Date.now() + 60_000, body);
+    expect(Buffer.concat(chunks).toString()).toBe(body);
+    expect(stringify).not.toHaveBeenCalled();
+  } finally {
+    stringify.mockRestore();
+  }
 });
