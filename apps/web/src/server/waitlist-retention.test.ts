@@ -1,11 +1,18 @@
 import { execFile, spawn } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { appendWaitlistRecord, forgetWaitlistEmail, pruneWaitlist, resolveWaitlistPath, retentionExpiry } from '../../waitlist/file.mjs';
+import {
+  appendWaitlistRecord,
+  forgetWaitlistEmail,
+  pruneWaitlist,
+  registerWaitlistWriter,
+  resolveWaitlistPath,
+  retentionExpiry,
+} from '../../waitlist/file.mjs';
 import { createCloudflareStore, retentionDeadline } from './waitlist-cloudflare';
 import { scheduleWaitlistRetention, sweepWaitlist } from './waitlist-retention';
 
@@ -95,7 +102,7 @@ it('removes a temporary copy left by a crashed rewrite, so a deleted record has 
   const leftover = `${file}.rewrite-crashed`;
   await writeFile(leftover, `${JSON.stringify(record('forget-me@example.test', '2026-11-01T00:00:00.000Z'))}\n`);
   expect(await forgetWaitlistEmail(file, 'forget-me@example.test')).toEqual({ kept: 0, removed: 1, unreadable: 0 });
-  expect(await readdir(dir)).toEqual(['waitlist.jsonl']);
+  expect((await readdir(dir)).filter((name) => !name.endsWith('.writers'))).toEqual(['waitlist.jsonl']);
 });
 
 it('works on the real file behind a symlinked WAITLIST_FILE, and keeps the symlink', async (context) => {
@@ -149,31 +156,75 @@ it('resolves every alias of a file to one path, before and after its directory e
   expect(await resolveWaitlistPath(join(dir, 'first.jsonl'))).toBe(await resolveWaitlistPath(end));
 });
 
-it('loses nothing when processes create the file through different aliases at once', async () => {
+/**
+ * Starts writer processes that each append 30 records to `path` once a go-file appears, then keeps rewriting the file
+ * for real (adds a record and forgets it again, so every pass renames a new file into place) until they finish.
+ * Returns how many real rewrites ran while the writers were writing.
+ */
+async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
+  const go = join(dir, 'go');
+  const writers = paths.map((path, writer) =>
+    child(
+      `const { existsSync } = await import('node:fs');
+       console.log('ready');
+       while (!existsSync(${JSON.stringify(go)})) await new Promise((done) => setTimeout(done, 5));
+       for (let i = 0; i < 30; i++) await waitlist.appendWaitlistRecord(${JSON.stringify(path)}, { email: 'new-${writer}-' + i + '@example.test', interest: 'cloud', receivedAt: new Date().toISOString() });`,
+    ),
+  );
+  await Promise.all(writers.map((writer) => new Promise<void>((done) => writer.stdout.once('data', () => done()))));
+  const finished = Promise.all(writers.map((writer) => new Promise((done) => writer.on('exit', done))));
+  let running = true;
+  void finished.then(() => {
+    running = false;
+  });
+  await writeFile(go, '');
+  let rewrites = 0;
+  for (let pass = 0; running; pass += 1) {
+    await appendWaitlistRecord(rewriteVia, record(`victim-${pass}@example.test`, '2026-11-01T00:00:00.000Z'));
+    const { removed } = await forgetWaitlistEmail(rewriteVia, `victim-${pass}@example.test`);
+    if (running && removed === 1) {
+      rewrites += 1;
+    }
+    await new Promise((done) => setTimeout(done, 2));
+  }
+  expect(await finished).toEqual(paths.map(() => 0));
+  return rewrites;
+}
+
+it('loses nothing when processes create the file through different aliases while it is rewritten', async () => {
   const real = join(dir, 'real');
   const alias = join(dir, 'alias');
   await mkdir(real);
   await symlink(real, alias, 'junction');
   // The directory doesn't exist yet: the first writer creates it while the others are already writing.
   const paths = [join(alias, 'new', 'waitlist.jsonl'), join(real, 'new', 'waitlist.jsonl')];
-  const writers = paths.map((path, writer) =>
-    child(
-      `for (let i = 0; i < 30; i++) await waitlist.appendWaitlistRecord(${JSON.stringify(path)}, { email: 'w${writer}-' + i + '@example.test', interest: 'cloud', receivedAt: new Date().toISOString() });`,
-    ),
-  );
-  const finished = Promise.all(writers.map((writer) => new Promise((done) => writer.on('exit', done))));
-  let running = true;
-  void finished.then(() => {
-    running = false;
-  });
-  while (running) {
-    await new Promise((done) => setTimeout(done, 5));
-    await forgetWaitlistEmail(paths[0] as string, 'nobody@example.test');
-  }
-  expect(await finished).toEqual([0, 0]);
+  const rewrites = await rewriteWhileOthersAppend(paths, paths[0] as string);
+  expect(rewrites).toBeGreaterThan(0);
   const stored = (await readFile(paths[1] as string, 'utf8')).split('\n').filter(Boolean);
-  expect(stored).toHaveLength(60);
+  expect(stored.filter((line) => line.includes('"new-'))).toHaveLength(60);
 }, 60_000);
+
+it('refuses to rewrite while another container writes the same file, and resumes once it has stopped', async () => {
+  await appendWaitlistRecord(file, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
+  // This host's own announcement (made by the append) never blocks it.
+  expect(await readdir(`${file}.writers`)).toEqual([hostname()]);
+  const other = join(`${file}.writers`, 'other-container');
+  await writeFile(other, '');
+  await expect(forgetWaitlistEmail(file, 'forget-me@example.test')).rejects.toThrow('Another site container (other-container)');
+  await expect(pruneWaitlist(file, Date.now() + 100 * 365 * 86_400_000, 1)).rejects.toThrow(/Another site container/);
+  expect(await emails()).toEqual(['forget-me@example.test']);
+  // An announcement older than 90 s belongs to a container that has stopped.
+  const old = new Date(Date.now() - 120_000);
+  await utimes(other, old, old);
+  expect(await forgetWaitlistEmail(file, 'forget-me@example.test')).toMatchObject({ removed: 1 });
+});
+
+it('announces the site server as a writer until it stops', async () => {
+  const unregister = await registerWaitlistWriter(file, 50);
+  expect(await readdir(`${file}.writers`)).toEqual([hostname()]);
+  await unregister();
+  expect(await readdir(`${file}.writers`)).toEqual([]);
+});
 
 it('forgets every submission from one address, ignoring case and spaces', async () => {
   await appendWaitlistRecord(file, record('Someone@Example.test', '2026-11-01T00:00:00.000Z'));
@@ -184,33 +235,13 @@ it('forgets every submission from one address, ignoring case and spaces', async 
   await expect(forgetWaitlistEmail(file, '  ')).rejects.toThrow(/required/);
 });
 
-it('never loses a submission another process writes while this one rewrites the file', async () => {
-  for (let index = 0; index < 50; index += 1) {
-    await appendWaitlistRecord(file, record(`old-${index}@example.test`, '2020-01-01T00:00:00.000Z'));
-  }
-  // Three other processes append 30 fresh submissions each while this one keeps rewriting the file.
-  const writers = [0, 1, 2].map((writer) =>
-    child(
-      `for (let i = 0; i < 30; i++) await waitlist.appendWaitlistRecord(${JSON.stringify(file)}, { email: 'new-${writer}-' + i + '@example.test', interest: 'cloud', receivedAt: new Date().toISOString() });`,
-    ),
-  );
-  const finished = Promise.all(writers.map((writer) => new Promise((done) => writer.on('exit', done))));
-  let rewrites = 0;
-  let running = true;
-  void finished.then(() => {
-    running = false;
-  });
-  while (running) {
-    await new Promise((done) => setTimeout(done, 5));
-    await pruneWaitlist(file, Date.now(), 24);
-    await forgetWaitlistEmail(file, `old-${rewrites}@example.test`);
-    rewrites += 1;
-  }
-  expect(await finished).toEqual([0, 0, 0]);
-  await pruneWaitlist(file, Date.now(), 24);
+it('never loses a submission other processes write while this one rewrites the file', async () => {
+  // Three other processes append 30 records each while this one keeps renaming rewritten files into place.
+  const rewrites = await rewriteWhileOthersAppend([file, file, file], file);
+  expect(rewrites).toBeGreaterThan(0);
   const fresh = (await emails()).filter((email: string) => email.startsWith('new-'));
   expect(fresh).toHaveLength(90);
-  expect(rewrites).toBeGreaterThan(0);
+  expect(new Set(fresh).size).toBe(90);
 }, 60_000);
 
 it('waits while another process holds the lock, and gets it as soon as that process dies', async () => {

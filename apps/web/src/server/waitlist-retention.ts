@@ -7,9 +7,10 @@ import { siteConfig } from '../env';
  * after the server starts and then every six hours (server/plugins/form-retention.ts). The Cloudflare build gives each
  * KV record the same lifetime instead (waitlist-cloudflare.ts).
  *
- * The lock that keeps writers apart works inside one container (one network namespace). The first sweep waits ten
- * minutes so that during a rolling deploy, when a new site container starts beside the old one on the same volume,
- * the old one has stopped before the new one rewrites the file. Run one site container per volume (docs/coolify.md).
+ * The socket lock keeps writers apart inside one container. Across containers sharing the volume (a deploy that
+ * overlaps old and new), each announces itself next to the file and a sweep refuses to rewrite while another one is
+ * running (waitlist/file.mjs); it logs `waitlist.retention_failed` and tries again on the next pass. The first sweep
+ * waits ten minutes so a fresh start doesn't begin with one. Run one site container per volume (docs/coolify.md).
  */
 export const WAITLIST_FIRST_SWEEP_MS = 10 * 60 * 1000;
 export const WAITLIST_SWEEP_EVERY_MS = 6 * 60 * 60 * 1000;

@@ -135,10 +135,14 @@ file and remove them by hand. The cleanup runs only in the production server wit
 prerenders pages, or for the source default file. To change the period, set the
 variable and redeploy the site; the policy text and the cleanup change together.
 
-Run **one** site container per `site-data` volume. Writers take a lock that only
-works inside one container. The first cleanup waits ten minutes, so the brief
-overlap of a rolling deploy (new container up, old one stopping) ends before the new
-container rewrites the file. Don't scale the site service beyond one replica.
+Run **one** site container per `site-data` volume; don't scale the site service
+beyond one replica. Writers in one container share a lock. Across containers (a
+deploy that starts the new one before the old one stops), each running site
+announces itself in `/data/waitlist.jsonl.writers/`. While another container has
+done so in the last 90 seconds, the cleanup and `forget` refuse to rewrite the file
+(logged as `waitlist.retention_failed`, or an error from `forget`); new submissions
+are still stored. They go ahead once the old container has stopped. The cleanup
+runs on its next pass; rerun `forget`.
 
 To delete one person's submissions on request, run this in the site container:
 

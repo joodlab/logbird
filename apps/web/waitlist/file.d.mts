@@ -11,3 +11,4 @@ export { retentionExpiry } from './expiry.mjs';
 export function pruneWaitlist(file: string, now: number, months: number): Promise<WaitlistRewrite>;
 export function forgetWaitlistEmail(file: string, email: string): Promise<WaitlistRewrite>;
 export function resolveWaitlistPath(file: string): Promise<string>;
+export function registerWaitlistWriter(file: string, everyMs?: number): Promise<() => Promise<void>>;

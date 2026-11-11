@@ -17,14 +17,24 @@ export default definePlugin((nitroApp) => {
   if (!configured || process.env.NODE_ENV !== 'production') {
     return;
   }
-  const started = import('../../src/server/waitlist-retention')
-    .then(({ scheduleWaitlistRetention }) => scheduleWaitlistRetention(resolve(configured)))
+  const file = resolve(configured);
+  // Announce this container as a writer first, so another container sharing the volume (during a deploy) holds off
+  // its cleanup, and this one holds off while that one is still running (waitlist/file.mjs).
+  const started = Promise.all([import('../../waitlist/file.mjs'), import('../../src/server/waitlist-retention')])
+    .then(async ([{ registerWaitlistWriter }, { scheduleWaitlistRetention }]) => {
+      const unregister = await registerWaitlistWriter(file);
+      const stop = scheduleWaitlistRetention(file);
+      return async () => {
+        stop();
+        await unregister();
+      };
+    })
     .catch((error: unknown) => {
       console.error(
         JSON.stringify({ level: 'error', event: 'waitlist.retention_failed', reason: error instanceof Error ? error.message : 'unknown' }),
       );
     });
   nitroApp.hooks.hook('close', async () => {
-    (await started)?.();
+    await (await started)?.();
   });
 });

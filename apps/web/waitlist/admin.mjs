@@ -14,6 +14,13 @@ if (command !== 'forget' || !email) {
   console.error('Usage: node waitlist/admin.mjs forget <email>');
   process.exit(2);
 }
-const { removed, kept } = await forgetWaitlistEmail(file, email);
-console.log(`Removed ${removed} submission(s) for that address; ${kept} other submission(s) kept in ${file}.`);
-console.log('Also delete the notification emails for that address from the team mailbox.');
+try {
+  const { removed, kept } = await forgetWaitlistEmail(file, email);
+  console.log(`Removed ${removed} submission(s) for that address; ${kept} other submission(s) kept in ${file}.`);
+  console.log('Also delete the notification emails for that address from the team mailbox.');
+} catch (error) {
+  // Nothing was deleted. The likely cause is another site container still running on this volume (a deploy in
+  // progress): try again once it has stopped.
+  console.error(`Nothing was deleted: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
