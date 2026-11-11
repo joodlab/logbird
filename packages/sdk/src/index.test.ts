@@ -202,6 +202,26 @@ it.each([
     Array.from({ length: 10 - settled }, (_, index) => `time-${settled + index}`),
   );
 });
+it('measures the five-minute send cap on a monotonic clock, not the wall clock', async () => {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  let calls = 0;
+  vi.stubGlobal('fetch', async () => {
+    calls++;
+    if (calls > 1) return new Response('{}', { status: 202 });
+    // A wall-clock step (NTP, suspend) between attempts must not end the send.
+    vi.setSystemTime(Date.now() + 301_000);
+    return new Response('', { status: 503, headers: { 'Retry-After': '0' } });
+  });
+  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', maxRetries: 1 });
+  sdk.track({ id: 'wall-clock-step', action: 'qa91.sdk' });
+  const flushed = sdk.flush();
+  await vi.advanceTimersByTimeAsync(1000);
+  await flushed;
+  expect(calls).toBe(2);
+  expect(sdk.queueSize).toBe(0);
+  expect(sdk.dropped).toBe(0);
+  await sdk.shutdown();
+});
 it.each([undefined, 123, 'unchanged-id'])('stamps a stable string id after beforeSend returns id %s', async (id) => {
   vi.useFakeTimers();
   const fetcher = vi.fn(async (_url: string, init: RequestInit) => {

@@ -42,6 +42,7 @@ export interface EventInput {
   schemaVersion?: string;
   [key: string]: unknown;
 }
+const monotonicNow = (): number => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
 export function uuidv7(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let time = Date.now();
@@ -164,7 +165,8 @@ export class Logbird {
     (this.timer as unknown as { unref?: () => void }).unref?.();
   }
   private async send(batch: EventInput[]) {
-    const deadline = Date.now() + MAX_SEND_MS;
+    // Monotonic: a wall-clock step (NTP, suspend, a test clock) must not shorten or extend the send cap.
+    const deadline = monotonicNow() + MAX_SEND_MS;
     const serialized = batch.map((event) => JSON.stringify(event));
     let attemptIndices = batch.map((_, index) => index);
     const serializeBody = () => `{"events":[${attemptIndices.map((index) => serialized[index]).join(',')}]}`;
@@ -186,7 +188,7 @@ export class Logbird {
     let retries = 0;
     try {
       for (let attempt = 0; ; attempt++) {
-        const remainingMs = deadline - Date.now();
+        const remainingMs = deadline - monotonicNow();
         if (remainingMs <= 0) throw new Error('Logbird send exceeded its five-minute time limit');
         let progressed = false;
         let response: Response | undefined, error: unknown;
@@ -287,7 +289,7 @@ export class Logbird {
         const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
         const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** retries) * (0.5 + Math.random());
         if (!progressed) retries++;
-        await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(60_000, delay, deadline - Date.now()))));
+        await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(60_000, delay, deadline - monotonicNow()))));
       }
     } finally {
       // On every exceptional exit, flush can requeue only events not already accepted or rejected.
