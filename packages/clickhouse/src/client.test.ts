@@ -1,7 +1,18 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { fileURLToPath } from 'node:url';
 import { expect, it, vi } from 'vitest';
-import { AmbiguousInsertError, type ClickHouseClient, INGEST_INSERT_SETTINGS, InsertLeaseExhaustedError, insertEvents } from './client';
+import {
+  AmbiguousInsertError,
+  type ClickHouseClient,
+  INGEST_INSERT_SETTINGS,
+  InsertLeaseExhaustedError,
+  insertEvents,
+  isPrewriteParseError,
+  LOGBIRD_MATERIALIZED_VIEWS,
+} from './client';
 import { normalizeEvent } from './normalize';
 
 it.each([
@@ -23,6 +34,7 @@ it.each([
   ['60', 'New failure wording for view logbird.events_mv: While executing WaitForAsyncInsert.', true],
   ['25', 'Unfamiliar wording mentioning event_ids_v3_mv: While executing WaitForAsyncInsert.', true],
   ['25', 'Custom database names too: analytics.events_by_minute_mv failed: While executing WaitForAsyncInsert.', true],
+  ['25', 'Self-hoster view: logbird.audit_copy_mv failed: While executing WaitForAsyncInsert.', true],
 ])('classifies %s with server context %s', async (code, message, ambiguous) => {
   const row = normalizeEvent({ id: 'safe', action: 'safe' }, { projectId: 'fictional', receivedAt: new Date() });
   if (!row.ok) throw new Error(row.reason);
@@ -38,6 +50,48 @@ it.each([
   if (ambiguous) await expect(result).rejects.toBeInstanceOf(AmbiguousInsertError);
   else await expect(result).rejects.toBe(error);
   expect(consumed).toBe(true);
+});
+
+// A parse error quotes the offending input. View-shaped event values must not turn it into an endless ambiguity.
+it.each([
+  ['6', 'events_by_minute_mv', "Cannot parse value 'events_by_minute_mv': While executing WaitForAsyncInsert.", false],
+  ['6', 'analytics.events_by_minute_mv', "Cannot parse value 'analytics.events_by_minute_mv': While executing WaitForAsyncInsert.", false],
+  ['27', 'media.final_mv', `Cannot parse input: before: '"source":"media.final_mv"}': While executing WaitForAsyncInsert.`, false],
+  // The same name in failure context, absent from the body, still names a view.
+  ['25', 'unrelated', 'Parse failed in logbird.events_by_minute_mv: While executing WaitForAsyncInsert.', true],
+  // A quoted value does not hide a different, real view name.
+  ['25', 'media.final_mv', "Parse failed in logbird.event_ids_v3_mv near 'media.final_mv': While executing WaitForAsyncInsert.", true],
+])('classifies code %s with event value %s quoted in the error', async (code, value, message, ambiguous) => {
+  const row = normalizeEvent({ id: 'quoted', action: 'qa.quoted', metadata: { source: value } }, { projectId: 'fictional', receivedAt: new Date() });
+  if (!row.ok) throw new Error(row.reason);
+  const error = Object.assign(new Error(message), { code });
+  const exec = vi.fn(async (params: { values: AsyncIterable<unknown> }) => {
+    for await (const _chunk of params.values) {
+      /* send the body */
+    }
+    throw error;
+  });
+  const result = insertEvents({ exec } as unknown as ClickHouseClient, [row.row]);
+  if (ambiguous) await expect(result).rejects.toBeInstanceOf(AmbiguousInsertError);
+  else await expect(result).rejects.toBe(error);
+  expect(isPrewriteParseError(error, `${JSON.stringify(row.row)}\n`)).toBe(!ambiguous);
+});
+
+it('knows every materialized view this package creates', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const sources = [
+    ...readdirSync(join(root, 'migrations')).map((file) => join(root, 'migrations', file)),
+    ...readdirSync(join(root, 'src'))
+      .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
+      .map((file) => join(root, 'src', file)),
+  ];
+  const created = new Set<string>();
+  for (const file of sources) {
+    for (const [, name] of readFileSync(file, 'utf8').matchAll(/CREATE MATERIALIZED VIEW (?:IF NOT EXISTS )?(\w+)\s+(?:TO|AS)\b/g))
+      created.add(name!);
+  }
+  expect(created.size).toBeGreaterThan(0);
+  expect([...created].sort()).toEqual([...LOGBIRD_MATERIALIZED_VIEWS].sort());
 });
 
 it('writes one serialized byte body under backpressure and consumes the acknowledgement', async () => {
@@ -138,5 +192,39 @@ it('sends a cached JSONEachRow body without serializing its rows again', async (
     expect(stringify).not.toHaveBeenCalled();
   } finally {
     stringify.mockRestore();
+  }
+});
+
+it('surfaces a lease lapse during real socket acquisition as InsertLeaseExhaustedError', async () => {
+  // A throwaway local HTTP endpoint (no ClickHouse): proves the real @clickhouse/client rejects exec with the
+  // stream's own error object, so isolation files the rows under the 'lease' limit, never as unavailable.
+  const { createServer } = await import('node:http');
+  const { createClickHouseClient } = await import('./client');
+  let received = 0;
+  const server = createServer((request, response) => {
+    request.on('data', (chunk: Buffer) => {
+      received += chunk.length;
+    });
+    request.on('end', () => response.end());
+    request.on('error', () => response.destroy());
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address() as { port: number };
+  const ch = createClickHouseClient({ CLICKHOUSE_URL: `http://127.0.0.1:${address.port}`, CLICKHOUSE_USER: 'qa', CLICKHOUSE_PASSWORD: 'qa' });
+  const n = normalizeEvent({ id: 'qa-lease-socket', action: 'qa.lease' }, { projectId: 'fictional', receivedAt: new Date() });
+  if (!n.ok) throw new Error(n.reason);
+  const realNow = Date.now.bind(Date);
+  let shifted = false;
+  // Time "passes" between exec() and the first body read: the lease is still valid at exec, lapsed at read().
+  const now = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + (shifted ? 61_000 : 0));
+  try {
+    const inserting = insertEvents(ch, [n.row], realNow() + 60_000);
+    shifted = true;
+    await expect(inserting).rejects.toBeInstanceOf(InsertLeaseExhaustedError);
+    expect(received).toBe(0);
+  } finally {
+    now.mockRestore();
+    await ch.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });

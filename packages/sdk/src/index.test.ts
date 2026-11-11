@@ -222,13 +222,14 @@ it('measures the five-minute send cap on a monotonic clock, not the wall clock',
   expect(sdk.dropped).toBe(0);
   await sdk.shutdown();
 });
-it.each([undefined, 123, 'unchanged-id'])('stamps a stable string id after beforeSend returns id %s', async (id) => {
+it.each([undefined, 123, 'unchanged-id', '', '   '])('stamps a stable string id after beforeSend returns id %j', async (id) => {
   vi.useFakeTimers();
   const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
     const events = JSON.parse(String(init.body)).events as { id: string }[];
     if (fetcher.mock.calls.length > 1) return new Response('{}', { status: 202 });
     expect(typeof events[0]!.id).toBe('string');
-    if (id === undefined) expect(events[0]!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    if (id === undefined || (typeof id === 'string' && !id.trim()))
+      expect(events[0]!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     else expect(events[0]!.id).toBe(String(id));
     return new Response(
       JSON.stringify({
@@ -262,6 +263,46 @@ it.each([undefined, 123, 'unchanged-id'])('stamps a stable string id after befor
   expect(JSON.parse(String(fetcher.mock.calls[1]![1].body)).events.map((event: { id: string }) => event.id)).toEqual(['unsettled']);
   expect(sdk.queueSize).toBe(0);
   await sdk.shutdown();
+});
+
+it('fixes the id of a frozen beforeSend result on a copy', async () => {
+  const fetcher = vi.fn(async (_url: string, _init: RequestInit) => new Response('{}', { status: 202 }));
+  vi.stubGlobal('fetch', fetcher);
+  const owned = Object.freeze({ action: 'qa91.frozen', id: 7 }) as unknown as EventInput;
+  const onError = vi.fn();
+  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', beforeSend: () => owned, onError });
+  sdk.track({ action: 'qa91.frozen' });
+  await sdk.shutdown();
+  expect(onError).not.toHaveBeenCalled();
+  expect(owned.id).toBe(7);
+  expect(JSON.parse(String(fetcher.mock.calls[0]![1]!.body)).events[0].id).toBe('7');
+});
+
+it('passes an integer timeout to AbortSignal.timeout on a fractional monotonic clock near the cap', async () => {
+  let clock = 0.25;
+  vi.spyOn(performance, 'now').mockImplementation(() => clock);
+  const timeout = vi.spyOn(AbortSignal, 'timeout');
+  let calls = 0;
+  vi.stubGlobal('fetch', async () => {
+    calls++;
+    // Leave 12_345.75 ms of the five-minute cap: the next request's timeout must still be an integer.
+    if (calls === 1) {
+      clock = 0.25 + 300_000 - 12_345.75;
+      return new Response('', { status: 503, headers: { 'Retry-After': '0' } });
+    }
+    return new Response('{}', { status: 202 });
+  });
+  try {
+    const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', maxRetries: 1 });
+    sdk.track({ id: 'fractional', action: 'qa91.sdk' });
+    await sdk.flush();
+    expect(calls).toBe(2);
+    expect(timeout.mock.calls.map(([ms]) => ms)).toEqual([30_000, 12_345]);
+    expect(sdk.queueSize).toBe(0);
+    await sdk.shutdown();
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
 
 it('remaps mixed accepted/rejected indices across three subsets and requeues only the original unsettled event', async () => {

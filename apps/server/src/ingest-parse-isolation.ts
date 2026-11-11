@@ -100,14 +100,15 @@ export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number
     }
     statements++;
     if (isolating) isolationBytes += partBytes;
+    const body = part.map((row) => serialized.get(row)!.line).join('');
     try {
-      await insert(part, part.map((row) => serialized.get(row)!.line).join(''));
+      await insert(part, body);
       written.push(...part);
       return true;
     } catch (error) {
       if (error instanceof AmbiguousInsertError) pending.push(...part);
       else if (error instanceof InsertLeaseExhaustedError) defer(part, 'lease');
-      else if (isPrewriteParseError(error)) {
+      else if (isPrewriteParseError(error, body)) {
         isolationDeadline = Math.min(isolationDeadline, Date.now() + MAX_PARSE_ISOLATION_MS);
         await parseFailure(part, error);
       } else unavailable.push(...part);

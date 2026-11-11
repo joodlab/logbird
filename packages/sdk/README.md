@@ -272,7 +272,7 @@ five leading bad rows fit per attempt under the server's byte budget; subset ret
 converge. An attempt settling events and shrinking the body does not consume
 `maxRetries`; total attempts remain bounded by batch length plus retries and five minutes
 per send. At that time limit, `flush()` rejects and requeues only unsettled events.
-After `beforeSend`, missing ids get a uuidv7 and numeric ids become strings; valid string
+After `beforeSend`, missing or blank ids get a uuidv7 and numeric ids become strings; valid string
 ids stay unchanged so subset retries can match accepted events.
 
 Raw HTTP clients declaring `Logbird-Retry: subset` must honor settled rejections and resend only `details.indices`

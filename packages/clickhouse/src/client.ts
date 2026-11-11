@@ -65,27 +65,51 @@ export class InsertLeaseExhaustedError extends Error {
     this.name = 'InsertLeaseExhaustedError';
   }
 }
-export function isPrewriteParseError(error: unknown) {
+/**
+ * True only for a parse failure ClickHouse reports before writing anything. Pass the statement body when available:
+ * a view name that also occurs in the body may be ClickHouse quoting the offending input, not naming a failing view.
+ */
+export function isPrewriteParseError(error: unknown, body?: string) {
   return (
     error instanceof Error &&
     'code' in error &&
     CLICKHOUSE_PARSE_ERROR_CODES.has(String(error.code)) &&
     /\bWhile executing WaitForAsyncInsert\b/i.test(error.message) &&
-    !isViewFailure(error)
+    !isViewFailure(error, body)
   );
 }
 
 // Our materialized views all end in _mv; ClickHouse names a failing one db-qualified (the database is configurable).
 // Matching names rather than the word "view" keeps quoted row values such as 'page.view' from turning a genuine
-// parse failure into an ambiguous one, while unfamiliar wording that names one of our views still fails safe.
-const MATERIALIZED_VIEW_NAME =
-  /\b\w+\.\w+_mv\b|\b(?:attribute_keys|entities_(?:actor|executor|target|tenant)|event_ids(?:_v[23])?|events_by_minute)_mv\b/i;
-function isViewFailure(error: unknown) {
+// parse failure into an ambiguous one, while unfamiliar wording that names a view still fails safe. The known list
+// is checked against every CREATE MATERIALIZED VIEW in this package by client.test.ts.
+export const LOGBIRD_MATERIALIZED_VIEWS = [
+  'attribute_keys_mv',
+  'entities_actor_mv',
+  'entities_executor_mv',
+  'entities_target_mv',
+  'entities_tenant_mv',
+  'event_ids_mv',
+  'event_ids_v2_mv',
+  'event_ids_v3_mv',
+  'events_by_minute_mv',
+] as const;
+const MATERIALIZED_VIEW_NAME = new RegExp(String.raw`\b\w+\.\w+_mv\b|\b(?:${LOGBIRD_MATERIALIZED_VIEWS.join('|')})\b`, 'gi');
+function namesView(message: string, body?: string) {
+  for (const [name] of message.matchAll(MATERIALIZED_VIEW_NAME)) {
+    // Parse errors quote input verbatim ("Cannot parse value '...'", "before: '...'"). The body is JSON.stringify
+    // output, which never escapes word characters or dots, so a quoted view-shaped value is always a substring of
+    // it. A name absent from our body names a view (or another body sharing the async flush): ambiguous, fail safe.
+    if (!body?.includes(name)) return true;
+  }
+  return false;
+}
+function isViewFailure(error: unknown, body?: string) {
   if (!(error instanceof Error)) return false;
   return (
     /(?:^|[(:]\s*|\n\s*)while pushing to (?:materialized )?view\b/i.test(error.message) ||
     ('code' in error && String(error.code) === '60' && /^Target table .+ of view .+ (?:doesn't|does not) exists?\b/i.test(error.message)) ||
-    MATERIALIZED_VIEW_NAME.test(error.message)
+    namesView(error.message, body)
   );
 }
 export async function insertEvents(
@@ -97,6 +121,7 @@ export async function insertEvents(
   if (!rows.length) return;
   let bodySent = false;
   let bodyBytes = 0;
+  let sentBody: string | undefined;
   // A single byte body avoids the client's per-row object transform/backpressure pipeline.
   // Keep serialization and the lease check lazy: socket acquisition can be delayed.
   const values = new Readable({
@@ -104,6 +129,7 @@ export async function insertEvents(
       try {
         const body = serializedBody ?? `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`;
         bodyBytes = Buffer.byteLength(body);
+        sentBody = body;
         if (Date.now() + INSERT_LEASE_BUDGET_MS > leaseExpiresAt) throw new InsertLeaseExhaustedError();
         bodySent = true;
         this.push(body);
@@ -136,8 +162,8 @@ export async function insertEvents(
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
     // The same parse code can originate inside a failing MV after the source row was written.
     const definite = CLICKHOUSE_PARSE_ERROR_CODES.has(code)
-      ? bodyBytes <= INGEST_ASYNC_MAX_DATA_SIZE && isPrewriteParseError(error)
-      : CLICKHOUSE_PREWRITE_ERROR_CODES.has(code) && !isViewFailure(error);
+      ? bodyBytes <= INGEST_ASYNC_MAX_DATA_SIZE && isPrewriteParseError(error, sentBody)
+      : CLICKHOUSE_PREWRITE_ERROR_CODES.has(code) && !isViewFailure(error, sentBody);
     if (bodySent && !definite) throw new AmbiguousInsertError();
     throw error;
   } finally {

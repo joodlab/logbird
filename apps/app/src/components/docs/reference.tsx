@@ -8,7 +8,7 @@ import { modKeyLabel, useIsMac } from '@/lib/platform';
 /* Reference material that used to live on the Quickstart page; the Setup page renders it below the checklist. */
 
 const INGEST_CODES: [string, string, string][] = [
-  ['invalid_event', 'Invalid event fields.', 'Fix the reported event. A native parse error may return 422 for the batch.'],
+  ['invalid_event', 'Invalid event fields.', 'Fix the reported event. Healthy siblings in the batch are still stored.'],
   ['invalid_event_id', 'Unsafe or oversized string id.', 'Use valid Unicode without NUL, at most 256 UTF-16 units after trimming.'],
   ['duplicate_id_conflict', 'The id belongs to different content.', 'Keep the original; send corrections with a new id and context.parentEventId.'],
   [
@@ -17,14 +17,19 @@ const INGEST_CODES: [string, string, string][] = [
     'Keep the evidence. Send a correction with a new id; ask the operator to inspect storage.',
   ],
   [
+    'unverified_after_parse_failure',
+    'A storage parse failure hit the isolation limit before this event was checked. It is not proven invalid.',
+    'Only for clients without Logbird-Retry: subset. Resend the event on its own if needed.',
+  ],
+  [
     'ingest_pending (503)',
     'Some writes remain unresolved.',
-    'Retry the identical batch with Retry-After: about 70 seconds for ambiguity, up to 10 minutes for a ready claim.',
+    'Retry with Retry-After (about 70 seconds for ambiguity, up to 10 minutes for a ready claim): the unsettled events, or the identical batch.',
   ],
   [
     'ingest_unavailable (503)',
     'Identity lookup or storage is unavailable.',
-    'Retry the identical batch with Retry-After; the operator may need to restore service.',
+    'Retry with Retry-After: the unsettled events, or the identical batch. The operator may need to restore service.',
   ],
   ['project_busy (503)', 'A project maintenance lock is held.', 'Retry with Retry-After after the current operation releases its lock.'],
   [
@@ -51,10 +56,16 @@ export function EventIdsAndRetries() {
         id and <code>context.parentEventId</code>. The original is kept; the reason includes difference details.
       </p>
       <p>
-        <code>503 ingest_pending</code> or <code>ingest_unavailable</code> means retry the identical batch with Retry-After. Healthy siblings commit
-        before a pending response. Pending details include accepted, ids, rejected, warnings, indices and eventIds. Every index outside indices is
-        settled. Rejected entries include a code and explanation. The SDK retries; if its budget expires, flush rejects and keeps the batch for a
-        later flush.
+        <code>503 ingest_pending</code> or <code>ingest_unavailable</code> means retry with Retry-After. Healthy siblings commit before a pending
+        response. Pending details include accepted, ids, rejected, warnings, indices and eventIds. Every index outside indices is settled. Rejected
+        entries include a code and explanation.
+      </p>
+      <p>
+        The SDK sends <code>Logbird-Retry: subset</code> and, after complete details, resends only the unsettled events with byte-identical JSON. If
+        its retry budget or five-minute send limit runs out, flush rejects and keeps only the unsettled events for a later flush. Raw HTTP clients can
+        send the same header if they resend only <code>details.indices</code> with each event's JSON unchanged. Clients without it get a final 202
+        instead when parse isolation runs out of budget: events it could not check are rejected as <code>unverified_after_parse_failure</code>; resend
+        those on their own. Allow the header through proxies.
       </p>
       <p>
         Use string ids. Numeric ids generate a fresh UUID and a warning; convert with String(id) first. Ids over 256 UTF-16 code units after trimming,

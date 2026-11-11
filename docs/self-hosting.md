@@ -881,9 +881,10 @@ rejects the entire query with code 452 (`SETTING_CONSTRAINT_VIOLATION`) before
 reading data if a pin violates a constraint; ingest returns retryable
 `503 ingest_unavailable` and releases the unwritten claims. A parse code is isolated only
 when the serialized body fits the pinned async limit, its error names
-`WaitForAsyncInsert`, and it is not a materialized-view failure: neither "while pushing to view"
-nor the name of one of Logbird's `*_mv` views appears in it (a quoted row value such as
-`'page.view'` doesn't count).
+`WaitForAsyncInsert`, and it is not a materialized-view failure: "while pushing to view" doesn't
+appear in it, and neither does a view name (one of Logbird's nine views, or any
+`database.name_mv`) that is absent from the statement body. ClickHouse quotes the offending
+input verbatim, so row values such as `'page.view'` or `'analytics.events_by_minute_mv'` don't count.
 If a ClickHouse upgrade changes the `WaitForAsyncInsert` wording, parse failures
 become ambiguous and can loop through pending/recovery until the incompatibility is fixed.
 Do not infer pre-write safety from the
