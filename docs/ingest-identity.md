@@ -369,8 +369,8 @@ statement's UTF-8 bytes (excluding that original statement), a ten-second isolat
 wall clock and the original lease's remaining 40-second finish budget bound the work.
 Rows are serialized once; subsets join cached JSON lines. Canary and prefix writes count
 against both the statement and byte budgets. About five leading bad rows fit per attempt
-under the byte budget. Typed pre-body lease exhaustion or any cap leaves unchecked,
-proven-unwritten rows and releases their claims. The response depends on capability:
+under the byte budget. A cap reached during isolation leaves unchecked, proven-unwritten
+rows and releases their claims. The response depends on capability:
 
 - Clients declaring exactly `Logbird-Retry: subset` get `503 ingest_pending` with settled
   `{accepted,ids,rejected,warnings}` plus unresolved `indices`/`eventIds`, and converge
@@ -384,6 +384,9 @@ proven-unwritten rows and releases their claims. The response depends on capabil
   that 503: SDK 0.1.1 ignores its details. Identical retries skip confirmed rows, pending
   writes settle through recovery, and the next attempt returns terminal 202 once no other
   rows require retry. Definite unavailable failures also keep unchecked rows unresolved.
+- Rows deferred before any statement ran (typed pre-body lease exhaustion, for example
+  after a slow claim phase) are healthy but unsent. They are never rejected: every client
+  gets the retryable 503 with their indices, as before this change.
 
 Only truly
 ambiguous/competing claim-held ids determine Retry-After; unresolved-only

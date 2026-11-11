@@ -6492,7 +6492,8 @@
                               "invalid_event",
                               "invalid_event_id",
                               "duplicate_id_conflict",
-                              "stored_event_unreadable"
+                              "stored_event_unreadable",
+                              "unverified_after_parse_failure"
                             ],
                             "type": "string"
                           },
@@ -10325,6 +10326,20 @@
       },
       "post": {
         "operationId": "public_ingest_events",
+        "parameters": [
+          {
+            "description": "Send `subset` if the client resends only unsettled events: events left unchecked after parse failures then come back as retryable 503 ingest_pending instead of terminal unverified_after_parse_failure rejections.",
+            "in": "header",
+            "name": "Logbird-Retry",
+            "required": false,
+            "schema": {
+              "enum": [
+                "subset"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -10392,7 +10407,8 @@
                               "invalid_event",
                               "invalid_event_id",
                               "duplicate_id_conflict",
-                              "stored_event_unreadable"
+                              "stored_event_unreadable",
+                              "unverified_after_parse_failure"
                             ],
                             "type": "string"
                           },

@@ -192,6 +192,7 @@ export class Logbird {
               Authorization: `Bearer ${this.options.apiKey}`,
               'Content-Type': 'application/json',
               'X-Logbird-SDK': `typescript/${SDK_VERSION}`,
+              // Must equal @logbird/contracts LOGBIRD_RETRY_HEADER / LOGBIRD_RETRY_SUBSET (the SDK has no dependencies).
               'Logbird-Retry': 'subset',
             },
             body,

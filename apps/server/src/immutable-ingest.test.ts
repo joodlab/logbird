@@ -91,8 +91,9 @@ it.each([true, false])('composes all unresolved/pending combinations for subset 
         limited: unresolved,
         limitReason: unresolved ? 'bytes' : undefined,
       });
-      const retryUnchecked = uncheckedIngestPolicy(capable, pending) === 'retry';
-      expect(retryUnchecked).toBe(capable || pending);
+      const retryUnchecked = uncheckedIngestPolicy(capable, pending, unresolved) === 'retry';
+      // With nothing unresolved, isolation never started (limited=false), so there is nothing to reject.
+      expect(retryUnchecked).toBe(capable || pending || !unresolved);
       const result = await insertImmutableEvents('qa91-unit', 'qa91-org', input, capable).catch((error: unknown) => error);
       const retry = pending || (unresolved && capable);
       const expectedRejections = [
@@ -110,6 +111,29 @@ it.each([true, false])('composes all unresolved/pending combinations for subset 
       vi.mocked(isolation.isolateIngestRows).mockRestore();
     }
   }
+});
+
+it('keeps rows deferred before any statement ran retryable for clients without the subset header', async () => {
+  // Lease too short for the original INSERT: no parse failure happened, so isolation never started (limited false).
+  expect(uncheckedIngestPolicy(false, false, false)).toBe('retry');
+  expect(uncheckedIngestPolicy(false, false, true)).toBe('reject');
+  const input = candidates();
+  vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
+    values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+  );
+  vi.spyOn(isolation, 'isolateIngestRows').mockResolvedValue({
+    written: [],
+    rejected: [],
+    unresolved: input.map((c) => c.row),
+    pending: [],
+    unavailable: [],
+    limited: false,
+    limitReason: undefined,
+  });
+  const result = await insertImmutableEvents('qa91-unit', 'qa91-org', input, false).catch((error: unknown) => error);
+  expect(result).toMatchObject({ status: 503, code: 'ingest_pending', details: { rejected: [], indices: [0, 1, 2, 3] } });
+  expect(String((result as Error).message)).not.toMatch(/smaller batches/);
+  vi.mocked(isolation.isolateIngestRows).mockRestore();
 });
 
 it.each(['ambiguous', 'held-claim conflict'])('legacy identical retries reach 202 after a %s settles', async (kind) => {

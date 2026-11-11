@@ -85,7 +85,7 @@ it('retains only an ambiguity after the body was consumed, then recovers an abse
   expect((await f.post(input)).status).toBe(202);
   expect(await f.count()).toBe(1);
 });
-it('refuses an insert if its claim lease expires while the process is paused', async () => {
+it.each([false, true])('refuses an insert if its claim lease expires while the process is paused (subset retry %s)', async (capable) => {
   const claim = receipts.claimIngestReceipts;
   vi.spyOn(receipts, 'claimIngestReceipts').mockImplementation(async (...args) => {
     const rows = await claim(...args);
@@ -93,7 +93,10 @@ it('refuses an insert if its claim lease expires while the process is paused', a
     return rows;
   });
   const spy = vi.spyOn(clickhouse, 'exec');
-  expect((await f.post(input, 0, { 'Logbird-Retry': 'subset' })).status).toBe(503);
+  // No statement ran, so the healthy row stays retryable for every client (SDK 0.1.1 sends no capability header).
+  const response = await f.post(input, 0, capable ? { 'Logbird-Retry': 'subset' } : {});
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ error: { code: 'ingest_pending', details: { rejected: [], indices: [0] } } });
   expect(spy).not.toHaveBeenCalled();
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(0);
 });

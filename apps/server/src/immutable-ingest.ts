@@ -273,9 +273,14 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
 export const UNVERIFIED_PARSE_REJECTION =
   'unverified_after_parse_failure: Storage stopped checking this batch after parse failures; resend this event individually if needed.';
 
-/** Never settle unchecked rows inside a retryable response: old SDKs ignore its details. */
-export function uncheckedIngestPolicy(supportsSubsetRetry: boolean, hasOtherRetryableRows: boolean) {
-  return supportsSubsetRetry || hasOtherRetryableRows ? 'retry' : 'reject';
+/**
+ * Rows left unchecked are rejected terminally only for clients that can't resend a subset, only when isolation really
+ * started after a proven parse failure (`isolationStarted`), and never inside a retryable response (old SDKs ignore
+ * its details). Rows deferred before any statement ran (e.g. the lease was too short for the original INSERT) are
+ * healthy-but-unsent and stay retryable for every client.
+ */
+export function uncheckedIngestPolicy(supportsSubsetRetry: boolean, hasOtherRetryableRows: boolean, isolationStarted: boolean) {
+  return supportsSubsetRetry || hasOtherRetryableRows || !isolationStarted ? 'retry' : 'reject';
 }
 
 async function composeIngestOutcome(
@@ -290,7 +295,7 @@ async function composeIngestOutcome(
   const rejectedIds = new Set(outcome.rejected.map((row) => row.event_id));
   const pendingIds = new Set([...result.pending.map((p) => p.eventId), ...outcome.pending.map((row) => row.event_id)]);
   const unavailableIds = new Set(outcome.unavailable.map((row) => row.event_id));
-  const rejectUnchecked = uncheckedIngestPolicy(supportsSubsetRetry, pendingIds.size + unavailableIds.size > 0) === 'reject';
+  const rejectUnchecked = uncheckedIngestPolicy(supportsSubsetRetry, pendingIds.size + unavailableIds.size > 0, outcome.limited) === 'reject';
   // Classification rejections (including conflicts with another index of the same id) stay settled.
   const classifiedRejections = new Set(result.rejected.map((r) => r.index));
   for (const candidate of candidates) {
@@ -320,6 +325,7 @@ async function composeIngestOutcome(
       receipts,
       pendingIds,
       pendingIds.size || unresolvedIds.size ? 'ingest_pending' : 'ingest_unavailable',
+      outcome.limited,
     );
   }
   return { ids, rejected: result.rejected };
@@ -333,6 +339,7 @@ async function pendingError(
   receipts: Map<string, IngestReceipt>,
   pendingIds: ReadonlySet<string>,
   code: 'ingest_pending' | 'ingest_unavailable',
+  limited = false,
 ) {
   const details = ingestPendingDetailsSchema.parse({
     accepted: ids.length,
@@ -359,7 +366,9 @@ async function pendingError(
   return new ApiError(
     503,
     code,
-    'Some events need a retry; listed indices are unresolved. Send smaller batches if isolation repeatedly reaches its limit.',
+    limited
+      ? 'Some events need a retry; listed indices are unresolved. Send smaller batches if isolation repeatedly reaches its limit.'
+      : 'Some events need a retry; listed indices are unresolved.',
     details,
     retryAfter,
   );

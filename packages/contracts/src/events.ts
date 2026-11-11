@@ -107,10 +107,14 @@ export const ingestResponseSchema = z.object({
   warnings: z.array(z.object({ index: z.number().int(), reason: z.string() })).default([]),
 });
 export type IngestResponse = z.infer<typeof ingestResponseSchema>;
+/** Request header a client sends to declare it resends only unsettled events (`Logbird-Retry: subset`). */
+export const LOGBIRD_RETRY_HEADER = 'Logbird-Retry';
+export const LOGBIRD_RETRY_SUBSET = 'subset';
 /**
  * 503 ingest_pending / ingest_unavailable: siblings commit first; every index outside indices is settled.
  * Clients declaring Logbird-Retry: subset retry only unsettled events, byte-identically, with Retry-After.
- * Other clients get terminal 202 unverified_after_parse_failure rejections for limit-unchecked rows,
+ * Other clients get terminal 202 unverified_after_parse_failure rejections for rows a limit left unchecked after a
+ * proven parse failure (rows deferred before any statement ran stay retryable for everyone),
  * unless other rows still need a retry (including held claims): unchecked rows then stay unresolved in 503.
  * Identical retries skip confirmed rows and reach terminal 202 once genuine pending writes resolve.
  */
