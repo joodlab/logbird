@@ -1,5 +1,5 @@
 import { projectMaintenance } from '@logbird/clickhouse';
-import { closeProjectLocks, prisma, pruneIngestReceipts, sweepIngestReceipts } from '@logbird/database';
+import { closeProjectLocks, prisma, pruneIngestReceipts, sweepExpiredAuthRecords, sweepIngestReceipts } from '@logbird/database';
 import { Queue, Worker } from 'bullmq';
 import { env } from './env';
 import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from './ingest-recovery';
@@ -53,7 +53,25 @@ const receiptQueue = new Queue(receiptQueueName, {
 await receiptQueue.setGlobalConcurrency(1);
 const receiptWorker = new Worker(
   receiptQueueName,
-  async () => {
+  async (job) => {
+    if (job.name === 'auth-records.sweep') {
+      // Expired sessions, sign-in codes and invitations (#129): Postgres-only, short batches, so it shares this queue.
+      const started = Date.now();
+      const result = await sweepExpiredAuthRecords();
+      console.log(
+        JSON.stringify({
+          level: result.limited ? 'warn' : 'info',
+          event: 'auth.records_pruned',
+          sessions: result.removed.session,
+          verifications: result.removed.verification,
+          invitations: result.removed.invitation,
+          batches: result.batches,
+          limited: result.limited,
+          durationMs: Date.now() - started,
+        }),
+      );
+      return;
+    }
     const started = Date.now();
     const result = await sweepIngestReceipts();
     console.log(
@@ -62,9 +80,23 @@ const receiptWorker = new Worker(
   },
   { connection, prefix: env.BULLMQ_PREFIX, concurrency: 1 },
 );
-receiptWorker.on('failed', (job) => console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_sweep_failed', jobId: job?.id })));
+receiptWorker.on('failed', (job, error) =>
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      event: job?.name === 'auth-records.sweep' ? 'auth.records_sweep_failed' : 'ingest.receipt_sweep_failed',
+      jobId: job?.id,
+      // Prisma prefixes its own preamble, so keep the end of the message, where the database's reason is.
+      code: (error as { code?: unknown } | undefined)?.code,
+      reason: String(error?.message ?? error)
+        .trim()
+        .slice(-300),
+    }),
+  ),
+);
 receiptWorker.on('error', () => console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_worker_error' })));
 await receiptQueue.upsertJobScheduler('ingest-receipts-minute', { every: 60_000 }, { name: 'ingest-receipts.prune', data: {} });
+await receiptQueue.upsertJobScheduler('auth-records-hourly', { every: 3_600_000 }, { name: 'auth-records.sweep', data: {} });
 // Startup sweep uses the same locked recovery path as hourly and on-demand jobs.
 for (const run of await prisma.retentionRun.findMany({ where: { status: 'running' }, distinct: ['projectId'], select: { projectId: true } }))
   await retentionQueue.add('retention.project', { projectId: run.projectId });

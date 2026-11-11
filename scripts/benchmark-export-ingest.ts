@@ -160,11 +160,6 @@ try {
   try {
     for (const project of projects) {
       await purgeProject(clickhouse, project.id);
-      await clickhouse.command({
-        query: 'ALTER TABLE event_ids DELETE WHERE project_id={p:String}',
-        query_params: { p: project.id },
-        clickhouse_settings: { mutations_sync: '2' },
-      });
       await prisma.$executeRaw`DELETE FROM "IngestReceipt" WHERE "projectId"=${project.id}`;
     }
     await prisma.auditOutbox.deleteMany({ where: { namespace } });

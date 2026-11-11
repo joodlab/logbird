@@ -9,6 +9,8 @@ import { z } from 'zod';
 import { meQuery } from '@/lib/api/queries';
 import { sendSignInCode } from '@/lib/auth-client';
 import { changeAndRevalidate, fieldErrorMessage } from '@/lib/forms';
+import type { LegalLinks } from '@/lib/legal-links';
+import { getLegalLinks } from '@/lib/legal-links-fn';
 import { markOtpSent } from '@/lib/otp';
 import { safeRedirect } from '@/lib/session';
 
@@ -18,6 +20,9 @@ export const Route = createFileRoute('/login/')({
     const me = await context.queryClient.fetchQuery(meQuery()).catch(() => null);
     if (me) throw redirect({ to: safeRedirect(search.redirect) });
   },
+  // The operator's terms and privacy policy, from the console's runtime settings. A failure only hides the line.
+  loader: (): Promise<LegalLinks> => getLegalLinks().catch(() => ({})),
+  staleTime: Number.POSITIVE_INFINITY,
   component: EmailStep,
 });
 
@@ -105,11 +110,42 @@ function EmailStep() {
           )}
         </form.Subscribe>
       </form>
+      <LegalNotice links={Route.useLoaderData()} />
       {import.meta.env.DEV ? (
         <p className="text-muted-foreground text-xs leading-relaxed">
           Local development: codes land in Mailpit at <span className="font-mono">127.0.0.1:8025</span>.
         </p>
       ) : null}
     </div>
+  );
+}
+
+const legalLink = 'text-foreground underline underline-offset-2 hover:text-foreground/80';
+
+/** "By continuing…" with whichever of the terms and privacy policy the operator publishes; nothing when neither. */
+function LegalNotice({ links }: { links: LegalLinks }) {
+  const terms = links.terms ? (
+    <a className={legalLink} href={links.terms} rel="noreferrer" target="_blank">
+      Terms
+    </a>
+  ) : null;
+  const privacy = links.privacy ? (
+    <a className={legalLink} href={links.privacy} rel="noreferrer" target="_blank">
+      Privacy policy
+    </a>
+  ) : null;
+  if (!(terms || privacy)) return null;
+  return (
+    <p className="text-muted-foreground text-xs leading-relaxed" data-testid="legal-notice">
+      {terms && privacy ? (
+        <>
+          By continuing you agree to the {terms} and acknowledge the {privacy}.
+        </>
+      ) : terms ? (
+        <>By continuing you agree to the {terms}.</>
+      ) : (
+        <>See the {privacy} for how your data is handled.</>
+      )}
+    </p>
   );
 }

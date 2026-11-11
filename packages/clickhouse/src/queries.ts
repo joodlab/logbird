@@ -614,31 +614,110 @@ export async function hasExpiredEvents(ch: ClickHouseClient, p: string, before: 
   return Number(rows[0]?.n ?? 0) > 0;
 }
 
-async function deleteAndVerify(ch: ClickHouseClient, table: string, predicate: string, params: Params) {
-  await ch.command({
-    query: `DELETE FROM ${table} WHERE ${predicate}`,
-    query_params: params,
-    clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-  });
-  // Native-restored parts can outrank the new database's mutation sequence.
-  // A completed mutation alone does not prove that the rows disappeared.
-  const rows = await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`, params);
-  if (Number(rows[0]?.n ?? 0) !== 0) {
-    throw Object.assign(new Error(`Delete left visible rows in ${table}; stop writers and follow the ClickHouse restore normalization procedure.`), {
-      code: 'LOGBIRD_DELETE_INCOMPLETE',
+export const DELETE_ATTEMPTS = 3;
+/**
+ * A DELETE that times out or is cancelled may still be running as a mutation, so its effect is unknown. ClickHouse
+ * codes 159 (TIMEOUT_EXCEEDED) and 394 (QUERY_WAS_CANCELLED), or a client-side timeout/abort/reset with no server code.
+ * Anything else (syntax, auth, missing table) was rejected before it could run.
+ */
+function deleteOutcomeUnknown(error: unknown) {
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
+  if (code === '159' || code === '394') return true;
+  if (code && /^\d+$/.test(code)) return false;
+  return /timeout|timed out|aborted|socket hang up|ECONNRESET/i.test(error instanceof Error ? error.message : String(error));
+}
+/**
+ * Project-scoped maintenance DELETE that proves its effect. `table` and `filter` are trusted code, never input. The
+ * predicate is built here as `project_id={p:String} AND (filter)` with `p` bound to `projectId`, so no filter (even
+ * one containing OR) can reach another project. Every statement is tagged as `projectId`'s maintenance so project
+ * deletion can stop it.
+ *
+ * Any caller whose project can have live writers must hold the project's exclusive lock, so no new matching rows can
+ * arrive between attempts: a retry only re-applies a mutation that ClickHouse skipped (ClickHouse#124167). Only a
+ * whole-project purge with no writers (e.g. a test or script fixture) needs none.
+ */
+export async function deleteAndVerify(
+  client: ClickHouseClient,
+  projectId: string,
+  table: string,
+  filter = '',
+  params: Params = {},
+  // A caller that treats the failure as non-fatal (stale identity pointers) logs its own warning instead.
+  { logIncomplete = true }: { logIncomplete?: boolean } = {},
+) {
+  if ('p' in params) throw new Error('deleteAndVerify binds p to projectId itself; do not pass params.p');
+  const predicate = `project_id={p:String}${filter ? ` AND (${filter})` : ''}`;
+  const bound = { ...params, p: projectId };
+  const ch = projectMaintenance(client, projectId);
+  // Once the first DELETE has run, a storage error or timeout leaves the delete unproven: fail closed with a code the
+  // API maps to a retryable 503 (no time-range advice), keeping the storage error as `cause`.
+  const unverified = (cause: unknown, attempt: number) => {
+    console.error(JSON.stringify({ level: 'error', event: 'clickhouse.delete_unverified', table, projectId, attempt }));
+    return Object.assign(new Error(`Could not verify the delete in ${table} (attempt ${attempt}). Retry the operation.`, { cause }), {
+      code: 'LOGBIRD_DELETE_UNVERIFIED',
+      table,
+      attempts: attempt,
     });
+  };
+  for (let attempt = 1; attempt <= DELETE_ATTEMPTS; attempt++) {
+    try {
+      await ch.command({
+        query: `DELETE FROM ${table} WHERE ${predicate}`,
+        query_params: bound,
+        clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
+      });
+    } catch (error) {
+      // A definite rejection of the first DELETE changed nothing: propagate it unchanged. A timeout or cancellation, or
+      // any error after an earlier DELETE ran, leaves the outcome unknown.
+      if (attempt === 1 && !deleteOutcomeUnknown(error)) throw error;
+      throw unverified(error, attempt);
+    }
+    // Concurrent non-replicated mutations can register out of order and skip rows.
+    // Retry with a fresh mutation version, but still fail closed for restored parts
+    // that outrank every attempt. Completion alone never proves deletion.
+    // The probe binds exactly the DELETE's params (not through read(), which rewrites date keys and turns a timeout
+    // into a 422 query-budget error). A filter outside the sort key (sample-data `source`) scans the whole project once
+    // nothing matches, so it gets a maintenance budget.
+    let rows: { n: number }[];
+    try {
+      rows = await (
+        await ch.query({
+          query: `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`,
+          query_params: bound,
+          format: 'JSONEachRow',
+          clickhouse_settings: { max_execution_time: 60 },
+        })
+      ).json<{ n: number }>();
+    } catch (error) {
+      throw unverified(error, attempt);
+    }
+    if (Number(rows[0]?.n ?? 0) === 0) return;
+    if (attempt < DELETE_ATTEMPTS) {
+      console.warn(JSON.stringify({ level: 'warn', event: 'clickhouse.delete_retry', table, projectId, attempt: attempt + 1 }));
+      await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+    }
   }
+  // One log line for every fail-closed caller (server, worker, scripts); the restore gate greps for it.
+  if (logIncomplete)
+    console.error(JSON.stringify({ level: 'error', event: 'clickhouse.delete_incomplete', table, projectId, attempts: DELETE_ATTEMPTS }));
+  throw Object.assign(
+    new Error(
+      `Delete left visible rows in ${table} after ${DELETE_ATTEMPTS} attempts. Retry the operation; if it persists on a natively restored database, stop writers and follow the ClickHouse restore normalization procedure.`,
+    ),
+    { code: 'LOGBIRD_DELETE_INCOMPLETE', table, attempts: DELETE_ATTEMPTS },
+  );
 }
 
 export async function purgeProject(client: ClickHouseClient, p: string, before?: Date) {
   // Every statement is tagged as this project's maintenance, whoever the caller is (see maintenance-tag.ts).
   const ch = projectMaintenance(client, p);
   // Caller serializes ingestion. Capture only aggregate keys touched by expired rows.
-  const params = {
-    p,
+  // deleteAndVerify binds p itself; only the affected-key read and the rollup INSERT take it here.
+  const cutoffParams = {
     before: before?.toISOString().replace('T', ' ').slice(0, -1),
     bucket: before ? new Date(Math.floor(before.getTime() / 60_000) * 60_000).toISOString().replace('T', ' ').slice(0, -1) : undefined,
   };
+  const params = { p, ...cutoffParams };
   const affected = before
     ? await read<{ kind: string; id: string }>(
         ch,
@@ -651,9 +730,9 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
         params,
       )
     : [];
-  const predicate = `project_id={p:String}${before ? ' AND timestamp < {before:DateTime64(3)}' : ''}`;
-  await deleteAndVerify(ch, 'events', predicate, params);
-  await deleteAndVerify(ch, 'event_ids', predicate, params);
+  const cutoff = before ? 'timestamp < {before:DateTime64(3)}' : '';
+  await deleteAndVerify(ch, p, 'events', cutoff, cutoffParams);
+  await deleteAndVerify(ch, p, 'event_ids', cutoff, cutoffParams);
   // The required 007/008 migration repairs collapsed legacy pointers once before rollout.
   // Its plain MergeTree/MV keeps every raw tuple, so cutoff deletion preserves surviving
   // versions without scanning retained history under the exclusive project lock.
@@ -664,13 +743,13 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
     entities: '(kind,entity_id) IN arrayZip({kinds:Array(String)},{entityIds:Array(String)})',
     attribute_keys: 'key IN {keys:Array(String)}',
   };
-  const scoped = {
-    ...params,
+  const scopedParams = {
+    ...cutoffParams,
     kinds: affected.filter((r) => r.kind !== 'attribute').map((r) => r.kind),
     entityIds: affected.filter((r) => r.kind !== 'attribute').map((r) => r.id),
     keys: affected.filter((r) => r.kind === 'attribute').map((r) => r.id),
   };
-  for (const [table, filter] of Object.entries(filters)) await deleteAndVerify(ch, table, `project_id={p:String} AND ${filter}`, scoped);
+  for (const [table, filter] of Object.entries(filters)) await deleteAndVerify(ch, p, table, filter, scopedParams);
   // Recompute the boundary minute and affected entity/key histories exactly; newer buckets stay intact.
   for (const statement of rollupSql.split(';')) {
     const m = statement.match(/CREATE MATERIALIZED VIEW IF NOT EXISTS \w+ TO (\w+) AS (SELECT[\s\S]+)/);
@@ -678,7 +757,7 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
     const table = m[1] as keyof typeof filters;
     await ch.command({
       query: `INSERT INTO ${table} SELECT * FROM (${m[2]}) WHERE project_id={p:String} AND ${filters[table]}`,
-      query_params: scoped,
+      query_params: { ...scopedParams, p },
     });
   }
 }
@@ -686,7 +765,7 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
 /** Caller holds the project ingestion lock. Rebuild from surviving raw rows. */
 export async function rebuildProjectRollups(client: ClickHouseClient, p: string, rebuild = true) {
   const ch = projectMaintenance(client, p);
-  for (const table of ['events_by_minute', 'entities', 'attribute_keys']) await deleteAndVerify(ch, table, 'project_id={p:String}', { p });
+  for (const table of ['events_by_minute', 'entities', 'attribute_keys']) await deleteAndVerify(ch, p, table);
   if (rebuild) {
     for (const statement of rollupSql.split(';')) {
       const m = statement.match(/CREATE MATERIALIZED VIEW IF NOT EXISTS \w+ TO (\w+) AS (SELECT[\s\S]+)/);

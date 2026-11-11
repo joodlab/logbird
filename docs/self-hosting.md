@@ -89,6 +89,7 @@ One .env.example serves source development and containers. Empty URL overrides l
 | AUTH_LOG_SIGN_IN_CODES | false; true logs sign-in codes, warns at boot, bypasses SMTP only without SMTP_HOST |
 | AUTH_SIGNUP / AUTH_SIGNUP_DOMAINS | open / empty. `restricted` admits existing accounts, the listed email domains (comma-separated), addresses with a pending unexpired email invitation, and domains named by an active domain-limited invite link. Anyone else is treated like a wrong code: the request answers normally, no code is delivered, sign-in fails with `INVALID_OTP`, and the server logs `auth.signup_refused` with the domain only, so responses never reveal who has an account. Only approved domains may create workspaces. Use `restricted` on any internet-facing instance with SMTP |
 | LOGBIRD_SERVER_URL | Production runtime proxy target, http://server:4601; recreate app to change, no rebuild |
+| LOGBIRD_TERMS_URL / LOGBIRD_PRIVACY_URL | Optional: your own terms and privacy policy, linked under the sign-in form (https URL or a path on the console origin); empty shows no line. When the console forwards a marketing site (`LOGBIRD_SITE_URL`, passed to the app by `docker-compose.coolify.yml`; see [docs/coolify.md](coolify.md)) they default to the site's `/legal/terms` and `/legal/privacy`. The plain `docker-compose.yml` doesn't pass `LOGBIRD_SITE_URL`, so there set these two directly |
 | TRUST_PROXY / TRUSTED_ORIGINS | Trusted proxy hops: 1 in Compose (the console), 2 behind one reverse proxy; source dev 0 / empty. See ingress rules below |
 | AUTH_RATE_LIMIT_PER_MINUTE / PUBLIC_RATE_LIMIT_PER_MINUTE | 30 / 600 per client: sign-in requests and failed public-API authentications |
 | INGEST_RATE_LIMIT_PER_MINUTE / READ_RATE_LIMIT_PER_MINUTE | 3000 / 1200 per project key (shared Redis limits) |
@@ -421,6 +422,20 @@ See the [ClickHouse backup reference](https://clickhouse.com/docs/concepts/featu
 pinned ClickHouse 26.9.27.3 can restore parts with mutation versions higher than
 new delete mutations. A mutation may report success while rows remain. The source
 guard checks deletion and raises `LOGBIRD_DELETE_INCOMPLETE` before reinsertion.
+Transient [concurrent-mutation skips](https://github.com/ClickHouse/ClickHouse/pull/124167)
+are retried automatically with a fresh DELETE, up to three total attempts (logged as
+`clickhouse.delete_retry`). If the error still appears, retry the operation (retention
+runs again on its own). Only a failure that persists on a natively restored database
+needs the normalization procedure below. Every verified delete that fails closed (worker
+retention and repair, API sample-data removal and project deletion, `demo-clean`) logs one
+`clickhouse.delete_incomplete` line with the table and project; the API answers 503 with
+`Retry-After`. If storage fails after a DELETE ran (the verification probe times out, or a
+retry DELETE errors), the delete is unproven: it fails closed as `LOGBIRD_DELETE_UNVERIFIED`,
+logs `clickhouse.delete_unverified`, and gets the same retryable 503. The non-fatal stale-pointer cleanup logs only its own warning: ingest
+recovery or sample-data removal logs `clickhouse.event_index_stale_pointers` when it cannot
+delete stale identity pointers.
+The pinned 26.9 line has no upstream fix for that race; ClickHouse 26.10 and later include it.
+Moving the pin is tracked in [#147](https://github.com/joodlab/logbird/issues/147).
 **Live verification of the packaged guard and retry after normalization is pending
 in [#77](https://github.com/joodlab/logbird/issues/77); full DR readiness is not
 claimed.** See [#75](https://github.com/joodlab/logbird/issues/75).
@@ -514,17 +529,72 @@ docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/recove
 docker compose --env-file .env.restore -p logbird-restore exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /tmp/recovery-gate.sql'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep 'retention.run_failed'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep '"errorCode":"LOGBIRD_DELETE_INCOMPLETE"'
+docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep -E '"event":"clickhouse.delete_(incomplete|unverified)"'
+docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.event_index_stale_pointers"'
+```
+
+Then, separately (informational: a match does not block, and the version check below runs either way):
+
+```sh
+docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.delete_retry"'
 ```
 
 The receipt table is Prisma's `"RetentionRun"`. Wait until each restored project's
 latest run is `completed`, started after GATE_STARTED, and the missing count is
-zero. A running receipt needs more time; a failure or guard log blocks cutover.
+zero. A running receipt needs more time; a failure or guard log blocks cutover. So does
+`clickhouse.event_index_stale_pointers`: stale identity pointers remain and need investigation
+(ineffective normalization is one possible cause, repeated concurrent-mutation skips another).
+A `clickhouse.delete_retry` during the gate does not block by itself, because a retry can
+also succeed on a restored part that only slightly outranks the new mutations. Whether or not
+it logged, run the version check below before cutover. In a non-replicated MergeTree, inserts
+and mutations share one block counter, so it compares only *mutated* parts
+(`data_version > min_block_number`; a part that was never mutated, merged or not, has
+`data_version = min_block_number`) with the newest mutation each table received during the
+gate. A table that has mutated parts but received no gate mutation (for example because no
+restored row had expired yet) cannot be checked this way, so it also reports
+`blocks_cutover = 1`. Only finished gate mutations count: `pending_gate_mutations` shows
+how many are still running, so wait for them (or treat a stuck one as blocking). No output means none of the five tables that deletes touch has mutated parts. The check assumes a
+restored part can outrank new mutations only through its mutation version, as observed so
+far; the mandatory normalization (`TRUNCATE` + `INSERT`) removes the case entirely, and live
+verification of restored parts is tracked in [#77](https://github.com/joodlab/logbird/issues/77).
+
+```sh
+cat > .tmp/backups/mutation-versions.sql <<SQL
+SELECT p.table,
+       max(p.data_version) AS mutated_part_version,
+       any(m.done_version) AS newest_gate_mutation,
+       ifNull(any(m.pending), 0) AS pending_gate_mutations,
+       newest_gate_mutation IS NULL OR mutated_part_version > newest_gate_mutation AS blocks_cutover
+FROM (SELECT table, data_version FROM system.parts
+      WHERE database = 'logbird' AND active AND data_version > min_block_number
+        AND table IN ('events', 'event_ids', 'events_by_minute', 'entities', 'attribute_keys')) p
+LEFT JOIN (SELECT table,
+                  maxIfOrNull(toUInt64(extract(mutation_id, '(\d+)')), is_done) AS done_version,
+                  countIf(NOT is_done) AS pending
+           FROM system.mutations
+           WHERE database = 'logbird' AND create_time >= parseDateTimeBestEffort('$GATE_STARTED')
+           GROUP BY table) m ON m.table = p.table
+GROUP BY p.table
+ORDER BY p.table
+SETTINGS join_use_nulls = 1
+SQL
+docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/mutation-versions.sql clickhouse:/tmp/mutation-versions.sql
+docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --queries-file /tmp/mutation-versions.sql'
+```
+
+Block cutover and normalize if any row has `blocks_cutover = 1`: either a restored part outranks
+the gate's deletes, or the table had no gate delete to prove it does not.
 Inspect `retention.completed` too; a queue job completion alone does not establish
 every project receipt. Repeat the receipt query until the cycle ends.
 
-The grep checks pass with **no output**; grep exits 1 for no match. If using
+The blocking grep checks pass with **no output**; grep exits 1 for no match. If using
 `set -e`, run them in an `if` condition or handle that expected exit explicitly.
-Matching failure/guard lines block cutover; a log-read error is not a clean pass.
+Matching failure/guard lines block cutover (a `delete_retry` match is informational; the
+version check above decides); a log-read error is not a clean pass. To clear a block,
+investigate the matching lines first. If the cause was transient (for example a network
+blip on a probe, or a project deletion that stopped a retention run), record a new
+`GATE_STARTED`, enqueue a fresh retention sweep and rerun every gate check from the start.
+If `delete_incomplete` repeats on the restored database, normalize it (see above).
 
 Save this SQL as `.tmp/backups/logical-totals.sql`:
 

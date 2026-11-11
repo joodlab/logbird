@@ -37,7 +37,7 @@ function AcceptInvitationPage() {
     body =
       preview.error instanceof ApiRequestError && preview.error.status === 404 ? (
         <StateCard
-          description="The link may be mistyped, or the workspace was deleted. Ask the person who invited you for a new invitation."
+          description="The link may be mistyped, the invitation expired more than 30 days ago, or the workspace was deleted. Ask the person who invited you for a new invitation."
           icon={CircleSlashIcon}
           title="Invitation not found"
         />
