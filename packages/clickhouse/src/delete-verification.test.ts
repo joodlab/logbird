@@ -91,6 +91,30 @@ it('propagates a first-DELETE storage error unchanged, without retrying or proce
   expect(console.error).not.toHaveBeenCalled();
 });
 
+it.each([
+  ['a server timeout', Object.assign(new Error('Timeout exceeded: elapsed 600 seconds'), { code: '159' })],
+  ['a cancelled query', Object.assign(new Error('Query was cancelled'), { code: '394' })],
+  ['a client timeout', new Error('Timeout error.')],
+])('fails closed as unverified when the first DELETE ends with %s', async (_label, failure) => {
+  const command = vi.fn().mockRejectedValue(failure);
+  const query = vi.fn();
+  await expect(deleteAndVerify({ command, query } as unknown as ClickHouseClient, 'qa95-errors', 'events')).rejects.toMatchObject({
+    code: 'LOGBIRD_DELETE_UNVERIFIED',
+    table: 'events',
+    attempts: 1,
+    cause: failure,
+  });
+  expect(command).toHaveBeenCalledTimes(1);
+  expect(query).not.toHaveBeenCalled();
+});
+
+it('propagates a definite first-DELETE rejection unchanged', async () => {
+  const failure = Object.assign(new Error('Syntax error'), { code: '62' });
+  const command = vi.fn().mockRejectedValue(failure);
+  await expect(deleteAndVerify({ command, query: vi.fn() } as unknown as ClickHouseClient, 'qa95-errors', 'events')).rejects.toBe(failure);
+  expect(console.error).not.toHaveBeenCalled();
+});
+
 it('fails closed as unverified when the probe errors after the DELETE ran', async () => {
   const failure = Object.assign(new Error('Timeout exceeded'), { code: '159' });
   const command = vi.fn().mockResolvedValue({});

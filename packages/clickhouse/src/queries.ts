@@ -616,6 +616,17 @@ export async function hasExpiredEvents(ch: ClickHouseClient, p: string, before: 
 
 export const DELETE_ATTEMPTS = 3;
 /**
+ * A DELETE that times out or is cancelled may still be running as a mutation, so its effect is unknown. ClickHouse
+ * codes 159 (TIMEOUT_EXCEEDED) and 394 (QUERY_WAS_CANCELLED), or a client-side timeout/abort/reset with no server code.
+ * Anything else (syntax, auth, missing table) was rejected before it could run.
+ */
+function deleteOutcomeUnknown(error: unknown) {
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
+  if (code === '159' || code === '394') return true;
+  if (code && /^\d+$/.test(code)) return false;
+  return /timeout|timed out|aborted|socket hang up|ECONNRESET/i.test(error instanceof Error ? error.message : String(error));
+}
+/**
  * Project-scoped maintenance DELETE that proves its effect. `table` and `filter` are trusted code, never input. The
  * predicate is built here as `project_id={p:String} AND (filter)` with `p` bound to `projectId`, so no filter (even
  * one containing OR) can reach another project. Every statement is tagged as `projectId`'s maintenance so project
@@ -656,7 +667,9 @@ export async function deleteAndVerify(
         clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
       });
     } catch (error) {
-      if (attempt === 1) throw error;
+      // A definite rejection of the first DELETE changed nothing: propagate it unchanged. A timeout or cancellation, or
+      // any error after an earlier DELETE ran, leaves the outcome unknown.
+      if (attempt === 1 && !deleteOutcomeUnknown(error)) throw error;
       throw unverified(error, attempt);
     }
     // Concurrent non-replicated mutations can register out of order and skip rows.

@@ -15,4 +15,6 @@ it('leaves every other error to the generic handlers', () => {
   expect(deleteFailureResponse(Object.assign(new Error('Timeout exceeded'), { code: '159' }))).toBeNull();
   expect(deleteFailureResponse(new Error('LOGBIRD_DELETE_INCOMPLETE'))).toBeNull();
   expect(deleteFailureResponse(null)).toBeNull();
+  // Inherited object keys are not delete codes.
+  expect(deleteFailureResponse(Object.assign(new Error('x'), { code: 'toString' }))).toBeNull();
 });

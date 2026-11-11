@@ -589,7 +589,11 @@ every project receipt. Repeat the receipt query until the cycle ends.
 The blocking grep checks pass with **no output**; grep exits 1 for no match. If using
 `set -e`, run them in an `if` condition or handle that expected exit explicitly.
 Matching failure/guard lines block cutover (a `delete_retry` match is informational; the
-version check above decides); a log-read error is not a clean pass.
+version check above decides); a log-read error is not a clean pass. To clear a block,
+investigate the matching lines first. If the cause was transient (for example a network
+blip on a probe, or a project deletion that stopped a retention run), record a new
+`GATE_STARTED`, enqueue a fresh retention sweep and rerun every gate check from the start.
+If `delete_incomplete` repeats on the restored database, normalize it (see above).
 
 Save this SQL as `.tmp/backups/logical-totals.sql`:
 

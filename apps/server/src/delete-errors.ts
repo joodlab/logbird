@@ -9,6 +9,6 @@ const DELETE_FAILURES: Record<string, string> = {
 
 export function deleteFailureResponse(error: unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? (error as { code?: unknown }).code : undefined;
-  const message = typeof code === 'string' ? DELETE_FAILURES[code] : undefined;
+  const message = typeof code === 'string' && Object.hasOwn(DELETE_FAILURES, code) ? DELETE_FAILURES[code] : undefined;
   return message ? { status: 503 as const, retryAfter: '5', body: { error: { code: 'query_unavailable', message } } } : null;
 }
