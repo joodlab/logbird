@@ -172,6 +172,44 @@ it('skips a rebuild that an older open transaction would fail after building, an
   expect(big.calls.some((sql) => sql.startsWith('REINDEX'))).toBe(false);
   const check = big.query.mock.calls.find(([sql]) => String(sql).includes('pg_stat_activity'));
   expect(check?.[0]).toContain('pid <> pg_backend_pid()');
-  expect(check?.[1]).toEqual([RECEIPT_INDEX_COMPACTION.lockTimeoutMs]);
+  expect(check?.[0]).toContain('AND (backend_xmin IS NOT NULL OR pid IN (SELECT pid FROM pg_locks WHERE relation = to_regclass($2)))');
+  expect(check?.[1]).toEqual([RECEIPT_INDEX_COMPACTION.lockTimeoutMs, '"qa_current"."IngestReceipt"']);
   expect(big.calls.at(-1)).toContain('pg_advisory_unlock');
+});
+
+it('closes the managed connection on shutdown instead of waiting for an active rebuild', async () => {
+  const abort = new AbortController();
+  connection.connect.mockResolvedValue(undefined);
+  const { query } = fakeDb({ pages: [RECEIPT_INDEX_COMPACTION.minPages * 10], live: 1000, keyBytes: 60 });
+  let started: (() => void) | undefined;
+  const active = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let failQuery: ((error: Error) => void) | undefined;
+  connection.query.mockImplementation((sql: string, params?: unknown[]) => {
+    if (!sql.startsWith('REINDEX')) return query(sql, params);
+    started?.();
+    return new Promise((_resolve, reject) => {
+      failQuery = reject;
+    });
+  });
+  connection.end.mockImplementation(async () => {
+    failQuery?.(new Error('Connection terminated'));
+  });
+  const rebuilding = compactIngestReceiptIndex({ signal: abort.signal });
+  await active;
+  expect(connection.end).not.toHaveBeenCalled();
+  abort.abort();
+  await expect(rebuilding).rejects.toThrow('Connection terminated');
+  expect(connection.end).toHaveBeenCalled();
+});
+
+it('does not issue maintenance statements if shutdown happened while connecting', async () => {
+  const abort = new AbortController();
+  connection.connect.mockImplementationOnce(async () => {
+    abort.abort();
+  });
+  await expect(compactIngestReceiptIndex({ signal: abort.signal })).rejects.toMatchObject({ name: 'AbortError' });
+  expect(connection.query.mock.calls.some(([sql]) => String(sql).includes('pg_try_advisory_lock'))).toBe(false);
+  expect(connection.end).toHaveBeenCalledTimes(1);
 });

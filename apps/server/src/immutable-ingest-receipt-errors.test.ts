@@ -8,12 +8,14 @@ const fake = vi.hoisted(() => ({
   insert: vi.fn(),
   lookup: vi.fn(),
   retryAfter: vi.fn(),
+  expire: vi.fn(),
+  retryFingerprint: vi.fn(),
 }));
 vi.mock('@logbird/database', () => ({
   findIngestReceipts: fake.find,
   claimIngestReceipts: fake.claim,
   confirmIngestReceipts: fake.confirm,
-  expireIngestReceipts: vi.fn(),
+  expireIngestReceipts: fake.expire,
   takeOverIngestReceipts: vi.fn(),
   INGEST_RECEIPT_WINDOW_MS: 600_000,
   prisma: { ingestReceipt: { deleteMany: fake.release } },
@@ -22,9 +24,9 @@ vi.mock('@logbird/clickhouse', () => ({
   AmbiguousInsertError: class extends Error {},
   ASYNC_INSERT_FLUSH_BOUND_MS: 30_000,
   INGEST_CLAIM_LEASE_MS: 60_000,
-  CLICKHOUSE_PARSE_ERROR_CODES: new Set(),
+  CLICKHOUSE_PARSE_ERROR_CODES: new Set(['27']),
   eventFingerprint: () => 'v1:qa',
-  retryFingerprint: () => 'v1:qa',
+  retryFingerprint: fake.retryFingerprint,
   existingEventIdentities: fake.lookup,
   insertEvents: fake.insert,
   normalizeEvent: vi.fn(),
@@ -52,6 +54,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.useFakeTimers();
   vi.setSystemTime(now);
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  fake.retryFingerprint.mockReturnValue('v1:qa');
   fake.find.mockResolvedValue([]);
   fake.claim.mockResolvedValue([receipt]);
   fake.lookup.mockResolvedValue(new Map());
@@ -60,7 +64,10 @@ beforeEach(() => {
     if (values.length) throw conflict();
   });
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 it('returns a retryable unavailable mapping without holding claims when the claim statement conflicts', async () => {
   fake.claim.mockRejectedValueOnce(conflict());
@@ -108,7 +115,7 @@ it('maps a pre-insert database failure (pool timeout) to a retryable 503 without
 });
 
 it('maps a receipt lookup failure before any claim to a retryable 503', async () => {
-  fake.find.mockRejectedValueOnce(Object.assign(new Error('connection lost'), { name: 'PrismaClientUnknownRequestError' }));
+  fake.find.mockRejectedValueOnce(prismaFailure('P1017'));
   const error = await insertImmutableEvents('qa-project', 'qa-org', candidates).catch((error: unknown) => error);
   expect(error).toMatchObject({ status: 503, code: 'ingest_unavailable', retryAfter: 1 });
   expect(fake.claim).not.toHaveBeenCalled();
@@ -120,10 +127,16 @@ it('still surfaces a programming error before the insert', async () => {
 });
 
 it.each([
-  ['a statement timeout', prismaFailure('P2010')],
+  [
+    'a statement timeout',
+    Object.assign(prismaFailure('P2010'), { meta: { driverAdapterError: { cause: { originalCode: '57014', kind: 'postgres' } } } }),
+    'postgres',
+  ],
   ['a pool timeout', prismaFailure('P2024')],
   ['an unknown failure', new Error('socket closed')],
-])('keeps acknowledged claims and reports pending indices after %s while confirming', async (_label, failure) => {
+  ['a programming error', new TypeError('private bug detail')],
+  ['invalid SQL', Object.assign(prismaFailure('P2010'), { meta: { code: '42601' } })],
+])('keeps acknowledged claims and reports pending indices after %s while confirming', async (_label, failure, kind?: string) => {
   fake.confirm.mockImplementation(async (_project, values: unknown[]) => {
     if (values.length) throw failure;
   });
@@ -133,6 +146,78 @@ it.each([
   expect((error as ApiError).retryAfter).toBeGreaterThanOrEqual(1);
   expect(fake.insert).toHaveBeenCalledTimes(1);
   expect(fake.release).not.toHaveBeenCalled();
+  expect(console.error).toHaveBeenCalledWith(
+    JSON.stringify({
+      level: 'error',
+      event: 'ingest.receipt_phase_failed',
+      phase: 'confirm',
+      name: failure.name,
+      code: 'code' in failure ? failure.code : undefined,
+      kind,
+    }),
+  );
+});
+
+it.each(['claim', 'classify', 'empty', 'insert'] as const)('maps a failed claim release at %s to a retryable 503 and logs it', async (site) => {
+  fake.release.mockRejectedValueOnce(prismaFailure('P2024'));
+  if (site === 'claim') {
+    // Claim one id, then fail while reloading a competing id.
+    fake.find.mockResolvedValueOnce([]).mockRejectedValueOnce(prismaFailure('P1017'));
+  } else if (site === 'classify') {
+    fake.claim.mockResolvedValueOnce([{ ...receipt, eventAt: new Date(Number.NaN) }]);
+  } else if (site === 'empty') {
+    fake.claim.mockResolvedValueOnce([{ ...receipt, fingerprint: 'unreadable:qa' }]);
+  } else {
+    fake.insert.mockRejectedValueOnce(new Error('definite storage failure'));
+  }
+  const batch = site === 'claim' ? [...candidates, { ...candidates[0], row: { ...candidates[0]?.row, event_id: 'qa-competitor' } }] : candidates;
+  const error = await insertImmutableEvents('qa-project', 'qa-org', batch as IngestCandidate[]).catch((error: unknown) => error);
+  expect(error).toMatchObject({ status: 503, code: 'ingest_unavailable', retryAfter: 1 });
+  expect(fake.release).toHaveBeenCalledTimes(1);
+  expect(console.error).toHaveBeenCalledWith(
+    expect.stringContaining('"event":"ingest.claim_release_failed","name":"PrismaClientKnownRequestError","code":"P2024"'),
+  );
+  if (site === 'insert') expect((error as Error).message).toBe('Storage rejected this write. Retry this batch.');
+});
+
+it('preserves the original ApiError when classification and release both fail and logs both codes', async () => {
+  const original = new ApiError(503, 'project_busy', 'Project is busy.', undefined, 7);
+  fake.claim.mockResolvedValueOnce([{ ...receipt, fingerprint: 'legacy' }]);
+  fake.retryFingerprint.mockImplementationOnce(() => {
+    throw original;
+  });
+  fake.release.mockRejectedValueOnce(prismaFailure('P2024'));
+  await expect(insertImmutableEvents('qa-project', 'qa-org', candidates)).rejects.toBe(original);
+  expect(console.error).toHaveBeenCalledWith(expect.stringContaining('"original":{"name":"Error","code":"project_busy"}'));
+});
+
+it('preserves a definite parse rejection when release also fails', async () => {
+  fake.insert.mockRejectedValueOnce({ code: '27' });
+  fake.release.mockRejectedValueOnce(prismaFailure('P2024'));
+  await expect(insertImmutableEvents('qa-project', 'qa-org', candidates)).rejects.toMatchObject({ status: 422, code: 'invalid_event' });
+  expect(console.error).toHaveBeenCalledWith(expect.stringContaining('"original":{"name":"Error","code":"invalid_event"}'));
+});
+
+it('logs the adapter kind before mapping a pre-insert infrastructure failure', async () => {
+  fake.claim.mockRejectedValueOnce({ name: 'DriverAdapterError', cause: { kind: 'ConnectionClosed' } });
+  await expect(insertImmutableEvents('qa-project', 'qa-org', candidates)).rejects.toMatchObject({ code: 'ingest_unavailable', retryAfter: 1 });
+  expect(console.error).toHaveBeenCalledWith(
+    JSON.stringify({ level: 'error', event: 'ingest.receipt_phase_failed', phase: 'claim', name: 'DriverAdapterError', kind: 'ConnectionClosed' }),
+  );
+});
+
+it.each(['lookup', 'expire', 'claim'] as const)('surfaces and logs a programming error during pre-insert %s', async (site) => {
+  const error = Object.assign(new Error('private SQL detail'), { code: 'P2010', meta: { code: '42601' } });
+  if (site === 'lookup') fake.find.mockRejectedValueOnce(error);
+  else if (site === 'claim') fake.claim.mockRejectedValueOnce(error);
+  else {
+    fake.find.mockResolvedValueOnce([{ ...receipt, confirmedAt: new Date(now.getTime() - 700_000) }]);
+    fake.expire.mockRejectedValueOnce(error);
+  }
+  await expect(insertImmutableEvents('qa-project', 'qa-org', candidates)).rejects.toBe(error);
+  expect(console.error).toHaveBeenCalledWith(
+    JSON.stringify({ level: 'error', event: 'ingest.receipt_phase_failed', phase: 'claim', name: 'Error', code: 'P2010' }),
+  );
 });
 
 it('keeps the pending response when the recovery Retry-After lookup fails', async () => {

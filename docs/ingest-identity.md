@@ -52,9 +52,9 @@ the exact key and its tuple id (`ctid`); a missing key's successor, including
 another project's row, is never locked or changed. The statement then locks that
 tuple with `FOR UPDATE`, re-checking the ctid and exact key (and, for expiry, the
 cutoff). The UPDATE/DELETE itself matches on `ctid` only: it does not repeat the
-project/id predicates, and it cannot miss a tuple the statement holds locked. The
-gap is between seek and lock: a concurrent writer that updated the row moved it
-to a new ctid, so READ COMMITTED's recheck drops it. Each statement therefore
+project/id predicates. A concurrent update moves the row to a new ctid: either
+the TID recheck drops the row, or the UPDATE/DELETE by ctid cannot see the new
+version. Either way, the id is skipped and sought again. Each statement therefore
 returns how many keys it found, how many it changed and which ids it lost. Lost
 ids are sought again against the current version, up to three attempts. A renewed
 receipt drops out of the expiry re-seek because it no longer matches the cutoff;
@@ -63,7 +63,15 @@ that do not add up, or a conflict that persists for three attempts, raise
 `IngestReceiptConflictError` (a retryable 503 with `Retry-After` on the request
 path). After an acknowledged insert it returns `ingest_pending`, preserving the
 claims and the usual pending indices/event ids; before insertion it returns
-`ingest_unavailable`. Nothing on
+`ingest_unavailable`. Pre-insert database infrastructure failures also return
+`503 ingest_unavailable` with `Retry-After: 1`; SQL/API misuse surfaces as an error.
+Receipt phase failures log `ingest.receipt_phase_failed` with `phase: claim|confirm`
+and only the error name, code and adapter kind. After an acknowledged insert,
+even a programming error is logged and reported as `ingest_pending`, keeping claims.
+A failed release logs `ingest.claim_release_failed`, including the original error's
+metadata when present. It preserves an existing `ApiError`; otherwise infrastructure
+release failures return retryable `503 ingest_unavailable`. Unreleased claims remain
+held until abandoned-claim recovery. Nothing on
 today's request path writes the same receipt concurrently, so a retry is an
 anomaly, not a normal branch.
 
@@ -188,8 +196,12 @@ mark. Random-UUID leaf pages left half empty by a drained backlog stay in the in
 so only a rebuild restores a compact primary key. The hourly worker job therefore
 runs `compactIngestReceiptIndex`:
 
-- It runs last in the worker's hourly `retention.enforce` job, after abandoned-claim
-  recovery and project retention. A source-scan unit test guards server call sites
+- It runs in its own hourly `ingest-receipt-index.compact` job on the
+  `ingest-receipt-index-compaction` queue and worker (concurrency 1), using the same
+  BullMQ prefix and Redis connection as other worker queues. It has one attempt and
+  never retries; retention retries cannot repeat a rebuild. Recovery and fence lifting
+  run on their own worker, so a long rebuild cannot delay their queued jobs.
+  A source-scan unit test guards server call sites
   against references to it; this does not prove runtime process isolation.
 - It is single-flight across workers through a session advisory try-lock, and uses
   its own connection, because `REINDEX CONCURRENTLY` cannot run inside a transaction
@@ -204,28 +216,38 @@ runs `compactIngestReceiptIndex`:
   in at the end. It is bounded by a 15-minute statement timeout and a one-minute
   lock timeout. Connection attempts have a five-second timeout; connection errors
   are logged rather than emitted without a listener.
+  Shutdown closes the rebuild's connection before waiting for workers to close;
+  it does not wait for the 15-minute rebuild budget. PostgreSQL cancels the active
+  REINDEX when that connection closes; any invalid copy is dropped next run.
+- Reserve free disk for about the index's live size while the copy is built.
+  After a statement timeout (57014) or lock timeout (55P03), the worker stores a
+  timestamp under `<BULLMQ_PREFIX>:ingest-receipt-index-compaction:backoff` in its
+  existing Redis connection with a 24-hour TTL. Hourly jobs return and log
+  `skipped_backoff` until it expires, avoiding repeated expensive copies. Redis
+  read/write errors fail open; they do not disable compaction.
 - An interrupted rebuild's invalid `_ccnew`/`_ccold` copy is dropped concurrently,
   both before each run and after a failure. It cannot touch an operator's in-progress
   manual rebuild: that rebuild holds SHARE UPDATE EXCLUSIVE on the table, so the
-  worker's drop waits out its lock timeout and fails with 55P03, logged hourly while the
-  manual rebuild runs. Pause the worker during a manual rebuild to avoid that noise.
+  worker's drop waits out its lock timeout and fails with 55P03, then backs off for
+  24 hours. Pause the worker during a manual rebuild to avoid that noise.
 - The lock timeout also bounds REINDEX's waits for older transactions. Before building,
   the job therefore skips (`skipped_old_transactions`, logged) when another client
-  transaction in the database is older than the lock timeout, such as a `pg_dump`, a
-  long report or a session idle in transaction. Otherwise the rebuild would fail after
+  transaction in the database is older than the lock timeout and holds a snapshot
+  (`backend_xmin`) or a lock on the schema-qualified receipt table. An old transaction
+  with neither does not block this pre-check. Otherwise the rebuild would fail after
   building a full copy, every hour. The check sees only sessions the worker role may
   inspect (`pg_read_all_stats` widens it); an invisible old transaction still makes that
-  run fail and retry next hour.
+  run fail and enter the 24-hour timeout backoff.
 - It logs `ingest.receipt_index_compaction` with page counts, ratio and duration
   when it rebuilds (`info`), is busy, lacks analyzed key widths
   (`skipped_no_statistics`, `warn`), or cannot resolve its table/index
   (`skipped_missing`, `warn`), and `ingest.receipt_index_compaction_failed` with
-  only an error code. A failure never fails the retention job. Both hourly and
+  only an error code. Failures are never thrown or retried. Both hourly and
   per-project receipt-prune backstops are also best effort: a timeout or pool
   failure logs `ingest.receipts_prune_failed` with its code and retention continues.
   A failed pending-project or project-list query logs `ingest.pending_projects_failed`
-  or `retention.projects_failed`, respectively. Remaining phases still run, including
-  compaction; essential phase failures are reported together at the end.
+  or `retention.projects_failed`, respectively. Remaining retention phases still run;
+  essential phase failures are reported together at the end. Compaction is independent.
 
 During REINDEX CONCURRENTLY, the not-yet-valid `_ccnew` unique index still enforces
 uniqueness but cannot arbitrate `INSERT ... ON CONFLICT`. Concurrent claims for the

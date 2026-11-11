@@ -3,6 +3,7 @@ import { Queue, Worker } from 'bullmq';
 import { env } from './env';
 import { probeIngestRecovery } from './ingest-recovery';
 import { closeRetentionQueue, connection, retentionQueue, retentionQueueName } from './queue';
+import { runReceiptIndexCompaction } from './receipt-index-compaction';
 import { clickhouse, enforceProjectRetention } from './retention';
 import { enforceRetention } from './retention-sweep';
 
@@ -74,6 +75,37 @@ receiptWorker.on('failed', (job, error) =>
 receiptWorker.on('error', () => console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_worker_error' })));
 await receiptQueue.upsertJobScheduler('ingest-receipts-minute', { every: 60_000 }, { name: 'ingest-receipts.prune', data: {} });
 await receiptQueue.upsertJobScheduler('auth-records-hourly', { every: 3_600_000 }, { name: 'auth-records.sweep', data: {} });
+// Recovery and fence lifting have their own worker; an online rebuild cannot occupy their queue.
+const compactionQueueName = 'ingest-receipt-index-compaction';
+const compactionQueue = new Queue(compactionQueueName, {
+  connection,
+  prefix: env.BULLMQ_PREFIX,
+  defaultJobOptions: { attempts: 1, removeOnComplete: 100, removeOnFail: 100 },
+});
+await compactionQueue.setGlobalConcurrency(1);
+const compactionAbort = new AbortController();
+const compactionWorker = new Worker(
+  compactionQueueName,
+  async (job) => {
+    if (job.name !== 'ingest-receipt-index.compact') throw new Error('Unknown receipt index compaction job');
+    await runReceiptIndexCompaction(
+      connection,
+      `${env.BULLMQ_PREFIX}:ingest-receipt-index-compaction:backoff`,
+      job.attemptsMade,
+      compactionAbort.signal,
+    );
+  },
+  { connection, prefix: env.BULLMQ_PREFIX, concurrency: 1 },
+);
+compactionWorker.on('failed', (job) =>
+  console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_compaction_job_failed', jobId: job?.id })),
+);
+compactionWorker.on('error', () => console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_compaction_worker_error' })));
+await compactionQueue.upsertJobScheduler(
+  'ingest-receipt-index-hourly',
+  { every: 3_600_000 },
+  { name: 'ingest-receipt-index.compact', data: {}, opts: { attempts: 1 } },
+);
 // Startup sweep uses the same locked recovery path as hourly and on-demand jobs.
 for (const run of await prisma.retentionRun.findMany({ where: { status: 'running' }, distinct: ['projectId'], select: { projectId: true } }))
   await retentionQueue.add('retention.project', { projectId: run.projectId });
@@ -82,8 +114,10 @@ let stopping = false;
 async function shutdown() {
   if (stopping) return;
   stopping = true;
-  await Promise.all([worker.close(), receiptWorker.close()]);
-  await receiptQueue.close();
+  // Close the REINDEX connection before waiting for workers; its invalid copy is dropped next run.
+  compactionAbort.abort();
+  await Promise.all([worker.close(), receiptWorker.close(), compactionWorker.close()]);
+  await Promise.all([receiptQueue.close(), compactionQueue.close()]);
   const results = await Promise.allSettled([closeRetentionQueue(), closeProjectLocks(), clickhouse.close(), prisma.$disconnect()]);
   if (results.some((r) => r.status === 'rejected')) process.exitCode = 1;
 }

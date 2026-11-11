@@ -14,6 +14,8 @@ export default defineConfig({
       'src/immutable-ingest-receipt-errors.test.ts',
       '../worker/src/failed-repair-status.test.ts',
       '../worker/src/retention-sweep.test.ts',
+      '../worker/src/receipt-index-compaction.test.ts',
+      '../worker/src/receipt-index-scheduler.test.ts',
     ],
     maxWorkers: 1,
     fileParallelism: false,

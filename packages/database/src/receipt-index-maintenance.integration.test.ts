@@ -137,9 +137,18 @@ async function withFixture(
   if (cleanupFailure !== undefined) throw cleanupFailure;
 }
 
-async function waitForWriterPhase(observer: pg.Client, pid: number) {
+async function waitForWriterPhase(observer: pg.Client, pid: number, rebuilding?: ReturnType<typeof compactIngestReceiptIndex>) {
+  let outcome: Awaited<ReturnType<typeof compactIngestReceiptIndex>> | undefined;
+  void rebuilding?.then(
+    (result) => {
+      outcome = result;
+    },
+    () => undefined,
+  );
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
+    if (outcome?.action === 'skipped_old_transactions')
+      throw new Error('shared DB busy: a client transaction older than the lock timeout is open; retry later');
     const result = await observer.query<{ phase: string }>('SELECT phase FROM pg_stat_progress_create_index WHERE pid=$1', [pid]);
     if (result.rows[0]?.phase === 'waiting for writers before build') return;
     await pause(20);
@@ -174,7 +183,7 @@ it.runIf(enabled)('rebuilds a private index with concurrent writer progress, the
     // Attach a handler immediately, including when a barrier assertion fails.
     void rebuilding.catch(() => undefined);
     try {
-      await waitForWriterPhase(observer, pid);
+      await waitForWriterPhase(observer, pid, rebuilding);
       // A fresh writer can acquire its lock while the concurrent rebuild waits on the older transaction.
       await observer.query(`INSERT INTO ${table} VALUES ('qa-writer', 'qa-during')`);
       await writer.query('COMMIT');

@@ -1,5 +1,5 @@
 import { projectMaintenance } from '@logbird/clickhouse';
-import { compactIngestReceiptIndex, prisma } from '@logbird/database';
+import { prisma } from '@logbird/database';
 import { logIngestRecoveryFailure, recoverProjectIngest } from './ingest-recovery';
 import { clickhouse, enforceProjectRetention, pruneReceiptBackstop } from './retention';
 
@@ -38,17 +38,6 @@ export async function enforceRetention() {
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
     console.error(JSON.stringify({ level: 'error', event: 'retention.projects_failed', code }));
     failures.push(error);
-  }
-  // Recovery and fence lifting take priority over a potentially long online rebuild.
-  try {
-    const compaction = await compactIngestReceiptIndex();
-    if (compaction.action !== 'skipped_compact')
-      console.log(
-        JSON.stringify({ level: compaction.action === 'reindexed' ? 'info' : 'warn', event: 'ingest.receipt_index_compaction', ...compaction }),
-      );
-  } catch (error) {
-    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
-    console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_compaction_failed', code }));
   }
   if (failures.length) throw new AggregateError(failures, 'Retention sweep failed for some projects');
 }

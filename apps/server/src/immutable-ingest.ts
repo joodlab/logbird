@@ -25,7 +25,7 @@ import {
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
-import { ingestReceiptFailureResponse, isDatabaseFailure } from './ingest-receipt-errors';
+import { ingestReceiptFailureResponse, isDatabaseFailure, receiptErrorDetails } from './ingest-receipt-errors';
 
 export type IngestCandidate = { index: number; input: unknown; row: EventRow };
 export const DUPLICATE_ID_CONFLICT =
@@ -45,6 +45,30 @@ async function releaseClaims(projectId: string, owned: Map<string, IngestReceipt
     await prisma.ingestReceipt.deleteMany({
       where: { projectId, eventId: { in: [...owned.keys()] }, confirmedAt: null },
     });
+}
+
+async function releaseClaimsSafely(projectId: string, owned: Map<string, IngestReceipt>, originalError?: unknown) {
+  try {
+    await releaseClaims(projectId, owned);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        event: 'ingest.claim_release_failed',
+        ...receiptErrorDetails(error),
+        original: originalError === undefined ? undefined : receiptErrorDetails(originalError),
+      }),
+    );
+    // Keep the more informative request outcome, even when cleanup also failed.
+    if (originalError instanceof ApiError) throw originalError;
+    if (isDatabaseFailure(error))
+      throw new ApiError(503, 'ingest_unavailable', 'Event identity claims could not be released. Retry this batch.', undefined, 1);
+    throw error;
+  }
+}
+
+function logReceiptPhaseFailure(phase: 'claim' | 'confirm', error: unknown) {
+  console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_phase_failed', phase, ...receiptErrorDetails(error) }));
 }
 
 async function upgradeLegacyReceipts(projectId: string, cached: Map<string, IngestReceipt>, stored: Awaited<ReturnType<typeof lookup>>) {
@@ -87,18 +111,19 @@ async function recheckAfterPause(projectId: string, owned: Map<string, IngestRec
   return true;
 }
 
-/** Claim/recheck owns release until it hands the claims to the insert phase. */
-/** Before any ClickHouse insert: a database failure leaves no claim held (claimPhase releases its own), so retry. */
+/** Before insert, release owned claims on failure; a failed release leaves abandoned claims for recovery. */
 async function claimEvents(projectId: string, organizationId: string, candidates: IngestCandidate[], fingerprint: (row: EventRow) => string) {
   try {
     return await claimPhase(projectId, organizationId, candidates, fingerprint);
   } catch (error) {
+    if (!(error instanceof ApiError)) logReceiptPhaseFailure('claim', error);
     if (!(error instanceof ApiError) && isDatabaseFailure(error))
       throw new ApiError(503, 'ingest_unavailable', 'Event identity cache is unavailable. Retry this batch.', undefined, 1);
     throw error;
   }
 }
 
+/** Claim/recheck owns release until it hands the claims to the insert phase. */
 async function claimPhase(projectId: string, organizationId: string, candidates: IngestCandidate[], fingerprint: (row: EventRow) => string) {
   const unique = new Map<string, EventRow>();
   for (const { row } of candidates) if (!unique.has(row.event_id)) unique.set(row.event_id, row);
@@ -107,16 +132,11 @@ async function claimPhase(projectId: string, organizationId: string, candidates:
   const cacheCutoff = new Date(Date.now() - INGEST_RECEIPT_WINDOW_MS);
   const expired = prior.filter((r) => r.confirmedAt && r.confirmedAt < cacheCutoff);
   if (expired.length) {
-    try {
-      await expireIngestReceipts(
-        projectId,
-        expired.map((r) => r.eventId),
-        cacheCutoff,
-      );
-    } catch (error) {
-      if (ingestReceiptFailureResponse(error)) throw error;
-      throw new ApiError(503, 'ingest_unavailable', 'Event identity cache is unavailable. Retry this batch.');
-    }
+    await expireIngestReceipts(
+      projectId,
+      expired.map((r) => r.eventId),
+      cacheCutoff,
+    );
   }
   const cached = new Map(prior.filter((r) => !r.confirmedAt || r.confirmedAt >= cacheCutoff).map((r) => [r.eventId, r]));
   const lookupAt = Date.now();
@@ -158,7 +178,7 @@ async function claimPhase(projectId: string, organizationId: string, candidates:
     }
     return { owned, receipts };
   } catch (error) {
-    await releaseClaims(projectId, owned);
+    await releaseClaimsSafely(projectId, owned, error);
     throw error;
   }
 }
@@ -229,7 +249,7 @@ function classifyCandidates(
 /** Insert owns release before send and on definite failure. Unproven write outcomes retain the lease. */
 async function persistRows(projectId: string, rows: EventRow[], owned: Map<string, IngestReceipt>, fingerprint: (row: EventRow) => string) {
   if (!rows.length) {
-    await releaseClaims(projectId, owned);
+    await releaseClaimsSafely(projectId, owned);
     return;
   }
   let keepClaims = false;
@@ -246,7 +266,7 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
       }
       if (error && typeof error === 'object' && 'code' in error && CLICKHOUSE_PARSE_ERROR_CODES.has(String(error.code)))
         throw new ApiError(422, 'invalid_event', 'Storage could not parse this batch. Check event field types and timestamps.');
-      throw new ApiError(503, 'ingest_unavailable', 'Storage rejected this write. Retry this batch.');
+      throw new ApiError(503, 'ingest_unavailable', 'Storage rejected this write. Retry this batch.', undefined, 1);
     }
     // After acknowledgement, a Postgres failure must preserve the claim for a visibility retry.
     keepClaims = true;
@@ -260,15 +280,18 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
       })),
     );
   } catch (error) {
-    const failure = ingestReceiptFailureResponse(error, keepClaims);
+    if (!keepClaims) {
+      await releaseClaimsSafely(projectId, owned, error);
+      throw error;
+    }
+    if (!(error instanceof ApiError)) logReceiptPhaseFailure('confirm', error);
+    const failure = ingestReceiptFailureResponse(error, true);
     if (failure) throw new ApiError(failure.status, failure.body.error.code, failure.body.error.message, undefined, Number(failure.retryAfter));
-    // ClickHouse acknowledged the rows, so any confirmation failure (timeout, pool, connection) keeps the claims and
+    // ClickHouse acknowledged the rows, so any confirmation failure (including a bug) keeps the claims and
     // is reported as pending: insertImmutableEvents adds the unresolved indices and Retry-After.
-    if (keepClaims && !(error instanceof ApiError))
+    if (!(error instanceof ApiError))
       throw new ApiError(503, 'ingest_pending', 'Storage accepted this write but receipt confirmation is unresolved. Retry this batch.');
     throw error;
-  } finally {
-    if (!keepClaims) await releaseClaims(projectId, owned);
   }
 }
 
@@ -290,7 +313,7 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
   try {
     result = classifyCandidates(projectId, candidates, receipts, owned, fingerprint);
   } catch (error) {
-    await releaseClaims(projectId, owned);
+    await releaseClaimsSafely(projectId, owned, error);
     throw error;
   }
   try {

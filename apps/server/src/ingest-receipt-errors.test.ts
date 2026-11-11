@@ -22,14 +22,58 @@ it('uses context-neutral retry wording for sample removal and other non-ingest o
   expect(response?.body.error.message).toBe('Event identity cache changed concurrently. Retry this operation.');
 });
 
-it.each([
-  Object.assign(new Error('pool timeout'), { name: 'PrismaClientKnownRequestError', code: 'P2024' }),
-  Object.assign(new Error('cannot reach database'), { name: 'PrismaClientInitializationError' }),
-  Object.assign(new Error('statement timeout'), { code: 'P2010' }),
-  Object.assign(new Error('adapter'), { name: 'DriverAdapterError' }),
-])('classifies Prisma and driver failures as database failures (%s)', (error) => {
-  expect(isDatabaseFailure(error)).toBe(true);
+it.each(['P1001', 'P1002', 'P1008', 'P1017', 'P2024', 'P2034', 'P2028'])('classifies infrastructure Prisma code %s', (code) => {
+  expect(isDatabaseFailure({ name: 'PrismaClientKnownRequestError', code })).toBe(true);
 });
+
+it.each(['PrismaClientInitializationError', 'PrismaClientRustPanicError'])('classifies %s', (name) => {
+  expect(isDatabaseFailure({ name })).toBe(true);
+});
+
+const wrapped = (sqlstate: string) => [
+  { code: 'P2010', meta: { driverAdapterError: { cause: { originalCode: sqlstate } } } },
+  { code: 'P2010', meta: { code: sqlstate } },
+  { name: 'DriverAdapterError', cause: { originalCode: sqlstate } },
+];
+
+it.each(['08006', '53300', '57014', '57P01', '40001', '40P01', '58030', '55P03'])(
+  'classifies infrastructure SQLSTATE %s in every supported wrapper',
+  (sqlstate) => {
+    for (const error of wrapped(sqlstate)) expect(isDatabaseFailure(error)).toBe(true);
+  },
+);
+
+it.each(['42601', '42703', '42883', '22P02', '42501', '23505', '23503', '23502'])(
+  'does not mask SQL/API error %s in any supported wrapper',
+  (sqlstate) => {
+    for (const error of wrapped(sqlstate)) expect(isDatabaseFailure(error)).toBe(false);
+  },
+);
+
+it.each(['DatabaseNotReachable', 'ConnectionClosed', 'SocketTimeout', 'TlsConnectionError', 'TooManyConnections', 'TransactionWriteConflict'])(
+  'classifies adapter infrastructure kind %s without a SQLSTATE',
+  (kind) => {
+    expect(isDatabaseFailure({ name: 'DriverAdapterError', cause: { kind } })).toBe(true);
+    expect(isDatabaseFailure({ code: 'P2010', meta: { driverAdapterError: { cause: { kind } } } })).toBe(true);
+  },
+);
+
+it.each(['ColumnNotFound', 'InvalidInputValue', 'UniqueConstraintViolation', 'AuthenticationFailed', 'postgres'])(
+  'does not mask adapter error kind %s',
+  (kind) => {
+    expect(isDatabaseFailure({ name: 'DriverAdapterError', cause: { kind } })).toBe(false);
+    expect(isDatabaseFailure({ code: 'P2010', meta: { driverAdapterError: { cause: { kind } } } })).toBe(false);
+  },
+);
+
+it('does not let an adapter kind override an explicit programming-error SQLSTATE', () => {
+  expect(isDatabaseFailure({ name: 'DriverAdapterError', cause: { kind: 'SocketTimeout', originalCode: '42601' } })).toBe(false);
+});
+
+it.each([{ code: 'P2010' }, { code: 'P2002' }, { name: 'PrismaClientUnknownRequestError' }, { name: 'DriverAdapterError' }])(
+  'does not classify an unrecognised Prisma error as infrastructure: %o',
+  (error) => expect(isDatabaseFailure(error)).toBe(false),
+);
 
 it('does not classify programming errors or ClickHouse codes as database failures', () => {
   expect(isDatabaseFailure(new TypeError('undefined is not a function'))).toBe(false);

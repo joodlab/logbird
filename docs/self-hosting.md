@@ -308,7 +308,8 @@ backfill, the 007 and 008 full index copies, and 009's index materialization. It
 600 seconds by default (`CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS`, accepted
 600–86400). A copy that needs longer fails the same way on every retry, and the
 server cannot start until the migration gate completes. Raise the value for the
-migration run only; it also applies to the worker's cold maintenance client. The
+migration run only; it also applies to the worker's cold maintenance client and
+the server's `maintenanceClickhouse` client used by in-request recovery. The
 socket-idle timeout grows to the budget plus five minutes. Progress headers are
 spaced so a statement emits at most about 20 (every 30 seconds at the default),
 well under Node's 16 KiB response-header limit. A proxy between the worker and
@@ -809,8 +810,11 @@ backstop can accumulate about 18 million between successful sweeps. Requests
 expire only their own requested ids in a bounded statement; fresh batches never
 drain unrelated backlog. See [receipt coordination](ingest-identity.md#coordination-and-identity).
 
-The hourly worker runs receipt-index compaction last, after recovery and project
-retention. `REINDEX INDEX CONCURRENTLY` requires the worker role to own the table
+The worker runs receipt-index compaction on its own hourly queue and worker with
+concurrency 1 and one attempt, so retention retries never repeat it and queued
+recovery/fence-lifting jobs can run during a rebuild. On shutdown the rebuild's
+connection closes before the workers are awaited, cancelling REINDEX; its invalid
+copy is dropped next run. `REINDEX INDEX CONCURRENTLY` requires the worker role to own the table
 (or have the table's `MAINTAIN` privilege on PostgreSQL 17+, as documented for
 [REINDEX](https://www.postgresql.org/docs/17/sql-reindex.html)). A non-owner role
 without that privilege logs `ingest.receipt_index_compaction_failed` with code
@@ -820,10 +824,17 @@ the table owner); a maintenance-only role may require the owner to clean those u
 The hourly job drops invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copies left by a
 failed or cancelled rebuild. It cannot drop an operator's in-progress manual REINDEX
 CONCURRENTLY copy: the rebuild holds SHARE UPDATE EXCLUSIVE on the table, so the job's
-drop fails with 55P03 and logs `ingest.receipt_index_compaction_failed` hourly until the
-manual rebuild ends. Pause the worker during a manual rebuild to avoid that noise. The
+drop fails with 55P03 and logs `ingest.receipt_index_compaction_failed`, then backs off
+for 24 hours. Pause the worker during a manual rebuild to avoid that noise. The
 job also skips a run while another transaction is older than its one-minute lock
-timeout (for example a running `pg_dump`), instead of building a copy it couldn't swap in.
+timeout and holds a snapshot or a lock on the receipt table (for example a running
+`pg_dump`), instead of building a copy it couldn't swap in.
+
+Reserve free disk for about the index's live size during an online rebuild. A
+57014 statement timeout or 55P03 lock timeout stores a timestamp in the existing
+Redis connection under `<BULLMQ_PREFIX>:ingest-receipt-index-compaction:backoff`
+with a 24-hour TTL. Hourly jobs log and return `skipped_backoff` until it expires.
+Redis errors fail open so compaction can still run.
 
 ## Disposable acceptance fixture
 

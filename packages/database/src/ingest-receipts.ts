@@ -125,9 +125,9 @@ export async function takeOverIngestReceipts(projectId: string, eventIds: string
 
 /**
  * Compare-and-set result. `hits` is what the unlocked seek saw; `locked` keeps only tuples whose exact
- * ctid/key still matched once the row lock was granted. A concurrent update moves the row to a new ctid, so
- * READ COMMITTED's recheck drops it from `locked`. The modification itself matches on ctid only and cannot
- * skip a tuple this statement holds locked, so `skipped` names every id lost to a concurrent writer.
+ * ctid/key still matched once the row lock was granted. A concurrent update moves the row to a new ctid:
+ * either the TID recheck drops it, or the UPDATE/DELETE by ctid cannot see the new version. Either way,
+ * `skipped` names the lost id so it is sought again against the current version.
  */
 const casResult = (changed: Prisma.Sql) => Prisma.sql`
   SELECT (SELECT count(*) FROM hits)::int AS found, (SELECT count(*) FROM ${changed})::int AS changed,
