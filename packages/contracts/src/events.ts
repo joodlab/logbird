@@ -91,7 +91,13 @@ export const ingestBodySchema = z.union([
   z.record(z.string(), z.unknown()),
 ]);
 
-export const ingestRejectionCodeSchema = z.enum(['invalid_event', 'invalid_event_id', 'duplicate_id_conflict', 'stored_event_unreadable']);
+export const ingestRejectionCodeSchema = z.enum([
+  'invalid_event',
+  'invalid_event_id',
+  'duplicate_id_conflict',
+  'stored_event_unreadable',
+  'unverified_after_parse_failure',
+]);
 export const ingestResponseSchema = z.object({
   accepted: z.number().int(),
   ids: z.array(z.string()),
@@ -101,7 +107,17 @@ export const ingestResponseSchema = z.object({
   warnings: z.array(z.object({ index: z.number().int(), reason: z.string() })).default([]),
 });
 export type IngestResponse = z.infer<typeof ingestResponseSchema>;
-/** 503 ingest_pending: siblings commit first. Every index outside indices is settled; retry the identical batch with Retry-After. */
+/** Request header a client sends to declare it resends only unsettled events (`Logbird-Retry: subset`). */
+export const LOGBIRD_RETRY_HEADER = 'Logbird-Retry';
+export const LOGBIRD_RETRY_SUBSET = 'subset';
+/**
+ * 503 ingest_pending / ingest_unavailable: siblings commit first; every index outside indices is settled.
+ * Clients declaring Logbird-Retry: subset retry only unsettled events, byte-identically, with Retry-After.
+ * Other clients get terminal 202 unverified_after_parse_failure rejections for rows a limit left unchecked after a
+ * proven parse failure (rows deferred before any statement ran stay retryable for everyone),
+ * unless other rows still need a retry (including held claims): unchecked rows then stay unresolved in 503.
+ * Identical retries skip confirmed rows and reach terminal 202 once genuine pending writes resolve.
+ */
 export const ingestPendingDetailsSchema = ingestResponseSchema.extend({
   indices: z.array(z.number().int().nonnegative()),
   eventIds: z.array(z.string()),

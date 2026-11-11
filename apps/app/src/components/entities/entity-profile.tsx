@@ -116,14 +116,15 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
               <Skeleton className="size-11 rounded-full" />
             )}
             <div className="flex min-w-0 flex-col gap-1">
-              <div className="flex items-center gap-2 text-muted-foreground text-xs">
+              {/* min-h-5: the type pill's height, so the header does not grow when the profile (and its type) arrives. */}
+              <div className="flex min-h-5 items-center gap-2 text-muted-foreground text-xs">
                 <Link className="hover:text-foreground" params={{ projectId }} to={`/p/$projectId/${section}` as '/p/$projectId/actors'}>
                   {meta.singular}
                 </Link>
                 {p?.entity.type ? <TypePill>{p.entity.type}</TypePill> : null}
               </div>
               <h1 className="truncate font-semibold text-xl tracking-tight" dir="auto">
-                {p ? p.entity.name || displayId : <Skeleton className="h-6 w-48" />}
+                {p ? p.entity.name || displayId : <Skeleton className="h-7 w-48" />}
               </h1>
               <CopyValue className="text-muted-foreground" value={displayId} />
             </div>

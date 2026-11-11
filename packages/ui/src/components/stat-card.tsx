@@ -74,7 +74,8 @@ export function StatCard({ label, value, delta, goodWhen = 'up', deltaKind, hint
         <span className="truncate text-muted-foreground text-xs">{label}</span>
         {loading ? null : <DeltaBadge delta={delta} goodWhen={goodWhen} kind={deltaKind} />}
       </div>
-      {loading ? <Skeleton className="h-7 w-24" /> : <div className="font-semibold text-2xl tabular-nums tracking-tight">{value}</div>}
+      {/* h-8: the line height of text-2xl, so the card keeps its height when the value arrives. */}
+      {loading ? <Skeleton className="h-8 w-24" /> : <div className="font-semibold text-2xl tabular-nums tracking-tight">{value}</div>}
       {hint ? <div className="text-muted-foreground text-xs">{hint}</div> : null}
       {footer}
     </Comp>
@@ -89,7 +90,7 @@ export function StatTile({ label, value, loading, className }: { label: ReactNod
   return (
     <div className={cn('flex min-w-0 flex-col gap-1 bg-card px-4 py-3', className)}>
       <dt className="truncate text-muted-foreground text-xs">{label}</dt>
-      <dd className="font-semibold text-lg tabular-nums tracking-tight">{loading ? <Skeleton className="h-6 w-16" /> : value}</dd>
+      <dd className="font-semibold text-lg tabular-nums tracking-tight">{loading ? <Skeleton className="h-7 w-16" /> : value}</dd>
     </div>
   );
 }

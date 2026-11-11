@@ -23,6 +23,11 @@ vi.mock('@logbird/database', () => ({
 }));
 vi.mock('@logbird/clickhouse', () => ({
   AmbiguousInsertError: class extends Error {},
+  InsertLeaseExhaustedError: class extends Error {},
+  // Parse isolation (#150) runs the inserts; these unit tests use definite non-parse failures only.
+  isPrewriteParseError: () => false,
+  INGEST_ASYNC_MAX_DATA_SIZE: 64 * 1024 * 1024,
+  INSERT_LEASE_BUDGET_MS: 40_000,
   ASYNC_INSERT_FLUSH_BOUND_MS: 30_000,
   INGEST_CLAIM_LEASE_MS: 60_000,
   CLICKHOUSE_PARSE_ERROR_CODES: new Set(['27']),
@@ -62,6 +67,8 @@ beforeEach(() => {
   fake.claim.mockResolvedValue([receipt]);
   fake.lookup.mockResolvedValue(new Map());
   fake.retryAfter.mockResolvedValue(1);
+  // insertEvents is async; parse isolation chains on its promise.
+  fake.insert.mockResolvedValue(undefined);
   fake.confirm.mockImplementation(async (_project, values: unknown[]) => {
     if (values.length) throw conflict();
   });
@@ -88,6 +95,7 @@ it('keeps acknowledged claims and reports the usual pending indices and Retry-Af
     status: 503,
     code: 'ingest_pending',
     retryAfter: 90,
+    message: 'Storage accepted some events but receipt confirmation is unresolved. Retry this batch; listed indices are unresolved.',
     details: { accepted: 0, ids: [], indices: [3], eventIds: ['qa-event'] },
   });
   expect(fake.insert).toHaveBeenCalledTimes(1);
@@ -181,7 +189,9 @@ it.each(['claim', 'classify', 'empty', 'insert'] as const)('maps a failed claim 
   expect(console.error).toHaveBeenCalledWith(
     expect.stringContaining('"event":"ingest.claim_release_failed","name":"PrismaClientKnownRequestError","code":"P2024"'),
   );
-  if (site === 'insert') expect((error as Error).message).toBe('Storage rejected this write. Retry this batch.');
+  // With parse isolation (#150) a definite storage refusal is an isolation outcome; the refused row's claim is released
+  // afterwards, and a failed release is the same retryable 503.
+  if (site === 'insert') expect((error as Error).message).toBe('Event identity claims could not be released. Retry this batch.');
 });
 
 it('preserves the original ApiError when classification and release both fail and logs both codes', async () => {
@@ -229,11 +239,14 @@ it('surfaces a plain Error from targeted expiry without mapping it to 503', asyn
   expect(fake.insert).not.toHaveBeenCalled();
 });
 
-it('preserves a definite parse rejection when release also fails', async () => {
-  fake.insert.mockRejectedValueOnce({ code: '27' });
-  fake.release.mockRejectedValueOnce(prismaFailure('P2024'));
-  await expect(insertImmutableEvents('qa-project', 'qa-org', candidates)).rejects.toMatchObject({ status: 422, code: 'invalid_event' });
-  expect(console.error).toHaveBeenCalledWith(expect.stringContaining('"original":{"name":"Error","code":"invalid_event"}'));
+it('reports a definite storage refusal as retryable unavailable and releases only its claim', async () => {
+  // A definite non-parse refusal (the body was never written): parse isolation files it as unavailable.
+  fake.insert.mockRejectedValueOnce({ code: '516' });
+  const error = await insertImmutableEvents('qa-project', 'qa-org', candidates).catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(ApiError);
+  expect(error).toMatchObject({ status: 503, code: 'ingest_unavailable', retryAfter: 5, details: { indices: [3], eventIds: ['qa-event'] } });
+  expect(fake.release).toHaveBeenCalledExactlyOnceWith({ where: { projectId: 'qa-project', eventId: { in: ['qa-event'] }, confirmedAt: null } });
+  expect(fake.confirm).not.toHaveBeenCalledWith('qa-project', [expect.anything()]);
 });
 
 it('logs the adapter kind before mapping a pre-insert infrastructure failure', async () => {

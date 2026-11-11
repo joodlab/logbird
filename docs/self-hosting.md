@@ -934,6 +934,50 @@ stopped and investigate with the journal; recover all three stores from the same
 backup boundary rather than mixing old and new writes. The script is offline and
 idempotent, not a distributed transaction or an online migration.
 
+## Ingest insert settings
+
+Every ingest INSERT pins `async_insert_max_data_size=67108864` (64 MiB),
+`min_insert_block_size_bytes=268402944`, `min_insert_block_size_rows=1048449`,
+`max_insert_block_size=1048449`, `input_format_allow_errors_num=0` and
+`input_format_allow_errors_ratio=0` at query level, together with
+`async_insert=1` and `wait_for_async_insert=1`. The 5 MiB request limit does not
+bound the normalized statement to 5 MiB: duplicated changes and the escaped payload
+expand it, to about 15 MiB in the worst realistic case. These are thresholds, not
+preallocated buffers. Row/block pins keep a statement in one block if ClickHouse
+falls back to synchronous insertion, which otherwise can partially write before a
+late parser failure (measured on 26.9: 2300 of 3000 rows written with small blocks).
+Ingest splits cached rows into consecutive statements of at most 64 MiB, sharing
+the statement, byte, clock and lease budgets across chunks. A single row larger than
+64 MiB stays alone; its parse error is ambiguous and reconciled by recovery.
+This remains possible with extreme attribute paths until the size bound in #159 lands.
+The two error-tolerance pins prevent operator profiles from silently skipping bad
+rows while acknowledging success, which would lose those events.
+
+Query-level pins win over ordinary user profiles. Operators should allow these
+settings for the writer and avoid server constraints that reject them. ClickHouse
+rejects the entire query with code 452 (`SETTING_CONSTRAINT_VIOLATION`) before
+reading data if a pin violates a constraint; ingest returns retryable
+`503 ingest_unavailable` and releases the unwritten claims. A parse code is isolated only
+when the serialized body fits the pinned async limit, its error names
+`WaitForAsyncInsert`, and it is not a materialized-view failure: neither "while pushing to view"
+nor a view name (one of Logbird's nine views, or any `database.name_mv`, with the database
+optionally in backticks) appears outside the input excerpts. ClickHouse prints the offending input
+in single quotes after fixed markers (`before:`, `Cannot parse value`, `Cannot parse string`,
+`parsed text:`), escaping only backslashes, quotes and control characters. Such an excerpt whose
+text occurs in the statement body is row input, so values such as `'page.view'` or
+`'analytics.events_by_minute_mv'` don't count and can't impersonate a view failure. A view name or
+the phrase anywhere else, quoted or not, makes the failure ambiguous (the safe direction).
+If a ClickHouse upgrade changes the `WaitForAsyncInsert` wording, parse failures
+become ambiguous and can loop through pending/recovery until the incompatibility is fixed.
+Do not infer pre-write safety from the
+parse code alone. No new migration or settings profile is needed.
+
+Exact-row isolation assumes `(at row N)` is statement-relative and 1-based,
+including when multiple bodies share an async flush. The shared-flush test in
+`apps/server/src/ingest-parse-isolation.integration.test.ts` verifies this on
+ClickHouse 26.9. Other versions must retain that behavior; run the test after
+every ClickHouse upgrade before accepting ingest traffic; it also checks the async error wording.
+
 ## Webhook endpoint settings
 
 The endpoint management API can store and rotate secrets; this change does not

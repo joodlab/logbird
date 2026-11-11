@@ -9,6 +9,10 @@ export {
   type WebhookVerificationReason,
 } from './webhooks';
 
+// Keep in sync with packages/sdk/package.json (verified by index.test.ts).
+const SDK_VERSION = '0.1.1';
+const MAX_SEND_MS = 5 * 60_000;
+
 /** Copied structural envelope: no runtime or workspace dependency in the published SDK. */
 export interface EventInput {
   action: string;
@@ -38,6 +42,7 @@ export interface EventInput {
   schemaVersion?: string;
   [key: string]: unknown;
 }
+const monotonicNow = (): number => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
 export function uuidv7(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let time = Date.now();
@@ -133,6 +138,9 @@ export class Logbird {
         if (result == null) return;
         prepared = result;
       }
+      // The server mints a fresh id for a missing, blank or non-string id (numbers included), which a retry could
+      // never match. Mint it here instead, on a copy, so a frozen or caller-owned beforeSend result is never mutated.
+      if (typeof prepared.id !== 'string' || !prepared.id.trim()) prepared = { ...prepared, id: uuidv7() };
       const serialized = JSON.stringify(prepared);
       if (new TextEncoder().encode(serialized).length > 256 * 1024) throw new Error('Event exceeds 256 KB');
       const copy = JSON.parse(serialized) as EventInput;
@@ -159,41 +167,137 @@ export class Logbird {
     (this.timer as unknown as { unref?: () => void }).unref?.();
   }
   private async send(batch: EventInput[]) {
-    const body = JSON.stringify({ events: batch });
-    for (let attempt = 0; ; attempt++) {
-      let response: Response | undefined, error: unknown;
-      try {
-        response = await fetch(`${this.options.endpoint!.replace(/\/$/, '')}/v1/events`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${this.options.apiKey}`, 'Content-Type': 'application/json', 'X-Logbird-SDK': 'typescript/0.2.0' },
-          body,
-          signal: AbortSignal.timeout(30_000),
-        });
-      } catch (e) {
-        error = e;
+    // Monotonic: a wall-clock step (NTP, suspend, a test clock) must not shorten or extend the send cap.
+    const deadline = monotonicNow() + MAX_SEND_MS;
+    const serialized = batch.map((event) => JSON.stringify(event));
+    let attemptIndices = batch.map((_, index) => index);
+    const serializeBody = () => `{"events":[${attemptIndices.map((index) => serialized[index]).join(',')}]}`;
+    let body = serializeBody();
+    const settledIndices = new Set<number>();
+    const reject = (rejections: unknown) => {
+      if (!Array.isArray(rejections)) return;
+      const fresh: { index: number; reason: string }[] = [];
+      for (const rejection of rejections) {
+        if (!rejection || typeof rejection !== 'object' || !Number.isInteger(rejection.index) || typeof rejection.reason !== 'string') continue;
+        const index = attemptIndices[rejection.index];
+        if (index === undefined || settledIndices.has(index)) continue;
+        settledIndices.add(index);
+        fresh.push(rejection);
+        this.drop(batch[index]!);
       }
-      if (response?.ok) {
-        const result = (await response.json()) as { rejected?: { index: number; reason: string }[] };
-        if (result.rejected?.length) {
-          for (const rejection of result.rejected) {
-            const event = batch[rejection.index];
-            if (event) this.drop(event);
-          }
-          this.report(new Error(`${result.rejected.length} events rejected by Logbird: ${result.rejected.map((r) => r.reason).join('; ')}`));
+      if (fresh.length) this.report(new Error(`${fresh.length} events rejected by Logbird: ${fresh.map((r) => r.reason).join('; ')}`));
+    };
+    let retries = 0;
+    try {
+      for (let attempt = 0; ; attempt++) {
+        const remainingMs = deadline - monotonicNow();
+        if (remainingMs <= 0) throw new Error('Logbird send exceeded its five-minute time limit');
+        let progressed = false;
+        let response: Response | undefined, error: unknown;
+        try {
+          response = await fetch(`${this.options.endpoint!.replace(/\/$/, '')}/v1/events`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${this.options.apiKey}`,
+              'Content-Type': 'application/json',
+              'X-Logbird-SDK': `typescript/${SDK_VERSION}`,
+              // Must equal @logbird/contracts LOGBIRD_RETRY_HEADER / LOGBIRD_RETRY_SUBSET (the SDK has no dependencies).
+              'Logbird-Retry': 'subset',
+            },
+            body,
+            // AbortSignal.timeout() accepts integers only; the monotonic clock is fractional.
+            signal: AbortSignal.timeout(Math.max(1, Math.floor(Math.min(30_000, remainingMs)))),
+          });
+        } catch (e) {
+          error = e;
         }
-        return;
+        if (response?.ok) {
+          const result = (await response.json()) as { rejected?: { index: number; reason: string }[] };
+          reject(result.rejected);
+          return;
+        }
+        if (response?.status === 503) {
+          // Retry the identical body unless the server settled rows; then resend only unsettled rows.
+          const result = (await response.json().catch(() => null)) as {
+            error?: {
+              code?: string;
+              details?: {
+                accepted?: number;
+                ids?: string[];
+                rejected?: { index: number; reason: string }[];
+                indices?: number[];
+                eventIds?: string[];
+                warnings?: unknown[];
+              };
+            };
+          } | null;
+          if (result?.error?.code === 'ingest_pending' || result?.error?.code === 'ingest_unavailable') {
+            const details = result.error.details;
+            reject(details?.rejected);
+            if (
+              details &&
+              Array.isArray(details.ids) &&
+              details.ids.every((id) => typeof id === 'string') &&
+              details.accepted === details.ids.length &&
+              Array.isArray(details.rejected) &&
+              details.rejected.every(
+                (r) =>
+                  r && typeof r === 'object' && Number.isInteger(r.index) && attemptIndices[r.index] !== undefined && typeof r.reason === 'string',
+              ) &&
+              Array.isArray(details.indices) &&
+              details.indices.every((index) => Number.isInteger(index) && attemptIndices[index] !== undefined) &&
+              Array.isArray(details.eventIds) &&
+              details.eventIds.every((id) => typeof id === 'string') &&
+              details.indices.length === details.eventIds.length &&
+              new Set(details.indices).size === details.indices.length &&
+              new Set(details.rejected.map((r) => r.index)).size === details.rejected.length &&
+              details.indices.every((index, position) => {
+                const id = batch[attemptIndices[index]!]!.id;
+                return typeof id === 'string' && details.eventIds?.[position] === id.trim() && !details.rejected?.some((r) => r.index === index);
+              }) &&
+              Array.isArray(details.warnings)
+            ) {
+              const accepted = new Set(details.ids);
+              const unresolved = new Set(details.indices);
+              attemptIndices.forEach((index, wireIndex) => {
+                const event = batch[index]!;
+                if (!unresolved.has(wireIndex) && typeof event.id === 'string' && accepted.has(event.id.trim())) settledIndices.add(index);
+              });
+              // Require every omitted position to be settled; malformed details must keep the previous body.
+              if (attemptIndices.every((index, wireIndex) => unresolved.has(wireIndex) || settledIndices.has(index))) {
+                const remaining = attemptIndices.filter((index) => !settledIndices.has(index));
+                if (!remaining.length) return;
+                if (remaining.length < attemptIndices.length) {
+                  attemptIndices = remaining;
+                  body = serializeBody();
+                  progressed = true;
+                }
+              }
+            }
+          }
+        }
+        const retry = !response || response.status === 429 || response.status >= 500;
+        if (!retry) {
+          batch.forEach((event, index) => {
+            if (!settledIndices.has(index)) this.drop(event);
+          });
+          this.report(new Error(`Logbird HTTP ${response?.status}; batch dropped`));
+          return;
+        }
+        // Progress attempts strictly shrink the body, so there can be at most batch.length of them.
+        // Only non-progress failures consume maxRetries; retain a hard total-attempt bound as well.
+        if ((!progressed && retries >= this.retries) || attempt >= batch.length + this.retries - 1)
+          throw error ?? new Error(`Logbird HTTP ${response?.status}`);
+        const retryAfter = response?.headers.get('Retry-After');
+        const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
+        const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** retries) * (0.5 + Math.random());
+        if (!progressed) retries++;
+        await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(60_000, delay, deadline - monotonicNow()))));
       }
-      const retry = !response || response.status === 429 || response.status >= 500;
-      if (!retry) {
-        for (const event of batch) this.drop(event);
-        this.report(new Error(`Logbird HTTP ${response?.status}; batch dropped`));
-        return;
-      }
-      if (attempt >= this.retries) throw error ?? new Error(`Logbird HTTP ${response?.status}`);
-      const retryAfter = response?.headers.get('Retry-After');
-      const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
-      const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** attempt) * (0.5 + Math.random());
-      await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(60_000, delay))));
+    } finally {
+      // On every exceptional exit, flush can requeue only events not already accepted or rejected.
+      const remaining = batch.filter((_, index) => !settledIndices.has(index));
+      batch.splice(0, batch.length, ...remaining);
     }
   }
   flush(): Promise<void> {

@@ -9,18 +9,22 @@ import { isBusyError } from '@/lib/api/errors';
 export function BusyNotice() {
   const waiting = useIsFetching({ predicate: (query) => isBusyError(query.state.fetchFailureReason) });
   if (!waiting) return null;
+  // Floats over the top of the page instead of pushing it down: it comes and goes on its own, mid-read. It has nothing
+  // to click, so it never intercepts clicks on the content beneath it (pointer-events stay off).
   return (
-    <div
-      aria-live="polite"
-      className="tm-fade-in flex items-center gap-2 border-outcome-denied/25 border-b bg-outcome-denied/[0.07] px-4 py-1.5 text-[13px]"
-      data-testid="busy-notice"
-      role="status"
-    >
-      <Loader2Icon className="size-3.5 shrink-0 animate-spin text-outcome-denied" />
-      <span>
-        <span className="font-medium">Project is busy</span>
-        <span className="text-muted-foreground"> — a retention purge is running. Retrying automatically…</span>
-      </span>
+    <div className="pointer-events-none absolute inset-x-0 top-14 z-30 flex justify-center px-4">
+      <div
+        aria-live="polite"
+        className="tm-fade-in flex items-center gap-2 rounded-full border border-outcome-denied/25 bg-popover px-3 py-1 text-[13px] shadow-md"
+        data-testid="busy-notice"
+        role="status"
+      >
+        <Loader2Icon className="size-3.5 shrink-0 animate-spin text-outcome-denied" />
+        <span>
+          <span className="font-medium">Project is busy</span>
+          <span className="sr-only text-muted-foreground sm:not-sr-only"> — a retention purge is running. Retrying automatically…</span>
+        </span>
+      </div>
     </div>
   );
 }

@@ -51,8 +51,9 @@ choose their own SMTP provider).
 The hosted instance is planned on Coolify behind Cloudflare at `logbird.joodlab.com` after the repository is open-sourced. Provisioning and deployment remain separate steps.
 
 Ingestion path (v0): `POST /v1/events` → validate/normalize → ClickHouse `INSERT` with
-`async_insert=1, wait_for_async_insert=1` (ack only after ClickHouse has the rows) → 202. Large batches are
-inserted in one statement. A Postgres/queue buffer can be added later behind the same API.
+`async_insert=1, wait_for_async_insert=1` (ack only after ClickHouse has the rows) → 202. A batch is
+inserted in one statement, or in consecutive statements of at most 64 MiB each (the async-insert pin); a
+parse failure adds bounded isolation statements. A Postgres/queue buffer can be added later behind the same API.
 
 Ingestion reserves immutable ids in Postgres before ClickHouse writes. Confirmed
 receipts form a ten-minute cache; older ids use the additive `event_ids` MergeTree
@@ -73,7 +74,9 @@ repairs that finish during a read. Readers hold neither a project lock nor a Pos
 connection across ClickHouse I/O. Raw-event reads retain the existing **not a snapshot**
 semantics: concurrent ingest/retention can change results, and rebuilds do not empty raw events.
 
-The SDK retries the identical body. See [ingest-identity.md](ingest-identity.md) for
+The SDK declares `Logbird-Retry: subset` and retries the identical body unless complete 503 details settle events,
+then resends only unsettled events with byte-identical JSON. Clients without that header receive terminal 202
+rejections for limit-unchecked rows once no other rows need a retry. See [ingest-identity.md](ingest-identity.md) for
 migration, failure classification, permissions, cleanup and proof limits.
 
 ## 3. Recommended event envelope
@@ -112,7 +115,7 @@ Semantics worth documenting to users:
 - **id is immutable within a project**, regardless of `occurredAt`. Exact retries
   appear in `ids` as accepted, without another raw insert or rollup increment.
   Conflicting canonical full input or resolved timestamp is reported in `rejected`
-  with `code: duplicate_id_conflict` and a code-first reason; the original is kept. Recursively
+  with `code: duplicate_id_conflict` and reason `duplicate_id_conflict: id conflicts with different content in this request or stored history. Send corrections with a new id and context.parentEventId.` followed by difference details; the original is kept. Recursively
   reordered object keys are equivalent; array order and all string contents matter,
   including values beyond indexing caps. SDK headers do not participate. Omitted
   or invalid `occurredAt` uses the first receipt clock. Identity digests are versioned.
@@ -129,6 +132,48 @@ Semantics worth documenting to users:
   never releases unresolved receipts. After confirmed retention deletion and cleanup,
   an id may be used again. Unsafe ids (NUL, lone surrogates or >256 trimmed UTF-16 units)
   are per-event `invalid_event_id` rejections, so healthy siblings can proceed.
+- A storage parser rejection proven to precede writes is isolated per event using
+  the native body row number, with sibling-inference bisection as a fallback.
+  Every named row is checked alone as a canary. Only a pre-write
+  parse failure permits its rejection; if it writes, the server logs
+  `ingest.parse_row_number_mismatch` and bisects the rest of that attempt.
+  After a failed canary, the server inserts the parse-proven prefix through the normal insert path,
+  rejects the named row and continues with the suffix. Canary and prefix writes count
+  against the same statement, byte, clock and lease limits (about three statements per bad row).
+  Healthy siblings return in `ids`; individually proven offending indices appear
+  in `rejected` with `code: invalid_event`, including a 202 with `accepted: 0` when
+  all events fail. A 64-extra-statement cap, a four-original-body UTF-8 byte budget
+  for additional statements, a ten-second wall clock and the original lease bound
+  isolation. The clock is a scheduling budget: no statement starts after it, but one already in flight
+  finishes within its own execution limits and the lease, with its claims kept. Rows are serialized once; subset statements join cached lines. Consecutive chunks
+  fit the 64 MiB async pin, sharing all limits and a byte budget computed over all rows.
+  A single row larger than the pin stays alone and its parse failure remains ambiguous.
+  Unchecked, proven-unwritten rows release their claims. Clients declaring exactly
+  `Logbird-Retry: subset` receive retryable `503 ingest_pending` with settled 202 fields
+  and unresolved `indices`/`eventIds`; unresolved-only Retry-After is one second.
+  Without that capability (old SDKs and raw HTTP clients), unchecked rows instead receive
+  terminal 202 rejections with distinct code/reason `unverified_after_parse_failure`:
+  storage stopped checking after parse failures; resend the event individually if needed.
+  They are not proven invalid. Written rows remain accepted, and proven-bad rows use `invalid_event`.
+  If other rows still need retry (especially ambiguous writes or held-claim conflicts),
+  every client gets 503 and unchecked rows stay unresolved, never rejected inside that 503.
+  Identical retries skip confirmed rows; recovery settles pending writes, then the next attempt
+  returns terminal 202 for clients without the capability. Ambiguous writes keep their claims and determine lease-aware
+  Retry-After; definite non-parse errors return `503 ingest_unavailable` with settled
+  siblings and a five-second Retry-After when no claims are held. Retries skip
+  confirmed rows. After complete 503 details, the SDK resends only unsettled events,
+  mapping response indices back to the original batch. Each event is serialized once
+  per send and reused byte-identically, including id and occurredAt. Incomplete or
+  malformed details preserve the previous body. About five leading bad rows fit per attempt
+  under the byte budget. Capable clients converge through subset retries; SDK attempts that
+  settle events and shrink the body do not consume `maxRetries`, bounded by batch length plus retries
+  and five minutes per send. After `beforeSend`, missing, blank or non-string ids (numbers included) get a fresh
+  uuidv7, as the server would mint, and valid string ids stay unchanged. Exhausted retries or time requeue only unsettled events. Raw clients opting into subset retry must
+  omit settled indices and preserve each remaining event's JSON. A proxy stripping `Logbird-Retry`
+  causes safe fallback to terminal 202 with unchecked rows rejected; proxies should allow that header.
+  After #153 there is no known public input that reaches parse isolation: malformed attribute keys
+  are rejected before insert. Isolation is defence in depth for unknown future triggers, tested with
+  injected storage faults immediately before real ClickHouse INSERTs, without production hooks.
 - **actor = who caused it** (person, API key, scheduler…); **executor = who performed it** (api, worker, job,
   attempt). A worker doing work requested by Lina has `actor=Lina`, `executor=crm-worker`. Scheduled runs use
   `actor.type=system`.
@@ -138,10 +183,11 @@ Semantics worth documenting to users:
   after:"[redacted]"}` to record that a secret changed.
 
 Normalization rules (server):
-- Lift recognized fields into columns. Strings are trimmed/capped; non-string `before/after` are JSON-stringified.
+- Lift recognized fields into columns. Search strings replace lone surrogates with `toWellFormed()` and are trimmed/capped; non-string `before/after` are JSON-stringified.
 - Every other top-level key and everything under `metadata` (and unknown keys inside actor/tenant/executor/
   targets/context) is flattened to `attributes` with dot paths (`metadata.plan.tier`), max depth 6, max 256 keys,
   values stringified and capped at 2 KB. Arrays become JSON strings.
+- Every stored attribute key must be valid Unicode. Keys beyond the 256-attribute cap are not stored or checked. A lone surrogate in a stored key rejects the event before INSERT as `invalid_event: Attribute keys must be valid Unicode`; valid surrogate pairs remain verbatim. Keys are never repaired, avoiding replacement collisions. Changes values, target arrays and rejected occurredAt search copies also use `toWellFormed()`; raw input and v1 identity are unchanged.
 - Raw document (as received, ≤ 256 KB) is stored in `payload` (ZSTD).
 - `conformance` = % of {occurredAt, actor.id, actor.type, outcome, targets[≥1], tenant.id, executor.type,
   context.operationId|requestId, description} present.

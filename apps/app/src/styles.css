@@ -37,3 +37,15 @@
     animation: none;
   }
 }
+
+/* Console only (the marketing site shares globals.css but not this rule). Centred pages that scroll the document
+   (sign-in, onboarding, invitations) keep their position when content grows past the viewport and the scrollbar
+   appears. The signed-in shell never scrolls the document: pages scroll inside #app-main, which reserves its own gutter. */
+@layer base {
+  html {
+    scrollbar-gutter: stable;
+  }
+  html:has(#app-main) {
+    scrollbar-gutter: auto;
+  }
+}

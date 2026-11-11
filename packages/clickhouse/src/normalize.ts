@@ -12,7 +12,14 @@ function uuidv7() {
 
 const object = (v: unknown): Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
-const text = (v: unknown, cap = 512): string => (typeof v === 'string' ? v.trim().slice(0, cap) : '');
+const isHigh = (code: number) => code >= 0xd8_00 && code <= 0xdb_ff;
+const isLow = (code: number) => code >= 0xdc_00 && code <= 0xdf_ff;
+// A valid pair straddling a cap must not become a native JSONEachRow parse rejection.
+const capText = (s: string, cap: number) => s.slice(0, isHigh(s.charCodeAt(cap - 1)) && isLow(s.charCodeAt(cap)) ? cap - 1 : cap);
+// Search columns are lossy by design: a lone surrogate (which ClickHouse rejects as invalid UTF-8, code 25) becomes
+// U+FFFD, like String.prototype.toWellFormed. The raw payload and v1 identity keep the original input.
+const wellFormed = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
+const text = (v: unknown, cap = 512): string => (typeof v === 'string' ? capText(wellFormed(v.trim()), cap) : '');
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
 export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string }) {
   // Search normalization is intentionally lossy. Identity v1 hashes canonical raw input, NOT these columns.
@@ -29,8 +36,14 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   }
   if (Buffer.byteLength(payload) > 256 * 1024) return { ok: false as const, reason: 'event exceeds 256 KB' };
   const attributes: Record<string, string> = Object.create(null);
+  let invalidAttributeKey = false;
   const flatten = (v: unknown, path: string, depth: number) => {
     if (Object.keys(attributes).length >= 256) return;
+    // Reject instead of repairing keys: replacement could merge distinct attribute paths.
+    if (/[\uD800-\uDFFF]/u.test(path)) {
+      invalidAttributeKey = true;
+      return;
+    }
     const entries = Object.entries(object(v));
     if (entries.length && depth < 6) for (const [key, child] of entries) flatten(child, path ? `${path}.${key}` : key, depth + 1);
     else
@@ -67,6 +80,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   targets.forEach((t, i) => {
     for (const [k, v] of Object.entries(t)) if (!['type', 'id', 'name'].includes(k)) flatten(v, `targets.${i}.${k}`, 3);
   });
+  if (invalidAttributeKey) return { ok: false as const, reason: 'invalid_event: Attribute keys must be valid Unicode' };
   const changes = Array.isArray(e.changes) ? e.changes.slice(0, 256).map(object) : [];
   const actor = object(e.actor),
     executor = object(e.executor),
@@ -76,7 +90,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   // Only `action` is required: a bad occurredAt never drops the event. It is stored at receive time, the original value
   // is kept in attributes['logbird.occurredAt.rejected'] (and in payload), and the caller gets a warning.
   const { timestamp: date, problem: occurredAtProblem, valid: occurredAtValid } = resolveTimestamp(e.occurredAt, ctx.receivedAt);
-  if (occurredAtProblem) attributes['logbird.occurredAt.rejected'] = value(e.occurredAt).slice(0, 256);
+  if (occurredAtProblem) attributes['logbird.occurredAt.rejected'] = capText(wellFormed(value(e.occurredAt)), 256);
   const warning =
     [
       occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,
@@ -113,8 +127,8 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     target_ids: targets.map((t) => text(t.id, 256)),
     target_names: targets.map((t) => text(t.name)),
     changes_fields: changes.map((c) => text(c.field, 256)),
-    changes_before: changes.map((c) => value(c.before)),
-    changes_after: changes.map((c) => value(c.after)),
+    changes_before: changes.map((c) => wellFormed(value(c.before))),
+    changes_after: changes.map((c) => wellFormed(value(c.after))),
     operation_id: text(context.operationId, 256),
     parent_event_id: text(context.parentEventId, 256),
     request_id: text(context.requestId, 256),
