@@ -5,7 +5,9 @@ import type { z } from 'zod';
 /** Metadata only; IDs derive from fixed summaries, never registration order. */
 export function routeDoc(summary: string, options: DescribeRouteOptions = {}, security = 'session') {
   const tag = security === 'session' ? 'console' : security === 'none' ? 'system' : 'public/v1';
-  const publicApi = security === 'ingestKey' || security === 'readKey';
+  const publicApi = security === 'ingestKey' || security === 'readKey' || security === 'readKeyOrViewerToken';
+  // Read routes accept a read/scoped-read key or a viewer token: either scheme satisfies the operation.
+  const requirements = security === 'none' ? [] : security === 'readKeyOrViewerToken' ? [{ readKey: [] }, { viewerToken: [] }] : [{ [security]: [] }];
   const headers = {
     'RateLimit-Limit': { description: 'Requests per project and key kind per minute', schema: { type: 'integer' as const } },
     'RateLimit-Remaining': { description: 'Requests remaining in this window', schema: { type: 'integer' as const } },
@@ -15,7 +17,7 @@ export function routeDoc(summary: string, options: DescribeRouteOptions = {}, se
     summary,
     operationId: `${tag === 'public/v1' ? 'public' : tag}_${summary.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
     tags: [tag],
-    security: security === 'none' ? [] : [{ [security]: [] }],
+    security: requirements,
     ...options,
     responses: {
       default: { description: 'Request failed', content: { 'application/json': { schema: resolver(apiErrorSchema) } } },
