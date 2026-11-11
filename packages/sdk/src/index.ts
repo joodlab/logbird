@@ -1,3 +1,14 @@
+export {
+  generateWebhookSecret,
+  type SignWebhookOptions,
+  signWebhook,
+  type VerifyWebhookOptions,
+  verifyWebhook,
+  type WebhookHeaders,
+  WebhookVerificationError,
+  type WebhookVerificationReason,
+} from './webhooks';
+
 /** Copied structural envelope: no runtime or workspace dependency in the published SDK. */
 export interface EventInput {
   action: string;

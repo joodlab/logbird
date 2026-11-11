@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { appendFile, mkdir } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import nodemailer from 'nodemailer';
+import { appendWaitlistRecord } from '../../waitlist/file.mjs';
 import type { WaitlistRecord } from '../lib/waitlist-schema';
 import { serverEnv as env } from './env';
 /**
@@ -33,13 +33,15 @@ export function createNodeStore(
     }
   };
   return async (record: WaitlistRecord) => {
-    await mkdir(dirname(file), { recursive: true });
-    await appendFile(
-      file,
-      `${JSON.stringify(record)}
-`,
-      { mode: 0o600 },
-    );
+    // Under the store's lock, so an operator's deletion never drops a new line.
+    try {
+      await appendWaitlistRecord(file, record);
+    } catch (error) {
+      // The visitor gets a 503 and may retry; the log says why, with no personal data (a code such as ENOSPC).
+      const reason = (error as NodeJS.ErrnoException)?.code ?? (error instanceof Error ? error.name : 'unknown');
+      log(JSON.stringify({ level: 'error', event: 'waitlist.store_failed', reason }));
+      throw error;
+    }
     if (notify) {
       void deliver(record);
     }

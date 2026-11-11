@@ -30,13 +30,15 @@ describe('legal pages', () => {
     const [privacy, terms] = await renderPages(['/legal/privacy', '/legal/terms']);
     for (const page of [privacy, terms]) {
       expect(text(page?.html ?? '')).not.toMatch(/placeholder|counsel-reviewed|lorem/i);
-      expect(page?.html).toContain('dateTime="2026-11-10"');
+      expect(page?.html).toContain('dateTime="2026-11-11"');
     }
     const privacyText = text(privacy?.html ?? '');
     expect(privacyText).toContain('The operator of Logbird Cloud ("we")');
     // Without a privacy mailbox, rights requests go through the form's privacy topic.
     expect(privacy?.html).toContain('href="/contact?interest=privacy"');
     expect(privacyText).toContain('our server provider runs the servers');
+    // The retention period comes from WEB_FORM_RETENTION_MONTHS (default 24), the same value the cleanup applies.
+    expect(privacyText).toContain('Form submissions on our server: deleted automatically once they are 24 months old');
     // Logbird Cloud's transactional email provider, unless WEB_EMAIL_PROVIDER says otherwise.
     expect(privacyText).toContain("Postmark sends Logbird Cloud's sign-in codes");
     for (const fact of [

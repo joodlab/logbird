@@ -1,13 +1,24 @@
+import { retentionExpiry } from '../../waitlist/expiry.mjs';
+import { siteConfig } from '../env';
 import type { WaitlistRecord } from '../lib/waitlist-schema';
 /** Enable a KV namespace named WAITLIST_KV in wrangler.jsonc to opt in to storage. */
 export interface WaitlistBindings {
-  WAITLIST_KV?: { put(key: string, value: string): Promise<void> };
+  WAITLIST_KV?: { put(key: string, value: string, options?: { expiration?: number }): Promise<void> };
 }
-export function createCloudflareStore(bindings: WaitlistBindings) {
+
+/** When KV should delete a submission, in Unix seconds: the same calendar rule as the Node cleanup. */
+export function retentionDeadline(receivedAt: number, months: number) {
+  return Math.ceil(retentionExpiry(receivedAt, months) / 1000);
+}
+
+export function createCloudflareStore(bindings: WaitlistBindings, months = siteConfig.FORM_RETENTION_MONTHS) {
   return async (record: WaitlistRecord) => {
     if (!bindings.WAITLIST_KV) {
       throw new Error('WAITLIST_KV is not configured');
     }
-    await bindings.WAITLIST_KV.put(`waitlist:${record.receivedAt}:${crypto.randomUUID()}`, JSON.stringify(record));
+    // KV deletes the record itself once the privacy policy's retention period has passed (#132).
+    await bindings.WAITLIST_KV.put(`waitlist:${record.receivedAt}:${crypto.randomUUID()}`, JSON.stringify(record), {
+      expiration: retentionDeadline(Date.parse(record.receivedAt), months),
+    });
   };
 }

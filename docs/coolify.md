@@ -126,3 +126,111 @@ After a deploy, check the shared origin with
 `SHARED_ORIGIN=1 BASE_URL=https://<console origin> pnpm --filter @logbird/web check:live`:
 the forwarded paths must carry the site's own security headers, and console paths
 (sign-in, unknown pages) must never answer with a site page.
+
+### Form submissions
+
+The site stores each contact and early-access submission in one JSONL file per
+day of receipt (UTC) under `/data/waitlist.jsonl.d/` (`2026-11-11.jsonl`, mode
+600). Submissions stored before that layout stay in `/data/waitlist.jsonl`, which
+nothing appends to any more. It keeps them for `WEB_FORM_RETENTION_MONTHS` calendar
+months (a build variable, default 24, 1–120): a submission sent on 31 March with
+one month expires on 30 April. The privacy policy states the same period.
+
+The site deletes expired submissions itself, ten minutes after it starts and then
+every six hours, logging `waitlist.retention` with counts only.
+
+- A day's file is deleted whole once even its last moment is past the period, so a
+  submission is never deleted early. Counting the six-hourly runs, it goes at most about
+  30 hours after it expires; the privacy policy says "within two days".
+- The older single file is trimmed record by record. Lines in it that can't be
+  dated (not valid JSON, say from a crash mid-write, or without a `receivedAt`) are
+  older than the moment day files began. The first cleanup records that moment in
+  `/data/waitlist.jsonl.legacy-until`, and such lines go once the period has passed
+  for it. Until then the log line is `warn` with an `unreadable` count. When the
+  older file is empty, it and the marker are removed. In day files, unreadable lines
+  go with their day.
+- Backups of the `/data` volume hold copies of submissions until they rotate out.
+  The privacy policy says deleted data can remain in a backup until that backup
+  expires on its regular rotation, so keep that rotation short.
+- The cleanup never touches today's file, the only one new submissions go into, so
+  it can't lose one, even if two site containers ever shared the volume.
+- It runs only in the production server with `WAITLIST_FILE` set, which the site
+  image does: never in `vite dev`, while a build prerenders pages, or for the source
+  default file.
+
+A crash or a full disk mid-write can leave a torn line; the next submission then
+starts on a new line, so it stays readable. A failed write answers 503 and logs
+`waitlist.store_failed` with the error code only. Writes aren't flushed to disk one
+by one, so a power cut right after a submission can lose it. The notification
+email to the team is its second copy.
+
+To change the period, set the variable and redeploy the site; the policy text and
+the cleanup change together. Run one site container per `site-data` volume, and
+don't scale the site service beyond one replica.
+
+Redeploys don't overlap containers. The site is a Docker Compose resource, and
+[Coolify doesn't do rolling updates for Compose](https://coolify.io/docs/applications/deployments/rolling-updates):
+it runs `docker compose up`, and Compose recreates the service, stopping the old
+container before it starts the new one. So the old and new sites never write to the
+volume at the same time, and the site is briefly unavailable during a deploy. On the
+first deploy of day files, the old version's last submissions are in
+`/data/waitlist.jsonl`, which the cleanup trims record by record. After a rollback to
+an image from before retention, delete `/data/waitlist.jsonl.legacy-until`: that
+older image appends to `/data/waitlist.jsonl` again, so the marker's date no longer
+bounds every line in it.
+
+To delete one person's submissions on request, run this in the container that
+serves the site:
+
+```sh
+docker exec <site container> node waitlist/admin.mjs forget someone@example.com
+```
+
+It removes that address from every day's file and the older file, and prints how
+many submissions it removed, never their contents. If there's no store at
+`WAITLIST_FILE` (the wrong path, or run outside the site's container), it says so
+and deletes nothing. Lines that aren't valid JSON
+are removed too when they contain the address; any others are counted, so check
+them by hand. It rewrites files new submissions may still go into. It shares a lock
+with the site's writers in that container, so it never loses a submission. Don't
+run it from another container. On failure it prints one of three messages:
+
+- "Nothing was deleted: …" when nothing changed.
+- "Some submissions for that address were removed, but not all: …" when some files
+  were rewritten and another failed. Fix the cause and run it again.
+- "The submissions were removed, but the result may not be on disk yet: …" when
+  every file was rewritten but flushing the last change to disk failed. Check the
+  disk and run it again, which is safe.
+
+Also delete the notification emails for that address from the team mailbox. Run it
+as the image's default `node` user, as above. If you do run it as root, the rewritten
+files keep their original owner, so the site can still write to them. From a source
+checkout, `pnpm --filter @logbird/web waitlist:forget someone@example.com` does the
+same for the `WAITLIST_FILE` in the root `.env` (default
+`apps/web/.data/waitlist.jsonl`).
+
+The Cloudflare build (not used by the hosted site) stores submissions in the
+`WAITLIST_KV` namespace with the same lifetime as a KV expiry. Keys written before
+that expiry existed have none. From `apps/web` (its `wrangler.jsonc` names the
+binding), list them with
+`wrangler kv key list --binding WAITLIST_KV --remote --prefix waitlist:`, read one
+with `wrangler kv key get --binding WAITLIST_KV --remote <key>` and delete the
+expired ones with `wrangler kv key delete --binding WAITLIST_KV --remote <key>`.
+Without `--remote`, Wrangler 4 acts on local development storage only. On request,
+delete the keys whose value has that email address the same way.
+
+A KV record keeps the expiry it was written with. If you **lower**
+`WEB_FORM_RETENTION_MONTHS` on the Cloudflare build, every existing record still has
+the old, later expiry, so after redeploying, go through **all** of them. Each key
+starts with the time it was received (`waitlist:<ISO time>:<id>`); its new deadline
+is that time plus the new number of calendar months (on a shorter month's last day
+when the day doesn't exist).
+
+- If the deadline has passed, delete the key (`wrangler kv key delete … --remote`).
+- Otherwise, write the record again with the new deadline:
+  `wrangler kv key get --binding WAITLIST_KV --remote <key>`, then
+  `wrangler kv key put --binding WAITLIST_KV --remote <key> '<value>' --expiration <deadline in Unix seconds>`.
+
+Raising the period needs the same pass if existing records should be kept longer.
+The Node server needs neither: its cleanup checks every record against the current
+period.
