@@ -112,11 +112,31 @@ it('deletes a day file once its last moment is past the period, and trims the le
   expect(logged).toHaveLength(1);
 });
 
-it('never deletes a day file early, and deletes it within a day of its last submission expiring', async () => {
+it('never deletes a day file early, and deletes it once its last moment has expired', async () => {
   await appendWaitlistRecord(file, record('late@example.test', '2026-03-31T23:30:00.000Z'));
   // The day's last moment plus one month is 30 April, 23:59:59.999.
   expect((await pruneWaitlist(file, at('2026-04-30T23:59:59.998Z'), 1)).removed).toBe(0);
   expect((await pruneWaitlist(file, at('2026-04-30T23:59:59.999Z'), 1)).removed).toBe(1);
+});
+
+it('with six-hourly runs, deletes a submission never early and at most 30 hours after it expires', async () => {
+  // The worst case is a submission at the very start of a UTC day: its day file goes a day after it expires, and the
+  // run that removes it can come up to six hours after that. Try every hour of offset for the run schedule.
+  const sent = '2026-03-01T00:00:00.000Z';
+  const expires = retentionExpiry(at(sent), 1);
+  const SIX_HOURS = 6 * 60 * 60 * 1000;
+  for (let offset = 0; offset < 6; offset += 1) {
+    const store = join(dir, `offset-${offset}`, 'waitlist.jsonl');
+    await appendWaitlistRecord(store, record('edge@example.test', sent));
+    let deletedAt: number | undefined;
+    for (let run = expires - SIX_HOURS + offset * 60 * 60 * 1000; deletedAt === undefined; run += SIX_HOURS) {
+      if ((await pruneWaitlist(store, run, 1)).removed) {
+        deletedAt = run;
+      }
+    }
+    expect(deletedAt).toBeGreaterThanOrEqual(expires);
+    expect(deletedAt - expires).toBeLessThanOrEqual(30 * 60 * 60 * 1000);
+  }
 });
 
 it('treats a missing store as empty', async () => {
@@ -177,11 +197,29 @@ it('rewrites bytes as they are: a kept line that is not valid UTF-8 comes back u
 it('removes temporary copies left by a crashed rewrite, so a deleted record has no other copy', async () => {
   await appendWaitlistRecord(file, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
   const copy = `${JSON.stringify(record('forget-me@example.test', '2026-11-01T00:00:00.000Z'))}\n`;
-  await writeFile(join(waitlistDays(file), '2026-11-01.jsonl.rewrite-crashed'), copy);
-  await writeFile(`${file}.rewrite-crashed`, copy);
+  const crashed = '0b8e4c1a-7f2d-4e6b-9a3c-5d1f2e8b7c90';
+  await writeFile(join(waitlistDays(file), `2026-11-01.jsonl.rewrite-${crashed}`), copy);
+  await writeFile(`${file}.rewrite-${crashed}`, copy);
+  // Files that only look similar are not this store's leftovers and stay: another store's data, a backup.
+  await writeFile(join(dir, 'waitlist.rewrite-live.jsonl'), copy);
+  await writeFile(join(dir, `other.jsonl.rewrite-${crashed}`), copy);
+  await writeFile(join(waitlistDays(file), 'notes.rewrite-kept.txt'), copy);
   expect(await forgetWaitlistEmail(file, 'forget-me@example.test')).toMatchObject({ removed: 1 });
-  expect(await readdir(waitlistDays(file))).toEqual(['2026-11-01.jsonl']);
-  expect((await readdir(dir)).sort()).toEqual(['waitlist.jsonl.d']);
+  expect((await readdir(waitlistDays(file))).sort()).toEqual(['2026-11-01.jsonl', 'notes.rewrite-kept.txt']);
+  expect((await readdir(dir)).sort()).toEqual([`other.jsonl.rewrite-${crashed}`, 'waitlist.jsonl.d', 'waitlist.rewrite-live.jsonl']);
+});
+
+it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('never mistakes an unreadable store for an empty one', async () => {
+  const { chmod } = await import('node:fs/promises');
+  await appendWaitlistRecord(file, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
+  await chmod(waitlistDays(file), 0o000);
+  try {
+    // Reading the day directory fails with EACCES: forget and the cleanup must fail, not report "removed 0".
+    await expect(forgetWaitlistEmail(file, 'forget-me@example.test')).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(pruneWaitlist(file, Date.now(), 1)).rejects.toMatchObject({ code: 'EACCES' });
+  } finally {
+    await chmod(waitlistDays(file), 0o700);
+  }
 });
 
 it('forgets every submission from one address in every day file and the legacy file, ignoring case and spaces', async () => {
@@ -301,26 +339,37 @@ it('loses nothing when processes create the store through different aliases whil
   expect((await emails(paths[1] as string)).filter((email: string) => email.startsWith('new-'))).toHaveLength(60);
 }, 60_000);
 
-it('the cleanup never touches the file new submissions go into, even without the lock (another container)', async () => {
-  // An expired day file and submissions arriving today: a process appending today shares nothing with the cleanup.
+it('the cleanup never touches the file new submissions go into, even for a writer that takes no lock', async () => {
   await appendWaitlistRecord(file, record('expired@example.test', '2020-01-01T00:00:00.000Z'));
+  // A writer that skips the lock entirely, as another container would: raw appends to today's day file.
+  const today = join(waitlistDays(await resolveWaitlistPath(file)), `${new Date().toISOString().slice(0, 10)}.jsonl`);
+  const go = join(dir, 'go');
   const writer = child(
-    `for (let i = 0; i < 40; i++) await waitlist.appendWaitlistRecord(${JSON.stringify(file)}, { email: 'today-' + i + '@example.test', interest: 'cloud', receivedAt: new Date().toISOString() });`,
+    `const { appendFileSync, existsSync } = await import('node:fs');
+     console.log('ready');
+     while (!existsSync(${JSON.stringify(go)})) await new Promise((done) => setTimeout(done, 5));
+     for (let i = 0; i < 200; i++) {
+       appendFileSync(${JSON.stringify(today)}, JSON.stringify({ email: 'today-' + i + '@example.test', interest: 'cloud', receivedAt: new Date().toISOString() }) + '\\n');
+       await new Promise((done) => setTimeout(done, 1));
+     }`,
   );
+  await new Promise<void>((done) => writer.stdout.once('data', () => done()));
   const finished = new Promise((done) => writer.on('exit', done));
-  let sweeps = 0;
   let running = true;
   void finished.then(() => {
     running = false;
   });
+  await writeFile(go, '');
+  let sweepsWhileWriting = 0;
   while (running) {
     await pruneWaitlist(file, Date.now(), 1);
-    sweeps += 1;
-    await new Promise((done) => setTimeout(done, 2));
+    if (running) {
+      sweepsWhileWriting += 1;
+    }
   }
   expect(await finished).toBe(0);
-  expect(sweeps).toBeGreaterThan(0);
-  expect((await emails()).filter((email: string) => email.startsWith('today-'))).toHaveLength(40);
+  expect(sweepsWhileWriting).toBeGreaterThan(0);
+  expect((await emails()).filter((email: string) => email.startsWith('today-'))).toHaveLength(200);
   expect(await emails()).not.toContain('expired@example.test');
 }, 60_000);
 

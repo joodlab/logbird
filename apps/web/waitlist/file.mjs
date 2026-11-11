@@ -150,16 +150,28 @@ function dayFile(path, record) {
   return join(waitlistDays(path), `${day}.jsonl`);
 }
 
+/**
+ * Calls `read` and treats "doesn't exist" as `missing`. Any other failure (EACCES, EIO) is thrown, so a store that
+ * can't be read never looks empty: `forget` would otherwise report "removed 0" while the records remain.
+ */
+async function orMissing(read, missing) {
+  try {
+    return await read();
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return missing;
+    }
+    throw error;
+  }
+}
+
 /** Every file holding records: the day files, then the legacy file if it exists. */
 async function storeFiles(path) {
-  const days = (await readdir(waitlistDays(path)).catch(() => []))
+  const days = (await orMissing(() => readdir(waitlistDays(path)), []))
     .filter((name) => DAY_FILE.test(name))
     .sort()
     .map((name) => join(waitlistDays(path), name));
-  const legacy = await stat(path).then(
-    (info) => info.isFile(),
-    () => false,
-  );
+  const legacy = await orMissing(async () => (await stat(path)).isFile(), false);
   return legacy ? [...days, path] : days;
 }
 
@@ -235,10 +247,23 @@ function afterChange(error) {
   });
 }
 
-/** Deletes temporary files left by a crashed rewrite (rewrites only happen under the lock, so any found are leftovers). */
-async function removeLeftovers(directory) {
-  for (const name of (await readdir(directory).catch(() => [])).filter((entry) => entry.includes(TEMPORARY))) {
-    await rm(join(directory, name), { force: true });
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Deletes temporary files left by a crashed rewrite of this store (rewrites only happen under the lock, so any found
+ * are leftovers): exactly `<day>.jsonl.rewrite-<uuid>` in the day directory and `<store file>.rewrite-<uuid>` next to
+ * the store, and nothing else that merely looks similar.
+ */
+async function removeLeftovers(path) {
+  const places = [
+    [waitlistDays(path), new RegExp(`^\\d{4}-\\d{2}-\\d{2}\\.jsonl${escapeRegExp(TEMPORARY)}${UUID}$`)],
+    [dirname(path), new RegExp(`^${escapeRegExp(basename(path))}${escapeRegExp(TEMPORARY)}${UUID}$`)],
+  ];
+  for (const [directory, pattern] of places) {
+    for (const name of (await orMissing(() => readdir(directory), [])).filter((entry) => pattern.test(entry))) {
+      await rm(join(directory, name), { force: true });
+    }
   }
 }
 
@@ -310,18 +335,17 @@ async function rewriteFile(path, keep, dropUnreadable = () => false) {
   return { kept: kept.length, removed, unreadable };
 }
 
-const countLines = async (path) => (await readFile(path, 'utf8').catch(() => '')).split('\n').filter((line) => line.trim()).length;
+const countLines = async (path) => (await orMissing(() => readFile(path, 'utf8'), '')).split('\n').filter((line) => line.trim()).length;
 
 /**
  * Deletes submissions whose retention period has ended by `now`. A day file goes whole once even its last moment is
- * past the period (so a submission is deleted on time or up to a day after, never early); its lines, readable or not,
+ * past the period (so a submission is never deleted early, and goes at most a day after it expires); its lines, readable or not,
  * go with it. The legacy file is trimmed record by record; a legacy record without a readable `receivedAt` is kept.
  * Today's file, the only one still appended to, is never touched.
  */
 export function pruneWaitlist(file, now, months) {
   return withWaitlistLock(file, async (path) => {
-    await removeLeftovers(waitlistDays(path));
-    await removeLeftovers(dirname(path));
+    await removeLeftovers(path);
     let removed = 0;
     let kept = 0;
     let deletedDays = false;
@@ -368,8 +392,7 @@ export async function forgetWaitlistEmail(file, email) {
     throw new Error('An email address is required.');
   }
   return withWaitlistLock(file, async (path) => {
-    await removeLeftovers(waitlistDays(path));
-    await removeLeftovers(dirname(path));
+    await removeLeftovers(path);
     const total = { kept: 0, removed: 0, unreadable: 0 };
     for (const store of await storeFiles(path)) {
       let result;

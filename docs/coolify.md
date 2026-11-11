@@ -140,7 +140,8 @@ The site deletes expired submissions itself, ten minutes after it starts and the
 every six hours, logging `waitlist.retention` with counts only.
 
 - A day's file is deleted whole once even its last moment is past the period, so a
-  submission goes on time or up to a day later, never early.
+  submission is never deleted early. Counting the six-hourly runs, it goes at most about
+  30 hours after it expires; the privacy policy says "within two days".
 - The older single file is trimmed record by record. A `warn` level means that file
   has lines that aren't valid JSON (say, from a crash mid-write). They are never
   deleted automatically, so check the file and remove them by hand. In day files
