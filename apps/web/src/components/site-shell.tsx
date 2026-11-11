@@ -6,7 +6,7 @@ import { COPYRIGHT_HOLDER, GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import { ACCESS_CTA, SIGN_IN_URL } from '../lib/cloud';
 import { siteMap } from '../lib/site-map';
 import { ButtonLink } from './marketing/button-link';
-import { BilingualWordmark, Wordmark } from './marketing/wordmark';
+import { Wordmark } from './marketing/wordmark';
 
 const themes: { value: Theme; label: string; Icon: typeof SunIcon }[] = [
   { value: 'light', label: 'Light theme', Icon: SunIcon },
@@ -154,14 +154,11 @@ export function SiteFooter() {
       <div className="container-site grid gap-12 py-14 md:grid-cols-[1.2fr_2fr]">
         <div className="flex flex-col gap-4">
           <p className="self-start">
-            <BilingualWordmark className="h-9 w-auto" />
-            <span className="sr-only">Logbird · لوغبيرد</span>
+            <Wordmark className="h-9 w-auto" />
+            <span className="sr-only">Logbird</span>
           </p>
           <p className="max-w-xs text-muted-foreground text-sm leading-relaxed">
-            Retrace every step.{' '}
-            <span dir="rtl" lang="ar">
-              تتبّع كل خطوة.
-            </span>
+            Retrace every step.
             <br />
             The open-source audit log for your product.
           </p>

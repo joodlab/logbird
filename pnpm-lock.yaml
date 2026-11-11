@@ -294,9 +294,6 @@ importers:
       '@fontsource/geist-mono':
         specifier: ^5.3.0
         version: 5.3.0
-      '@fontsource/ibm-plex-sans-arabic':
-        specifier: ^5.3.0
-        version: 5.3.0
       '@logbird/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
@@ -1637,9 +1634,6 @@ packages:
 
   '@fontsource/geist@5.3.0':
     resolution: {integrity: sha512-u03ftlfVwb05uijq2jGDJ03/HKGqMKaNFk7KOhkpBUex8+BhrAOfMs/XciJ2UUNUX9fEsZbZQld/RWMA2oFU7g==}
-
-  '@fontsource/ibm-plex-sans-arabic@5.3.0':
-    resolution: {integrity: sha512-ZZ4g+JDgQY0NqSh4o0MNWU1sHQmtcee1g++aKAwyJvZxnT5y51JXsN1cIXnaQaMd40dcbK6QFYa+Z1LbaiNuqA==}
 
   '@hono/node-server@2.1.1':
     resolution: {integrity: sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg==}
@@ -9227,8 +9221,6 @@ snapshots:
   '@fontsource/geist-mono@5.3.0': {}
 
   '@fontsource/geist@5.3.0': {}
-
-  '@fontsource/ibm-plex-sans-arabic@5.3.0': {}
 
   '@hono/node-server@2.1.1(hono@4.13.5)':
     dependencies:

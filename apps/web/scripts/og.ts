@@ -13,12 +13,11 @@ const require = createRequire(import.meta.url);
 const { SITE_URL } = siteConfigFrom(loadPublicEnv());
 console.log(`og: cards for ${new URL(SITE_URL).host}`);
 const font = (pkg: string, file: string) => readFile(resolve(dirname(require.resolve(`${pkg}/package.json`)), 'files', file));
-const [regular, semibold, mono, arabic, logo] = await Promise.all([
+const [regular, semibold, mono, logo] = await Promise.all([
   font('@fontsource/geist', 'geist-latin-400-normal.woff'),
   font('@fontsource/geist', 'geist-latin-600-normal.woff'),
   font('@fontsource/geist-mono', 'geist-mono-latin-400-normal.woff'),
-  font('@fontsource/ibm-plex-sans-arabic', 'ibm-plex-sans-arabic-arabic-600-normal.woff'),
-  readFile('public/brand/logbird-wordmark-bilingual-dark.svg'),
+  readFile('public/brand/logbird-wordmark-dark.svg'),
 ]);
 await mkdir('public/og', { recursive: true });
 const box = (style: Record<string, unknown>, ...children: Parameters<typeof h>[2][]) =>
@@ -55,7 +54,7 @@ for (const page of siteMap) {
   const tree = box(
     { width: 1200, height: 630, background: '#0b0b0c', color: '#ededed', fontFamily: 'Geist', position: 'relative', padding: 64 },
     box({ position: 'absolute', left: 20, top: 20, width: 1160, height: 590, border: '1px solid #242426', borderRadius: 24 }),
-    h('img', { src: `data:image/svg+xml;base64,${logo.toString('base64')}`, height: 44, style: { position: 'absolute', left: 64, top: 64 } }),
+    h('img', { src: `data:image/svg+xml;base64,${logo.toString('base64')}`, height: 40, style: { position: 'absolute', left: 64, top: 66 } }),
     box(
       { position: 'absolute', left: 64, top: 192, width: 650, flexDirection: 'column' },
       h('div', { style: { fontSize: 64, fontWeight: 600, letterSpacing: '-0.025em', lineHeight: 1.08, lineClamp: 2, overflow: 'hidden' } }, title),
@@ -76,7 +75,6 @@ for (const page of siteMap) {
       { name: 'Geist', data: regular, weight: 400 },
       { name: 'Geist', data: semibold, weight: 600 },
       { name: 'Geist Mono', data: mono, weight: 400 },
-      { name: 'IBM Plex Sans Arabic', data: arabic, weight: 600 },
     ],
   });
   await writeFile(`public/og/${page.ogSlug}.png`, new Resvg(svg).render().asPng());

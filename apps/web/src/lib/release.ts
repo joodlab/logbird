@@ -7,7 +7,7 @@ import { getPage, type SitePage } from './site-map';
  * `build:cloudflare` refuses to package unless LOGBIRD_WEB_ALLOW_INTERIM=1 (local previews only).
  *
  * - interim media: a console capture may still show a real workspace, a person or a timing;
- * - provisional domain: WEB_SITE_URL is unset, so canonicals point at a domain that isn't ours yet;
+ * - provisional domain: WEB_SITE_URL is unset, so canonicals rely on the built-in default instead of the deploy's origin;
  * - security contact: WEB_SECURITY_EMAIL is unset, so the site can't name a vulnerability-report mailbox;
  * - contact mailbox: WEB_CONTACT_EMAIL is unset, so the site can't name a general address;
  * - publisher: WEB_ORG_NAME is unset, so the privacy policy and terms can't name who is responsible for your data;
@@ -15,7 +15,7 @@ import { getPage, type SitePage } from './site-map';
  * - legal page not ready: /legal/privacy or /legal/terms is marked `ready: false`, so the site would collect emails
  *   without a published privacy policy and terms.
  *
- * No mailbox is ever derived from the provisional domain.
+ * No mailbox is ever derived from the domain.
  */
 export const LEGAL_PAGES = ['/legal/privacy', '/legal/terms'] as const;
 export function releaseBlockers(config: SiteConfig = siteConfig): string[] {

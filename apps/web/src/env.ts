@@ -1,12 +1,12 @@
 /**
- * Public, client-safe site configuration. This is the ONLY file that may contain the provisional domain (pending the
- * owner: the domain is not bought yet); a test enforces it. Server-only settings live in src/server/env.ts.
+ * Public, client-safe site configuration. This is the ONLY file that may contain the default domain (the public origin,
+ * logbird.joodlab.com); a test enforces it. Server-only settings live in src/server/env.ts.
  *
  * The site's variables are prefixed `WEB_` so they never collide with the console's (`APP_URL` in the root .env is the
  * local console). Values come from the build (`__SITE_ENV__`, injected by vite.config.ts) or from process.env in Node
  * scripts and tests.
  *
- *   WEB_SITE_URL       canonical origin of this site               default https://<provisional domain>
+ *   WEB_SITE_URL       canonical origin of this site               default https://<default domain>; unset is a blocker
  *   WEB_APP_URL        console sign-in URL; unset hides "Sign in"   default unset (Cloud is waitlist-only)
  *   WEB_GITHUB_PUBLIC  "true" once the repository is public        default false
  *   WEB_GITHUB_URL     repository URL; required when public        default unset
@@ -44,7 +44,7 @@ declare const __SITE_ENV__: Record<string, string | undefined> | undefined;
 const source: Record<string, string | undefined> =
   typeof __SITE_ENV__ === 'undefined' ? (typeof process === 'undefined' ? {} : process.env) : __SITE_ENV__;
 
-const DOMAIN = 'logbird.dev';
+const DOMAIN = 'logbird.joodlab.com';
 
 export interface SiteConfig {
   SITE_URL: string;
@@ -81,7 +81,7 @@ export interface SiteConfig {
    * (src/server/waitlist-retention.ts), so the two can't disagree. Default 24.
    */
   FORM_RETENTION_MONTHS: number;
-  /** False while WEB_SITE_URL is unset, i.e. the canonical origin is the provisional domain (a release blocker). */
+  /** False while WEB_SITE_URL is unset, i.e. the canonical origin is only the built-in default (a release blocker). */
   SITE_URL_CONFIGURED: boolean;
 }
 
