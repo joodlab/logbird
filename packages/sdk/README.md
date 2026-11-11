@@ -131,6 +131,79 @@ const hide = redact({ keys });
 const beforeSend = event => event.action === 'health.checked' ? null : hide(event);
 ```
 
+## Standard Webhooks
+
+`signWebhook`, `verifyWebhook`, `generateWebhookSecret` and
+`WebhookVerificationError` are exported from `@logbird/sdk`. Signing and verification
+are async. Signing uses Web Crypto HMAC-SHA256. Verification uses Node's
+`timingSafeEqual` on equal-length signatures, or Web Crypto `subtle.verify` in
+browsers and edge runtimes. Node crypto is loaded lazily only in Node; there are
+no runtime dependencies. Browser bundlers must externalize the optional
+`node:crypto` import (Vite does this automatically).
+
+Verify the **raw body** before parsing it. This Hono receiver returns the parsed
+public `AuditEvent` (the type in `@logbird/sdk/read`); verification authenticates
+the body and parses JSON, but does not validate its schema:
+
+```ts
+import { Hono } from 'hono';
+import { verifyWebhook, WebhookVerificationError } from '@logbird/sdk';
+
+const app = new Hono();
+const secret = process.env.LOGBIRD_WEBHOOK_SECRET!; // whsec_...; keep on the receiver
+
+app.post('/webhooks/logbird', async (c) => {
+  try {
+    const event = await verifyWebhook({
+      payload: await c.req.text(), // never JSON.stringify(await c.req.json())
+      headers: c.req.raw.headers,
+      secret,
+    });
+    // Durably enqueue/process event before returning 2xx. Deduplicate using
+    // webhook-id within this receiver: retries can carry the same event again.
+    console.log(event.action);
+    return c.body(null, 204);
+  } catch (error) {
+    if (error instanceof WebhookVerificationError) return c.text('Invalid webhook', 400);
+    throw error;
+  }
+});
+```
+
+Headers may also be a plain string record; names are case-insensitive. The default
+timestamp tolerance is 300 seconds in either direction, including the exact edges.
+`toleranceSeconds` overrides it; optional `now` is Unix time **in seconds** for a
+controlled clock. Keep the receiver's clock synchronized. During rotation, supply
+`secrets: [oldSecret, newSecret]` instead of `secret`; any valid `v1` signature
+matching any configured secret succeeds. Unknown versions and malformed signatures
+are skipped. All configured secrets must be valid `whsec_` base64 keys containing
+24–64 bytes, as specified by [Standard Webhooks](https://www.standardwebhooks.com/).
+
+`WebhookVerificationError.reason` is one of `missing_header`, `invalid_timestamp`
+(also invalid clock/tolerance settings), `timestamp_out_of_tolerance`,
+`no_matching_signature`, `invalid_secret`, or `invalid_payload` (authenticated body
+is not JSON). Do not log the raw body, secrets or signature headers on errors.
+
+Senders generate a secret once, store it securely and sign the exact serialized body:
+
+```ts
+import { generateWebhookSecret, signWebhook } from '@logbird/sdk';
+
+const secret = generateWebhookSecret(); // whsec_ + 32 random bytes, base64 encoded
+// Save this secret securely for the endpoint; do not regenerate it per delivery.
+const id = 'evt_example'; // stable across retries; no dots or newlines
+const timestamp = Math.floor(Date.now() / 1000); // refresh on each attempt
+const payload = JSON.stringify({ action: 'hotel.updated' });
+const signature = await signWebhook({ id, timestamp, payload, secrets: [secret] });
+const headers = {
+  'content-type': 'application/json',
+  'webhook-id': id,
+  'webhook-timestamp': String(timestamp),
+  'webhook-signature': signature,
+};
+// Send payload unchanged with these headers. During overlap, sign with both secrets.
+```
+
 ## Requests and workers
 
 `createAudit(options, hostContext, request)` from `@logbird/sdk/integration` captures
