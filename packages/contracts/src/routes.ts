@@ -36,6 +36,14 @@ export const routes = {
     sampleData: { method: 'POST', path: '/api/projects/:projectId/sample-data', auth: 'session' },
     removeSampleData: { method: 'DELETE', path: '/api/projects/:projectId/sample-data', auth: 'session' },
   },
+  webhooks: {
+    list: { method: 'GET', path: '/api/projects/:projectId/webhooks', auth: 'session' },
+    create: { method: 'POST', path: '/api/projects/:projectId/webhooks', auth: 'session' },
+    get: { method: 'GET', path: '/api/projects/:projectId/webhooks/:id', auth: 'session' },
+    update: { method: 'PATCH', path: '/api/projects/:projectId/webhooks/:id', auth: 'session' },
+    remove: { method: 'DELETE', path: '/api/projects/:projectId/webhooks/:id', auth: 'session' },
+    rotateSecret: { method: 'POST', path: '/api/projects/:projectId/webhooks/:id/rotate-secret', auth: 'session' },
+  },
   keys: {
     list: { method: 'GET', path: '/api/projects/:projectId/keys', auth: 'session' },
     create: { method: 'POST', path: '/api/projects/:projectId/keys', auth: 'session' },

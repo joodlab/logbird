@@ -896,3 +896,40 @@ rename tool against two populated PostgreSQL namespaces. On failure keep writes
 stopped and investigate with the journal; recover all three stores from the same
 backup boundary rather than mixing old and new writes. The script is offline and
 idempotent, not a distributed transaction or an online migration.
+
+## Webhook endpoint settings
+
+The endpoint management API can store and rotate secrets; this change does not
+send webhooks yet. Each project may have up to 10 endpoints. Owners and admins
+manage them; workspace members can read endpoint configuration without secrets.
+Create and rotate return a `whsec_` secret once, with `Cache-Control: no-store`.
+Save it in the receiver's secret store. Never put it in a webhook URL.
+
+Secrets use AES-256-GCM encryption. By default the key is derived with HKDF-SHA256
+from `BETTER_AUTH_SECRET` (info `logbird-webhook-secrets-v1`). No new setting is
+required. Optionally set `WEBHOOK_SECRET_KEY` to the base64 encoding of 32 random
+bytes, consistently on the server and worker. This keeps the encryption key
+independent of auth-secret rotation. Both Compose variants pass this optional key
+and `BETTER_AUTH_SECRET` through the shared runtime environment to both roles.
+
+Changing `BETTER_AUTH_SECRET` without a stable `WEBHOOK_SECRET_KEY` makes existing
+webhook secrets unreadable: rotate each endpoint's webhook secret too and update
+its receiver, using `overlapSeconds: 0` to expire unreadable old secrets
+immediately. The old overlap secrets cannot be decrypted with the new key.
+Changing `WEBHOOK_SECRET_KEY` likewise requires rotating the webhook secrets.
+The versioned ciphertext envelope alone does not provide a keyring or automatic
+key migration.
+
+URLs require HTTPS. `WEBHOOKS_ALLOW_HTTP=true` explicitly permits HTTP for
+self-hosted receivers, but still requires public unicast addresses. Loopback,
+private, link-local, CGNAT, multicast, unspecified, reserved, documentation and
+metadata addresses are rejected, including mapped/translated forms. Every DNS
+answer must pass validation. Credentials and fragments are forbidden. Save-time
+validation does not protect a sender against DNS rebinding; the future sender
+must resolve and pin an allowed address again when connecting.
+
+PATCH `scope` replaces the whole scope; `null` clears it. `filterQuery` uses the
+Logbird query language (empty matches everything). Secret rotation accepts an
+`overlapSeconds` integer from 0 to 604800 (default 86400); omitted fields in PATCH
+remain unchanged. Delivery, filters at delivery time, retries and the UI arrive
+in later webhook PRs.
