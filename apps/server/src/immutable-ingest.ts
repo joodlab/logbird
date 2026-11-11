@@ -1,4 +1,5 @@
 import {
+  AmbiguousInsertError,
   ASYNC_INSERT_FLUSH_BOUND_MS,
   type EventRow,
   eventFingerprint,
@@ -217,7 +218,20 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
     const expiresAt = Math.min(
       ...[...owned.values()].filter((c) => !c.confirmedAt).map((c) => (c.claimedAt?.getTime() ?? 0) + INGEST_CLAIM_LEASE_MS),
     );
-    const outcome = await isolateIngestRows(rows, expiresAt, (part, body) => insertEvents(clickhouse, part, expiresAt, body));
+    // Keep claims as soon as a statement may have written, so even an unexpected throw later in isolation can never
+    // release a claim for a row that is already stored.
+    const keepClaims = (part: EventRow[]) => {
+      for (const row of part) releasable.delete(row.event_id);
+    };
+    const outcome = await isolateIngestRows(rows, expiresAt, (part, body) =>
+      insertEvents(clickhouse, part, expiresAt, body).then(
+        () => keepClaims(part),
+        (error: unknown) => {
+          if (error instanceof AmbiguousInsertError) keepClaims(part);
+          throw error;
+        },
+      ),
+    );
     if (outcome.limited)
       console.warn(
         JSON.stringify({

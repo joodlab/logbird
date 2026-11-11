@@ -272,8 +272,8 @@ five leading bad rows fit per attempt under the server's byte budget; subset ret
 converge. An attempt settling events and shrinking the body does not consume
 `maxRetries`; total attempts remain bounded by batch length plus retries and five minutes
 per send. At that time limit, `flush()` rejects and requeues only unsettled events.
-After `beforeSend`, missing or blank ids get a uuidv7 and numeric ids become strings; valid string
-ids stay unchanged so subset retries can match accepted events.
+After `beforeSend`, missing, blank or non-string ids (numbers included) get a fresh uuidv7,
+as the server would mint; valid string ids stay unchanged so subset retries can match accepted events.
 
 Raw HTTP clients declaring `Logbird-Retry: subset` must honor settled rejections and resend only `details.indices`
 or the remaining unsettled events to make progress. Preserve each event's JSON
@@ -297,8 +297,9 @@ Retry `flush()` later. Unresolved writes recover automatically per project after
 bounded lease and ClickHouse queue drain. An id containing NUL, a lone surrogate,
 or more than 256 UTF-16 code units after trimming is rejected individually as
 `invalid_event_id`. Earlier releases truncated long ids; this release rejects them.
-Use string ids: numeric ids generate a fresh UUID and a warning, so convert a
-numeric source id with `String(id)` before sending it.
+Use string ids: a numeric id gets a fresh UUID (the SDK mints a uuidv7; raw HTTP
+requests get one from the server, with a warning), so convert a numeric source id
+with `String(id)` before sending it.
 
 Rejection codes appear in `rejected[].code`; retryable HTTP codes appear in
 `error.code`. Every index outside pending `indices` is settled. Use the full

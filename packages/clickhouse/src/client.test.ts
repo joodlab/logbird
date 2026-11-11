@@ -53,17 +53,52 @@ it.each([
 });
 
 // A parse error quotes the offending input. View-shaped event values must not turn it into an endless ambiguity.
-it.each([
-  ['6', 'events_by_minute_mv', "Cannot parse value 'events_by_minute_mv': While executing WaitForAsyncInsert.", false],
-  ['6', 'analytics.events_by_minute_mv', "Cannot parse value 'analytics.events_by_minute_mv': While executing WaitForAsyncInsert.", false],
-  ['27', 'media.final_mv', `Cannot parse input: before: '"source":"media.final_mv"}': While executing WaitForAsyncInsert.`, false],
+// ClickHouse's "before:" excerpt: raw body bytes, with backslashes and single quotes escaped.
+const excerpt = (body: string, value: string) => {
+  const at = body.indexOf(value);
+  return body
+    .slice(Math.max(0, at - 16), at + value.length + 6)
+    .replaceAll('\\', '\\\\')
+    .replaceAll("'", "\\'");
+};
+it.each<[string, string, (body: string) => string, boolean]>([
+  ['6', 'events_by_minute_mv', (_body: string) => "Cannot parse value 'events_by_minute_mv': While executing WaitForAsyncInsert.", false],
+  [
+    '6',
+    'analytics.events_by_minute_mv',
+    (_body: string) => "Cannot parse value 'analytics.events_by_minute_mv': While executing WaitForAsyncInsert.",
+    false,
+  ],
+  // A real excerpt of the JSON body, with its escaped quotes, around the value.
+  [
+    '27',
+    'media.final_mv',
+    (body: string) => `Cannot parse input: before: '${excerpt(body, 'media.final_mv')}': While executing WaitForAsyncInsert.`,
+    false,
+  ],
+  [
+    '27',
+    "it's logbird.events_mv",
+    (body: string) => `Cannot parse input: before: '${excerpt(body, 'logbird.events_mv')}': While executing WaitForAsyncInsert.`,
+    false,
+  ],
   // The same name in failure context, absent from the body, still names a view.
-  ['25', 'unrelated', 'Parse failed in logbird.events_by_minute_mv: While executing WaitForAsyncInsert.', true],
+  ['25', 'unrelated', (_body: string) => 'Parse failed in logbird.events_by_minute_mv: While executing WaitForAsyncInsert.', true],
+  // A value in the body does not hide the same name used as unquoted failure context.
+  ['25', 'logbird.events_by_minute_mv', (_body: string) => 'Parse failed in logbird.events_by_minute_mv: While executing WaitForAsyncInsert.', true],
   // A quoted value does not hide a different, real view name.
-  ['25', 'media.final_mv', "Parse failed in logbird.event_ids_v3_mv near 'media.final_mv': While executing WaitForAsyncInsert.", true],
-])('classifies code %s with event value %s quoted in the error', async (code, value, message, ambiguous) => {
+  [
+    '25',
+    'media.final_mv',
+    (_body: string) => "Parse failed in logbird.event_ids_v3_mv near 'media.final_mv': While executing WaitForAsyncInsert.",
+    true,
+  ],
+  // A quoted name that is not from our body (another body in the same flush, or a view) still counts.
+  ['6', 'unrelated', (_body: string) => "Cannot parse value 'analytics.events_by_minute_mv': While executing WaitForAsyncInsert.", true],
+])('classifies code %s with event value %j quoted in the error', async (code, value, render, ambiguous) => {
   const row = normalizeEvent({ id: 'quoted', action: 'qa.quoted', metadata: { source: value } }, { projectId: 'fictional', receivedAt: new Date() });
   if (!row.ok) throw new Error(row.reason);
+  const message = render(`${JSON.stringify(row.row)}\n`);
   const error = Object.assign(new Error(message), { code });
   const exec = vi.fn(async (params: { values: AsyncIterable<unknown> }) => {
     for await (const _chunk of params.values) {

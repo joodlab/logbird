@@ -883,8 +883,10 @@ reading data if a pin violates a constraint; ingest returns retryable
 when the serialized body fits the pinned async limit, its error names
 `WaitForAsyncInsert`, and it is not a materialized-view failure: "while pushing to view" doesn't
 appear in it, and neither does a view name (one of Logbird's nine views, or any
-`database.name_mv`) that is absent from the statement body. ClickHouse quotes the offending
-input verbatim, so row values such as `'page.view'` or `'analytics.events_by_minute_mv'` don't count.
+`database.name_mv`) outside the quoted input. ClickHouse quotes the offending input in single
+quotes, escaping only backslashes, quotes and control characters. A quoted span whose text occurs
+in the statement body is row input, so values such as `'page.view'` or
+`'analytics.events_by_minute_mv'` don't count; a view name anywhere else does.
 If a ClickHouse upgrade changes the `WaitForAsyncInsert` wording, parse failures
 become ambiguous and can loop through pending/recovery until the incompatibility is fixed.
 Do not infer pre-write safety from the

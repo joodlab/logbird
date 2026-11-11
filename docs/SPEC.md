@@ -161,8 +161,8 @@ Semantics worth documenting to users:
   malformed details preserve the previous body. About five leading bad rows fit per attempt
   under the byte budget. Capable clients converge through subset retries; SDK attempts that
   settle events and shrink the body do not consume `maxRetries`, bounded by batch length plus retries
-  and five minutes per send. After `beforeSend`, missing or blank ids get a uuidv7, numeric ids become strings,
-  and valid string ids stay unchanged. Exhausted retries or time requeue only unsettled events. Raw clients opting into subset retry must
+  and five minutes per send. After `beforeSend`, missing, blank or non-string ids (numbers included) get a fresh
+  uuidv7, as the server would mint, and valid string ids stay unchanged. Exhausted retries or time requeue only unsettled events. Raw clients opting into subset retry must
   omit settled indices and preserve each remaining event's JSON. A proxy stripping `Logbird-Retry`
   causes safe fallback to terminal 202 with unchecked rows rejected; proxies should allow that header.
   After #153 there is no known public input that reaches parse isolation: malformed attribute keys

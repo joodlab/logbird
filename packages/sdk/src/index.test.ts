@@ -222,15 +222,14 @@ it('measures the five-minute send cap on a monotonic clock, not the wall clock',
   expect(sdk.dropped).toBe(0);
   await sdk.shutdown();
 });
-it.each([undefined, 123, 'unchanged-id', '', '   '])('stamps a stable string id after beforeSend returns id %j', async (id) => {
+it.each([undefined, 123, Number.NaN, 'unchanged-id', '', '   '])('stamps a stable string id after beforeSend returns id %j', async (id) => {
   vi.useFakeTimers();
   const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
     const events = JSON.parse(String(init.body)).events as { id: string }[];
     if (fetcher.mock.calls.length > 1) return new Response('{}', { status: 202 });
     expect(typeof events[0]!.id).toBe('string');
-    if (id === undefined || (typeof id === 'string' && !id.trim()))
-      expect(events[0]!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-    else expect(events[0]!.id).toBe(String(id));
+    if (typeof id !== 'string' || !id.trim()) expect(events[0]!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    else expect(events[0]!.id).toBe(id);
     return new Response(
       JSON.stringify({
         error: {
@@ -275,7 +274,8 @@ it('fixes the id of a frozen beforeSend result on a copy', async () => {
   await sdk.shutdown();
   expect(onError).not.toHaveBeenCalled();
   expect(owned.id).toBe(7);
-  expect(JSON.parse(String(fetcher.mock.calls[0]![1]!.body)).events[0].id).toBe('7');
+  // Like the server, a numeric id gets a fresh uuidv7: it never becomes a reusable string id such as "7".
+  expect(JSON.parse(String(fetcher.mock.calls[0]![1]!.body)).events[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
 });
 
 it('passes an integer timeout to AbortSignal.timeout on a fractional monotonic clock near the cap', async () => {

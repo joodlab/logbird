@@ -67,7 +67,7 @@ export class InsertLeaseExhaustedError extends Error {
 }
 /**
  * True only for a parse failure ClickHouse reports before writing anything. Pass the statement body when available:
- * a view name that also occurs in the body may be ClickHouse quoting the offending input, not naming a failing view.
+ * a view name inside a quoted excerpt of that body is ClickHouse quoting the offending input, not a failing view.
  */
 export function isPrewriteParseError(error: unknown, body?: string) {
   return (
@@ -94,15 +94,24 @@ export const LOGBIRD_MATERIALIZED_VIEWS = [
   'event_ids_v3_mv',
   'events_by_minute_mv',
 ] as const;
-const MATERIALIZED_VIEW_NAME = new RegExp(String.raw`\b\w+\.\w+_mv\b|\b(?:${LOGBIRD_MATERIALIZED_VIEWS.join('|')})\b`, 'gi');
+const MATERIALIZED_VIEW_NAME = new RegExp(String.raw`\b\w+\.\w+_mv\b|\b(?:${LOGBIRD_MATERIALIZED_VIEWS.join('|')})\b`, 'i');
+// ClickHouse quotes the offending input in single quotes ("Cannot parse value '...'", "before: '...'"), escaping
+// backslashes, quotes and control characters. Bounded so a hostile message can't cost more than a few body scans.
+const QUOTED_SPAN = /'((?:[^'\\]|\\.){0,1024})'/g;
+const MAX_QUOTED_SPANS = 8;
+const CONTROL_ESCAPES: Record<string, string> = { n: '\n', r: '\r', t: '\t' };
+const unescapeQuoted = (text: string) => text.replace(/\\(.)/g, (_, c: string) => CONTROL_ESCAPES[c] ?? c);
 function namesView(message: string, body?: string) {
-  for (const [name] of message.matchAll(MATERIALIZED_VIEW_NAME)) {
-    // Parse errors quote input verbatim ("Cannot parse value '...'", "before: '...'"). The body is JSON.stringify
-    // output, which never escapes word characters or dots, so a quoted view-shaped value is always a substring of
-    // it. A name absent from our body names a view (or another body sharing the async flush): ambiguous, fail safe.
-    if (!body?.includes(name)) return true;
-  }
-  return false;
+  let spans = 0;
+  // Only a quoted span whose text occurs in our own body is provably row input; mask it. A view name anywhere else,
+  // including failure context that happens to repeat a value from the body, still names a view: ambiguous, fail safe.
+  const outsideInput =
+    body === undefined
+      ? message
+      : message.replace(QUOTED_SPAN, (span, text: string) =>
+          ++spans <= MAX_QUOTED_SPANS && (body.includes(text) || body.includes(unescapeQuoted(text))) ? "''" : span,
+        );
+  return MATERIALIZED_VIEW_NAME.test(outsideInput);
 }
 function isViewFailure(error: unknown, body?: string) {
   if (!(error instanceof Error)) return false;

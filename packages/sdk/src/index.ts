@@ -138,11 +138,9 @@ export class Logbird {
         if (result == null) return;
         prepared = result;
       }
-      // The server stores a trimmed id and mints one for a blank id, which a retry could never match: fix it here,
-      // on a copy, so a frozen or caller-owned beforeSend result is never mutated.
-      const id = typeof prepared.id === 'number' ? String(prepared.id) : prepared.id;
-      if (typeof id !== 'string' || !id.trim()) prepared = { ...prepared, id: uuidv7() };
-      else if (id !== prepared.id) prepared = { ...prepared, id };
+      // The server mints a fresh id for a missing, blank or non-string id (numbers included), which a retry could
+      // never match. Mint it here instead, on a copy, so a frozen or caller-owned beforeSend result is never mutated.
+      if (typeof prepared.id !== 'string' || !prepared.id.trim()) prepared = { ...prepared, id: uuidv7() };
       const serialized = JSON.stringify(prepared);
       if (new TextEncoder().encode(serialized).length > 256 * 1024) throw new Error('Event exceeds 256 KB');
       const copy = JSON.parse(serialized) as EventInput;

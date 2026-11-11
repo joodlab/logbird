@@ -340,8 +340,8 @@ the size bound in #159 lands. Block pins prevent partial synchronous fallback
 writes within that bound. Ordinary user profiles cannot lower query-level pins.
 A parse error is proven pre-write only when the serialized body fits the async
 pin, its error names `WaitForAsyncInsert`, and it is not a materialized-view failure
-("while pushing to view", or a view name absent from the statement body; quoted row values such as
-`'page.view'` or `'analytics.events_by_minute_mv'` don't count). A server
+("while pushing to view", or a view name outside a quoted excerpt of the statement body; quoted row
+values such as `'page.view'` or `'analytics.events_by_minute_mv'` don't count). A server
 constraint rejects the whole query before reading data (code 452), returning
 `503 ingest_unavailable` and releasing unwritten claims. Client-side overrides
 that force synchronous fallback, changed error wording, oversize internal
@@ -421,8 +421,8 @@ and final requeue. Incomplete or malformed details keep the previous body unchan
 The SDK always sends `Logbird-Retry: subset`. Attempts settling at least one event and
 shrinking the body do not consume `maxRetries`; total attempts remain bounded by batch
 length plus retries and five minutes per send. The time limit requeues only unsettled
-events. After `beforeSend`, missing or blank ids get a uuidv7 and numeric ids become strings;
-valid string ids stay unchanged. The SDK reports individually rejected rows through `onDrop`
+events. After `beforeSend`, missing, blank or non-string ids (numbers included) get a fresh
+uuidv7, as the server would mint; valid string ids stay unchanged. The SDK reports individually rejected rows through `onDrop`
 once per send; unchecked healthy rows stay retryable while this header is preserved.
 If the retry budget is exhausted, `onError` reports it and only unsettled events
 are requeued for a later `flush()`.

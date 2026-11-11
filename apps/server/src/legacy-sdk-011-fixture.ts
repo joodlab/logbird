@@ -4,6 +4,8 @@ import type { EventInput, LogbirdOptions } from '../../../packages/sdk/src/index
  * Compatibility fixture. send() is copied verbatim from
  * git show v0.1.1:packages/sdk/src/index.ts (including its historical SDK header).
  * In particular, 503 details are ignored and every retry sends the identical body.
+ * track() is NOT a copy either: it adds no default id or occurredAt and has no beforeSend or capacity handling, so
+ * tests supply ids themselves.
  * flush() is NOT a copy: it sends up to 1000 events per batch (0.1.1 defaulted to batchSize 100, applied its 5 MiB
  * cut and trimmed to capacity on requeue), so a 1000-event scenario here is one request rather than ten. Requeue on
  * failure matches 0.1.1.
