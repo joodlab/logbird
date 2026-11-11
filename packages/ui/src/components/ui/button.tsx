@@ -61,15 +61,17 @@ function Button({
     <ButtonPrimitive
       aria-busy={loading || undefined}
       data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }), loading && "relative")}
+      className={cn(buttonVariants({ variant, size, className }))}
       disabled={disabled || loading}
       {...props}
     >
       {loading ? (
-        <>
-          <span className="inline-flex items-center justify-center gap-[inherit] opacity-0">{children}</span>
-          <Loader2Icon aria-hidden className="absolute animate-spin" />
-        </>
+        // One grid cell holds both, so the spinner overlays the content without positioning the button itself (a caller's
+        // absolute/fixed/sticky classes keep working). gap-[inherit] passes the button's gap through to the content.
+        <span className="inline-grid place-items-center gap-[inherit]">
+          <span className="col-start-1 row-start-1 inline-flex items-center justify-center gap-[inherit] opacity-0">{children}</span>
+          <Loader2Icon aria-hidden className="col-start-1 row-start-1 animate-spin" />
+        </span>
       ) : (
         children
       )}

@@ -263,13 +263,6 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
-    /* Centred pages that scroll the document (sign-in, onboarding, invitations) keep their position when content
-       grows past the viewport and the scrollbar appears. */
-    scrollbar-gutter: stable;
-  }
-  /* The signed-in shell never scrolls the document (pages scroll inside #app-main, which reserves its own gutter). */
-  html:has(#app-main) {
-    scrollbar-gutter: auto;
   }
   body {
     @apply bg-background text-foreground;

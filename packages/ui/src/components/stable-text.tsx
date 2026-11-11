@@ -10,8 +10,9 @@ export function StableText({ children, reserve, className }: { children: ReactNo
   return (
     <span className={cn('inline-grid justify-items-center', className)}>
       <span className="col-start-1 row-start-1">{children}</span>
-      {reserve.map((text) => (
-        <span aria-hidden className="invisible col-start-1 row-start-1" key={text}>
+      {reserve.map((text, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a static list that may repeat a text; never reordered
+        <span aria-hidden className="invisible col-start-1 row-start-1" key={index}>
           {text}
         </span>
       ))}

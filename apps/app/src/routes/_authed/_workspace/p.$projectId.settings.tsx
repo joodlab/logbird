@@ -120,7 +120,10 @@ function SettingsLayout() {
           })}
         </nav>
       </div>
-      <div className={cn('w-full', isActivity ? 'flex min-h-0 flex-1 flex-col' : 'max-w-4xl p-4 sm:p-6')}>
+      <div
+        className={cn('w-full', isActivity ? 'flex min-h-0 flex-1 flex-col' : 'max-w-4xl p-4 sm:p-6')}
+        data-fills-viewport={isActivity || undefined}
+      >
         <Outlet />
       </div>
     </div>
