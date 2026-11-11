@@ -146,9 +146,9 @@ These variants are **not** used anywhere on the site. The owner may approve them
 
 ## Pending owner decisions that affect copy
 
-- **Domain.** `logbird.dev` is **not bought yet**. Copy writes the domain as `logbird.dev`
-  wherever one is needed, but nothing on the site may imply it is live before it is bought and configured. No mailbox
-  is derived from it: contact addresses come only from `WEB_SECURITY_EMAIL` and `WEB_CONTACT_EMAIL`, with no default. The engineer should keep the domain in one config value.
+- **Domain (decided).** The public origin is `logbird.joodlab.com`; copy writes it wherever a domain is needed and
+  never invents another one. No mailbox is derived from it: contact addresses come only from `WEB_SECURITY_EMAIL` and
+  `WEB_CONTACT_EMAIL`, with no default. The engineer keeps the domain in one config value (`apps/web/src/env.ts`).
 - **Public repository timing.** All copy says "the repository opens publicly soon".
 - **npm packages.** `@logbird/sdk` and the integrations are not on npm yet (registry returned 404 on 2026-11-07;
   `docs/roadmap.md` P0-3). Install lines are labelled "after the first npm release".

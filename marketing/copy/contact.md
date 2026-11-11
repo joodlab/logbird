@@ -60,7 +60,7 @@ path: /contact
   - **Too many attempts:** Too many attempts. Wait a minute, then try again.
   - **Unavailable (form disabled, for example before the backend exists):** The form isn't available right now.
     Email us at `{WEB_CONTACT_EMAIL}` (only when set; no default) instead.
-    <!-- domain pending owner: logbird.dev isn't bought yet; see README.md § Pending owner decisions -->
+    <!-- no mailbox is derived from the domain (logbird.joodlab.com); see README.md § Pending owner decisions -->
 - **visual:** none
 
 ## other-channels
