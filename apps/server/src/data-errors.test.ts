@@ -8,6 +8,15 @@ app.get('/_test/budget', () => {
 app.get('/_test/query', () => {
   throw new Error('Invalid cursor');
 });
+app.get('/_test/delete', () => {
+  throw Object.assign(new Error('Delete left visible rows in events after 3 attempts.'), { code: 'LOGBIRD_DELETE_INCOMPLETE', table: 'events' });
+});
+app.get('/_test/delete-unverified', () => {
+  throw Object.assign(new Error('Could not verify the delete in events (attempt 1). Retry the operation.', { cause: new Error('Timeout') }), {
+    code: 'LOGBIRD_DELETE_UNVERIFIED',
+    table: 'events',
+  });
+});
 app.get('/_test/internal', () => {
   throw new Error('Internal processor error with private details');
 });
@@ -24,3 +33,14 @@ it('does not expose arbitrary internal errors as query validation failures', asy
   expect(result.status).toBe(500);
   expect(JSON.stringify(await result.json())).not.toContain('private details');
 });
+it.each(['/_test/delete', '/_test/delete-unverified'])(
+  'reports a failed verified delete (%s) as a retryable 503 without range advice',
+  async (path) => {
+    const result = await app.request(path);
+    expect(result.status).toBe(503);
+    expect(result.headers.get('Retry-After')).toBe('5');
+    const body = apiErrorSchema.parse(await result.json());
+    expect(body.error.code).toBe('query_unavailable');
+    expect(body.error.message).not.toMatch(/time range/);
+  },
+);
