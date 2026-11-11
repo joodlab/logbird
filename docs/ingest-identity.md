@@ -220,22 +220,27 @@ runs `compactIngestReceiptIndex`:
   eight seconds in all) and sends `pg_cancel_backend` for the recorded rebuild
   backend pid only. The original connection stays open while cancellation completes
   and REINDEX settles with 57014; its ten-second shutdown deadline is longer than the
-  cancel budget, so the pid can't be reused before the cancel runs. Then sockets are
-  destroyed. Every close is bounded to five seconds: pg's graceful close on an idle
+  cancel budget, so the pid can't be reused before the cancel runs: the cancel socket
+  is destroyed by eight seconds and the original session's by ten, and the run settles
+  within about fifteen seconds of shutdown. Every close is bounded to five seconds: pg's graceful close on an idle
   session waits for the server, so past that the socket is destroyed. Each maintenance session also sets `client_connection_check_interval`
   to one second as a disconnect fallback (unsupported on PostgreSQL before 14).
   Closing a socket alone is not the cancellation mechanism. Only a running REINDEX
   is cancelled: catalog queries and the `DROP INDEX CONCURRENTLY` cleanup are left to
-  finish within the same ten-second deadline, and no new step starts after shutdown.
-  Connection setup (connect plus the session `SET`s) has its own 15-second deadline
-  and closes its socket on shutdown, since no server-side work runs yet. An invalid
+  finish within the same ten-second deadline. The run checks for shutdown at each step
+  boundary (after the schema lookup, after the lock, before cleanup and before the
+  statistics), so no new step starts after shutdown. Connection setup (connect plus the
+  session `SET`s) has its own 15-second deadline; shutdown or the deadline rejects it
+  directly, because pg never calls back a connect that `end()` interrupted. An invalid
   copy is dropped after cancellation, or by the next run if the deadline interrupts
   cleanup. An aborted run logs `ingest.receipt_index_compaction_aborted` at info level.
 - Reserve free disk for about the index's live size while the copy is built.
   After a statement timeout (57014) or lock timeout (55P03), the worker stores a
   timestamp under `<BULLMQ_PREFIX>:ingest-receipt-index-compaction:backoff` in its
   existing Redis connection with a 24-hour TTL. Hourly jobs return and log
-  `skipped_backoff` until it expires, avoiding repeated expensive copies. Both Redis
+  `skipped_backoff` until it expires, avoiding repeated expensive copies. While backed
+  off, each hourly run still drops an invalid copy a failed rebuild left behind (every
+  receipt write would otherwise keep maintaining it), but never builds a new one. Both Redis
   hints have a one-second client deadline and stop waiting immediately on abort.
   A Redis error or stall does not disable compaction or block shutdown: a failed
   GET means no back-off, and a timed-out SET is logged. An aborted rebuild does

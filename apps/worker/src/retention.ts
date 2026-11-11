@@ -8,7 +8,7 @@ const unfinishedRepair = (projectId: string) => ({ projectId, kind: 'ingest_repa
 export function logReceiptPrune(result: { removed: number; batches: number; limited: boolean }, durationMs: number, projectId?: string) {
   // Limited means expired rows remain after the budget; the minute queue is the primary cleanup path.
   if (result.removed || result.limited)
-    console.log(
+    console[result.limited ? 'warn' : 'log'](
       JSON.stringify({
         level: result.limited ? 'warn' : 'info',
         event: 'ingest.receipts_pruned',

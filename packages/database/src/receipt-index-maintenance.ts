@@ -33,6 +33,7 @@ export const INGEST_RECEIPT_PKEY: ReceiptIndexTarget = {
 
 export type ReceiptIndexCompaction = {
   action:
+    | 'skipped_backoff'
     | 'skipped_busy'
     | 'skipped_invalid_copy'
     | 'skipped_missing'
@@ -92,18 +93,24 @@ async function connect(signal?: AbortSignal) {
     const code = 'code' in error ? String(error.code) : undefined;
     console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_connection_failed', code }));
   });
-  // Setup runs no long server work, so closing the socket is enough: pg's end() destroys it mid-connect or mid-query.
+  // Setup runs no long server work, so closing the socket is enough. But closing doesn't settle every pending call:
+  // once end() runs, pg 8 never calls back a connect() still waiting for ReadyForQuery. So setup races a promise that
+  // shutdown or the deadline rejects, and never awaits pg alone.
   let closing: Promise<void> | undefined;
   const close = () => {
     closing ??= closeClient(client);
     return closing;
   };
-  const deadline = setTimeout(() => void close(), RECEIPT_INDEX_SETUP_TIMEOUT_MS);
-  signal?.addEventListener('abort', close, { once: true });
-  try {
-    signal?.throwIfAborted();
+  let stop: (reason: unknown) => void = () => undefined;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    stop = reject;
+  });
+  stopped.catch(() => undefined);
+  const deadline = setTimeout(() => stop(new Error('Receipt index maintenance setup timed out')), RECEIPT_INDEX_SETUP_TIMEOUT_MS);
+  const abort = () => stop(signal?.reason);
+  signal?.addEventListener('abort', abort, { once: true });
+  const setup = async () => {
     await client.connect();
-    signal?.throwIfAborted();
     // URL options override pg's constructor config. Apply bounds to the connected session.
     await client.query(`SET statement_timeout = ${RECEIPT_INDEX_COMPACTION.statementTimeoutMs}`);
     await client.query(`SET lock_timeout = ${RECEIPT_INDEX_COMPACTION.lockTimeoutMs}`);
@@ -115,16 +122,23 @@ async function connect(signal?: AbortSignal) {
       if ((error as { code?: string }).code !== '42704') throw error;
     }
     const { rows } = await client.query<{ pid: number }>('SELECT pg_backend_pid() pid');
+    return rows[0]?.pid as number;
+  };
+  try {
     signal?.throwIfAborted();
-    return { client, pid: rows[0]?.pid as number };
+    const settingUp = setup();
+    // Whichever loses the race may reject later; never let that surface as an unhandled rejection.
+    settingUp.catch(() => undefined);
+    const pid = await Promise.race([settingUp, stopped]);
+    signal?.throwIfAborted();
+    return { client, pid };
   } catch (error) {
     await close();
-    // An abort or the deadline surfaces as the socket error it caused; report the cause instead.
     signal?.throwIfAborted();
     throw error;
   } finally {
     clearTimeout(deadline);
-    signal?.removeEventListener('abort', close);
+    signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -183,10 +197,13 @@ export async function compactIngestReceiptIndex({
   target: requestedTarget = INGEST_RECEIPT_PKEY,
   db,
   signal,
+  cleanupOnly = false,
 }: {
   target?: ReceiptIndexTarget;
   db?: Queryable;
   signal?: AbortSignal;
+  /** While a timeout back-off is active: only drop invalid copies a failed rebuild left behind, never rebuild. */
+  cleanupOnly?: boolean;
 } = {}): Promise<ReceiptIndexCompaction> {
   const { client, pid } = db ? { client: db, pid: undefined } : await connect(signal);
   let cancellation: Promise<void> | undefined;
@@ -226,6 +243,8 @@ export async function compactIngestReceiptIndex({
         )
       ).rows[0]?.schema;
     if (!schema) return { action: 'skipped_missing', indexPages: 0, droppedInvalid: 0 };
+    // Shutdown stops the run at each step boundary: no lock, cleanup DROP or rebuild starts after it.
+    signal?.throwIfAborted();
     const target = { ...requestedTarget, schema };
     // Isolate private integration targets while keeping workers on the same real index single-flight.
     lockKey = `${LOCK_KEY}:${quote(schema)}.${quote(target.index)}`;
@@ -234,6 +253,7 @@ export async function compactIngestReceiptIndex({
     const pages = await indexPages(client, target);
     if (pages === null) return { action: 'skipped_missing', indexPages: 0, droppedInvalid: 0 };
     if (!locked) return { action: 'skipped_busy', indexPages: pages, droppedInvalid: 0 };
+    signal?.throwIfAborted();
     let droppedInvalid: number;
     try {
       droppedInvalid = await dropInvalidCopies(client, target);
@@ -242,6 +262,9 @@ export async function compactIngestReceiptIndex({
       if ((error as { code?: string }).code !== '42501') throw error;
       return { action: 'skipped_invalid_copy', indexPages: pages, droppedInvalid: 0 };
     }
+    // The 24 h back-off must not keep a copy that every write maintains: drop it, but don't build another.
+    if (cleanupOnly) return { action: 'skipped_backoff', indexPages: pages, droppedInvalid };
+    signal?.throwIfAborted();
     if (pages < RECEIPT_INDEX_COMPACTION.minPages) return { action: 'skipped_compact', indexPages: pages, droppedInvalid };
     const { rows } = await client.query<{ live: number; key_bytes: number | null }>(
       `SELECT greatest(c.reltuples, 0)::float8 live,

@@ -28,7 +28,7 @@ it('runs once on the first attempt and never on job retries', async () => {
   await runReceiptIndexCompaction(redis, key, 0, abort.signal);
   await runReceiptIndexCompaction(redis, key, 1, abort.signal);
   await runReceiptIndexCompaction(redis, key, 2, abort.signal);
-  expect(compact).toHaveBeenCalledExactlyOnceWith({ signal: abort.signal });
+  expect(compact).toHaveBeenCalledExactlyOnceWith({ signal: abort.signal, cleanupOnly: false });
   expect(redis.get).toHaveBeenCalledTimes(1);
 });
 
@@ -41,11 +41,19 @@ it.each(['57014', '55P03'])('persists a 24 h backoff timestamp on %s, then skips
   expect(Number(timestamp)).toBeGreaterThanOrEqual(started);
   expect(Number(timestamp)).toBeLessThanOrEqual(Date.now());
   redis.get.mockResolvedValueOnce(timestamp);
-  await expect(runReceiptIndexCompaction(redis, key, 0, abort.signal)).resolves.toEqual({ action: 'skipped_backoff' });
-  expect(compact).toHaveBeenCalledTimes(1);
+  // While backed off, the run still drops a leftover invalid copy, but never rebuilds.
+  compact.mockResolvedValueOnce({ action: 'skipped_backoff', indexPages: 81_920, droppedInvalid: 1 });
+  await expect(runReceiptIndexCompaction(redis, key, 0, abort.signal)).resolves.toEqual({
+    action: 'skipped_backoff',
+    indexPages: 81_920,
+    droppedInvalid: 1,
+  });
+  expect(compact).toHaveBeenLastCalledWith({ signal: abort.signal, cleanupOnly: true });
   expect(console.error).toHaveBeenCalledWith(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_compaction_failed', code }));
   // A back-off skip is expected for 24 hours: informational, not a warning every hour.
-  expect(console.log).toHaveBeenCalledWith(JSON.stringify({ level: 'info', event: 'ingest.receipt_index_compaction', action: 'skipped_backoff' }));
+  expect(console.log).toHaveBeenCalledWith(
+    JSON.stringify({ level: 'info', event: 'ingest.receipt_index_compaction', action: 'skipped_backoff', indexPages: 81_920, droppedInvalid: 1 }),
+  );
 });
 
 it('backs off for 24 h after an invalid copy this role cannot drop, warning once', async () => {

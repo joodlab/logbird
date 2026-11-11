@@ -31,7 +31,8 @@ export async function runReceiptIndexCompaction(redis: Pick<Redis, 'get' | 'set'
     // Redis is only a backoff hint: an outage must not disable maintenance.
     const backedOff = await backoffHint(redis.get(backoffKey), signal, 'get');
     if (signal.aborted) return;
-    const result = backedOff ? { action: 'skipped_backoff' as const } : await compactIngestReceiptIndex({ signal });
+    // While backed off, still drop an invalid copy a failed rebuild left behind (every receipt write maintains it).
+    const result = await compactIngestReceiptIndex({ signal, cleanupOnly: Boolean(backedOff) });
     // An invalid copy this role cannot drop needs the table owner; warn once per back-off window, not hourly.
     if (result.action === 'skipped_invalid_copy') await backoffHint(redis.set(backoffKey, String(Date.now()), 'EX', BACKOFF_SECONDS), signal, 'set');
     if (result.action !== 'skipped_compact') {

@@ -367,7 +367,8 @@ The hourly job drops only invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copies l
 failed or cancelled rebuild. An operator's in-progress manual REINDEX CONCURRENTLY holds
 SHARE UPDATE EXCLUSIVE on the table, so the job's drop fails with 55P03 and logs the
 failure. A 55P03 lock timeout or 57014 statement timeout sets a 24-hour Redis
-back-off; later hourly jobs log `skipped_backoff` until it expires. Pause the worker
+back-off; later hourly jobs log `skipped_backoff` until it expires (they still drop a
+leftover invalid copy, but never rebuild). Pause the worker
 during a manual rebuild, and stop it before deploying a migration that alters
 `IngestReceipt`: a running rebuild holds SHARE UPDATE EXCLUSIVE for up to 15 minutes,
 and the migration's ACCESS EXCLUSIVE request would queue behind it and stall ingest. After stopping

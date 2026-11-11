@@ -341,7 +341,7 @@ it('bounds a stalled setup with its own deadline even without shutdown', async (
     );
     connection.end.mockImplementation(async () => failSetup?.(new Error('Connection terminated')));
     const compacting = compactIngestReceiptIndex();
-    const outcome = expect(compacting).rejects.toThrow('Connection terminated');
+    const outcome = expect(compacting).rejects.toThrow('setup timed out');
     await vi.advanceTimersByTimeAsync(RECEIPT_INDEX_SETUP_TIMEOUT_MS - 1);
     expect(connection.end).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
@@ -511,4 +511,45 @@ it('bounds the cancel connection, including a close that never completes, within
   } finally {
     vi.useRealTimers();
   }
+});
+
+it('settles shutdown even when pg never calls back a connect that end() interrupted', async () => {
+  const abort = new AbortController();
+  // pg 8: once end() runs, a connect() still waiting for ReadyForQuery is never called back.
+  connection.connect.mockImplementation(() => new Promise(() => undefined));
+  connection.end.mockResolvedValue(undefined);
+  const compacting = compactIngestReceiptIndex({ signal: abort.signal });
+  await vi.waitFor(() => expect(connection.connect).toHaveBeenCalled());
+  abort.abort();
+  await expect(compacting).rejects.toMatchObject({ name: 'AbortError' });
+  expect(connection.end).toHaveBeenCalledTimes(1);
+  expect(connection.query).not.toHaveBeenCalled();
+});
+
+it('starts no lock, cleanup or rebuild after a shutdown during the schema lookup', async () => {
+  const abort = new AbortController();
+  connection.connect.mockResolvedValue(undefined);
+  const { query } = fakeDb({ pages: [RECEIPT_INDEX_COMPACTION.minPages * 10], live: 1000, keyBytes: 60, invalid: ['IngestReceipt_pkey_ccnew'] });
+  connection.query.mockImplementation(async (sql: string, params?: unknown[]) => {
+    if (sql.includes('n.nspname AS schema')) abort.abort();
+    return query(sql, params);
+  });
+  await expect(compactIngestReceiptIndex({ signal: abort.signal })).rejects.toMatchObject({ name: 'AbortError' });
+  for (const statement of ['pg_try_advisory_lock', 'DROP INDEX', 'REINDEX', 'reltuples'])
+    expect(query.mock.calls.some(([sql]) => sql.includes(statement))).toBe(false);
+  expect(cancelConnection.connect).not.toHaveBeenCalled();
+});
+
+it('only drops leftover invalid copies while backed off, never rebuilding', async () => {
+  connection.connect.mockResolvedValue(undefined);
+  const { query } = fakeDb({ pages: [RECEIPT_INDEX_COMPACTION.minPages * 10], live: 1000, keyBytes: 60, invalid: ['IngestReceipt_pkey_ccnew'] });
+  connection.query.mockImplementation((sql: string, params?: unknown[]) => query(sql, params));
+  await expect(compactIngestReceiptIndex({ cleanupOnly: true })).resolves.toEqual({
+    action: 'skipped_backoff',
+    indexPages: RECEIPT_INDEX_COMPACTION.minPages * 10,
+    droppedInvalid: 1,
+  });
+  expect(query).toHaveBeenCalledWith('DROP INDEX CONCURRENTLY IF EXISTS "qa_current"."IngestReceipt_pkey_ccnew"', undefined);
+  expect(query.mock.calls.some(([sql]) => sql.startsWith('REINDEX') || sql.includes('reltuples'))).toBe(false);
+  expect(query).toHaveBeenCalledWith('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [expect.any(String)]);
 });

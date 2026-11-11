@@ -814,9 +814,10 @@ The worker runs receipt-index compaction on its own hourly queue and worker with
 concurrency 1 and one attempt, so retention retries never repeat it and queued
 recovery/fence-lifting jobs can run during a rebuild. On shutdown a separate
 connection calls `pg_cancel_backend` for the recorded rebuild backend pid only,
-with five-second connect/query timeouts and an eight-second budget in all. The original
-session remains open while REINDEX settles with 57014; cancellation and cleanup have a
-ten-second deadline before its socket is destroyed. Every close is bounded to five seconds,
+with five-second connect/query timeouts; its socket is destroyed by eight seconds. The
+original session remains open while REINDEX settles with 57014; cancellation and cleanup
+have a ten-second deadline before its socket is destroyed, and the run settles within
+about fifteen seconds of shutdown. Every close is bounded to five seconds,
 since a graceful close on an idle session can wait on an unreachable server. The maintenance session sets `client_connection_check_interval`
 to one second as a disconnect fallback where supported (PostgreSQL 14+).
 Only a running REINDEX is cancelled; catalog queries and the invalid-copy cleanup
@@ -850,7 +851,8 @@ timeout and holds a snapshot or a lock on the receipt table (for example a runni
 Reserve free disk for about the index's live size during an online rebuild. A
 57014 statement timeout or 55P03 lock timeout stores a timestamp in the existing
 Redis connection under `<BULLMQ_PREFIX>:ingest-receipt-index-compaction:backoff`
-with a 24-hour TTL. Hourly jobs log and return `skipped_backoff` until it expires.
+with a 24-hour TTL. Hourly jobs log and return `skipped_backoff` until it expires; they
+still drop an invalid copy a failed rebuild left behind, but never build a new one.
 Both Redis hints have a one-second client deadline and stop waiting immediately
 on abort. A Redis error or stall does not disable compaction or block shutdown:
 a failed GET means no back-off; a timed-out SET is logged. An aborted rebuild does
