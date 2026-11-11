@@ -1,4 +1,11 @@
-import { AmbiguousInsertError, type EventRow, INGEST_CLAIM_LEASE_MS, InsertLeaseExhaustedError, normalizeEvent } from '@logbird/clickhouse';
+import {
+  AmbiguousInsertError,
+  type EventRow,
+  INGEST_ASYNC_MAX_DATA_SIZE,
+  INGEST_CLAIM_LEASE_MS,
+  InsertLeaseExhaustedError,
+  normalizeEvent,
+} from '@logbird/clickhouse';
 import { afterEach, expect, it, vi } from 'vitest';
 import { isolateIngestRows, MAX_PARSE_ISOLATION_MS, MAX_PARSE_ISOLATION_STATEMENTS } from './ingest-parse-isolation';
 
@@ -30,10 +37,11 @@ it('writes each reported prefix before rejecting the named row and continuing wi
   const result = await isolateIngestRows(input, lease(), insert);
   expect(result.rejected).toEqual([...bad]);
   expect(result.written).toEqual(input.filter((r) => !bad.has(r)));
-  expect(insert.mock.calls.map(([part]) => part.length)).toEqual([1000, 1, 5, 994, 494, 499, 497, 1]);
+  expect(insert.mock.calls.map(([part]) => part.length)).toEqual([1000, 1, 5, 994, 1, 494, 499, 1, 497, 1]);
+  for (const row of result.rejected) expect(insert.mock.calls.some(([part]) => part.length === 1 && part[0] === row)).toBe(true);
   uniqueBodies(insert);
 });
-it('proves the first named row with a singleton canary before trusting exact-row rejections', async () => {
+it('proves a named row with a singleton canary before rejecting it', async () => {
   const input = rows(5);
   const insert = vi.fn(async (part: EventRow[]) => {
     const index = part.indexOf(input[2]!);
@@ -44,6 +52,96 @@ it('proves the first named row with a singleton canary before trusting exact-row
   expect(result.rejected).toEqual([input[2]]);
   expect(result.written).toEqual([input[0], input[1], input[3], input[4]]);
   uniqueBodies(insert);
+});
+it('canaries later named rows even after the first row number was correct', async () => {
+  const input = rows(8);
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const insert = vi.fn(async (part: EventRow[]) => {
+    if (part.includes(input[1]!)) throw parseError(part.indexOf(input[1]!) + 1);
+    // The second report names a healthy row; only the final row is actually bad.
+    if (part.includes(input[7]!)) throw parseError(1);
+  });
+  const result = await isolateIngestRows(input, lease(), insert);
+  expect(result.rejected).toEqual([input[1], input[7]]);
+  expect(new Set(result.written)).toEqual(new Set(input.filter((_, index) => index !== 1 && index !== 7)));
+  expect(warning).toHaveBeenCalledOnce();
+  for (const row of result.rejected) expect(insert.mock.calls.some(([part]) => part.length === 1 && part[0] === row)).toBe(true);
+  uniqueBodies(insert);
+});
+
+// Exercise the actual 64 MiB boundary with cached byte lengths, without allocating huge fixture strings.
+function cachedRowSizes(input: EventRow[], sizes: number[]) {
+  const lengths = new Map(input.map((row, index) => [`${JSON.stringify(row)}\n`, sizes[index]!]));
+  const byteLength = Buffer.byteLength;
+  vi.spyOn(Buffer, 'byteLength').mockImplementation((value, encoding) => lengths.get(String(value)) ?? byteLength(value, encoding));
+}
+it('chunks consecutive rows at the inclusive async pin and merges independent outcomes', async () => {
+  const input = rows(6),
+    pin = INGEST_ASYNC_MAX_DATA_SIZE;
+  cachedRowSizes(input, [pin / 2, pin / 2, 1, pin, pin + 1, 1]);
+  const insert = vi.fn(async (part: EventRow[]) => {
+    if (part[0] === input[2]) throw parseError(1);
+    if (part[0] === input[3]) throw Object.assign(new Error('Unknown table'), { code: '60' });
+    if (part[0] === input[4]) throw new AmbiguousInsertError();
+  });
+  const result = await isolateIngestRows(input, lease(), insert);
+  expect(insert.mock.calls.map(([part]) => part)).toEqual([input.slice(0, 2), [input[2]], [input[3]], [input[4]], [input[5]]]);
+  expect(result.written).toEqual([input[0], input[1], input[5]]);
+  expect(result.rejected).toEqual([input[2]]);
+  expect(result.unavailable).toEqual([input[3]]);
+  expect(result.pending).toEqual([input[4]]);
+  expect(result.unresolved).toEqual([]);
+});
+it('shares the statement cap across chunks', async () => {
+  const input = rows(70);
+  cachedRowSizes(
+    input,
+    input.map(() => INGEST_ASYNC_MAX_DATA_SIZE),
+  );
+  const insert = vi.fn(async () => {
+    throw parseError(1);
+  });
+  const result = await isolateIngestRows(input, lease(), insert);
+  expect(insert).toHaveBeenCalledTimes(1 + MAX_PARSE_ISOLATION_STATEMENTS);
+  expect(result.rejected).toEqual(input.slice(0, 65));
+  expect(result.unresolved).toEqual(input.slice(65));
+  expect(result.limitReason).toBe('statements');
+});
+it('computes the shared byte budget over all chunks', async () => {
+  const input = rows(101),
+    pin = INGEST_ASYNC_MAX_DATA_SIZE;
+  const rowBytes = Math.floor(pin / 100);
+  cachedRowSizes(input, [...input.slice(0, 100).map(() => rowBytes), pin]);
+  const insert = vi.fn(async (part: EventRow[]) => {
+    if (part[0] !== input[100]) throw parseError(1);
+  });
+  const result = await isolateIngestRows(input, lease(), insert);
+  // One chunk alone stops at five bad rows. The second chunk contributes to the global budget.
+  expect(result.rejected.length).toBeGreaterThan(5);
+  expect(result.written).toEqual([]);
+  expect(result.unresolved).toContain(input[100]); // The next chunk does not get a fresh byte budget.
+  expect(result.limitReason).toBe('bytes');
+  const sizes = new Map(input.map((row, index) => [row, index === 100 ? pin : rowBytes]));
+  const extraBytes = insert.mock.calls.slice(1).reduce((sum, [part]) => sum + part.reduce((n, row) => n + sizes.get(row)!, 0), 0);
+  expect(extraBytes).toBeLessThanOrEqual(4 * (100 * rowBytes + pin));
+});
+it.each(['wall clock', 'lease'] as const)('shares the %s deadline across chunks', async (cap) => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const input = rows(3),
+    expires = cap === 'lease' ? Date.now() + 45_000 : lease();
+  cachedRowSizes(
+    input,
+    input.map(() => INGEST_ASYNC_MAX_DATA_SIZE),
+  );
+  const insert = vi.fn(async (part: EventRow[]) => {
+    if (part[0] === input[0]) throw parseError(1);
+    vi.setSystemTime(Date.now() + (cap === 'lease' ? 6000 : MAX_PARSE_ISOLATION_MS));
+  });
+  const result = await isolateIngestRows(input, expires, insert);
+  expect(result.rejected).toEqual([input[0]]);
+  expect(result.written).toEqual([input[1]]);
+  expect(result.unresolved).toEqual([input[2]]);
+  expect(result.limitReason).toBe(cap === 'lease' ? 'lease' : 'wall_clock');
 });
 it('writes a healthy canary, logs a row-number mismatch and bisects for the rest of the attempt', async () => {
   const input = rows(8),
@@ -95,7 +193,7 @@ it.each([5, 20, 80])('preserves proven prefixes at the byte limit and converges 
   const insert = vi.fn(async (part: EventRow[]) => {
     const index = part.findIndex((row) => bad.has(row));
     if (index >= 0) {
-      named.add(part[index]!);
+      if (part.length === 1) named.add(part[index]!);
       throw parseError(index + 1);
     }
     for (const row of part) {
@@ -145,7 +243,7 @@ it.each(['ambiguous', 'unavailable', 'lease'] as const)('keeps a parse-proven pr
   expect(result.unresolved).toEqual(failure === 'lease' ? input.slice(0, 2) : []);
   uniqueBodies(insert);
 });
-it.each([undefined, 0, 1001])('falls back for row %s and infers an unwritten right sibling without sending it', async (row) => {
+it.each([undefined, 0, 1001])('falls back for row %s, bisects inferred siblings and confirms the final singleton', async (row) => {
   const input = rows(8),
     bad = input[7];
   const insert = vi.fn(async (part: EventRow[]) => {
@@ -154,7 +252,8 @@ it.each([undefined, 0, 1001])('falls back for row %s and infers an unwritten rig
   const result = await isolateIngestRows(input, lease(), insert);
   expect(result.rejected).toEqual([bad]);
   expect(result.written).toHaveLength(7);
-  expect(insert.mock.calls.map(([part]) => part.length)).toEqual([8, 4, 2, 1]);
+  expect(insert.mock.calls.map(([part]) => part.length)).toEqual([8, 4, 2, 1, 1]);
+  expect(insert.mock.calls.at(-1)![0]).toEqual([bad]);
   uniqueBodies(insert);
 });
 it('caps statements without rejecting unchecked healthy rows when bytes are below budget', async () => {
@@ -168,11 +267,11 @@ it('caps statements without rejecting unchecked healthy rows when bytes are belo
   });
   const result = await isolateIngestRows(input, lease(), insert);
   expect(insert).toHaveBeenCalledTimes(1 + MAX_PARSE_ISOLATION_STATEMENTS);
-  expect(result.rejected).toHaveLength(33);
-  expect(result.written).toEqual(input.slice(2, 64).filter((_, i) => i % 2 === 0));
-  expect(result.unresolved).toContain(input[64]);
+  expect(result.rejected).toHaveLength(22);
+  expect(result.written).toEqual(input.slice(2, 42).filter((_, i) => i % 2 === 0));
+  expect(result.unresolved).toContain(input[42]);
   expect(result.rejected.every((r) => bad.has(r))).toBe(true);
-  expect(result.unresolved).toHaveLength(936);
+  expect(result.unresolved).toHaveLength(958);
   expect(result.limited).toBe(true);
   uniqueBodies(insert);
   expect(result.limitReason).toBe('statements');
@@ -188,7 +287,7 @@ it('serializes each row once and caps isolation UTF-8 bytes at four original bod
   for (const row of input) expect(stringify.mock.calls.filter(([value]) => value === row)).toHaveLength(1);
   const originalBytes = Buffer.byteLength(insert.mock.calls[0]![1]);
   const isolationBytes = insert.mock.calls.slice(1).reduce((total, [, body]) => total + Buffer.byteLength(body), 0);
-  expect(insert).toHaveBeenCalledTimes(6);
+  expect(insert).toHaveBeenCalledTimes(10);
   expect(isolationBytes).toBeLessThanOrEqual(4 * originalBytes);
   const nextBody = result.unresolved.map((row) => `${JSON.stringify(row)}\n`).join('');
   expect(isolationBytes + Buffer.byteLength(nextBody)).toBeGreaterThan(4 * originalBytes);

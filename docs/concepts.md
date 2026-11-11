@@ -166,17 +166,20 @@ be fixed before recovery can settle the claim; honor the server's Retry-After.
 
 Search normalization uses `toWellFormed()` for indexed strings, target arrays,
 changes values and rejected occurredAt copies; raw payload and v1 identity keep
-original Unicode. A lone surrogate in a flattened attribute key rejects the event
+original Unicode. Every stored attribute key must be valid Unicode; keys beyond the
+256-attribute cap are not stored or checked. A lone surrogate in a stored key rejects the event
 before INSERT (`invalid_event: Attribute keys must be valid Unicode`); valid pairs
 remain verbatim, avoiding key collisions. Isolation is defence in depth for unknown
-parse triggers. Its first named row is checked alone; a written canary logs a mismatch
-and switches to bisection. Prefix and canary statements share the isolation budgets.
+parse triggers. Every named row is checked alone; a written canary logs a mismatch
+and switches to bisection. Prefix and canary statements share the isolation budgets
+(about three statements per bad row).
 
 Clients declaring `Logbird-Retry: subset` get unchecked rows in `503 ingest_pending`
 indices and converge by retrying only unsettled events, byte-identically. About five
 leading bad rows fit per attempt under the byte budget. The SDK always sends this header,
 maps subset indices back to original events, and does not charge shrinking progress
-attempts against `maxRetries` (total attempts are bounded by batch length plus retries).
+attempts against `maxRetries` (total attempts are bounded by batch length plus retries
+and five minutes per send).
 Incomplete or malformed details keep the previous body. Exhaustion requeues only
 unsettled events; retry `flush()` after `onError`.
 

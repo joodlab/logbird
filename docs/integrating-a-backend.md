@@ -186,9 +186,10 @@ Use a current timestamp when creating an event. Send a single event, an array or
 `rejected` lists individual failures and `warnings` reports normalization.
 Definite native storage parse failures are isolated into `invalid_event` rejections
 with zero-based indices and code-first reasons. Healthy siblings remain accepted;
-the server checks the first named row alone as a canary, then inserts the parse-proven
+the server checks every named row alone as a canary, then inserts the parse-proven
 prefix before continuing with the suffix. If the canary writes, it is accepted and
-the rest of the attempt uses bisection. Canary and prefix writes consume the same budgets.
+the rest of the attempt uses bisection. Canary and prefix writes consume the same budgets,
+at about three statements per bad row.
 An all-rejected batch still returns 202 with `accepted: 0`. Isolation is bounded; if
 it runs out of its 64-extra-statement, four-original-body byte budget for additional
 statements, ten-second wall-clock or lease budget,
@@ -219,7 +220,7 @@ keep the previous body unchanged. The SDK sends individually rejected rows to
 preserved, unchecked healthy rows stay retryable. After retry exhaustion (`onError`),
 only unsettled events are requeued.
 Attempts that settle events and shrink the body do not consume `maxRetries`;
-total attempts remain bounded by batch length plus retries.
+total attempts remain bounded by batch length plus retries and five minutes per send.
 Fix permanent validation failures instead of retrying indefinitely.
 
 For raw HTTP clients opting into `Logbird-Retry: subset`, honor settled rejections and resend only `details.indices`
@@ -232,7 +233,8 @@ claims use a five-second Retry-After; claim-held responses retain lease-aware ti
 
 Search columns use `toWellFormed()` to replace invalid Unicode, including changes,
 target arrays and rejected occurredAt copies. Payload and v1 identity retain raw
-input. Flattened attribute keys containing a lone surrogate are rejected before INSERT
+input. Every stored attribute key must be valid Unicode; keys beyond the 256-attribute cap
+are not stored or checked. Stored keys containing a lone surrogate are rejected before INSERT
 as `invalid_event: Attribute keys must be valid Unicode`; valid pairs remain verbatim.
 After #153 there is no known public parse-isolation trigger. Isolation remains defence
 in depth for unknown future triggers, tested with injected storage faults before real INSERTs.

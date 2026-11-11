@@ -334,23 +334,27 @@ A parser code alone does not prove that nothing was written. Each insert pins
 `input_format_allow_errors_num=0` and `input_format_allow_errors_ratio=0` at query
 level. Realistic 5 MiB requests normalize to at most about 15 MiB (duplicated
 changes, twice-escaped payload); 64 MiB adds headroom without letting the async
-queue buffer gigabytes. Only an absurd body (hundreds of flattened attribute paths
-repeating a huge key prefix) can exceed it, and then a parse error is treated as
-ambiguous rather than isolated. Block pins prevent partial synchronous fallback
+queue buffer gigabytes. Ingest chunks cached rows at the pin; only a single oversized
+row (extreme flattened attribute paths) remains ambiguous on parse failure, until
+the size bound in #159 lands. Block pins prevent partial synchronous fallback
 writes within that bound. Ordinary user profiles cannot lower query-level pins.
 A parse error is proven pre-write only when the serialized body fits the async
-pin, its error names `WaitForAsyncInsert`, and it is not a view failure. A server
+pin, its error names `WaitForAsyncInsert`, and it is not a materialized-view failure
+("while pushing to view", or the name of a Logbird `*_mv` view; quoted row values such as
+`'page.view'` don't count). A server
 constraint rejects the whole query before reading data (code 452), returning
 `503 ingest_unavailable` and releasing unwritten claims. Client-side overrides
 that force synchronous fallback, changed error wording, oversize internal
 statements and view failures remain ambiguous after handoff, retaining claims
-for recovery. See [self-hosting](self-hosting.md#ingest-insert-settings).
+for recovery. Changed `WaitForAsyncInsert` wording after an upgrade can cause parse
+failures to loop through recovery until fixed; run the shared-flush test after upgrades.
+See [self-hosting](self-hosting.md#ingest-insert-settings).
 
 Isolation checks that native `(at row N)` is statement-relative and 1-based. The
 shared-flush integration test in `apps/server/src/ingest-parse-isolation.integration.test.ts`
 pins this behavior on ClickHouse 26.9, including when two bodies share one async
-flush. Run that test after an upgrade. Before the first exact-row rejection in each
-attempt, the server sends the named row alone as a canary. Only a pre-write parse
+flush. Run that test after an upgrade. Before every exact-row rejection, the server
+sends the named row alone as a canary. Only a pre-write parse
 failure rejects it. A written canary is accepted, logs `ingest.parse_row_number_mismatch`,
 and disables row-number trust for the rest of that attempt, using bisection instead.
 An ambiguous, unavailable or unchecked canary keeps its normal classification.
@@ -359,16 +363,20 @@ rejects the named row and continues with its suffix under the original claims an
 lease. Prefix writes have the same ambiguous, unavailable and lease semantics as
 any other insert. Missing/out-of-range row reports use bisection; a written left
 sibling proves the right contains a failure, so it is split without resending
-that known-failing body. No identical body is sent twice within an attempt.
+that known-failing body; inferred singletons are checked alone before rejection.
+No identical body is sent twice within an attempt.
 Only individual proven failures become `invalid_event`, including a 202 with
 `accepted: 0` when every row is rejected. A definite non-parse failure returns
 503 `ingest_unavailable`, with acknowledged siblings confirmed and listed in ids.
 
 A 64-extra-statement cap, an isolation byte budget of four times the original
-statement's UTF-8 bytes (excluding that original statement), a ten-second isolation
+batch's UTF-8 bytes (excluding statements before isolation starts), a ten-second isolation
 wall clock and the original lease's remaining 40-second finish budget bound the work.
-Rows are serialized once; subsets join cached JSON lines. Canary and prefix writes count
-against both the statement and byte budgets. About five leading bad rows fit per attempt
+Rows are serialized once; subsets join cached JSON lines. Consecutive chunks fit the
+64 MiB async pin. All chunks share statement, byte, clock and lease budgets, with
+the byte budget computed over all rows. A single oversized row stays alone.
+Canary and prefix writes count against both the statement and byte budgets
+(about three statements per bad row). About five leading bad rows fit per attempt
 under the byte budget. A cap reached during isolation leaves unchecked, proven-unwritten
 rows and releases their claims. The response depends on capability:
 
@@ -412,7 +420,9 @@ response indices to original batch positions for acceptance, drop-once reporting
 and final requeue. Incomplete or malformed details keep the previous body unchanged.
 The SDK always sends `Logbird-Retry: subset`. Attempts settling at least one event and
 shrinking the body do not consume `maxRetries`; total attempts remain bounded by batch
-length plus retries. The SDK reports individually rejected rows through `onDrop`
+length plus retries and five minutes per send. The time limit requeues only unsettled
+events. After `beforeSend`, missing ids get a uuidv7 and numeric ids become strings;
+valid string ids stay unchanged. The SDK reports individually rejected rows through `onDrop`
 once per send; unchecked healthy rows stay retryable while this header is preserved.
 If the retry budget is exhausted, `onError` reports it and only unsettled events
 are requeued for a later `flush()`.
@@ -423,8 +433,8 @@ rejected. Integrators should allow this header through their proxies.
 Search strings use `toWellFormed()` to replace lone surrogates with U+FFFD,
 including targets, changes and `logbird.occurredAt.rejected`. Caps do not split
 valid surrogate pairs. Attribute values already replace invalid Unicode through
-UTF-8 encoding. Flattened attribute keys at every indexed depth are checked for lone
-surrogates before INSERT. A malformed key rejects the event with
+UTF-8 encoding. Every stored attribute key must be valid Unicode; keys beyond the
+256-attribute cap are not stored or checked. A malformed stored key rejects the event with
 `invalid_event: Attribute keys must be valid Unicode`; valid surrogate pairs remain
 verbatim. Replacing keys could collide distinct keys and silently lose data.
 After #153 there is no known public input reaching the parse-isolation path. It remains

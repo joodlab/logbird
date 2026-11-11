@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
-import { Logbird } from './index';
+import { type EventInput, Logbird } from './index';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -157,6 +157,90 @@ it('limits non-progress failures to the default retry budget', async () => {
   expect(sdk.queueSize).toBe(1);
   expect(sdk.dropped).toBe(0);
   vi.stubGlobal('fetch', async () => new Response('{}', { status: 202 }));
+  await sdk.shutdown();
+});
+it.each([
+  [0, 5],
+  [19_000, 4],
+])('bounds shrinking progress retries with %i ms responses to five minutes (%i settled)', async (latency, settled) => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
+    const events = JSON.parse(String(init.body)).events as { id: string }[];
+    if (latency) await new Promise((resolve) => setTimeout(resolve, latency));
+    return new Response(
+      JSON.stringify({
+        error: {
+          code: 'ingest_pending',
+          details: {
+            accepted: 1,
+            ids: [events[0]!.id],
+            rejected: [],
+            warnings: [],
+            indices: events.slice(1).map((_, index) => index + 1),
+            eventIds: events.slice(1).map((event) => event.id),
+          },
+        },
+      }),
+      { status: 503, headers: { 'Retry-After': '60' } },
+    );
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const onDrop = vi.fn();
+  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', maxRetries: 0, onDrop });
+  for (let index = 0; index < 10; index++) sdk.track({ id: `time-${index}`, action: 'qa91.sdk' });
+  const failed = expect(sdk.flush()).rejects.toThrow('five-minute time limit');
+  await vi.advanceTimersByTimeAsync(299_999);
+  expect(fetcher).toHaveBeenCalledTimes(settled);
+  await vi.advanceTimersByTimeAsync(1);
+  await failed;
+  expect(fetcher).toHaveBeenCalledTimes(settled);
+  expect(sdk.queueSize).toBe(10 - settled);
+  expect(onDrop).not.toHaveBeenCalled();
+  fetcher.mockImplementation(async () => new Response('{}', { status: 202 }));
+  await sdk.shutdown();
+  expect(JSON.parse(String(fetcher.mock.calls[settled]![1].body)).events.map((event: { id: string }) => event.id)).toEqual(
+    Array.from({ length: 10 - settled }, (_, index) => `time-${settled + index}`),
+  );
+});
+it.each([undefined, 123, 'unchanged-id'])('stamps a stable string id after beforeSend returns id %s', async (id) => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
+    const events = JSON.parse(String(init.body)).events as { id: string }[];
+    if (fetcher.mock.calls.length > 1) return new Response('{}', { status: 202 });
+    expect(typeof events[0]!.id).toBe('string');
+    if (id === undefined) expect(events[0]!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    else expect(events[0]!.id).toBe(String(id));
+    return new Response(
+      JSON.stringify({
+        error: {
+          code: 'ingest_pending',
+          details: {
+            accepted: 1,
+            ids: [events[0]!.id],
+            rejected: [],
+            warnings: [],
+            indices: [1],
+            eventIds: [events[1]!.id],
+          },
+        },
+      }),
+      { status: 503, headers: { 'Retry-After': '0' } },
+    );
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = new Logbird({
+    apiKey: 'fictional',
+    endpoint: 'http://qa91.invalid',
+    beforeSend: (event) => (event.action === 'hook' ? ({ action: event.action, id } as EventInput) : event),
+  });
+  sdk.track({ action: 'hook' });
+  sdk.track({ id: 'unsettled', action: 'keep' });
+  const flushing = sdk.flush();
+  await vi.advanceTimersByTimeAsync(0);
+  await flushing;
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(String(fetcher.mock.calls[1]![1].body)).events.map((event: { id: string }) => event.id)).toEqual(['unsettled']);
+  expect(sdk.queueSize).toBe(0);
   await sdk.shutdown();
 });
 

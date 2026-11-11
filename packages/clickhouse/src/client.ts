@@ -36,8 +36,8 @@ export const INSERT_LEASE_BUDGET_MS = INSERT_MAX_EXECUTION_SECONDS * 1000 + ASYN
 // async_insert_max_data_size) or split a statement into several insert blocks (partial writes on a parse error).
 // A 5 MiB request normalizes to at most ~15 MiB for realistic content (changes are duplicated and payload escaped
 // twice); 64 MiB covers that with headroom without letting the async queue buffer gigabytes. Only an absurd body
-// (e.g. hundreds of attribute paths repeating a huge key prefix) can exceed it: the byte guard in insertEvents then
-// treats a parse error as ambiguous (claims kept, recovery reconciles) instead of isolating it, so it still fails safe.
+// (e.g. hundreds of attribute paths repeating a huge key prefix) can exceed it: ingest chunks cached rows at this
+// limit. A single oversized row still fails safe through insertEvents' byte guard (ambiguous, recovery reconciles).
 export const INGEST_ASYNC_MAX_DATA_SIZE = 64 * 1024 * 1024;
 // UInt64 settings travel as strings; Float settings use numbers in @clickhouse/client.
 export const INGEST_INSERT_SETTINGS = {
@@ -75,11 +75,17 @@ export function isPrewriteParseError(error: unknown) {
   );
 }
 
+// Our materialized views all end in _mv; ClickHouse names a failing one db-qualified (the database is configurable).
+// Matching names rather than the word "view" keeps quoted row values such as 'page.view' from turning a genuine
+// parse failure into an ambiguous one, while unfamiliar wording that names one of our views still fails safe.
+const MATERIALIZED_VIEW_NAME =
+  /\b\w+\.\w+_mv\b|\b(?:attribute_keys|entities_(?:actor|executor|target|tenant)|event_ids(?:_v[23])?|events_by_minute)_mv\b/i;
 function isViewFailure(error: unknown) {
   if (!(error instanceof Error)) return false;
   return (
     /(?:^|[(:]\s*|\n\s*)while pushing to (?:materialized )?view\b/i.test(error.message) ||
-    ('code' in error && String(error.code) === '60' && /^Target table .+ of view .+ (?:doesn't|does not) exists?\b/i.test(error.message))
+    ('code' in error && String(error.code) === '60' && /^Target table .+ of view .+ (?:doesn't|does not) exists?\b/i.test(error.message)) ||
+    MATERIALIZED_VIEW_NAME.test(error.message)
   );
 }
 export async function insertEvents(

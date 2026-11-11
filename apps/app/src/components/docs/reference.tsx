@@ -47,8 +47,8 @@ export function EventIdsAndRetries() {
         executor.attempt. Omitted or invalid occurredAt keeps the first receipt clock.
       </p>
       <p>
-        <code>duplicate_id_conflict</code> means different content reused an id; the original is kept. Send a correction with a new id and{' '}
-        <code>context.parentEventId</code> pointing to the original.
+        <code>duplicate_id_conflict</code> reports: id conflicts with different content in this request or stored history. Send corrections with a new
+        id and <code>context.parentEventId</code>. The original is kept; the reason includes difference details.
       </p>
       <p>
         <code>503 ingest_pending</code> or <code>ingest_unavailable</code> means retry the identical batch with Retry-After. Healthy siblings commit

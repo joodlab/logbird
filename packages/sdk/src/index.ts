@@ -11,6 +11,7 @@ export {
 
 // Keep in sync with packages/sdk/package.json (verified by index.test.ts).
 const SDK_VERSION = '0.1.1';
+const MAX_SEND_MS = 5 * 60_000;
 
 /** Copied structural envelope: no runtime or workspace dependency in the published SDK. */
 export interface EventInput {
@@ -136,6 +137,7 @@ export class Logbird {
         if (result == null) return;
         prepared = result;
       }
+      if (typeof prepared.id !== 'string') prepared.id = typeof prepared.id === 'number' ? String(prepared.id) : uuidv7();
       const serialized = JSON.stringify(prepared);
       if (new TextEncoder().encode(serialized).length > 256 * 1024) throw new Error('Event exceeds 256 KB');
       const copy = JSON.parse(serialized) as EventInput;
@@ -162,6 +164,7 @@ export class Logbird {
     (this.timer as unknown as { unref?: () => void }).unref?.();
   }
   private async send(batch: EventInput[]) {
+    const deadline = Date.now() + MAX_SEND_MS;
     const serialized = batch.map((event) => JSON.stringify(event));
     let attemptIndices = batch.map((_, index) => index);
     const serializeBody = () => `{"events":[${attemptIndices.map((index) => serialized[index]).join(',')}]}`;
@@ -183,6 +186,8 @@ export class Logbird {
     let retries = 0;
     try {
       for (let attempt = 0; ; attempt++) {
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) throw new Error('Logbird send exceeded its five-minute time limit');
         let progressed = false;
         let response: Response | undefined, error: unknown;
         try {
@@ -196,7 +201,7 @@ export class Logbird {
               'Logbird-Retry': 'subset',
             },
             body,
-            signal: AbortSignal.timeout(30_000),
+            signal: AbortSignal.timeout(Math.min(30_000, remainingMs)),
           });
         } catch (e) {
           error = e;
@@ -282,7 +287,7 @@ export class Logbird {
         const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
         const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** retries) * (0.5 + Math.random());
         if (!progressed) retries++;
-        await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(60_000, delay))));
+        await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(60_000, delay, deadline - Date.now()))));
       }
     } finally {
       // On every exceptional exit, flush can requeue only events not already accepted or rejected.

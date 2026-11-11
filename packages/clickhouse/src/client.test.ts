@@ -5,7 +5,9 @@ import { AmbiguousInsertError, type ClickHouseClient, INGEST_INSERT_SETTINGS, In
 import { normalizeEvent } from './normalize';
 
 it.each([
+  // A quoted row value that merely contains "view" is still a genuine pre-write parse failure.
   ['6', "Cannot parse value 'page.view': While executing WaitForAsyncInsert.", false],
+  ['27', "Cannot parse input: before: 'document.view (preview)': While executing WaitForAsyncInsert.", false],
   ['25', 'Cannot parse escape sequence: While executing WaitForAsyncInsert.', false],
   ['25', 'Cannot parse escape sequence (while pushing to view logbird.events_mv)', true],
   ['25', 'Cannot parse escape sequence: While executing JSONEachRowRowInputFormat.', true],
@@ -17,6 +19,10 @@ it.each([
   ['60', 'Target missing: while pushing to view logbird.event_ids_mv', true],
   ['60', "Target table 'logbird.event_ids_v2' of view 'logbird.events' doesn't exists: While executing WaitForAsyncInsert.", true],
   ['6', 'Parse failed (while pushing to view logbird.events_mv)', true],
+  ['25', 'Parse failed while updating VIEW logbird.events_mv: While executing WaitForAsyncInsert.', true],
+  ['60', 'New failure wording for view logbird.events_mv: While executing WaitForAsyncInsert.', true],
+  ['25', 'Unfamiliar wording mentioning event_ids_v3_mv: While executing WaitForAsyncInsert.', true],
+  ['25', 'Custom database names too: analytics.events_by_minute_mv failed: While executing WaitForAsyncInsert.', true],
 ])('classifies %s with server context %s', async (code, message, ambiguous) => {
   const row = normalizeEvent({ id: 'safe', action: 'safe' }, { projectId: 'fictional', receivedAt: new Date() });
   if (!row.ok) throw new Error(row.reason);

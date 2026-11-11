@@ -114,7 +114,7 @@ Semantics worth documenting to users:
 - **id is immutable within a project**, regardless of `occurredAt`. Exact retries
   appear in `ids` as accepted, without another raw insert or rollup increment.
   Conflicting canonical full input or resolved timestamp is reported in `rejected`
-  with `code: duplicate_id_conflict` and a code-first reason; the original is kept. Recursively
+  with `code: duplicate_id_conflict` and reason `duplicate_id_conflict: id conflicts with different content in this request or stored history. Send corrections with a new id and context.parentEventId.` followed by difference details; the original is kept. Recursively
   reordered object keys are equivalent; array order and all string contents matter,
   including values beyond indexing caps. SDK headers do not participate. Omitted
   or invalid `occurredAt` uses the first receipt clock. Identity digests are versioned.
@@ -129,17 +129,19 @@ Semantics worth documenting to users:
   are per-event `invalid_event_id` rejections, so healthy siblings can proceed.
 - A storage parser rejection proven to precede writes is isolated per event using
   the native body row number, with sibling-inference bisection as a fallback.
-  The first named row in each attempt is checked alone as a canary. Only a pre-write
+  Every named row is checked alone as a canary. Only a pre-write
   parse failure permits its rejection; if it writes, the server logs
   `ingest.parse_row_number_mismatch` and bisects the rest of that attempt.
   After a failed canary, the server inserts the parse-proven prefix through the normal insert path,
   rejects the named row and continues with the suffix. Canary and prefix writes count
-  against the same statement, byte, clock and lease limits.
+  against the same statement, byte, clock and lease limits (about three statements per bad row).
   Healthy siblings return in `ids`; individually proven offending indices appear
   in `rejected` with `code: invalid_event`, including a 202 with `accepted: 0` when
   all events fail. A 64-extra-statement cap, a four-original-body UTF-8 byte budget
   for additional statements, ten-second wall clock and original lease bound
-  isolation. Rows are serialized once; subset statements join cached lines.
+  isolation. Rows are serialized once; subset statements join cached lines. Consecutive chunks
+  fit the 64 MiB async pin, sharing all limits and a byte budget computed over all rows.
+  A single row larger than the pin stays alone and its parse failure remains ambiguous.
   Unchecked, proven-unwritten rows release their claims. Clients declaring exactly
   `Logbird-Retry: subset` receive retryable `503 ingest_pending` with settled 202 fields
   and unresolved `indices`/`eventIds`; unresolved-only Retry-After is one second.
@@ -158,8 +160,9 @@ Semantics worth documenting to users:
   per send and reused byte-identically, including id and occurredAt. Incomplete or
   malformed details preserve the previous body. About five leading bad rows fit per attempt
   under the byte budget. Capable clients converge through subset retries; SDK attempts that
-  settle events and shrink the body do not consume `maxRetries`, bounded by batch length plus retries.
-  Exhausted retries requeue only unsettled events. Raw clients opting into subset retry must
+  settle events and shrink the body do not consume `maxRetries`, bounded by batch length plus retries
+  and five minutes per send. After `beforeSend`, missing ids get a uuidv7, numeric ids become strings,
+  and valid string ids stay unchanged. Exhausted retries or time requeue only unsettled events. Raw clients opting into subset retry must
   omit settled indices and preserve each remaining event's JSON. A proxy stripping `Logbird-Retry`
   causes safe fallback to terminal 202 with unchecked rows rejected; proxies should allow that header.
   After #153 there is no known public input that reaches parse isolation: malformed attribute keys
@@ -178,7 +181,7 @@ Normalization rules (server):
 - Every other top-level key and everything under `metadata` (and unknown keys inside actor/tenant/executor/
   targets/context) is flattened to `attributes` with dot paths (`metadata.plan.tier`), max depth 6, max 256 keys,
   values stringified and capped at 2 KB. Arrays become JSON strings.
-- Flattened attribute keys at every indexed depth must be valid Unicode. A lone surrogate rejects the event before INSERT as `invalid_event: Attribute keys must be valid Unicode`; valid surrogate pairs remain verbatim. Keys are never repaired, avoiding replacement collisions. Changes values, target arrays and rejected occurredAt search copies also use `toWellFormed()`; raw input and v1 identity are unchanged.
+- Every stored attribute key must be valid Unicode. Keys beyond the 256-attribute cap are not stored or checked. A lone surrogate in a stored key rejects the event before INSERT as `invalid_event: Attribute keys must be valid Unicode`; valid surrogate pairs remain verbatim. Keys are never repaired, avoiding replacement collisions. Changes values, target arrays and rejected occurredAt search copies also use `toWellFormed()`; raw input and v1 identity are unchanged.
 - Raw document (as received, ≤ 256 KB) is stored in `payload` (ZSTD).
 - `conformance` = % of {occurredAt, actor.id, actor.type, outcome, targets[≥1], tenant.id, executor.type,
   context.operationId|requestId, description} present.

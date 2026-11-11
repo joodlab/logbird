@@ -257,9 +257,10 @@ honoring `Retry-After`. Healthy siblings commit before a pending response and re
 idempotent on retry. Pending details include `accepted`, `ids`, `rejected`, `warnings`,
 `indices` and `eventIds`. Every index outside `indices` is settled. Each rejected
 entry has a `code` plus a code-first explanation in `reason`. On an exact-row storage
-parse failure, the server checks the first named row alone as a canary. A written
+parse failure, the server checks every named row alone as a canary. A written
 canary is accepted and the rest of that attempt uses bisection; a failed canary permits
-exact-row rejection and prefix writes. All share the original isolation budgets.
+exact-row rejection and prefix writes. All share the original isolation budgets
+(about three statements per bad row).
 The SDK retries with the identical previous body unless complete 503 details settle
 events; then it resends only unsettled events within the same send. It serializes
 each event once per send and reuses that exact JSON (including id and occurredAt)
@@ -269,7 +270,10 @@ the previous body unchanged. After its retry budget, only unsettled events stay
 queued and `flush()` rejects. The SDK always sends `Logbird-Retry: subset`. About
 five leading bad rows fit per attempt under the server's byte budget; subset retries
 converge. An attempt settling events and shrinking the body does not consume
-`maxRetries`; total attempts remain bounded by batch length plus retries.
+`maxRetries`; total attempts remain bounded by batch length plus retries and five minutes
+per send. At that time limit, `flush()` rejects and requeues only unsettled events.
+After `beforeSend`, missing ids get a uuidv7 and numeric ids become strings; valid string
+ids stay unchanged so subset retries can match accepted events.
 
 Raw HTTP clients declaring `Logbird-Retry: subset` must honor settled rejections and resend only `details.indices`
 or the remaining unsettled events to make progress. Preserve each event's JSON
@@ -284,7 +288,8 @@ rows; after recovery settles pending writes, the next legacy request reaches ter
 A proxy stripping `Logbird-Retry` safely selects that fallback but rejects unchecked rows;
 allow this header through proxies to preserve subset retries.
 
-Lone surrogates in flattened attribute keys are rejected before INSERT as
+Every stored attribute key must be valid Unicode; keys beyond the 256-attribute cap are
+not stored or checked. Lone surrogates in stored keys are rejected before INSERT as
 `invalid_event: Attribute keys must be valid Unicode`. Valid surrogate pairs are kept.
 Parse isolation remains defence in depth for unknown future triggers after this validation.
 

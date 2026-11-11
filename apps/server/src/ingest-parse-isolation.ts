@@ -1,4 +1,11 @@
-import { AmbiguousInsertError, type EventRow, INSERT_LEASE_BUDGET_MS, InsertLeaseExhaustedError, isPrewriteParseError } from '@logbird/clickhouse';
+import {
+  AmbiguousInsertError,
+  type EventRow,
+  INGEST_ASYNC_MAX_DATA_SIZE,
+  INSERT_LEASE_BUDGET_MS,
+  InsertLeaseExhaustedError,
+  isPrewriteParseError,
+} from '@logbird/clickhouse';
 
 // Extra statements after the original failure, including the row-number canary and prefix writes.
 export const MAX_PARSE_ISOLATION_STATEMENTS = 64;
@@ -27,7 +34,6 @@ export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number
   const bytes = (part: EventRow[]) => part.reduce((total, row) => total + serialized.get(row)!.bytes, 0);
   const isolationByteBudget = bytes(rows) * MAX_PARSE_ISOLATION_BYTE_MULTIPLIER;
   let isolationBytes = 0;
-  let rowNumberChecked = false;
   let trustRowNumbers = true;
   function defer(part: EventRow[], reason: NonNullable<typeof limitReason>) {
     if (Number.isFinite(isolationDeadline)) {
@@ -38,30 +44,28 @@ export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number
   }
   async function parseFailure(part: EventRow[], error?: unknown): Promise<void> {
     if (part.length === 1) {
-      rejected.push(...part);
+      if (error !== undefined) rejected.push(...part);
+      else await visit(part);
       return;
     }
     const match = error instanceof Error ? /\(at row (\d+)\)/i.exec(error.message) : null;
     const index = match ? Number(match[1]) - 1 : -1;
     if (trustRowNumbers && Number.isSafeInteger(index) && index >= 0 && index < part.length) {
       const named = part[index] as EventRow;
-      if (!rowNumberChecked) {
-        rowNumberChecked = true;
-        const canaryWritten = await visit([named]);
-        if (!rejected.includes(named)) {
-          trustRowNumbers = false;
-          const rest = part.filter((row) => row !== named);
-          if (canaryWritten) {
-            console.warn(JSON.stringify({ level: 'warn', event: 'ingest.parse_row_number_mismatch', projectId: named.project_id }));
-            // The failed parent still proves a bad row exists outside the written canary.
-            await parseFailure(rest);
-          } else {
-            // An ambiguous, unavailable or unchecked canary cannot prove anything about its siblings.
-            await visit(rest);
-          }
-          return;
+      const canaryWritten = await visit([named]);
+      if (!rejected.includes(named)) {
+        trustRowNumbers = false;
+        const rest = part.filter((row) => row !== named);
+        if (canaryWritten) {
+          console.warn(JSON.stringify({ level: 'warn', event: 'ingest.parse_row_number_mismatch', projectId: named.project_id }));
+          // The failed parent still proves a bad row exists outside the written canary.
+          await parseFailure(rest);
+        } else {
+          // An ambiguous, unavailable or unchecked canary cannot prove anything about its siblings.
+          await visit(rest);
         }
-      } else rejected.push(named);
+        return;
+      }
       // ClickHouse reports a statement-relative, 1-based row. Persist its parse-proven prefix
       // before continuing, so confirmed rows leave the next attempt even if a limit stops us.
       await visit(part.slice(0, index));
@@ -110,6 +114,20 @@ export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number
       return false;
     }
   }
-  await visit(rows);
+  // Keep each statement on the pinned async path. All chunks share the budgets above.
+  // A single oversized row stays alone and remains ambiguous if parsing fails.
+  let chunk: EventRow[] = [];
+  let chunkBytes = 0;
+  for (const row of rows) {
+    const rowBytes = serialized.get(row)!.bytes;
+    if (chunk.length && chunkBytes + rowBytes > INGEST_ASYNC_MAX_DATA_SIZE) {
+      await visit(chunk);
+      chunk = [];
+      chunkBytes = 0;
+    }
+    chunk.push(row);
+    chunkBytes += rowBytes;
+  }
+  await visit(chunk);
   return { written, rejected, pending, unavailable, unresolved, limited, limitReason };
 }

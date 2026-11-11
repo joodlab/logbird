@@ -868,8 +868,10 @@ expand it, to about 15 MiB in the worst realistic case. These are thresholds, no
 preallocated buffers. Row/block pins keep a statement in one block if ClickHouse
 falls back to synchronous insertion, which otherwise can partially write before a
 late parser failure (measured on 26.9: 2300 of 3000 rows written with small blocks).
-A statement larger than 64 MiB (only possible with absurd flattened attribute paths)
-is never isolated: its parse error is treated as ambiguous and reconciled by recovery.
+Ingest splits cached rows into consecutive statements of at most 64 MiB, sharing
+the statement, byte, clock and lease budgets across chunks. A single row larger than
+64 MiB stays alone; its parse error is ambiguous and reconciled by recovery.
+This remains possible with extreme attribute paths until the size bound in #159 lands.
 The two error-tolerance pins prevent operator profiles from silently skipping bad
 rows while acknowledging success, which would lose those events.
 
@@ -879,15 +881,19 @@ rejects the entire query with code 452 (`SETTING_CONSTRAINT_VIOLATION`) before
 reading data if a pin violates a constraint; ingest returns retryable
 `503 ingest_unavailable` and releases the unwritten claims. A parse code is isolated only
 when the serialized body fits the pinned async limit, its error names
-`WaitForAsyncInsert`, and it is not a materialized-view failure. Changed server
-wording fails safe as pending/recovery. Do not infer pre-write safety from the
+`WaitForAsyncInsert`, and it is not a materialized-view failure: neither "while pushing to view"
+nor the name of one of Logbird's `*_mv` views appears in it (a quoted row value such as
+`'page.view'` doesn't count).
+If a ClickHouse upgrade changes the `WaitForAsyncInsert` wording, parse failures
+become ambiguous and can loop through pending/recovery until the incompatibility is fixed.
+Do not infer pre-write safety from the
 parse code alone. No new migration or settings profile is needed.
 
 Exact-row isolation assumes `(at row N)` is statement-relative and 1-based,
 including when multiple bodies share an async flush. The shared-flush test in
 `apps/server/src/ingest-parse-isolation.integration.test.ts` verifies this on
 ClickHouse 26.9. Other versions must retain that behavior; run the test after
-every ClickHouse upgrade before accepting ingest traffic.
+every ClickHouse upgrade before accepting ingest traffic; it also checks the async error wording.
 
 ## Webhook endpoint settings
 

@@ -240,7 +240,7 @@ it.each([3, 20, 80])('isolates a real 1000-row body with %i injected storage fau
   if (badCount === 3) {
     expect(response.status).toBe(202);
     expect(details.rejected).toHaveLength(badCount);
-    expect(writes).toHaveBeenCalledTimes(2 * badCount + 2); // One singleton row-number canary.
+    expect(writes).toHaveBeenCalledTimes(3 * badCount + 1); // Every named row has a singleton canary.
     await assertHealthy(healthyIds);
     expect((await f.post(batch)).status).toBe(202);
     await assertHealthy(healthyIds);
