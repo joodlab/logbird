@@ -121,15 +121,25 @@ try {
     const target = createClickHouseClient({ ...process.env, CLICKHOUSE_DATABASE: 'logbird' });
     try {
       await provisionQueryUser(target, process.env.CLICKHOUSE_QUERY_PASSWORD);
-      await target.command({
-        query: "ALTER TABLE events UPDATE source='logbird-sample' WHERE source='trailmark-sample'",
-        clickhouse_settings: { mutations_sync: 2 },
-      });
-      await target.command({
-        query:
-          "ALTER TABLE events UPDATE attributes=mapUpdate(mapFilter((k,v) -> k != 'trailmark.occurredAt.rejected', attributes), map('logbird.occurredAt.rejected', attributes['trailmark.occurredAt.rejected'])) WHERE mapContains(attributes,'trailmark.occurredAt.rejected')",
-        clickhouse_settings: { mutations_sync: 2 },
-      });
+      // A concurrent mutation can be skipped while reporting done (ClickHouse#124167): re-run until no row matches.
+      const updateUntilClear = async (update: string, remaining: string) => {
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          await target.command({ query: update, clickhouse_settings: { mutations_sync: '2' } });
+          if (!Number((await rows<{ n: string }>(remaining))[0]?.n ?? 0)) return;
+          if (attempt === 3) break;
+          console.warn(JSON.stringify({ level: 'warn', event: 'clickhouse.mutation_retry', attempt: attempt + 1, remaining }));
+          await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+        }
+        throw new Error(`Update left matching rows (${remaining}); preserve backups and journal, stop and investigate`);
+      };
+      await updateUntilClear(
+        "ALTER TABLE logbird.events UPDATE source='logbird-sample' WHERE source='trailmark-sample'",
+        "SELECT toString(count()) n FROM logbird.events WHERE source='trailmark-sample'",
+      );
+      await updateUntilClear(
+        "ALTER TABLE logbird.events UPDATE attributes=mapUpdate(mapFilter((k,v) -> k != 'trailmark.occurredAt.rejected', attributes), map('logbird.occurredAt.rejected', attributes['trailmark.occurredAt.rejected'])) WHERE mapContains(attributes,'trailmark.occurredAt.rejected')",
+        "SELECT toString(count()) n FROM logbird.events WHERE mapContains(attributes,'trailmark.occurredAt.rejected')",
+      );
       if ((await rows<{ n: number }>("SELECT count() n FROM logbird.attribute_keys WHERE key='trailmark.occurredAt.rejected'"))[0]?.n) {
         await target.command({ query: 'DROP TABLE IF EXISTS logbird.namespace_attribute_keys' });
         await target.command({ query: 'CREATE TABLE logbird.namespace_attribute_keys AS logbird.attribute_keys' });

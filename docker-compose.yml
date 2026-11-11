@@ -104,6 +104,9 @@ services:
       HOST: '0.0.0.0'
       NODE_ENV: production
       LOGBIRD_SERVER_URL: ${LOGBIRD_SERVER_URL:-http://server:4601}
+      # Optional links on the sign-in screen to your own terms and privacy policy (URL or same-origin path).
+      LOGBIRD_TERMS_URL: ${LOGBIRD_TERMS_URL:-}
+      LOGBIRD_PRIVACY_URL: ${LOGBIRD_PRIVACY_URL:-}
     ports: ['${LOGBIRD_BIND:-127.0.0.1}:${LOGBIRD_HTTP_PORT:-4600}:4600']
     depends_on:
       server: {condition: service_healthy}

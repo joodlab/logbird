@@ -42,8 +42,9 @@ moves there, rewrite the form section first.
 - Closed accounts and workspaces deleted within `CLOSURE_DELETION_DAYS` (30) days of closing: a manual commitment.
 - Keeping a closed account's entries in the activity of workspaces that still exist (the policy says so; nothing
   removes them today), rather than removing or anonymising them on request.
-- The form retention period: `FORM_RETENTION` ("24 months after our last exchange"). Nothing deletes submissions
-  automatically, so this is a manual commitment (a calendar reminder, or a cleanup job later).
+- The form retention period: `WEB_FORM_RETENTION_MONTHS` (default 24), shown as `FORM_RETENTION` ("24 months after
+  our last exchange"). The site deletes its own copy of a submission that many months after it was sent (#132). The
+  copies in the team mailbox and our emails are still a manual commitment.
 - That the 30-day answer time for rights requests is workable.
 - That production runs `AUTH_SIGNUP=restricted` (the terms say sign-ups are limited; the default is `open`).
 - What access logs Cloudflare and the server provider keep, and for how long (the policy says they may keep them).
@@ -61,7 +62,13 @@ moves there, rewrite the form section first.
 - **Form**: fields in `apps/web/src/lib/waitlist-schema.ts`; stored as JSONL with mode 600
   (`apps/web/src/server/waitlist-node.ts`, `/data` volume in `docker-compose.site.yml`); no IP or user agent stored;
   the rate limiter keeps IPs only in memory, each for a 60 s window, swept on later requests or at restart
-  (`apps/web/src/server/waitlist.ts`); SMTP notification to `WAITLIST_NOTIFY_TO`.
+  (`apps/web/src/server/waitlist.ts`); SMTP notification to `WAITLIST_NOTIFY_TO`. Retention: the Node server deletes
+  submissions older than `WEB_FORM_RETENTION_MONTHS` within two days (at most about 30 hours late: a day file goes once
+  its last moment has expired, and the cleanup runs ten minutes after start and every six hours): day files
+  (`<WAITLIST_FILE>.d/YYYY-MM-DD.jsonl`) are deleted whole, the pre-day-file `WAITLIST_FILE` trimmed per record
+  (`apps/web/src/server/waitlist-retention.ts`, `apps/web/waitlist/file.mjs`); the Cloudflare build sets the same
+  lifetime as a KV expiry (`waitlist-cloudflare.ts`). One person's submissions are deleted on request with
+  `node waitlist/admin.mjs forget <email>` (docs/coolify.md).
 - **Accounts**: `User`, `Session` (ipAddress, userAgent), `Verification` in `packages/database/prisma/schema.prisma`;
   `emailHash` (`packages/auth/src/sign-in-audit.ts`); 6-digit hashed codes, 10 minutes, 3 attempts
   (`packages/auth/src/server.ts`); session cookie `__Secure-logbird.session_token`, 7 days, renewed daily

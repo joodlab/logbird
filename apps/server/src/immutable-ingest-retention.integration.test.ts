@@ -1,4 +1,4 @@
-import { insertEvents, read } from '@logbird/clickhouse';
+import { deleteAndVerify, insertEvents, read } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { enforceProjectRetention, clickhouse as retentionClickhouse } from '../../worker/src/retention';
@@ -42,11 +42,8 @@ it('keeps the surviving identity after the upgrade repaired a collapsed legacy p
   const retained = f.row({ id, action: 'customer.retained' }, new Date(receivedAt.getTime() - 1000));
   await insertEvents(clickhouse, [expired, retained]);
   // Reproduce the old replacing index after its merge retained only the now-expired pointer.
-  await clickhouse.command({
-    query: 'DELETE FROM event_ids WHERE project_id={p:String}',
-    query_params: { p: f.project },
-    clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-  });
+  // Verified: a skipped mutation on the shared server must not leave the old pointers behind.
+  await deleteAndVerify(clickhouse, f.project, 'event_ids');
   await clickhouse.insert({
     table: 'event_ids',
     format: 'JSONEachRow',

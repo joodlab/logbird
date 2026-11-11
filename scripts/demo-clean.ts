@@ -16,15 +16,21 @@
  *   runs, old seed sinks such as seed-staydesk-dev). They are listed in every dry run.
  * The demo user, the "Acme" workspace and its StayDesk / Ledger demo projects are protected: the script refuses to
  * run if the plan would touch them, and it never changes retention. ClickHouse deletes are always project-scoped and
- * go through `purgeProject` (the same code retention and project deletion use).
+ * run under the project lock: whole projects go through `purgeProject` (the same code retention and project deletion
+ * use); activity rows in kept workspaces use the same verified delete (`deleteAndVerify`) on raw events only. That
+ * targeted delete keeps the rows' event_ids pointers (harmless: lookups fall back to raw rows) and ingest receipts
+ * (harmless: these random-id workspace-activity events are never resent) and
+ * does not rebuild the workspace's rollups, so entity/attribute counts there can stay slightly high.
  */
 import { parseArgs } from 'node:util';
-import { createClickHouseClient, purgeProject } from '@logbird/clickhouse';
+import { createClickHouseClient, deleteAndVerify, purgeProject } from '@logbird/clickhouse';
 import { prisma, withProjectLock } from '@logbird/database';
 
 export const THROWAWAY_EMAIL = /^(newcomer|ui-smoke|smoke|e2e|invite|invited|foundation|qa)-[\w.+-]*@(logbird\.local|example\.test)$/i;
 export const SMOKE_PROJECT = [/^Backend gaps [0-9a-f-]{36}$/i, /^Smoke (project|fixture)$/i];
 const SMOKE_WORKSPACE = /^Smoke fixture$/i;
+// One filter for both the dry-run count and the delete, so they cannot drift apart.
+const ACTIVITY_FILTER = 'hasAny(target_ids,{targets:Array(String)}) OR actor_id IN {actors:Array(String)}';
 const PROTECTED = { email: 'demo@logbird.local', orgSlug: 'acme', projectSlugs: ['staydesk', 'ledger-demo'] };
 
 const { values } = parseArgs({ options: { yes: { type: 'boolean', default: false }, orphans: { type: 'boolean', default: false } } });
@@ -68,7 +74,7 @@ try {
   const activity = await Promise.all(
     keptOrgs.map(async (o) => {
       const params = { p: `ws:${o.id}`, targets: dropProjects.filter((p) => p.org.id === o.id).map((p) => p.id), actors: [...userIds] };
-      const where = 'project_id={p:String} AND (hasAny(target_ids,{targets:Array(String)}) OR actor_id IN {actors:Array(String)})';
+      const where = `project_id={p:String} AND (${ACTIVITY_FILTER})`;
       return {
         org: o,
         params,
@@ -117,11 +123,8 @@ try {
     if (values.orphans) for (const r of orphans) await purge(r.project_id);
     for (const a of activity) {
       if (!a.n) continue;
-      await ch.command({
-        query: `DELETE FROM events WHERE ${a.where}`,
-        query_params: a.params,
-        clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-      });
+      const { targets, actors } = a.params;
+      await withProjectLock(a.params.p, () => deleteAndVerify(ch, a.params.p, 'events', ACTIVITY_FILTER, { targets, actors }));
     }
     if (dropInvitations.length) await prisma.invitation.deleteMany({ where: { id: { in: dropInvitations.map((i) => i.id) } } });
     if (users.length) {

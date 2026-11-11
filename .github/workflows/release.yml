@@ -37,7 +37,7 @@ jobs:
       - name: Resolve version
         id: version
         run: echo "version=$(node scripts/check-version-consistency.mjs "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - name: Install release tooling
         # No lifecycle scripts run in this job, which holds GH_TOKEN.
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -47,7 +47,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/release-notes.mjs --version "$GITHUB_REF_NAME" --to "$GITHUB_REF_NAME" --output release-notes.md
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: release-notes
           path: release-notes.md
@@ -113,7 +113,7 @@ jobs:
           VERSION: ${{ needs.preflight.outputs.version }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: printf '%s:%s@%s\n' "$IMAGE" "$VERSION" "$DIGEST" > image-${{ matrix.role }}.txt
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: image-${{ matrix.role }}
           path: image-${{ matrix.role }}.txt
@@ -126,10 +126,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: release-notes
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: image-*
           merge-multiple: true
