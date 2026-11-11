@@ -29,6 +29,39 @@ describe('Lighthouse SEO pass mark', () => {
     expect(robotsAllowsCrawling('')).toBe(false);
   });
 
+  it('reads robots.txt behind a CDN that prepends its own groups (Cloudflare managed content signals)', () => {
+    const cloudflare = [
+      '# As a condition of accessing this website, you agree to abide by the following',
+      '# BEGIN Cloudflare Managed content',
+      '',
+      'User-agent: *',
+      'Content-Signal: search=yes,ai-train=no,use=reference',
+      'Allow: /',
+      '',
+      '# Training crawlers',
+      'User-agent: GPTBot',
+      'Disallow: /',
+      '',
+      'User-agent: CCBot',
+      'Disallow: /',
+      '',
+      '# END Cloudflare Managed Content',
+      '',
+    ].join('\r\n');
+    const released = robotsTxt(siteConfigFrom({ ...RELEASED_ENV, WEB_APP_URL: RELEASED_ENV.WEB_SITE_URL }));
+    // Named AI crawlers being blocked does not make an indexable site look gated...
+    expect(robotsAllowsCrawling(cloudflare + released)).toBe(true);
+    // ...and the CDN's `Allow: /` for everyone does not hide the site's own gate.
+    expect(robotsAllowsCrawling(cloudflare + robotsTxt(siteConfigFrom({})))).toBe(false);
+  });
+
+  it('does not let extension records such as Sitemap split a user-agent group (RFC 9309 §2.2.4)', () => {
+    // One group for both crawlers: the Sitemap line sits between its User-agent lines.
+    expect(robotsAllowsCrawling('User-agent: *\nSitemap: https://example.test/sitemap.xml\nUser-agent: GPTBot\nAllow: /\n')).toBe(true);
+    // A Sitemap line after a group's rules doesn't end it, and rules before any User-agent apply to no one.
+    expect(robotsAllowsCrawling('Disallow: /\nUser-agent: *\nAllow: /\nSitemap: https://example.test/sitemap.xml\nDisallow: /private\n')).toBe(true);
+  });
+
   it('keeps crawlers off console and API paths only when the console shares the origin', () => {
     const shared = robotsTxt(siteConfigFrom({ ...RELEASED_ENV, WEB_APP_URL: RELEASED_ENV.WEB_SITE_URL }));
     expect(robotsAllowsCrawling(shared)).toBe(true);
@@ -37,6 +70,11 @@ describe('Lighthouse SEO pass mark', () => {
     }
     const separate = robotsTxt(siteConfigFrom({ ...RELEASED_ENV, WEB_APP_URL: 'https://console.example.test' }));
     expect(separate).not.toContain('Disallow');
+  });
+
+  it('reads robots.txt with any RFC 9309 line ending, bare CR included', () => {
+    expect(robotsAllowsCrawling('User-agent: *\rAllow: /\r')).toBe(true);
+    expect(robotsAllowsCrawling('User-agent: *\rAllow: /\rDisallow: /\r')).toBe(false);
   });
 
   it('keeps is-crawlable in the mark for ready pages once the site is indexable', () => {
