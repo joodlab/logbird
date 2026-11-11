@@ -142,6 +142,8 @@ async function connect(signal?: AbortSignal) {
   }
 }
 
+const CANCEL_OWN_REINDEX = `SELECT pg_cancel_backend(pid) FROM pg_stat_activity
+  WHERE pid=$1 AND application_name='logbird-receipt-index-maintenance' AND state='active' AND query ~* '^\\s*REINDEX'`;
 /** Keep the original session alive until its cancellation request has finished, so the pid cannot be reused. */
 async function cancelBackend(pid: number, settled?: Promise<unknown>) {
   const cancel = new pg.Client({
@@ -162,7 +164,8 @@ async function cancelBackend(pid: number, settled?: Promise<unknown>) {
   try {
     await cancel.connect();
     await cancel.query('SET statement_timeout = 5000');
-    await cancel.query('SELECT pg_cancel_backend($1)', [pid]);
+    // Only if that pid is still our maintenance session running REINDEX: never signal a backend that took its place.
+    await cancel.query(CANCEL_OWN_REINDEX, [pid]);
     await settled;
   } finally {
     await closeClient(cancel);
@@ -267,9 +270,11 @@ export async function compactIngestReceiptIndex({
     signal?.throwIfAborted();
     if (pages < RECEIPT_INDEX_COMPACTION.minPages) return { action: 'skipped_compact', indexPages: pages, droppedInvalid };
     const { rows } = await client.query<{ live: number; key_bytes: number | null }>(
-      `SELECT greatest(c.reltuples, 0)::float8 live,
+      // reltuples only moves with ANALYZE and lags an ingest burst; n_live_tup tracks inserts and deletes as they
+      // commit. Taking the larger one never under-counts live entries, so a growing table can't look bloated.
+      `SELECT greatest(c.reltuples, coalesce(t.n_live_tup, 0), 0)::float8 live,
         (SELECT sum(s.avg_width)::float8 FROM pg_stats s WHERE s.schemaname=$1 AND s.tablename=$2 AND s.attname=ANY($3::text[])) key_bytes
-       FROM pg_class c WHERE c.oid=to_regclass($4)`,
+       FROM pg_class c LEFT JOIN pg_stat_all_tables t ON t.relid=c.oid WHERE c.oid=to_regclass($4)`,
       [target.schema, target.table, target.keyColumns, `${quote(target.schema)}.${quote(target.table)}`],
     );
     const live = Number(rows[0]?.live ?? 0);

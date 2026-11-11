@@ -810,10 +810,14 @@ backstop can accumulate about 18 million between successful sweeps. Requests
 expire only their own requested ids in a bounded statement; fresh batches never
 drain unrelated backlog. See [receipt coordination](ingest-identity.md#coordination-and-identity).
 
+The worker's `DATABASE_URL` must be a direct, session-mode connection (not a
+transaction-mode pooler such as PgBouncer in transaction mode): compaction relies on one
+session for its advisory lock, session settings, backend pid and REINDEX.
 The worker runs receipt-index compaction on its own hourly queue and worker with
 concurrency 1 and one attempt, so retention retries never repeat it and queued
 recovery/fence-lifting jobs can run during a rebuild. On shutdown a separate
-connection calls `pg_cancel_backend` for the recorded rebuild backend pid only,
+connection calls `pg_cancel_backend` for the recorded rebuild backend pid only, and only
+while `pg_stat_activity` still shows it as the maintenance session running REINDEX,
 with five-second connect/query timeouts; its socket is destroyed by eight seconds. The
 original session remains open while REINDEX settles with 57014; cancellation and cleanup
 have a ten-second deadline before its socket is destroyed, and the run settles within

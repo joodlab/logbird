@@ -3,12 +3,9 @@ import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
 import { expect, it } from 'vitest';
 import { ingestReceiptFailureResponse, isDatabaseFailure } from './ingest-receipt-errors';
 
-it.each([false, true])('maps a receipt conflict to a retryable 503 (acknowledged=%s)', (acknowledged) => {
-  const response = ingestReceiptFailureResponse(
-    Object.assign(new Error('private receipt detail'), { code: 'LOGBIRD_INGEST_RECEIPT_CONFLICT' }),
-    acknowledged,
-  );
-  expect(response).toMatchObject({ status: 503, retryAfter: '1', body: { error: { code: acknowledged ? 'ingest_pending' : 'ingest_unavailable' } } });
+it('maps a receipt conflict to a retryable 503', () => {
+  const response = ingestReceiptFailureResponse(Object.assign(new Error('private receipt detail'), { code: 'LOGBIRD_INGEST_RECEIPT_CONFLICT' }));
+  expect(response).toMatchObject({ status: 503, retryAfter: '1', body: { error: { code: 'ingest_unavailable' } } });
   expect(apiErrorSchema.parse(response?.body).error.message).not.toMatch(/private receipt detail|time range/);
 });
 

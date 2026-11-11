@@ -173,7 +173,7 @@ that copy's `deploy/k3s` directory:
    | Secret | Keys / purpose |
    | --- | --- |
    | `logbird-runtime` | API: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `REDIS_URL`, `BETTER_AUTH_SECRET`, `CLICKHOUSE_QUERY_PASSWORD` (64 lowercase hex); `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` as required by the selected provider |
-   | `logbird-worker` | Retention/health/queue only: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `REDIS_URL`. The manifest names these five `secretKeyRef` entries explicitly; no API auth secret, restricted-query password or SMTP credentials are mounted |
+   | `logbird-worker` | Retention/health/queue only: `DATABASE_URL` (a direct, session-mode connection: receipt-index compaction needs one session for its lock, settings, pid and REINDEX, so not a transaction-mode pooler), `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `REDIS_URL`. The manifest names these five `secretKeyRef` entries explicitly; no API auth secret, restricted-query password or SMTP credentials are mounted |
    | `logbird-migration` | One-shot schema/access tooling: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, preserved `CLICKHOUSE_QUERY_PASSWORD`; no auth or mail credentials |
 
    Back up the three object names, key inventories and encrypted recovery references

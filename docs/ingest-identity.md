@@ -206,8 +206,9 @@ runs `compactIngestReceiptIndex`:
 - It is single-flight across workers through a session advisory try-lock, and uses
   its own connection, because `REINDEX CONCURRENTLY` cannot run inside a transaction
   or a pooled Prisma call.
-- It estimates the pages the live entries need from `reltuples` and the analyzed key
-  widths, at a 90% leaf fill. It rebuilds with `REINDEX INDEX CONCURRENTLY
+- It estimates the pages the live entries need from the larger of `reltuples` and
+  `pg_stat_all_tables.n_live_tup` (so a stale ANALYZE during an ingest burst never makes a
+  growing table look bloated) and the analyzed key widths, at a 90% leaf fill. It rebuilds with `REINDEX INDEX CONCURRENTLY
   "IngestReceipt_pkey"` only when the index is at least 64 MiB **and** at least
   three times that estimate. Otherwise it does nothing. The threshold comes from the
   experiment below: steady churn stays under 2×, and a drained backlog leaves
@@ -218,7 +219,8 @@ runs `compactIngestReceiptIndex`:
   are logged rather than emitted without a listener.
   Shutdown opens a separate connection (five-second connect and query timeouts,
   eight seconds in all) and sends `pg_cancel_backend` for the recorded rebuild
-  backend pid only. The original connection stays open while cancellation completes
+  backend pid only, and only while `pg_stat_activity` still shows that pid as this
+  maintenance session running REINDEX. The original connection stays open while cancellation completes
   and REINDEX settles with 57014; its ten-second shutdown deadline is longer than the
   cancel budget, so the pid can't be reused before the cancel runs: the cancel socket
   is destroyed by eight seconds and the original session's by ten, and the run settles

@@ -51,6 +51,9 @@ import {
   RECEIPT_INDEX_SETUP_TIMEOUT_MS,
 } from './receipt-index-maintenance';
 
+// The cancel signals the pid only while it is still our maintenance session running REINDEX.
+const OWN_REINDEX_CANCEL =
+  /pg_cancel_backend\(pid\) FROM pg_stat_activity\s+WHERE pid=\$1 AND application_name='logbird-receipt-index-maintenance' AND state='active' AND query ~\* '\^\\s\*REINDEX'/;
 type Row = Record<string, unknown>;
 function fakeDb(state: {
   locked?: boolean;
@@ -247,7 +250,7 @@ it('cancels only the managed backend on shutdown, waits for 57014 and drops the 
   abort.abort();
   await expect(rebuilding).rejects.toMatchObject({ code: '57014' });
   expect(cancelConnection.query).toHaveBeenCalledWith('SET statement_timeout = 5000');
-  expect(cancelConnection.query).toHaveBeenCalledWith('SELECT pg_cancel_backend($1)', [12_345]);
+  expect(cancelConnection.query).toHaveBeenCalledWith(expect.stringMatching(OWN_REINDEX_CANCEL), [12_345]);
   expect(cancelConnection.options).toMatchObject({ connectionTimeoutMillis: 5000, query_timeout: 5000 });
   expect(cancelConnection.end).toHaveBeenCalledTimes(1);
   expect(connection.end).toHaveBeenCalledTimes(1);
@@ -278,7 +281,7 @@ it('bounds shutdown to ten seconds when REINDEX does not acknowledge cancellatio
     expect(connection.end).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await outcome;
-    expect(cancelConnection.query).toHaveBeenCalledWith('SELECT pg_cancel_backend($1)', [12_345]);
+    expect(cancelConnection.query).toHaveBeenCalledWith(expect.stringMatching(OWN_REINDEX_CANCEL), [12_345]);
     expect(cancelConnection.end).toHaveBeenCalled();
     expect(connection.end).toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
