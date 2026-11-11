@@ -185,9 +185,13 @@ export const webhookRoutes = new Hono<AppEnv>()
       const secret = generateWebhookSecret();
       await lockedProject(c, async (tx) => {
         const endpoint = await findEndpoint(c, tx);
+        // Every earlier secret stops working by the end of this overlap: the current one and any still inside an earlier
+        // rotation's window. An expiry already sooner is left alone, so a rotation never extends a secret's life, and a
+        // zero overlap retires every earlier secret at once.
+        const until = new Date(Date.now() + overlapSeconds * 1000);
         await tx.webhookSecret.updateMany({
-          where: { endpointId: endpoint.id, expiresAt: null },
-          data: { expiresAt: new Date(Date.now() + overlapSeconds * 1000) },
+          where: { endpointId: endpoint.id, OR: [{ expiresAt: null }, { expiresAt: { gt: until } }] },
+          data: { expiresAt: until },
         });
         await tx.webhookSecret.create({ data: { endpointId: endpoint.id, ciphertext: encryptWebhookSecret(secret, secretKey) } });
         await record(c, tx, 'webhook.secret_rotated', endpoint);

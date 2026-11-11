@@ -132,11 +132,33 @@ it('rotates with default, zero and maximum overlap without extending already exp
     expect(decryptWebhookSecret(active[0].ciphertext, webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY))).toBe(next.secret);
     previous = active[0];
   }
+  // A later rotation caps every earlier expiry at its own window and never extends one.
   const before = await prisma.webhookSecret.findMany({ where: { endpointId: endpoint.id, expiresAt: { not: null } } });
+  const start = Date.now();
   await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', { overlapSeconds: 5 });
-  for (const old of before) expect((await prisma.webhookSecret.findUniqueOrThrow({ where: { id: old.id } })).expiresAt).toEqual(old.expiresAt);
+  for (const old of before) {
+    const after = (await prisma.webhookSecret.findUniqueOrThrow({ where: { id: old.id } })).expiresAt?.getTime() ?? Number.NaN;
+    expect(after).toBeLessThanOrEqual(old.expiresAt?.getTime() ?? Number.NaN);
+    expect(after).toBeLessThanOrEqual(Date.now() + 5_000);
+    if ((old.expiresAt?.getTime() ?? 0) < start) expect(after).toBe(old.expiresAt?.getTime());
+  }
   for (const overlapSeconds of [-1, 604_801, 1.5])
     expect((await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', { overlapSeconds })).status).toBe(422);
+});
+it('a zero-overlap rotation retires every earlier secret, including one still inside an earlier window', async () => {
+  const { endpoint } = await create();
+  const first = await prisma.webhookSecret.findFirstOrThrow({ where: { endpointId: endpoint.id } });
+  // A -> B with the default 24-hour overlap: A stays valid for a day.
+  expect((await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', {})).status).toBe(200);
+  const second = await prisma.webhookSecret.findFirstOrThrow({ where: { endpointId: endpoint.id, expiresAt: null } });
+  // B -> C with no overlap (say, B leaked): neither A nor B may keep signing.
+  const now = Date.now();
+  expect((await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', { overlapSeconds: 0 })).status).toBe(200);
+  for (const id of [first.id, second.id]) {
+    expect((await prisma.webhookSecret.findUniqueOrThrow({ where: { id } })).expiresAt?.getTime()).toBeLessThanOrEqual(Date.now());
+    expect((await prisma.webhookSecret.findUniqueOrThrow({ where: { id } })).expiresAt?.getTime()).toBeGreaterThanOrEqual(now - 1_000);
+  }
+  expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id, expiresAt: null } })).toBe(1);
 });
 it.each(['owner', 'admin'])('%s can manage endpoints', async (role) => {
   const { endpoint } = await create(role);
