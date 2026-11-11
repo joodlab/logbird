@@ -108,7 +108,13 @@ function SettingsLayout() {
                 params={{ projectId }}
                 to={tab.to}
               >
-                {tab.label}
+                {/* The active tab is medium weight: an invisible medium copy reserves that width, so tabs never shift. */}
+                <span className="inline-grid justify-items-center">
+                  <span className="col-start-1 row-start-1">{tab.label}</span>
+                  <span aria-hidden className="invisible col-start-1 row-start-1 font-medium">
+                    {tab.label}
+                  </span>
+                </span>
               </Link>
             );
           })}

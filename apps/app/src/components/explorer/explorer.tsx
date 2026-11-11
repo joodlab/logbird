@@ -1,4 +1,5 @@
 import type { AuditEvent, HistogramResponse, QueryLang, SearchResponse } from '@logbird/contracts';
+import { StableText } from '@logbird/ui/components/stable-text';
 import { EmptyState, ErrorState } from '@logbird/ui/components/states';
 import { Button } from '@logbird/ui/components/ui/button';
 import { Sheet, SheetContent, SheetTitle } from '@logbird/ui/components/ui/sheet';
@@ -389,7 +390,11 @@ export function Explorer({
                 className={cn('flex items-center gap-1.5', relative ? 'cursor-pointer' : 'cursor-not-allowed')}
                 htmlFor={embedded ? 'live-tail-embedded' : 'live-tail'}
               >
-                {liveActive ? <span className="tm-pulse-dot size-1.5 rounded-full bg-outcome-success text-outcome-success" /> : null}
+                {/* Always laid out (hidden while paused) so toggling never resizes the control or the query bar beside it. */}
+                <span
+                  aria-hidden
+                  className={cn('size-1.5 rounded-full bg-outcome-success text-outcome-success', liveActive ? 'tm-pulse-dot' : 'invisible')}
+                />
                 Live
               </label>
             </TooltipTrigger>
@@ -455,7 +460,7 @@ export function Explorer({
             type="button"
           >
             <ChevronDownIcon className={cn('size-3.5 transition-transform', !showChart && '-rotate-90')} />
-            {showChart ? 'Hide chart' : 'Show chart'}
+            <StableText reserve={['Hide chart', 'Show chart']}>{showChart ? 'Hide chart' : 'Show chart'}</StableText>
           </button>
         </div>
         {showChart ? (

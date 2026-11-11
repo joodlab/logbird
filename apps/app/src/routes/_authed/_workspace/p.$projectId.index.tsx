@@ -114,11 +114,10 @@ function OverviewPage() {
         <StatCard
           className="col-span-2 md:col-span-1"
           footer={
-            k ? (
-              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${Math.round(k.avgConformance)}%` }} />
-              </div>
-            ) : null
+            // The empty track shows while loading, so the card (and the row of cards) keeps its height.
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${k ? Math.round(k.avgConformance) : 0}%` }} />
+            </div>
           }
           hint={hasSampleData ? 'in range · includes sample data' : undefined}
           label="Avg conformance"
@@ -132,7 +131,8 @@ function OverviewPage() {
         <Panel description="Click a band to open those events" title="Events by outcome">
           <div className="p-3 pb-2">
             {loading ? (
-              <Skeleton className="h-[248px] w-full" />
+              // The chart (240 px), the gap and the one-row legend below it.
+              <Skeleton className="h-[276px] w-full" />
             ) : (
               <OutcomeAreaChart data={data?.series} height={240} onSelectOutcome={(o) => explore(`outcome:${o}`)} />
             )}
@@ -141,7 +141,8 @@ function OverviewPage() {
         <Panel title="Ingestion">
           <div className="flex flex-col gap-4 p-4">
             {loading ? (
-              <Skeleton className="h-40 w-full" />
+              // Status line, the two figures, the sparkline and the button.
+              <Skeleton className="h-[216px] w-full" />
             ) : (
               <>
                 <div className="flex items-center gap-2">

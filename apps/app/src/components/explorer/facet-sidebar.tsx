@@ -123,7 +123,8 @@ function presenceOps(field: string, lang: QueryLang): FacetOps {
 export function FacetSidebar({ projectId, range, q, lang = 'query', counts, staleReason, onChange, className }: FacetSidebarProps) {
   const isMac = useIsMac();
   return (
-    <aside aria-label="Filters" className={cn('flex flex-col overflow-y-auto py-2', className)}>
+    // Stable gutter: opening a group past the bottom must not narrow every row and move the counts.
+    <aside aria-label="Filters" className={cn('flex flex-col overflow-y-auto py-2 [scrollbar-gutter:stable]', className)}>
       <div className="flex items-center justify-between px-3 pb-1">
         <span className="font-medium text-[11px] text-muted-foreground uppercase tracking-wider">Filters</span>
         <span className="text-[10px] text-muted-foreground" data-testid="facet-exclude-hint">

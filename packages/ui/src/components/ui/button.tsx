@@ -1,5 +1,6 @@
 import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
+import { Loader2Icon } from "lucide-react"
 
 import { cn } from '../../lib/utils'
 
@@ -44,14 +45,35 @@ function Button({
   className,
   variant = "default",
   size = "default",
+  loading = false,
+  disabled,
+  children,
   ...props
-}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+}: ButtonPrimitive.Props &
+  VariantProps<typeof buttonVariants> & {
+    /**
+     * Pending: disables the button and shows a spinner over its content. The content stays laid out (transparent, still
+     * the accessible name), so the button keeps its size and its neighbours do not move.
+     */
+    loading?: boolean
+  }) {
   return (
     <ButtonPrimitive
+      aria-busy={loading || undefined}
       data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={cn(buttonVariants({ variant, size, className }), loading && "relative")}
+      disabled={disabled || loading}
       {...props}
-    />
+    >
+      {loading ? (
+        <>
+          <span className="inline-flex items-center justify-center gap-[inherit] opacity-0">{children}</span>
+          <Loader2Icon aria-hidden className="absolute animate-spin" />
+        </>
+      ) : (
+        children
+      )}
+    </ButtonPrimitive>
   )
 }
 

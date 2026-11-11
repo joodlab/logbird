@@ -2,6 +2,7 @@ import { type AuditEvent, type ProjectSetup, SAMPLE_DATA_EVENTS, SAMPLE_DATA_SOU
 import { OutcomeDot, SeverityBadge } from '@logbird/ui/components/badges';
 import { CodeTabs } from '@logbird/ui/components/code-block';
 import { EntityChip } from '@logbird/ui/components/entity-chip';
+import { StableText } from '@logbird/ui/components/stable-text';
 import { ErrorState } from '@logbird/ui/components/states';
 import { Button } from '@logbird/ui/components/ui/button';
 import { useConfirm } from '@logbird/ui/components/ui/confirm';
@@ -253,7 +254,7 @@ export function SampleDataControl({ projectId, setup }: { projectId: string; set
         ) : manage ? (
           <Button disabled={load.isPending} onClick={() => load.mutate()} size="sm" variant="outline">
             {load.isPending ? <Loader2Icon className="animate-spin" /> : <DatabaseIcon />}
-            {load.isPending ? 'Loading…' : 'Load sample data'}
+            <StableText reserve={['Load sample data', 'Loading…']}>{load.isPending ? 'Loading…' : 'Load sample data'}</StableText>
           </Button>
         ) : (
           <span className="text-muted-foreground text-xs">Ask an admin to load it</span>

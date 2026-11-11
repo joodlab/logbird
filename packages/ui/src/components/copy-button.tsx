@@ -2,6 +2,7 @@ import { CheckIcon, CopyIcon } from 'lucide-react';
 import type { ComponentProps } from 'react';
 import { useCopy } from '../hooks/use-copy';
 import { cn } from '../lib/utils';
+import { StableText } from './stable-text';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
@@ -30,7 +31,7 @@ export function CopyButton({ value, label = 'Copy', showLabel = false, onCopied,
       {...props}
     >
       {copied ? <CheckIcon className="text-outcome-success" /> : <CopyIcon />}
-      {showLabel ? <span>{copied ? 'Copied' : label}</span> : null}
+      {showLabel ? <StableText reserve={[label, 'Copied']}>{copied ? 'Copied' : label}</StableText> : null}
     </Button>
   );
   if (showLabel) return button;

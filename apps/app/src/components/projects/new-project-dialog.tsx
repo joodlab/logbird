@@ -6,7 +6,6 @@ import { Textarea } from '@logbird/ui/components/ui/textarea';
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { Loader2Icon } from 'lucide-react';
 import { type RefObject, useId, useRef } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
@@ -152,8 +151,7 @@ export function NewProjectDialog({
             <Button disabled={create.isPending} onClick={() => close(false)} type="button" variant="outline">
               Cancel
             </Button>
-            <Button disabled={create.isPending} type="submit">
-              {create.isPending ? <Loader2Icon className="animate-spin" /> : null}
+            <Button loading={create.isPending} type="submit">
               Create project
             </Button>
           </DialogFooter>

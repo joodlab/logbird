@@ -3,6 +3,7 @@ import { OutcomeBadge, OutcomeDot, SeverityBadge, TypePill } from '@logbird/ui/c
 import { CopyButton, CopyValue } from '@logbird/ui/components/copy-button';
 import { EntityAvatar, EntityChip } from '@logbird/ui/components/entity-chip';
 import { JsonViewer } from '@logbird/ui/components/json-viewer';
+import { StableText } from '@logbird/ui/components/stable-text';
 import { ErrorState } from '@logbird/ui/components/states';
 import { Alert, AlertDescription } from '@logbird/ui/components/ui/alert';
 import { Button } from '@logbird/ui/components/ui/button';
@@ -326,11 +327,11 @@ function EventDetailBody({
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => link.copy(shareUrl)} size="xs" variant="outline">
             <LinkIcon />
-            {link.copied ? 'Link copied' : 'Copy link'}
+            <StableText reserve={['Copy link', 'Link copied']}>{link.copied ? 'Link copied' : 'Copy link'}</StableText>
           </Button>
           <Button onClick={() => curl.copy(eventCurl(e))} size="xs" variant="outline">
             <TerminalIcon />
-            {curl.copied ? 'Copied' : 'Copy as curl'}
+            <StableText reserve={['Copy as curl', 'Copied']}>{curl.copied ? 'Copied' : 'Copy as curl'}</StableText>
           </Button>
           {ctx.operationId && projectId ? (
             <Button
@@ -348,7 +349,7 @@ function EventDetailBody({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <Section title="Who">
           {e.impersonator ? (
             <Alert className="py-2" role="note" variant="support">
@@ -605,7 +606,8 @@ function EventDetailBody({
         ) : null}
 
         <Collapsible className="border-b px-5 py-4" defaultOpen={false}>
-          <div className="flex items-center justify-between">
+          {/* min-h-6: the copy button arrives with the detail; the row is already its height, so nothing below moves. */}
+          <div className="flex min-h-6 items-center justify-between">
             <CollapsibleTrigger className="group/raw flex items-center gap-1.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wider outline-none hover:text-foreground">
               <ChevronDownIcon className="-rotate-90 size-3.5 transition-transform group-data-[panel-open]/raw:rotate-0" />
               Raw payload
