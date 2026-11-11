@@ -202,6 +202,9 @@ importers:
       '@logbird/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@logbird/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@logbird/worker':
         specifier: workspace:*
         version: link:../worker

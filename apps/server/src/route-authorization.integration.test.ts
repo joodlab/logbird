@@ -86,11 +86,13 @@ it('denies anonymous and foreign-project requests through every concrete route; 
         metadata: { isolation: index ? marker : 'allowed' },
       });
     }
+    const webhook = await prisma.webhookEndpoint.create({ data: { projectId: allowed, url: 'https://8.8.8.8/qa-matrix' } });
     const range = { from: new Date(Date.now() - 3_600_000).toISOString(), to: new Date(Date.now() + 60_000).toISOString() };
     const pathFor = (pattern: string, project: string) => {
       const path = pattern
         .replace(':projectId', project)
         .replace(':eventId', eventId)
+        .replace(':id', webhook.id)
         .replace(':exportId', '00000000-0000-4000-8000-000000000072')
         .replace(':operationId', 'shared-operation')
         .replace(':kind', 'actor')
