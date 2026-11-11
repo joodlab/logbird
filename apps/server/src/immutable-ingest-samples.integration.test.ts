@@ -73,13 +73,7 @@ it('an expired sample-removal crash cache cannot acknowledge or reject a missing
   const sample = { id: 'sample-crash-cache', action: 'sample.original', source: 'logbird-sample' };
   expect((await f.post(sample)).status).toBe(202);
   // Simulate a crash after raw deletion and before index/receipt reconciliation.
-  await withProjectLock(f.project, () =>
-    clickhouse.command({
-      query: 'DELETE FROM events WHERE project_id={p:String}',
-      query_params: { p: f.project },
-      clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-    }),
-  );
+  await withProjectLock(f.project, () => deleteAndVerify(clickhouse, f.project, 'events'));
   const replacement = { id: sample.id, action: 'customer.after-expiry' };
   expect(await (await f.post(replacement)).json()).toMatchObject({ accepted: 0, rejected: [{ code: 'duplicate_id_conflict' }] });
   await prisma.ingestReceipt.createMany({

@@ -638,26 +638,46 @@ export async function deleteAndVerify(
   const predicate = `project_id={p:String}${filter ? ` AND (${filter})` : ''}`;
   const bound = { ...params, p: projectId };
   const ch = projectMaintenance(client, projectId);
-  for (let attempt = 1; attempt <= DELETE_ATTEMPTS; attempt++) {
-    await ch.command({
-      query: `DELETE FROM ${table} WHERE ${predicate}`,
-      query_params: bound,
-      clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
+  // Once the first DELETE has run, a storage error or timeout leaves the delete unproven: fail closed with a code the
+  // API maps to a retryable 503 (no time-range advice), keeping the storage error as `cause`.
+  const unverified = (cause: unknown, attempt: number) => {
+    console.error(JSON.stringify({ level: 'error', event: 'clickhouse.delete_unverified', table, projectId, attempt }));
+    return Object.assign(new Error(`Could not verify the delete in ${table} (attempt ${attempt}). Retry the operation.`, { cause }), {
+      code: 'LOGBIRD_DELETE_UNVERIFIED',
+      table,
+      attempts: attempt,
     });
+  };
+  for (let attempt = 1; attempt <= DELETE_ATTEMPTS; attempt++) {
+    try {
+      await ch.command({
+        query: `DELETE FROM ${table} WHERE ${predicate}`,
+        query_params: bound,
+        clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
+      });
+    } catch (error) {
+      if (attempt === 1) throw error;
+      throw unverified(error, attempt);
+    }
     // Concurrent non-replicated mutations can register out of order and skip rows.
     // Retry with a fresh mutation version, but still fail closed for restored parts
     // that outrank every attempt. Completion alone never proves deletion.
     // The probe binds exactly the DELETE's params (not through read(), which rewrites date keys and turns a timeout
     // into a 422 query-budget error). A filter outside the sort key (sample-data `source`) scans the whole project once
-    // nothing matches, so it gets a maintenance budget; a storage error or timeout propagates as a retryable 503.
-    const rows = await (
-      await ch.query({
-        query: `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`,
-        query_params: bound,
-        format: 'JSONEachRow',
-        clickhouse_settings: { max_execution_time: 60 },
-      })
-    ).json<{ n: number }>();
+    // nothing matches, so it gets a maintenance budget.
+    let rows: { n: number }[];
+    try {
+      rows = await (
+        await ch.query({
+          query: `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`,
+          query_params: bound,
+          format: 'JSONEachRow',
+          clickhouse_settings: { max_execution_time: 60 },
+        })
+      ).json<{ n: number }>();
+    } catch (error) {
+      throw unverified(error, attempt);
+    }
     if (Number(rows[0]?.n ?? 0) === 0) return;
     if (attempt < DELETE_ATTEMPTS) {
       console.warn(JSON.stringify({ level: 'warn', event: 'clickhouse.delete_retry', table, projectId, attempt: attempt + 1 }));

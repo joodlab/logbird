@@ -16,6 +16,7 @@ import { queueAuditEvent } from './audit-outbox';
 import { recordFailedSignIn } from './auth-activity';
 import { clickhouse } from './clickhouse';
 import { dataRoutes, publicRoutes } from './data-routes';
+import { deleteFailureResponse } from './delete-errors';
 import { env } from './env';
 import { ApiError } from './errors';
 import { invitationRoutes } from './invitation-routes';
@@ -95,10 +96,11 @@ app.onError((error, c) => {
   if (error instanceof HTTPException) return c.json({ error: { code: 'invalid_request', message: error.message } }, error.status);
   if (/^(Invalid (time range|cursor|query syntax)|Query exceeds|Unterminated quoted query)/.test(error.message) && !('code' in error))
     return c.json({ error: { code: 'invalid_query', message: error.message } }, 422);
-  if ('code' in error && error.code === 'LOGBIRD_DELETE_INCOMPLETE') {
-    // deleteAndVerify already logged clickhouse.delete_incomplete; narrowing a time range does not apply to a delete.
-    c.header('Retry-After', '5');
-    return c.json({ error: { code: 'query_unavailable', message: 'Storage did not finish deleting the data. Retry shortly.' } }, 503);
+  // deleteAndVerify already logged clickhouse.delete_incomplete or clickhouse.delete_unverified.
+  const deleteFailure = deleteFailureResponse(error);
+  if (deleteFailure) {
+    c.header('Retry-After', deleteFailure.retryAfter);
+    return c.json(deleteFailure.body, deleteFailure.status);
   }
   if ('code' in error || /timeout|budget/i.test(error.message))
     return c.json(

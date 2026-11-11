@@ -428,7 +428,9 @@ runs again on its own). Only a failure that persists on a natively restored data
 needs the normalization procedure below. Every verified delete that fails closed (worker
 retention and repair, API sample-data removal and project deletion, `demo-clean`) logs one
 `clickhouse.delete_incomplete` line with the table and project; the API answers 503 with
-`Retry-After`. The non-fatal stale-pointer cleanup logs only its own warning: ingest
+`Retry-After`. If storage fails after a DELETE ran (the verification probe times out, or a
+retry DELETE errors), the delete is unproven: it fails closed as `LOGBIRD_DELETE_UNVERIFIED`,
+logs `clickhouse.delete_unverified`, and gets the same retryable 503. The non-fatal stale-pointer cleanup logs only its own warning: ingest
 recovery or sample-data removal logs `clickhouse.event_index_stale_pointers` when it cannot
 delete stale identity pointers.
 The pinned 26.9 line has no upstream fix for that race; ClickHouse 26.10 and later include it.
@@ -526,7 +528,7 @@ docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/recove
 docker compose --env-file .env.restore -p logbird-restore exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /tmp/recovery-gate.sql'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep 'retention.run_failed'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep '"errorCode":"LOGBIRD_DELETE_INCOMPLETE"'
-docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.delete_incomplete"'
+docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep -E '"event":"clickhouse.delete_(incomplete|unverified)"'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.event_index_stale_pointers"'
 ```
 
@@ -550,7 +552,7 @@ and mutations share one block counter, so it compares only *mutated* parts
 gate. A table that has mutated parts but received no gate mutation (for example because no
 restored row had expired yet) cannot be checked this way, so it also reports
 `blocks_cutover = 1`. Only finished gate mutations count: `pending_gate_mutations` shows
-how many are still running, so wait for them (or treat a stuck one as blocking). No output means no table has mutated parts. The check assumes a
+how many are still running, so wait for them (or treat a stuck one as blocking). No output means none of the five tables that deletes touch has mutated parts. The check assumes a
 restored part can outrank new mutations only through its mutation version, as observed so
 far; the mandatory normalization (`TRUNCATE` + `INSERT`) removes the case entirely, and live
 verification of restored parts is tracked in [#77](https://github.com/joodlab/logbird/issues/77).
@@ -563,7 +565,8 @@ SELECT p.table,
        ifNull(any(m.pending), 0) AS pending_gate_mutations,
        newest_gate_mutation IS NULL OR mutated_part_version > newest_gate_mutation AS blocks_cutover
 FROM (SELECT table, data_version FROM system.parts
-      WHERE database = 'logbird' AND active AND data_version > min_block_number) p
+      WHERE database = 'logbird' AND active AND data_version > min_block_number
+        AND table IN ('events', 'event_ids', 'events_by_minute', 'entities', 'attribute_keys')) p
 LEFT JOIN (SELECT table,
                   maxIfOrNull(toUInt64(extract(mutation_id, '(\d+)')), is_done) AS done_version,
                   countIf(NOT is_done) AS pending

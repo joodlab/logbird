@@ -80,14 +80,47 @@ it.each([
     );
 });
 
-it.each(['command', 'query'])('propagates %s errors without retrying or proceeding', async (method) => {
+it('propagates a first-DELETE storage error unchanged, without retrying or proceeding', async () => {
   const failure = new Error('storage unavailable');
-  const command = vi.fn().mockResolvedValue({});
-  const query = vi.fn().mockResolvedValue({ json: async () => [{ n: 0 }] });
-  (method === 'command' ? command : query).mockRejectedValue(failure);
+  const command = vi.fn().mockRejectedValue(failure);
+  const query = vi.fn();
   await expect(purgeProject({ command, query } as unknown as ClickHouseClient, 'qa95-errors')).rejects.toBe(failure);
   expect(command).toHaveBeenCalledTimes(1);
+  expect(query).not.toHaveBeenCalled();
   expect(console.warn).not.toHaveBeenCalled();
+  expect(console.error).not.toHaveBeenCalled();
+});
+
+it('fails closed as unverified when the probe errors after the DELETE ran', async () => {
+  const failure = Object.assign(new Error('Timeout exceeded'), { code: '159' });
+  const command = vi.fn().mockResolvedValue({});
+  const query = vi.fn().mockRejectedValue(failure);
+  await expect(purgeProject({ command, query } as unknown as ClickHouseClient, 'qa95-errors')).rejects.toMatchObject({
+    code: 'LOGBIRD_DELETE_UNVERIFIED',
+    table: 'events',
+    attempts: 1,
+    cause: failure,
+  });
+  // No retry and no further table: the purge stops at the unproven delete.
+  expect(command).toHaveBeenCalledTimes(1);
+  expect(query).toHaveBeenCalledTimes(1);
+  expect(console.error).toHaveBeenCalledExactlyOnceWith(
+    JSON.stringify({ level: 'error', event: 'clickhouse.delete_unverified', table: 'events', projectId: 'qa95-errors', attempt: 1 }),
+  );
+});
+
+it('fails closed as unverified when a retry DELETE errors', async () => {
+  const failure = new Error('socket hang up');
+  const command = vi.fn().mockResolvedValueOnce({}).mockRejectedValueOnce(failure);
+  const query = vi.fn().mockResolvedValue({ json: async () => [{ n: 1 }] });
+  await expect(settle(deleteAndVerify({ command, query } as unknown as ClickHouseClient, 'qa95-errors', 'entities'))).rejects.toMatchObject({
+    code: 'LOGBIRD_DELETE_UNVERIFIED',
+    table: 'entities',
+    attempts: 2,
+    cause: failure,
+  });
+  expect(command).toHaveBeenCalledTimes(2);
+  expect(query).toHaveBeenCalledTimes(1);
 });
 
 it('writes valid identity pointers first and only reports stale pointers that stay visible', async () => {
