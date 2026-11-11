@@ -353,6 +353,14 @@ headroom or change the probe design before qualifying that image (OPS-02).
 Verify `worker.ready`, its scheduler and a real completed retention job. The 300-second worker
 grace period needs long-running retention/drain evidence before relying on it.
 
+The hourly worker compacts a bloated receipt primary key after recovery and project
+retention. `REINDEX INDEX CONCURRENTLY` requires table ownership, or the table's
+`MAINTAIN` privilege on PostgreSQL 17+ (see [REINDEX](https://www.postgresql.org/docs/17/sql-reindex.html)). A non-owner worker without that grant logs
+`ingest.receipt_index_compaction_failed` with code `42501`; recovery and retention
+continue. Dropping invalid `_ccnew`/`_ccold` reindex copies additionally requires
+ownership of the table/index (see [DROP INDEX](https://www.postgresql.org/docs/17/sql-dropindex.html)), so a maintenance-only role needs owner-assisted
+cleanup when a cancelled rebuild leaves a copy.
+
 ## Acceptance and rollback
 
 Use the [local port-forward, then operator-IP-only HTTPS window](cloud-ingress.md#fence-and-operator-acceptance-window)

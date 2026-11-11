@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
 
 // REINDEX CONCURRENTLY holds its own session for minutes; it belongs to the worker's hourly job, never to a request.
-it('the API server never references worker-only receipt index maintenance', () => {
+it('guards server call sites against worker-only receipt index maintenance', () => {
   const root = fileURLToPath(new URL('.', import.meta.url));
   const scanned: string[] = [];
   const offenders: string[] = [];

@@ -6,6 +6,7 @@ type CasResult = { found: number; changed: number; skipped: string[] };
 
 /** A receipt changed between the unlocked key seek and its row lock on every bounded retry. */
 export class IngestReceiptConflictError extends Error {
+  readonly code = 'LOGBIRD_INGEST_RECEIPT_CONFLICT';
   constructor(readonly operation: 'confirm' | 'expire') {
     super(`Ingest receipt ${operation} kept losing a concurrent row update`);
     this.name = 'IngestReceiptConflictError';

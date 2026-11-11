@@ -24,9 +24,8 @@ export const RECEIPT_INDEX_COMPACTION = {
 const LOCK_KEY = 'logbird:ingest-receipt-index-compaction';
 const quote = (identifier: string) => `"${identifier.replaceAll('"', '""')}"`;
 
-export type ReceiptIndexTarget = { schema: string; table: string; index: string; keyColumns: string[] };
+export type ReceiptIndexTarget = { schema?: string; table: string; index: string; keyColumns: string[] };
 export const INGEST_RECEIPT_PKEY: ReceiptIndexTarget = {
-  schema: 'public',
   table: 'IngestReceipt',
   index: 'IngestReceipt_pkey',
   keyColumns: ['projectId', 'eventId'],
@@ -53,14 +52,24 @@ async function connect() {
   const client = new pg.Client({
     connectionString: keys().DATABASE_URL,
     application_name: 'logbird-receipt-index-maintenance',
+    connectionTimeoutMillis: 5000,
     options: `-c statement_timeout=${RECEIPT_INDEX_COMPACTION.statementTimeoutMs} -c lock_timeout=${RECEIPT_INDEX_COMPACTION.lockTimeoutMs}`,
   });
-  await client.connect();
+  client.on('error', (error) => {
+    const code = 'code' in error ? String(error.code) : undefined;
+    console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_connection_failed', code }));
+  });
+  try {
+    await client.connect();
+  } catch (error) {
+    await client.end().catch(() => undefined);
+    throw error;
+  }
   return client;
 }
 
 /** An interrupted REINDEX CONCURRENTLY leaves an invalid copy that every write still maintains. */
-async function dropInvalidCopies(db: Queryable, target: ReceiptIndexTarget) {
+async function dropInvalidCopies(db: Queryable, target: ReceiptIndexTarget & { schema: string }) {
   const { rows } = await db.query<{ name: string }>(
     `SELECT c.relname name FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace
      WHERE i.indrelid=to_regclass($1) AND NOT i.indisvalid AND c.relname ~ ('^' || $2 || '_cc(new|old)[0-9]*$')`,
@@ -70,7 +79,7 @@ async function dropInvalidCopies(db: Queryable, target: ReceiptIndexTarget) {
   return rows.length;
 }
 
-async function indexPages(db: Queryable, target: ReceiptIndexTarget) {
+async function indexPages(db: Queryable, target: ReceiptIndexTarget & { schema: string }) {
   const { rows } = await db.query<{ pages: string }>('SELECT pg_relation_size(to_regclass($1))/8192 pages', [
     `${quote(target.schema)}.${quote(target.index)}`,
   ]);
@@ -82,7 +91,7 @@ async function indexPages(db: Queryable, target: ReceiptIndexTarget) {
  * advisory lock on its own connection; REINDEX CONCURRENTLY cannot run inside a transaction or a pooled Prisma call.
  */
 export async function compactIngestReceiptIndex({
-  target = INGEST_RECEIPT_PKEY,
+  target: requestedTarget = INGEST_RECEIPT_PKEY,
   db,
 }: {
   target?: ReceiptIndexTarget;
@@ -90,11 +99,18 @@ export async function compactIngestReceiptIndex({
 } = {}): Promise<ReceiptIndexCompaction> {
   const client = db ?? (await connect());
   let locked = false;
+  let lockKey: string = LOCK_KEY;
   try {
-    locked = (await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock(hashtext($1)) locked', [LOCK_KEY])).rows[0]?.locked === true;
+    const schema = requestedTarget.schema ?? (await client.query<{ schema: string }>('SELECT current_schema() AS schema')).rows[0]?.schema;
+    if (!schema) throw new Error('Receipt index schema is unavailable');
+    const target = { ...requestedTarget, schema };
+    // Isolate private integration targets while keeping workers on the same real index single-flight.
+    lockKey = `${LOCK_KEY}:${quote(schema)}.${quote(target.index)}`;
+    locked = (await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock(hashtext($1)) locked', [lockKey])).rows[0]?.locked === true;
     const pages = await indexPages(client, target);
     if (!locked) return { action: 'skipped_busy', indexPages: pages, droppedInvalid: 0 };
     const droppedInvalid = await dropInvalidCopies(client, target);
+    if (pages < RECEIPT_INDEX_COMPACTION.minPages) return { action: 'skipped_compact', indexPages: pages, droppedInvalid };
     const { rows } = await client.query<{ live: number; key_bytes: number | null }>(
       `SELECT greatest(c.reltuples, 0)::float8 live,
         (SELECT sum(s.avg_width)::float8 FROM pg_stats s WHERE s.schemaname=$1 AND s.tablename=$2 AND s.attname=ANY($3::text[])) key_bytes
@@ -106,7 +122,7 @@ export async function compactIngestReceiptIndex({
     if (!keyBytes) return { action: 'skipped_no_statistics', indexPages: pages, droppedInvalid };
     const neededPages = neededIndexPages(live, keyBytes);
     const ratio = Math.round((pages / neededPages) * 10) / 10;
-    if (pages < RECEIPT_INDEX_COMPACTION.minPages || pages < RECEIPT_INDEX_COMPACTION.bloatFactor * neededPages)
+    if (pages < RECEIPT_INDEX_COMPACTION.bloatFactor * neededPages)
       return { action: 'skipped_compact', indexPages: pages, neededPages, ratio, droppedInvalid };
     const started = Date.now();
     try {
@@ -126,7 +142,7 @@ export async function compactIngestReceiptIndex({
       droppedInvalid,
     };
   } finally {
-    if (locked) await client.query('SELECT pg_advisory_unlock(hashtext($1))', [LOCK_KEY]).catch(() => undefined);
+    if (locked) await client.query('SELECT pg_advisory_unlock(hashtext($1))', [lockKey]).catch(() => undefined);
     if (!db) await (client as pg.Client).end().catch(() => undefined);
   }
 }

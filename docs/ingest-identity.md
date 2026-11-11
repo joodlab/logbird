@@ -60,7 +60,10 @@ ids are sought again against the current version, up to three attempts. A renewe
 receipt drops out of the expiry re-seek because it no longer matches the cutoff;
 a concurrently changed receipt is confirmed with the requested identity. Counts
 that do not add up, or a conflict that persists for three attempts, raise
-`IngestReceiptConflictError` (a retryable 503 on the request path). Nothing on
+`IngestReceiptConflictError` (a retryable 503 with `Retry-After` on the request
+path). After an acknowledged insert it returns `ingest_pending`, preserving the
+claims and the usual pending indices/event ids; before insertion it returns
+`ingest_unavailable`. Nothing on
 today's request path writes the same receipt concurrently, so a retry is an
 anomaly, not a normal branch.
 
@@ -185,8 +188,9 @@ mark. Random-UUID leaf pages left half empty by a drained backlog stay in the in
 so only a rebuild restores a compact primary key. The hourly worker job therefore
 runs `compactIngestReceiptIndex`:
 
-- It runs only in the worker's hourly `retention.enforce` job. A unit test fails if
-  any API server source references it, so it never runs on the ingest path.
+- It runs last in the worker's hourly `retention.enforce` job, after abandoned-claim
+  recovery and project retention. A source-scan unit test guards server call sites
+  against references to it; this does not prove runtime process isolation.
 - It is single-flight across workers through a session advisory try-lock, and uses
   its own connection, because `REINDEX CONCURRENTLY` cannot run inside a transaction
   or a pooled Prisma call.
@@ -198,12 +202,23 @@ runs `compactIngestReceiptIndex`:
   about 4×.
 - The rebuild is online: reads and writes continue, and the new index is swapped
   in at the end. It is bounded by a 15-minute statement timeout and a one-minute
-  lock timeout.
+  lock timeout. Connection attempts have a five-second timeout; connection errors
+  are logged rather than emitted without a listener.
 - An interrupted rebuild's invalid `_ccnew`/`_ccold` copy is dropped concurrently,
   both before each run and after a failure.
 - It logs `ingest.receipt_index_compaction` with page counts, ratio and duration
   when it rebuilds or is busy, and `ingest.receipt_index_compaction_failed` with
-  only an error code. A failure never fails the retention job.
+  only an error code. A failure never fails the retention job. Both hourly and
+  per-project receipt-prune backstops are also best effort: a timeout or pool
+  failure logs `ingest.receipts_prune_failed` with its code and retention continues.
+
+The regular-table `receipt-index-maintenance.integration` fixtures use a unique
+private `qa_compaction_<uuid>` schema and drop it in `finally`. They exercise
+concurrent writer progress, rebuild sizing and validity, and invalid `_ccnew`
+cleanup after cancelling only their own reindex backend. The former temporary-table
+fixture covered rebuild sizing/validity, compact-index skipping and advisory-lock
+contention; Postgres reindexes temporary tables non-concurrently, so it did not
+establish concurrent writer progress or cancellation cleanup.
 
 A churn experiment backs both the job and its threshold. It used session-local temp
 tables with the receipt schema, 200,000 live receipts, 150 one-minute churn cycles
@@ -490,12 +505,18 @@ is itself read-fenced. Failed repairs are therefore surfaced in `/readyz` as
 non-failing details: `maintenance.failedIngestRepairs` reports `fencedProjects`
 (projects with a failed `ingest_repair`) and `oldestFailedAt`. Readiness is
 unauthenticated, so it reports counts only and never names a project. It is cached
-for 30 seconds per API process because RetentionRun history is never pruned. A
+for 30 seconds per API process because RetentionRun history is never pruned.
+Refreshes are single-flight, including after the 250 ms response deadline. The
+query itself uses a 200 ms statement timeout and a 100 ms lock timeout. A slow or
+failed refresh returns last-known counts with `stale: true`, or `{ unavailable: true }`
+when no counts are known; these details never change readiness status. A
 non-zero count means some project's reads return `503 retention_unavailable` until
 retention completes the repair. To list those projects, operators query
 `SELECT "projectId", max("startedAt") FROM "RetentionRun" WHERE kind='ingest_repair'
 AND status='failed' GROUP BY 1`. The `RetentionRun (projectId, kind, status)` index
-serves the per-project failed-repair checks, read fences and retention counts. Sample removal uses the same repair
+serves the per-project failed-repair checks, read fences and retention counts. It
+does not efficiently serve the global readiness filter without a leading project
+id; a partial index on failed ingest repairs is a separate follow-up. Sample removal uses the same repair
 fence. Workspace activity reads raw rows only, so its unused rollups need no Project
 read fence; its writes remain serialized by the workspace advisory lock.
 

@@ -19,9 +19,17 @@ export function logReceiptPrune(result: { removed: number; batches: number; limi
       }),
     );
 }
-export async function enforceProjectRetention(projectId: string) {
+export async function pruneReceiptBackstop(projectId?: string) {
   const pruneStarted = Date.now();
-  logReceiptPrune(await pruneIngestReceipts(projectId), Date.now() - pruneStarted, projectId);
+  try {
+    logReceiptPrune(await pruneIngestReceipts(projectId), Date.now() - pruneStarted, projectId);
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
+    console.error(JSON.stringify({ level: 'error', event: 'ingest.receipts_prune_failed', projectId, code }));
+  }
+}
+export async function enforceProjectRetention(projectId: string) {
+  await pruneReceiptBackstop(projectId);
   const current = await prisma.project.findUnique({ where: { id: projectId } });
   if (!current) return;
   const previewCutoff = new Date(Date.now() - current.retentionDays * 86_400_000);

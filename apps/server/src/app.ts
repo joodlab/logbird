@@ -20,6 +20,7 @@ import { dataRoutes, publicRoutes } from './data-routes';
 import { deleteFailureResponse } from './delete-errors';
 import { env } from './env';
 import { ApiError } from './errors';
+import { ingestReceiptFailureResponse } from './ingest-receipt-errors';
 import { invitationRoutes } from './invitation-routes';
 import { inviteLinkRoutes } from './invite-link-routes';
 import { authorizeMutation } from './middlewares/require-role';
@@ -81,6 +82,11 @@ app.onError((error, c) => {
 
   if (error instanceof QueryError)
     return c.json({ error: { code: 'invalid_query', message: error.message, details: queryErrorDetailsSchema.parse(error.details) } }, 422);
+  const receiptFailure = ingestReceiptFailureResponse(error);
+  if (receiptFailure) {
+    c.header('Retry-After', receiptFailure.retryAfter);
+    return c.json(receiptFailure.body, receiptFailure.status);
+  }
   if (error instanceof ApiError) {
     // Any error that knows when to retry says so (e.g. 503 maintenance_pending); these codes default to 1 s.
     if (

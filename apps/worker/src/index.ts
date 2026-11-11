@@ -1,60 +1,18 @@
-import { projectMaintenance } from '@logbird/clickhouse';
-import {
-  closeProjectLocks,
-  compactIngestReceiptIndex,
-  prisma,
-  pruneIngestReceipts,
-  sweepExpiredAuthRecords,
-  sweepIngestReceipts,
-} from '@logbird/database';
+import { closeProjectLocks, prisma, sweepExpiredAuthRecords, sweepIngestReceipts } from '@logbird/database';
 import { Queue, Worker } from 'bullmq';
 import { env } from './env';
-import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from './ingest-recovery';
+import { probeIngestRecovery } from './ingest-recovery';
 import { closeRetentionQueue, connection, retentionQueue, retentionQueueName } from './queue';
-import { clickhouse, enforceProjectRetention, logReceiptPrune } from './retention';
+import { clickhouse, enforceProjectRetention } from './retention';
+import { enforceRetention } from './retention-sweep';
 
 await probeIngestRecovery(clickhouse);
 const worker = new Worker(
   retentionQueueName,
   async (job) => {
     if (job.name === 'retention.project') await enforceProjectRetention(job.data.projectId);
-    else if (job.name === 'retention.enforce') {
-      const pruneStarted = Date.now();
-      logReceiptPrune(await pruneIngestReceipts(), Date.now() - pruneStarted); // Includes idle workspace audit streams.
-      // Hourly at most, worker only: rebuild a bloated receipt primary key online. Never fails the sweep.
-      try {
-        const compaction = await compactIngestReceiptIndex();
-        if (compaction.action !== 'skipped_compact')
-          console.log(
-            JSON.stringify({ level: compaction.action === 'reindexed' ? 'info' : 'warn', event: 'ingest.receipt_index_compaction', ...compaction }),
-          );
-      } catch (error) {
-        const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
-        console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_compaction_failed', code }));
-      }
-      const failures: unknown[] = [];
-      for (const pending of await prisma.ingestReceipt.findMany({
-        where: { confirmedAt: null },
-        distinct: ['projectId'],
-        select: { projectId: true },
-      })) {
-        try {
-          // Tagged per project: deletion can stop a recovery statement left running by a failed call.
-          await recoverProjectIngest(projectMaintenance(clickhouse, pending.projectId), pending.projectId);
-        } catch (error) {
-          logIngestRecoveryFailure(error, pending.projectId);
-          failures.push(error);
-        }
-      }
-      for (const project of await prisma.project.findMany({ select: { id: true } })) {
-        try {
-          await enforceProjectRetention(project.id);
-        } catch (error) {
-          failures.push(error);
-        }
-      }
-      if (failures.length) throw new AggregateError(failures, 'Retention sweep failed for some projects');
-    } else throw new Error('Unknown retention job');
+    else if (job.name === 'retention.enforce') await enforceRetention();
+    else throw new Error('Unknown retention job');
   },
   { connection, prefix: env.BULLMQ_PREFIX, concurrency: 1 },
 );

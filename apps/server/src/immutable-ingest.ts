@@ -25,6 +25,7 @@ import {
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
+import { ingestReceiptFailureResponse } from './ingest-receipt-errors';
 
 export type IngestCandidate = { index: number; input: unknown; row: EventRow };
 export const DUPLICATE_ID_CONFLICT =
@@ -101,7 +102,8 @@ async function claimEvents(projectId: string, organizationId: string, candidates
         expired.map((r) => r.eventId),
         cacheCutoff,
       );
-    } catch {
+    } catch (error) {
+      if (ingestReceiptFailureResponse(error)) throw error;
       throw new ApiError(503, 'ingest_unavailable', 'Event identity cache is unavailable. Retry this batch.');
     }
   }
@@ -246,6 +248,10 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
         eventAt: new Date(row.timestamp),
       })),
     );
+  } catch (error) {
+    const failure = ingestReceiptFailureResponse(error, keepClaims);
+    if (failure) throw new ApiError(failure.status, failure.body.error.code, failure.body.error.message, undefined, Number(failure.retryAfter));
+    throw error;
   } finally {
     if (!keepClaims) await releaseClaims(projectId, owned);
   }

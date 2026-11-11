@@ -1,5 +1,6 @@
 import { type ClickHouseClient, projectMaintenance, rebuildProjectRollups } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
+import { createFailedRepairStatus } from './failed-repair-status';
 import { enqueueProjectRetention } from './queue';
 
 export function heartbeatMaintenanceRun(runId: string) {
@@ -16,25 +17,18 @@ export function heartbeatMaintenanceRun(runId: string) {
  * completes the repair. Counts only: readiness is unauthenticated, so it never names a project. RetentionRun
  * history is never pruned and this filter has no leading project id, so probes share one cached read.
  */
-const FAILED_REPAIR_STATUS_TTL_MS = 30_000;
-let failedRepairs: { at: number; value: Promise<{ fencedProjects: number; oldestFailedAt: string | null }> } | undefined;
-export function failedRepairStatus(now = Date.now()) {
-  if (!failedRepairs || now - failedRepairs.at >= FAILED_REPAIR_STATUS_TTL_MS) {
-    const value = prisma.retentionRun
-      .groupBy({ by: ['projectId'], where: { kind: 'ingest_repair', status: 'failed' }, _min: { startedAt: true } })
-      .then((projects) => {
-        const oldest = Math.min(...projects.map((p) => p._min.startedAt?.getTime() ?? now));
-        return { fencedProjects: projects.length, oldestFailedAt: projects.length ? new Date(oldest).toISOString() : null };
-      });
-    const entry = { at: now, value };
-    failedRepairs = entry;
-    // Never cache a failure: the next probe retries.
-    value.catch(() => {
-      if (failedRepairs === entry) failedRepairs = undefined;
-    });
-  }
-  return failedRepairs.value;
-}
+export const failedRepairStatus = createFailedRepairStatus(() =>
+  prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT set_config('statement_timeout', '200ms', true), set_config('lock_timeout', '100ms', true)`;
+      const [row] = await tx.$queryRaw<{ fencedProjects: bigint; oldestFailedAt: Date | null }[]>`
+      SELECT count(DISTINCT "projectId") AS "fencedProjects", min("startedAt") AS "oldestFailedAt"
+      FROM "RetentionRun" WHERE kind='ingest_repair' AND status='failed'`;
+      return { fencedProjects: Number(row?.fencedProjects ?? 0), oldestFailedAt: row?.oldestFailedAt?.toISOString() ?? null };
+    },
+    { maxWait: 200, timeout: 500 },
+  ),
+);
 
 /** Caller holds EXCLUSIVE. Keep the durable read fence until every derived destination is rebuilt. */
 export async function rebuildProjectReadModel(client: ClickHouseClient, projectId: string) {

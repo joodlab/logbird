@@ -807,6 +807,15 @@ backstop can accumulate about 18 million between successful sweeps. Requests
 expire only their own requested ids in a bounded statement; fresh batches never
 drain unrelated backlog. See [receipt coordination](ingest-identity.md#coordination-and-identity).
 
+The hourly worker runs receipt-index compaction last, after recovery and project
+retention. `REINDEX INDEX CONCURRENTLY` requires the worker role to own the table
+(or have the table's `MAINTAIN` privilege on PostgreSQL 17+, as documented for
+[REINDEX](https://www.postgresql.org/docs/17/sql-reindex.html)). A non-owner role
+without that privilege logs `ingest.receipt_index_compaction_failed` with code
+`42501`; retention continues, but automatic compaction cannot proceed. The same
+worker must be permitted to [drop invalid reindex copies](https://www.postgresql.org/docs/17/sql-dropindex.html) (index ownership follows
+the table owner); a maintenance-only role may require the owner to clean those up.
+
 ## Disposable acceptance fixture
 
 For a disposable evaluation only, `scripts/selfhost-smoke.mjs` creates a fictional
