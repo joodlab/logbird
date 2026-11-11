@@ -372,7 +372,9 @@ Only individual proven failures become `invalid_event`, including a 202 with
 
 A 64-extra-statement cap, an isolation byte budget of four times the original
 batch's UTF-8 bytes (excluding statements before isolation starts), a ten-second isolation
-wall clock and the original lease's remaining 40-second finish budget bound the work.
+wall clock and the original lease's remaining 40-second finish budget bound the work. The wall clock
+is a scheduling budget: no statement starts after it, but one already in flight finishes within its
+own execution limits and the lease (claims kept), so isolation can overrun ten seconds by one statement.
 Rows are serialized once; subsets join cached JSON lines. Consecutive chunks fit the
 64 MiB async pin. All chunks share statement, byte, clock and lease budgets, with
 the byte budget computed over all rows. A single oversized row stays alone.

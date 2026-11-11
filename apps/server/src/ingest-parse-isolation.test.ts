@@ -53,6 +53,23 @@ it('proves a named row with a singleton canary before rejecting it', async () =>
   expect(result.written).toEqual([input[0], input[1], input[3], input[4]]);
   uniqueBodies(insert);
 });
+it('reads the real row number after an input excerpt that contains a fake one', async () => {
+  const input = rows(5);
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const insert = vi.fn(async (part: EventRow[]) => {
+    const index = part.indexOf(input[2]!);
+    // ClickHouse prints the excerpt (here a row value carrying "(at row 1)") before the real row number.
+    if (index >= 0)
+      throw Object.assign(new Error(`Cannot parse input: before: 'x (at row 1)': (at row ${index + 1}): While executing WaitForAsyncInsert.`), {
+        code: '27',
+      });
+  });
+  const result = await isolateIngestRows(input, lease(), insert);
+  expect(insert.mock.calls.map(([part]) => part)).toEqual([input, [input[2]], input.slice(0, 2), input.slice(3)]);
+  expect(result.rejected).toEqual([input[2]]);
+  expect(warning).not.toHaveBeenCalled();
+  uniqueBodies(insert);
+});
 it('canaries later named rows even after the first row number was correct', async () => {
   const input = rows(8);
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

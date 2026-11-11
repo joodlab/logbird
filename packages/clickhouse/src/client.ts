@@ -74,7 +74,8 @@ export function isPrewriteParseError(error: unknown, body?: string) {
     error instanceof Error &&
     'code' in error &&
     CLICKHOUSE_PARSE_ERROR_CODES.has(String(error.code)) &&
-    /\bWhile executing WaitForAsyncInsert\b/i.test(error.message) &&
+    // Read outside our own input excerpts, so row input can't impersonate the async path either.
+    /\bWhile executing WaitForAsyncInsert\b/i.test(withoutBodyExcerpts(error.message, body)) &&
     !isViewFailure(error, body)
   );
 }
@@ -109,9 +110,11 @@ const unescapeQuoted = (text: string) => text.replace(/\\(.)/g, (_, c: string) =
 function withoutBodyExcerpts(message: string, body?: string) {
   if (body === undefined) return message;
   let excerpts = 0;
-  return message.replace(INPUT_EXCERPT, (span, marker: string, text: string) =>
-    ++excerpts <= MAX_INPUT_EXCERPTS && (body.includes(text) || body.includes(unescapeQuoted(text))) ? `${marker}''` : span,
-  );
+  return message.replace(INPUT_EXCERPT, (span, marker: string, quoted: string) => {
+    // ClickHouse cuts an excerpt at a byte limit; a cut inside a UTF-8 character decodes as a trailing U+FFFD.
+    const text = quoted.replace(/�$/, '');
+    return ++excerpts <= MAX_INPUT_EXCERPTS && (body.includes(text) || body.includes(unescapeQuoted(text))) ? `${marker}''` : span;
+  });
 }
 function isViewFailure(error: unknown, body?: string) {
   if (!(error instanceof Error)) return false;

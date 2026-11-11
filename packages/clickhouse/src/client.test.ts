@@ -109,6 +109,20 @@ it.each<[string, string, (body: string) => string, boolean]>([
     (_body: string) => "Cannot parse value 'x(while pushing to view logbird.events_by_minute_mv)': While executing WaitForAsyncInsert.",
     false,
   ],
+  // Row input can't impersonate the async path: a sync-path failure quoting it stays ambiguous.
+  [
+    '6',
+    'x: While executing WaitForAsyncInsert.',
+    (_body: string) => "Cannot parse value 'x: While executing WaitForAsyncInsert.': While executing JSONEachRowRowInputFormat.",
+    true,
+  ],
+  // An excerpt cut inside a UTF-8 character ends in U+FFFD and is still recognized as our input.
+  [
+    '27',
+    'media.final_mv é',
+    (body: string) => `Cannot parse input: before: '${excerpt(body, 'media.final_mv').slice(0, -2)}�': While executing WaitForAsyncInsert.`,
+    false,
+  ],
   // A self-hoster's view in a database whose name needs backticks.
   ['25', 'unrelated', (_body: string) => 'Parse failed in `my-db`.audit_copy_mv: While executing WaitForAsyncInsert.', true],
 ])('classifies code %s with event value %j quoted in the error', async (code, value, render, ambiguous) => {

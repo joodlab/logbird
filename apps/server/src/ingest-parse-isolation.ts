@@ -48,7 +48,9 @@ export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number
       else await visit(part);
       return;
     }
-    const match = error instanceof Error ? /\(at row (\d+)\)/i.exec(error.message) : null;
+    // ClickHouse prints the input excerpt before the real "(at row N)", so a row value can only add earlier matches:
+    // take the last one. A wrong number would still be caught by the canary.
+    const match = error instanceof Error ? ([...error.message.matchAll(/\(at row (\d+)\)/gi)].at(-1) ?? null) : null;
     const index = match ? Number(match[1]) - 1 : -1;
     if (trustRowNumbers && Number.isSafeInteger(index) && index >= 0 && index < part.length) {
       const named = part[index] as EventRow;

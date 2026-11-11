@@ -51,8 +51,9 @@ choose their own SMTP provider).
 The hosted instance is planned on Coolify behind Cloudflare at `logbird.joodlab.com` after the repository is open-sourced. Provisioning and deployment remain separate steps.
 
 Ingestion path (v0): `POST /v1/events` → validate/normalize → ClickHouse `INSERT` with
-`async_insert=1, wait_for_async_insert=1` (ack only after ClickHouse has the rows) → 202. Large batches are
-inserted in one statement. A Postgres/queue buffer can be added later behind the same API.
+`async_insert=1, wait_for_async_insert=1` (ack only after ClickHouse has the rows) → 202. A batch is
+inserted in one statement, or in consecutive statements of at most 64 MiB each (the async-insert pin); a
+parse failure adds bounded isolation statements. A Postgres/queue buffer can be added later behind the same API.
 
 Ingestion reserves immutable ids in Postgres before ClickHouse writes. Confirmed
 receipts form a ten-minute cache; older ids use the additive `event_ids` MergeTree
@@ -138,8 +139,9 @@ Semantics worth documenting to users:
   Healthy siblings return in `ids`; individually proven offending indices appear
   in `rejected` with `code: invalid_event`, including a 202 with `accepted: 0` when
   all events fail. A 64-extra-statement cap, a four-original-body UTF-8 byte budget
-  for additional statements, ten-second wall clock and original lease bound
-  isolation. Rows are serialized once; subset statements join cached lines. Consecutive chunks
+  for additional statements, a ten-second wall clock and the original lease bound
+  isolation. The clock is a scheduling budget: no statement starts after it, but one already in flight
+  finishes within its own execution limits and the lease, with its claims kept. Rows are serialized once; subset statements join cached lines. Consecutive chunks
   fit the 64 MiB async pin, sharing all limits and a byte budget computed over all rows.
   A single row larger than the pin stays alone and its parse failure remains ambiguous.
   Unchecked, proven-unwritten rows release their claims. Clients declaring exactly
