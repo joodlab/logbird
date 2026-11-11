@@ -87,12 +87,25 @@ export async function claimIngestReceipts(
   } catch (error) {
     // During REINDEX CONCURRENTLY an invalid ccnew index still enforces uniqueness,
     // but ON CONFLICT cannot use it as an arbiter. The whole statement rolls back.
-    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-    const meta = error && typeof error === 'object' && 'meta' in error ? error.meta : undefined;
-    if (code === 'P2002' || code === '23505' || (code === 'P2010' && meta && typeof meta === 'object' && 'code' in meta && meta.code === '23505'))
-      throw new IngestReceiptConflictError('claim');
+    if (isUniqueViolation(error)) throw new IngestReceiptConflictError('claim');
     throw error;
   }
+}
+
+const field = (value: unknown, key: string): unknown =>
+  value && typeof value === 'object' && key in value ? (value as Record<string, unknown>)[key] : undefined;
+/**
+ * True for a Postgres unique violation (23505) in any shape Prisma surfaces it. With Prisma 7 and adapter-pg a raw
+ * query fails as P2010 carrying `meta.driverAdapterError.cause` ({ kind: 'UniqueConstraintViolation', originalCode });
+ * model queries use P2002; a bare driver error carries code 23505.
+ */
+export function isUniqueViolation(error: unknown) {
+  const code = field(error, 'code');
+  if (code === 'P2002' || code === '23505') return true;
+  const meta = field(error, 'meta');
+  if (field(meta, 'code') === '23505') return true;
+  const cause = field(field(meta, 'driverAdapterError'), 'cause');
+  return field(cause, 'originalCode') === '23505' || field(cause, 'kind') === 'UniqueConstraintViolation';
 }
 
 /** Ready replays retain the first receipt clock. Fence only rows actually claimed for an INSERT.

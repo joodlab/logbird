@@ -76,7 +76,8 @@ async function connect() {
 async function dropInvalidCopies(db: Queryable, target: ReceiptIndexTarget & { schema: string }) {
   const { rows } = await db.query<{ name: string }>(
     `SELECT c.relname name FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace
-     WHERE i.indrelid=to_regclass($1) AND NOT i.indisvalid AND c.relname ~ ('^' || $2 || '_cc(new|old)[0-9]*$')`,
+     WHERE i.indrelid=to_regclass($1) AND NOT i.indisvalid
+       AND left(c.relname, length($2)) = $2 AND substr(c.relname, length($2) + 1) ~ '^_cc(new|old)[0-9]*$'`,
     [`${quote(target.schema)}.${quote(target.table)}`, target.index],
   );
   for (const { name } of rows) await db.query(`DROP INDEX CONCURRENTLY IF EXISTS ${quote(target.schema)}.${quote(name)}`);

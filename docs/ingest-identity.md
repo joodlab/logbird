@@ -220,8 +220,10 @@ runs `compactIngestReceiptIndex`:
 
 During REINDEX CONCURRENTLY, the not-yet-valid `_ccnew` unique index still enforces
 uniqueness but cannot arbitrate `INSERT ... ON CONFLICT`. Concurrent claims for the
-same project/event can therefore raise a unique violation (23505, surfaced by Prisma
-as P2002 or a raw-query P2010). The atomic claim statement rolls back, so this attempt
+same project/event can therefore raise a unique violation (23505). With Prisma 7 and
+adapter-pg the raw claim query surfaces it as P2010 with
+`meta.driverAdapterError.cause.originalCode = '23505'`; `isUniqueViolation` also accepts
+P2002 and bare 23505, and a real-Postgres test proves the adapter shape. The atomic claim statement rolls back, so this attempt
 holds no claims. Logbird returns retryable `503 ingest_unavailable` with `Retry-After: 1`.
 
 The regular-table `receipt-index-maintenance.integration` fixtures use a unique
@@ -537,8 +539,9 @@ waiter returns without rebuilding, and retention owns the recovery.
 Settings lastRun includes only kind=retention, and the retention status endpoint
 is itself read-fenced. Failed repairs are therefore surfaced in `/readyz` as
 non-failing details: `maintenance.failedIngestRepairs` reports `fencedProjects`
-(projects with a failed `ingest_repair`) and `oldestFailedAt`. Readiness is
-unauthenticated, so it reports counts only and never names a project. It is cached
+(projects with a failed `ingest_repair`), plus `stale` when the details are older than
+the cache. Readiness is unauthenticated, so it reports the count only, with no timestamps,
+and never names a project. Operators find the failed runs in `RetentionRun`. It is cached
 for 30 seconds per API process because RetentionRun history is never pruned.
 Refreshes are single-flight, including after the 250 ms response deadline. The
 query itself uses a 200 ms statement timeout and a 100 ms lock timeout. A slow or

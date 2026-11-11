@@ -218,7 +218,7 @@ it('retention that completes a failed repair also settles its receipts, so the r
   expect(ready.status).toBe(200);
   const { maintenance } = await ready.json();
   expect(maintenance.failedIngestRepairs.fencedProjects).toBeGreaterThanOrEqual(1);
-  expect(Date.parse(maintenance.failedIngestRepairs.oldestFailedAt)).not.toBeNaN();
+  expect(maintenance.failedIngestRepairs).not.toHaveProperty('oldestFailedAt');
   expect(JSON.stringify(maintenance)).not.toContain(f.project);
 
   await enforceProjectRetention(f.project);

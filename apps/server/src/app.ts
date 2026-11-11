@@ -199,7 +199,10 @@ app.get('/readyz', async (c) => {
     failedRepairStatus().catch(() => ({ unavailable: true })),
   ]);
   // Non-failing details: a fenced project needs operator attention, not removal of this replica from routing.
-  return c.json({ status: ready ? 'ok' : 'degraded', audit, maintenance: { failedIngestRepairs: repairs } }, ready ? 200 : 503);
+  // Unauthenticated, so only the cross-tenant count is public (no timestamps, never a project id).
+  const failedIngestRepairs =
+    'fencedProjects' in repairs ? { fencedProjects: repairs.fencedProjects, ...('stale' in repairs ? { stale: repairs.stale } : {}) } : repairs;
+  return c.json({ status: ready ? 'ok' : 'degraded', audit, maintenance: { failedIngestRepairs } }, ready ? 200 : 503);
 });
 app.get(
   '/health',

@@ -69,6 +69,8 @@ async function withFixture(
   let created = false;
   const minPages = RECEIPT_INDEX_COMPACTION.minPages;
   const setupStarted = Date.now();
+  let failure: unknown;
+  let cleanupFailure: unknown;
   try {
     for (const client of clients) {
       await client.connect();
@@ -81,7 +83,13 @@ async function withFixture(
     console.info(JSON.stringify({ event: 'qa.compaction_schemas_before', schemas: before, rows }));
     for (const name of before) {
       const createdAt = Number(SCHEMA_PATTERN.exec(name)?.[1]);
-      if (createdAt && Date.now() - createdAt > 60 * 60_000) await observer.query(`DROP SCHEMA IF EXISTS "${name}" CASCADE`);
+      if (!createdAt || Date.now() - createdAt <= 60 * 60_000) continue;
+      // One stuck stale schema must not abort this run: log it and let a later sweep retry.
+      try {
+        await observer.query(`DROP SCHEMA IF EXISTS "${name}" CASCADE`);
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'qa.compaction_stale_drop_failed', schema: name, error: String(error) }));
+      }
     }
     await db.query(`CREATE SCHEMA "${schema}"`);
     created = true;
@@ -98,12 +106,22 @@ async function withFixture(
     Object.assign(RECEIPT_INDEX_COMPACTION, { minPages: 1 });
     console.info(JSON.stringify({ event: 'qa.compaction_setup', schema, rows, setupDurationMs: Date.now() - setupStarted }));
     await work({ db, writer, observer, table, target, pid });
+  } catch (error) {
+    failure = error;
   } finally {
     Object.assign(RECEIPT_INDEX_COMPACTION, { minPages });
     try {
       // Release fixture-owned transactions/locks even if a rollback query would fail.
       await Promise.allSettled([db.end(), writer.end()]);
-      if (created) await observer.query(`DROP SCHEMA "${schema}" CASCADE`);
+      if (created) {
+        // The polling timeout (2 s) must not cut the drop short while a cancelled rebuild finishes server-side.
+        await observer.query('SET statement_timeout = 120000');
+        await observer.query(`DROP SCHEMA "${schema}" CASCADE`);
+      }
+    } catch (error) {
+      // Logged and rethrown below only if the test itself passed, so it never masks the original failure.
+      cleanupFailure = error;
+      console.error(JSON.stringify({ event: 'qa.compaction_cleanup_failed', schema, error: String(error) }));
     } finally {
       try {
         if (connected.includes(observer))
@@ -113,6 +131,8 @@ async function withFixture(
       }
     }
   }
+  if (failure !== undefined) throw failure;
+  if (cleanupFailure !== undefined) throw cleanupFailure;
 }
 
 async function waitForWriterPhase(observer: pg.Client, pid: number) {

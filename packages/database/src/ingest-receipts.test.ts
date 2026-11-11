@@ -27,7 +27,14 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-it.each([{ code: 'P2002' }, { code: '23505' }, { code: 'P2010', meta: { code: '23505' } }])(
+it.each([
+  { code: 'P2002' },
+  { code: '23505' },
+  { code: 'P2010', meta: { code: '23505' } },
+  // Prisma 7 + adapter-pg raw query shape (rethrowAsUserFacingRawError).
+  { code: 'P2010', meta: { driverAdapterError: { cause: { kind: 'UniqueConstraintViolation', originalCode: '23505' } } } },
+  { code: 'P2010', meta: { driverAdapterError: { cause: { originalCode: '23505' } } } },
+])(
   'turns claim uniqueness failures into retryable receipt conflicts (%j)',
   async (error) => {
     query.mockRejectedValueOnce(error);
@@ -47,8 +54,10 @@ it.each([{ code: 'P2002' }, { code: '23505' }, { code: 'P2010', meta: { code: '2
   },
 );
 
-it('preserves unrelated claim failures', async () => {
-  const error = { code: 'P2010', meta: { code: '57014' } };
+it.each([
+  { code: 'P2010', meta: { code: '57014' } },
+  { code: 'P2010', meta: { driverAdapterError: { cause: { kind: 'postgres', originalCode: '57014' } } } },
+])('preserves unrelated claim failures (%j)', async (error) => {
   query.mockRejectedValueOnce(error);
   await expect(
     claimIngestReceipts('qa-project', 'qa-org', [
