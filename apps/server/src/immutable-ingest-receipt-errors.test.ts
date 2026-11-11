@@ -53,6 +53,14 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
+it('returns a retryable unavailable mapping without holding claims when the claim statement conflicts', async () => {
+  fake.claim.mockRejectedValueOnce(conflict());
+  const error = await insertImmutableEvents('qa-project', 'qa-org', candidates).catch((error: unknown) => error);
+  expect(ingestReceiptFailureResponse(error)).toMatchObject({ status: 503, retryAfter: '1', body: { error: { code: 'ingest_unavailable' } } });
+  expect(fake.release).not.toHaveBeenCalled();
+  expect(fake.insert).not.toHaveBeenCalled();
+});
+
 it('keeps acknowledged claims and reports the usual pending indices and Retry-After', async () => {
   const error = await insertImmutableEvents('qa-project', 'qa-org', candidates).catch((error: unknown) => error);
   expect(error).toBeInstanceOf(ApiError);

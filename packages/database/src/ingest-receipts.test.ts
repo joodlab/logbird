@@ -8,6 +8,7 @@ vi.mock('./index', async () => ({
 }));
 
 import {
+  claimIngestReceipts,
   confirmIngestReceipts,
   expireIngestReceipts,
   findIngestReceipts,
@@ -25,6 +26,43 @@ beforeEach(() => {
   transaction.mockImplementation((run) => (typeof run === 'function' ? run({ $executeRaw: execute }) : Promise.all(run)));
 });
 afterEach(() => vi.restoreAllMocks());
+
+it.each([{ code: 'P2002' }, { code: '23505' }, { code: 'P2010', meta: { code: '23505' } }])(
+  'turns claim uniqueness failures into retryable receipt conflicts (%j)',
+  async (error) => {
+    query.mockRejectedValueOnce(error);
+    await expect(
+      claimIngestReceipts('qa-project', 'qa-org', [
+        {
+          eventId: 'qa-event',
+          fingerprint: 'v1:qa',
+          receivedAt: new Date(0),
+          eventAt: new Date(0),
+          confirmedAt: null,
+          claimedAt: new Date(0),
+        },
+      ]),
+    ).rejects.toMatchObject({ code: 'LOGBIRD_INGEST_RECEIPT_CONFLICT', operation: 'claim' });
+    expect(query).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('preserves unrelated claim failures', async () => {
+  const error = { code: 'P2010', meta: { code: '57014' } };
+  query.mockRejectedValueOnce(error);
+  await expect(
+    claimIngestReceipts('qa-project', 'qa-org', [
+      {
+        eventId: 'qa-event',
+        fingerprint: 'v1:qa',
+        receivedAt: new Date(0),
+        eventAt: new Date(0),
+        confirmedAt: null,
+        claimedAt: new Date(0),
+      },
+    ]),
+  ).rejects.toBe(error);
+});
 
 it('empty lookups and confirmations do no SQL; receipt reads preserve the returned clocks', async () => {
   expect(await findIngestReceipts('project', [])).toEqual([]);

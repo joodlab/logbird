@@ -10,7 +10,7 @@ export function ingestReceiptFailureResponse(error: unknown, acknowledged = fals
         code: acknowledged ? 'ingest_pending' : 'ingest_unavailable',
         message: acknowledged
           ? 'Storage accepted this write but receipt confirmation is unresolved. Retry this batch.'
-          : 'Event identity cache changed concurrently. Retry this batch.',
+          : 'Event identity cache changed concurrently. Retry this operation.',
       },
     },
   };

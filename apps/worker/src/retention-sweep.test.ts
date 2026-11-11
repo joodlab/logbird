@@ -71,3 +71,32 @@ it('attempts compaction after failed project work and preserves the essential fa
   expect(fake.compact).toHaveBeenCalledTimes(1);
   expect(console.error).toHaveBeenCalledWith(expect.stringContaining('"event":"ingest.receipt_index_compaction_failed","code":"42501"'));
 });
+
+it('continues fan-out and compaction after the pending-project query fails', async () => {
+  const error = Object.assign(new Error('qa pool unavailable'), { code: 'P2024' });
+  fake.pending.mockRejectedValueOnce(error);
+  await expect(enforceRetention()).rejects.toMatchObject({ errors: [error] });
+  expect(fake.recover).not.toHaveBeenCalled();
+  expect(fake.lock).toHaveBeenCalledWith('qa-project', expect.any(Function));
+  expect(fake.compact).toHaveBeenCalledTimes(1);
+  expect(console.error).toHaveBeenCalledWith(JSON.stringify({ level: 'error', event: 'ingest.pending_projects_failed', code: 'P2024' }));
+});
+
+it('preserves recovery and runs compaction after the project-list query fails', async () => {
+  const error = Object.assign(new Error('qa pool unavailable'), { code: 'P2024' });
+  fake.projects.mockRejectedValueOnce(error);
+  await expect(enforceRetention()).rejects.toMatchObject({ errors: [error] });
+  expect(fake.recover).toHaveBeenCalledWith({}, 'qa-pending');
+  expect(fake.lock).not.toHaveBeenCalled();
+  expect(fake.compact).toHaveBeenCalledTimes(1);
+  expect(console.error).toHaveBeenCalledWith(JSON.stringify({ level: 'error', event: 'retention.projects_failed', code: 'P2024' }));
+});
+
+it.each(['skipped_missing', 'skipped_no_statistics'])('logs %s as a warning', async (action) => {
+  vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  fake.compact.mockResolvedValueOnce({ action, indexPages: 0, droppedInvalid: 0 });
+  await enforceRetention();
+  expect(console.log).toHaveBeenCalledWith(
+    JSON.stringify({ level: 'warn', event: 'ingest.receipt_index_compaction', action, indexPages: 0, droppedInvalid: 0 }),
+  );
+});

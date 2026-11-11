@@ -1,12 +1,40 @@
 import { randomUUID } from 'node:crypto';
+import { statfs } from 'node:fs/promises';
+import { freemem } from 'node:os';
 import { setTimeout as pause } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { expect, it, vi } from 'vitest';
 import { compactIngestReceiptIndex, RECEIPT_INDEX_COMPACTION } from './receipt-index-maintenance';
 
 vi.setConfig({ testTimeout: 300_000 });
 
-/** Regular tables exercise REINDEX CONCURRENTLY; the former temp fixture only proved rebuild sizing/validity. */
+/**
+ * OPT-IN ONLY: LOGBIRD_RECEIPT_COMPACTION_IT=1 and DATABASE_URL must be set.
+ * LOGBIRD_RECEIPT_COMPACTION_ROWS defaults to 200000 (integer, 100000..400000).
+ * Real regular tables exercise REINDEX CONCURRENTLY in a test-owned schema only.
+ * Prechecks require 5 GiB free RAM and 10 GiB free disk on the repository drive.
+ * The production 64 MiB gate is unit-tested; this fixture lowers only that gate
+ * to avoid growing the local WSL disk. An open writer holds the observed REINDEX
+ * barrier, so cancellation needs neither a huge fixture nor a fixed sleep.
+ * Names carry creation milliseconds, like the #144 auth-record sweep. Only exact
+ * qa_compaction_<13-digit timestamp>_<32 hex uuid> names older than 1h are swept.
+ * Manual cleanup (psql, inspect generated commands before using \gexec):
+ * SELECT format('DROP SCHEMA %I CASCADE;', nspname) FROM pg_namespace
+ * WHERE nspname ~ '^qa_compaction_[0-9]{13}_[0-9a-f]{32}$'
+ * AND substring(nspname from '^qa_compaction_([0-9]{13})_')::bigint
+ *     < extract(epoch FROM clock_timestamp() - interval '1 hour') * 1000;
+ * Legacy qa_compaction_<uuid> names have no age proof: inspect them manually.
+ */
+const SCHEMA_PATTERN = /^qa_compaction_(\d{13})_[0-9a-f]{32}$/;
+const enabled = process.env.LOGBIRD_RECEIPT_COMPACTION_IT === '1';
+
+async function listSchemas(db: pg.Client) {
+  return (
+    await db.query<{ name: string }>("SELECT nspname AS name FROM pg_namespace WHERE starts_with(nspname, 'qa_compaction_') ORDER BY nspname")
+  ).rows.map(({ name }) => name);
+}
+
 async function withFixture(
   work: (fixture: {
     db: pg.Client;
@@ -17,7 +45,15 @@ async function withFixture(
     pid: number;
   }) => Promise<void>,
 ) {
-  const schema = `qa_compaction_${randomUUID().replaceAll('-', '')}`;
+  if (!process.env.DATABASE_URL) throw new Error('Compaction integration test requires DATABASE_URL');
+  const rows = Number(process.env.LOGBIRD_RECEIPT_COMPACTION_ROWS ?? 200_000);
+  if (!Number.isInteger(rows) || rows < 100_000 || rows > 400_000)
+    throw new Error('LOGBIRD_RECEIPT_COMPACTION_ROWS must be an integer between 100000 and 400000');
+  if (freemem() < 5 * 1024 ** 3) throw new Error('Compaction integration test requires at least 5 GiB free RAM; nothing was created');
+  const disk = await statfs(fileURLToPath(new URL('../../../', import.meta.url)), { bigint: true });
+  if (disk.bavail * disk.bsize < 10n * 1024n ** 3n)
+    throw new Error('Compaction integration test requires at least 10 GiB free disk on the repository drive; nothing was created');
+  const schema = `qa_compaction_${Date.now()}_${randomUUID().replaceAll('-', '')}`;
   const table = `"${schema}"."IngestReceipt"`;
   const clients = ['reindex', 'writer', 'observer'].map(
     (role) =>
@@ -29,31 +65,53 @@ async function withFixture(
       }),
   );
   const [db, writer, observer] = clients as [pg.Client, pg.Client, pg.Client];
+  const connected: pg.Client[] = [];
   let created = false;
+  const minPages = RECEIPT_INDEX_COMPACTION.minPages;
+  const setupStarted = Date.now();
   try {
-    await Promise.all(clients.map((client) => client.connect()));
+    for (const client of clients) {
+      await client.connect();
+      connected.push(client);
+      // Session SETs take precedence over options embedded in DATABASE_URL.
+      await client.query('SET statement_timeout = 120000');
+      await client.query('SET lock_timeout = 10000');
+    }
+    const before = await listSchemas(observer);
+    console.info(JSON.stringify({ event: 'qa.compaction_schemas_before', schemas: before, rows }));
+    for (const name of before) {
+      const createdAt = Number(SCHEMA_PATTERN.exec(name)?.[1]);
+      if (createdAt && Date.now() - createdAt > 60 * 60_000) await observer.query(`DROP SCHEMA IF EXISTS "${name}" CASCADE`);
+    }
     await db.query(`CREATE SCHEMA "${schema}"`);
     created = true;
     await db.query(`CREATE TABLE ${table} (
       "projectId" text NOT NULL, "eventId" text NOT NULL,
       CONSTRAINT "IngestReceipt_pkey" PRIMARY KEY ("projectId", "eventId"))`);
-    await db.query(`INSERT INTO ${table} SELECT 'qa-compaction-project', gen_random_uuid()::text FROM generate_series(1, 800000)`);
+    await db.query(`INSERT INTO ${table} SELECT 'qa-compaction-project', gen_random_uuid()::text FROM generate_series(1, $1::int)`, [rows]);
     await db.query(`DELETE FROM ${table} WHERE ctid NOT IN (SELECT ctid FROM ${table} LIMIT 10000)`);
     await db.query(`VACUUM ANALYZE ${table}`);
     await writer.query("SET statement_timeout = '2s'");
     await observer.query("SET statement_timeout = '2s'");
     const pid = (await db.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]?.pid as number;
     const target = { schema, table: 'IngestReceipt', index: 'IngestReceipt_pkey', keyColumns: ['projectId', 'eventId'] };
+    Object.assign(RECEIPT_INDEX_COMPACTION, { minPages: 1 });
+    console.info(JSON.stringify({ event: 'qa.compaction_setup', schema, rows, setupDurationMs: Date.now() - setupStarted }));
     await work({ db, writer, observer, table, target, pid });
   } finally {
-    await writer.query('ROLLBACK').catch(() => undefined);
-    if (created) {
-      await observer.query("SET lock_timeout = '5s'").catch(() => undefined);
-      await observer.query(`DROP SCHEMA "${schema}" CASCADE`).catch((error: unknown) => {
-        console.error(JSON.stringify({ event: 'qa.compaction_cleanup_failed', schema, code: (error as { code?: string }).code }));
-      });
+    Object.assign(RECEIPT_INDEX_COMPACTION, { minPages });
+    try {
+      // Release fixture-owned transactions/locks even if a rollback query would fail.
+      await Promise.allSettled([db.end(), writer.end()]);
+      if (created) await observer.query(`DROP SCHEMA "${schema}" CASCADE`);
+    } finally {
+      try {
+        if (connected.includes(observer))
+          console.info(JSON.stringify({ event: 'qa.compaction_schemas_after', schemas: await listSchemas(observer), rows }));
+      } finally {
+        await observer.end();
+      }
     }
-    await Promise.allSettled(clients.map((client) => client.end()));
   }
 }
 
@@ -86,7 +144,7 @@ async function finishRebuild(writer: pg.Client, observer: pg.Client, pid: number
   await rebuilding.catch(() => undefined);
 }
 
-it.runIf(process.env.DATABASE_URL)('rebuilds a private index with concurrent writer progress, then skips it', async () => {
+it.runIf(enabled)('rebuilds a private index with concurrent writer progress, then skips it', async () => {
   await withFixture(async ({ db, writer, observer, table, target, pid }) => {
     await writer.query('BEGIN');
     await writer.query(`INSERT INTO ${table} VALUES ('qa-writer', 'qa-before')`);
@@ -99,6 +157,14 @@ it.runIf(process.env.DATABASE_URL)('rebuilds a private index with concurrent wri
       await observer.query(`INSERT INTO ${table} VALUES ('qa-writer', 'qa-during')`);
       await writer.query('COMMIT');
       const rebuilt = await rebuilding;
+      console.info(
+        JSON.stringify({
+          event: 'qa.compaction_rebuild',
+          rebuildDurationMs: rebuilt.durationMs,
+          indexPages: rebuilt.indexPages,
+          pagesAfter: rebuilt.pagesAfter,
+        }),
+      );
       expect(rebuilt).toMatchObject({ action: 'reindexed', droppedInvalid: 0 });
       expect(rebuilt.indexPages).toBeGreaterThanOrEqual(RECEIPT_INDEX_COMPACTION.minPages);
       expect(rebuilt.pagesAfter).toBeLessThan((rebuilt.neededPages as number) * 2);
@@ -115,10 +181,11 @@ it.runIf(process.env.DATABASE_URL)('rebuilds a private index with concurrent wri
   });
 });
 
-it.runIf(process.env.DATABASE_URL)('cleans the invalid ccnew copy left by cancelling its own concurrent rebuild', async () => {
+it.runIf(enabled)('cleans the invalid ccnew copy left by cancelling its own concurrent rebuild', async () => {
   await withFixture(async ({ db, writer, observer, table, target, pid }) => {
     await writer.query('BEGIN');
     await writer.query(`INSERT INTO ${table} VALUES ('qa-writer', 'qa-cancel')`);
+    const started = Date.now();
     const rebuilding = compactIngestReceiptIndex({ db, target });
     const outcome = rebuilding.then(
       () => null,
@@ -128,9 +195,11 @@ it.runIf(process.env.DATABASE_URL)('cleans the invalid ccnew copy left by cancel
       await waitForWriterPhase(observer, pid);
       expect(await invalidCopies(observer, table)).toHaveLength(1);
       expect((await observer.query('SELECT pg_cancel_backend($1) cancelled', [pid])).rows[0]?.cancelled).toBe(true);
+      console.info(JSON.stringify({ event: 'qa.compaction_cancel', cancelTimingMs: Date.now() - started, pid }));
       // Concurrent DROP also waits on this writer; release it before awaiting cancellation cleanup.
       await writer.query('ROLLBACK');
       expect(await outcome).toMatchObject({ code: '57014' });
+      console.info(JSON.stringify({ event: 'qa.compaction_cancelled_rebuild', rebuildDurationMs: Date.now() - started }));
       expect(await invalidCopies(observer, table)).toEqual([]);
       await writer.query(`INSERT INTO ${table} VALUES ('qa-writer', 'qa-after-cancel')`);
       const validity = await observer.query('SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass($1)', [

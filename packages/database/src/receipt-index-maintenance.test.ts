@@ -14,7 +14,9 @@ vi.mock('pg', () => ({
     },
   },
 }));
-vi.mock('./keys', () => ({ keys: () => ({ DATABASE_URL: 'postgresql://fixture.invalid/qa' }) }));
+vi.mock('./keys', () => ({
+  keys: () => ({ DATABASE_URL: 'postgresql://fixture.invalid/qa?options=-c%20statement_timeout%3D0&application_name=qa-url' }),
+}));
 
 import { compactIngestReceiptIndex, INGEST_RECEIPT_PKEY, neededIndexPages, RECEIPT_INDEX_COMPACTION } from './receipt-index-maintenance';
 
@@ -26,15 +28,17 @@ function fakeDb(state: {
   keyBytes: number | null;
   invalid?: string[];
   reindexFails?: boolean;
+  missingTable?: boolean;
+  missingIndex?: boolean;
 }) {
   const pages = [...state.pages];
   const calls: string[] = [];
   const query = vi.fn(async (sql: string) => {
     calls.push(sql);
     let rows: Row[] = [];
-    if (sql.includes('current_schema()')) rows = [{ schema: 'qa_current' }];
+    if (sql.includes('n.nspname AS schema')) rows = state.missingTable ? [] : [{ schema: 'qa_current' }];
     else if (sql.includes('pg_try_advisory_lock')) rows = [{ locked: state.locked ?? true }];
-    else if (sql.includes('pg_relation_size')) rows = [{ pages: String(pages.length > 1 ? pages.shift() : pages[0]) }];
+    else if (sql.includes('pg_relation_size')) rows = [{ pages: state.missingIndex ? null : String(pages.length > 1 ? pages.shift() : pages[0]) }];
     else if (sql.includes('NOT i.indisvalid')) rows = (state.invalid ?? []).map((name) => ({ name }));
     else if (sql.includes('reltuples')) rows = [{ live: state.live, key_bytes: state.keyBytes }];
     else if (sql.startsWith('REINDEX') && state.reindexFails)
@@ -109,6 +113,34 @@ it('scopes the maintenance lock to its target so private fixtures never lock the
   const key = 'logbird:ingest-receipt-index-compaction:"qa_compaction_fixture"."IngestReceipt_pkey"';
   expect(query).toHaveBeenCalledWith(expect.stringContaining('pg_try_advisory_lock'), [key]);
   expect(query).toHaveBeenCalledWith(expect.stringContaining('pg_advisory_unlock'), [key]);
+});
+
+it.each(['missingTable', 'missingIndex'] as const)('reports %s distinctly instead of a compact index', async (missing) => {
+  const { db, calls, query } = fakeDb({ pages: [0], live: 0, keyBytes: null, [missing]: true });
+  expect(await compactIngestReceiptIndex({ db })).toEqual({ action: 'skipped_missing', indexPages: 0, droppedInvalid: 0 });
+  expect(query).toHaveBeenCalledWith(expect.stringContaining('WHERE c.oid=to_regclass($1)'), ['"IngestReceipt"']);
+  expect(calls.some((sql) => sql.includes('current_schema()') || sql.startsWith('REINDEX'))).toBe(false);
+});
+
+it('sets session bounds and identification after connecting and before any REINDEX despite URL overrides', async () => {
+  connection.connect.mockResolvedValue(undefined);
+  const { query, calls } = fakeDb({ pages: [RECEIPT_INDEX_COMPACTION.minPages * 10, 1000], live: 1000, keyBytes: 60 });
+  connection.query.mockImplementation(query);
+  await compactIngestReceiptIndex();
+  expect(connection.connect.mock.invocationCallOrder[0]).toBeLessThan(connection.query.mock.invocationCallOrder[0] as number);
+  expect(calls.slice(0, 3)).toEqual([
+    'SET statement_timeout = 900000',
+    'SET lock_timeout = 60000',
+    "SET application_name = 'logbird-receipt-index-maintenance'",
+  ]);
+  expect(calls.findIndex((sql) => sql.startsWith('REINDEX'))).toBeGreaterThan(2);
+});
+
+it('closes the session if applying a timeout fails', async () => {
+  connection.connect.mockResolvedValue(undefined);
+  connection.query.mockRejectedValueOnce(new Error('SET failed'));
+  await expect(compactIngestReceiptIndex()).rejects.toThrow('SET failed');
+  expect(connection.end).toHaveBeenCalledTimes(1);
 });
 
 it('bounds connection attempts and closes a failed attempt', async () => {

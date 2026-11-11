@@ -4,11 +4,11 @@ import { Prisma, prisma } from './index';
 type ReceiptIdentity = { eventId: string; fingerprint: string; receivedAt: Date; eventAt: Date };
 type CasResult = { found: number; changed: number; skipped: string[] };
 
-/** A receipt changed between the unlocked key seek and its row lock on every bounded retry. */
+/** A receipt claim or bounded CAS lost to concurrent index/row maintenance. */
 export class IngestReceiptConflictError extends Error {
   readonly code = 'LOGBIRD_INGEST_RECEIPT_CONFLICT';
-  constructor(readonly operation: 'confirm' | 'expire') {
-    super(`Ingest receipt ${operation} kept losing a concurrent row update`);
+  constructor(readonly operation: 'claim' | 'confirm' | 'expire') {
+    super(`Ingest receipt ${operation} conflicted with concurrent maintenance`);
     this.name = 'IngestReceiptConflictError';
   }
 }
@@ -69,7 +69,8 @@ export async function claimIngestReceipts(
   db: Pick<Prisma.TransactionClient, '$queryRaw'> = prisma,
 ) {
   if (!claims.length) return [];
-  return db.$queryRaw<import('./generated/client').IngestReceipt[]>(Prisma.sql`
+  try {
+    return await db.$queryRaw<import('./generated/client').IngestReceipt[]>(Prisma.sql`
     WITH claimed AS (INSERT INTO "IngestReceipt" ("projectId","organizationId","eventId","fingerprint","receivedAt","eventAt","confirmedAt","claimedAt")
     SELECT ${projectId},${organizationId},v.id,v.fingerprint,v.received,v.event,v.confirmed,v.claimed
     FROM unnest(${claims.map((r) => r.eventId)}::text[], ${claims.map((r) => r.fingerprint)}::text[],
@@ -83,6 +84,15 @@ export async function claimIngestReceipts(
         AND "receivedBefore">=(SELECT min("receivedAt") FROM claimed WHERE "confirmedAt" IS NULL)
       RETURNING id)
     SELECT * FROM claimed`);
+  } catch (error) {
+    // During REINDEX CONCURRENTLY an invalid ccnew index still enforces uniqueness,
+    // but ON CONFLICT cannot use it as an arbiter. The whole statement rolls back.
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+    const meta = error && typeof error === 'object' && 'meta' in error ? error.meta : undefined;
+    if (code === 'P2002' || code === '23505' || (code === 'P2010' && meta && typeof meta === 'object' && 'code' in meta && meta.code === '23505'))
+      throw new IngestReceiptConflictError('claim');
+    throw error;
+  }
 }
 
 /** Ready replays retain the first receipt clock. Fence only rows actually claimed for an INSERT.

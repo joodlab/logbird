@@ -225,6 +225,8 @@ model RetentionRun {
   error         String?
 
   @@index([projectId, startedAt])
+  // Raw-SQL-only partial index RetentionRun_failed_ingest_repair is maintained in
+  // 20261111120000_retention_run_failed_ingest_repair; do not replace it with a full index.
   @@index([projectId, kind, status])
 }
 

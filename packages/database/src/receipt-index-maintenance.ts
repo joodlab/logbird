@@ -32,7 +32,7 @@ export const INGEST_RECEIPT_PKEY: ReceiptIndexTarget = {
 };
 
 export type ReceiptIndexCompaction = {
-  action: 'skipped_busy' | 'skipped_no_statistics' | 'skipped_compact' | 'reindexed';
+  action: 'skipped_busy' | 'skipped_missing' | 'skipped_no_statistics' | 'skipped_compact' | 'reindexed';
   indexPages: number;
   neededPages?: number;
   ratio?: number;
@@ -61,6 +61,10 @@ async function connect() {
   });
   try {
     await client.connect();
+    // URL options override pg's constructor config. Apply bounds to the connected session.
+    await client.query(`SET statement_timeout = ${RECEIPT_INDEX_COMPACTION.statementTimeoutMs}`);
+    await client.query(`SET lock_timeout = ${RECEIPT_INDEX_COMPACTION.lockTimeoutMs}`);
+    await client.query("SET application_name = 'logbird-receipt-index-maintenance'");
   } catch (error) {
     await client.end().catch(() => undefined);
     throw error;
@@ -80,10 +84,10 @@ async function dropInvalidCopies(db: Queryable, target: ReceiptIndexTarget & { s
 }
 
 async function indexPages(db: Queryable, target: ReceiptIndexTarget & { schema: string }) {
-  const { rows } = await db.query<{ pages: string }>('SELECT pg_relation_size(to_regclass($1))/8192 pages', [
+  const { rows } = await db.query<{ pages: string | null }>('SELECT pg_relation_size(to_regclass($1))/8192 pages', [
     `${quote(target.schema)}.${quote(target.index)}`,
   ]);
-  return Number(rows[0]?.pages ?? 0);
+  return rows[0]?.pages == null ? null : Number(rows[0].pages);
 }
 
 /**
@@ -101,13 +105,21 @@ export async function compactIngestReceiptIndex({
   let locked = false;
   let lockKey: string = LOCK_KEY;
   try {
-    const schema = requestedTarget.schema ?? (await client.query<{ schema: string }>('SELECT current_schema() AS schema')).rows[0]?.schema;
-    if (!schema) throw new Error('Receipt index schema is unavailable');
+    const schema =
+      requestedTarget.schema ??
+      (
+        await client.query<{ schema: string }>(
+          'SELECT n.nspname AS schema FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.oid=to_regclass($1)',
+          [quote(requestedTarget.table)],
+        )
+      ).rows[0]?.schema;
+    if (!schema) return { action: 'skipped_missing', indexPages: 0, droppedInvalid: 0 };
     const target = { ...requestedTarget, schema };
     // Isolate private integration targets while keeping workers on the same real index single-flight.
     lockKey = `${LOCK_KEY}:${quote(schema)}.${quote(target.index)}`;
     locked = (await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock(hashtext($1)) locked', [lockKey])).rows[0]?.locked === true;
     const pages = await indexPages(client, target);
+    if (pages === null) return { action: 'skipped_missing', indexPages: 0, droppedInvalid: 0 };
     if (!locked) return { action: 'skipped_busy', indexPages: pages, droppedInvalid: 0 };
     const droppedInvalid = await dropInvalidCopies(client, target);
     if (pages < RECEIPT_INDEX_COMPACTION.minPages) return { action: 'skipped_compact', indexPages: pages, droppedInvalid };
@@ -137,7 +149,7 @@ export async function compactIngestReceiptIndex({
       indexPages: pages,
       neededPages,
       ratio,
-      pagesAfter: await indexPages(client, target),
+      pagesAfter: (await indexPages(client, target)) ?? undefined,
       durationMs: Date.now() - started,
       droppedInvalid,
     };

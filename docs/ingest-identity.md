@@ -205,20 +205,54 @@ runs `compactIngestReceiptIndex`:
   lock timeout. Connection attempts have a five-second timeout; connection errors
   are logged rather than emitted without a listener.
 - An interrupted rebuild's invalid `_ccnew`/`_ccold` copy is dropped concurrently,
-  both before each run and after a failure.
+  both before each run and after a failure. This includes an operator's in-progress
+  manual rebuild: pause the worker before running REINDEX CONCURRENTLY manually.
 - It logs `ingest.receipt_index_compaction` with page counts, ratio and duration
-  when it rebuilds or is busy, and `ingest.receipt_index_compaction_failed` with
+  when it rebuilds (`info`), is busy, lacks analyzed key widths
+  (`skipped_no_statistics`, `warn`), or cannot resolve its table/index
+  (`skipped_missing`, `warn`), and `ingest.receipt_index_compaction_failed` with
   only an error code. A failure never fails the retention job. Both hourly and
   per-project receipt-prune backstops are also best effort: a timeout or pool
   failure logs `ingest.receipts_prune_failed` with its code and retention continues.
+  A failed pending-project or project-list query logs `ingest.pending_projects_failed`
+  or `retention.projects_failed`, respectively. Remaining phases still run, including
+  compaction; essential phase failures are reported together at the end.
+
+During REINDEX CONCURRENTLY, the not-yet-valid `_ccnew` unique index still enforces
+uniqueness but cannot arbitrate `INSERT ... ON CONFLICT`. Concurrent claims for the
+same project/event can therefore raise a unique violation (23505, surfaced by Prisma
+as P2002 or a raw-query P2010). The atomic claim statement rolls back, so this attempt
+holds no claims. Logbird returns retryable `503 ingest_unavailable` with `Retry-After: 1`.
 
 The regular-table `receipt-index-maintenance.integration` fixtures use a unique
-private `qa_compaction_<uuid>` schema and drop it in `finally`. They exercise
+private `qa_compaction_<creation-ms>_<uuid>` schema and drop it in `finally`. They exercise
 concurrent writer progress, rebuild sizing and validity, and invalid `_ccnew`
 cleanup after cancelling only their own reindex backend. The former temporary-table
 fixture covered rebuild sizing/validity, compact-index skipping and advisory-lock
 contention; Postgres reindexes temporary tables non-concurrently, so it did not
 establish concurrent writer progress or cancellation cleanup.
+
+These fixtures are opt-in (`LOGBIRD_RECEIPT_COMPACTION_IT=1`, plus `DATABASE_URL`).
+They require at least 5 GiB free RAM and 10 GiB free disk on the repository drive
+before connecting or creating anything. The row count defaults to 200,000;
+`LOGBIRD_RECEIPT_COMPACTION_ROWS` accepts integers from 100,000 to 400,000.
+Only the 64 MiB size gate is lowered in these fixtures (covered separately by unit
+tests); the real bloat threshold and concurrent rebuild remain exercised. An open
+writer holds the observed REINDEX barrier until cancellation, avoiding fixed sleeps
+and oversized fixtures. JSON logs record rows, setup/rebuild/cancel timing and schemas
+before/after. Startup sweeps only exact timestamped test names older than one hour.
+For manual cleanup, inspect the generated commands before executing them in psql:
+
+```sql
+SELECT format('DROP SCHEMA %I CASCADE;', nspname) FROM pg_namespace
+WHERE nspname ~ '^qa_compaction_[0-9]{13}_[0-9a-f]{32}$'
+AND substring(nspname from '^qa_compaction_([0-9]{13})_')::bigint
+    < extract(epoch FROM clock_timestamp() - interval '1 hour') * 1000;
+-- After inspection, use psql's \gexec to run the generated commands.
+```
+
+Legacy `qa_compaction_<uuid>` schemas have no creation timestamp; inspect ownership
+and inactivity manually before removing any of them.
 
 A churn experiment backs both the job and its threshold. It used session-local temp
 tables with the receipt schema, 200,000 live receipts, 150 one-minute churn cycles
@@ -516,7 +550,14 @@ retention completes the repair. To list those projects, operators query
 AND status='failed' GROUP BY 1`. The `RetentionRun (projectId, kind, status)` index
 serves the per-project failed-repair checks, read fences and retention counts. It
 does not efficiently serve the global readiness filter without a leading project
-id; a partial index on failed ingest repairs is a separate follow-up. Sample removal uses the same repair
+id. The additive `RetentionRun_failed_ingest_repair` partial index on
+`(projectId, startedAt) WHERE kind='ingest_repair' AND status='failed'` covers the
+global readiness query's literal predicates and aggregate columns, without indexing
+all historical runs. The bounded timeouts still apply. This is the first raw-SQL-only
+partial index in these Prisma migrations; existing receipt sweep indexes are full
+indexes represented in `schema.prisma`. The partial index is recorded only in its
+migration (and a schema comment), so inspect future `migrate dev`/diff output and
+preserve it if a generated migration proposes a drop or replacement. Sample removal uses the same repair
 fence. Workspace activity reads raw rows only, so its unused rollups need no Project
 read fence; its writes remain serialized by the workspace advisory lock.
 

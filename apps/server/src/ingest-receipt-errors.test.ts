@@ -16,3 +16,8 @@ it('leaves other failures to their existing handlers', () => {
   expect(ingestReceiptFailureResponse(null)).toBeNull();
   expect(ingestReceiptFailureResponse({ code: '57014' })).toBeNull();
 });
+
+it('uses context-neutral retry wording for sample removal and other non-ingest operations', () => {
+  const response = ingestReceiptFailureResponse({ code: 'LOGBIRD_INGEST_RECEIPT_CONFLICT' });
+  expect(response?.body.error.message).toBe('Event identity cache changed concurrently. Retry this operation.');
+});
