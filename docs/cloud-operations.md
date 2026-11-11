@@ -358,8 +358,8 @@ primary key on its own queue and worker (concurrency 1, one attempt), so recover
 and project retention can continue during a rebuild. `REINDEX INDEX CONCURRENTLY`
 requires table ownership, or the table's
 `MAINTAIN` privilege on PostgreSQL 17+ (see [REINDEX](https://www.postgresql.org/docs/17/sql-reindex.html)). A non-owner worker without that grant logs
-`ingest.receipt_index_compaction_failed` with code `42501`; recovery and retention
-continue. Dropping invalid `_ccnew`/`_ccold` reindex copies additionally requires
+`ingest.receipt_index_compaction_failed` with code `42501` once the index qualifies for a rebuild
+(smaller indexes skip silently); recovery and retention continue. Dropping invalid `_ccnew`/`_ccold` reindex copies additionally requires
 ownership of the table/index (see [DROP INDEX](https://www.postgresql.org/docs/17/sql-dropindex.html)), so a maintenance-only role needs owner-assisted
 cleanup when a cancelled rebuild leaves a copy; until then runs report `skipped_invalid_copy` once per 24-hour
 back-off.

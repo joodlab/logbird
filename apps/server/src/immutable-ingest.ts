@@ -253,9 +253,17 @@ function classifyCandidates(
 
 /** Insert owns release before send and on definite failure. Unproven write outcomes retain the lease. */
 async function persistRows(projectId: string, rows: EventRow[], owned: Map<string, IngestReceipt>, fingerprint: (row: EventRow) => string) {
+  const empty = { written: [], rejected: [], pending: [], unavailable: [], unresolved: [], limited: false, unconfirmed: false };
   if (!rows.length) {
-    await releaseClaimsSafely(projectId, owned);
-    return { written: [], rejected: [], pending: [], unavailable: [], unresolved: [], limited: false, unconfirmed: false };
+    try {
+      await releaseClaims(projectId, owned);
+    } catch (error) {
+      logClaimReleaseFailure(error);
+      if (!isDatabaseFailure(error)) throw error;
+      // Nothing to insert: every row is already settled (confirmed elsewhere or terminally rejected), so a held claim
+      // can't change any result. Keep the settled response; recovery clears the claims after their lease.
+    }
+    return empty;
   }
   const releasable = new Map(owned);
   let persisted: Awaited<ReturnType<typeof isolateIngestRows>> & { unconfirmed: boolean };

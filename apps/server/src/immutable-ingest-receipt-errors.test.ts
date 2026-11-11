@@ -170,7 +170,7 @@ it.each([
   );
 });
 
-it.each(['claim', 'classify', 'empty', 'insert'] as const)('maps a failed claim release at %s to a retryable 503 and logs it', async (site) => {
+it.each(['claim', 'classify', 'empty', 'insert'] as const)('handles and logs a failed claim release at %s', async (site) => {
   fake.release.mockRejectedValueOnce(prismaFailure('P2024'));
   if (site === 'claim') {
     // Claim one id, then fail while reloading a competing id.
@@ -184,9 +184,11 @@ it.each(['claim', 'classify', 'empty', 'insert'] as const)('maps a failed claim 
   }
   const batch = site === 'claim' ? [...candidates, { ...candidates[0], row: { ...candidates[0]?.row, event_id: 'qa-competitor' } }] : candidates;
   const error = await insertImmutableEvents('qa-project', 'qa-org', batch as IngestCandidate[]).catch((error: unknown) => error);
-  // After parse isolation (#150) has an outcome, a failed release keeps it: the row whose claim stays held is pending,
-  // with a lease-aware Retry-After. Before any outcome exists, the release failure is the retryable 503 itself.
+  // Once an outcome exists, a failed release keeps it. After an insert, the row whose claim stays held is pending, with a
+  // lease-aware Retry-After. With nothing to insert, every row is settled, so the settled response stands. Before any
+  // outcome exists (claim, classification), the release failure is the retryable 503 itself.
   if (site === 'insert') expect(error).toMatchObject({ status: 503, code: 'ingest_pending', retryAfter: 90, details: { indices: [3] } });
+  else if (site === 'empty') expect(error).toEqual({ ids: [], rejected: [expect.objectContaining({ index: 3, code: 'stored_event_unreadable' })] });
   else expect(error).toMatchObject({ status: 503, code: 'ingest_unavailable', retryAfter: 1 });
   expect(fake.release).toHaveBeenCalledTimes(1);
   expect(console.error).toHaveBeenCalledWith(
@@ -206,7 +208,8 @@ it('preserves the original ApiError when classification and release both fail an
 });
 
 it.each(['57014', '55P03'])('maps the real P2039 model-query wrapper at releaseClaims/deleteMany (%s) to retryable unavailable', async (sqlstate) => {
-  fake.claim.mockResolvedValueOnce([{ ...receipt, fingerprint: 'unreadable:qa' }]);
+  // A classification failure releases before any outcome exists, so the release failure is the response itself.
+  fake.claim.mockResolvedValueOnce([{ ...receipt, eventAt: new Date(Number.NaN) }]);
   fake.release.mockRejectedValueOnce(
     new PrismaClientKnownRequestError('qa database failure', {
       code: 'P2039',

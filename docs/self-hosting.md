@@ -812,7 +812,10 @@ drain unrelated backlog. See [receipt coordination](ingest-identity.md#coordinat
 
 The worker's `DATABASE_URL` must be a direct, session-mode connection (not a
 transaction-mode pooler such as PgBouncer in transaction mode): compaction relies on one
-session for its advisory lock, session settings, backend pid and REINDEX.
+session for its advisory lock, session settings, backend pid and REINDEX. Keep
+PostgreSQL's `track_activities` on (the default): shutdown only cancels a rebuild that
+`pg_stat_activity` shows as this session's active REINDEX; without it, shutdown falls back to
+closing the socket, and on PostgreSQL before 14 the rebuild then runs on until its timeout.
 The worker runs receipt-index compaction on its own hourly queue and worker with
 concurrency 1 and one attempt, so retention retries never repeat it and queued
 recovery/fence-lifting jobs can run during a rebuild. On shutdown a separate
@@ -838,7 +841,9 @@ must return no rows. The release notes say when a migration touches that table. 
 (or have the table's `MAINTAIN` privilege on PostgreSQL 17+, as documented for
 [REINDEX](https://www.postgresql.org/docs/17/sql-reindex.html)). A non-owner role
 without that privilege logs `ingest.receipt_index_compaction_failed` with code
-`42501`; retention continues, but automatic compaction cannot proceed. The same
+`42501` on each hourly run once the index qualifies for a rebuild (at least 64 MiB and three
+times its live size); below that, runs skip silently, so a missing log line doesn't prove the
+role is sufficient. Retention continues, but automatic compaction cannot proceed. The same
 worker must be permitted to [drop invalid reindex copies](https://www.postgresql.org/docs/17/sql-dropindex.html) (index ownership follows
 the table owner); a maintenance-only role may require the owner to clean those up. Until the owner
 drops such a copy, runs report `skipped_invalid_copy` at warn level once per 24-hour back-off instead of
