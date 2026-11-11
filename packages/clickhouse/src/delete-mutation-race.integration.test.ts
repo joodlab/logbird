@@ -32,7 +32,7 @@ it.runIf(process.env.LOGBIRD_MUTATION_RACE_STRESS === '1' && process.env.CLICKHO
     if (!Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > 20)
       throw new Error('LOGBIRD_MUTATION_RACE_ROUNDS must be an integer from 1 to 20');
     const started = Date.now();
-    const ch = createClient({
+    const raw = createClient({
       url: process.env.CLICKHOUSE_URL,
       database: process.env.CLICKHOUSE_DATABASE,
       username: process.env.CLICKHOUSE_USER,
@@ -41,6 +41,20 @@ it.runIf(process.env.LOGBIRD_MUTATION_RACE_STRESS === '1' && process.env.CLICKHO
       // One socket per concurrent DELETE: the @clickhouse/client default pool (10) would queue the burst.
       max_open_connections: CONCURRENCY,
       clickhouse_settings: { max_execution_time: STATEMENT_SECONDS },
+    });
+    // deleteAndVerify passes its own probe budget (60 s); clamp every statement back to the stress cap, so the server
+    // stops a stalled statement as well as the socket.
+    const capped = <T extends { clickhouse_settings?: object }>(params: T) => ({
+      ...params,
+      clickhouse_settings: { ...params.clickhouse_settings, max_execution_time: STATEMENT_SECONDS },
+    });
+    const ch = new Proxy(raw, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop);
+        if (prop === 'query' || prop === 'command' || prop === 'insert')
+          return (params: { clickhouse_settings?: object }) => (value as (p: unknown) => unknown).call(target, capped(params));
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
     });
     const run = randomUUID().slice(0, 8);
     const projects = Array.from({ length: CONCURRENCY }, (_, i) => `qa95-race-${run}-${i}`);

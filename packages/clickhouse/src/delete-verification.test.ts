@@ -55,8 +55,15 @@ it.each([
     expect(args.query_id.startsWith(maintenanceQueryPrefix('qa95-retry'))).toBe(true);
   }
   expect(new Set(command.mock.calls.map(([args]) => args.query_id)).size).toBe(attempts);
-  // The probe gets the maintenance budget: a filter outside the sort key scans the whole project.
-  for (const [args] of query.mock.calls) expect(args.clickhouse_settings.max_execution_time).toBe(60);
+  // The probe binds exactly the DELETE's predicate and params, with the maintenance budget (a filter outside the sort
+  // key scans the whole project).
+  for (const [args] of query.mock.calls) {
+    expect(args.query).toBe(
+      'SELECT count() n FROM (SELECT 1 FROM entities WHERE project_id={p:String} AND (entity_id IN {ids:Array(String)}) LIMIT 1)',
+    );
+    expect(args.query_params).toEqual({ p: 'qa95-retry', ids: ['private-value-not-for-logs'] });
+    expect(args.clickhouse_settings.max_execution_time).toBe(60);
+  }
   // Backoff between attempts: 50 ms, then 100 ms.
   expect(sleep.mock.calls.map(([, ms]) => ms)).toEqual([50, 100].slice(0, attempts - 1));
   expect(console.warn).toHaveBeenCalledTimes(attempts - 1);
@@ -145,18 +152,6 @@ it('rejects a caller-supplied params.p before any statement', async () => {
   await expect(
     deleteAndVerify({ command, query } as unknown as ClickHouseClient, 'qa95-a', 'events', 'event_id={id:String}', { p: 'qa95-b', id: 'x' }),
   ).rejects.toThrow(/binds p to projectId/);
-  expect(command).not.toHaveBeenCalled();
-  expect(query).not.toHaveBeenCalled();
-});
-
-it.each(['cutoff', 'from', 'since'])('rejects the read() date key %s before any statement', async (key) => {
-  const command = vi.fn();
-  const query = vi.fn();
-  await expect(
-    deleteAndVerify({ command, query } as unknown as ClickHouseClient, 'qa95-a', 'events', `timestamp < {${key}:DateTime64(3)}`, {
-      [key]: '2026-11-07 00:00:00.000',
-    }),
-  ).rejects.toThrow(`read() date keys: ${key}`);
   expect(command).not.toHaveBeenCalled();
   expect(query).not.toHaveBeenCalled();
 });

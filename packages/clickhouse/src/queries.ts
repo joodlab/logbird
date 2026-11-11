@@ -39,8 +39,6 @@ async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }, no
 }
 
 type Params = Record<string, unknown>;
-// read() re-parses these string params as dates (UTC normalization) before binding them.
-const READ_DATE_KEYS = ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff', 'exportReceivedBefore'] as const;
 export type ExportExecution = { signal: AbortSignal; cancelQuery: (queryId: string) => Promise<void> };
 export async function read<T>(
   ch: ClickHouseClient,
@@ -51,7 +49,7 @@ export async function read<T>(
   execution?: ExportExecution,
 ): Promise<T[]> {
   const query_params = { ...parameters };
-  for (const key of READ_DATE_KEYS) {
+  for (const key of ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff', 'exportReceivedBefore']) {
     const value = query_params[key];
     if (typeof value === 'string') query_params[key] = new Date(value).toISOString().replace('T', ' ').slice(0, -1);
   }
@@ -637,10 +635,6 @@ export async function deleteAndVerify(
   { logIncomplete = true }: { logIncomplete?: boolean } = {},
 ) {
   if ('p' in params) throw new Error('deleteAndVerify binds p to projectId itself; do not pass params.p');
-  // The DELETE binds params verbatim but the probe goes through read(), which rewrites these keys: the two would test
-  // different predicates.
-  const rewritten = READ_DATE_KEYS.filter((key) => key in params);
-  if (rewritten.length) throw new Error(`deleteAndVerify params must not use read() date keys: ${rewritten.join(', ')}`);
   const predicate = `project_id={p:String}${filter ? ` AND (${filter})` : ''}`;
   const bound = { ...params, p: projectId };
   const ch = projectMaintenance(client, projectId);
@@ -653,9 +647,17 @@ export async function deleteAndVerify(
     // Concurrent non-replicated mutations can register out of order and skip rows.
     // Retry with a fresh mutation version, but still fail closed for restored parts
     // that outrank every attempt. Completion alone never proves deletion.
-    // A filter outside the sort key (sample-data `source`) scans the whole project once nothing matches: give the
-    // maintenance probe a roomier budget than read()'s 10 s default.
-    const rows = await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`, bound, 60);
+    // The probe binds exactly the DELETE's params (not through read(), which rewrites date keys and turns a timeout
+    // into a 422 query-budget error). A filter outside the sort key (sample-data `source`) scans the whole project once
+    // nothing matches, so it gets a maintenance budget; a storage error or timeout propagates as a retryable 503.
+    const rows = await (
+      await ch.query({
+        query: `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`,
+        query_params: bound,
+        format: 'JSONEachRow',
+        clickhouse_settings: { max_execution_time: 60 },
+      })
+    ).json<{ n: number }>();
     if (Number(rows[0]?.n ?? 0) === 0) return;
     if (attempt < DELETE_ATTEMPTS) {
       console.warn(JSON.stringify({ level: 'warn', event: 'clickhouse.delete_retry', table, projectId, attempt: attempt + 1 }));
@@ -677,11 +679,12 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
   // Every statement is tagged as this project's maintenance, whoever the caller is (see maintenance-tag.ts).
   const ch = projectMaintenance(client, p);
   // Caller serializes ingestion. Capture only aggregate keys touched by expired rows.
-  const params = {
-    p,
+  // deleteAndVerify binds p itself; only the affected-key read and the rollup INSERT take it here.
+  const cutoffParams = {
     before: before?.toISOString().replace('T', ' ').slice(0, -1),
     bucket: before ? new Date(Math.floor(before.getTime() / 60_000) * 60_000).toISOString().replace('T', ' ').slice(0, -1) : undefined,
   };
+  const params = { p, ...cutoffParams };
   const affected = before
     ? await read<{ kind: string; id: string }>(
         ch,
@@ -695,7 +698,6 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
       )
     : [];
   const cutoff = before ? 'timestamp < {before:DateTime64(3)}' : '';
-  const { p: _p, ...cutoffParams } = params;
   await deleteAndVerify(ch, p, 'events', cutoff, cutoffParams);
   await deleteAndVerify(ch, p, 'event_ids', cutoff, cutoffParams);
   // The required 007/008 migration repairs collapsed legacy pointers once before rollout.
@@ -708,13 +710,12 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
     entities: '(kind,entity_id) IN arrayZip({kinds:Array(String)},{entityIds:Array(String)})',
     attribute_keys: 'key IN {keys:Array(String)}',
   };
-  const scoped = {
-    ...params,
+  const scopedParams = {
+    ...cutoffParams,
     kinds: affected.filter((r) => r.kind !== 'attribute').map((r) => r.kind),
     entityIds: affected.filter((r) => r.kind !== 'attribute').map((r) => r.id),
     keys: affected.filter((r) => r.kind === 'attribute').map((r) => r.id),
   };
-  const { p: _scopedP, ...scopedParams } = scoped;
   for (const [table, filter] of Object.entries(filters)) await deleteAndVerify(ch, p, table, filter, scopedParams);
   // Recompute the boundary minute and affected entity/key histories exactly; newer buckets stay intact.
   for (const statement of rollupSql.split(';')) {
@@ -723,7 +724,7 @@ export async function purgeProject(client: ClickHouseClient, p: string, before?:
     const table = m[1] as keyof typeof filters;
     await ch.command({
       query: `INSERT INTO ${table} SELECT * FROM (${m[2]}) WHERE project_id={p:String} AND ${filters[table]}`,
-      query_params: scoped,
+      query_params: { ...scopedParams, p },
     });
   }
 }

@@ -425,11 +425,12 @@ Transient [concurrent-mutation skips](https://github.com/ClickHouse/ClickHouse/p
 are retried automatically with a fresh DELETE, up to three total attempts (logged as
 `clickhouse.delete_retry`). If the error still appears, retry the operation (retention
 runs again on its own). Only a failure that persists on a natively restored database
-needs the normalization procedure below. Every fail-closed delete, from the worker, the API
-server (sample-data removal, project deletion) or a script, logs one
+needs the normalization procedure below. Every verified delete that fails closed (worker
+retention and repair, API sample-data removal and project deletion, `demo-clean`) logs one
 `clickhouse.delete_incomplete` line with the table and project; the API answers 503 with
-`Retry-After`. The non-fatal stale-pointer cleanup logs only its own warning. Ingest recovery or sample-data removal logs
-`clickhouse.event_index_stale_pointers` when it cannot delete stale identity pointers.
+`Retry-After`. The non-fatal stale-pointer cleanup logs only its own warning: ingest
+recovery or sample-data removal logs `clickhouse.event_index_stale_pointers` when it cannot
+delete stale identity pointers.
 The pinned 26.9 line has no upstream fix for that race; ClickHouse 26.10 and later include it.
 Moving the pin is tracked in [#147](https://github.com/joodlab/logbird/issues/147).
 **Live verification of the packaged guard and retry after normalization is pending
@@ -548,8 +549,8 @@ and mutations share one block counter, so it compares only *mutated* parts
 `data_version = min_block_number`) with the newest mutation each table received during the
 gate. A table that has mutated parts but received no gate mutation (for example because no
 restored row had expired yet) cannot be checked this way, so it also reports
-`blocks_cutover = 1`. Only finished gate mutations count, so wait for pending ones (or treat
-a stuck one as blocking). No output means no table has mutated parts. The check assumes a
+`blocks_cutover = 1`. Only finished gate mutations count: `pending_gate_mutations` shows
+how many are still running, so wait for them (or treat a stuck one as blocking). No output means no table has mutated parts. The check assumes a
 restored part can outrank new mutations only through its mutation version, as observed so
 far; the mandatory normalization (`TRUNCATE` + `INSERT`) removes the case entirely, and live
 verification of restored parts is tracked in [#77](https://github.com/joodlab/logbird/issues/77).
@@ -558,12 +559,17 @@ verification of restored parts is tracked in [#77](https://github.com/joodlab/lo
 cat > .tmp/backups/mutation-versions.sql <<SQL
 SELECT p.table,
        max(p.data_version) AS mutated_part_version,
-       maxOrNull(m.version) AS newest_gate_mutation,
+       any(m.done_version) AS newest_gate_mutation,
+       ifNull(any(m.pending), 0) AS pending_gate_mutations,
        newest_gate_mutation IS NULL OR mutated_part_version > newest_gate_mutation AS blocks_cutover
 FROM (SELECT table, data_version FROM system.parts
       WHERE database = 'logbird' AND active AND data_version > min_block_number) p
-LEFT JOIN (SELECT table, toUInt64(extract(mutation_id, '(\d+)')) AS version FROM system.mutations
-           WHERE database = 'logbird' AND is_done AND create_time >= parseDateTimeBestEffort('$GATE_STARTED')) m ON m.table = p.table
+LEFT JOIN (SELECT table,
+                  maxIfOrNull(toUInt64(extract(mutation_id, '(\d+)')), is_done) AS done_version,
+                  countIf(NOT is_done) AS pending
+           FROM system.mutations
+           WHERE database = 'logbird' AND create_time >= parseDateTimeBestEffort('$GATE_STARTED')
+           GROUP BY table) m ON m.table = p.table
 GROUP BY p.table
 ORDER BY p.table
 SETTINGS join_use_nulls = 1
