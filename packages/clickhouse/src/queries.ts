@@ -627,7 +627,15 @@ export const DELETE_ATTEMPTS = 3;
  * arrive between attempts: a retry only re-applies a mutation that ClickHouse skipped (ClickHouse#124167). Only a
  * whole-project purge with no writers (e.g. a test or script fixture) needs none.
  */
-export async function deleteAndVerify(client: ClickHouseClient, projectId: string, table: string, filter = '', params: Params = {}) {
+export async function deleteAndVerify(
+  client: ClickHouseClient,
+  projectId: string,
+  table: string,
+  filter = '',
+  params: Params = {},
+  // A caller that treats the failure as non-fatal (stale identity pointers) logs its own warning instead.
+  { logIncomplete = true }: { logIncomplete?: boolean } = {},
+) {
   if ('p' in params) throw new Error('deleteAndVerify binds p to projectId itself; do not pass params.p');
   // The DELETE binds params verbatim but the probe goes through read(), which rewrites these keys: the two would test
   // different predicates.
@@ -645,15 +653,18 @@ export async function deleteAndVerify(client: ClickHouseClient, projectId: strin
     // Concurrent non-replicated mutations can register out of order and skip rows.
     // Retry with a fresh mutation version, but still fail closed for restored parts
     // that outrank every attempt. Completion alone never proves deletion.
-    const rows = await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`, bound);
+    // A filter outside the sort key (sample-data `source`) scans the whole project once nothing matches: give the
+    // maintenance probe a roomier budget than read()'s 10 s default.
+    const rows = await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT 1 FROM ${table} WHERE ${predicate} LIMIT 1)`, bound, 60);
     if (Number(rows[0]?.n ?? 0) === 0) return;
     if (attempt < DELETE_ATTEMPTS) {
       console.warn(JSON.stringify({ level: 'warn', event: 'clickhouse.delete_retry', table, projectId, attempt: attempt + 1 }));
       await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
     }
   }
-  // One log line for every caller (server, worker, scripts); the restore gate greps for it.
-  console.error(JSON.stringify({ level: 'error', event: 'clickhouse.delete_incomplete', table, projectId, attempts: DELETE_ATTEMPTS }));
+  // One log line for every fail-closed caller (server, worker, scripts); the restore gate greps for it.
+  if (logIncomplete)
+    console.error(JSON.stringify({ level: 'error', event: 'clickhouse.delete_incomplete', table, projectId, attempts: DELETE_ATTEMPTS }));
   throw Object.assign(
     new Error(
       `Delete left visible rows in ${table} after ${DELETE_ATTEMPTS} attempts. Retry the operation; if it persists on a natively restored database, stop writers and follow the ClickHouse restore normalization procedure.`,

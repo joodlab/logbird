@@ -428,7 +428,7 @@ runs again on its own). Only a failure that persists on a natively restored data
 needs the normalization procedure below. Every fail-closed delete, from the worker, the API
 server (sample-data removal, project deletion) or a script, logs one
 `clickhouse.delete_incomplete` line with the table and project; the API answers 503 with
-`Retry-After`. Ingest recovery or sample-data removal logs
+`Retry-After`. The non-fatal stale-pointer cleanup logs only its own warning. Ingest recovery or sample-data removal logs
 `clickhouse.event_index_stale_pointers` when it cannot delete stale identity pointers.
 The pinned 26.9 line has no upstream fix for that race; ClickHouse 26.10 and later include it.
 Moving the pin is tracked in [#147](https://github.com/joodlab/logbird/issues/147).
@@ -548,7 +548,11 @@ and mutations share one block counter, so it compares only *mutated* parts
 `data_version = min_block_number`) with the newest mutation each table received during the
 gate. A table that has mutated parts but received no gate mutation (for example because no
 restored row had expired yet) cannot be checked this way, so it also reports
-`blocks_cutover = 1`. No output means no table has mutated parts.
+`blocks_cutover = 1`. Only finished gate mutations count, so wait for pending ones (or treat
+a stuck one as blocking). No output means no table has mutated parts. The check assumes a
+restored part can outrank new mutations only through its mutation version, as observed so
+far; the mandatory normalization (`TRUNCATE` + `INSERT`) removes the case entirely, and live
+verification of restored parts is tracked in [#77](https://github.com/joodlab/logbird/issues/77).
 
 ```sh
 cat > .tmp/backups/mutation-versions.sql <<SQL
@@ -559,7 +563,7 @@ SELECT p.table,
 FROM (SELECT table, data_version FROM system.parts
       WHERE database = 'logbird' AND active AND data_version > min_block_number) p
 LEFT JOIN (SELECT table, toUInt64(extract(mutation_id, '(\d+)')) AS version FROM system.mutations
-           WHERE database = 'logbird' AND create_time >= parseDateTimeBestEffort('$GATE_STARTED')) m ON m.table = p.table
+           WHERE database = 'logbird' AND is_done AND create_time >= parseDateTimeBestEffort('$GATE_STARTED')) m ON m.table = p.table
 GROUP BY p.table
 ORDER BY p.table
 SETTINGS join_use_nulls = 1

@@ -249,6 +249,8 @@ try {
         });
         if (!Number(left[0]?.n ?? 0)) break;
         if (attempt === 3) throw new Error(`event_ids cleanup left rows for ${owned}`);
+        console.warn(JSON.stringify({ level: 'warn', event: 'clickhouse.delete_retry', table: 'event_ids', projectId: owned, attempt: attempt + 1 }));
+        await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
       }
     });
   await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS ${table}`);

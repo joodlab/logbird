@@ -55,6 +55,8 @@ it.each([
     expect(args.query_id.startsWith(maintenanceQueryPrefix('qa95-retry'))).toBe(true);
   }
   expect(new Set(command.mock.calls.map(([args]) => args.query_id)).size).toBe(attempts);
+  // The probe gets the maintenance budget: a filter outside the sort key scans the whole project.
+  for (const [args] of query.mock.calls) expect(args.clickhouse_settings.max_execution_time).toBe(60);
   // Backoff between attempts: 50 ms, then 100 ms.
   expect(sleep.mock.calls.map(([, ms]) => ms)).toEqual([50, 100].slice(0, attempts - 1));
   expect(console.warn).toHaveBeenCalledTimes(attempts - 1);
@@ -104,6 +106,8 @@ it('writes valid identity pointers first and only reports stale pointers that st
   expect(console.warn).toHaveBeenLastCalledWith(
     JSON.stringify({ level: 'warn', event: 'clickhouse.event_index_stale_pointers', projectId: 'qa95-index', count: 1 }),
   );
+  // Non-fatal here, so no fail-closed error line: only the warning above.
+  expect(console.error).not.toHaveBeenCalled();
 });
 
 it('still propagates storage errors from the stale-pointer delete, after writing the valid pointers', async () => {

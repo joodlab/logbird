@@ -156,7 +156,7 @@ export async function repairEventIndex(client: ClickHouseClient, projectId: stri
   // valid pointers are written first, and a delete that stays visible (restored parts) is reported, not thrown.
   if (absent.length)
     try {
-      await deleteAndVerify(ch, projectId, 'event_ids', 'event_id IN {ids:Array(String)}', { ids: absent });
+      await deleteAndVerify(ch, projectId, 'event_ids', 'event_id IN {ids:Array(String)}', { ids: absent }, { logIncomplete: false });
     } catch (error) {
       if ((error as { code?: string })?.code !== 'LOGBIRD_DELETE_INCOMPLETE') throw error;
       console.warn(JSON.stringify({ level: 'warn', event: 'clickhouse.event_index_stale_pointers', projectId, count: absent.length }));
