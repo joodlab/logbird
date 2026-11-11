@@ -28,5 +28,9 @@ describe('legal links on the sign-in screen', () => {
     for (const value of ['javascript:alert(1)', '//evil.example', 'terms.html', 'ftp://files.example/terms', '/\\evil.example', '   ']) {
       expect(legalLinksFrom({ LOGBIRD_TERMS_URL: value }).terms, value).toBeUndefined();
     }
+    // Browsers strip tabs and line breaks inside URLs, which would turn these into off-origin "//evil.example" links.
+    for (const value of ['/\t/evil.example/terms', '/\n/evil.example', '/\r/evil.example', 'https://audit.example.com/te\trms']) {
+      expect(legalLinksFrom({ LOGBIRD_TERMS_URL: value }).terms, JSON.stringify(value)).toBeUndefined();
+    }
   });
 });

@@ -16,6 +16,9 @@ export interface LegalLinks {
 function safeHref(value: string | undefined): string | undefined {
   const href = value?.trim();
   if (!href) return;
+  // Browsers drop tabs and line breaks inside a URL, so "/\t/other.example" would become "//other.example": off-origin.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
+  if (/[\u0000-\u001f\u007f]/.test(href)) return;
   if (href.startsWith('/') && !href.startsWith('//') && !href.includes('\\')) return href;
   const url = URL.canParse(href) ? new URL(href) : undefined;
   return url && (url.protocol === 'https:' || url.protocol === 'http:') ? url.href : undefined;
