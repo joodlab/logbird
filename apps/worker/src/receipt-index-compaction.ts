@@ -36,7 +36,7 @@ export async function runReceiptIndexCompaction(redis: Pick<Redis, 'get' | 'set'
     if (result.action === 'skipped_invalid_copy') await backoffHint(redis.set(backoffKey, String(Date.now()), 'EX', BACKOFF_SECONDS), signal, 'set');
     if (result.action !== 'skipped_compact') {
       const level = result.action === 'reindexed' || result.action === 'skipped_backoff' ? 'info' : 'warn';
-      console.log(JSON.stringify({ level, event: 'ingest.receipt_index_compaction', ...result }));
+      console[level === 'warn' ? 'warn' : 'log'](JSON.stringify({ level, event: 'ingest.receipt_index_compaction', ...result }));
     }
     return result;
   } catch (error) {

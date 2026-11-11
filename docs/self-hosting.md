@@ -814,9 +814,10 @@ The worker runs receipt-index compaction on its own hourly queue and worker with
 concurrency 1 and one attempt, so retention retries never repeat it and queued
 recovery/fence-lifting jobs can run during a rebuild. On shutdown a separate
 connection calls `pg_cancel_backend` for the recorded rebuild backend pid only,
-with five-second connect/query timeouts. The original session remains open while
-REINDEX settles with 57014; cancellation and cleanup have a ten-second deadline
-before sockets close. The maintenance session sets `client_connection_check_interval`
+with five-second connect/query timeouts and an eight-second budget in all. The original
+session remains open while REINDEX settles with 57014; cancellation and cleanup have a
+ten-second deadline before its socket is destroyed. Every close is bounded to five seconds,
+since a graceful close on an idle session can wait on an unreachable server. The maintenance session sets `client_connection_check_interval`
 to one second as a disconnect fallback where supported (PostgreSQL 14+).
 Only a running REINDEX is cancelled; catalog queries and the invalid-copy cleanup
 are left to finish within that deadline, and connection setup closes its socket

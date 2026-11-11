@@ -55,6 +55,29 @@ export function neededIndexPages(liveTuples: number, keyBytes: number, fill = 0.
 }
 
 type Queryable = Pick<pg.Client, 'query'>;
+/** A close that waits on an unreachable peer must not outlive this. */
+export const RECEIPT_INDEX_CLOSE_TIMEOUT_MS = 5000;
+/** The cancel connection's whole budget; shorter than the 10 s fallback, so the original session outlives it. */
+export const RECEIPT_INDEX_CANCEL_TIMEOUT_MS = 8000;
+/** pg 8's end() is graceful when no query is active and then waits for the peer's FIN; destroying never waits. */
+function destroySocket(client: pg.Client) {
+  (client as unknown as { connection?: { stream?: { destroy?: () => void } } }).connection?.stream?.destroy?.();
+}
+/** end(), bounded: past the deadline the socket is destroyed, which makes pg emit 'end' and settle end(). */
+async function closeClient(client: pg.Client, ms = RECEIPT_INDEX_CLOSE_TIMEOUT_MS) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const forced = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      destroySocket(client);
+      resolve();
+    }, ms);
+  });
+  try {
+    await Promise.race([client.end().catch(() => undefined), forced]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 /** Connection plus session setup. A stalled server can hang a setup query, so abort and a deadline close the socket. */
 export const RECEIPT_INDEX_SETUP_TIMEOUT_MS = 15_000;
 async function connect(signal?: AbortSignal) {
@@ -62,6 +85,7 @@ async function connect(signal?: AbortSignal) {
     connectionString: keys().DATABASE_URL,
     application_name: 'logbird-receipt-index-maintenance',
     connectionTimeoutMillis: 5000,
+    keepAlive: true,
     options: `-c statement_timeout=${RECEIPT_INDEX_COMPACTION.statementTimeoutMs} -c lock_timeout=${RECEIPT_INDEX_COMPACTION.lockTimeoutMs}`,
   });
   client.on('error', (error) => {
@@ -71,7 +95,7 @@ async function connect(signal?: AbortSignal) {
   // Setup runs no long server work, so closing the socket is enough: pg's end() destroys it mid-connect or mid-query.
   let closing: Promise<void> | undefined;
   const close = () => {
-    closing ??= client.end().catch(() => undefined);
+    closing ??= closeClient(client);
     return closing;
   };
   const deadline = setTimeout(() => void close(), RECEIPT_INDEX_SETUP_TIMEOUT_MS);
@@ -111,19 +135,24 @@ async function cancelBackend(pid: number, settled?: Promise<unknown>) {
     application_name: 'logbird-receipt-index-cancel',
     connectionTimeoutMillis: 5000,
     query_timeout: 5000,
+    keepAlive: true,
     options: '-c statement_timeout=5000',
   });
   cancel.on('error', () => undefined);
-  // Covers connection, SET and cancel together, including URL timeout overrides.
-  const deadline = setTimeout(() => void cancel.end().catch(() => undefined), 10_000);
+  // Covers connection, SET, cancel and the wait together, including URL timeout overrides. It ends before the 10 s
+  // fallback closes the original session, so the pid stays owned while pg_cancel_backend can still run.
+  const deadline = setTimeout(() => {
+    destroySocket(cancel);
+    void cancel.end().catch(() => undefined);
+  }, RECEIPT_INDEX_CANCEL_TIMEOUT_MS);
   try {
     await cancel.connect();
     await cancel.query('SET statement_timeout = 5000');
     await cancel.query('SELECT pg_cancel_backend($1)', [pid]);
     await settled;
   } finally {
+    await closeClient(cancel);
     clearTimeout(deadline);
-    await cancel.end().catch(() => undefined);
   }
 }
 
@@ -178,6 +207,8 @@ export async function compactIngestReceiptIndex({
       // Without client_connection_check_interval (PostgreSQL < 14) a REINDEX whose cancel never landed keeps running
       // server-side; name the backend so an operator can check it before a migration that alters the table.
       console.warn(JSON.stringify({ level: 'warn', event: 'ingest.receipt_index_shutdown_fallback', pid, reindexRunning }));
+      // Destroy rather than end: a graceful end() on an idle session waits for an unreachable peer.
+      destroySocket(client as pg.Client);
       void (client as pg.Client).end().catch(() => undefined);
     }, 10_000);
   };
@@ -270,7 +301,7 @@ export async function compactIngestReceiptIndex({
     try {
       await cancellation;
       if (locked) await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [lockKey]).catch(() => undefined);
-      if (!db) await (client as pg.Client).end().catch(() => undefined);
+      if (!db) await closeClient(client as pg.Client);
     } finally {
       signal?.removeEventListener('abort', abort);
       clearTimeout(abortDeadline);

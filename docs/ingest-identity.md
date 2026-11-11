@@ -216,11 +216,13 @@ runs `compactIngestReceiptIndex`:
   in at the end. It is bounded by a 15-minute statement timeout and a one-minute
   lock timeout. Connection attempts have a five-second timeout; connection errors
   are logged rather than emitted without a listener.
-  Shutdown opens a separate connection (five-second connect and query timeouts)
-  and sends `pg_cancel_backend` for the recorded rebuild backend pid only. The
-  original connection stays open while cancellation completes and REINDEX settles
-  with 57014. Cancellation and cleanup have a ten-second shutdown deadline; then
-  sockets close. Each maintenance session also sets `client_connection_check_interval`
+  Shutdown opens a separate connection (five-second connect and query timeouts,
+  eight seconds in all) and sends `pg_cancel_backend` for the recorded rebuild
+  backend pid only. The original connection stays open while cancellation completes
+  and REINDEX settles with 57014; its ten-second shutdown deadline is longer than the
+  cancel budget, so the pid can't be reused before the cancel runs. Then sockets are
+  destroyed. Every close is bounded to five seconds: pg's graceful close on an idle
+  session waits for the server, so past that the socket is destroyed. Each maintenance session also sets `client_connection_check_interval`
   to one second as a disconnect fallback (unsupported on PostgreSQL before 14).
   Closing a socket alone is not the cancellation mechanism. Only a running REINDEX
   is cancelled: catalog queries and the `DROP INDEX CONCURRENTLY` cleanup are left to
@@ -247,8 +249,8 @@ runs `compactIngestReceiptIndex`:
   the job therefore skips (`skipped_old_transactions`, logged) when another
   transaction in the database is older than the lock timeout and holds a snapshot
   (`backend_xmin`) or a lock on the schema-qualified receipt table. An old transaction
-  with neither does not block this pre-check. Background workers and walsenders
-  are included; autovacuum workers and launchers are excluded. Otherwise the rebuild
+  with neither does not block this pre-check. Background workers and logical walsenders
+  are included (physical walsenders have no database, and REINDEX doesn't wait for them); autovacuum workers and launchers are excluded. Otherwise the rebuild
   would fail after building a full copy, every hour. The check sees only sessions the worker role may
   inspect (`pg_read_all_stats` widens it); an invisible old transaction still makes that
   run fail and enter the 24-hour timeout backoff.

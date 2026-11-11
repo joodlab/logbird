@@ -1,7 +1,21 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 
-const connection = vi.hoisted(() => ({ connect: vi.fn(), end: vi.fn(), on: vi.fn(), query: vi.fn(), options: {} as Record<string, unknown> }));
-const cancelConnection = vi.hoisted(() => ({ connect: vi.fn(), end: vi.fn(), on: vi.fn(), query: vi.fn(), options: {} as Record<string, unknown> }));
+const connection = vi.hoisted(() => ({
+  connect: vi.fn(),
+  end: vi.fn(),
+  on: vi.fn(),
+  query: vi.fn(),
+  destroy: vi.fn(),
+  options: {} as Record<string, unknown>,
+}));
+const cancelConnection = vi.hoisted(() => ({
+  connect: vi.fn(),
+  end: vi.fn(),
+  on: vi.fn(),
+  query: vi.fn(),
+  destroy: vi.fn(),
+  options: {} as Record<string, unknown>,
+}));
 vi.mock('pg', () => ({
   default: {
     Client: class {
@@ -12,7 +26,10 @@ vi.mock('pg', () => ({
         this.end = state.end;
         this.on = state.on;
         this.query = state.query;
+        // pg's internal socket, which the bounded close destroys.
+        this.connection = { stream: { destroy: state.destroy } };
       }
+      connection = { stream: { destroy: connection.destroy } };
       connect = connection.connect;
       end = connection.end;
       on = connection.on;
@@ -28,6 +45,8 @@ import {
   compactIngestReceiptIndex,
   INGEST_RECEIPT_PKEY,
   neededIndexPages,
+  RECEIPT_INDEX_CANCEL_TIMEOUT_MS,
+  RECEIPT_INDEX_CLOSE_TIMEOUT_MS,
   RECEIPT_INDEX_COMPACTION,
   RECEIPT_INDEX_SETUP_TIMEOUT_MS,
 } from './receipt-index-maintenance';
@@ -428,4 +447,68 @@ it('reports an invalid copy this role cannot drop instead of failing every run',
   await expect(compactIngestReceiptIndex()).resolves.toMatchObject({ action: 'skipped_invalid_copy', droppedInvalid: 0 });
   expect(query.mock.calls.some(([sql]) => sql.startsWith('REINDEX'))).toBe(false);
   expect(query).toHaveBeenCalledWith('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [expect.any(String)]);
+});
+
+it('bounds an idle close that waits on an unreachable peer, destroying the socket', async () => {
+  vi.useFakeTimers();
+  try {
+    connection.connect.mockResolvedValue(undefined);
+    const { query } = fakeDb({ pages: [1], live: 0, keyBytes: null });
+    connection.query.mockImplementation(query);
+    // pg 8's graceful end() on an idle session waits for the server's FIN, which never comes.
+    connection.end.mockImplementation(() => new Promise(() => undefined));
+    const compacting = compactIngestReceiptIndex();
+    const outcome = expect(compacting).resolves.toMatchObject({ action: 'skipped_compact' });
+    await vi.advanceTimersByTimeAsync(RECEIPT_INDEX_CLOSE_TIMEOUT_MS - 1);
+    expect(connection.destroy).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await outcome;
+    expect(connection.destroy).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('bounds the cancel connection, including a close that never completes, within its shorter budget', async () => {
+  vi.useFakeTimers();
+  try {
+    const abort = new AbortController();
+    connection.connect.mockResolvedValue(undefined);
+    const { query } = fakeDb({ pages: [RECEIPT_INDEX_COMPACTION.minPages * 10], live: 1000, keyBytes: 60 });
+    let failQuery: ((error: Error) => void) | undefined;
+    connection.query.mockImplementation((sql: string, params?: unknown[]) => {
+      if (!sql.startsWith('REINDEX')) return query(sql, params);
+      return new Promise((_resolve, reject) => {
+        failQuery = reject;
+      });
+    });
+    // The cancel connection never connects and never finishes closing; like pg, destroying its socket fails connect.
+    let failConnect: ((error: Error) => void) | undefined;
+    cancelConnection.connect.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          failConnect = reject;
+        }),
+    );
+    cancelConnection.destroy.mockImplementation(() => failConnect?.(new Error('Connection terminated')));
+    cancelConnection.end.mockImplementation(() => new Promise(() => undefined));
+    connection.end.mockImplementation(async () => failQuery?.(new Error('Connection terminated')));
+    connection.destroy.mockImplementation(() => failQuery?.(new Error('Connection terminated')));
+    const compacting = compactIngestReceiptIndex({ signal: abort.signal });
+    const outcome = expect(compacting).rejects.toThrow('Connection terminated');
+    await vi.advanceTimersByTimeAsync(0);
+    abort.abort();
+    await vi.advanceTimersByTimeAsync(RECEIPT_INDEX_CANCEL_TIMEOUT_MS);
+    // The cancel budget ends before the original session is closed, so its pid is never released early.
+    expect(cancelConnection.destroy).toHaveBeenCalled();
+    expect(connection.destroy).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(10_000 - RECEIPT_INDEX_CANCEL_TIMEOUT_MS);
+    expect(connection.destroy).toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(RECEIPT_INDEX_CLOSE_TIMEOUT_MS);
+    await outcome;
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
 });

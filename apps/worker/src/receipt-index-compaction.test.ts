@@ -52,7 +52,7 @@ it('backs off for 24 h after an invalid copy this role cannot drop, warning once
   compact.mockResolvedValueOnce({ action: 'skipped_invalid_copy', indexPages: 81_920, droppedInvalid: 0 });
   await runReceiptIndexCompaction(redis, key, 0, abort.signal);
   expect(redis.set).toHaveBeenCalledWith(key, expect.any(String), 'EX', 86_400);
-  expect(console.log).toHaveBeenCalledWith(
+  expect(console.warn).toHaveBeenCalledWith(
     JSON.stringify({
       level: 'warn',
       event: 'ingest.receipt_index_compaction',
@@ -84,7 +84,8 @@ it.each(['skipped_missing', 'skipped_no_statistics', 'skipped_old_transactions',
   async (action) => {
     compact.mockResolvedValueOnce({ action, indexPages: 10, droppedInvalid: 0 });
     await runReceiptIndexCompaction(redis, key, 0, abort.signal);
-    expect(console.log).toHaveBeenCalledWith(
+    // A log router keyed on the stream sees warn-level outcomes as warnings.
+    expect(action === 'reindexed' ? console.log : console.warn).toHaveBeenCalledWith(
       JSON.stringify({
         level: action === 'reindexed' ? 'info' : 'warn',
         event: 'ingest.receipt_index_compaction',
