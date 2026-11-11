@@ -131,6 +131,83 @@ const hide = redact({ keys });
 const beforeSend = event => event.action === 'health.checked' ? null : hide(event);
 ```
 
+## Standard Webhooks
+
+`signWebhook`, `verifyWebhook`, `generateWebhookSecret` and
+`WebhookVerificationError` are exported from `@logbird/sdk`. Signing and verification
+are async and use Web Crypto HMAC-SHA256, which Node 22+, browsers and edge runtimes
+all provide, so there are no runtime dependencies. Verification computes one HMAC of
+the body per secret and compares it with each claimed signature (at most 10) in
+constant time.
+
+Verify the **raw body** before parsing it. `verifyWebhook` authenticates the body,
+parses it as JSON and returns it as `unknown`, or as the type you pass
+(`verifyWebhook<MyType>(…)`); it does not validate the shape:
+
+```ts
+import { Hono } from 'hono';
+import { verifyWebhook, WebhookVerificationError } from '@logbird/sdk';
+
+const app = new Hono();
+const secret = process.env.LOGBIRD_WEBHOOK_SECRET!; // whsec_...; keep on the receiver
+
+app.post('/webhooks/logbird', async (c) => {
+  try {
+    const event = await verifyWebhook<{ id: string }>({
+      payload: await c.req.text(), // never JSON.stringify(await c.req.json())
+      headers: c.req.raw.headers,
+      secret,
+    });
+    // Durably enqueue/process event before returning 2xx. Deduplicate using
+    // webhook-id within this receiver: retries can carry the same event again.
+    console.log(event.id);
+    return c.body(null, 204);
+  } catch (error) {
+    // A bad request: answer 400. Anything else (a malformed secret is a TypeError) is your bug: let it surface.
+    if (error instanceof WebhookVerificationError) return c.text('Invalid webhook', 400);
+    throw error;
+  }
+});
+```
+
+Headers may be a Fetch `Headers` (or anything with a `get` method) or a plain record
+such as Node's `req.headers`; names are case-insensitive, and a webhook header sent
+twice counts as missing. The default
+timestamp tolerance is 300 seconds in either direction, including the exact edges.
+`toleranceSeconds` overrides it; optional `now` is Unix time **in seconds** for a
+controlled clock. Keep the receiver's clock synchronized. During rotation, supply
+`secrets: [oldSecret, newSecret]` instead of `secret`; any valid `v1` signature
+matching any configured secret succeeds. Unknown versions and malformed signatures
+are skipped. All configured secrets must be valid `whsec_` base64 keys containing
+24–64 bytes, as specified by [Standard Webhooks](https://www.standardwebhooks.com/).
+
+`WebhookVerificationError.reason` is one of `missing_header`, `invalid_timestamp`,
+`timestamp_out_of_tolerance`, `no_matching_signature` or `invalid_payload`
+(authenticated body is not JSON). A receiver misconfiguration is not a verification
+failure: a malformed or missing secret throws a `TypeError`, and an invalid `now` or
+`toleranceSeconds` a `RangeError`, so it reaches your error monitoring instead of
+answering every delivery with 400. Do not log the raw body, secrets or signature headers on errors.
+
+Senders generate a secret once, store it securely and sign the exact serialized body:
+
+```ts
+import { generateWebhookSecret, signWebhook } from '@logbird/sdk';
+
+const secret = generateWebhookSecret(); // whsec_ + 32 random bytes, base64 encoded
+// Save this secret securely for the endpoint; do not regenerate it per delivery.
+const id = 'evt_example'; // stable across retries; no dots or newlines
+const timestamp = Math.floor(Date.now() / 1000); // refresh on each attempt
+const payload = JSON.stringify({ action: 'hotel.updated' });
+const signature = await signWebhook({ id, timestamp, payload, secrets: [secret] });
+const headers = {
+  'content-type': 'application/json',
+  'webhook-id': id,
+  'webhook-timestamp': String(timestamp),
+  'webhook-signature': signature,
+};
+// Send payload unchanged with these headers. During overlap, sign with both secrets.
+```
+
 ## Requests and workers
 
 `createAudit(options, hostContext, request)` from `@logbird/sdk/integration` captures
