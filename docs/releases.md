@@ -182,13 +182,13 @@ creation fails rather than replacing its reviewed notes. No Coolify deployment
 runs automatically.
 
 `.github/workflows/docker.yml` separately builds all four amd64 targets, plus the
-marketing site image (`apps/web/Dockerfile`, fictional build arguments), only via
-an explicit `workflow_dispatch` trigger. Pull requests never trigger image builds.
+marketing site image (`apps/web/Dockerfile`, fictional build arguments), on PRs
+changing Dockerfiles, Compose, Docker context exclusions or the image workflows.
 The site image is not a release artifact: tags publish only the four roles above,
 and the hosted instance builds the site from `docker-compose.site.yml` (see
 [Coolify](coolify.md#hosted-marketing-site-logbirdjoodlabcom-only)).
 It has read-only repository permissions, no registry login and never pushes.
-Tag-driven release publication remains a separate authorized workflow.
+The owner explicitly authorized these PR builds and tag-driven publication.
 
 ## First publication: make GHCR packages public
 
