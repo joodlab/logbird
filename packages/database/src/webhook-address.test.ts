@@ -135,13 +135,17 @@ it('gives up on a lookup that never answers, and uses at most two lookups at onc
     () => new Promise<{ address: string; family: number }[]>((resolve) => never.push({ settle: () => resolve([{ address: '8.8.8.8', family: 4 }]) })),
   );
   const timedOut = { message: 'Webhook hostname lookup timed out; try again.' };
-  // Two hung lookups take both slots and time out; a third waits for a slot, then times out without starting a lookup.
-  const attempts = await Promise.allSettled([1, 2, 3].map(() => validateWebhookUrl('https://receiver.example.test', false, hanging, 50)));
-  expect(attempts).toEqual([1, 2, 3].map(() => ({ status: 'rejected', reason: expect.objectContaining(timedOut) })));
-  expect(hanging).toHaveBeenCalledTimes(2);
-  // The slots stay taken until the hung lookups really end, because their pool threads are still busy.
-  await expect(validateWebhookUrl('https://receiver.example.test', false, publicLookup, 50)).rejects.toMatchObject(timedOut);
-  for (const lookup of never) lookup.settle();
+  try {
+    // Two hung lookups take both slots and time out; a third waits for a slot, then times out without starting a lookup.
+    const attempts = await Promise.allSettled([1, 2, 3].map(() => validateWebhookUrl('https://receiver.example.test', false, hanging, 50)));
+    expect(attempts).toEqual([1, 2, 3].map(() => ({ status: 'rejected', reason: expect.objectContaining(timedOut) })));
+    expect(hanging).toHaveBeenCalledTimes(2);
+    // The slots stay taken until the hung lookups really end, because their pool threads are still busy.
+    await expect(validateWebhookUrl('https://receiver.example.test', false, publicLookup, 50)).rejects.toMatchObject(timedOut);
+  } finally {
+    // Settle even when an assertion failed, so the module-wide slots are free for later tests.
+    for (const lookup of never) lookup.settle();
+  }
   await vi.waitFor(async () =>
     expect(await validateWebhookUrl('https://receiver.example.test/', false, publicLookup, 50)).toBe('https://receiver.example.test/'),
   );

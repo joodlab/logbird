@@ -137,13 +137,13 @@ it('rotates with default, zero and maximum overlap without extending already exp
   expect(before).toHaveLength(1);
   // A later rotation caps every earlier expiry at its own window: exactly that window, neither later nor sooner.
   let start = Date.now();
-  await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', { overlapSeconds: 5 });
+  await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', { overlapSeconds: 600 });
   let end = Date.now();
   const capped = await prisma.webhookSecret.findMany({ where: { endpointId: endpoint.id, expiresAt: { not: null } } });
   expect(capped.map((row) => row.id)).toEqual(expect.arrayContaining([...before.map((row) => row.id), previous.id]));
   for (const row of capped) {
-    expect(row.expiresAt?.getTime()).toBeGreaterThanOrEqual(start + 5000);
-    expect(row.expiresAt?.getTime()).toBeLessThanOrEqual(end + 5000);
+    expect(row.expiresAt?.getTime()).toBeGreaterThanOrEqual(start + 600_000);
+    expect(row.expiresAt?.getTime()).toBeLessThanOrEqual(end + 600_000);
   }
   // A longer window never extends an expiry that's already sooner, and a secret still inside its window is kept.
   start = Date.now();
@@ -151,7 +151,7 @@ it('rotates with default, zero and maximum overlap without extending already exp
   end = Date.now();
   for (const row of capped)
     expect((await prisma.webhookSecret.findUniqueOrThrow({ where: { id: row.id } })).expiresAt?.getTime()).toBe(row.expiresAt?.getTime());
-  const latest = await prisma.webhookSecret.findMany({ where: { endpointId: endpoint.id, expiresAt: { gt: new Date(end + 5000) } } });
+  const latest = await prisma.webhookSecret.findMany({ where: { endpointId: endpoint.id, expiresAt: { gt: new Date(end + 600_000) } } });
   expect(latest).toHaveLength(1);
   expect(latest[0]?.expiresAt?.getTime()).toBeGreaterThanOrEqual(start + 3_600_000);
   expect(latest[0]?.expiresAt?.getTime()).toBeLessThanOrEqual(end + 3_600_000);

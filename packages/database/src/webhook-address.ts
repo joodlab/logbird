@@ -83,6 +83,11 @@ function acquireLookup(ms: number) {
 async function boundedLookup(resolve: WebhookLookup, hostname: string, timeoutMs: number) {
   const deadline = Date.now() + timeoutMs;
   if (!(await acquireLookup(timeoutMs))) throw new WebhookUrlError('Webhook hostname lookup timed out; try again.');
+  // A slot granted at the deadline would start a lookup whose answer is thrown away: hand it on instead.
+  if (deadline - Date.now() <= 0) {
+    releaseLookup();
+    throw new WebhookUrlError('Webhook hostname lookup timed out; try again.');
+  }
   // The slot is held until the lookup really settles, not just until the deadline: its pool thread is busy until then.
   const pending = Promise.resolve().then(() => resolve(hostname, { all: true }));
   pending.then(releaseLookup, releaseLookup);
