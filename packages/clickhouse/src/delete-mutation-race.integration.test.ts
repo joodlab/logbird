@@ -13,10 +13,13 @@ const TABLE = 'qa95_mutation_race';
 const CONCURRENCY = 16;
 const ROWS_PER_PROJECT = 200;
 const MAX_PENDING_MUTATIONS = 100;
-// Time budget inside the 330 s test timeout: every statement is capped at 20 s (client and server side), no round
-// starts after 150 s, so the worst round (3 DELETE attempts) ends by ~215 s and cleanup (<= 60 s wait + DROP) still fits.
-const STATEMENT_SECONDS = 20;
+// Absolute time budget inside the 330 s test timeout, with every statement capped at 10 s (client and server side):
+// - no round (and no DELETE burst) starts after 150 s; the worst round is 2 guard queries + insert + 3 x (DELETE +
+//   probe) + verify, each at the cap: 2x10 + 10 + 3x(10+10) + backoff + 10 ~ 100 s, so the workload ends by ~250 s;
+// - cleanup polls pending mutations only until 275 s, then DROP (<= 10 s) and close still finish before 330 s.
+const STATEMENT_SECONDS = 10;
 const ROUND_START_DEADLINE_MS = 150_000;
+const CLEANUP_POLL_DEADLINE_MS = 275_000;
 
 it.runIf(process.env.LOGBIRD_MUTATION_RACE_STRESS === '1' && process.env.CLICKHOUSE_URL)(
   'concurrent DELETEs can be skipped on a single node, and deleteAndVerify always ends at zero rows',
@@ -74,6 +77,8 @@ it.runIf(process.env.LOGBIRD_MUTATION_RACE_STRESS === '1' && process.env.CLICKHO
             Array.from({ length: ROWS_PER_PROJECT }, (_, n) => ({ project_id, n, payload: `qa95 fixture ${round}` })),
           ),
         });
+        // Re-check right before the burst: the guard queries and insert may have used up the start window.
+        if (Date.now() - started >= ROUND_START_DEADLINE_MS) break;
         const before = warn.mock.calls.length;
         const results = await Promise.allSettled(
           projects.map((project) => deleteAndVerify(ch, project, TABLE, 'project_id={p:String}', { p: project })),
@@ -119,7 +124,8 @@ it.runIf(process.env.LOGBIRD_MUTATION_RACE_STRESS === '1' && process.env.CLICKHO
     let cleanupFailure: unknown;
     try {
       if (created) {
-        for (let i = 0; i < 60 && (await pending('table')) > 0; i++) await new Promise((resolve) => setTimeout(resolve, 1000));
+        while (Date.now() - started < CLEANUP_POLL_DEADLINE_MS && (await pending('table')) > 0)
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         console.info(JSON.stringify({ event: 'qa95.mutation_race_cleanup', pendingTableMutations: await pending('table') }));
         await ch.command({ query: `DROP TABLE ${TABLE} SYNC` });
       }
