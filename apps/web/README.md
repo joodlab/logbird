@@ -56,7 +56,7 @@ domain, and no site source may contain the company or design-partner names (test
 | `WEB_MAILBOX_PROVIDER` | Host of the team mailbox that receives form submissions and emails, named in the privacy policy | unset → "our mailbox provider" (pending owner) |
 | `WEB_FORM_RETENTION_MONTHS` | Calendar months the site keeps a form submission: the privacy policy states it and the cleanup applies it (docs/coolify.md, "Form submissions") | 24 (1–120) |
 | `SMTP_*`, `MAIL_FROM`, `WAITLIST_NOTIFY_TO` | Server-only waitlist notification (Mailpit locally). `MAIL_FROM` and `WAITLIST_NOTIFY_TO` have **no defaults**: with SMTP on and either missing, notifications are off (one `waitlist.notify_disabled` warning, no personal data) and submissions are still stored | — |
-| `WAITLIST_FILE` | Node adapter's JSONL file; when set, the production server also deletes expired submissions from it | `apps/web/.data/waitlist.jsonl` when run from `apps/web` (no cleanup) |
+| `WAITLIST_FILE` | Node adapter's store: one JSONL file per day in `<WAITLIST_FILE>.d/`, plus this file for submissions stored before day files; when set, the production server also deletes expired submissions | `apps/web/.data/waitlist.jsonl` when run from `apps/web` (no cleanup) |
 | `WEB_TRUST_PROXY` | Reverse proxies in front of the Node server that append to `X-Forwarded-For`; the client is that many entries from the right. 0 (default) ignores forwarding headers, so behind an untrusted or unset proxy every visitor shares one limiter bucket: set this, or enforce the per-client limit at the proxy | 0 |
 | `WEB_ALLOWED_ORIGINS` | Extra origins allowed to post the form (set `http://127.0.0.1:4620` for a local `pnpm start`, which runs as production) | — |
 

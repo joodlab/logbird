@@ -63,7 +63,8 @@ moves there, rewrite the form section first.
   (`apps/web/src/server/waitlist-node.ts`, `/data` volume in `docker-compose.site.yml`); no IP or user agent stored;
   the rate limiter keeps IPs only in memory, each for a 60 s window, swept on later requests or at restart
   (`apps/web/src/server/waitlist.ts`); SMTP notification to `WAITLIST_NOTIFY_TO`. Retention: the Node server deletes
-  submissions older than `WEB_FORM_RETENTION_MONTHS` ten minutes after start and every six hours
+  submissions older than `WEB_FORM_RETENTION_MONTHS`, within a day, ten minutes after start and every six hours: day files
+  (`<WAITLIST_FILE>.d/YYYY-MM-DD.jsonl`) are deleted whole, the pre-day-file `WAITLIST_FILE` trimmed per record
   (`apps/web/src/server/waitlist-retention.ts`, `apps/web/waitlist/file.mjs`); the Cloudflare build sets the same
   lifetime as a KV expiry (`waitlist-cloudflare.ts`). One person's submissions are deleted on request with
   `node waitlist/admin.mjs forget <email>` (docs/coolify.md).

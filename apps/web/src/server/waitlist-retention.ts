@@ -3,14 +3,12 @@ import { siteConfig } from '../env';
 
 /**
  * Automated retention for form submissions (#132). The privacy policy says how long the site keeps a submission
- * (WEB_FORM_RETENTION_MONTHS, default 24); this deletes older ones from the Node server's JSONL file, ten minutes
- * after the server starts and then every six hours (server/plugins/form-retention.ts). The Cloudflare build gives each
- * KV record the same lifetime instead (waitlist-cloudflare.ts).
+ * (WEB_FORM_RETENTION_MONTHS, default 24); this deletes older ones from the Node server's store, ten minutes after
+ * the server starts and then every six hours (server/plugins/form-retention.ts). The Cloudflare build gives each KV
+ * record the same lifetime instead (waitlist-cloudflare.ts).
  *
- * The socket lock keeps writers apart inside one container. Across containers sharing the volume (a deploy that
- * overlaps old and new), each announces itself next to the file and a sweep refuses to rewrite while another one is
- * running (waitlist/file.mjs); it logs `waitlist.retention_failed` and tries again on the next pass. The first sweep
- * waits ten minutes so a fresh start doesn't begin with one. Run one site container per volume (docs/coolify.md).
+ * It deletes whole day files and trims the legacy file, neither of which is still appended to (waitlist/file.mjs),
+ * so it can't lose a new submission, even while a deploy briefly runs two containers on the volume.
  */
 export const WAITLIST_FIRST_SWEEP_MS = 10 * 60 * 1000;
 export const WAITLIST_SWEEP_EVERY_MS = 6 * 60 * 60 * 1000;

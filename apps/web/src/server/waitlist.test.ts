@@ -132,13 +132,15 @@ describe('storage adapters', () => {
     const directory = await mkdtemp(join(tmpdir(), 'logbird-web-'));
     try {
       const file = join(directory, 'nested/waitlist.jsonl');
+      // Stored in the file for its day of receipt (waitlist/file.mjs), before the notification runs.
+      const day = join(`${file}.d`, '1970-01-01.jsonl');
       const notify = vi.fn(async () => {
-        expect(await readFile(file, 'utf8')).toContain(valid.email);
+        expect(await readFile(day, 'utf8')).toContain(valid.email);
       });
       const response = await handleWaitlist(req({ ...valid, website: '' }), { ...dependencies(), store: createNodeStore(file, notify) });
       expect(response.status).toBe(200);
       await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce());
-      const record = JSON.parse((await readFile(file, 'utf8')).trim());
+      const record = JSON.parse((await readFile(day, 'utf8')).trim());
       expect(record).toEqual({ ...valid, receivedAt: '1970-01-01T00:00:01.000Z' });
       expect(record).not.toHaveProperty('website');
     } finally {
@@ -160,7 +162,7 @@ describe('storage adapters', () => {
       expect(notify).toHaveBeenCalledTimes(3);
       expect(lines[0]).toContain('waitlist.notify_failed');
       expect(lines[0]).not.toContain(valid.email);
-      expect(await readFile(file, 'utf8')).toContain(valid.email);
+      expect(await readFile(join(`${file}.d`, '1970-01-01.jsonl'), 'utf8')).toContain(valid.email);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

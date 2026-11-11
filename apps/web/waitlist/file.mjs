@@ -1,16 +1,24 @@
-// The form submissions file (JSONL, mode 600): appends, the retention cleanup and deletion on request. Plain ESM with
-// only Node built-ins, so the site server bundles it and the runtime image can run admin.mjs without a build step.
+// Form submissions on the Node server: appends, the retention cleanup and deletion on request. Plain ESM with only
+// Node built-ins, so the site server bundles it and the runtime image can run admin.mjs without a build step.
 //
-// Every write holds one lock per file, so the server's appends and cleanup and an operator's `admin.mjs forget` never
-// interleave and lose a line. The lock is a listening socket: binding is exclusive, and the operating system releases
-// it the moment its process exits, crash included, so there is no stale lock to detect or take over. On Linux (the
-// site image; `docker exec` shares the container's network namespace) it is an abstract Unix socket. Elsewhere
-// (development) it is a loopback TCP port derived from the file's path (20000-29999); if an unrelated program happens to hold that
-// port, writes wait and then fail with an error, never proceed unlocked.
+// Storage. WAITLIST_FILE names the store, say /data/waitlist.jsonl. New submissions go into one JSONL file per UTC day
+// of receipt in `<WAITLIST_FILE>.d/` (2026-11-11.jsonl, mode 600). Submissions stored before that layout stay in
+// WAITLIST_FILE itself (the legacy file); nothing appends to it any more.
+//
+// Retention never rewrites a file anything still appends to: it deletes whole day files once their last moment is
+// past the retention period, and trims the legacy file record by record. New submissions only ever go into today's
+// file, which is never that old. So the cleanup can't lose a submission, even when two containers share the volume
+// for the seconds a deploy overlaps them. Only `forget` (deletion on request) rewrites files that may still be
+// appended to, so it runs in the site's own container (docs/coolify.md), where every writer shares one lock.
+//
+// The lock is a listening socket: binding is exclusive, and the operating system releases it the moment its process
+// exits, crash included, so there is no stale lock to detect or take over. On Linux (the site image; `docker exec`
+// shares the container's network namespace) it is an abstract Unix socket. Elsewhere (development) it is a loopback
+// TCP port derived from the store's path (20000-29999); if an unrelated program happens to hold that port, writes
+// wait and then fail with an error, never proceed unlocked.
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFile, lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, stat } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { hostname } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { retentionExpiry } from './expiry.mjs';
 
@@ -67,7 +75,7 @@ async function acquire(file) {
       throw new Error('No address is available for the form submissions lock.');
     }
     if (Date.now() > deadline) {
-      throw new Error('The form submissions file stayed locked for 30 s.');
+      throw new Error('The form submissions store stayed locked for 30 s.');
     }
     // A little jitter, so waiting processes take turns rather than retrying in step.
     await new Promise((done) => setTimeout(done, 10 + Math.random() * 20));
@@ -75,7 +83,7 @@ async function acquire(file) {
 }
 
 /**
- * The file's real path, symlinks resolved, so every alias of one file shares one lock, and a rewrite renames over
+ * The store's real path, symlinks resolved, so every alias of one store shares one lock, and a rewrite renames over
  * the file that holds the records rather than replacing a symlink and leaving the records in its target. It gives
  * the same answer before and after the file or its directories exist: the nearest existing ancestor is resolved and
  * the missing rest appended, and a dangling symlink (or a chain of them) is followed to the path it will create.
@@ -111,8 +119,8 @@ export async function resolveWaitlistPath(file) {
 let local = Promise.resolve();
 
 /**
- * Runs `task` with the file's real path while holding its lock: queued within this process, exclusive across
- * processes. Every read and write inside `task` must use the path it is given.
+ * Runs `task` with the store's real path while holding its lock: queued within this process, exclusive across
+ * processes in one container. Every read and write inside `task` must use the path it is given.
  */
 export function withWaitlistLock(file, task) {
   const run = local.then(async () => {
@@ -131,71 +139,35 @@ export function withWaitlistLock(file, task) {
   return run;
 }
 
-// The socket lock keeps writers apart inside one container. Two containers sharing the volume (a deploy that starts
-// the new one before stopping the old) each have their own lock, so they also coordinate through files next to the
-// submissions file, in `<file>.writers/`:
-//
-// - `host-<hostname>`: a container announcing it writes the file. The site server touches it on start, every 30 s
-//   and on every append; an announcement older than 90 s belongs to a container that has stopped.
-// - `rewrite-<hostname>`: a container rewriting the file right now (the cleanup or `forget`).
-//
-// A rewrite writes its marker first and then looks for another container's announcement; an append writes its
-// announcement first and then looks for another container's marker. Each writes its own flag before reading the
-// other's, so at least one of them sees the other: the rewrite backs off (it refuses, and the cleanup tries again on
-// its next pass), or the append waits until the rewrite has finished. A foreign append can therefore never land in a
-// file that a rewrite is about to replace. The volume must be local to one machine (one clock, one file system), as a
-// Docker volume is.
-const WRITER_FRESH_MS = 90_000;
-/** A rewrite takes well under a second; a marker older than this was left by a container that crashed mid-rewrite. */
-const REWRITE_STALE_MS = 60_000;
-const writers = (path) => `${path}.writers`;
-const announcement = (host) => `host-${host}`;
-const marker = (host) => `rewrite-${host}`;
+/** The directory holding one file per day of receipt. */
+export const waitlistDays = (path) => `${path}.d`;
+const DAY_FILE = /^(\d{4})-(\d{2})-(\d{2})\.jsonl$/;
 
-async function touch(path, name) {
-  await mkdir(writers(path), { recursive: true });
-  await writeFile(join(writers(path), name), `${Date.now()}\n`, { mode: 0o600 });
+/** The day file a record belongs in: its UTC day of receipt, or today when `receivedAt` isn't a valid time. */
+function dayFile(path, record) {
+  const at = typeof record?.receivedAt === 'string' ? Date.parse(record.receivedAt) : Number.NaN;
+  const day = new Date(Number.isNaN(at) ? Date.now() : at).toISOString().slice(0, 10);
+  return join(waitlistDays(path), `${day}.jsonl`);
 }
 
-/** Other hosts with an entry of `kind` touched within `freshMs`. */
-async function othersWith(path, kind, freshMs) {
-  const names = await readdir(writers(path)).catch(() => []);
-  const prefix = `${kind}-`;
-  const others = [];
-  for (const name of names.filter((entry) => entry.startsWith(prefix) && entry !== `${prefix}${hostname()}`)) {
-    const info = await stat(join(writers(path), name)).catch(() => undefined);
-    if (info && Date.now() - info.mtimeMs < freshMs) {
-      others.push(name.slice(prefix.length));
-    }
-  }
-  return others;
+/** Every file holding records: the day files, then the legacy file if it exists. */
+async function storeFiles(path) {
+  const days = (await readdir(waitlistDays(path)).catch(() => []))
+    .filter((name) => DAY_FILE.test(name))
+    .sort()
+    .map((name) => join(waitlistDays(path), name));
+  const legacy = await stat(path).then(
+    (info) => info.isFile(),
+    () => false,
+  );
+  return legacy ? [...days, path] : days;
 }
 
-/** Announces this host as a writer of `file` until the returned function is called (the site server does this). */
-export async function registerWaitlistWriter(file, everyMs = 30_000) {
-  const path = await resolveWaitlistPath(file);
-  await touch(path, announcement(hostname()));
-  const timer = setInterval(() => touch(path, announcement(hostname())).catch(() => undefined), everyMs);
-  timer.unref();
-  return async () => {
-    clearInterval(timer);
-    await rm(join(writers(path), announcement(hostname())), { force: true });
-  };
-}
-
-/** Appends one record as a JSONL line, after any rewrite another container is running has finished. */
+/** Appends one record as a JSONL line to the file for its day of receipt. */
 export function appendWaitlistRecord(file, record) {
   return withWaitlistLock(file, async (path) => {
-    await mkdir(dirname(path), { recursive: true });
-    await touch(path, announcement(hostname()));
-    const deadline = Date.now() + LOCK_WAIT_MS;
-    while ((await othersWith(path, 'rewrite', REWRITE_STALE_MS)).length) {
-      if (Date.now() > deadline) {
-        throw new Error('Another site container kept rewriting the form submissions file for 30 s.');
-      }
-      await new Promise((done) => setTimeout(done, 20));
-    }
-    await appendFile(path, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+    await mkdir(waitlistDays(path), { recursive: true, mode: 0o700 });
+    await appendFile(dayFile(path, record), `${JSON.stringify(record)}\n`, { mode: 0o600 });
   });
 }
 
@@ -216,8 +188,8 @@ async function writeDurably(path, text, owner) {
 }
 
 /**
- * Flushes a directory entry change (the rename) to disk. Windows can't open a directory for this, and some file
- * systems refuse to sync one (EINVAL, ENOTSUP); any other failure (EIO, say) is reported, because the deletion
+ * Flushes a directory entry change (a rename or a deletion) to disk. Windows can't open a directory for this, and
+ * some file systems refuse to sync one (EINVAL, ENOTSUP); any other failure (EIO, say) is reported, because the change
  * may then not survive a crash.
  */
 async function syncDirectory(path) {
@@ -237,39 +209,29 @@ async function syncDirectory(path) {
   }
 }
 
-/**
- * Rewrites the file keeping only the records `keep` accepts: a new, uniquely named mode-600 file, flushed to disk,
- * renamed over the old one, so a reader (or a reboot after a power cut) sees either the old file or the new one.
- * Lines that aren't JSON are kept, because this never deletes what it can't read, and counted as `unreadable` so an
- * operator can deal with them. Run as root (say `docker exec -u root`), the new file keeps the old one's owner, so
- * the site can still append to it. A failed rewrite removes its temporary file; one left by a crash (rewrites only
- * happen under the lock, so any that exists now is a leftover) is deleted first, so no copy of a deleted record
- * survives. It refuses while another container writes the file (see above).
- *
- * An error thrown before the new file replaced the old one means nothing changed. One thrown after carries
- * `replaced: true`: the deletion happened, but it may not survive a crash.
- */
-export function rewriteWaitlist(file, keep) {
-  return withWaitlistLock(file, async (path) => {
-    await touch(path, marker(hostname()));
-    try {
-      const others = await othersWith(path, 'host', WRITER_FRESH_MS);
-      if (others.length) {
-        throw new Error(`Another site container (${others.join(', ')}) is writing this file; not rewriting it until it stops.`);
-      }
-      return await rewriteAlone(path, keep);
-    } finally {
-      await rm(join(writers(path), marker(hostname())), { force: true });
-    }
+/** An error after the store already changed: the deletion happened, but it may not survive a crash. */
+function afterChange(error) {
+  return Object.assign(new Error(`The submissions were changed, but flushing that to disk failed: ${error?.message ?? error}`), {
+    replaced: true,
+    cause: error,
   });
 }
 
-async function rewriteAlone(path, keep) {
-  const prefix = `${basename(path)}${TEMPORARY}`;
-  const leftovers = await readdir(dirname(path)).catch(() => []);
-  for (const name of leftovers.filter((entry) => entry.startsWith(prefix))) {
-    await rm(join(dirname(path), name), { force: true });
+/** Deletes temporary files left by a crashed rewrite (rewrites only happen under the lock, so any found are leftovers). */
+async function removeLeftovers(directory) {
+  for (const name of (await readdir(directory).catch(() => [])).filter((entry) => entry.includes(TEMPORARY))) {
+    await rm(join(directory, name), { force: true });
   }
+}
+
+/**
+ * Rewrites one file keeping only the records `keep` accepts: a new, uniquely named mode-600 file, flushed to disk,
+ * renamed over the old one, so a reader (or a reboot after a power cut) sees either the old file or the new one.
+ * Lines that aren't JSON are kept, because this never deletes what it can't read, and counted as `unreadable`. Run as
+ * root (say `docker exec -u root`), the new file keeps the old one's owner, so the site can still append to it. A
+ * failed rewrite removes its temporary file. Must run under the store's lock.
+ */
+async function rewriteFile(path, keep) {
   let text;
   try {
     text = await readFile(path, 'utf8');
@@ -295,7 +257,7 @@ async function rewriteAlone(path, keep) {
   if (!removed) {
     return { kept: kept.length, removed, unreadable };
   }
-  const temporary = join(dirname(path), `${prefix}${randomUUID()}`);
+  const temporary = join(dirname(path), `${basename(path)}${TEMPORARY}${randomUUID()}`);
   const current = await stat(path);
   const owner = process.getuid?.() === 0 ? { uid: current.uid, gid: current.gid } : undefined;
   try {
@@ -308,33 +270,88 @@ async function rewriteAlone(path, keep) {
   try {
     await syncDirectory(dirname(path));
   } catch (error) {
-    throw Object.assign(new Error(`The file was rewritten, but flushing that to disk failed: ${error?.message ?? error}`), {
-      replaced: true,
-      cause: error,
-    });
+    throw afterChange(error);
   }
   return { kept: kept.length, removed, unreadable };
 }
 
-/** Deletes records whose retention period has ended by `now`. A record without a readable `receivedAt` is kept. */
+const countLines = async (path) => (await readFile(path, 'utf8').catch(() => '')).split('\n').filter((line) => line.trim()).length;
+
+/**
+ * Deletes submissions whose retention period has ended by `now`. A day file goes whole once even its last moment is
+ * past the period (so a submission is deleted on time or up to a day after, never early); its lines, readable or not,
+ * go with it. The legacy file is trimmed record by record; a legacy record without a readable `receivedAt` is kept.
+ * Today's file, the only one still appended to, is never touched.
+ */
 export function pruneWaitlist(file, now, months) {
-  return rewriteWaitlist(file, (record) => {
-    const receivedAt = typeof record?.receivedAt === 'string' ? Date.parse(record.receivedAt) : Number.NaN;
-    return Number.isNaN(receivedAt) || retentionExpiry(receivedAt, months) > now;
+  return withWaitlistLock(file, async (path) => {
+    await removeLeftovers(waitlistDays(path));
+    await removeLeftovers(dirname(path));
+    let removed = 0;
+    let kept = 0;
+    let deletedDays = false;
+    for (const day of await storeFiles(path)) {
+      const match = DAY_FILE.exec(basename(day));
+      if (!match || day === path) {
+        continue;
+      }
+      const nextDay = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + 1);
+      const lines = await countLines(day);
+      if (retentionExpiry(nextDay - 1, months) <= now) {
+        await rm(day, { force: true });
+        removed += lines;
+        deletedDays = true;
+      } else {
+        kept += lines;
+      }
+    }
+    if (deletedDays) {
+      try {
+        await syncDirectory(waitlistDays(path));
+      } catch (error) {
+        throw afterChange(error);
+      }
+    }
+    const legacy = await rewriteFile(path, (record) => {
+      const receivedAt = typeof record?.receivedAt === 'string' ? Date.parse(record.receivedAt) : Number.NaN;
+      return Number.isNaN(receivedAt) || retentionExpiry(receivedAt, months) > now;
+    });
+    return { kept: kept + legacy.kept, removed: removed + legacy.removed, unreadable: legacy.unreadable };
   });
 }
 
-/** Deletes every record sent from `email` (case and surrounding spaces ignored). */
+/**
+ * Deletes every record sent from `email` (case and surrounding spaces ignored), from every day file and the legacy
+ * file. It rewrites files that new submissions may still go into, so it must run where every writer shares the lock:
+ * in the site's own container.
+ */
 export async function forgetWaitlistEmail(file, email) {
   const target = email.trim().toLowerCase();
   if (!target) {
     throw new Error('An email address is required.');
   }
-  return rewriteWaitlist(
-    file,
-    (record) =>
-      String(record?.email ?? '')
-        .trim()
-        .toLowerCase() !== target,
-  );
+  return withWaitlistLock(file, async (path) => {
+    await removeLeftovers(waitlistDays(path));
+    await removeLeftovers(dirname(path));
+    const total = { kept: 0, removed: 0, unreadable: 0 };
+    for (const store of await storeFiles(path)) {
+      let result;
+      try {
+        result = await rewriteFile(
+          store,
+          (record) =>
+            String(record?.email ?? '')
+              .trim()
+              .toLowerCase() !== target,
+        );
+      } catch (error) {
+        // Files already rewritten stay changed: say so, even when this one failed before replacing anything.
+        throw total.removed && !error?.replaced ? afterChange(error) : error;
+      }
+      total.kept += result.kept;
+      total.removed += result.removed;
+      total.unreadable += result.unreadable;
+    }
+    return total;
+  });
 }

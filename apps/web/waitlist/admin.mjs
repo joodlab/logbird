@@ -3,8 +3,9 @@
 //
 //   docker exec <site container> node waitlist/admin.mjs forget someone@example.com
 //
-// From a source checkout: `pnpm --filter @logbird/web waitlist:forget someone@example.com`. Reads WAITLIST_FILE (the
-// image sets /data/waitlist.jsonl). Prints only counts, never the records.
+// Run it in the container that serves the site, so it shares the lock with new submissions. From a source checkout:
+// `pnpm --filter @logbird/web waitlist:forget someone@example.com`. Reads WAITLIST_FILE (the image sets
+// /data/waitlist.jsonl; the day files are in /data/waitlist.jsonl.d). Prints only counts, never the records.
 import { resolve } from 'node:path';
 import { forgetWaitlistEmail } from './file.mjs';
 
@@ -16,17 +17,16 @@ if (command !== 'forget' || !email) {
 }
 try {
   const { removed, kept } = await forgetWaitlistEmail(file, email);
-  console.log(`Removed ${removed} submission(s) for that address; ${kept} other submission(s) kept in ${file}.`);
+  console.log(`Removed ${removed} submission(s) for that address; ${kept} other submission(s) kept in ${file} and its day files.`);
   console.log('Also delete the notification emails for that address from the team mailbox.');
 } catch (error) {
   const reason = error instanceof Error ? error.message : String(error);
   if (error?.replaced) {
-    // The submissions are gone from the file, but the change may not survive a crash: check the disk, then run the
+    // Some or all of the submissions are gone, but the change may not survive a crash: check the disk, then run the
     // command again (it is safe to repeat).
     console.error(`The submissions were removed, but the result may not be on disk yet: ${reason}`);
   } else {
-    // Nothing changed. The usual cause is another site container still running on this volume (a deploy in
-    // progress): try again once it has stopped.
+    // Nothing changed, so it is safe to fix the cause and run it again.
     console.error(`Nothing was deleted: ${reason}`);
   }
   process.exit(1);
