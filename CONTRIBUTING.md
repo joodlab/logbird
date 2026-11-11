@@ -57,7 +57,7 @@ Before handoff, run `pnpm install`, `pnpm typecheck`, `pnpm check`, `pnpm test` 
 The required `Quality` job uses Node 22 and the pinned pnpm version to install with
 `--frozen-lockfile`, typecheck, run Biome, and run `pnpm test:unit`. PR titles must
 follow Conventional Commits; Gitleaks scans Git history on PRs and pushes.
-The Docker workflow builds the images on PRs that touch Dockerfiles or Compose files; only the tag-driven release workflow publishes them.
+The Docker workflow builds images only with an explicit workflow_dispatch trigger; pull requests never build Docker images. The tag-driven release workflow publishes release images.
 
 `pnpm test:unit` runs every test outside the server except `*.integration.test.ts`,
 the server's three pure export regression suites, and the self-hosting/Kubernetes
@@ -84,7 +84,7 @@ Look for the [good first issue](https://github.com/joodlab/logbird/labels/good%2
 
 Create a focused branch and use Conventional Commits, for example `feat(server): add capability`, `fix(app): correct behavior`, or `docs: clarify setup`. Use a conventional PR title, rebase on `origin/master`, and open the PR ready for review. Explain what changed, why, how it was verified, contract changes and remaining limits. Attach screenshots for UI changes and a short recording when interaction matters; use [the media capture guide](docs/media/README.md) for public demo assets. Never include credentials, customer data or personal paths.
 
-GitHub Actions runs the required `Quality` check, PR-title lint and Gitleaks on every PR; fix failures before asking for review. PRs that touch Dockerfiles or Compose files also build (never push) the four release images and the marketing site image. Maintainers review and merge; do not merge your own PR.
+GitHub Actions runs the required `Quality` check, PR-title lint and Gitleaks on every PR; fix failures before asking for review. The manual Docker workflow can build (never push) the four release images and the marketing site image; PRs never trigger image builds. Maintainers review and merge; do not merge your own PR.
 
 ## Releases and changelog
 

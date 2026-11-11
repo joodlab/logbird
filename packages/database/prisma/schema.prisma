@@ -28,6 +28,7 @@ model User {
   apiKeys       ApiKey[]
   savedViews    SavedView[]
   inviteLinks   InviteLink[]
+  webhookEndpoints WebhookEndpoint[]
 
   @@index([emailHash])
   @@map("user")
@@ -151,6 +152,7 @@ model Project {
   keys           ApiKey[]
   views          SavedView[]
   retentionRuns  RetentionRun[]
+  webhookEndpoints WebhookEndpoint[]
 
   @@unique([organizationId, slug])
   @@index([exportDeleteStartedAt, id])
@@ -342,4 +344,37 @@ model AuthAuditBudget {
 
   @@index([reported, windowEnd])
   @@index([namespace, reported, quarantinedAt, nextAttemptAt, windowEnd], map: "AuthAuditBudget_due_idx")
+}
+
+model WebhookEndpoint {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  url String
+  description String?
+  enabled Boolean @default(true)
+  disabledReason String?
+  disabledAt DateTime?
+  filterQuery String @default("")
+  scopeTenantId String?
+  scopeTargetType String?
+  scopeTargetId String?
+  createdById String?
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  secrets WebhookSecret[]
+
+  @@index([projectId])
+}
+
+model WebhookSecret {
+  id String @id @default(cuid())
+  endpointId String
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  ciphertext String
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+
+  @@index([endpointId])
 }

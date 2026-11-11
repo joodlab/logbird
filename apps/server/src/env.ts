@@ -1,3 +1,4 @@
+import { webhookSecretKey } from '@logbird/database/webhooks';
 import { createEnv } from '@t3-oss/env-core';
 import { z } from 'zod';
 export const env = createEnv({
@@ -19,6 +20,24 @@ export const env = createEnv({
     PORT: z.coerce.number().int().min(1).max(65_535).default(4601),
     APP_URL: z.url(),
     BETTER_AUTH_SECRET: z.string().min(32),
+    WEBHOOK_SECRET_KEY: z.preprocess(
+      (v) => (v === '' ? undefined : v),
+      z
+        .string()
+        .refine((v) => {
+          try {
+            webhookSecretKey('', v);
+            return true;
+          } catch {
+            return false;
+          }
+        }, 'WEBHOOK_SECRET_KEY must be base64 encoding of 32 bytes')
+        .optional(),
+    ),
+    WEBHOOKS_ALLOW_HTTP: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
     CLICKHOUSE_URL: z.url(),
     CLICKHOUSE_DATABASE: z.string(),
     CLICKHOUSE_USER: z.string(),

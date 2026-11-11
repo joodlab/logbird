@@ -29,6 +29,7 @@ import { managementRoutes } from './routes';
 import { sessionMutationOrigin, sessionRoutes } from './session-routes';
 import { setupRoutes } from './setup-routes';
 import type { AppEnv } from './types';
+import { webhookRoutes } from './webhook-routes';
 
 export const app = new Hono<AppEnv>();
 app.use('*', requestId());
@@ -222,6 +223,7 @@ export const routes = app
   .route('/api', setupRoutes)
   .route('/api', dataRoutes)
   .route('/api', managementRoutes)
+  .route('/api', webhookRoutes)
   .route('/v1', publicRoutes);
 app.get(
   '/openapi.json',

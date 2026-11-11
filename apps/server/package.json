@@ -28,6 +28,7 @@
     "@logbird/auth": "workspace:*",
     "@logbird/contracts": "workspace:*",
     "@logbird/database": "workspace:*",
+    "@logbird/sdk": "workspace:*",
     "@logbird/worker": "workspace:*",
     "bullmq": "^6.2.0",
     "hono": "^4.13.5",

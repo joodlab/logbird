@@ -1,20 +1,13 @@
 name: Docker
 
 on:
-  pull_request:
-    paths:
-      - 'apps/**/Dockerfile'
-      - 'apps/web/Dockerfile.dockerignore'
-      - 'docker-compose*.yml'
-      - '.dockerignore'
-      - '.github/workflows/docker.yml'
-      - '.github/workflows/release.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: docker-pr-${{ github.event.pull_request.number }}
+  group: docker-manual-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
