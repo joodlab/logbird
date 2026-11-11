@@ -227,7 +227,13 @@ app.get(
         securitySchemes: {
           session: { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' },
           ingestKey: { type: 'http', scheme: 'bearer' },
-          readKey: { type: 'http', scheme: 'bearer' },
+          readKey: { type: 'http', scheme: 'bearer', description: 'A read (`lb_read_…`) or scoped-read key. Scoped keys see only their scope.' },
+          viewerToken: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'lbv1',
+            description: 'Short-lived viewer token from POST /v1/viewer-tokens (≤ 1 h). Read routes only; sees only its scope.',
+          },
         },
       },
     },

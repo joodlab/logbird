@@ -28,6 +28,23 @@ import { clientAddress, publicRateLimits } from './rate-limit';
 import type { AppEnv } from './types';
 
 const ingestRequestSchema = (await resolver(s.ingestBodySchema).toOpenAPISchema()).schema;
+const viewerTokenRequestSchema = (await resolver(s.viewerTokenRequestSchema).toOpenAPISchema()).schema;
+// CONTRACT STUB (#138): replaced by the implementation; registered only so /openapi.json shows the final contract.
+const notImplemented = () => {
+  throw new ApiError(501, 'not_implemented', 'Not implemented yet (#138).');
+};
+const exportResponses = {
+  429: { description: 'Export capacity is in use. Finish or cancel an export, then retry.' },
+  200: {
+    description:
+      'Versioned CSV/JSONL or complete original-payload JSONL, limited to the caller scope and audited as export.created. See docs/exports.md.',
+    headers: {
+      [s.EXPORT_ID_HEADER]: { description: 'Stable export id in filename and workspace records.', schema: { type: 'string', format: 'uuid' } },
+      [s.EXPORT_SCHEMA_HEADER]: { description: 'Export format and schema version.', schema: { type: 'string' } },
+    },
+    content: { 'text/csv': { schema: { type: 'string' } }, 'application/x-ndjson': { schema: { type: 'string' } } },
+  },
+};
 
 const doc = (summary: string, schema: z.ZodType, status = 200, security = 'session') =>
   summary === 'Ingest events'
@@ -106,7 +123,7 @@ export const publicRoutes = new Hono<AppEnv>()
     publicRateLimits.authenticated('read'),
     publicQueryLanguage,
     projectRead,
-    doc('Search events', s.searchResponseSchema, 200, 'readKey'),
+    doc('Search events', s.searchResponseSchema, 200, 'readKeyOrViewerToken'),
     query(s.publicSearchQuerySchema),
     async (c) =>
       c.json(s.searchResponseSchema.parse(await ch.searchEvents(queryClient(c.req.valid('query')), c.get('project').id, c.req.valid('query')))),
@@ -117,8 +134,39 @@ export const publicRoutes = new Hono<AppEnv>()
     publicRateLimits.authenticated('read'),
     publicQueryLanguage,
     projectRead,
-    doc('Event detail', s.eventDetailSchema, 200, 'readKey'),
+    doc('Event detail', s.eventDetailSchema, 200, 'readKeyOrViewerToken'),
     async (c) => c.json(s.eventDetailSchema.parse(found(await ch.getEvent(clickhouse, c.get('project').id, c.req.param('eventId'))))),
+  )
+  .get('/facets', doc('Facets', s.facetResponseSchema, 200, 'readKeyOrViewerToken'), query(s.publicFacetQuerySchema), notImplemented)
+  .get(
+    '/export',
+    routeDoc('Stream CSV or JSONL', { responses: exportResponses }, 'readKeyOrViewerToken'),
+    query(s.publicExportQuerySchema),
+    notImplemented,
+  )
+  .post(
+    '/viewer-tokens',
+    routeDoc(
+      'Mint viewer token',
+      {
+        requestBody: {
+          required: true,
+          description: 'Scope equal to or narrower than the key scope; ttlSeconds 60–3600 (default 900).',
+          content: {
+            'application/json': {
+              schema: viewerTokenRequestSchema,
+              example: { scope: { tenantId: 'biz_5', target: { type: 'website', id: 'site_42' } }, ttlSeconds: 900 },
+            },
+          },
+        },
+        responses: {
+          201: { description: 'Viewer token', content: { 'application/json': { schema: resolver(s.viewerTokenResponseSchema) } } },
+          403: { description: 'scope_exceeded: the requested scope is wider than the key scope.' },
+        },
+      },
+      'readKey',
+    ),
+    notImplemented,
   );
 async function activeWorkspace(c: Context<AppEnv>) {
   const id = c.get('activeOrganizationId');

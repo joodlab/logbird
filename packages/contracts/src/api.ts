@@ -65,6 +65,8 @@ export const searchQuerySchema = rangeQuerySchema.extend({
   order: z.enum(['desc', 'asc']).default('desc'),
 });
 export const publicSearchQuerySchema = searchQuerySchema.extend({ lang: z.literal('query').optional() });
+/** `GET /v1/export`: the console schema without SQL mode (`lang=sql` is console-only). */
+export const publicExportQuerySchema = exportQuerySchema.extend({ lang: z.literal('query').optional() });
 export type SearchQuery = z.infer<typeof searchQuerySchema>;
 
 export const searchResponseSchema = z.object({
@@ -122,16 +124,38 @@ export const FACET_FIELDS = [
   'target.type',
   'source',
 ] as const;
+/** An envelope field, or any attribute key as `attr.<path>` (array-valued attributes count each element). */
+export const facetFieldSchema = z.union([
+  z.enum(FACET_FIELDS),
+  z
+    .string()
+    .max(256)
+    .regex(/^attr\..+/),
+]);
 export const facetQuerySchema = rangeQuerySchema.extend({
-  field: z.union([z.enum(FACET_FIELDS), z.string().regex(/^attr\..+/)]),
+  field: facetFieldSchema.meta({ example: 'attr.metadata.missing' }),
   limit: z.coerce.number().int().min(1).max(100).default(10),
+  /** Optional second level (#140): the top `byLimit` values of `by` within each returned value of `field`. */
+  by: facetFieldSchema.optional().meta({ example: 'tenant' }),
+  byLimit: z.coerce.number().int().min(1).max(20).default(5),
 });
+const facetValueSchema = z.object({ value: z.string(), label: z.string(), count: z.number().int() });
 export const facetResponseSchema = z.object({
   field: z.string(),
-  values: z.array(z.object({ value: z.string(), label: z.string(), count: z.number().int() })),
+  /** The second-level field when `by` was requested, else null. */
+  by: z.string().nullable(),
+  values: z.array(
+    facetValueSchema.extend({
+      /** Present only with `by`: top values of `by` among this value's events, and the count of the rest. */
+      groups: z.array(facetValueSchema).optional(),
+      groupsOtherCount: z.number().int().optional(),
+    }),
+  ),
   otherCount: z.number().int(),
 });
 export type FacetResponse = z.infer<typeof facetResponseSchema>;
+/** `GET /v1/facets`: the console schema without SQL mode (`lang=sql` is console-only). */
+export const publicFacetQuerySchema = facetQuerySchema.extend({ lang: z.literal('query').optional() });
 
 /* ------------------------------------------------------------------ */
 /* Overview dashboard                                                  */
@@ -252,13 +276,72 @@ export const updateProjectSchema = z.object({
   setupDismissed: z.boolean().optional(),
 });
 
-export const API_KEY_KINDS = ['ingest', 'read'] as const;
+/**
+ * `ingest` writes; `read` reads the whole project and may mint viewer tokens for any scope; `scoped-read` reads only
+ * within its fixed `scope` and may mint viewer tokens for an equal or narrower scope. All read kinds use `lb_read_…`.
+ */
+export const API_KEY_KINDS = ['ingest', 'read', 'scoped-read'] as const;
+export const apiKeyKindSchema = z.enum(API_KEY_KINDS);
+export type ApiKeyKind = z.infer<typeof apiKeyKindSchema>;
+
+/** Field-mask presets. Any active mask also drops the raw `payload` (detail → null, export → refused for jsonl-evidence). */
+export const SCOPE_MASKS = ['ip', 'user_agent', 'actor_email'] as const;
+export const scopeMaskSchema = z.enum(SCOPE_MASKS);
+
+/**
+ * A read scope, enforced by the server as a mandatory predicate ANDed outside the caller's `q` on every scoped read
+ * (search, detail, parents/children/operation counts, facets, export). Nothing in `q` can widen it.
+ * - `tenantId`: the event's `tenant.id` must equal it. Events without a tenant are never visible to a scoped caller.
+ * - `target`: the event must have a target with exactly this type and id (e.g. `{type: 'website', id: 'site_42'}`).
+ * - `actionPrefixes`: the action must start with one of these prefixes (e.g. `booking.`).
+ * - `mask`: field-mask presets applied to every returned event.
+ * v1 allows one tenant per scope; the shape stays list-ready (a future `tenantIds` would be additive).
+ */
+export const readScopeSchema = z
+  .object({
+    tenantId: z.string().min(1).max(256).meta({ example: 'biz_5' }),
+    target: z
+      .object({ type: z.string().min(1).max(64), id: z.string().min(1).max(256) })
+      .strict()
+      .optional()
+      .meta({ example: { type: 'website', id: 'site_42' } }),
+    actionPrefixes: z
+      .array(z.string().min(1).max(200))
+      .min(1)
+      .max(20)
+      .optional()
+      .meta({ example: ['booking.', 'auth.'] }),
+    mask: z
+      .array(scopeMaskSchema)
+      .min(1)
+      .max(SCOPE_MASKS.length)
+      .optional()
+      .meta({ example: ['ip', 'user_agent'] }),
+  })
+  .strict();
+export type ReadScope = z.infer<typeof readScopeSchema>;
+
+/** `https://host[:port]` (or `http://localhost[:port]`), exactly as a browser sends `Origin`. */
+export const embedOriginSchema = z
+  .string()
+  .max(255)
+  .regex(
+    /^(https:\/\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*|http:\/\/(localhost|127\.0\.0\.1))(:\d{1,5})?$/,
+    'Use a lowercase origin such as https://app.example.com (no path or trailing slash).',
+  );
+
 export const apiKeySchema = z.object({
   id: z.string(),
   projectId: z.string(),
   name: z.string(),
-  kind: z.enum(API_KEY_KINDS),
+  kind: apiKeyKindSchema,
   prefix: z.string(), // e.g. "lb_ingest_7Hq2"; full secret only returned once on create
+  /** `scoped-read` only: the fixed scope enforced on every read and viewer token (null for other kinds). */
+  scope: readScopeSchema.nullable(),
+  /** Read kinds: browser origins allowed to use this key's viewer tokens (CORS) and, later, to frame the embed viewer. */
+  embedOrigins: z.array(z.string()),
+  /** Optional expiry. An expired key is rejected like a revoked one, and so are its viewer tokens. */
+  expiresAt: z.string().nullable(),
   createdAt: z.string(),
   createdBy: z.object({ id: z.string(), name: z.string(), email: z.string().optional() }).nullable(),
   lastUsedAt: z.string().nullable(),
@@ -269,8 +352,46 @@ export const apiKeySchema = z.object({
   revokedAt: z.string().nullable(),
 });
 export type ApiKey = z.infer<typeof apiKeySchema>;
-export const createApiKeySchema = z.object({ name: z.string().min(1).max(64), kind: z.enum(API_KEY_KINDS) });
+/**
+ * Create a key. `scope` is required for `scoped-read` and rejected otherwise. `embedOrigins` is for read kinds only.
+ * `expiresAt` must be in the future. Scope, origins and expiry are fixed at creation (rolling copies scope and origins,
+ * not expiry); change them by creating a new key.
+ */
+export const createApiKeySchema = z
+  .object({
+    name: z.string().min(1).max(64),
+    kind: apiKeyKindSchema,
+    scope: readScopeSchema.optional(),
+    embedOrigins: z.array(embedOriginSchema).max(10).optional(),
+    expiresAt: z.iso.datetime().optional(),
+  })
+  .superRefine((input, ctx) => {
+    if ((input.kind === 'scoped-read') !== (input.scope !== undefined))
+      ctx.addIssue({ code: 'custom', path: ['scope'], message: 'A scope is required for scoped-read keys and only allowed on them.' });
+    if (input.kind === 'ingest' && input.embedOrigins?.length)
+      ctx.addIssue({ code: 'custom', path: ['embedOrigins'], message: 'Embed origins apply to read keys only.' });
+  });
 export const createApiKeyResponseSchema = z.object({ key: apiKeySchema, secret: z.string() });
+
+export const VIEWER_TOKEN_TTL_SECONDS = { min: 60, default: 900, max: 3600 } as const;
+/**
+ * `POST /v1/viewer-tokens` (read or scoped-read key). The token's scope must be equal to or narrower than the key's:
+ * a `read` key may mint any scope; a `scoped-read` key only its own tenant and target, with a subset of its action
+ * prefixes and at least its masks.
+ */
+export const viewerTokenRequestSchema = z
+  .object({
+    scope: readScopeSchema,
+    ttlSeconds: z.number().int().min(VIEWER_TOKEN_TTL_SECONDS.min).max(VIEWER_TOKEN_TTL_SECONDS.max).default(VIEWER_TOKEN_TTL_SECONDS.default),
+  })
+  .strict();
+export const viewerTokenResponseSchema = z.object({
+  /** `lbv1.<payload>.<mac>`; send as `Authorization: Bearer …` to the /v1 read routes. Never put it in a URL query. */
+  token: z.string(),
+  expiresAt: z.string(),
+  scope: readScopeSchema,
+});
+export type ViewerTokenResponse = z.infer<typeof viewerTokenResponseSchema>;
 
 export const createProjectResponseSchema = z.object({ project: projectSchema, ingestKey: createApiKeyResponseSchema });
 

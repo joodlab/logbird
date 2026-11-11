@@ -95,10 +95,21 @@ export const routes = {
   },
 
   /* Public API used by SDKs and customer products */
+  /**
+   * Read routes accept a `read` key, a `scoped-read` key, or a viewer token (`Authorization: Bearer lbv1…`). A scoped
+   * caller sees only events inside its scope: out-of-scope detail answers 404, and parents, child and operation counts,
+   * facets and exports are scoped too. Viewer tokens are never accepted for ingest or management.
+   */
   public: {
     ingest: { method: 'POST', path: '/v1/events', auth: 'ingestKey' },
-    search: { method: 'GET', path: '/v1/events', auth: 'readKey' },
-    get: { method: 'GET', path: '/v1/events/:eventId', auth: 'readKey' },
+    search: { method: 'GET', path: '/v1/events', auth: 'readKeyOrViewerToken' }, // publicSearchQuerySchema → SearchResponse
+    get: { method: 'GET', path: '/v1/events/:eventId', auth: 'readKeyOrViewerToken' }, // → EventDetail (payload null when masked)
+    /** Count/group by any field, including `attr.*` (#140). Not under /v1/events/: an event id may be "facets". */
+    facets: { method: 'GET', path: '/v1/facets', auth: 'readKeyOrViewerToken' }, // publicFacetQuerySchema → FacetResponse
+    /** Streamed csv | jsonl | jsonl-evidence (refused with 422 for masked scopes); audited as export.created. */
+    export: { method: 'GET', path: '/v1/export', auth: 'readKeyOrViewerToken' }, // publicExportQuerySchema
+    /** Mint a short-lived viewer token (viewerTokenRequestSchema → ViewerTokenResponse) with a read or scoped-read key. */
+    viewerTokens: { method: 'POST', path: '/v1/viewer-tokens', auth: 'readKey' },
   },
 
   health: { method: 'GET', path: '/health', auth: 'none' },

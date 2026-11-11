@@ -6,6 +6,7 @@
         "type": "http"
       },
       "readKey": {
+        "description": "A read (`lb_read_…`) or scoped-read key. Scoped keys see only their scope.",
         "scheme": "bearer",
         "type": "http"
       },
@@ -13,6 +14,12 @@
         "in": "cookie",
         "name": "better-auth.session_token",
         "type": "apiKey"
+      },
+      "viewerToken": {
+        "bearerFormat": "lbv1",
+        "description": "Short-lived viewer token from POST /v1/viewer-tokens (≤ 1 h). Read routes only; sees only its scope.",
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
@@ -743,13 +750,26 @@
                                 }
                               ]
                             },
+                            "embedOrigins": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "expiresAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
                             "id": {
                               "type": "string"
                             },
                             "kind": {
                               "enum": [
                                 "ingest",
-                                "read"
+                                "read",
+                                "scoped-read"
                               ],
                               "type": "string"
                             },
@@ -785,6 +805,83 @@
                                 "string",
                                 "null"
                               ]
+                            },
+                            "scope": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "actionPrefixes": {
+                                      "example": [
+                                        "booking.",
+                                        "auth."
+                                      ],
+                                      "items": {
+                                        "maxLength": 200,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "maxItems": 20,
+                                      "minItems": 1,
+                                      "type": "array"
+                                    },
+                                    "mask": {
+                                      "example": [
+                                        "ip",
+                                        "user_agent"
+                                      ],
+                                      "items": {
+                                        "enum": [
+                                          "ip",
+                                          "user_agent",
+                                          "actor_email"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "maxItems": 3,
+                                      "minItems": 1,
+                                      "type": "array"
+                                    },
+                                    "target": {
+                                      "additionalProperties": false,
+                                      "example": {
+                                        "id": "site_42",
+                                        "type": "website"
+                                      },
+                                      "properties": {
+                                        "id": {
+                                          "maxLength": 256,
+                                          "minLength": 1,
+                                          "type": "string"
+                                        },
+                                        "type": {
+                                          "maxLength": 64,
+                                          "minLength": 1,
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "type",
+                                        "id"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "tenantId": {
+                                      "example": "biz_5",
+                                      "maxLength": 256,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "tenantId"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             }
                           },
                           "required": [
@@ -793,6 +890,9 @@
                             "name",
                             "kind",
                             "prefix",
+                            "scope",
+                            "embedOrigins",
+                            "expiresAt",
                             "createdAt",
                             "createdBy",
                             "lastUsedAt",
@@ -2983,10 +3083,12 @@
                   "type": "string"
                 },
                 {
+                  "maxLength": 256,
                   "pattern": "^attr\\..+",
                   "type": "string"
                 }
-              ]
+              ],
+              "example": "attr.metadata.missing"
             }
           },
           {
@@ -2995,6 +3097,49 @@
             "schema": {
               "default": 10,
               "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "by",
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "action",
+                    "category",
+                    "outcome",
+                    "severity",
+                    "environment",
+                    "actor.type",
+                    "actor",
+                    "impersonator",
+                    "tenant",
+                    "executor",
+                    "executor.type",
+                    "target",
+                    "target.type",
+                    "source"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "maxLength": 256,
+                  "pattern": "^attr\\..+",
+                  "type": "string"
+                }
+              ],
+              "example": "tenant"
+            }
+          },
+          {
+            "in": "query",
+            "name": "byLimit",
+            "schema": {
+              "default": 5,
+              "maximum": 20,
               "minimum": 1,
               "type": "integer"
             }
@@ -3014,6 +3159,12 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "by": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "field": {
                       "type": "string"
                     },
@@ -3026,6 +3177,35 @@
                       "items": {
                         "properties": {
                           "count": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "groups": {
+                            "items": {
+                              "properties": {
+                                "count": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "value",
+                                "label",
+                                "count"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "groupsOtherCount": {
                             "maximum": 9007199254740991,
                             "minimum": -9007199254740991,
                             "type": "integer"
@@ -3049,6 +3229,7 @@
                   },
                   "required": [
                     "field",
+                    "by",
                     "values",
                     "otherCount"
                   ],
@@ -3461,13 +3642,26 @@
                               }
                             ]
                           },
+                          "embedOrigins": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "expiresAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "id": {
                             "type": "string"
                           },
                           "kind": {
                             "enum": [
                               "ingest",
-                              "read"
+                              "read",
+                              "scoped-read"
                             ],
                             "type": "string"
                           },
@@ -3503,6 +3697,83 @@
                               "string",
                               "null"
                             ]
+                          },
+                          "scope": {
+                            "anyOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "actionPrefixes": {
+                                    "example": [
+                                      "booking.",
+                                      "auth."
+                                    ],
+                                    "items": {
+                                      "maxLength": 200,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "maxItems": 20,
+                                    "minItems": 1,
+                                    "type": "array"
+                                  },
+                                  "mask": {
+                                    "example": [
+                                      "ip",
+                                      "user_agent"
+                                    ],
+                                    "items": {
+                                      "enum": [
+                                        "ip",
+                                        "user_agent",
+                                        "actor_email"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "maxItems": 3,
+                                    "minItems": 1,
+                                    "type": "array"
+                                  },
+                                  "target": {
+                                    "additionalProperties": false,
+                                    "example": {
+                                      "id": "site_42",
+                                      "type": "website"
+                                    },
+                                    "properties": {
+                                      "id": {
+                                        "maxLength": 256,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "maxLength": 64,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "id"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "tenantId": {
+                                    "example": "biz_5",
+                                    "maxLength": 256,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "tenantId"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [
@@ -3511,6 +3782,9 @@
                           "name",
                           "kind",
                           "prefix",
+                          "scope",
+                          "embedOrigins",
+                          "expiresAt",
                           "createdAt",
                           "createdBy",
                           "lastUsedAt",
@@ -3591,10 +3865,25 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "embedOrigins": {
+                    "items": {
+                      "maxLength": 255,
+                      "pattern": "^(https:\\/\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*|http:\\/\\/(localhost|127\\.0\\.0\\.1))(:\\d{1,5})?$",
+                      "type": "string"
+                    },
+                    "maxItems": 10,
+                    "type": "array"
+                  },
+                  "expiresAt": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                    "type": "string"
+                  },
                   "kind": {
                     "enum": [
                       "ingest",
-                      "read"
+                      "read",
+                      "scoped-read"
                     ],
                     "type": "string"
                   },
@@ -3602,6 +3891,76 @@
                     "maxLength": 64,
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "scope": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "actionPrefixes": {
+                        "example": [
+                          "booking.",
+                          "auth."
+                        ],
+                        "items": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 20,
+                        "minItems": 1,
+                        "type": "array"
+                      },
+                      "mask": {
+                        "example": [
+                          "ip",
+                          "user_agent"
+                        ],
+                        "items": {
+                          "enum": [
+                            "ip",
+                            "user_agent",
+                            "actor_email"
+                          ],
+                          "type": "string"
+                        },
+                        "maxItems": 3,
+                        "minItems": 1,
+                        "type": "array"
+                      },
+                      "target": {
+                        "additionalProperties": false,
+                        "example": {
+                          "id": "site_42",
+                          "type": "website"
+                        },
+                        "properties": {
+                          "id": {
+                            "maxLength": 256,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": {
+                            "maxLength": 64,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "id"
+                        ],
+                        "type": "object"
+                      },
+                      "tenantId": {
+                        "example": "biz_5",
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "tenantId"
+                    ],
+                    "type": "object"
                   }
                 },
                 "required": [
@@ -3650,13 +4009,26 @@
                             }
                           ]
                         },
+                        "embedOrigins": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "expiresAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
                         "id": {
                           "type": "string"
                         },
                         "kind": {
                           "enum": [
                             "ingest",
-                            "read"
+                            "read",
+                            "scoped-read"
                           ],
                           "type": "string"
                         },
@@ -3692,6 +4064,83 @@
                             "string",
                             "null"
                           ]
+                        },
+                        "scope": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "actionPrefixes": {
+                                  "example": [
+                                    "booking.",
+                                    "auth."
+                                  ],
+                                  "items": {
+                                    "maxLength": 200,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "maxItems": 20,
+                                  "minItems": 1,
+                                  "type": "array"
+                                },
+                                "mask": {
+                                  "example": [
+                                    "ip",
+                                    "user_agent"
+                                  ],
+                                  "items": {
+                                    "enum": [
+                                      "ip",
+                                      "user_agent",
+                                      "actor_email"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "maxItems": 3,
+                                  "minItems": 1,
+                                  "type": "array"
+                                },
+                                "target": {
+                                  "additionalProperties": false,
+                                  "example": {
+                                    "id": "site_42",
+                                    "type": "website"
+                                  },
+                                  "properties": {
+                                    "id": {
+                                      "maxLength": 256,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "type": {
+                                      "maxLength": 64,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "id"
+                                  ],
+                                  "type": "object"
+                                },
+                                "tenantId": {
+                                  "example": "biz_5",
+                                  "maxLength": 256,
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "tenantId"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       },
                       "required": [
@@ -3700,6 +4149,9 @@
                         "name",
                         "kind",
                         "prefix",
+                        "scope",
+                        "embedOrigins",
+                        "expiresAt",
                         "createdAt",
                         "createdBy",
                         "lastUsedAt",
@@ -3891,13 +4343,26 @@
                             }
                           ]
                         },
+                        "embedOrigins": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "expiresAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
                         "id": {
                           "type": "string"
                         },
                         "kind": {
                           "enum": [
                             "ingest",
-                            "read"
+                            "read",
+                            "scoped-read"
                           ],
                           "type": "string"
                         },
@@ -3933,6 +4398,83 @@
                             "string",
                             "null"
                           ]
+                        },
+                        "scope": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "actionPrefixes": {
+                                  "example": [
+                                    "booking.",
+                                    "auth."
+                                  ],
+                                  "items": {
+                                    "maxLength": 200,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "maxItems": 20,
+                                  "minItems": 1,
+                                  "type": "array"
+                                },
+                                "mask": {
+                                  "example": [
+                                    "ip",
+                                    "user_agent"
+                                  ],
+                                  "items": {
+                                    "enum": [
+                                      "ip",
+                                      "user_agent",
+                                      "actor_email"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "maxItems": 3,
+                                  "minItems": 1,
+                                  "type": "array"
+                                },
+                                "target": {
+                                  "additionalProperties": false,
+                                  "example": {
+                                    "id": "site_42",
+                                    "type": "website"
+                                  },
+                                  "properties": {
+                                    "id": {
+                                      "maxLength": 256,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "type": {
+                                      "maxLength": 64,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "id"
+                                  ],
+                                  "type": "object"
+                                },
+                                "tenantId": {
+                                  "example": "biz_5",
+                                  "maxLength": 256,
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "tenantId"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       },
                       "required": [
@@ -3941,6 +4483,9 @@
                         "name",
                         "kind",
                         "prefix",
+                        "scope",
+                        "embedOrigins",
+                        "expiresAt",
                         "createdAt",
                         "createdBy",
                         "lastUsedAt",
@@ -9222,6 +9767,9 @@
         "security": [
           {
             "readKey": []
+          },
+          {
+            "viewerToken": []
           }
         ],
         "summary": "Search events",
@@ -10164,9 +10712,875 @@
         "security": [
           {
             "readKey": []
+          },
+          {
+            "viewerToken": []
           }
         ],
         "summary": "Event detail",
+        "tags": [
+          "public/v1"
+        ]
+      }
+    },
+    "/v1/export": {
+      "get": {
+        "operationId": "public_stream_csv_or_jsonl",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "example": "action:document.updated",
+              "maxLength": 4096,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lang",
+            "schema": {
+              "const": "query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": true,
+            "schema": {
+              "enum": [
+                "csv",
+                "jsonl",
+                "jsonl-evidence"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Versioned CSV/JSONL or complete original-payload JSONL, limited to the caller scope and audited as export.created. See docs/exports.md.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds before retrying; budget headers apply only after authentication",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request failed"
+          }
+        },
+        "security": [
+          {
+            "readKey": []
+          },
+          {
+            "viewerToken": []
+          }
+        ],
+        "summary": "Stream CSV or JSONL",
+        "tags": [
+          "public/v1"
+        ]
+      }
+    },
+    "/v1/facets": {
+      "get": {
+        "operationId": "public_facets",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "example": "action:document.updated",
+              "maxLength": 4096,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lang",
+            "schema": {
+              "const": "query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "field",
+            "required": true,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "action",
+                    "category",
+                    "outcome",
+                    "severity",
+                    "environment",
+                    "actor.type",
+                    "actor",
+                    "impersonator",
+                    "tenant",
+                    "executor",
+                    "executor.type",
+                    "target",
+                    "target.type",
+                    "source"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "maxLength": 256,
+                  "pattern": "^attr\\..+",
+                  "type": "string"
+                }
+              ],
+              "example": "attr.metadata.missing"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 10,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "by",
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "action",
+                    "category",
+                    "outcome",
+                    "severity",
+                    "environment",
+                    "actor.type",
+                    "actor",
+                    "impersonator",
+                    "tenant",
+                    "executor",
+                    "executor.type",
+                    "target",
+                    "target.type",
+                    "source"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "maxLength": 256,
+                  "pattern": "^attr\\..+",
+                  "type": "string"
+                }
+              ],
+              "example": "tenant"
+            }
+          },
+          {
+            "in": "query",
+            "name": "byLimit",
+            "schema": {
+              "default": 5,
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "by": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "field": {
+                      "type": "string"
+                    },
+                    "otherCount": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "values": {
+                      "items": {
+                        "properties": {
+                          "count": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "groups": {
+                            "items": {
+                              "properties": {
+                                "count": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": -9007199254740991,
+                                  "type": "integer"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "value",
+                                "label",
+                                "count"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "groupsOtherCount": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "value",
+                          "label",
+                          "count"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "by",
+                    "values",
+                    "otherCount"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Facets",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds before retrying; budget headers apply only after authentication",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request failed"
+          }
+        },
+        "security": [
+          {
+            "readKey": []
+          },
+          {
+            "viewerToken": []
+          }
+        ],
+        "summary": "Facets",
+        "tags": [
+          "public/v1"
+        ]
+      }
+    },
+    "/v1/viewer-tokens": {
+      "post": {
+        "operationId": "public_mint_viewer_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "scope": {
+                  "target": {
+                    "id": "site_42",
+                    "type": "website"
+                  },
+                  "tenantId": "biz_5"
+                },
+                "ttlSeconds": 900
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "scope": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "actionPrefixes": {
+                        "example": [
+                          "booking.",
+                          "auth."
+                        ],
+                        "items": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 20,
+                        "minItems": 1,
+                        "type": "array"
+                      },
+                      "mask": {
+                        "example": [
+                          "ip",
+                          "user_agent"
+                        ],
+                        "items": {
+                          "enum": [
+                            "ip",
+                            "user_agent",
+                            "actor_email"
+                          ],
+                          "type": "string"
+                        },
+                        "maxItems": 3,
+                        "minItems": 1,
+                        "type": "array"
+                      },
+                      "target": {
+                        "additionalProperties": false,
+                        "example": {
+                          "id": "site_42",
+                          "type": "website"
+                        },
+                        "properties": {
+                          "id": {
+                            "maxLength": 256,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": {
+                            "maxLength": 64,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "id"
+                        ],
+                        "type": "object"
+                      },
+                      "tenantId": {
+                        "example": "biz_5",
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "tenantId"
+                    ],
+                    "type": "object"
+                  },
+                  "ttlSeconds": {
+                    "default": 900,
+                    "maximum": 3600,
+                    "minimum": 60,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "scope"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "description": "Scope equal to or narrower than the key scope; ttlSeconds 60–3600 (default 900).",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "expiresAt": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "actionPrefixes": {
+                          "example": [
+                            "booking.",
+                            "auth."
+                          ],
+                          "items": {
+                            "maxLength": 200,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 20,
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        "mask": {
+                          "example": [
+                            "ip",
+                            "user_agent"
+                          ],
+                          "items": {
+                            "enum": [
+                              "ip",
+                              "user_agent",
+                              "actor_email"
+                            ],
+                            "type": "string"
+                          },
+                          "maxItems": 3,
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        "target": {
+                          "additionalProperties": false,
+                          "example": {
+                            "id": "site_42",
+                            "type": "website"
+                          },
+                          "properties": {
+                            "id": {
+                              "maxLength": 256,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "type": {
+                              "maxLength": 64,
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "id"
+                          ],
+                          "type": "object"
+                        },
+                        "tenantId": {
+                          "example": "biz_5",
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "tenantId"
+                      ],
+                      "type": "object"
+                    },
+                    "token": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token",
+                    "expiresAt",
+                    "scope"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Viewer token",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "scope_exceeded: the requested scope is wider than the key scope.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.",
+            "headers": {
+              "RateLimit-Limit": {
+                "description": "Requests per project and key kind per minute",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Remaining": {
+                "description": "Requests remaining in this window",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "RateLimit-Reset": {
+                "description": "Seconds until the fixed window resets",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds before retrying; budget headers apply only after authentication",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request failed"
+          }
+        },
+        "security": [
+          {
+            "readKey": []
+          }
+        ],
+        "summary": "Mint viewer token",
         "tags": [
           "public/v1"
         ]
