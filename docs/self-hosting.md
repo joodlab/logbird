@@ -825,13 +825,18 @@ run if cleanup is interrupted. **Before a release whose migrations alter
 `IngestReceipt`, stop the worker first:** a running rebuild holds SHARE UPDATE
 EXCLUSIVE for up to its 15-minute statement timeout, and a migration's ACCESS EXCLUSIVE
 request would queue behind it and block every receipt read and write (ingest) until
-it ends. The release notes say when a migration touches that table. `REINDEX INDEX CONCURRENTLY` requires the worker role to own the table
+it ends. Then confirm no rebuild is still running server-side (on PostgreSQL < 14 a REINDEX whose
+cancel failed keeps running; the worker logs `ingest.receipt_index_shutdown_fallback` with its pid):
+`SELECT pid FROM pg_stat_activity WHERE application_name = 'logbird-receipt-index-maintenance' AND state = 'active'`
+must return no rows. The release notes say when a migration touches that table. `REINDEX INDEX CONCURRENTLY` requires the worker role to own the table
 (or have the table's `MAINTAIN` privilege on PostgreSQL 17+, as documented for
 [REINDEX](https://www.postgresql.org/docs/17/sql-reindex.html)). A non-owner role
 without that privilege logs `ingest.receipt_index_compaction_failed` with code
 `42501`; retention continues, but automatic compaction cannot proceed. The same
 worker must be permitted to [drop invalid reindex copies](https://www.postgresql.org/docs/17/sql-dropindex.html) (index ownership follows
-the table owner); a maintenance-only role may require the owner to clean those up.
+the table owner); a maintenance-only role may require the owner to clean those up. Until the owner
+drops such a copy, runs report `skipped_invalid_copy` at warn level once per 24-hour back-off instead of
+rebuilding.
 The hourly job drops invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copies left by a
 failed or cancelled rebuild. It cannot drop an operator's in-progress manual REINDEX
 CONCURRENTLY copy: the rebuild holds SHARE UPDATE EXCLUSIVE on the table, so the job's

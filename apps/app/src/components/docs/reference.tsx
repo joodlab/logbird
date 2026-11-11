@@ -76,7 +76,7 @@ export function EventIdsAndRetries() {
           <tbody className="divide-y max-sm:block">
             {INGEST_CODES.map(([code, meaning, action]) => (
               <tr className="max-sm:flex max-sm:flex-col max-sm:gap-1 max-sm:py-2.5" key={code}>
-                <td className="px-4 py-2 align-top font-mono text-xs [overflow-wrap:anywhere] max-sm:py-0 sm:break-normal">{code}</td>
+                <td className="px-4 py-2 align-top font-mono text-xs [overflow-wrap:anywhere] max-sm:py-0">{code}</td>
                 <td className="px-4 py-2 align-top max-sm:py-0">{meaning}</td>
                 <td className="px-4 py-2 align-top max-sm:py-0">{action}</td>
               </tr>

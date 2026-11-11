@@ -32,8 +32,12 @@ export async function runReceiptIndexCompaction(redis: Pick<Redis, 'get' | 'set'
     const backedOff = await backoffHint(redis.get(backoffKey), signal, 'get');
     if (signal.aborted) return;
     const result = backedOff ? { action: 'skipped_backoff' as const } : await compactIngestReceiptIndex({ signal });
-    if (result.action !== 'skipped_compact')
-      console.log(JSON.stringify({ level: result.action === 'reindexed' ? 'info' : 'warn', event: 'ingest.receipt_index_compaction', ...result }));
+    // An invalid copy this role cannot drop needs the table owner; warn once per back-off window, not hourly.
+    if (result.action === 'skipped_invalid_copy') await backoffHint(redis.set(backoffKey, String(Date.now()), 'EX', BACKOFF_SECONDS), signal, 'set');
+    if (result.action !== 'skipped_compact') {
+      const level = result.action === 'reindexed' || result.action === 'skipped_backoff' ? 'info' : 'warn';
+      console.log(JSON.stringify({ level, event: 'ingest.receipt_index_compaction', ...result }));
+    }
     return result;
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;

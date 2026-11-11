@@ -380,3 +380,52 @@ it('does not cancel catalog work when shutdown arrives before REINDEX, and never
   expect(query.mock.calls.some(([sql]) => sql.startsWith('REINDEX'))).toBe(false);
   expect(query).toHaveBeenCalledWith('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [expect.stringContaining('IngestReceipt_pkey')]);
 });
+
+it('keeps the shutdown fallback armed while the advisory unlock stalls', async () => {
+  vi.useFakeTimers();
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    const abort = new AbortController();
+    connection.connect.mockResolvedValue(undefined);
+    const { query } = fakeDb({ pages: [1], live: 0, keyBytes: null });
+    let unlockStarted = false;
+    let failUnlock: ((error: Error) => void) | undefined;
+    connection.query.mockImplementation((sql: string, params?: unknown[]) => {
+      if (!sql.includes('pg_advisory_unlock')) return query(sql, params);
+      unlockStarted = true;
+      return new Promise((_resolve, reject) => {
+        failUnlock = reject;
+      });
+    });
+    connection.end.mockImplementation(async () => failUnlock?.(new Error('Connection terminated')));
+    const compacting = compactIngestReceiptIndex({ signal: abort.signal });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(unlockStarted).toBe(true);
+    abort.abort();
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(connection.end).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(compacting).resolves.toMatchObject({ action: 'skipped_compact' });
+    expect(connection.end).toHaveBeenCalled();
+    // No REINDEX was running, so nothing was cancelled server-side; the fallback names the backend anyway.
+    expect(cancelConnection.connect).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      JSON.stringify({ level: 'warn', event: 'ingest.receipt_index_shutdown_fallback', pid: 12_345, reindexRunning: false }),
+    );
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('reports an invalid copy this role cannot drop instead of failing every run', async () => {
+  const { query } = fakeDb({ pages: [RECEIPT_INDEX_COMPACTION.minPages * 10], live: 1000, keyBytes: 60, invalid: ['IngestReceipt_pkey_ccnew'] });
+  connection.connect.mockResolvedValue(undefined);
+  connection.query.mockImplementation((sql: string, params?: unknown[]) => {
+    if (sql.startsWith('DROP INDEX')) return Promise.reject(Object.assign(new Error('must be owner of index'), { code: '42501' }));
+    return query(sql, params);
+  });
+  await expect(compactIngestReceiptIndex()).resolves.toMatchObject({ action: 'skipped_invalid_copy', droppedInvalid: 0 });
+  expect(query.mock.calls.some(([sql]) => sql.startsWith('REINDEX'))).toBe(false);
+  expect(query).toHaveBeenCalledWith('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [expect.any(String)]);
+});

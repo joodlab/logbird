@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import { afterAll, expect, it } from 'vitest';
-import { isDatabaseFailure } from '../../../apps/server/src/ingest-receipt-errors';
 import { PrismaClient } from './generated/client';
 import { isUniqueViolation, prisma } from './index';
 import { keys } from './keys';
@@ -69,7 +68,7 @@ it('recognizes a real model-query statement timeout through Prisma 7 adapter-pg'
       code: 'P2039',
       meta: { modelName: 'IngestReceipt', driverAdapterError: { cause: { kind: 'postgres', originalCode: '57014' } } },
     });
-    expect(isDatabaseFailure(error)).toBe(true);
+    // apps/server/src/ingest-receipt-errors.test.ts classifies exactly this pinned shape (P2039 + 57014) as infrastructure.
     const observed = error as { code: string; meta: unknown };
     console.info(JSON.stringify({ event: 'qa.receipt_model_timeout_shape', code: observed.code, meta: observed.meta }));
   } finally {

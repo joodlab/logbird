@@ -44,7 +44,23 @@ it.each(['57014', '55P03'])('persists a 24 h backoff timestamp on %s, then skips
   await expect(runReceiptIndexCompaction(redis, key, 0, abort.signal)).resolves.toEqual({ action: 'skipped_backoff' });
   expect(compact).toHaveBeenCalledTimes(1);
   expect(console.error).toHaveBeenCalledWith(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_compaction_failed', code }));
-  expect(console.log).toHaveBeenCalledWith(JSON.stringify({ level: 'warn', event: 'ingest.receipt_index_compaction', action: 'skipped_backoff' }));
+  // A back-off skip is expected for 24 hours: informational, not a warning every hour.
+  expect(console.log).toHaveBeenCalledWith(JSON.stringify({ level: 'info', event: 'ingest.receipt_index_compaction', action: 'skipped_backoff' }));
+});
+
+it('backs off for 24 h after an invalid copy this role cannot drop, warning once', async () => {
+  compact.mockResolvedValueOnce({ action: 'skipped_invalid_copy', indexPages: 81_920, droppedInvalid: 0 });
+  await runReceiptIndexCompaction(redis, key, 0, abort.signal);
+  expect(redis.set).toHaveBeenCalledWith(key, expect.any(String), 'EX', 86_400);
+  expect(console.log).toHaveBeenCalledWith(
+    JSON.stringify({
+      level: 'warn',
+      event: 'ingest.receipt_index_compaction',
+      action: 'skipped_invalid_copy',
+      indexPages: 81_920,
+      droppedInvalid: 0,
+    }),
+  );
 });
 
 it('fails open on Redis read and write errors and never throws a compaction failure', async () => {

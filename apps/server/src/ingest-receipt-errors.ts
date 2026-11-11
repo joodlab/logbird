@@ -20,6 +20,22 @@ const PG_CONNECTION_MESSAGES = new Set([
   'timeout expired',
   'timeout exceeded when trying to connect',
 ]);
+// Node socket and DNS codes. adapter-pg maps only ENOTFOUND/ECONNREFUSED/ECONNRESET/ETIMEDOUT and rethrows the rest
+// unchanged; Prisma then wraps any coded error as PrismaClientKnownRequestError with that same code.
+const NETWORK_CODES = new Set([
+  'EAI_AGAIN',
+  'ECONNABORTED',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTDOWN',
+  'EHOSTUNREACH',
+  'ENETDOWN',
+  'ENETRESET',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EPIPE',
+  'ETIMEDOUT',
+]);
 const record = (value: unknown): Record<string, unknown> => (value && typeof value === 'object' ? (value as Record<string, unknown>) : {});
 const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
 
@@ -40,7 +56,7 @@ export function receiptErrorDetails(error: unknown) {
 export function isDatabaseFailure(error: unknown) {
   const { name, code, kind } = receiptErrorDetails(error);
   if (name === 'PrismaClientInitializationError' || name === 'PrismaClientRustPanicError') return true;
-  if (code && INFRASTRUCTURE_CODES.has(code)) return true;
+  if (code && (INFRASTRUCTURE_CODES.has(code) || NETWORK_CODES.has(code))) return true;
   // Exact match on a plain Error only: a Prisma class, a coded error or a reworded message never qualifies.
   if (error instanceof Error && error.constructor === Error && code === undefined && PG_CONNECTION_MESSAGES.has(error.message)) return true;
   if (code !== 'P2010' && code !== 'P2039' && name !== 'DriverAdapterError') return false;

@@ -32,7 +32,14 @@ export const INGEST_RECEIPT_PKEY: ReceiptIndexTarget = {
 };
 
 export type ReceiptIndexCompaction = {
-  action: 'skipped_busy' | 'skipped_missing' | 'skipped_no_statistics' | 'skipped_old_transactions' | 'skipped_compact' | 'reindexed';
+  action:
+    | 'skipped_busy'
+    | 'skipped_invalid_copy'
+    | 'skipped_missing'
+    | 'skipped_no_statistics'
+    | 'skipped_old_transactions'
+    | 'skipped_compact'
+    | 'reindexed';
   indexPages: number;
   neededPages?: number;
   ratio?: number;
@@ -167,7 +174,12 @@ export async function compactIngestReceiptIndex({
         console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_cancel_failed', code }));
       });
     // pg.end() alone is not a server cancellation. It is only the bounded fallback if cancellation/cleanup stalls.
-    abortDeadline = setTimeout(() => void (client as pg.Client).end().catch(() => undefined), 10_000);
+    abortDeadline = setTimeout(() => {
+      // Without client_connection_check_interval (PostgreSQL < 14) a REINDEX whose cancel never landed keeps running
+      // server-side; name the backend so an operator can check it before a migration that alters the table.
+      console.warn(JSON.stringify({ level: 'warn', event: 'ingest.receipt_index_shutdown_fallback', pid, reindexRunning }));
+      void (client as pg.Client).end().catch(() => undefined);
+    }, 10_000);
   };
   signal?.addEventListener('abort', abort, { once: true });
   let locked = false;
@@ -191,7 +203,14 @@ export async function compactIngestReceiptIndex({
     const pages = await indexPages(client, target);
     if (pages === null) return { action: 'skipped_missing', indexPages: 0, droppedInvalid: 0 };
     if (!locked) return { action: 'skipped_busy', indexPages: pages, droppedInvalid: 0 };
-    const droppedInvalid = await dropInvalidCopies(client, target);
+    let droppedInvalid: number;
+    try {
+      droppedInvalid = await dropInvalidCopies(client, target);
+    } catch (error) {
+      // A MAINTAIN-only role (PG17+) can rebuild but not drop: report it instead of failing every hour.
+      if ((error as { code?: string }).code !== '42501') throw error;
+      return { action: 'skipped_invalid_copy', indexPages: pages, droppedInvalid: 0 };
+    }
     if (pages < RECEIPT_INDEX_COMPACTION.minPages) return { action: 'skipped_compact', indexPages: pages, droppedInvalid };
     const { rows } = await client.query<{ live: number; key_bytes: number | null }>(
       `SELECT greatest(c.reltuples, 0)::float8 live,
@@ -235,6 +254,8 @@ export async function compactIngestReceiptIndex({
       await dropInvalidCopies(client, target).catch(() => undefined);
       throw error;
     }
+    // A cancel sent just as REINDEX finished must land before the size query, not on it.
+    await cancellation;
     return {
       action: 'reindexed',
       indexPages: pages,
@@ -245,10 +266,14 @@ export async function compactIngestReceiptIndex({
       droppedInvalid,
     };
   } finally {
-    signal?.removeEventListener('abort', abort);
-    await cancellation;
-    if (locked) await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [lockKey]).catch(() => undefined);
-    if (!db) await (client as pg.Client).end().catch(() => undefined);
-    clearTimeout(abortDeadline);
+    // Keep the abort listener through finalization: a shutdown while the unlock stalls still arms the socket fallback.
+    try {
+      await cancellation;
+      if (locked) await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [lockKey]).catch(() => undefined);
+      if (!db) await (client as pg.Client).end().catch(() => undefined);
+    } finally {
+      signal?.removeEventListener('abort', abort);
+      clearTimeout(abortDeadline);
+    }
   }
 }

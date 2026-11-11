@@ -129,3 +129,13 @@ it('matches pg connection messages exactly, on plain uncoded Errors only', () =>
   expect(isDatabaseFailure(Object.assign(new Error('Connection terminated'), { code: '42601' }))).toBe(false);
   expect(isDatabaseFailure({ message: 'Connection terminated' })).toBe(false);
 });
+
+it.each(['EAI_AGAIN', 'ECONNABORTED', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE'])(
+  'classifies a socket code %s that adapter-pg passes through',
+  (code) => {
+    // Prisma 7.10's handleRequestError wraps a coded error as a known request error carrying that code.
+    const error = new PrismaClientKnownRequestError('fictional socket failure', { code, clientVersion: '7.10.0' });
+    expect(isDatabaseFailure(error)).toBe(true);
+    expect(isDatabaseFailure(Object.assign(new Error('fictional socket failure'), { code }))).toBe(true);
+  },
+);

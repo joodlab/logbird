@@ -120,7 +120,11 @@ Semantics worth documenting to users:
   Unconfirmed competing claims return `503 ingest_pending` with a lease-aware
   Retry-After. Details include the settled 202 response fields plus `indices` and
   `eventIds`; every index outside `indices` is settled. Healthy siblings commit first. Identity lookup
-  failures return retryable `503 ingest_unavailable`. Expired leases reconcile under
+  failures return retryable `503 ingest_unavailable`. Before the ClickHouse insert, a receipt conflict or
+  a database infrastructure failure (connection loss, timeouts, pool exhaustion, lock timeouts) releases
+  the request's claims and returns `503 ingest_unavailable` with `Retry-After: 1`; other errors surface
+  as server errors. After an acknowledged insert, a receipt confirmation failure keeps the claims and
+  returns `503 ingest_pending` with the unresolved indices. Expired leases reconcile under
   the exclusive project lock after draining the async queue. Ordinary retention
   never releases unresolved receipts. After confirmed retention deletion and cleanup,
   an id may be used again. Unsafe ids (NUL, lone surrogates or >256 trimmed UTF-16 units)
@@ -258,6 +262,8 @@ Once rebuilt, rollups reflect surviving rows exactly because concurrent writers 
 Failed ordinary retention runs allow reads and ingestion; aggregates may be incomplete until a successful retry.
 Failed ingest-repair runs keep project reads fenced while healthy ingestion can continue. The queued retention
 job owns their retry; matching ingest requests do not repeat the failed rebuild and poll with Retry-After: 60.
+`/readyz` reports `maintenance.failedIngestRepairs.fencedProjects` (a count only, cached for 30 seconds) as
+non-failing details.
 The retention status endpoint exposes ordinary retention failures once the project read fence allows access.
 Recovery never restores expired events. Workspace setup reports `retentionBusy: true` per affected
 project instead of failing the workspace; its progress is a placeholder (0, nextStep null,
