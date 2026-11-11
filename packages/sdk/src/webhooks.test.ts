@@ -1,7 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { generateWebhookSecret, signWebhook, verifyWebhook, WebhookVerificationError, type WebhookVerificationReason } from './index';
-import type { AuditEvent } from './read';
 
 // Official fixed signing vector ("sign function works"):
 // https://github.com/standard-webhooks/standard-webhooks/blob/main/libraries/javascript/src/webhook.test.ts
@@ -37,19 +36,9 @@ describe('Standard Webhooks', () => {
   it('signs and verifies the official fixed vector through the SDK entry', async () => {
     expect(await signWebhook({ id, timestamp, payload, secrets: [secret] })).toBe(signature);
     expect(await verifyWebhook({ payload, headers: headers(), secret, now: timestamp })).toEqual({ test: 2_432_232_314 });
-    expectTypeOf<Awaited<ReturnType<typeof verifyWebhook>>>().toEqualTypeOf<AuditEvent>();
-  });
-
-  it('verifies with Web Crypto when Node crypto is unavailable', async () => {
-    vi.stubGlobal('process', undefined);
-    const valid = await verifyWebhook({ payload, headers: headers(), secret, now: timestamp });
-    const invalid = verifyWebhook({ payload: `${payload}\n`, headers: headers(), secret, now: timestamp });
-    // Restore Node globals before the test runner makes assertions.
-    const invalidReason = await invalid.catch((error: unknown) => error);
-    vi.unstubAllGlobals();
-    expect(valid).toEqual(JSON.parse(payload));
-    expect(invalidReason).toBeInstanceOf(WebhookVerificationError);
-    expect(invalidReason).toMatchObject({ reason: 'no_matching_signature' });
+    // The body is returned as `unknown` unless the caller names the type it expects.
+    expectTypeOf<Awaited<ReturnType<typeof verifyWebhook>>>().toEqualTypeOf<unknown>();
+    expectTypeOf(verifyWebhook<{ test: number }>({ payload, headers: headers(), secret, now: timestamp })).resolves.toEqualTypeOf<{ test: number }>();
   });
 
   it('signs exact UTF-8 body bytes and rotation headers like independent Node crypto', async () => {
@@ -119,27 +108,31 @@ describe('Standard Webhooks', () => {
     expect(await verifyWebhook({ payload, headers: headers(), secret, toleranceSeconds: 301 })).toEqual(JSON.parse(payload));
   });
 
-  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])('rejects unsafe tolerance %s', async (toleranceSeconds) => {
-    await rejectsWithReason(verifyWebhook({ payload, headers: headers(), secret, now: timestamp, toleranceSeconds }), 'invalid_timestamp');
+  // A bad clock or tolerance is the receiver's configuration error, not a bad request: a RangeError, not a 400.
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])('refuses an unsafe tolerance %s as a configuration error', async (toleranceSeconds) => {
+    await expect(verifyWebhook({ payload, headers: headers(), secret, now: timestamp, toleranceSeconds })).rejects.toBeInstanceOf(RangeError);
   });
 
-  it.each([Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid clock %s', async (now) => {
-    await rejectsWithReason(verifyWebhook({ payload, headers: headers(), secret, now }), 'invalid_timestamp');
+  it.each([Number.NaN, Number.POSITIVE_INFINITY])('refuses an invalid clock %s as a configuration error', async (now) => {
+    await expect(verifyWebhook({ payload, headers: headers(), secret, now })).rejects.toBeInstanceOf(RangeError);
   });
 
   it.each(['', 'whsec_', 'bare-base64', 'whsec_!!!!', 'whsec_YQ==', `whsec_${'A'.repeat(88)}`, `${secret}=`, `${secret} `])(
-    'rejects malformed or out-of-spec secret %s when signing and verifying',
+    'refuses a malformed or out-of-spec secret %s as a configuration error when signing and verifying',
     async (invalidSecret) => {
-      await rejectsWithReason(signWebhook({ id, timestamp, payload, secrets: [invalidSecret] }), 'invalid_secret');
-      await rejectsWithReason(verifyWebhook({ payload, headers: headers(), secret: invalidSecret, now: timestamp }), 'invalid_secret');
+      await expect(signWebhook({ id, timestamp, payload, secrets: [invalidSecret] })).rejects.toBeInstanceOf(TypeError);
+      // Even for a request with no webhook headers at all: a broken secret shows up on the first delivery.
+      await expect(verifyWebhook({ payload, headers: {}, secret: invalidSecret, now: timestamp })).rejects.toBeInstanceOf(TypeError);
     },
   );
 
-  it('rejects an empty secret list or an invalid rotation member', async () => {
+  it('refuses an empty secret list, an invalid rotation member or a missing secret as configuration errors', async () => {
     for (const secrets of [[], [secret, 'whsec_']]) {
-      await rejectsWithReason(signWebhook({ id, timestamp, payload, secrets }), 'invalid_secret');
-      await rejectsWithReason(verifyWebhook({ payload, headers: headers(), secrets, now: timestamp }), 'invalid_secret');
+      await expect(signWebhook({ id, timestamp, payload, secrets })).rejects.toBeInstanceOf(TypeError);
+      await expect(verifyWebhook({ payload, headers: headers(), secrets, now: timestamp })).rejects.toBeInstanceOf(TypeError);
     }
+    // Plain JavaScript callers that pass neither secret nor secrets get the same typed error, not a crash.
+    await expect(verifyWebhook({ payload, headers: headers(), now: timestamp } as never)).rejects.toThrow(/webhook secret must be a string/);
   });
 
   it.each(['v2,AAA=', 'v1', 'v1,', 'v1,not-base64!', 'v1,AA==', `${signature},extra`, signature.slice(0, -4)])(
@@ -175,6 +168,36 @@ describe('Standard Webhooks', () => {
   });
 
   it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])('refuses invalid signer timestamps: %s', async (time) => {
-    await rejectsWithReason(signWebhook({ id, timestamp: time, payload, secrets: [secret] }), 'invalid_timestamp');
+    await expect(signWebhook({ id, timestamp: time, payload, secrets: [secret] })).rejects.toBeInstanceOf(RangeError);
+  });
+
+  it('checks a bounded number of claimed signatures, with one HMAC of the body per secret', async () => {
+    const sign = vi.spyOn(crypto.subtle, 'sign');
+    const junk = Array.from({ length: 300 }, (_, index) => `v1,${Buffer.alloc(32, index % 256).toString('base64')}`).join(' ');
+    await rejectsWithReason(
+      verifyWebhook({ payload, headers: headers(junk), secrets: [secret, newSecret], now: timestamp }),
+      'no_matching_signature',
+    );
+    expect(sign).toHaveBeenCalledTimes(2);
+    // A valid signature past the cap isn't looked at: the cap bounds the work for any header.
+    const late = `${Array.from({ length: 10 }, () => independentSignature(wrongSecret)).join(' ')} ${signature}`;
+    await rejectsWithReason(verifyWebhook({ payload, headers: headers(late), secret, now: timestamp }), 'no_matching_signature');
+    sign.mockRestore();
+  });
+
+  it("accepts Node's req.headers (array values ignored) and Headers-like objects from another realm", async () => {
+    const nodeHeaders: Record<string, string | string[] | undefined> = { ...headers(), 'set-cookie': ['a=1', 'b=2'] };
+    expect(await verifyWebhook({ payload, headers: nodeHeaders, secret, now: timestamp })).toEqual(JSON.parse(payload));
+    // A webhook header sent twice is ambiguous and counts as missing.
+    await rejectsWithReason(verifyWebhook({ payload, headers: { ...headers(), 'webhook-id': [id, id] }, secret, now: timestamp }), 'missing_header');
+    const values = new Map<string, string>(Object.entries(headers()));
+    const polyfill = { get: (name: string) => values.get(name.toLowerCase()) ?? null };
+    expect(await verifyWebhook({ payload, headers: polyfill, secret, now: timestamp })).toEqual(JSON.parse(payload));
+  });
+
+  it('uses whole seconds for the default clock, so zero tolerance works within the second', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(timestamp * 1000 + 999);
+    expect(await verifyWebhook({ payload, headers: headers(), secret, toleranceSeconds: 0 })).toEqual(JSON.parse(payload));
   });
 });
