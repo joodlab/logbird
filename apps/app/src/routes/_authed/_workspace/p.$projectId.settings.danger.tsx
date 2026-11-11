@@ -1,3 +1,4 @@
+import { StableText } from '@logbird/ui/components/stable-text';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -14,7 +15,7 @@ import { Label } from '@logbird/ui/components/ui/label';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, useNavigate, useRouter } from '@tanstack/react-router';
-import { HourglassIcon, Loader2Icon, Trash2Icon } from 'lucide-react';
+import { HourglassIcon, Trash2Icon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AdminNote, AdminOnly } from '@/components/admin-gate';
@@ -177,10 +178,25 @@ function DangerZone() {
             />
             <AlertDialogFooter>
               {/* While deleting, this only hides the dialog: the request keeps running. */}
-              <AlertDialogCancel type="button">{remove.isPending ? 'Hide' : 'Cancel'}</AlertDialogCancel>
-              <Button data-testid="delete-project-submit" disabled={!matches || remove.isPending || waitLeft > 0} type="submit" variant="destructive">
-                {remove.isPending ? <Loader2Icon className="animate-spin" /> : null}
-                {block === null ? 'Delete project' : waitLeft > 0 ? `Try again in ${waitLeft} s` : 'Try again'}
+              <AlertDialogCancel type="button">
+                <StableText reserve={['Cancel', 'Hide']}>{remove.isPending ? 'Hide' : 'Cancel'}</StableText>
+              </AlertDialogCancel>
+              <Button
+                className="tabular-nums"
+                data-testid="delete-project-submit"
+                disabled={!matches || waitLeft > 0}
+                loading={remove.isPending}
+                type="submit"
+                variant="destructive"
+              >
+                {block === null ? (
+                  'Delete project'
+                ) : (
+                  // The countdown ticks every second: reserve its widest form so the button (and Cancel) hold still.
+                  <StableText reserve={['Try again', `Try again in ${'0'.repeat(Math.max(2, String(waitLeft).length))} s`]}>
+                    {waitLeft > 0 ? `Try again in ${waitLeft} s` : 'Try again'}
+                  </StableText>
+                )}
               </Button>
             </AlertDialogFooter>
           </form>

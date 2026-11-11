@@ -434,8 +434,7 @@ function SaveViewDialog({
             <Button onClick={() => onOpenChange(false)} type="button" variant="outline">
               Cancel
             </Button>
-            <Button disabled={create.isPending} type="submit">
-              {create.isPending ? <Loader2Icon className="animate-spin" /> : null}
+            <Button loading={create.isPending} type="submit">
               Save view
             </Button>
           </DialogFooter>

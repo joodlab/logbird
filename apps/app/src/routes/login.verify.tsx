@@ -1,4 +1,5 @@
 import { signInCodeLifetimeLabel } from '@logbird/contracts';
+import { StableText } from '@logbird/ui/components/stable-text';
 import { Button } from '@logbird/ui/components/ui/button';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@logbird/ui/components/ui/input-otp';
 import { useOtpResendCountdown } from '@logbird/ui/hooks/use-otp-resend-countdown';
@@ -125,7 +126,8 @@ function VerifyStep() {
               {error}
             </p>
           ) : (
-            <p className="text-muted-foreground text-xs" id="otp-help">
+            // leading-5: the error line's height, so swapping tip and error does not move the button below.
+            <p className="text-muted-foreground text-xs leading-5" id="otp-help">
               Tip: paste the whole code — it fills every box.
             </p>
           )}
@@ -144,9 +146,9 @@ function VerifyStep() {
           <ArrowLeftIcon className="size-3.5" />
           Use another email
         </Link>
-        <Button className="tabular-nums" disabled={resendIn > 0 || resending} onClick={resend} size="sm" variant="ghost">
-          {resending ? <Loader2Icon className="animate-spin" /> : null}
-          {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
+        {/* Right-aligned and ticking every second: a reserved width keeps it (and its left edge) still. */}
+        <Button className="tabular-nums" disabled={resendIn > 0} loading={resending} onClick={resend} size="sm" variant="ghost">
+          <StableText reserve={['Resend code', 'Resend in 00s']}>{resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}</StableText>
         </Button>
       </div>
     </div>

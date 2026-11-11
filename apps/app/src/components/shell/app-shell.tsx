@@ -39,7 +39,9 @@ export function AppShell({ projectId, children }: { projectId?: string; children
           <TopBar onOpenPalette={() => setPaletteOpen(true)} />
           <BusyNotice />
           <div
-            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain outline-none"
+            // Stable gutter: a page that grows past the viewport (data arriving, a section opening) does not narrow and
+            // reflow. Viewport-filling pages (the explorer) scroll inside themselves and need no gutter.
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain outline-none [scrollbar-gutter:stable] has-[[data-fills-viewport]]:[scrollbar-gutter:auto]"
             data-scroll-restoration-id="app-main"
             id="app-main"
             tabIndex={-1}

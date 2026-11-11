@@ -1,5 +1,6 @@
 import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
+import { Loader2Icon } from "lucide-react"
 
 import { cn } from '../../lib/utils'
 
@@ -44,14 +45,37 @@ function Button({
   className,
   variant = "default",
   size = "default",
+  loading = false,
+  disabled,
+  children,
   ...props
-}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+}: ButtonPrimitive.Props &
+  VariantProps<typeof buttonVariants> & {
+    /**
+     * Pending: disables the button and shows a spinner over its content. The content stays laid out (transparent, still
+     * the accessible name), so the button keeps its size and its neighbours do not move.
+     */
+    loading?: boolean
+  }) {
   return (
     <ButtonPrimitive
+      aria-busy={loading || undefined}
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      disabled={disabled || loading}
       {...props}
-    />
+    >
+      {loading ? (
+        // One grid cell holds both, so the spinner overlays the content without positioning the button itself (a caller's
+        // absolute/fixed/sticky classes keep working). gap-[inherit] passes the button's gap through to the content.
+        <span className="inline-grid place-items-center gap-[inherit]">
+          <span className="col-start-1 row-start-1 inline-flex items-center justify-center gap-[inherit] opacity-0">{children}</span>
+          <Loader2Icon aria-hidden className="col-start-1 row-start-1 animate-spin" />
+        </span>
+      ) : (
+        children
+      )}
+    </ButtonPrimitive>
   )
 }
 
