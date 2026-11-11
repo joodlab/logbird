@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Logbird } from './index';
 
@@ -89,11 +90,15 @@ it('settles accepted ids using the same trimming as the server', async () => {
   expect(JSON.parse(fetcher.mock.calls[1]?.[1].body).events.map((event: { id: string }) => event.id)).toEqual(['qa91-unresolved']);
 });
 
-it('converges inside one send with twelve leading bad rows and cached byte-identical events', async () => {
+it('converges inside one send with 80 leading bad rows, default maxRetries and cached byte-identical events', async () => {
   vi.useFakeTimers();
   const bodies: string[] = [];
+  const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const fetcher = vi.fn(async (_url: string, init: RequestInit) => {
     bodies.push(String(init.body));
+    const headers = new Headers(init.headers);
+    expect(headers.get('Logbird-Retry')).toBe('subset');
+    expect(headers.get('X-Logbird-SDK')).toBe(`typescript/${version}`);
     const events = JSON.parse(String(init.body)).events as { id: string }[];
     const rejected = events.flatMap((event, index) => (event.id.startsWith('bad-') && index < 2 ? [{ index, reason: event.id }] : []));
     if (!rejected.length) return new Response('{}', { status: 202 });
@@ -111,9 +116,9 @@ it('converges inside one send with twelve leading bad rows and cached byte-ident
   vi.stubGlobal('fetch', fetcher);
   const onDrop = vi.fn(),
     onError = vi.fn();
-  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', maxRetries: 6, onDrop, onError });
-  const events = Array.from({ length: 14 }, (_, index) => ({
-    id: index < 12 ? `bad-${index}` : `healthy-${index}`,
+  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', onDrop, onError });
+  const events = Array.from({ length: 82 }, (_, index) => ({
+    id: index < 80 ? `bad-${index}` : `healthy-${index}`,
     action: 'qa91.sdk',
     occurredAt: '2026-11-11T00:00:00.000Z',
     metadata: { text: 'quoted "Unicode €"\n', index },
@@ -129,13 +134,29 @@ it('converges inside one send with twelve leading bad rows and cached byte-ident
   for (const event of events)
     expect(stringify.mock.calls.filter(([value]) => value && typeof value === 'object' && 'id' in value && value.id === event.id)).toHaveLength(2);
   stringify.mockRestore();
-  expect(bodies).toEqual(Array.from({ length: 7 }, (_, attempt) => `{"events":[${serialized.slice(attempt * 2).join(',')}]}`));
-  expect(onDrop.mock.calls.map(([event]) => event.id)).toEqual(events.slice(0, 12).map((event) => event.id));
+  expect(bodies).toEqual(Array.from({ length: 41 }, (_, attempt) => `{"events":[${serialized.slice(attempt * 2).join(',')}]}`));
+  expect(onDrop.mock.calls.map(([event]) => event.id)).toEqual(events.slice(0, 80).map((event) => event.id));
   expect(onError.mock.calls.map(([error]) => error.message)).toEqual(
-    Array.from({ length: 6 }, (_, attempt) => `2 events rejected by Logbird: bad-${attempt * 2}; bad-${attempt * 2 + 1}`),
+    Array.from({ length: 40 }, (_, attempt) => `2 events rejected by Logbird: bad-${attempt * 2}; bad-${attempt * 2 + 1}`),
   );
-  expect(sdk.dropped).toBe(12);
+  expect(sdk.dropped).toBe(80);
   expect(sdk.queueSize).toBe(0);
+  await sdk.shutdown();
+});
+
+it('limits non-progress failures to the default retry budget', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn(async () => new Response('', { status: 503, headers: { 'Retry-After': '0' } }));
+  vi.stubGlobal('fetch', fetcher);
+  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid' });
+  sdk.track({ id: 'unsettled', action: 'qa91.sdk' });
+  const failed = expect(sdk.flush()).rejects.toThrow('Logbird HTTP 503');
+  await vi.advanceTimersByTimeAsync(100);
+  await failed;
+  expect(fetcher).toHaveBeenCalledTimes(6); // Initial request plus the default five retries.
+  expect(sdk.queueSize).toBe(1);
+  expect(sdk.dropped).toBe(0);
+  vi.stubGlobal('fetch', async () => new Response('{}', { status: 202 }));
   await sdk.shutdown();
 });
 
@@ -169,7 +190,7 @@ it('remaps mixed accepted/rejected indices across three subsets and requeues onl
   vi.stubGlobal('fetch', fetcher);
   const onDrop = vi.fn(),
     onError = vi.fn();
-  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', maxRetries: 3, onDrop, onError });
+  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', maxRetries: 0, onDrop, onError });
   for (const id of expectedBodies[0]!) sdk.track({ id, action: 'qa91.sdk' });
   const failed = expect(sdk.flush()).rejects.toThrow('Logbird HTTP 503');
   await vi.advanceTimersByTimeAsync(100);
@@ -257,6 +278,7 @@ it.each(['ingest_pending', 'ingest_unavailable'])('requeues only unsettled event
           respond = resolve;
         }),
     )
+    .mockResolvedValueOnce(new Response('', { status: 503 }))
     .mockImplementation(async () => new Response('{}', { status: 202 }));
   vi.stubGlobal('fetch', fetcher);
   const onDrop = vi.fn();
@@ -271,7 +293,7 @@ it.each(['ingest_pending', 'ingest_unavailable'])('requeues only unsettled event
   expect(sdk.dropped).toBe(1);
   expect(onDrop.mock.calls.map(([event]) => event.id)).toEqual(['qa91-bad']);
   await sdk.shutdown();
-  expect(JSON.parse(fetcher.mock.calls[1]?.[1].body).events.map((event: { id: string }) => event.id)).toEqual([
+  expect(JSON.parse(fetcher.mock.calls[2]?.[1].body).events.map((event: { id: string }) => event.id)).toEqual([
     'qa91-unresolved',
     'qa91-new1',
     'qa91-new2',
@@ -307,7 +329,7 @@ it('reports each rejection once across subset 503 retries and requeues only unre
   const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://qa91.invalid', maxRetries: 1, onDrop, onError });
   for (const id of ['qa91-unresolved', 'qa91-bad', 'qa91-accepted']) sdk.track({ id, action: 'qa91.sdk' });
   const failed = expect(sdk.flush()).rejects.toThrow('Logbird HTTP 503');
-  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(100);
   await failed;
   expect(sdk.queueSize).toBe(1);
   expect(sdk.dropped).toBe(1);
@@ -316,7 +338,7 @@ it('reports each rejection once across subset 503 retries and requeues only unre
   expect(JSON.parse(fetcher.mock.calls[1]?.[1].body).events.map((event: { id: string }) => event.id)).toEqual(['qa91-unresolved']);
   fetcher.mockImplementation(async () => new Response('{}', { status: 202 }));
   await sdk.shutdown();
-  expect(JSON.parse(fetcher.mock.calls[2]?.[1].body).events.map((event: { id: string }) => event.id)).toEqual(['qa91-unresolved']);
+  expect(JSON.parse(fetcher.mock.calls[3]?.[1].body).events.map((event: { id: string }) => event.id)).toEqual(['qa91-unresolved']);
 });
 
 it('prunes settled events on an exceptional exit after a 503 and malformed 202', async () => {

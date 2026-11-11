@@ -36,8 +36,14 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   }
   if (Buffer.byteLength(payload) > 256 * 1024) return { ok: false as const, reason: 'event exceeds 256 KB' };
   const attributes: Record<string, string> = Object.create(null);
+  let invalidAttributeKey = false;
   const flatten = (v: unknown, path: string, depth: number) => {
     if (Object.keys(attributes).length >= 256) return;
+    // Reject instead of repairing keys: replacement could merge distinct attribute paths.
+    if (/[\uD800-\uDFFF]/u.test(path)) {
+      invalidAttributeKey = true;
+      return;
+    }
     const entries = Object.entries(object(v));
     if (entries.length && depth < 6) for (const [key, child] of entries) flatten(child, path ? `${path}.${key}` : key, depth + 1);
     else
@@ -74,6 +80,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   targets.forEach((t, i) => {
     for (const [k, v] of Object.entries(t)) if (!['type', 'id', 'name'].includes(k)) flatten(v, `targets.${i}.${k}`, 3);
   });
+  if (invalidAttributeKey) return { ok: false as const, reason: 'invalid_event: Attribute keys must be valid Unicode' };
   const changes = Array.isArray(e.changes) ? e.changes.slice(0, 256).map(object) : [];
   const actor = object(e.actor),
     executor = object(e.executor),

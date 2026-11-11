@@ -151,7 +151,8 @@ Rejection codes appear in `rejected[].code`; retryable HTTP codes appear in
 
 | Code | Meaning | What to do / expected timing |
 | --- | --- | --- |
-| `invalid_event` | Invalid event fields or a definite native storage parse failure. | Fix the reported indices in `rejected`. Healthy siblings are accepted (202); all rejected gives `accepted: 0`. If isolation reaches its statement, byte, wall-clock or lease limit, unchecked rows stay retryable in `503 ingest_pending` indices, never in `rejected`. |
+| `invalid_event` | Invalid event fields or a definite native storage parse failure. | Fix the reported indices in `rejected`. Healthy siblings are accepted (202); all rejected gives `accepted: 0`. |
+| `unverified_after_parse_failure` | Isolation stopped before checking this proven-unwritten row; it is not proven invalid. | Terminal 202 for clients without `Logbird-Retry: subset`, once no other rows need retry. Resend individually if needed. |
 | `invalid_event_id` | Unsafe or oversized string id. | Use valid Unicode without NUL, at most 256 UTF-16 units after trimming. |
 | `duplicate_id_conflict` | The id belongs to different content. | Keep the original; send corrections with a new id and context.parentEventId. |
 | `stored_event_unreadable` | Retained evidence cannot be compared. | Keep the evidence. Send a correction with a new id; ask the operator to inspect storage. |
@@ -165,14 +166,23 @@ be fixed before recovery can settle the claim; honor the server's Retry-After.
 
 Search normalization uses `toWellFormed()` for indexed strings, target arrays,
 changes values and rejected occurredAt copies; raw payload and v1 identity keep
-original Unicode. Malformed attribute keys remain per-event failures to avoid key
-collisions. On an exact-row parse failure, the server inserts the parse-proven prefix
-before rejecting the named event and continuing with the suffix; prefix statements
-use the same isolation limits. Retries skip confirmed rows, but identical bodies
-revisit rejected rows whose claims were released. After complete 503 details, the
-SDK resends only unsettled events, each using its cached serialized JSON, id and
-occurredAt, and maps response indices back to the original events. Incomplete or
-malformed details keep the previous body. Raw HTTP clients must resend only the
-unresolved or remaining unsettled events, byte-identically, to make progress.
-Older SDKs keep identical bodies and can exhaust retries on pathological batches.
-After retry exhaustion (`onError`), retry `flush()` to send only unsettled events.
+original Unicode. A lone surrogate in a flattened attribute key rejects the event
+before INSERT (`invalid_event: Attribute keys must be valid Unicode`); valid pairs
+remain verbatim, avoiding key collisions. Isolation is defence in depth for unknown
+parse triggers. Its first named row is checked alone; a written canary logs a mismatch
+and switches to bisection. Prefix and canary statements share the isolation budgets.
+
+Clients declaring `Logbird-Retry: subset` get unchecked rows in `503 ingest_pending`
+indices and converge by retrying only unsettled events, byte-identically. About five
+leading bad rows fit per attempt under the byte budget. The SDK always sends this header,
+maps subset indices back to original events, and does not charge shrinking progress
+attempts against `maxRetries` (total attempts are bounded by batch length plus retries).
+Incomplete or malformed details keep the previous body. Exhaustion requeues only
+unsettled events; retry `flush()` after `onError`.
+
+Old SDKs and raw clients without the header instead receive terminal 202: written
+rows accepted, proven-bad rows `invalid_event`, unchecked rows `unverified_after_parse_failure`.
+If ambiguous writes, held-claim conflicts or other failures still require retry, all
+clients get 503 and unchecked rows remain unresolved. Identical retries skip confirmed
+rows and reach terminal 202 after pending writes settle through recovery. Proxies must
+allow `Logbird-Retry`; stripping it safely falls back to 202 but rejects unchecked rows.

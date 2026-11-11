@@ -346,11 +346,15 @@ that force synchronous fallback, changed error wording, oversize internal
 statements and view failures remain ambiguous after handoff, retaining claims
 for recovery. See [self-hosting](self-hosting.md#ingest-insert-settings).
 
-Isolation trusts that native `(at row N)` is statement-relative and 1-based. The
+Isolation checks that native `(at row N)` is statement-relative and 1-based. The
 shared-flush integration test in `apps/server/src/ingest-parse-isolation.integration.test.ts`
 pins this behavior on ClickHouse 26.9, including when two bodies share one async
-flush. Other ClickHouse versions must preserve it; run that test after an upgrade.
-The server inserts the parse-proven prefix through the normal visit path, then
+flush. Run that test after an upgrade. Before the first exact-row rejection in each
+attempt, the server sends the named row alone as a canary. Only a pre-write parse
+failure rejects it. A written canary is accepted, logs `ingest.parse_row_number_mismatch`,
+and disables row-number trust for the rest of that attempt, using bisection instead.
+An ambiguous, unavailable or unchecked canary keeps its normal classification.
+After a failed canary, the server inserts the parse-proven prefix through the normal visit path, then
 rejects the named row and continues with its suffix under the original claims and
 lease. Prefix writes have the same ambiguous, unavailable and lease semantics as
 any other insert. Missing/out-of-range row reports use bisection; a written left
@@ -363,11 +367,25 @@ Only individual proven failures become `invalid_event`, including a 202 with
 A 64-extra-statement cap, an isolation byte budget of four times the original
 statement's UTF-8 bytes (excluding that original statement), a ten-second isolation
 wall clock and the original lease's remaining 40-second finish budget bound the work.
-Rows are serialized once; subsets join cached JSON lines. Prefix writes count
-against both the statement and byte budgets. Typed pre-body lease
-exhaustion or any cap leaves unchecked rows retryable: `503 ingest_pending`
-includes settled `{accepted,ids,rejected,warnings}` plus their `indices` and
-`eventIds`. Claims for these proven-unwritten rows are released. Only truly
+Rows are serialized once; subsets join cached JSON lines. Canary and prefix writes count
+against both the statement and byte budgets. About five leading bad rows fit per attempt
+under the byte budget. Typed pre-body lease exhaustion or any cap leaves unchecked,
+proven-unwritten rows and releases their claims. The response depends on capability:
+
+- Clients declaring exactly `Logbird-Retry: subset` get `503 ingest_pending` with settled
+  `{accepted,ids,rejected,warnings}` plus unresolved `indices`/`eventIds`, and converge
+  by resending only that subset, preserving each event's JSON.
+- Every other client gets terminal 202: written rows accepted, proven-bad rows rejected
+  as `invalid_event`, unchecked rows rejected with distinct code/reason
+  `unverified_after_parse_failure: Storage stopped checking this batch after parse failures; resend this event individually if needed.`
+  These rows are not proven invalid; this fallback lets old SDKs finish their queue.
+- If other rows still require retry (including ambiguous writes and held-claim conflicts),
+  everyone gets 503 and unchecked rows stay unresolved. Never reject unchecked rows inside
+  that 503: SDK 0.1.1 ignores its details. Identical retries skip confirmed rows, pending
+  writes settle through recovery, and the next attempt returns terminal 202 once no other
+  rows require retry. Definite unavailable failures also keep unchecked rows unresolved.
+
+Only truly
 ambiguous/competing claim-held ids determine Retry-After; unresolved-only
 responses use one second. Definite non-parse failures without held claims use five
 seconds for `ingest_unavailable`. The server logs `ingest.parse_isolation_limited`
@@ -378,7 +396,8 @@ Ambiguous children are never split or retried within an attempt. Their claims
 stay leased while siblings settle; confirmation failures also preserve every
 acknowledged child's claim. Confirmed rows leave the work set, but released bad
 claims are checked again on identical-body retries, which can repeat the same
-isolation limit. Raw HTTP clients must honor settled rejections and resend only
+isolation limit for capable clients that ignore the contract. Raw HTTP clients declaring
+`Logbird-Retry: subset` must honor settled rejections and resend only
 the unresolved indices or remaining unsettled events, each with byte-identical
 JSON, id and occurredAt, to make progress. The next response's indices refer to
 that smaller request. There is no virtual partition-tree charge.
@@ -388,18 +407,29 @@ attempt within the same send resends only unsettled events. It serializes each
 event once per send and builds subset bodies from those cached strings, remapping
 response indices to original batch positions for acceptance, drop-once reporting
 and final requeue. Incomplete or malformed details keep the previous body unchanged.
-Older SDK versions retain identical-body retries and may exhaust retries on
-pathological batches. The SDK reports individually rejected rows through `onDrop`
-once per send; healthy rows are never dropped because isolation ran out of budget.
+The SDK always sends `Logbird-Retry: subset`. Attempts settling at least one event and
+shrinking the body do not consume `maxRetries`; total attempts remain bounded by batch
+length plus retries. The SDK reports individually rejected rows through `onDrop`
+once per send; unchecked healthy rows stay retryable while this header is preserved.
 If the retry budget is exhausted, `onError` reports it and only unsettled events
 are requeued for a later `flush()`.
+Older SDK versions retain identical-body retries and use the terminal 202 fallback.
+A proxy stripping `Logbird-Retry` safely selects that fallback, but unchecked rows are
+rejected. Integrators should allow this header through their proxies.
 
 Search strings use `toWellFormed()` to replace lone surrogates with U+FFFD,
 including targets, changes and `logbird.occurredAt.rejected`. Caps do not split
 valid surrogate pairs. Attribute values already replace invalid Unicode through
-UTF-8 encoding. Attribute keys remain verbatim: replacing them could collide
-distinct keys and silently lose data. A malformed key therefore remains a native
-per-event parser rejection. Raw `payload` and v1 identity keep the original input;
+UTF-8 encoding. Flattened attribute keys at every indexed depth are checked for lone
+surrogates before INSERT. A malformed key rejects the event with
+`invalid_event: Attribute keys must be valid Unicode`; valid surrogate pairs remain
+verbatim. Replacing keys could collide distinct keys and silently lose data.
+After #153 there is no known public input reaching the parse-isolation path. It remains
+defence in depth for unknown future triggers, validated by integration-only storage-fault
+fixtures that rewrite designated serialized rows to an invalid UInt16 immediately before
+real ClickHouse INSERTs. ClickHouse produces the real parser error and `WaitForAsyncInsert`;
+there are no production test hooks or environment switches.
+Raw `payload` and v1 identity keep the original input;
 search normalization is intentionally lossy. Invalid dates still fall back with
 warnings and job attempts clamp to UInt16.
 
@@ -447,8 +477,9 @@ Healthy siblings commit before 503 ingest_pending. Its details are a superset of
 the 202 response: `{accepted,ids,rejected,warnings,indices,eventIds}`. Each rejected
 entry includes `code` and a code-first explanatory `reason`. Every input index
 outside `indices` is settled, including permanent rejections; retrying the entire
-identical batch is idempotent but may repeat an isolation limit. Omit settled events
-to make progress. Retry-After for held claims reflects the longest remaining lease
+identical batch skips confirmed writes. Capable clients must omit settled events to
+make progress through isolation limits; legacy clients reach terminal 202 after held
+claims resolve, with unchecked rows rejected distinctly. Retry-After for held claims reflects the longest remaining lease
 plus flush bound. Ready receipts report the remaining ten-minute grace, and
 throttled flushes report the remaining minute, with a one-second minimum. A different-content retry against
 an unresolved claimant stays pending until the original outcome is known. The

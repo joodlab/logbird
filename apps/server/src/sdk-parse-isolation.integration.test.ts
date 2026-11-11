@@ -1,17 +1,82 @@
-import { read } from '@logbird/clickhouse';
+import { insertEvents, read } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Logbird } from '../../../packages/sdk/src/index';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { installIngestStorageFault } from './ingest-storage-fault-fixture';
+import { LegacySdk011Fixture } from './legacy-sdk-011-fixture';
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 let fixture: ImmutableFixture;
 beforeEach(async () => {
   fixture = await immutableFixture('qa91-sdk');
+  installIngestStorageFault();
+});
+
+it.each([20, 80])('legacy SDK 0.1.1 and raw HTTP terminate immediately with %i leading storage faults in 1000 rows', async (badCount) => {
+  const occurredAt = new Date(Date.now() - 60_000).toISOString();
+  const batch = Array.from({ length: 1000 }, (_, index) => ({
+    id: `legacy-${index}`,
+    action: 'qa91.legacy',
+    occurredAt,
+    ...(index < badCount ? { metadata: { qa91StorageParseFault: true } } : {}),
+  }));
+  // The test-only adapter sends an invalid UInt16 to REAL ClickHouse, not a fabricated parser error.
+  await expect(insertEvents(clickhouse, [fixture.row(batch[0])])).rejects.toMatchObject({
+    code: expect.stringMatching(/^(25|27|53|72)$/),
+    message: expect.stringContaining('WaitForAsyncInsert'),
+  });
+  const seeded = batch.slice(-10);
+  expect((await fixture.post(seeded)).status).toBe(202);
+  const raw = await fixture.post({ events: batch }); // No capability header.
+  expect(raw.status).toBe(202);
+  const result = await raw.json();
+  expect(result.ids.toSorted()).toEqual(seeded.map((event) => event.id).toSorted());
+  const proven = result.rejected.filter((rejection: { code: string }) => rejection.code === 'invalid_event');
+  const unchecked = result.rejected.filter((rejection: { code: string }) => rejection.code === 'unverified_after_parse_failure');
+  expect(proven.length).toBeGreaterThan(0);
+  expect(proven.length).toBeLessThan(badCount);
+  expect(
+    proven.every((rejection: { index: number; reason: string }) => rejection.index < badCount && rejection.reason.startsWith('invalid_event:')),
+  ).toBe(true);
+  expect(unchecked.length).toBeGreaterThan(0);
+  expect(unchecked.every((rejection: { reason: string }) => rejection.reason.startsWith('unverified_after_parse_failure:'))).toBe(true);
+  expect(new Set(result.rejected.map((rejection: { index: number }) => rejection.index)).size).toBe(1000 - seeded.length);
+  expect(result.rejected).toHaveLength(proven.length + unchecked.length);
+  const statuses: number[] = [],
+    dropped: string[] = [];
+  vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+    expect(new Headers(init.headers).get('Logbird-Retry')).toBeNull();
+    const response = await fixture.post(JSON.parse(String(init.body)));
+    statuses.push(response.status);
+    return response;
+  });
+  const legacy = new LegacySdk011Fixture({ apiKey: 'fictional', endpoint: 'http://in-process.invalid', onDrop: (event) => dropped.push(event.id!) });
+  for (const event of batch) legacy.track(event);
+  await legacy.flush();
+  expect(statuses).toEqual([202]); // No 503 retry loop; the queue is no longer wedged.
+  expect(legacy.queueSize).toBe(0);
+  expect(new Set(dropped)).toEqual(new Set(result.rejected.map((rejection: { index: number }) => batch[rejection.index]!.id)));
+  expect(dropped).toHaveLength(result.rejected.length);
+  for (const table of ['events', 'event_ids']) {
+    expect(
+      await read(clickhouse, `SELECT event_id id,count() n FROM ${table} WHERE project_id={p:String} GROUP BY event_id ORDER BY event_id`, {
+        p: fixture.project,
+      }),
+    ).toEqual(seeded.map((event) => ({ id: event.id, n: 1 })).sort((a, b) => a.id.localeCompare(b.id)));
+  }
+  expect(await read(clickhouse, 'SELECT sum(events) n FROM events_by_minute WHERE project_id={p:String}', { p: fixture.project })).toEqual([
+    { n: seeded.length },
+  ]);
+  legacy.track({ id: 'legacy-later', action: 'qa91.after' });
+  await legacy.flush();
+  expect(statuses).toEqual([202, 202]);
+  expect(await fixture.count()).toBe(seeded.length + 1);
 });
 afterEach(async () => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   await fixture.cleanup();
   for (const table of ['events', 'event_ids', 'events_by_minute', 'entities', 'attribute_keys']) {
     expect(await read(clickhouse, `SELECT count() n FROM ${table} WHERE project_id={p:String}`, { p: fixture.project })).toEqual([{ n: 0 }]);
@@ -25,13 +90,14 @@ it.each([3, 80])('drives the real in-process ingest app with %i poison events an
     id: `sdk-${i}`,
     action: 'qa91.sdk',
     occurredAt,
-    ...(i < badCount ? { metadata: { '\ud800': 'bad' } } : {}),
+    ...(i < badCount ? { metadata: { qa91StorageParseFault: true } } : {}),
   }));
   const responses: { status: number; body: unknown }[] = [];
   const bodies: string[] = [];
   vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
     bodies.push(String(init.body));
-    const result = await fixture.post(JSON.parse(String(init.body)));
+    expect(new Headers(init.headers).get('Logbird-Retry')).toBe('subset');
+    const result = await fixture.post(JSON.parse(String(init.body)), 0, { 'Logbird-Retry': 'subset' });
     responses.push({ status: result.status, body: await result.clone().json() });
     return result;
   });
@@ -50,7 +116,6 @@ it.each([3, 80])('drives the real in-process ingest app with %i poison events an
     apiKey: 'fictional',
     endpoint: 'http://in-process.invalid',
     batchSize: 1000,
-    maxRetries: badCount,
     flushIntervalMs: 60_000,
     onDrop: (e) => dropped.push(e.id!),
     onError: (e) => errors.push(e),

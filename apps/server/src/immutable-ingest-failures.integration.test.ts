@@ -93,7 +93,7 @@ it('refuses an insert if its claim lease expires while the process is paused', a
     return rows;
   });
   const spy = vi.spyOn(clickhouse, 'exec');
-  expect((await f.post(input)).status).toBe(503);
+  expect((await f.post(input, 0, { 'Logbird-Retry': 'subset' })).status).toBe(503);
   expect(spy).not.toHaveBeenCalled();
   expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(0);
 });

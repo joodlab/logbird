@@ -6,10 +6,12 @@ import { prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { installIngestStorageFault, storageFaultBody } from './ingest-storage-fault-fixture';
 
 let f: ImmutableFixture;
 beforeEach(async () => {
   f = await immutableFixture('qa91');
+  installIngestStorageFault();
 });
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -32,11 +34,7 @@ it('returns retryable unresolved indices when the lease budget expires after a p
     }
   });
   const writes = vi.spyOn(clickhouse, 'exec');
-  const response = await f.post([
-    { ...event('bad'), metadata: { fixture: 'qa91', '\ud800': 'bad' } },
-    event('unsent'),
-    { description: 'missing action' },
-  ]);
+  const response = await f.post([badEvent('bad'), event('unsent'), { description: 'missing action' }], 0, { 'Logbird-Retry': 'subset' });
   expect(response.status).toBe(503);
   expect(await response.json()).toMatchObject({
     error: {
@@ -44,12 +42,9 @@ it('returns retryable unresolved indices when the lease budget expires after a p
       details: {
         accepted: 0,
         ids: [],
-        indices: [1],
-        eventIds: ['unsent'],
-        rejected: expect.arrayContaining([
-          { index: 0, code: 'invalid_event', reason: expect.stringMatching(/^invalid_event:/) },
-          { index: 2, code: 'invalid_event', reason: expect.stringMatching(/^invalid_event:/) },
-        ]),
+        indices: [0, 1],
+        eventIds: ['bad', 'unsent'],
+        rejected: expect.arrayContaining([{ index: 2, code: 'invalid_event', reason: expect.stringMatching(/^invalid_event:/) }]),
       },
     },
   });
@@ -68,6 +63,31 @@ async function destinationCounts() {
   return counts;
 }
 const event = (id: string) => ({ id, action: 'qa91.fixture', actor: { id, type: 'user' }, metadata: { fixture: 'qa91' } });
+const badEvent = (id: string) => ({ ...event(id), metadata: { fixture: 'qa91', qa91StorageParseFault: true } });
+// Real ClickHouse parser errors (version-dependent wording), never a mocked error classification.
+const parseCode = expect.stringMatching(/^(25|27|53|72)$/);
+
+it('rejects lone-surrogate attribute keys before INSERT, with no parse-isolation statements (#153)', async () => {
+  const writes = vi.spyOn(clickhouse, 'exec');
+  const bad = [
+    { ...event('bad-top'), '\ud800': 1 },
+    { ...event('bad-nested'), metadata: { nested: { '\udfff': 1 } } },
+    { ...event('bad-target'), targets: [{ type: 'record', id: 'x', nested: { '\ud800': 1 } }] },
+  ];
+  const response = await f.post(bad);
+  expect(response.status).toBe(202);
+  expect(await response.json()).toMatchObject({
+    accepted: 0,
+    ids: [],
+    rejected: bad.map((_, index) => ({ index, code: 'invalid_event', reason: 'invalid_event: Attribute keys must be valid Unicode' })),
+  });
+  expect(writes).not.toHaveBeenCalled();
+  expect(await f.count()).toBe(0);
+  const healthy = await f.post({ ...event('valid-pair'), metadata: { nested: { '\ud83d\ude00': 1 } } });
+  expect(healthy.status).toBe(202);
+  expect(await healthy.json()).toMatchObject({ accepted: 1, rejected: [] });
+  expect(writes).toHaveBeenCalledTimes(1);
+});
 
 async function assertHealthy(ids: string[]) {
   for (const table of ['events', 'event_ids']) {
@@ -97,16 +117,16 @@ async function assertHealthy(ids: string[]) {
 }
 
 it('isolates a real normalized JSONEachRow rejection, confirms healthy siblings and exactly retries the same per-index result', async () => {
-  const bad = { ...event('bad'), metadata: { fixture: 'qa91', '\ud800': 'bad' } };
+  const bad = badEvent('bad');
   const capped = { ...event('healthy-b'), description: `${'a'.repeat(4095)}😀` };
   const batch = [event('healthy-a'), bad, capped, bad, { ...bad, action: 'qa91.conflict' }];
-  // No transport or storage fake: prove a late parser rejection writes NONE of the destinations.
+  // The integration-only adapter corrupts a typed field; REAL ClickHouse must reject before any destination writes.
   await expect(
     insertEvents(
       clickhouse,
       batch.slice(0, 3).map((e) => f.row(e)),
     ),
-  ).rejects.toMatchObject({ code: '25' });
+  ).rejects.toMatchObject({ code: parseCode, message: expect.stringContaining('WaitForAsyncInsert') });
   expect(await destinationCounts()).toEqual({ events: 0, event_ids: 0, events_by_minute: 0, entities: 0, attribute_keys: 0 });
   const response = await f.post(batch);
   expect(response.status).toBe(202);
@@ -131,12 +151,7 @@ it('isolates a real normalized JSONEachRow rejection, confirms healthy siblings 
 });
 
 it('composes confirmed, parse-rejected, conflicting and ambiguous child indices without resending the ambiguous child', async () => {
-  const batch = [
-    event('healthy'),
-    { ...event('bad'), metadata: { fixture: 'qa91', '\ud800': 'bad' } },
-    event('pending'),
-    { ...event('pending'), action: 'qa91.conflict' },
-  ];
+  const batch = [event('healthy'), badEvent('bad'), event('pending'), { ...event('pending'), action: 'qa91.conflict' }];
   const exec = clickhouse.exec.bind(clickhouse);
   let ambiguousStatements = 0;
   vi.spyOn(clickhouse, 'exec').mockImplementation(async (params) => {
@@ -200,7 +215,7 @@ it('keeps acknowledged child claims if Postgres confirmation fails', async () =>
     if (args[1].length) throw new Error('fictional confirmation failure');
     return confirm(...args);
   });
-  const response = await f.post([event('healthy'), { ...event('bad'), metadata: { fixture: 'qa91', '\ud800': 'bad' } }]);
+  const response = await f.post([event('healthy'), badEvent('bad')]);
   expect(response.status).toBe(500);
   expect(await read(clickhouse, 'SELECT event_id FROM events WHERE project_id={p:String}', { p: f.project })).toEqual([{ event_id: 'healthy' }]);
   expect(await prisma.ingestReceipt.findMany({ where: { projectId: f.project } })).toEqual([
@@ -211,14 +226,13 @@ it('keeps acknowledged child claims if Postgres confirmation fails', async () =>
   await prisma.ingestReceipt.deleteMany({ where: { projectId: f.project, confirmedAt: null } });
 });
 
-const badEvent = (id: string) => ({ ...event(id), metadata: { fixture: 'qa91', '\ud800': 'bad' } });
-it.each([3, 20, 80])('isolates a real 1000-row body with %i bad keys without rejecting a healthy row', async (badCount) => {
+it.each([3, 20, 80])('isolates a real 1000-row body with %i injected storage faults without rejecting a healthy row', async (badCount) => {
   const badIndices = new Set(Array.from({ length: badCount }, (_, index) => Math.floor(((index + 1) * 1000) / (badCount + 1))));
   const batch = Array.from({ length: 1000 }, (_, i) => (badIndices.has(i) ? badEvent(`bad-${i}`) : event(`healthy-${i}`)));
   const healthyIds = batch.filter((_, index) => !badIndices.has(index)).map((e) => e.id);
   const writes = vi.spyOn(clickhouse, 'exec');
   const warnings = vi.spyOn(console, 'warn');
-  const response = await f.post(batch);
+  const response = await f.post(batch, 0, { 'Logbird-Retry': 'subset' });
   const wire = await response.json();
   const details = response.status === 202 ? wire : wire.error.details;
   expect(details.rejected.every((r: { index: number }) => badIndices.has(r.index))).toBe(true);
@@ -226,7 +240,7 @@ it.each([3, 20, 80])('isolates a real 1000-row body with %i bad keys without rej
   if (badCount === 3) {
     expect(response.status).toBe(202);
     expect(details.rejected).toHaveLength(badCount);
-    expect(writes).toHaveBeenCalledTimes(2 * badCount + 1);
+    expect(writes).toHaveBeenCalledTimes(2 * badCount + 2); // One singleton row-number canary.
     await assertHealthy(healthyIds);
     expect((await f.post(batch)).status).toBe(202);
     await assertHealthy(healthyIds);
@@ -249,7 +263,7 @@ it.each([3, 20, 80])('isolates a real 1000-row body with %i bad keys without rej
     // The byte budget may require several attempts. Only resubmit the unresolved indices from each response.
     for (let attempt = 0; ; attempt++) {
       expect(attempt).toBeLessThan(badCount);
-      const retry = await f.post(remaining);
+      const retry = await f.post(remaining, 0, { 'Logbird-Retry': 'subset' });
       const retryBody = await retry.json();
       const retryDetails = retry.status === 202 ? retryBody : retryBody.error.details;
       expect(retryDetails.rejected.every((r: { index: number }) => remaining[r.index]!.id.startsWith('bad-'))).toBe(true);
@@ -264,7 +278,7 @@ it.each([3, 20, 80])('isolates a real 1000-row body with %i bad keys without rej
     }
     expect(rejectedCount).toBe(badCount);
     await assertHealthy(healthyIds);
-    expect((await f.post(batch)).status).toBe(503);
+    expect((await f.post(batch, 0, { 'Logbird-Retry': 'subset' })).status).toBe(503);
     await assertHealthy(healthyIds);
   }
 });
@@ -287,7 +301,7 @@ it('verifies the native row number identifies the first of several bad rows', as
       clickhouse,
       [event('a'), badEvent('b'), event('c'), badEvent('d')].map((e) => f.row(e)),
     ),
-  ).rejects.toMatchObject({ code: '25', message: expect.stringMatching(/\(at row 2\).*WaitForAsyncInsert/s) });
+  ).rejects.toMatchObject({ code: parseCode, message: expect.stringMatching(/\(at row 2\).*WaitForAsyncInsert/s) });
   expect((await destinationCounts()).events).toBe(0);
 });
 it('reports a statement-relative row number when two concurrent bodies share one async flush', async () => {
@@ -306,7 +320,7 @@ it('reports a statement-relative row number when two concurrent bodies share one
     async_insert_busy_timeout_max_ms: 5000,
   };
   const native = async (batch: ReturnType<typeof event>[], queryId: string) => {
-    const body = batch.map((input) => `${JSON.stringify(f.row(input))}\n`).join('');
+    const body = storageFaultBody(batch.map((input) => `${JSON.stringify(f.row(input))}\n`).join(''));
     const result = await clickhouse.exec({
       query: 'INSERT INTO events FORMAT JSONEachRow',
       query_id: queryId,
@@ -338,7 +352,7 @@ it('reports a statement-relative row number when two concurrent bodies share one
     expect(good!.status).toBe('fulfilled');
     expect(bad!.status).toBe('rejected');
     if (bad!.status !== 'rejected') throw new Error('Expected the qa91 poison statement to fail');
-    expect(bad.reason).toMatchObject({ code: '25', message: expect.stringMatching(/\(at row 3\).*WaitForAsyncInsert/s) });
+    expect(bad.reason).toMatchObject({ code: parseCode, message: expect.stringMatching(/\(at row 3\).*WaitForAsyncInsert/s) });
     for (const table of ['events', 'event_ids']) {
       expect(
         await read(clickhouse, `SELECT event_id id,count() n FROM ${table} WHERE project_id={p:String} GROUP BY event_id ORDER BY event_id`, {
@@ -369,7 +383,7 @@ it('reports a statement-relative row number when two concurrent bodies share one
 }, 60_000);
 it('reproduces sync partial writes under client-side pin overrides and prevents writes with pinned blocks', async () => {
   const rows = Array.from({ length: 3000 }, (_, i) => f.row(i === 2499 ? badEvent(`sync-${i}`) : event(`sync-${i}`)));
-  const body = `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`;
+  const body = storageFaultBody(`${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
   const low: ClickHouseSettings = {
     async_insert: 1,
     wait_for_async_insert: 1,
@@ -386,7 +400,7 @@ it('reproduces sync partial writes under client-side pin overrides and prevents 
       /* consume ack */
     }
   };
-  await expect(native(low)).rejects.toMatchObject({ code: '25', message: expect.stringMatching(/\(at row 2500\)/) });
+  await expect(native(low)).rejects.toMatchObject({ code: parseCode, message: expect.stringMatching(/\(at row 2500\)/) });
   const partial = await destinationCounts();
   expect(partial.events).toBeGreaterThan(0);
   expect(partial.event_ids).toBeGreaterThan(0);
@@ -394,7 +408,7 @@ it('reproduces sync partial writes under client-side pin overrides and prevents 
   expect(await destinationCounts()).toEqual({ events: 0, event_ids: 0, events_by_minute: 0, entities: 0, attribute_keys: 0 });
   // Override pins on the client, without changing a server profile. A real server constraint rejects with code 452.
   vi.spyOn(clickhouse, 'exec').mockImplementation((params) => exec({ ...params, clickhouse_settings: { ...params.clickhouse_settings, ...low } }));
-  await expect(insertEvents(clickhouse, rows)).rejects.toBeInstanceOf(AmbiguousInsertError);
+  await expect(insertEvents(clickhouse, rows, undefined, body)).rejects.toBeInstanceOf(AmbiguousInsertError);
   expect((await destinationCounts()).events).toBeGreaterThan(0);
   vi.restoreAllMocks();
   await f.cleanup();
@@ -402,12 +416,15 @@ it('reproduces sync partial writes under client-side pin overrides and prevents 
   vi.spyOn(clickhouse, 'exec').mockImplementation((params) =>
     exec({ ...params, clickhouse_settings: { ...low, ...params.clickhouse_settings, async_insert_max_data_size: '1000' } }),
   );
-  await expect(insertEvents(clickhouse, rows)).rejects.toBeInstanceOf(AmbiguousInsertError);
+  await expect(insertEvents(clickhouse, rows, undefined, body)).rejects.toBeInstanceOf(AmbiguousInsertError);
   expect(await destinationCounts()).toEqual({ events: 0, event_ids: 0, events_by_minute: 0, entities: 0, attribute_keys: 0 });
   vi.restoreAllMocks();
   // Per-client lowered defaults emulate a session profile; all real query pins win over them.
   vi.spyOn(clickhouse, 'exec').mockImplementation((params) => exec({ ...params, clickhouse_settings: { ...low, ...params.clickhouse_settings } }));
-  await expect(insertEvents(clickhouse, rows)).rejects.toMatchObject({ code: '25', message: expect.stringContaining('WaitForAsyncInsert') });
+  await expect(insertEvents(clickhouse, rows, undefined, body)).rejects.toMatchObject({
+    code: parseCode,
+    message: expect.stringContaining('WaitForAsyncInsert'),
+  });
   expect(Number(INGEST_INSERT_SETTINGS.min_insert_block_size_rows)).toBeGreaterThanOrEqual(rows.length);
   expect(await destinationCounts()).toEqual({ events: 0, event_ids: 0, events_by_minute: 0, entities: 0, attribute_keys: 0 });
 });

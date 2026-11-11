@@ -257,23 +257,36 @@ honoring `Retry-After`. Healthy siblings commit before a pending response and re
 idempotent on retry. Pending details include `accepted`, `ids`, `rejected`, `warnings`,
 `indices` and `eventIds`. Every index outside `indices` is settled. Each rejected
 entry has a `code` plus a code-first explanation in `reason`. On an exact-row storage
-parse failure, the server inserts the parse-proven prefix before rejecting the bad
-row and continuing with the suffix, all within the original isolation budgets.
+parse failure, the server checks the first named row alone as a canary. A written
+canary is accepted and the rest of that attempt uses bisection; a failed canary permits
+exact-row rejection and prefix writes. All share the original isolation budgets.
 The SDK retries with the identical previous body unless complete 503 details settle
 events; then it resends only unsettled events within the same send. It serializes
 each event once per send and reuses that exact JSON (including id and occurredAt)
 in every subset body. Response indices are mapped back to the original events,
 so rejections call `onDrop` once per send. Incomplete or malformed details keep
 the previous body unchanged. After its retry budget, only unsettled events stay
-queued and `flush()` rejects.
+queued and `flush()` rejects. The SDK always sends `Logbird-Retry: subset`. About
+five leading bad rows fit per attempt under the server's byte budget; subset retries
+converge. An attempt settling events and shrinking the body does not consume
+`maxRetries`; total attempts remain bounded by batch length plus retries.
 
-Raw HTTP clients must honor settled rejections and resend only `details.indices`
+Raw HTTP clients declaring `Logbird-Retry: subset` must honor settled rejections and resend only `details.indices`
 or the remaining unsettled events to make progress. Preserve each event's JSON
 byte-identically, including id and occurredAt; response indices then refer to the
-smaller request. An identical body revisits rejected rows with released claims
-and can repeat the same isolation limit. Older SDK versions keep identical-body
-retries and may exhaust retries on pathological batches. Upgrade or use smaller
-batches if affected.
+smaller request. Clients without that capability (old SDKs and raw HTTP without the
+header) instead receive terminal 202: proven-bad rows `invalid_event`, written rows
+accepted, unchecked rows rejected with distinct code/reason `unverified_after_parse_failure`
+and guidance to resend individually if needed. Unchecked rows are not proven invalid.
+If other rows still need retry, including ambiguous writes or held-claim conflicts,
+everyone gets 503 and unchecked rows stay unresolved. Identical retries skip confirmed
+rows; after recovery settles pending writes, the next legacy request reaches terminal 202.
+A proxy stripping `Logbird-Retry` safely selects that fallback but rejects unchecked rows;
+allow this header through proxies to preserve subset retries.
+
+Lone surrogates in flattened attribute keys are rejected before INSERT as
+`invalid_event: Attribute keys must be valid Unicode`. Valid surrogate pairs are kept.
+Parse isolation remains defence in depth for unknown future triggers after this validation.
 
 Retry `flush()` later. Unresolved writes recover automatically per project after a
 bounded lease and ClickHouse queue drain. An id containing NUL, a lone surrogate,
@@ -288,7 +301,8 @@ Rejection codes appear in `rejected[].code`; retryable HTTP codes appear in
 
 | Code | Meaning | What to do / expected timing |
 | --- | --- | --- |
-| `invalid_event` | Invalid event fields or a proven storage parse failure. | Fix the reported indices in `rejected`. Healthy siblings are accepted (202); all rejected gives `accepted: 0`. Isolation limits leave unchecked indices retryable in `503 ingest_pending`. |
+| `invalid_event` | Invalid event fields or a proven storage parse failure. | Fix the reported indices in `rejected`. Healthy siblings are accepted (202); all rejected gives `accepted: 0`. |
+| `unverified_after_parse_failure` | Isolation stopped before checking this proven-unwritten row. | Terminal 202 fallback without `Logbird-Retry: subset`; resend individually if needed. With the header, unchecked rows stay retryable in `503 ingest_pending`. |
 | `invalid_event_id` | Unsafe or oversized string id. | Use valid Unicode without NUL, at most 256 UTF-16 units after trimming. |
 | `duplicate_id_conflict` | The id belongs to different content. | Keep the original; send corrections with a new id and context.parentEventId. |
 | `stored_event_unreadable` | Retained evidence cannot be compared. | Keep the evidence. Send a correction with a new id; ask the operator to inspect storage. |

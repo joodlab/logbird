@@ -246,7 +246,7 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
 }
 
 /** Caller holds a project lock: exclusive during recovery, shared otherwise. Receipts fence every API process. */
-export async function insertImmutableEvents(projectId: string, organizationId: string, candidates: IngestCandidate[]) {
+export async function insertImmutableEvents(projectId: string, organizationId: string, candidates: IngestCandidate[], supportsSubsetRetry = false) {
   if (!candidates.length) return { ids: [] as string[], rejected: [] as { index: number; reason: string; code: string }[] };
   // The wire payload and normalized rows are immutable within this attempt; hash each row once.
   const fingerprints = new Map<EventRow, string>();
@@ -267,7 +267,15 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
     throw error;
   }
   const outcome = await persistRows(projectId, result.rows, owned, fingerprint);
-  return composeIngestOutcome(projectId, candidates, result, outcome, receipts);
+  return composeIngestOutcome(projectId, candidates, result, outcome, receipts, supportsSubsetRetry);
+}
+
+export const UNVERIFIED_PARSE_REJECTION =
+  'unverified_after_parse_failure: Storage stopped checking this batch after parse failures; resend this event individually if needed.';
+
+/** Never settle unchecked rows inside a retryable response: old SDKs ignore its details. */
+export function uncheckedIngestPolicy(supportsSubsetRetry: boolean, hasOtherRetryableRows: boolean) {
+  return supportsSubsetRetry || hasOtherRetryableRows ? 'retry' : 'reject';
 }
 
 async function composeIngestOutcome(
@@ -276,11 +284,13 @@ async function composeIngestOutcome(
   result: ReturnType<typeof classifyCandidates>,
   outcome: Awaited<ReturnType<typeof persistRows>>,
   receipts: Map<string, IngestReceipt>,
+  supportsSubsetRetry: boolean,
 ) {
   const unresolvedIds = new Set(outcome.unresolved.map((row) => row.event_id));
   const rejectedIds = new Set(outcome.rejected.map((row) => row.event_id));
   const pendingIds = new Set([...result.pending.map((p) => p.eventId), ...outcome.pending.map((row) => row.event_id)]);
   const unavailableIds = new Set(outcome.unavailable.map((row) => row.event_id));
+  const rejectUnchecked = uncheckedIngestPolicy(supportsSubsetRetry, pendingIds.size + unavailableIds.size > 0) === 'reject';
   // Classification rejections (including conflicts with another index of the same id) stay settled.
   const classifiedRejections = new Set(result.rejected.map((r) => r.index));
   for (const candidate of candidates) {
@@ -292,10 +302,12 @@ async function composeIngestOutcome(
         code: 'invalid_event',
         reason: STORAGE_PARSE_REJECTION,
       });
+    else if (rejectUnchecked && unresolvedIds.has(id))
+      result.rejected.push({ index: candidate.index, code: 'unverified_after_parse_failure', reason: UNVERIFIED_PARSE_REJECTION });
   }
   const ids = result.ids.filter((id) => !rejectedIds.has(id) && !pendingIds.has(id) && !unavailableIds.has(id) && !unresolvedIds.has(id));
   // Healthy siblings are already durable; an identical batch retry will not insert them again.
-  const retryableIds = new Set([...pendingIds, ...unavailableIds, ...unresolvedIds]);
+  const retryableIds = new Set([...pendingIds, ...unavailableIds, ...(rejectUnchecked ? [] : unresolvedIds)]);
   if (retryableIds.size) {
     const retryable = candidates
       .filter((c) => retryableIds.has(c.row.event_id) && !classifiedRejections.has(c.index))

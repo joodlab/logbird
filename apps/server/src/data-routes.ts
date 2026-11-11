@@ -98,7 +98,15 @@ export const publicRoutes = new Hono<AppEnv>()
     publicQueryLanguage,
     doc('Ingest events', s.ingestResponseSchema, 202, 'ingestKey'),
     async (c) =>
-      c.json(await ingest(c.get('project').id, await readIngestBody(c.req.raw), c.req.header('x-logbird-sdk') ?? c.req.header('user-agent')), 202),
+      c.json(
+        await ingest(
+          c.get('project').id,
+          await readIngestBody(c.req.raw),
+          c.req.header('x-logbird-sdk') ?? c.req.header('user-agent'),
+          c.req.header('Logbird-Retry') === 'subset',
+        ),
+        202,
+      ),
   )
   .get(
     '/events',

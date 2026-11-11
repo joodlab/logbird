@@ -38,7 +38,7 @@ export async function readIngestBody(request: Request): Promise<unknown> {
     source.destroy();
   }
 }
-export async function ingest(projectId: string, body: unknown, sdk = '') {
+export async function ingest(projectId: string, body: unknown, sdk = '', supportsSubsetRetry = false) {
   const events = Array.isArray(body) ? body : body && typeof body === 'object' && 'events' in body ? (body as { events: unknown }).events : [body];
   if (!Array.isArray(events) || !events.length) throw new ApiError(422, 'validation_error', 'events must be a nonempty array.');
   if (events.length > 1000 || events.some((e) => Buffer.byteLength(JSON.stringify(e)) > 256 * 1024))
@@ -82,7 +82,12 @@ export async function ingest(projectId: string, body: unknown, sdk = '') {
         candidate.row = { ...candidate.row, received_at: acceptedAt.toISOString(), timestamp: next.timestamp.toISOString() };
       }
     }
-    const result = await insertImmutableEvents(projectId, organizationIdForStream(projectId, project?.organizationId), candidates);
+    const result = await insertImmutableEvents(
+      projectId,
+      organizationIdForStream(projectId, project?.organizationId),
+      candidates,
+      supportsSubsetRetry,
+    );
     ids.push(...result.ids);
     rejected.push(...result.rejected);
     invalidateSetup(projectId);

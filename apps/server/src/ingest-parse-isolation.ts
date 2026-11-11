@@ -1,6 +1,6 @@
 import { AmbiguousInsertError, type EventRow, INSERT_LEASE_BUDGET_MS, InsertLeaseExhaustedError, isPrewriteParseError } from '@logbird/clickhouse';
 
-// Extra statements after the original failure, including parse-proven prefix writes.
+// Extra statements after the original failure, including the row-number canary and prefix writes.
 export const MAX_PARSE_ISOLATION_STATEMENTS = 64;
 export const MAX_PARSE_ISOLATION_MS = 10_000;
 export const MAX_PARSE_ISOLATION_BYTE_MULTIPLIER = 4;
@@ -27,6 +27,8 @@ export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number
   const bytes = (part: EventRow[]) => part.reduce((total, row) => total + serialized.get(row)!.bytes, 0);
   const isolationByteBudget = bytes(rows) * MAX_PARSE_ISOLATION_BYTE_MULTIPLIER;
   let isolationBytes = 0;
+  let rowNumberChecked = false;
+  let trustRowNumbers = true;
   function defer(part: EventRow[], reason: NonNullable<typeof limitReason>) {
     if (Number.isFinite(isolationDeadline)) {
       limited = true;
@@ -41,11 +43,28 @@ export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number
     }
     const match = error instanceof Error ? /\(at row (\d+)\)/i.exec(error.message) : null;
     const index = match ? Number(match[1]) - 1 : -1;
-    if (Number.isSafeInteger(index) && index >= 0 && index < part.length) {
+    if (trustRowNumbers && Number.isSafeInteger(index) && index >= 0 && index < part.length) {
+      const named = part[index] as EventRow;
+      if (!rowNumberChecked) {
+        rowNumberChecked = true;
+        const canaryWritten = await visit([named]);
+        if (!rejected.includes(named)) {
+          trustRowNumbers = false;
+          const rest = part.filter((row) => row !== named);
+          if (canaryWritten) {
+            console.warn(JSON.stringify({ level: 'warn', event: 'ingest.parse_row_number_mismatch', projectId: named.project_id }));
+            // The failed parent still proves a bad row exists outside the written canary.
+            await parseFailure(rest);
+          } else {
+            // An ambiguous, unavailable or unchecked canary cannot prove anything about its siblings.
+            await visit(rest);
+          }
+          return;
+        }
+      } else rejected.push(named);
       // ClickHouse reports a statement-relative, 1-based row. Persist its parse-proven prefix
       // before continuing, so confirmed rows leave the next attempt even if a limit stops us.
       await visit(part.slice(0, index));
-      rejected.push(part[index] as EventRow);
       await visit(part.slice(index + 1));
       return;
     }

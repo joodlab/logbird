@@ -9,6 +9,9 @@ export {
   type WebhookVerificationReason,
 } from './webhooks';
 
+// Keep in sync with packages/sdk/package.json (verified by index.test.ts).
+const SDK_VERSION = '0.1.1';
+
 /** Copied structural envelope: no runtime or workspace dependency in the published SDK. */
 export interface EventInput {
   action: string;
@@ -177,13 +180,20 @@ export class Logbird {
       }
       if (fresh.length) this.report(new Error(`${fresh.length} events rejected by Logbird: ${fresh.map((r) => r.reason).join('; ')}`));
     };
+    let retries = 0;
     try {
       for (let attempt = 0; ; attempt++) {
+        let progressed = false;
         let response: Response | undefined, error: unknown;
         try {
           response = await fetch(`${this.options.endpoint!.replace(/\/$/, '')}/v1/events`, {
             method: 'POST',
-            headers: { Authorization: `Bearer ${this.options.apiKey}`, 'Content-Type': 'application/json', 'X-Logbird-SDK': 'typescript/0.2.0' },
+            headers: {
+              Authorization: `Bearer ${this.options.apiKey}`,
+              'Content-Type': 'application/json',
+              'X-Logbird-SDK': `typescript/${SDK_VERSION}`,
+              'Logbird-Retry': 'subset',
+            },
             body,
             signal: AbortSignal.timeout(30_000),
           });
@@ -249,6 +259,7 @@ export class Logbird {
                 if (remaining.length < attemptIndices.length) {
                   attemptIndices = remaining;
                   body = serializeBody();
+                  progressed = true;
                 }
               }
             }
@@ -262,10 +273,14 @@ export class Logbird {
           this.report(new Error(`Logbird HTTP ${response?.status}; batch dropped`));
           return;
         }
-        if (attempt >= this.retries) throw error ?? new Error(`Logbird HTTP ${response?.status}`);
+        // Progress attempts strictly shrink the body, so there can be at most batch.length of them.
+        // Only non-progress failures consume maxRetries; retain a hard total-attempt bound as well.
+        if ((!progressed && retries >= this.retries) || attempt >= batch.length + this.retries - 1)
+          throw error ?? new Error(`Logbird HTTP ${response?.status}`);
         const retryAfter = response?.headers.get('Retry-After');
         const seconds = retryAfter ? Number(retryAfter) : Number.NaN;
-        const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** attempt) * (0.5 + Math.random());
+        const delay = Number.isFinite(seconds) ? seconds * 1000 : Math.min(30_000, 250 * 2 ** retries) * (0.5 + Math.random());
+        if (!progressed) retries++;
         await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(60_000, delay))));
       }
     } finally {

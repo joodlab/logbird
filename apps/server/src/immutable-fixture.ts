@@ -23,10 +23,10 @@ export async function immutableFixture(prefix = 'qa-immutable') {
   await prisma.apiKey.create({ data: { projectId: project, name: 'QA key', kind: 'ingest', hash: key.hash, prefix: key.prefix } });
   const first = new Hono().route('/', app);
   const replicas = [first, new Hono().route('/', app)];
-  const post = (input: unknown, replica = 0) =>
+  const post = (input: unknown, replica = 0, headers?: HeadersInit) =>
     (replicas[replica] ?? first).request('/v1/events', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key.secret}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key.secret}`, ...Object.fromEntries(new Headers(headers)) },
       body: JSON.stringify(input),
     });
   const row = (input: unknown, receivedAt = new Date()) => {
