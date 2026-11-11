@@ -6,6 +6,7 @@ import { deleteAndVerify, purgeProject, rebuildProjectRollups } from './queries'
 
 beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
   // Retry backoff is real setTimeout in production; tests advance it instantly.
   vi.useFakeTimers({ toFake: ['setTimeout'] });
 });
@@ -62,6 +63,12 @@ it.each([
       i + 1,
       JSON.stringify({ level: 'warn', event: 'clickhouse.delete_retry', table: 'entities', projectId: 'qa95-retry', attempt: i + 2 }),
     );
+  // Fail-closed logs one error line (no row data) for every caller; a success logs none.
+  if (visible.at(-1) === 0) expect(console.error).not.toHaveBeenCalled();
+  else
+    expect(console.error).toHaveBeenCalledExactlyOnceWith(
+      JSON.stringify({ level: 'error', event: 'clickhouse.delete_incomplete', table: 'entities', projectId: 'qa95-retry', attempts: 3 }),
+    );
 });
 
 it.each(['command', 'query'])('propagates %s errors without retrying or proceeding', async (method) => {
@@ -99,14 +106,23 @@ it('writes valid identity pointers first and only reports stale pointers that st
   );
 });
 
-it('still propagates storage errors from the stale-pointer delete', async () => {
+it('still propagates storage errors from the stale-pointer delete, after writing the valid pointers', async () => {
   const failure = new Error('storage unavailable');
-  const command = vi.fn().mockRejectedValue(failure);
-  const insert = vi.fn().mockResolvedValue({});
+  const order: string[] = [];
+  const command = vi.fn().mockImplementation(async () => {
+    order.push('delete');
+    throw failure;
+  });
+  const insert = vi.fn().mockImplementation(async () => {
+    order.push('insert');
+    return {};
+  });
+  const stored = new Map([['stored', { fingerprint: 'f', legacyFingerprint: 'legacy-f', receivedAt: new Date(), eventAt: new Date() }]]);
   await expect(
-    repairEventIndex({ command, query: vi.fn(), insert } as unknown as ClickHouseClient, 'qa95-index', ['absent'], new Map()),
+    repairEventIndex({ command, query: vi.fn(), insert } as unknown as ClickHouseClient, 'qa95-index', ['absent', 'stored'], stored),
   ).rejects.toBe(failure);
-  expect(insert).not.toHaveBeenCalled();
+  expect(order).toEqual(['insert', 'delete']);
+  expect(console.warn).not.toHaveBeenCalled();
 });
 
 it('deletes stale pointers once without a warning when the delete takes effect', async () => {
@@ -125,6 +141,18 @@ it('rejects a caller-supplied params.p before any statement', async () => {
   await expect(
     deleteAndVerify({ command, query } as unknown as ClickHouseClient, 'qa95-a', 'events', 'event_id={id:String}', { p: 'qa95-b', id: 'x' }),
   ).rejects.toThrow(/binds p to projectId/);
+  expect(command).not.toHaveBeenCalled();
+  expect(query).not.toHaveBeenCalled();
+});
+
+it.each(['cutoff', 'from', 'since'])('rejects the read() date key %s before any statement', async (key) => {
+  const command = vi.fn();
+  const query = vi.fn();
+  await expect(
+    deleteAndVerify({ command, query } as unknown as ClickHouseClient, 'qa95-a', 'events', `timestamp < {${key}:DateTime64(3)}`, {
+      [key]: '2026-11-07 00:00:00.000',
+    }),
+  ).rejects.toThrow(`read() date keys: ${key}`);
   expect(command).not.toHaveBeenCalled();
   expect(query).not.toHaveBeenCalled();
 });

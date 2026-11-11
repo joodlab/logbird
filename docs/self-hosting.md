@@ -425,8 +425,10 @@ Transient [concurrent-mutation skips](https://github.com/ClickHouse/ClickHouse/p
 are retried automatically with a fresh DELETE, up to three total attempts (logged as
 `clickhouse.delete_retry`). If the error still appears, retry the operation (retention
 runs again on its own). Only a failure that persists on a natively restored database
-needs the normalization procedure below. Sample-data removal fails closed with the same
-error, and ingest recovery or sample-data removal logs
+needs the normalization procedure below. Every fail-closed delete, from the worker, the API
+server (sample-data removal, project deletion) or a script, logs one
+`clickhouse.delete_incomplete` line with the table and project; the API answers 503 with
+`Retry-After`. Ingest recovery or sample-data removal logs
 `clickhouse.event_index_stale_pointers` when it cannot delete stale identity pointers.
 The pinned 26.9 line has no upstream fix for that race; ClickHouse 26.10 and later include it.
 Moving the pin is tracked in [#147](https://github.com/joodlab/logbird/issues/147).
@@ -523,6 +525,7 @@ docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/recove
 docker compose --env-file .env.restore -p logbird-restore exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /tmp/recovery-gate.sql'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep 'retention.run_failed'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep '"errorCode":"LOGBIRD_DELETE_INCOMPLETE"'
+docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.delete_incomplete"'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.event_index_stale_pointers"'
 ```
 
@@ -541,29 +544,32 @@ A `clickhouse.delete_retry` during the gate does not block by itself, because a 
 also succeed on a restored part that only slightly outranks the new mutations. Whether or not
 it logged, run the version check below before cutover. In a non-replicated MergeTree, inserts
 and mutations share one block counter, so it compares only *mutated* parts
-(`data_version > max_block_number`; a plain inserted part's `data_version` is its first block
-and is naturally newer) with the newest mutation each table received during the gate. Tables
-without a gate mutation are skipped.
+(`data_version > min_block_number`; a part that was never mutated, merged or not, has
+`data_version = min_block_number`) with the newest mutation each table received during the
+gate. A table that has mutated parts but received no gate mutation (for example because no
+restored row had expired yet) cannot be checked this way, so it also reports
+`blocks_cutover = 1`. No output means no table has mutated parts.
 
 ```sh
 cat > .tmp/backups/mutation-versions.sql <<SQL
-SELECT m.table,
-       maxOrNull(p.data_version) AS mutated_part_version,
-       max(toUInt64(extract(m.mutation_id, '(\d+)'))) AS newest_gate_mutation,
-       mutated_part_version > newest_gate_mutation AS blocks_cutover
-FROM system.mutations m
-LEFT JOIN (SELECT table, data_version FROM system.parts
-           WHERE database = 'logbird' AND active AND data_version > max_block_number) p ON p.table = m.table
-WHERE m.database = 'logbird' AND m.create_time >= parseDateTimeBestEffort('$GATE_STARTED')
-GROUP BY m.table
-ORDER BY m.table
+SELECT p.table,
+       max(p.data_version) AS mutated_part_version,
+       maxOrNull(m.version) AS newest_gate_mutation,
+       newest_gate_mutation IS NULL OR mutated_part_version > newest_gate_mutation AS blocks_cutover
+FROM (SELECT table, data_version FROM system.parts
+      WHERE database = 'logbird' AND active AND data_version > min_block_number) p
+LEFT JOIN (SELECT table, toUInt64(extract(mutation_id, '(\d+)')) AS version FROM system.mutations
+           WHERE database = 'logbird' AND create_time >= parseDateTimeBestEffort('$GATE_STARTED')) m ON m.table = p.table
+GROUP BY p.table
+ORDER BY p.table
 SETTINGS join_use_nulls = 1
 SQL
 docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/mutation-versions.sql clickhouse:/tmp/mutation-versions.sql
 docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --queries-file /tmp/mutation-versions.sql'
 ```
 
-Block cutover and normalize if any row has `blocks_cutover = 1`.
+Block cutover and normalize if any row has `blocks_cutover = 1`: either a restored part outranks
+the gate's deletes, or the table had no gate delete to prove it does not.
 Inspect `retention.completed` too; a queue job completion alone does not establish
 every project receipt. Repeat the receipt query until the cycle ends.
 

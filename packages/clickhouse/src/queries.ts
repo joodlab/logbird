@@ -39,6 +39,8 @@ async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }, no
 }
 
 type Params = Record<string, unknown>;
+// read() re-parses these string params as dates (UTC normalization) before binding them.
+const READ_DATE_KEYS = ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff', 'exportReceivedBefore'] as const;
 export type ExportExecution = { signal: AbortSignal; cancelQuery: (queryId: string) => Promise<void> };
 export async function read<T>(
   ch: ClickHouseClient,
@@ -49,7 +51,7 @@ export async function read<T>(
   execution?: ExportExecution,
 ): Promise<T[]> {
   const query_params = { ...parameters };
-  for (const key of ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff', 'exportReceivedBefore']) {
+  for (const key of READ_DATE_KEYS) {
     const value = query_params[key];
     if (typeof value === 'string') query_params[key] = new Date(value).toISOString().replace('T', ' ').slice(0, -1);
   }
@@ -627,6 +629,10 @@ export const DELETE_ATTEMPTS = 3;
  */
 export async function deleteAndVerify(client: ClickHouseClient, projectId: string, table: string, filter = '', params: Params = {}) {
   if ('p' in params) throw new Error('deleteAndVerify binds p to projectId itself; do not pass params.p');
+  // The DELETE binds params verbatim but the probe goes through read(), which rewrites these keys: the two would test
+  // different predicates.
+  const rewritten = READ_DATE_KEYS.filter((key) => key in params);
+  if (rewritten.length) throw new Error(`deleteAndVerify params must not use read() date keys: ${rewritten.join(', ')}`);
   const predicate = `project_id={p:String}${filter ? ` AND (${filter})` : ''}`;
   const bound = { ...params, p: projectId };
   const ch = projectMaintenance(client, projectId);
@@ -646,6 +652,8 @@ export async function deleteAndVerify(client: ClickHouseClient, projectId: strin
       await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
     }
   }
+  // One log line for every caller (server, worker, scripts); the restore gate greps for it.
+  console.error(JSON.stringify({ level: 'error', event: 'clickhouse.delete_incomplete', table, projectId, attempts: DELETE_ATTEMPTS }));
   throw Object.assign(
     new Error(
       `Delete left visible rows in ${table} after ${DELETE_ATTEMPTS} attempts. Retry the operation; if it persists on a natively restored database, stop writers and follow the ClickHouse restore normalization procedure.`,

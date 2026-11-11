@@ -8,6 +8,9 @@ app.get('/_test/budget', () => {
 app.get('/_test/query', () => {
   throw new Error('Invalid cursor');
 });
+app.get('/_test/delete', () => {
+  throw Object.assign(new Error('Delete left visible rows in events after 3 attempts.'), { code: 'LOGBIRD_DELETE_INCOMPLETE', table: 'events' });
+});
 app.get('/_test/internal', () => {
   throw new Error('Internal processor error with private details');
 });
@@ -23,4 +26,12 @@ it('does not expose arbitrary internal errors as query validation failures', asy
   const result = await app.request('/_test/internal');
   expect(result.status).toBe(500);
   expect(JSON.stringify(await result.json())).not.toContain('private details');
+});
+it('reports an incomplete verified delete as a retryable 503 without range advice', async () => {
+  const result = await app.request('/_test/delete');
+  expect(result.status).toBe(503);
+  expect(result.headers.get('Retry-After')).toBe('5');
+  const body = apiErrorSchema.parse(await result.json());
+  expect(body.error.code).toBe('query_unavailable');
+  expect(body.error.message).not.toMatch(/time range/);
 });

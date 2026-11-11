@@ -95,6 +95,11 @@ app.onError((error, c) => {
   if (error instanceof HTTPException) return c.json({ error: { code: 'invalid_request', message: error.message } }, error.status);
   if (/^(Invalid (time range|cursor|query syntax)|Query exceeds|Unterminated quoted query)/.test(error.message) && !('code' in error))
     return c.json({ error: { code: 'invalid_query', message: error.message } }, 422);
+  if ('code' in error && error.code === 'LOGBIRD_DELETE_INCOMPLETE') {
+    // deleteAndVerify already logged clickhouse.delete_incomplete; narrowing a time range does not apply to a delete.
+    c.header('Retry-After', '5');
+    return c.json({ error: { code: 'query_unavailable', message: 'Storage did not finish deleting the data. Retry shortly.' } }, 503);
+  }
   if ('code' in error || /timeout|budget/i.test(error.message))
     return c.json(
       { error: { code: 'query_unavailable', message: 'Storage query failed or exceeded its budget. Narrow the time range and retry.' } },

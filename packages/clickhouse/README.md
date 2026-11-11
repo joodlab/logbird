@@ -33,6 +33,7 @@ operationEvents(ch, projectId, operationId): Promise<AuditEvent[]>
 exportEvents(ch, projectId, q: ExportQuery): AsyncGenerator<string> // csv | jsonl | jsonl-evidence; docs/exports.md
 projectStats(ch, projectIds: string[]): Promise<Record<string, {lastEventAt: string | null; eventsLast24h: number}>>
 purgeProject(ch, projectId, before?: Date): Promise<void>
+deleteAndVerify(ch, projectId, table, filter?, params?): Promise<void> // project-scoped DELETE, retried and verified; table and filter are trusted code, never input
 ```
 
 HistogramQuery, FacetQuery, EntityListQuery, EntityListResponse and FieldsResponse
