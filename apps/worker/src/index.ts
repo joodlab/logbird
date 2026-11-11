@@ -1,5 +1,12 @@
 import { projectMaintenance } from '@logbird/clickhouse';
-import { closeProjectLocks, compactIngestReceiptIndex, prisma, pruneIngestReceipts, sweepExpiredAuthRecords, sweepIngestReceipts } from '@logbird/database';
+import {
+  closeProjectLocks,
+  compactIngestReceiptIndex,
+  prisma,
+  pruneIngestReceipts,
+  sweepExpiredAuthRecords,
+  sweepIngestReceipts,
+} from '@logbird/database';
 import { Queue, Worker } from 'bullmq';
 import { env } from './env';
 import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from './ingest-recovery';
