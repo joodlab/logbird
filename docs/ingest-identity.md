@@ -205,8 +205,17 @@ runs `compactIngestReceiptIndex`:
   lock timeout. Connection attempts have a five-second timeout; connection errors
   are logged rather than emitted without a listener.
 - An interrupted rebuild's invalid `_ccnew`/`_ccold` copy is dropped concurrently,
-  both before each run and after a failure. This includes an operator's in-progress
-  manual rebuild: pause the worker before running REINDEX CONCURRENTLY manually.
+  both before each run and after a failure. It cannot touch an operator's in-progress
+  manual rebuild: that rebuild holds SHARE UPDATE EXCLUSIVE on the table, so the
+  worker's drop waits out its lock timeout and fails with 55P03, logged hourly while the
+  manual rebuild runs. Pause the worker during a manual rebuild to avoid that noise.
+- The lock timeout also bounds REINDEX's waits for older transactions. Before building,
+  the job therefore skips (`skipped_old_transactions`, logged) when another client
+  transaction in the database is older than the lock timeout, such as a `pg_dump`, a
+  long report or a session idle in transaction. Otherwise the rebuild would fail after
+  building a full copy, every hour. The check sees only sessions the worker role may
+  inspect (`pg_read_all_stats` widens it); an invisible old transaction still makes that
+  run fail and retry next hour.
 - It logs `ingest.receipt_index_compaction` with page counts, ratio and duration
   when it rebuilds (`info`), is busy, lacks analyzed key widths
   (`skipped_no_statistics`, `warn`), or cannot resolve its table/index

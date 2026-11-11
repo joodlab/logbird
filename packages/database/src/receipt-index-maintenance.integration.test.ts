@@ -116,6 +116,8 @@ async function withFixture(
       if (created) {
         // The polling timeout (2 s) must not cut the drop short while a cancelled rebuild finishes server-side.
         await observer.query('SET statement_timeout = 120000');
+        // A cancelled backend can hold its locks briefly after disconnect: wait for them rather than leak the schema.
+        await observer.query('SET lock_timeout = 60000');
         await observer.query(`DROP SCHEMA "${schema}" CASCADE`);
       }
     } catch (error) {

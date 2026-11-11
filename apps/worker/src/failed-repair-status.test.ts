@@ -26,7 +26,7 @@ it('bounds a stalled refresh to 250ms and keeps it single-flight across cache pe
 
 it('returns stale counts on timeout, then publishes a late successful refresh', async () => {
   vi.useFakeTimers();
-  const initial: { fencedProjects: number; oldestFailedAt: string | null } = { fencedProjects: 2, oldestFailedAt: '2026-11-01T00:00:00.000Z' };
+  const initial: { fencedProjects: number } = { fencedProjects: 2 };
   let finish!: (value: typeof initial) => void;
   const load = vi
     .fn()
@@ -43,9 +43,9 @@ it('returns stale counts on timeout, then publishes a late successful refresh', 
   const refresh = status();
   await vi.advanceTimersByTimeAsync(250);
   expect(await refresh).toEqual({ ...initial, stale: true });
-  finish({ fencedProjects: 0, oldestFailedAt: null });
+  finish({ fencedProjects: 0 });
   await vi.advanceTimersByTimeAsync(0);
-  expect(await status()).toEqual({ fencedProjects: 0, oldestFailedAt: null, stale: false });
+  expect(await status()).toEqual({ fencedProjects: 0, stale: false });
 });
 
 it('degrades refresh errors without rejecting or issuing a query on every probe', async () => {

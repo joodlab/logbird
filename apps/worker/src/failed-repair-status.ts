@@ -1,4 +1,4 @@
-type RepairDetails = { fencedProjects: number; oldestFailedAt: string | null };
+type RepairDetails = { fencedProjects: number };
 const TTL_MS = 30_000;
 const DEADLINE_MS = 250;
 

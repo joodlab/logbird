@@ -21,10 +21,10 @@ export const failedRepairStatus = createFailedRepairStatus(() =>
   prisma.$transaction(
     async (tx) => {
       await tx.$queryRaw`SELECT set_config('statement_timeout', '200ms', true), set_config('lock_timeout', '100ms', true)`;
-      const [row] = await tx.$queryRaw<{ fencedProjects: bigint; oldestFailedAt: Date | null }[]>`
-      SELECT count(DISTINCT "projectId") AS "fencedProjects", min("startedAt") AS "oldestFailedAt"
+      const [row] = await tx.$queryRaw<{ fencedProjects: bigint }[]>`
+      SELECT count(DISTINCT "projectId") AS "fencedProjects"
       FROM "RetentionRun" WHERE kind='ingest_repair' AND status='failed'`;
-      return { fencedProjects: Number(row?.fencedProjects ?? 0), oldestFailedAt: row?.oldestFailedAt?.toISOString() ?? null };
+      return { fencedProjects: Number(row?.fencedProjects ?? 0) };
     },
     { maxWait: 200, timeout: 500 },
   ),

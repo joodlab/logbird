@@ -104,8 +104,9 @@ export function isUniqueViolation(error: unknown) {
   if (code === 'P2002' || code === '23505') return true;
   const meta = field(error, 'meta');
   if (field(meta, 'code') === '23505') return true;
-  const cause = field(field(meta, 'driverAdapterError'), 'cause');
-  return field(cause, 'originalCode') === '23505' || field(cause, 'kind') === 'UniqueConstraintViolation';
+  for (const cause of [field(field(meta, 'driverAdapterError'), 'cause'), field(error, 'cause')])
+    if (field(cause, 'originalCode') === '23505' || field(cause, 'kind') === 'UniqueConstraintViolation') return true;
+  return false;
 }
 
 /** Ready replays retain the first receipt clock. Fence only rows actually claimed for an INSERT.

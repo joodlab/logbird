@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-const fake = vi.hoisted(() => ({ find: vi.fn(), claim: vi.fn(), confirm: vi.fn(), release: vi.fn(), insert: vi.fn(), lookup: vi.fn() }));
+const fake = vi.hoisted(() => ({
+  find: vi.fn(),
+  claim: vi.fn(),
+  confirm: vi.fn(),
+  release: vi.fn(),
+  insert: vi.fn(),
+  lookup: vi.fn(),
+  retryAfter: vi.fn(),
+}));
 vi.mock('@logbird/database', () => ({
   findIngestReceipts: fake.find,
   claimIngestReceipts: fake.claim,
@@ -22,7 +30,7 @@ vi.mock('@logbird/clickhouse', () => ({
   normalizeEvent: vi.fn(),
   resolveTimestamp: vi.fn(),
 }));
-vi.mock('@logbird/worker/ingest-recovery', () => ({ ingestRecoveryRetryAfter: async () => 1 }));
+vi.mock('@logbird/worker/ingest-recovery', () => ({ ingestRecoveryRetryAfter: fake.retryAfter }));
 vi.mock('./clickhouse', () => ({ clickhouse: {} }));
 
 import { ApiError } from './errors';
@@ -47,6 +55,7 @@ beforeEach(() => {
   fake.find.mockResolvedValue([]);
   fake.claim.mockResolvedValue([receipt]);
   fake.lookup.mockResolvedValue(new Map());
+  fake.retryAfter.mockResolvedValue(1);
   fake.confirm.mockImplementation(async (_project, values: unknown[]) => {
     if (values.length) throw conflict();
   });
@@ -85,4 +94,53 @@ it('releases pre-insert claims after a paused recheck conflict and exposes a ret
   expect(ingestReceiptFailureResponse(error)).toMatchObject({ status: 503, retryAfter: '1', body: { error: { code: 'ingest_unavailable' } } });
   expect(fake.release).toHaveBeenCalledWith({ where: { projectId: 'qa-project', eventId: { in: ['qa-event'] }, confirmedAt: null } });
   expect(fake.insert).not.toHaveBeenCalled();
+});
+
+const prismaFailure = (code: string) => Object.assign(new Error('private database detail'), { name: 'PrismaClientKnownRequestError', code });
+
+it('maps a pre-insert database failure (pool timeout) to a retryable 503 without holding claims', async () => {
+  fake.claim.mockRejectedValueOnce(prismaFailure('P2024'));
+  const error = await insertImmutableEvents('qa-project', 'qa-org', candidates).catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(ApiError);
+  expect(error).toMatchObject({ status: 503, code: 'ingest_unavailable', retryAfter: 1 });
+  expect(String((error as Error).message)).not.toMatch(/private database detail/);
+  expect(fake.insert).not.toHaveBeenCalled();
+});
+
+it('maps a receipt lookup failure before any claim to a retryable 503', async () => {
+  fake.find.mockRejectedValueOnce(Object.assign(new Error('connection lost'), { name: 'PrismaClientUnknownRequestError' }));
+  const error = await insertImmutableEvents('qa-project', 'qa-org', candidates).catch((error: unknown) => error);
+  expect(error).toMatchObject({ status: 503, code: 'ingest_unavailable', retryAfter: 1 });
+  expect(fake.claim).not.toHaveBeenCalled();
+});
+
+it('still surfaces a programming error before the insert', async () => {
+  fake.claim.mockRejectedValueOnce(new TypeError('bug'));
+  await expect(insertImmutableEvents('qa-project', 'qa-org', candidates)).rejects.toBeInstanceOf(TypeError);
+});
+
+it.each([
+  ['a statement timeout', prismaFailure('P2010')],
+  ['a pool timeout', prismaFailure('P2024')],
+  ['an unknown failure', new Error('socket closed')],
+])('keeps acknowledged claims and reports pending indices after %s while confirming', async (_label, failure) => {
+  fake.confirm.mockImplementation(async (_project, values: unknown[]) => {
+    if (values.length) throw failure;
+  });
+  const error = await insertImmutableEvents('qa-project', 'qa-org', candidates).catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(ApiError);
+  expect(error).toMatchObject({ status: 503, code: 'ingest_pending', details: { indices: [3], eventIds: ['qa-event'] } });
+  expect((error as ApiError).retryAfter).toBeGreaterThanOrEqual(1);
+  expect(fake.insert).toHaveBeenCalledTimes(1);
+  expect(fake.release).not.toHaveBeenCalled();
+});
+
+it('keeps the pending response when the recovery Retry-After lookup fails', async () => {
+  fake.retryAfter.mockRejectedValueOnce(prismaFailure('P2024'));
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const error = await insertImmutableEvents('qa-project', 'qa-org', candidates).catch((error: unknown) => error);
+  expect(error).toMatchObject({ status: 503, code: 'ingest_pending', details: { indices: [3] } });
+  expect((error as ApiError).retryAfter).toBeGreaterThanOrEqual(1);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining('ingest.retry_after_unavailable'));
+  warn.mockRestore();
 });

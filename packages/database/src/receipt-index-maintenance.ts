@@ -32,7 +32,7 @@ export const INGEST_RECEIPT_PKEY: ReceiptIndexTarget = {
 };
 
 export type ReceiptIndexCompaction = {
-  action: 'skipped_busy' | 'skipped_missing' | 'skipped_no_statistics' | 'skipped_compact' | 'reindexed';
+  action: 'skipped_busy' | 'skipped_missing' | 'skipped_no_statistics' | 'skipped_old_transactions' | 'skipped_compact' | 'reindexed';
   indexPages: number;
   neededPages?: number;
   ratio?: number;
@@ -137,6 +137,16 @@ export async function compactIngestReceiptIndex({
     const ratio = Math.round((pages / neededPages) * 10) / 10;
     if (pages < RECEIPT_INDEX_COMPACTION.bloatFactor * neededPages)
       return { action: 'skipped_compact', indexPages: pages, neededPages, ratio, droppedInvalid };
+    // REINDEX CONCURRENTLY waits for every older transaction under lock_timeout. If one is already older than that,
+    // the rebuild would fail after building a full copy, every hour; skip instead. Best effort: a role without
+    // pg_read_all_stats sees xact_start only for its own sessions.
+    const { rows: old } = await client.query<{ n: number }>(
+      `SELECT count(*)::int n FROM pg_stat_activity
+       WHERE pid <> pg_backend_pid() AND backend_type = 'client backend' AND datname = current_database()
+         AND xact_start < clock_timestamp() - make_interval(secs => $1::float8 / 1000)`,
+      [RECEIPT_INDEX_COMPACTION.lockTimeoutMs],
+    );
+    if (Number(old[0]?.n ?? 0) > 0) return { action: 'skipped_old_transactions', indexPages: pages, neededPages, ratio, droppedInvalid };
     const started = Date.now();
     try {
       await client.query(`REINDEX INDEX CONCURRENTLY ${quote(target.schema)}.${quote(target.index)}`);

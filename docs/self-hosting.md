@@ -817,9 +817,13 @@ without that privilege logs `ingest.receipt_index_compaction_failed` with code
 `42501`; retention continues, but automatic compaction cannot proceed. The same
 worker must be permitted to [drop invalid reindex copies](https://www.postgresql.org/docs/17/sql-dropindex.html) (index ownership follows
 the table owner); a maintenance-only role may require the owner to clean those up.
-The hourly job drops any invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copy matching
-the reindex naming pattern, including one from an operator's in-progress manual
-REINDEX CONCURRENTLY. Pause the worker before a manual rebuild and resume it afterwards.
+The hourly job drops invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copies left by a
+failed or cancelled rebuild. It cannot drop an operator's in-progress manual REINDEX
+CONCURRENTLY copy: the rebuild holds SHARE UPDATE EXCLUSIVE on the table, so the job's
+drop fails with 55P03 and logs `ingest.receipt_index_compaction_failed` hourly until the
+manual rebuild ends. Pause the worker during a manual rebuild to avoid that noise. The
+job also skips a run while another transaction is older than its one-minute lock
+timeout (for example a running `pg_dump`), instead of building a copy it couldn't swap in.
 
 ## Disposable acceptance fixture
 

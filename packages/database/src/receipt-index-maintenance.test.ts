@@ -30,10 +30,11 @@ function fakeDb(state: {
   reindexFails?: boolean;
   missingTable?: boolean;
   missingIndex?: boolean;
+  oldTransactions?: number;
 }) {
   const pages = [...state.pages];
   const calls: string[] = [];
-  const query = vi.fn(async (sql: string) => {
+  const query = vi.fn(async (sql: string, _params?: unknown[]) => {
     calls.push(sql);
     let rows: Row[] = [];
     if (sql.includes('n.nspname AS schema')) rows = state.missingTable ? [] : [{ schema: 'qa_current' }];
@@ -41,6 +42,7 @@ function fakeDb(state: {
     else if (sql.includes('pg_relation_size')) rows = [{ pages: state.missingIndex ? null : String(pages.length > 1 ? pages.shift() : pages[0]) }];
     else if (sql.includes('NOT i.indisvalid')) rows = (state.invalid ?? []).map((name) => ({ name }));
     else if (sql.includes('reltuples')) rows = [{ live: state.live, key_bytes: state.keyBytes }];
+    else if (sql.includes('pg_stat_activity')) rows = [{ n: state.oldTransactions ?? 0 }];
     else if (sql.startsWith('REINDEX') && state.reindexFails)
       throw Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' });
     return { rows };
@@ -161,4 +163,15 @@ it('handles and logs idle connection errors before closing the session', async (
   listener(Object.assign(new Error('idle FATAL'), { code: '57P01' }));
   expect(log).toHaveBeenCalledWith(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_connection_failed', code: '57P01' }));
   expect(connection.end).toHaveBeenCalledTimes(1);
+});
+
+it('skips a rebuild that an older open transaction would fail after building, and still releases the lock', async () => {
+  const big = fakeDb({ pages: [RECEIPT_INDEX_COMPACTION.minPages * 10], live: 100_000, keyBytes: 60, oldTransactions: 1 });
+  const result = await compactIngestReceiptIndex({ db: big.db });
+  expect(result).toMatchObject({ action: 'skipped_old_transactions', indexPages: RECEIPT_INDEX_COMPACTION.minPages * 10 });
+  expect(big.calls.some((sql) => sql.startsWith('REINDEX'))).toBe(false);
+  const check = big.query.mock.calls.find(([sql]) => String(sql).includes('pg_stat_activity'));
+  expect(check?.[0]).toContain('pid <> pg_backend_pid()');
+  expect(check?.[1]).toEqual([RECEIPT_INDEX_COMPACTION.lockTimeoutMs]);
+  expect(big.calls.at(-1)).toContain('pg_advisory_unlock');
 });

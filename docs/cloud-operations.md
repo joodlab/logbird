@@ -360,9 +360,12 @@ retention. `REINDEX INDEX CONCURRENTLY` requires table ownership, or the table's
 continue. Dropping invalid `_ccnew`/`_ccold` reindex copies additionally requires
 ownership of the table/index (see [DROP INDEX](https://www.postgresql.org/docs/17/sql-dropindex.html)), so a maintenance-only role needs owner-assisted
 cleanup when a cancelled rebuild leaves a copy.
-The hourly job drops any invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copy matching
-the reindex naming pattern, including an operator's in-progress manual REINDEX
-CONCURRENTLY. Pause the worker for a manual rebuild and resume it afterwards.
+The hourly job drops only invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copies left by a
+failed or cancelled rebuild. An operator's in-progress manual REINDEX CONCURRENTLY holds
+SHARE UPDATE EXCLUSIVE on the table, so the job's drop fails with 55P03 (logged hourly)
+until it ends; pause the worker during a manual rebuild. Runs are skipped while a
+transaction older than one minute is open (for example a backup), and logged as
+`skipped_old_transactions`.
 
 ## Acceptance and rollback
 

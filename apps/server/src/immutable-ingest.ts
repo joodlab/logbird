@@ -25,7 +25,7 @@ import {
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
-import { ingestReceiptFailureResponse } from './ingest-receipt-errors';
+import { ingestReceiptFailureResponse, isDatabaseFailure } from './ingest-receipt-errors';
 
 export type IngestCandidate = { index: number; input: unknown; row: EventRow };
 export const DUPLICATE_ID_CONFLICT =
@@ -88,7 +88,18 @@ async function recheckAfterPause(projectId: string, owned: Map<string, IngestRec
 }
 
 /** Claim/recheck owns release until it hands the claims to the insert phase. */
+/** Before any ClickHouse insert: a database failure leaves no claim held (claimPhase releases its own), so retry. */
 async function claimEvents(projectId: string, organizationId: string, candidates: IngestCandidate[], fingerprint: (row: EventRow) => string) {
+  try {
+    return await claimPhase(projectId, organizationId, candidates, fingerprint);
+  } catch (error) {
+    if (!(error instanceof ApiError) && isDatabaseFailure(error))
+      throw new ApiError(503, 'ingest_unavailable', 'Event identity cache is unavailable. Retry this batch.', undefined, 1);
+    throw error;
+  }
+}
+
+async function claimPhase(projectId: string, organizationId: string, candidates: IngestCandidate[], fingerprint: (row: EventRow) => string) {
   const unique = new Map<string, EventRow>();
   for (const { row } of candidates) if (!unique.has(row.event_id)) unique.set(row.event_id, row);
   const eventIds = [...unique.keys()].sort();
@@ -251,6 +262,10 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
   } catch (error) {
     const failure = ingestReceiptFailureResponse(error, keepClaims);
     if (failure) throw new ApiError(failure.status, failure.body.error.code, failure.body.error.message, undefined, Number(failure.retryAfter));
+    // ClickHouse acknowledged the rows, so any confirmation failure (timeout, pool, connection) keeps the claims and
+    // is reported as pending: insertImmutableEvents adds the unresolved indices and Retry-After.
+    if (keepClaims && !(error instanceof ApiError))
+      throw new ApiError(503, 'ingest_pending', 'Storage accepted this write but receipt confirmation is unresolved. Retry this batch.');
     throw error;
   } finally {
     if (!keepClaims) await releaseClaims(projectId, owned);
@@ -310,6 +325,17 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
   return { ids: result.ids, rejected: result.rejected };
 }
 
+/** Best effort: a failed lookup must not lose the pending response; the per-receipt bounds below still apply. */
+async function recoveryRetryAfter(projectId: string) {
+  try {
+    return await ingestRecoveryRetryAfter(projectId);
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
+    console.warn(JSON.stringify({ level: 'warn', event: 'ingest.retry_after_unavailable', projectId, code }));
+    return 1;
+  }
+}
+
 async function pendingError(
   projectId: string,
   message: string,
@@ -329,7 +355,7 @@ async function pendingError(
   const now = Date.now();
   const retryAfter = Math.max(
     1,
-    pending.some((p) => receipts.get(p.eventId)?.claimedAt) ? await ingestRecoveryRetryAfter(projectId) : 0,
+    pending.some((p) => receipts.get(p.eventId)?.claimedAt) ? await recoveryRetryAfter(projectId) : 0,
     ...pending.map((p) => {
       const receipt = receipts.get(p.eventId);
       if (!receipt) return 1;

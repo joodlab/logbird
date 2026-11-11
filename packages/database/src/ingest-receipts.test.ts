@@ -34,6 +34,8 @@ it.each([
   // Prisma 7 + adapter-pg raw query shape (rethrowAsUserFacingRawError).
   { code: 'P2010', meta: { driverAdapterError: { cause: { kind: 'UniqueConstraintViolation', originalCode: '23505' } } } },
   { code: 'P2010', meta: { driverAdapterError: { cause: { originalCode: '23505' } } } },
+  // An unwrapped adapter error (e.g. inside an interactive transaction).
+  { name: 'DriverAdapterError', cause: { kind: 'UniqueConstraintViolation', originalCode: '23505' } },
 ])('turns claim uniqueness failures into retryable receipt conflicts (%j)', async (error) => {
   query.mockRejectedValueOnce(error);
   await expect(
