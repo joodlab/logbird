@@ -1,11 +1,17 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const connection = vi.hoisted(() => ({ connect: vi.fn(), end: vi.fn(), on: vi.fn(), query: vi.fn(), options: {} as Record<string, unknown> }));
+const cancelConnection = vi.hoisted(() => ({ connect: vi.fn(), end: vi.fn(), on: vi.fn(), query: vi.fn(), options: {} as Record<string, unknown> }));
 vi.mock('pg', () => ({
   default: {
     Client: class {
       constructor(options: Record<string, unknown>) {
-        connection.options = options;
+        const state = options.application_name === 'logbird-receipt-index-cancel' ? cancelConnection : connection;
+        state.options = options;
+        this.connect = state.connect;
+        this.end = state.end;
+        this.on = state.on;
+        this.query = state.query;
       }
       connect = connection.connect;
       end = connection.end;
@@ -38,6 +44,7 @@ function fakeDb(state: {
     calls.push(sql);
     let rows: Row[] = [];
     if (sql.includes('n.nspname AS schema')) rows = state.missingTable ? [] : [{ schema: 'qa_current' }];
+    else if (sql === 'SELECT pg_backend_pid() pid') rows = [{ pid: 12_345 }];
     else if (sql.includes('pg_try_advisory_lock')) rows = [{ locked: state.locked ?? true }];
     else if (sql.includes('pg_relation_size')) rows = [{ pages: state.missingIndex ? null : String(pages.length > 1 ? pages.shift() : pages[0]) }];
     else if (sql.includes('NOT i.indisvalid')) rows = (state.invalid ?? []).map((name) => ({ name }));
@@ -53,6 +60,10 @@ beforeEach(() => {
   vi.restoreAllMocks();
   vi.resetAllMocks();
   connection.end.mockResolvedValue(undefined);
+  connection.query.mockResolvedValue({ rows: [{ pid: 12_345 }] });
+  cancelConnection.connect.mockResolvedValue(undefined);
+  cancelConnection.end.mockResolvedValue(undefined);
+  cancelConnection.query.mockResolvedValue({ rows: [] });
 });
 
 it('estimates the pages a freshly built B-tree needs from analyzed key widths', () => {
@@ -130,10 +141,12 @@ it('sets session bounds and identification after connecting and before any REIND
   connection.query.mockImplementation(query);
   await compactIngestReceiptIndex();
   expect(connection.connect.mock.invocationCallOrder[0]).toBeLessThan(connection.query.mock.invocationCallOrder[0] as number);
-  expect(calls.slice(0, 3)).toEqual([
+  expect(calls.slice(0, 5)).toEqual([
     'SET statement_timeout = 900000',
     'SET lock_timeout = 60000',
     "SET application_name = 'logbird-receipt-index-maintenance'",
+    "SET client_connection_check_interval = '1s'",
+    'SELECT pg_backend_pid() pid',
   ]);
   expect(calls.findIndex((sql) => sql.startsWith('REINDEX'))).toBeGreaterThan(2);
 });
@@ -172,15 +185,17 @@ it('skips a rebuild that an older open transaction would fail after building, an
   expect(big.calls.some((sql) => sql.startsWith('REINDEX'))).toBe(false);
   const check = big.query.mock.calls.find(([sql]) => String(sql).includes('pg_stat_activity'));
   expect(check?.[0]).toContain('pid <> pg_backend_pid()');
+  expect(check?.[0]).toContain("backend_type NOT IN ('autovacuum worker', 'autovacuum launcher')");
   expect(check?.[0]).toContain('AND (backend_xmin IS NOT NULL OR pid IN (SELECT pid FROM pg_locks WHERE relation = to_regclass($2)))');
   expect(check?.[1]).toEqual([RECEIPT_INDEX_COMPACTION.lockTimeoutMs, '"qa_current"."IngestReceipt"']);
   expect(big.calls.at(-1)).toContain('pg_advisory_unlock');
 });
 
-it('closes the managed connection on shutdown instead of waiting for an active rebuild', async () => {
+it('cancels only the managed backend on shutdown, waits for 57014 and drops the invalid copy before closing', async () => {
   const abort = new AbortController();
   connection.connect.mockResolvedValue(undefined);
-  const { query } = fakeDb({ pages: [RECEIPT_INDEX_COMPACTION.minPages * 10], live: 1000, keyBytes: 60 });
+  const invalid: string[] = [];
+  const { query } = fakeDb({ pages: [RECEIPT_INDEX_COMPACTION.minPages * 10], live: 1000, keyBytes: 60, invalid });
   let started: (() => void) | undefined;
   const active = new Promise<void>((resolve) => {
     started = resolve;
@@ -188,20 +203,74 @@ it('closes the managed connection on shutdown instead of waiting for an active r
   let failQuery: ((error: Error) => void) | undefined;
   connection.query.mockImplementation((sql: string, params?: unknown[]) => {
     if (!sql.startsWith('REINDEX')) return query(sql, params);
+    invalid.push('IngestReceipt_pkey_ccnew');
     started?.();
     return new Promise((_resolve, reject) => {
       failQuery = reject;
     });
   });
-  connection.end.mockImplementation(async () => {
-    failQuery?.(new Error('Connection terminated'));
+  cancelConnection.query.mockImplementation(async (sql: string) => {
+    if (sql.includes('pg_cancel_backend')) {
+      expect(connection.end).not.toHaveBeenCalled();
+      failQuery?.(Object.assign(new Error('canceling statement due to user request'), { code: '57014' }));
+    }
+    return { rows: [] };
   });
   const rebuilding = compactIngestReceiptIndex({ signal: abort.signal });
   await active;
   expect(connection.end).not.toHaveBeenCalled();
   abort.abort();
-  await expect(rebuilding).rejects.toThrow('Connection terminated');
-  expect(connection.end).toHaveBeenCalled();
+  await expect(rebuilding).rejects.toMatchObject({ code: '57014' });
+  expect(cancelConnection.query).toHaveBeenCalledWith('SET statement_timeout = 5000');
+  expect(cancelConnection.query).toHaveBeenCalledWith('SELECT pg_cancel_backend($1)', [12_345]);
+  expect(cancelConnection.options).toMatchObject({ connectionTimeoutMillis: 5000, query_timeout: 5000 });
+  expect(cancelConnection.end).toHaveBeenCalledTimes(1);
+  expect(connection.end).toHaveBeenCalledTimes(1);
+  expect(query.mock.calls.filter(([sql]) => sql.includes('NOT i.indisvalid'))).toHaveLength(2);
+  expect(query).toHaveBeenCalledWith('DROP INDEX CONCURRENTLY IF EXISTS "qa_current"."IngestReceipt_pkey_ccnew"', undefined);
+  expect(query.mock.invocationCallOrder.at(-1)).toBeLessThan(connection.end.mock.invocationCallOrder[0] as number);
+});
+
+it('bounds shutdown to ten seconds when REINDEX does not acknowledge cancellation', async () => {
+  vi.useFakeTimers();
+  const abort = new AbortController();
+  const { query } = fakeDb({ pages: [RECEIPT_INDEX_COMPACTION.minPages * 10], live: 1000, keyBytes: 60 });
+  let failQuery: ((error: Error) => void) | undefined;
+  connection.query.mockImplementation((sql: string, params?: unknown[]) => {
+    if (!sql.startsWith('REINDEX')) return query(sql, params);
+    return new Promise((_resolve, reject) => {
+      failQuery = reject;
+    });
+  });
+  connection.end.mockImplementation(async () => failQuery?.(new Error('Connection terminated')));
+  const rebuilding = compactIngestReceiptIndex({ signal: abort.signal });
+  const outcome = expect(rebuilding).rejects.toThrow('Connection terminated');
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(failQuery).toBeTypeOf('function');
+    abort.abort();
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(connection.end).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await outcome;
+    expect(cancelConnection.query).toHaveBeenCalledWith('SELECT pg_cancel_backend($1)', [12_345]);
+    expect(cancelConnection.end).toHaveBeenCalled();
+    expect(connection.end).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each(['42704', '42501'])('ignores only an unsupported connection-check setting (%s)', async (code) => {
+  const { query } = fakeDb({ pages: [1], live: 0, keyBytes: null });
+  connection.query.mockImplementation((sql: string, params?: unknown[]) => {
+    if (sql.includes('client_connection_check_interval')) return Promise.reject(Object.assign(new Error('SET failed'), { code }));
+    return query(sql, params);
+  });
+  if (code === '42704') await expect(compactIngestReceiptIndex()).resolves.toMatchObject({ action: 'skipped_compact' });
+  else await expect(compactIngestReceiptIndex()).rejects.toMatchObject({ code });
+  expect(connection.end).toHaveBeenCalledTimes(1);
 });
 
 it('does not issue maintenance statements if shutdown happened while connecting', async () => {

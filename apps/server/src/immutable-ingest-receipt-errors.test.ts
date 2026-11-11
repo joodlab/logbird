@@ -1,3 +1,4 @@
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const fake = vi.hoisted(() => ({
@@ -55,6 +56,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(now);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   fake.retryFingerprint.mockReturnValue('v1:qa');
   fake.find.mockResolvedValue([]);
   fake.claim.mockResolvedValue([receipt]);
@@ -75,6 +77,8 @@ it('returns a retryable unavailable mapping without holding claims when the clai
   expect(ingestReceiptFailureResponse(error)).toMatchObject({ status: 503, retryAfter: '1', body: { error: { code: 'ingest_unavailable' } } });
   expect(fake.release).not.toHaveBeenCalled();
   expect(fake.insert).not.toHaveBeenCalled();
+  expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('"level":"warn","event":"ingest.receipt_phase_failed","phase":"claim"'));
+  expect(console.error).not.toHaveBeenCalled();
 });
 
 it('keeps acknowledged claims and reports the usual pending indices and Retry-After', async () => {
@@ -189,6 +193,40 @@ it('preserves the original ApiError when classification and release both fail an
   fake.release.mockRejectedValueOnce(prismaFailure('P2024'));
   await expect(insertImmutableEvents('qa-project', 'qa-org', candidates)).rejects.toBe(original);
   expect(console.error).toHaveBeenCalledWith(expect.stringContaining('"original":{"name":"Error","code":"project_busy"}'));
+});
+
+it.each(['57014', '55P03'])('maps the real P2039 model-query wrapper at releaseClaims/deleteMany (%s) to retryable unavailable', async (sqlstate) => {
+  fake.claim.mockResolvedValueOnce([{ ...receipt, fingerprint: 'unreadable:qa' }]);
+  fake.release.mockRejectedValueOnce(
+    new PrismaClientKnownRequestError('qa database failure', {
+      code: 'P2039',
+      clientVersion: '7.10.0',
+      meta: {
+        modelName: 'IngestReceipt',
+        driverAdapterError: {
+          name: 'DriverAdapterError',
+          cause: { kind: 'postgres', originalCode: sqlstate, code: sqlstate, severity: 'ERROR', message: 'qa database failure' },
+        },
+      },
+    }),
+  );
+  const error = await insertImmutableEvents('qa-project', 'qa-org', candidates).catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(ApiError);
+  expect(error).toMatchObject({ status: 503, code: 'ingest_unavailable', retryAfter: 1 });
+  expect(fake.release).toHaveBeenCalledExactlyOnceWith({ where: { projectId: 'qa-project', eventId: { in: ['qa-event'] }, confirmedAt: null } });
+  expect(fake.insert).not.toHaveBeenCalled();
+});
+
+it('surfaces a plain Error from targeted expiry without mapping it to 503', async () => {
+  const failure = new Error('fictional programming failure');
+  fake.find.mockResolvedValueOnce([{ ...receipt, confirmedAt: new Date(now.getTime() - 700_000) }]);
+  fake.expire.mockRejectedValueOnce(failure);
+  const error = await insertImmutableEvents('qa-project', 'qa-org', candidates).catch((error: unknown) => error);
+  expect(error).toBe(failure);
+  expect(error).not.toBeInstanceOf(ApiError);
+  expect(ingestReceiptFailureResponse(error)).toBeNull();
+  expect(fake.claim).not.toHaveBeenCalled();
+  expect(fake.insert).not.toHaveBeenCalled();
 });
 
 it('preserves a definite parse rejection when release also fails', async () => {

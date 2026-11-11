@@ -242,3 +242,57 @@ it.runIf(enabled)('cleans the invalid ccnew copy left by cancelling its own conc
     }
   });
 });
+
+it.runIf(enabled)('aborts production compaction at the private writer barrier and cancels its backend', async () => {
+  await withFixture(async ({ writer, observer, table, target }) => {
+    await writer.query('BEGIN');
+    await writer.query(`INSERT INTO ${table} VALUES ('qa-writer', 'qa-production-abort')`);
+    const abort = new AbortController();
+    // No injected db: exercise production connection setup, pid capture and the separate cancellation connection.
+    const rebuilding = compactIngestReceiptIndex({ target, signal: abort.signal });
+    const outcome = rebuilding.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    let pid: number | undefined;
+    try {
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline && pid === undefined) {
+        const activity = await observer.query<{ pid: number }>('SELECT pid FROM pg_stat_progress_create_index WHERE relid=to_regclass($1)', [table]);
+        pid = activity.rows[0]?.pid;
+        if (pid === undefined) await pause(20);
+      }
+      if (pid === undefined) throw new Error('Private production reindex did not start');
+      await waitForWriterPhase(observer, pid, rebuilding);
+      expect(await invalidCopies(observer, table)).toHaveLength(1);
+      const cancelledAt = Date.now();
+      abort.abort();
+      // Keep the writer barrier closed until cancellation reaches PostgreSQL. Rolling back immediately could
+      // let REINDEX finish before the separate connection has connected and sent pg_cancel_backend.
+      let stopped = false;
+      while (Date.now() - cancelledAt < 10_000) {
+        const progress = await observer.query('SELECT pid FROM pg_stat_progress_create_index WHERE pid=$1', [pid]);
+        if (progress.rows.length === 0) {
+          stopped = true;
+          break;
+        }
+        await pause(20);
+      }
+      expect(stopped).toBe(true);
+      // DROP INDEX CONCURRENTLY also needs the writer released before cancellation cleanup can finish.
+      await writer.query('ROLLBACK');
+      expect(await outcome).toMatchObject({ code: '57014' });
+      console.info(JSON.stringify({ event: 'qa.compaction_production_aborted', pid, cancellationDurationMs: Date.now() - cancelledAt }));
+      const active = await observer.query("SELECT pid FROM pg_stat_activity WHERE pid=$1 AND state='active' AND query ~ '^REINDEX'", [pid]);
+      expect(active.rows).toEqual([]);
+      expect(await invalidCopies(observer, table)).toEqual([]);
+    } finally {
+      abort.abort();
+      try {
+        await writer.query('ROLLBACK');
+      } finally {
+        await outcome;
+      }
+    }
+  });
+});

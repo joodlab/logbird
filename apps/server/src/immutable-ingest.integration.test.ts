@@ -11,6 +11,7 @@ import {
 } from '@logbird/database';
 import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { legacyFingerprint3a1541f, normalizeEvent3a1541f } from '../../../packages/clickhouse/src/fixtures/identity-3a1541f';
 import { clickhouse } from './clickhouse';
@@ -430,10 +431,17 @@ it('rechecks expired confirmed cache ids without needing a prior bulk sweep', as
 it('returns a retryable error when targeted expiry fails before a claim', async () => {
   expect((await f.post(original)).status).toBe(202);
   await prisma.ingestReceipt.updateMany({ where: { projectId: f.project }, data: { confirmedAt: new Date(0) } });
-  const expire = vi.spyOn(await import('@logbird/database'), 'expireIngestReceipts').mockRejectedValueOnce(new Error('fictional storage failure'));
+  const expire = vi.spyOn(await import('@logbird/database'), 'expireIngestReceipts').mockRejectedValueOnce(
+    new PrismaClientKnownRequestError('fictional unreachable database', {
+      code: 'P1001',
+      clientVersion: '7.10.0',
+      meta: { driverAdapterError: { name: 'DriverAdapterError', cause: { kind: 'DatabaseNotReachable', host: 'qa.invalid', port: 5432 } } },
+    }),
+  );
   try {
     const response = await f.post(original);
     expect(response.status).toBe(503);
+    expect(response.headers.get('Retry-After')).toBe('1');
     expect(await response.json()).toMatchObject({ error: { code: 'ingest_unavailable' } });
     expect(await f.count()).toBe(1);
   } finally {
@@ -441,4 +449,38 @@ it('returns a retryable error when targeted expiry fails before a claim', async 
   }
   expect((await (await f.post(original)).json()).accepted).toBe(1);
   expect(await f.count()).toBe(1);
+});
+
+it('returns HTTP 503 and Retry-After when releaseClaims deleteMany gets a model-query cancellation', async () => {
+  const database = await import('@logbird/database');
+  const originalClaim = database.claimIngestReceipts;
+  const claim = vi.spyOn(database, 'claimIngestReceipts').mockImplementationOnce(async (...args) => {
+    const owned = await originalClaim(...args);
+    // Reject classification before insert while retaining a real owned claim for releaseClaims.
+    return owned.map((receipt) => ({ ...receipt, fingerprint: 'unreadable:qa-release' }));
+  });
+  const release = vi.spyOn(prisma.ingestReceipt, 'deleteMany').mockRejectedValueOnce(
+    new PrismaClientKnownRequestError('fictional model-query cancellation', {
+      code: 'P2039',
+      clientVersion: '7.10.0',
+      meta: {
+        modelName: 'IngestReceipt',
+        driverAdapterError: {
+          name: 'DriverAdapterError',
+          cause: { kind: 'postgres', originalCode: '57014', code: '57014', severity: 'ERROR', message: 'qa cancellation' },
+        },
+      },
+    }),
+  );
+  try {
+    const response = await f.post(original);
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Retry-After')).toBe('1');
+    expect(await response.json()).toMatchObject({ error: { code: 'ingest_unavailable' } });
+    expect(release).toHaveBeenCalledWith({ where: { projectId: f.project, eventId: { in: [original.id] }, confirmedAt: null } });
+    expect(await f.count()).toBe(0);
+  } finally {
+    claim.mockRestore();
+    release.mockRestore();
+  }
 });

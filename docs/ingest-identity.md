@@ -216,26 +216,35 @@ runs `compactIngestReceiptIndex`:
   in at the end. It is bounded by a 15-minute statement timeout and a one-minute
   lock timeout. Connection attempts have a five-second timeout; connection errors
   are logged rather than emitted without a listener.
-  Shutdown closes the rebuild's connection before waiting for workers to close;
-  it does not wait for the 15-minute rebuild budget. PostgreSQL cancels the active
-  REINDEX when that connection closes; any invalid copy is dropped next run.
+  Shutdown opens a separate connection (five-second connect and query timeouts)
+  and sends `pg_cancel_backend` for the recorded rebuild backend pid only. The
+  original connection stays open while cancellation completes and REINDEX settles
+  with 57014. Cancellation and cleanup have a ten-second shutdown deadline; then
+  sockets close. Each maintenance session also sets `client_connection_check_interval`
+  to one second as a disconnect fallback (unsupported on PostgreSQL before 14).
+  Closing a socket alone is not the cancellation mechanism. An invalid copy is
+  dropped after cancellation, or by the next run if shutdown interrupts cleanup.
 - Reserve free disk for about the index's live size while the copy is built.
   After a statement timeout (57014) or lock timeout (55P03), the worker stores a
   timestamp under `<BULLMQ_PREFIX>:ingest-receipt-index-compaction:backoff` in its
   existing Redis connection with a 24-hour TTL. Hourly jobs return and log
-  `skipped_backoff` until it expires, avoiding repeated expensive copies. Redis
-  read/write errors fail open; they do not disable compaction.
+  `skipped_backoff` until it expires, avoiding repeated expensive copies. Both Redis
+  hints have a one-second client deadline and stop waiting immediately on abort.
+  A Redis error or stall does not disable compaction or block shutdown: a failed
+  GET means no back-off, and a timed-out SET is logged. An aborted rebuild does
+  not request the 24-hour back-off.
 - An interrupted rebuild's invalid `_ccnew`/`_ccold` copy is dropped concurrently,
   both before each run and after a failure. It cannot touch an operator's in-progress
   manual rebuild: that rebuild holds SHARE UPDATE EXCLUSIVE on the table, so the
   worker's drop waits out its lock timeout and fails with 55P03, then backs off for
   24 hours. Pause the worker during a manual rebuild to avoid that noise.
 - The lock timeout also bounds REINDEX's waits for older transactions. Before building,
-  the job therefore skips (`skipped_old_transactions`, logged) when another client
+  the job therefore skips (`skipped_old_transactions`, logged) when another
   transaction in the database is older than the lock timeout and holds a snapshot
   (`backend_xmin`) or a lock on the schema-qualified receipt table. An old transaction
-  with neither does not block this pre-check. Otherwise the rebuild would fail after
-  building a full copy, every hour. The check sees only sessions the worker role may
+  with neither does not block this pre-check. Background workers and walsenders
+  are included; autovacuum workers and launchers are excluded. Otherwise the rebuild
+  would fail after building a full copy, every hour. The check sees only sessions the worker role may
   inspect (`pg_read_all_stats` widens it); an invisible old transaction still makes that
   run fail and enter the 24-hour timeout backoff.
 - It logs `ingest.receipt_index_compaction` with page counts, ratio and duration

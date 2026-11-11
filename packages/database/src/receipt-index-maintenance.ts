@@ -65,11 +65,41 @@ async function connect() {
     await client.query(`SET statement_timeout = ${RECEIPT_INDEX_COMPACTION.statementTimeoutMs}`);
     await client.query(`SET lock_timeout = ${RECEIPT_INDEX_COMPACTION.lockTimeoutMs}`);
     await client.query("SET application_name = 'logbird-receipt-index-maintenance'");
+    try {
+      await client.query("SET client_connection_check_interval = '1s'");
+    } catch (error) {
+      // PostgreSQL < 14 does not have this setting. Permission and connection failures must still surface.
+      if ((error as { code?: string }).code !== '42704') throw error;
+    }
+    const { rows } = await client.query<{ pid: number }>('SELECT pg_backend_pid() pid');
+    return { client, pid: rows[0]?.pid as number };
   } catch (error) {
     await client.end().catch(() => undefined);
     throw error;
   }
-  return client;
+}
+
+/** Keep the original session alive until its cancellation request has finished, so the pid cannot be reused. */
+async function cancelBackend(pid: number, settled?: Promise<unknown>) {
+  const cancel = new pg.Client({
+    connectionString: keys().DATABASE_URL,
+    application_name: 'logbird-receipt-index-cancel',
+    connectionTimeoutMillis: 5000,
+    query_timeout: 5000,
+    options: '-c statement_timeout=5000',
+  });
+  cancel.on('error', () => undefined);
+  // Covers connection, SET and cancel together, including URL timeout overrides.
+  const deadline = setTimeout(() => void cancel.end().catch(() => undefined), 10_000);
+  try {
+    await cancel.connect();
+    await cancel.query('SET statement_timeout = 5000');
+    await cancel.query('SELECT pg_cancel_backend($1)', [pid]);
+    await settled;
+  } finally {
+    clearTimeout(deadline);
+    await cancel.end().catch(() => undefined);
+  }
 }
 
 /** An interrupted REINDEX CONCURRENTLY leaves an invalid copy that every write still maintains. */
@@ -104,10 +134,18 @@ export async function compactIngestReceiptIndex({
   db?: Queryable;
   signal?: AbortSignal;
 } = {}): Promise<ReceiptIndexCompaction> {
-  const client = db ?? (await connect());
-  // pg.Client.end() destroys the socket while a query is active, cancelling the rebuild on shutdown.
+  const { client, pid } = db ? { client: db, pid: undefined } : await connect();
+  let cancellation: Promise<void> | undefined;
+  let activeReindex: Promise<unknown> | undefined;
+  let abortDeadline: ReturnType<typeof setTimeout> | undefined;
   const abort = () => {
-    if (!db) void (client as pg.Client).end().catch(() => undefined);
+    if (db || pid === undefined) return;
+    cancellation = cancelBackend(pid, activeReindex).catch((error: unknown) => {
+      const code = (error as { code?: string }).code;
+      console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_cancel_failed', code }));
+    });
+    // pg.end() alone is not a server cancellation. It is only the bounded fallback if cancellation/cleanup stalls.
+    abortDeadline = setTimeout(() => void (client as pg.Client).end().catch(() => undefined), 10_000);
   };
   signal?.addEventListener('abort', abort, { once: true });
   let locked = false;
@@ -150,16 +188,24 @@ export async function compactIngestReceiptIndex({
     // pg_read_all_stats sees xact_start only for its own sessions.
     const { rows: old } = await client.query<{ n: number }>(
       `SELECT count(*)::int n FROM pg_stat_activity
-       WHERE pid <> pg_backend_pid() AND backend_type = 'client backend' AND datname = current_database()
+       WHERE pid <> pg_backend_pid() AND backend_type NOT IN ('autovacuum worker', 'autovacuum launcher') AND datname = current_database()
          AND xact_start < clock_timestamp() - make_interval(secs => $1::float8 / 1000)
          AND (backend_xmin IS NOT NULL OR pid IN (SELECT pid FROM pg_locks WHERE relation = to_regclass($2)))`,
       [RECEIPT_INDEX_COMPACTION.lockTimeoutMs, `${quote(target.schema)}.${quote(target.table)}`],
     );
     if (Number(old[0]?.n ?? 0) > 0) return { action: 'skipped_old_transactions', indexPages: pages, neededPages, ratio, droppedInvalid };
     const started = Date.now();
+    signal?.throwIfAborted();
     try {
-      await client.query(`REINDEX INDEX CONCURRENTLY ${quote(target.schema)}.${quote(target.index)}`);
+      const reindexing = client.query(`REINDEX INDEX CONCURRENTLY ${quote(target.schema)}.${quote(target.index)}`);
+      activeReindex = reindexing.then(
+        () => undefined,
+        () => undefined,
+      );
+      await reindexing;
     } catch (error) {
+      // Do not let a late cancel interrupt DROP instead of REINDEX.
+      await cancellation;
       // Timeout or cancellation: never leave a maintained invalid copy behind.
       await dropInvalidCopies(client, target).catch(() => undefined);
       throw error;
@@ -174,8 +220,10 @@ export async function compactIngestReceiptIndex({
       droppedInvalid,
     };
   } finally {
+    signal?.removeEventListener('abort', abort);
+    await cancellation;
     if (locked) await client.query('SELECT pg_advisory_unlock(hashtext($1))', [lockKey]).catch(() => undefined);
     if (!db) await (client as pg.Client).end().catch(() => undefined);
-    signal?.removeEventListener('abort', abort);
+    clearTimeout(abortDeadline);
   }
 }

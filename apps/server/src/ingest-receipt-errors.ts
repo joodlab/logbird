@@ -1,4 +1,4 @@
-const INFRASTRUCTURE_CODES = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P2024', 'P2034', 'P2028']);
+const INFRASTRUCTURE_CODES = new Set(['P1001', 'P1002', 'P1008', 'P1011', 'P1017', 'P2024', 'P2034', 'P2028', 'P2037']);
 // Exact kinds emitted by Prisma 7's adapter-pg (including kinds whose SQLSTATE may be absent).
 const INFRASTRUCTURE_KINDS = new Set([
   'DatabaseNotReachable',
@@ -29,11 +29,11 @@ export function isDatabaseFailure(error: unknown) {
   const { name, code, kind } = receiptErrorDetails(error);
   if (name === 'PrismaClientInitializationError' || name === 'PrismaClientRustPanicError') return true;
   if (code && INFRASTRUCTURE_CODES.has(code)) return true;
-  if (code !== 'P2010' && name !== 'DriverAdapterError') return false;
+  if (code !== 'P2010' && code !== 'P2039' && name !== 'DriverAdapterError') return false;
   const source = record(error);
   const sqlstate = text(adapterCause(error).originalCode) ?? text(record(source.meta).code);
   // An explicit SQLSTATE takes precedence over a contradictory adapter kind.
-  if (sqlstate) return /^(08|53|57|40|58)[0-9A-Z]{3}$/.test(sqlstate) || sqlstate === '55P03';
+  if (sqlstate) return /^(08|53|57|40|58)[0-9A-Z]{3}$/.test(sqlstate) || ['55P03', '25P03', '25P04'].includes(sqlstate);
   return kind !== undefined && INFRASTRUCTURE_KINDS.has(kind);
 }
 

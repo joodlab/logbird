@@ -353,8 +353,10 @@ headroom or change the probe design before qualifying that image (OPS-02).
 Verify `worker.ready`, its scheduler and a real completed retention job. The 300-second worker
 grace period needs long-running retention/drain evidence before relying on it.
 
-The hourly worker compacts a bloated receipt primary key after recovery and project
-retention. `REINDEX INDEX CONCURRENTLY` requires table ownership, or the table's
+An independent hourly `ingest-receipt-index.compact` job compacts a bloated receipt
+primary key on its own queue and worker (concurrency 1, one attempt), so recovery
+and project retention can continue during a rebuild. `REINDEX INDEX CONCURRENTLY`
+requires table ownership, or the table's
 `MAINTAIN` privilege on PostgreSQL 17+ (see [REINDEX](https://www.postgresql.org/docs/17/sql-reindex.html)). A non-owner worker without that grant logs
 `ingest.receipt_index_compaction_failed` with code `42501`; recovery and retention
 continue. Dropping invalid `_ccnew`/`_ccold` reindex copies additionally requires
@@ -362,10 +364,13 @@ ownership of the table/index (see [DROP INDEX](https://www.postgresql.org/docs/1
 cleanup when a cancelled rebuild leaves a copy.
 The hourly job drops only invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copies left by a
 failed or cancelled rebuild. An operator's in-progress manual REINDEX CONCURRENTLY holds
-SHARE UPDATE EXCLUSIVE on the table, so the job's drop fails with 55P03 (logged hourly)
-until it ends; pause the worker during a manual rebuild. Runs are skipped while a
-transaction older than one minute is open (for example a backup), and logged as
-`skipped_old_transactions`.
+SHARE UPDATE EXCLUSIVE on the table, so the job's drop fails with 55P03 and logs the
+failure. A 55P03 lock timeout or 57014 statement timeout sets a 24-hour Redis
+back-off; later hourly jobs log `skipped_backoff` until it expires. Pause the worker
+during a manual rebuild. Before building, a run checks for transactions older
+than one minute that hold a snapshot or a lock on the receipt table (for example
+a backup), and logs `skipped_old_transactions` when one exists. Transactions with
+neither do not block the pre-check; autovacuum workers and launchers are excluded.
 
 ## Acceptance and rollback
 

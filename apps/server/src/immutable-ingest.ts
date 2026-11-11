@@ -68,7 +68,8 @@ async function releaseClaimsSafely(projectId: string, owned: Map<string, IngestR
 }
 
 function logReceiptPhaseFailure(phase: 'claim' | 'confirm', error: unknown) {
-  console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_phase_failed', phase, ...receiptErrorDetails(error) }));
+  const level = phase === 'claim' && ingestReceiptFailureResponse(error) ? 'warn' : 'error';
+  console[level](JSON.stringify({ level, event: 'ingest.receipt_phase_failed', phase, ...receiptErrorDetails(error) }));
 }
 
 async function upgradeLegacyReceipts(projectId: string, cached: Map<string, IngestReceipt>, stored: Awaited<ReturnType<typeof lookup>>) {

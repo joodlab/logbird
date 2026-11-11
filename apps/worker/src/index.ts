@@ -114,7 +114,7 @@ let stopping = false;
 async function shutdown() {
   if (stopping) return;
   stopping = true;
-  // Close the REINDEX connection before waiting for workers; its invalid copy is dropped next run.
+  // Cancel the owned PostgreSQL backend before waiting for workers; Redis hints are abortable too.
   compactionAbort.abort();
   await Promise.all([worker.close(), receiptWorker.close(), compactionWorker.close()]);
   await Promise.all([receiptQueue.close(), compactionQueue.close()]);

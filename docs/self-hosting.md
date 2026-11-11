@@ -812,9 +812,14 @@ drain unrelated backlog. See [receipt coordination](ingest-identity.md#coordinat
 
 The worker runs receipt-index compaction on its own hourly queue and worker with
 concurrency 1 and one attempt, so retention retries never repeat it and queued
-recovery/fence-lifting jobs can run during a rebuild. On shutdown the rebuild's
-connection closes before the workers are awaited, cancelling REINDEX; its invalid
-copy is dropped next run. `REINDEX INDEX CONCURRENTLY` requires the worker role to own the table
+recovery/fence-lifting jobs can run during a rebuild. On shutdown a separate
+connection calls `pg_cancel_backend` for the recorded rebuild backend pid only,
+with five-second connect/query timeouts. The original session remains open while
+REINDEX settles with 57014; cancellation and cleanup have a ten-second deadline
+before sockets close. The maintenance session sets `client_connection_check_interval`
+to one second as a disconnect fallback where supported (PostgreSQL 14+).
+Its invalid copy is dropped after cancellation, or next run if cleanup is
+interrupted. `REINDEX INDEX CONCURRENTLY` requires the worker role to own the table
 (or have the table's `MAINTAIN` privilege on PostgreSQL 17+, as documented for
 [REINDEX](https://www.postgresql.org/docs/17/sql-reindex.html)). A non-owner role
 without that privilege logs `ingest.receipt_index_compaction_failed` with code
@@ -834,7 +839,10 @@ Reserve free disk for about the index's live size during an online rebuild. A
 57014 statement timeout or 55P03 lock timeout stores a timestamp in the existing
 Redis connection under `<BULLMQ_PREFIX>:ingest-receipt-index-compaction:backoff`
 with a 24-hour TTL. Hourly jobs log and return `skipped_backoff` until it expires.
-Redis errors fail open so compaction can still run.
+Both Redis hints have a one-second client deadline and stop waiting immediately
+on abort. A Redis error or stall does not disable compaction or block shutdown:
+a failed GET means no back-off; a timed-out SET is logged. An aborted rebuild does
+not request the 24-hour back-off. BullMQ's shared connection settings are unchanged.
 
 ## Disposable acceptance fixture
 

@@ -12,12 +12,16 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   abort = new AbortController();
   redis.get.mockResolvedValue(null);
   redis.set.mockResolvedValue('OK');
   compact.mockResolvedValue({ action: 'skipped_compact' });
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 it('runs once on the first attempt and never on job retries', async () => {
   await runReceiptIndexCompaction(redis, key, 0, abort.signal);
@@ -89,4 +93,40 @@ it('does not start a connection if shutdown happens while checking backoff', asy
   });
   await runReceiptIndexCompaction(redis, key, 0, abort.signal);
   expect(compact).not.toHaveBeenCalled();
+});
+
+it.each(['get', 'set'] as const)('bounds a never-resolving Redis %s to one second', async (command) => {
+  vi.useFakeTimers();
+  redis[command].mockReturnValueOnce(new Promise(() => undefined));
+  if (command === 'set') compact.mockRejectedValueOnce({ code: '57014' });
+  const running = runReceiptIndexCompaction(redis, key, 0, abort.signal);
+  await vi.advanceTimersByTimeAsync(999);
+  if (command === 'get') expect(compact).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  await running;
+  expect(compact).toHaveBeenCalledTimes(1);
+  expect(console.warn).toHaveBeenCalledWith(JSON.stringify({ level: 'warn', event: 'ingest.receipt_index_backoff_timeout', command }));
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it.each(['get', 'set'] as const)('returns promptly when shutdown interrupts a never-resolving Redis %s', async (command) => {
+  vi.useFakeTimers();
+  redis[command].mockReturnValueOnce(new Promise(() => undefined));
+  if (command === 'set') compact.mockRejectedValueOnce({ code: '57014' });
+  const running = runReceiptIndexCompaction(redis, key, 0, abort.signal);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(redis[command]).toHaveBeenCalledTimes(1);
+  abort.abort();
+  await running;
+  expect(compact).toHaveBeenCalledTimes(command === 'get' ? 0 : 1);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('never writes a 24 h backoff for an aborted rebuild', async () => {
+  compact.mockImplementationOnce(async () => {
+    abort.abort();
+    throw Object.assign(new Error('qa cancellation'), { code: '57014' });
+  });
+  await runReceiptIndexCompaction(redis, key, 0, abort.signal);
+  expect(redis.set).not.toHaveBeenCalled();
 });

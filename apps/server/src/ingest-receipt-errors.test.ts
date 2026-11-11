@@ -1,4 +1,5 @@
 import { apiErrorSchema } from '@logbird/contracts';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
 import { expect, it } from 'vitest';
 import { ingestReceiptFailureResponse, isDatabaseFailure } from './ingest-receipt-errors';
 
@@ -22,7 +23,7 @@ it('uses context-neutral retry wording for sample removal and other non-ingest o
   expect(response?.body.error.message).toBe('Event identity cache changed concurrently. Retry this operation.');
 });
 
-it.each(['P1001', 'P1002', 'P1008', 'P1017', 'P2024', 'P2034', 'P2028'])('classifies infrastructure Prisma code %s', (code) => {
+it.each(['P1001', 'P1002', 'P1008', 'P1011', 'P1017', 'P2024', 'P2034', 'P2028', 'P2037'])('classifies infrastructure Prisma code %s', (code) => {
   expect(isDatabaseFailure({ name: 'PrismaClientKnownRequestError', code })).toBe(true);
 });
 
@@ -34,14 +35,40 @@ const wrapped = (sqlstate: string) => [
   { code: 'P2010', meta: { driverAdapterError: { cause: { originalCode: sqlstate } } } },
   { code: 'P2010', meta: { code: sqlstate } },
   { name: 'DriverAdapterError', cause: { originalCode: sqlstate } },
+  new PrismaClientKnownRequestError('Database error', {
+    clientVersion: '7.10.0',
+    code: 'P2039',
+    meta: {
+      modelName: 'IngestReceipt',
+      driverAdapterError: {
+        name: 'DriverAdapterError',
+        cause: { kind: 'postgres', originalCode: sqlstate, code: sqlstate, severity: 'ERROR', message: 'qa database failure' },
+      },
+    },
+  }),
 ];
 
-it.each(['08006', '53300', '57014', '57P01', '40001', '40P01', '58030', '55P03'])(
+it.each(['08006', '53300', '57014', '57P01', '40001', '40P01', '58030', '55P03', '25P03', '25P04'])(
   'classifies infrastructure SQLSTATE %s in every supported wrapper',
   (sqlstate) => {
     for (const error of wrapped(sqlstate)) expect(isDatabaseFailure(error)).toBe(true);
   },
 );
+
+it.each([
+  ['P2037', { kind: 'TooManyConnections', originalCode: '53300', cause: 'qa connection limit' }],
+  ['P1011', { kind: 'TlsConnectionError', reason: 'qa TLS failure' }],
+] as const)('classifies the real mapped model-query wrapper %s', (code, cause) => {
+  expect(
+    isDatabaseFailure(
+      new PrismaClientKnownRequestError('qa database failure', {
+        clientVersion: '7.10.0',
+        code,
+        meta: { modelName: 'IngestReceipt', driverAdapterError: { name: 'DriverAdapterError', cause } },
+      }),
+    ),
+  ).toBe(true);
+});
 
 it.each(['42601', '42703', '42883', '22P02', '42501', '23505', '23503', '23502'])(
   'does not mask SQL/API error %s in any supported wrapper',
@@ -70,7 +97,7 @@ it('does not let an adapter kind override an explicit programming-error SQLSTATE
   expect(isDatabaseFailure({ name: 'DriverAdapterError', cause: { kind: 'SocketTimeout', originalCode: '42601' } })).toBe(false);
 });
 
-it.each([{ code: 'P2010' }, { code: 'P2002' }, { name: 'PrismaClientUnknownRequestError' }, { name: 'DriverAdapterError' }])(
+it.each([{ code: 'P2010' }, { code: 'P2039' }, { code: 'P2002' }, { name: 'PrismaClientUnknownRequestError' }, { name: 'DriverAdapterError' }])(
   'does not classify an unrecognised Prisma error as infrastructure: %o',
   (error) => expect(isDatabaseFailure(error)).toBe(false),
 );
