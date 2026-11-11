@@ -4,7 +4,16 @@ import { defineConfig } from 'vitest/config';
 // or shared backing services.
 export default defineConfig({
   test: {
-    include: ['src/export-stream.test.ts', 'src/export-lifecycle.test.ts', 'src/export-outcomes.test.ts', 'src/delete-errors.test.ts'],
+    include: [
+      'src/export-stream.test.ts',
+      'src/export-lifecycle.test.ts',
+      'src/export-outcomes.test.ts',
+      'src/delete-errors.test.ts',
+      'src/ingest-parse-isolation.test.ts',
+      'src/immutable-ingest.test.ts',
+      'src/legacy-sdk-011-fixture.test.ts',
+      'src/ingest-storage-fault-fixture.test.ts',
+    ],
     maxWorkers: 1,
     fileParallelism: false,
   },

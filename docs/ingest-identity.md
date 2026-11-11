@@ -319,14 +319,135 @@ in the HTTP pipeline. The client socket budget is 60 seconds; the response strea
 is consumed before confirmation. Server socket timeout 209 remains ambiguous
 after handoff, even if that exception reports no written rows.
 Failures proven to precede any write release this attempt's claims. This includes
-before-body transport errors and an explicit server-code allowlist: parse codes
-6,27,38,41,53,69,72 (422 invalid_event), and unknown table/database, syntax,
-readonly, ACL/auth codes 60,62,81,164,497,516 (503 ingest_unavailable). A code wrapped
+before-body transport errors and an explicit server-code allowlist: async-proven parse codes
+6,25,27,38,41,53,69,72 (per-index invalid_event), and unknown table/database, syntax,
+readonly, settings-constraint and ACL/auth codes 60,62,81,164,452,497,516 (503 ingest_unavailable). A code wrapped
 by an MV failure is ambiguous even if its underlying code is on that list.
 All other errors after handoff retain the claim, including timeout 159, memory
 limit 241, and client timeout/reset. A server exception can follow a committed
 raw write or only some materialized destinations. Identity-read errors return
 503 ingest_unavailable with Retry-After, including timeout and memory exhaustion.
+
+A parser code alone does not prove that nothing was written. Each insert pins
+`async_insert_max_data_size=67108864` (64 MiB), `min_insert_block_size_bytes=268402944`,
+`min_insert_block_size_rows=1048449`, `max_insert_block_size=1048449`,
+`input_format_allow_errors_num=0` and `input_format_allow_errors_ratio=0` at query
+level. Realistic 5 MiB requests normalize to at most about 15 MiB (duplicated
+changes, twice-escaped payload); 64 MiB adds headroom without letting the async
+queue buffer gigabytes. Ingest chunks cached rows at the pin; only a single oversized
+row (extreme flattened attribute paths) remains ambiguous on parse failure, until
+the size bound in #159 lands. Block pins prevent partial synchronous fallback
+writes within that bound. Ordinary user profiles cannot lower query-level pins.
+A parse error is proven pre-write only when the serialized body fits the async
+pin, its error names `WaitForAsyncInsert`, and it is not a materialized-view failure
+("while pushing to view", or a view name, outside ClickHouse's input excerpts of the statement body;
+row values such as `'page.view'` or `'analytics.events_by_minute_mv'` quoted after `before:` or
+`Cannot parse value` don't count, and can't impersonate either marker). A server
+constraint rejects the whole query before reading data (code 452), returning
+`503 ingest_unavailable` and releasing unwritten claims. Client-side overrides
+that force synchronous fallback, changed error wording, oversize internal
+statements and view failures remain ambiguous after handoff, retaining claims
+for recovery. Changed `WaitForAsyncInsert` wording after an upgrade can cause parse
+failures to loop through recovery until fixed; run the shared-flush test after upgrades.
+See [self-hosting](self-hosting.md#ingest-insert-settings).
+
+Isolation checks that native `(at row N)` is statement-relative and 1-based. The
+shared-flush integration test in `apps/server/src/ingest-parse-isolation.integration.test.ts`
+pins this behavior on ClickHouse 26.9, including when two bodies share one async
+flush. Run that test after an upgrade. Before every exact-row rejection, the server
+sends the named row alone as a canary. Only a pre-write parse
+failure rejects it. A written canary is accepted, logs `ingest.parse_row_number_mismatch`,
+and disables row-number trust for the rest of that attempt, using bisection instead.
+An ambiguous, unavailable or unchecked canary keeps its normal classification.
+After a failed canary, the server inserts the parse-proven prefix through the normal visit path, then
+rejects the named row and continues with its suffix under the original claims and
+lease. Prefix writes have the same ambiguous, unavailable and lease semantics as
+any other insert. Missing/out-of-range row reports use bisection; a written left
+sibling proves the right contains a failure, so it is split without resending
+that known-failing body; inferred singletons are checked alone before rejection.
+No identical body is sent twice within an attempt.
+Only individual proven failures become `invalid_event`, including a 202 with
+`accepted: 0` when every row is rejected. A definite non-parse failure returns
+503 `ingest_unavailable`, with acknowledged siblings confirmed and listed in ids.
+
+A 64-extra-statement cap, an isolation byte budget of four times the original
+batch's UTF-8 bytes (excluding statements before isolation starts), a ten-second isolation
+wall clock and the original lease's remaining 40-second finish budget bound the work. The wall clock
+is a scheduling budget: no statement starts after it, but one already in flight finishes within its
+own execution limits and the lease (claims kept), so isolation can overrun ten seconds by one statement.
+Rows are serialized once; subsets join cached JSON lines. Consecutive chunks fit the
+64 MiB async pin. All chunks share statement, byte, clock and lease budgets, with
+the byte budget computed over all rows. A single oversized row stays alone.
+Canary and prefix writes count against both the statement and byte budgets
+(about three statements per bad row). About five leading bad rows fit per attempt
+under the byte budget. A cap reached during isolation leaves unchecked, proven-unwritten
+rows and releases their claims. The response depends on capability:
+
+- Clients declaring exactly `Logbird-Retry: subset` get `503 ingest_pending` with settled
+  `{accepted,ids,rejected,warnings}` plus unresolved `indices`/`eventIds`, and converge
+  by resending only that subset, preserving each event's JSON.
+- Every other client gets terminal 202: written rows accepted, proven-bad rows rejected
+  as `invalid_event`, unchecked rows rejected with distinct code/reason
+  `unverified_after_parse_failure: Storage stopped checking this batch after parse failures; resend this event individually if needed.`
+  These rows are not proven invalid; this fallback lets old SDKs finish their queue.
+- If other rows still require retry (including ambiguous writes and held-claim conflicts),
+  everyone gets 503 and unchecked rows stay unresolved. Never reject unchecked rows inside
+  that 503: SDK 0.1.1 ignores its details. Identical retries skip confirmed rows, pending
+  writes settle through recovery, and the next attempt returns terminal 202 once no other
+  rows require retry. Definite unavailable failures also keep unchecked rows unresolved.
+- Rows deferred before any statement ran (typed pre-body lease exhaustion, for example
+  after a slow claim phase) are healthy but unsent. They are never rejected: every client
+  gets the retryable 503 with their indices, as before this change.
+
+Only truly
+ambiguous/competing claim-held ids determine Retry-After; unresolved-only
+responses use one second. Definite non-parse failures without held claims use five
+seconds for `ingest_unavailable`. The server logs `ingest.parse_isolation_limited`
+with the limiting reason immediately after isolation, even when another failure
+takes response precedence.
+
+Ambiguous children are never split or retried within an attempt. Their claims
+stay leased while siblings settle; confirmation failures also preserve every
+acknowledged child's claim. Confirmed rows leave the work set, but released bad
+claims are checked again on identical-body retries, which can repeat the same
+isolation limit for capable clients that ignore the contract. Raw HTTP clients declaring
+`Logbird-Retry: subset` must honor settled rejections and resend only
+the unresolved indices or remaining unsettled events, each with byte-identical
+JSON, id and occurredAt, to make progress. The next response's indices refer to
+that smaller request. There is no virtual partition-tree charge.
+
+After complete `ingest_pending` or `ingest_unavailable` 503 details, the SDK's next
+attempt within the same send resends only unsettled events. It serializes each
+event once per send and builds subset bodies from those cached strings, remapping
+response indices to original batch positions for acceptance, drop-once reporting
+and final requeue. Incomplete or malformed details keep the previous body unchanged.
+The SDK always sends `Logbird-Retry: subset`. Attempts settling at least one event and
+shrinking the body do not consume `maxRetries`; total attempts remain bounded by batch
+length plus retries and five minutes per send. The time limit requeues only unsettled
+events. After `beforeSend`, missing, blank or non-string ids (numbers included) get a fresh
+uuidv7, as the server would mint; valid string ids stay unchanged. The SDK reports individually rejected rows through `onDrop`
+once per send; unchecked healthy rows stay retryable while this header is preserved.
+If the retry budget is exhausted, `onError` reports it and only unsettled events
+are requeued for a later `flush()`.
+Older SDK versions retain identical-body retries and use the terminal 202 fallback.
+A proxy stripping `Logbird-Retry` safely selects that fallback, but unchecked rows are
+rejected. Integrators should allow this header through their proxies.
+
+Search strings use `toWellFormed()` to replace lone surrogates with U+FFFD,
+including targets, changes and `logbird.occurredAt.rejected`. Caps do not split
+valid surrogate pairs. Attribute values already replace invalid Unicode through
+UTF-8 encoding. Every stored attribute key must be valid Unicode; keys beyond the
+256-attribute cap are not stored or checked. A malformed stored key rejects the event with
+`invalid_event: Attribute keys must be valid Unicode`; valid surrogate pairs remain
+verbatim. Replacing keys could collide distinct keys and silently lose data.
+After #153 there is no known public input reaching the parse-isolation path. It remains
+defence in depth for unknown future triggers, validated by integration-only storage-fault
+fixtures that rewrite designated serialized rows to an invalid UInt16 immediately before
+real ClickHouse INSERTs. ClickHouse produces the real parser error and `WaitForAsyncInsert`;
+there are no production test hooks or environment switches.
+Raw `payload` and v1 identity keep the original input;
+search normalization is intentionally lossy. Invalid dates still fall back with
+warnings and job attempts clamp to UInt16.
 
 An exact retry or hourly worker recovers per project after the lease plus a
 conservative ten-second async flush bound. Candidate fingerprints are checked
@@ -372,11 +493,14 @@ Healthy siblings commit before 503 ingest_pending. Its details are a superset of
 the 202 response: `{accepted,ids,rejected,warnings,indices,eventIds}`. Each rejected
 entry includes `code` and a code-first explanatory `reason`. Every input index
 outside `indices` is settled, including permanent rejections; retrying the entire
-identical batch is safe. Retry-After reflects the longest remaining pending lease
+identical batch skips confirmed writes. Capable clients must omit settled events to
+make progress through isolation limits; legacy clients reach terminal 202 after held
+claims resolve, with unchecked rows rejected distinctly. Retry-After for held claims reflects the longest remaining lease
 plus flush bound. Ready receipts report the remaining ten-minute grace, and
 throttled flushes report the remaining minute, with a one-second minimum. A different-content retry against
 an unresolved claimant stays pending until the original outcome is known. The
-SDK retries the identical body and honors Retry-After. Permanent conflicts reach
+SDK honors Retry-After and resends only unsettled events after complete 503 details;
+otherwise it keeps the previous body. Permanent conflicts reach
 onDrop/onError; a structured SDK LogbirdError class is tracked in [#89](https://github.com/joodlab/logbird/issues/89).
 
 ## Sample and retention lifecycle
@@ -470,10 +594,9 @@ separately scheduled acceptance gate. Run `scripts/benchmark-ingest-identity.ts`
 with the fourth argument `immutable`, under a documented memory and concurrency budget. Small real-service proofs are not
 10M/day capacity evidence.
 
-Other scoped follow-ups: [#90](https://github.com/joodlab/logbird/issues/90) covers
-the shared ingest/recovery dependency boundary, and
-[#91](https://github.com/joodlab/logbird/issues/91) covers per-event isolation of a
-definite storage parse failure. Neither changes ambiguity classification here.
+Other scoped follow-up: [#90](https://github.com/joodlab/logbird/issues/90) covers
+the shared ingest/recovery dependency boundary. Per-event storage parse isolation
+([#91](https://github.com/joodlab/logbird/issues/91)) preserves ambiguity classification.
 
 Removal of pre-merge compatibility after safe shared-DB reconciliation is tracked
 in [#94](https://github.com/joodlab/logbird/issues/94).

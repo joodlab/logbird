@@ -103,6 +103,6 @@ export async function loadSampleData(projectId: string) {
   });
   const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
   const result = await insertImmutableEvents(projectId, project.organizationId, candidates);
-  if (result.rejected.length) throw new ApiError(503, 'ingest_unavailable', 'Sample event identity collision; retry loading sample data.');
+  if (result.rejected.length) throw new ApiError(503, 'ingest_unavailable', 'Sample events were rejected; retry loading sample data.');
   return { inserted: result.ids.length };
 }

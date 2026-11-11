@@ -252,18 +252,54 @@ event with the same id is rejected with `duplicate_id_conflict: ...`; the origin
 is kept. Send a correction with a new id and `context.parentEventId` pointing to it.
 The SDK calls `onDrop` for that event and `onError` with the reason.
 
-`503 ingest_pending` and `503 ingest_unavailable` mean retry the identical batch,
+`503 ingest_pending` and `503 ingest_unavailable` mean retry unsettled events,
 honoring `Retry-After`. Healthy siblings commit before a pending response and remain
 idempotent on retry. Pending details include `accepted`, `ids`, `rejected`, `warnings`,
 `indices` and `eventIds`. Every index outside `indices` is settled. Each rejected
-entry has a `code` plus a code-first explanation in `reason`. The SDK retries these
-responses; after its retry budget, the batch stays queued and `flush()` rejects.
+entry has a `code` plus a code-first explanation in `reason`. On an exact-row storage
+parse failure, the server checks every named row alone as a canary. A written
+canary is accepted and the rest of that attempt uses bisection; a failed canary permits
+exact-row rejection and prefix writes. All share the original isolation budgets
+(about three statements per bad row).
+The SDK retries with the identical previous body unless complete 503 details settle
+events; then it resends only unsettled events within the same send. It serializes
+each event once per send and reuses that exact JSON (including id and occurredAt)
+in every subset body. Response indices are mapped back to the original events,
+so rejections call `onDrop` once per send. Incomplete or malformed details keep
+the previous body unchanged. After its retry budget, only unsettled events stay
+queued and `flush()` rejects. The SDK always sends `Logbird-Retry: subset`. About
+five leading bad rows fit per attempt under the server's byte budget; subset retries
+converge. An attempt settling events and shrinking the body does not consume
+`maxRetries`; total attempts remain bounded by batch length plus retries and five minutes
+per send. At that time limit, `flush()` rejects and requeues only unsettled events.
+After `beforeSend`, missing, blank or non-string ids (numbers included) get a fresh uuidv7,
+as the server would mint; valid string ids stay unchanged so subset retries can match accepted events.
+
+Raw HTTP clients declaring `Logbird-Retry: subset` must honor settled rejections and resend only `details.indices`
+or the remaining unsettled events to make progress. Preserve each event's JSON
+byte-identically, including id and occurredAt; response indices then refer to the
+smaller request. Clients without that capability (old SDKs and raw HTTP without the
+header) instead receive terminal 202: proven-bad rows `invalid_event`, written rows
+accepted, unchecked rows rejected with distinct code/reason `unverified_after_parse_failure`
+and guidance to resend individually if needed. Unchecked rows are not proven invalid.
+If other rows still need retry, including ambiguous writes or held-claim conflicts,
+everyone gets 503 and unchecked rows stay unresolved. Identical retries skip confirmed
+rows; after recovery settles pending writes, the next legacy request reaches terminal 202.
+A proxy stripping `Logbird-Retry` safely selects that fallback but rejects unchecked rows;
+allow this header through proxies to preserve subset retries.
+
+Every stored attribute key must be valid Unicode; keys beyond the 256-attribute cap are
+not stored or checked. Lone surrogates in stored keys are rejected before INSERT as
+`invalid_event: Attribute keys must be valid Unicode`. Valid surrogate pairs are kept.
+Parse isolation remains defence in depth for unknown future triggers after this validation.
+
 Retry `flush()` later. Unresolved writes recover automatically per project after a
 bounded lease and ClickHouse queue drain. An id containing NUL, a lone surrogate,
 or more than 256 UTF-16 code units after trimming is rejected individually as
 `invalid_event_id`. Earlier releases truncated long ids; this release rejects them.
-Use string ids: numeric ids generate a fresh UUID and a warning, so convert a
-numeric source id with `String(id)` before sending it.
+Use string ids: a numeric id gets a fresh UUID (the SDK mints a uuidv7; raw HTTP
+requests get one from the server, with a warning), so convert a numeric source id
+with `String(id)` before sending it.
 
 Rejection codes appear in `rejected[].code`; retryable HTTP codes appear in
 `error.code`. Every index outside pending `indices` is settled. Use the full
@@ -271,12 +307,13 @@ Rejection codes appear in `rejected[].code`; retryable HTTP codes appear in
 
 | Code | Meaning | What to do / expected timing |
 | --- | --- | --- |
-| `invalid_event` | Invalid event fields. | Fix the reported event. A native parse error may return 422 for the batch. |
+| `invalid_event` | Invalid event fields or a proven storage parse failure. | Fix the reported indices in `rejected`. Healthy siblings are accepted (202); all rejected gives `accepted: 0`. |
+| `unverified_after_parse_failure` | Isolation stopped before checking this proven-unwritten row. | Terminal 202 fallback without `Logbird-Retry: subset`; resend individually if needed. With the header, unchecked rows stay retryable in `503 ingest_pending`. |
 | `invalid_event_id` | Unsafe or oversized string id. | Use valid Unicode without NUL, at most 256 UTF-16 units after trimming. |
 | `duplicate_id_conflict` | The id belongs to different content. | Keep the original; send corrections with a new id and context.parentEventId. |
 | `stored_event_unreadable` | Retained evidence cannot be compared. | Keep the evidence. Send a correction with a new id; ask the operator to inspect storage. |
-| `ingest_pending (503)` | Some writes remain unresolved. | Retry the identical batch with Retry-After: about 70 seconds for ambiguity, up to 10 minutes for a ready claim. |
-| `ingest_unavailable (503)` | Identity lookup or storage is unavailable. | Retry the identical batch with Retry-After; the operator may need to restore service. |
+| `ingest_pending (503)` | Some writes remain unresolved. | Retry unsettled events with Retry-After: one second for unchecked rows (five seconds when storage also refused rows and no claims are held), about 70 seconds for ambiguity, up to 10 minutes for a ready claim. |
+| `ingest_unavailable (503)` | Identity lookup or storage is unavailable. | Retry unsettled events with Retry-After; when storage definitely refused rows and no claims are held, it is five seconds. The operator may need to restore service. |
 | `project_busy (503)` | A project maintenance lock is held. | Retry with Retry-After after the current operation releases its lock. |
 | `retention_unavailable (503)` | Project data is being rebuilt. | Retry reads with Retry-After. Interrupted repairs resume through the worker; the hourly sweep is the fallback. |
 

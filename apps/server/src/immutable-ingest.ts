@@ -1,7 +1,6 @@
 import {
   AmbiguousInsertError,
   ASYNC_INSERT_FLUSH_BOUND_MS,
-  CLICKHOUSE_PARSE_ERROR_CODES,
   type EventRow,
   eventFingerprint,
   existingEventIdentities,
@@ -25,10 +24,11 @@ import {
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
+import { isolateIngestRows, STORAGE_PARSE_REJECTION } from './ingest-parse-isolation';
 
 export type IngestCandidate = { index: number; input: unknown; row: EventRow };
 export const DUPLICATE_ID_CONFLICT =
-  'duplicate_id_conflict: id already belongs to different content; the original is kept. Send corrections with a new id and context.parentEventId.';
+  'duplicate_id_conflict: id conflicts with different content in this request or stored history. Send corrections with a new id and context.parentEventId.';
 
 async function lookup(projectId: string, ids: string[]) {
   try {
@@ -211,42 +211,56 @@ function classifyCandidates(
 async function persistRows(projectId: string, rows: EventRow[], owned: Map<string, IngestReceipt>, fingerprint: (row: EventRow) => string) {
   if (!rows.length) {
     await releaseClaims(projectId, owned);
-    return;
+    return { written: [], rejected: [], pending: [], unavailable: [], unresolved: [], limited: false };
   }
-  let keepClaims = false;
+  const releasable = new Map(owned);
   try {
     const expiresAt = Math.min(
       ...[...owned.values()].filter((c) => !c.confirmedAt).map((c) => (c.claimedAt?.getTime() ?? 0) + INGEST_CLAIM_LEASE_MS),
     );
-    try {
-      await insertEvents(clickhouse, rows, expiresAt);
-    } catch (error) {
-      if (error instanceof AmbiguousInsertError) {
-        keepClaims = true;
-        throw new ApiError(503, 'ingest_pending', 'Storage acknowledgement is unresolved. Retry this batch.');
-      }
-      if (error && typeof error === 'object' && 'code' in error && CLICKHOUSE_PARSE_ERROR_CODES.has(String(error.code)))
-        throw new ApiError(422, 'invalid_event', 'Storage could not parse this batch. Check event field types and timestamps.');
-      throw new ApiError(503, 'ingest_unavailable', 'Storage rejected this write. Retry this batch.');
-    }
+    // Keep claims as soon as a statement may have written, so even an unexpected throw later in isolation can never
+    // release a claim for a row that is already stored.
+    const keepClaims = (part: EventRow[]) => {
+      for (const row of part) releasable.delete(row.event_id);
+    };
+    const outcome = await isolateIngestRows(rows, expiresAt, (part, body) =>
+      insertEvents(clickhouse, part, expiresAt, body).then(
+        () => keepClaims(part),
+        (error: unknown) => {
+          if (error instanceof AmbiguousInsertError) keepClaims(part);
+          throw error;
+        },
+      ),
+    );
+    if (outcome.limited)
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          event: 'ingest.parse_isolation_limited',
+          projectId,
+          unresolved: outcome.unresolved.length,
+          reason: outcome.limitReason,
+        }),
+      );
     // After acknowledgement, a Postgres failure must preserve the claim for a visibility retry.
-    keepClaims = true;
+    for (const row of [...outcome.written, ...outcome.pending]) releasable.delete(row.event_id);
     await confirmIngestReceipts(
       projectId,
-      rows.map((row) => ({
+      outcome.written.map((row) => ({
         eventId: row.event_id,
         fingerprint: fingerprint(row),
         receivedAt: new Date(row.received_at),
         eventAt: new Date(row.timestamp),
       })),
     );
+    return outcome;
   } finally {
-    if (!keepClaims) await releaseClaims(projectId, owned);
+    await releaseClaims(projectId, releasable);
   }
 }
 
 /** Caller holds a project lock: exclusive during recovery, shared otherwise. Receipts fence every API process. */
-export async function insertImmutableEvents(projectId: string, organizationId: string, candidates: IngestCandidate[]) {
+export async function insertImmutableEvents(projectId: string, organizationId: string, candidates: IngestCandidate[], supportsSubsetRetry = false) {
   if (!candidates.length) return { ids: [] as string[], rejected: [] as { index: number; reason: string; code: string }[] };
   // The wire payload and normalized rows are immutable within this attempt; hash each row once.
   const fingerprints = new Map<EventRow, string>();
@@ -266,45 +280,82 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
     await releaseClaims(projectId, owned);
     throw error;
   }
-  try {
-    await persistRows(projectId, result.rows, owned, fingerprint);
-  } catch (error) {
-    if (error instanceof ApiError && error.code === 'ingest_pending') {
-      const pendingIds = new Set([...result.pending.map((p) => p.eventId), ...result.rows.map((r) => r.event_id)]);
-      const pending = candidates.filter((c) => pendingIds.has(c.row.event_id));
-      const ids = result.ids.filter((id) => !pendingIds.has(id));
-      const unsettled = new Set(pending.map((c) => c.index));
-      throw await pendingError(
-        projectId,
-        error.message,
-        ids,
-        result.rejected.filter((r) => !unsettled.has(r.index)),
-        pending.map((c) => ({ index: c.index, eventId: c.row.event_id })),
-        receipts,
-      );
-    }
-    throw error;
+  const outcome = await persistRows(projectId, result.rows, owned, fingerprint);
+  return composeIngestOutcome(projectId, candidates, result, outcome, receipts, supportsSubsetRetry);
+}
+
+export const UNVERIFIED_PARSE_REJECTION =
+  'unverified_after_parse_failure: Storage stopped checking this batch after parse failures; resend this event individually if needed.';
+
+/**
+ * Rows left unchecked are rejected terminally only for clients that can't resend a subset, only when isolation really
+ * started after a proven parse failure (`isolationStarted`), and never inside a retryable response (old SDKs ignore
+ * its details). Rows deferred before any statement ran (e.g. the lease was too short for the original INSERT) are
+ * healthy-but-unsent and stay retryable for every client.
+ */
+export function uncheckedIngestPolicy(supportsSubsetRetry: boolean, hasOtherRetryableRows: boolean, isolationStarted: boolean) {
+  return supportsSubsetRetry || hasOtherRetryableRows || !isolationStarted ? 'retry' : 'reject';
+}
+
+async function composeIngestOutcome(
+  projectId: string,
+  candidates: IngestCandidate[],
+  result: ReturnType<typeof classifyCandidates>,
+  outcome: Awaited<ReturnType<typeof persistRows>>,
+  receipts: Map<string, IngestReceipt>,
+  supportsSubsetRetry: boolean,
+) {
+  const unresolvedIds = new Set(outcome.unresolved.map((row) => row.event_id));
+  const rejectedIds = new Set(outcome.rejected.map((row) => row.event_id));
+  const pendingIds = new Set([...result.pending.map((p) => p.eventId), ...outcome.pending.map((row) => row.event_id)]);
+  const unavailableIds = new Set(outcome.unavailable.map((row) => row.event_id));
+  const rejectUnchecked = uncheckedIngestPolicy(supportsSubsetRetry, pendingIds.size + unavailableIds.size > 0, outcome.limited) === 'reject';
+  // Classification rejections (including conflicts with another index of the same id) stay settled.
+  const classifiedRejections = new Set(result.rejected.map((r) => r.index));
+  for (const candidate of candidates) {
+    if (classifiedRejections.has(candidate.index)) continue;
+    const id = candidate.row.event_id;
+    if (rejectedIds.has(id))
+      result.rejected.push({
+        index: candidate.index,
+        code: 'invalid_event',
+        reason: STORAGE_PARSE_REJECTION,
+      });
+    else if (rejectUnchecked && unresolvedIds.has(id))
+      result.rejected.push({ index: candidate.index, code: 'unverified_after_parse_failure', reason: UNVERIFIED_PARSE_REJECTION });
   }
+  const ids = result.ids.filter((id) => !rejectedIds.has(id) && !pendingIds.has(id) && !unavailableIds.has(id) && !unresolvedIds.has(id));
   // Healthy siblings are already durable; an identical batch retry will not insert them again.
-  if (result.pending.length)
+  const retryableIds = new Set([...pendingIds, ...unavailableIds, ...(rejectUnchecked ? [] : unresolvedIds)]);
+  if (retryableIds.size) {
+    const retryable = candidates
+      .filter((c) => retryableIds.has(c.row.event_id) && !classifiedRejections.has(c.index))
+      .map((c) => ({ index: c.index, eventId: c.row.event_id }));
     throw await pendingError(
       projectId,
-      'Some event ids have unresolved writes. Retry this batch; listed indices are unresolved.',
-      result.ids,
+      ids,
       result.rejected,
-      result.pending,
+      retryable,
       receipts,
+      pendingIds,
+      pendingIds.size || unresolvedIds.size ? 'ingest_pending' : 'ingest_unavailable',
+      outcome.limited,
+      unavailableIds.size > 0,
     );
-  return { ids: result.ids, rejected: result.rejected };
+  }
+  return { ids, rejected: result.rejected };
 }
 
 async function pendingError(
   projectId: string,
-  message: string,
   ids: string[],
   rejected: { index: number; reason: string; code: string }[],
   pending: { index: number; eventId: string }[],
   receipts: Map<string, IngestReceipt>,
+  pendingIds: ReadonlySet<string>,
+  code: 'ingest_pending' | 'ingest_unavailable',
+  limited = false,
+  storageRefused = code === 'ingest_unavailable',
 ) {
   const details = ingestPendingDetailsSchema.parse({
     accepted: ids.length,
@@ -315,10 +366,12 @@ async function pendingError(
     eventIds: pending.map((p) => p.eventId),
   });
   const now = Date.now();
+  const held = pending.filter((p) => pendingIds.has(p.eventId));
   const retryAfter = Math.max(
-    1,
-    pending.some((p) => receipts.get(p.eventId)?.claimedAt) ? await ingestRecoveryRetryAfter(projectId) : 0,
-    ...pending.map((p) => {
+    // Storage definitely refused some rows: don't retry it every second, even when unchecked rows ride along.
+    !held.length && storageRefused ? 5 : 1,
+    held.some((p) => receipts.get(p.eventId)?.claimedAt) ? await ingestRecoveryRetryAfter(projectId) : 0,
+    ...held.map((p) => {
       const receipt = receipts.get(p.eventId);
       if (!receipt) return 1;
       const settlesAt = receipt.claimedAt
@@ -327,5 +380,13 @@ async function pendingError(
       return Math.ceil((settlesAt - now) / 1000);
     }),
   );
-  return new ApiError(503, 'ingest_pending', message, details, retryAfter);
+  return new ApiError(
+    503,
+    code,
+    limited
+      ? 'Some events need a retry; listed indices are unresolved. Send smaller batches if isolation repeatedly reaches its limit.'
+      : 'Some events need a retry; listed indices are unresolved.',
+    details,
+    retryAfter,
+  );
 }

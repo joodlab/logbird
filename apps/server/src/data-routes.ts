@@ -39,6 +39,16 @@ const doc = (summary: string, schema: z.ZodType, status = 200, security = 'sessi
             description: 'Single event or batch. Gzip supported; 1000 events, 5 MiB decoded body, 256 KiB per event.',
             content: { 'application/json': { schema: ingestRequestSchema, example: { action: 'document.updated' } } },
           },
+          parameters: [
+            {
+              name: s.LOGBIRD_RETRY_HEADER,
+              in: 'header',
+              required: false,
+              description:
+                'Send `subset` if the client resends only unsettled events: events left unchecked after parse failures then come back as retryable 503 ingest_pending instead of terminal unverified_after_parse_failure rejections.',
+              schema: { type: 'string', enum: [s.LOGBIRD_RETRY_SUBSET] },
+            },
+          ],
           responses: { [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } } },
         },
         security,
@@ -98,7 +108,15 @@ export const publicRoutes = new Hono<AppEnv>()
     publicQueryLanguage,
     doc('Ingest events', s.ingestResponseSchema, 202, 'ingestKey'),
     async (c) =>
-      c.json(await ingest(c.get('project').id, await readIngestBody(c.req.raw), c.req.header('x-logbird-sdk') ?? c.req.header('user-agent')), 202),
+      c.json(
+        await ingest(
+          c.get('project').id,
+          await readIngestBody(c.req.raw),
+          c.req.header('x-logbird-sdk') ?? c.req.header('user-agent'),
+          c.req.header(s.LOGBIRD_RETRY_HEADER) === s.LOGBIRD_RETRY_SUBSET,
+        ),
+        202,
+      ),
   )
   .get(
     '/events',
