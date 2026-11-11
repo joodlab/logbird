@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "pnpm with-env vitest run",
     "generate": "pnpm with-env prisma generate",
     "setup": "pnpm generate",
     "build": "tsdown",
