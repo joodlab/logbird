@@ -451,13 +451,18 @@ it('returns a retryable error when targeted expiry fails before a claim', async 
   expect(await f.count()).toBe(1);
 });
 
-it('returns HTTP 503 and Retry-After when releaseClaims deleteMany gets a model-query cancellation', async () => {
+it.each([
+  ['classification fails before any outcome', 'classify'],
+  ['nothing is left to insert', 'settled'],
+] as const)('handles a model-query cancellation in releaseClaims deleteMany when %s', async (_label, site) => {
   const database = await import('@logbird/database');
   const originalClaim = database.claimIngestReceipts;
   const claim = vi.spyOn(database, 'claimIngestReceipts').mockImplementationOnce(async (...args) => {
     const owned = await originalClaim(...args);
-    // Reject classification before insert while retaining a real owned claim for releaseClaims.
-    return owned.map((receipt) => ({ ...receipt, fingerprint: 'unreadable:qa-release' }));
+    // Keep a real owned claim for releaseClaims, then either break classification or settle the row terminally.
+    return owned.map((receipt) =>
+      site === 'classify' ? { ...receipt, eventAt: new Date(Number.NaN) } : { ...receipt, fingerprint: 'unreadable:qa-release' },
+    );
   });
   const release = vi.spyOn(prisma.ingestReceipt, 'deleteMany').mockRejectedValueOnce(
     new PrismaClientKnownRequestError('fictional model-query cancellation', {
@@ -474,9 +479,18 @@ it('returns HTTP 503 and Retry-After when releaseClaims deleteMany gets a model-
   );
   try {
     const response = await f.post(original);
-    expect(response.status).toBe(503);
-    expect(response.headers.get('Retry-After')).toBe('1');
-    expect(await response.json()).toMatchObject({ error: { code: 'ingest_unavailable' } });
+    if (site === 'classify') {
+      // No outcome exists yet: the release failure is the retryable response itself.
+      expect(response.status).toBe(503);
+      expect(response.headers.get('Retry-After')).toBe('1');
+      expect(await response.json()).toMatchObject({ error: { code: 'ingest_unavailable' } });
+    } else {
+      // Nothing to insert: the row is already settled (terminally rejected), so the settled response stands and the
+      // held claim is left for recovery after its lease.
+      expect(response.status).toBe(202);
+      expect(await response.json()).toMatchObject({ accepted: 0, rejected: [{ index: 0, code: 'stored_event_unreadable' }] });
+      expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, eventId: original.id, confirmedAt: null } })).toBe(1);
+    }
     expect(release).toHaveBeenCalledWith({ where: { projectId: f.project, eventId: { in: [original.id] }, confirmedAt: null } });
     expect(await f.count()).toBe(0);
   } finally {
