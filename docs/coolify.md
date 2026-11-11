@@ -174,7 +174,10 @@ it runs `docker compose up`, and Compose recreates the service, stopping the old
 container before it starts the new one. So the old and new sites never write to the
 volume at the same time, and the site is briefly unavailable during a deploy. On the
 first deploy of day files, the old version's last submissions are in
-`/data/waitlist.jsonl`, which the cleanup trims record by record.
+`/data/waitlist.jsonl`, which the cleanup trims record by record. After a rollback to
+an image from before retention, delete `/data/waitlist.jsonl.legacy-until`: that
+older image appends to `/data/waitlist.jsonl` again, so the marker's date no longer
+bounds every line in it.
 
 To delete one person's submissions on request, run this in the container that
 serves the site:
@@ -190,12 +193,14 @@ and deletes nothing. Lines that aren't valid JSON
 are removed too when they contain the address; any others are counted, so check
 them by hand. It rewrites files new submissions may still go into. It shares a lock
 with the site's writers in that container, so it never loses a submission. Don't
-run it from another container. On failure it prints one of two messages:
+run it from another container. On failure it prints one of three messages:
 
 - "Nothing was deleted: …" when nothing changed.
+- "Some submissions for that address were removed, but not all: …" when some files
+  were rewritten and another failed. Fix the cause and run it again.
 - "The submissions were removed, but the result may not be on disk yet: …" when
-  files were already rewritten but flushing to disk failed. Check the disk and run
-  it again, which is safe.
+  every file was rewritten but flushing the last change to disk failed. Check the
+  disk and run it again, which is safe.
 
 Also delete the notification emails for that address from the team mailbox. Run it
 as the image's default `node` user, as above. If you do run it as root, the rewritten

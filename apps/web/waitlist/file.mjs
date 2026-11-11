@@ -400,6 +400,9 @@ async function pruneLegacy(path, now, months) {
       await rm(temporary, { force: true });
       throw error;
     }
+    // Make the rename itself durable: a marker lost to a power cut would be written again later, with a later date,
+    // and push back when undated lines expire. A failure here fails the run; the next run writes the marker again.
+    await syncDirectory(dirname(marker));
   }
   const undatedExpired = retentionExpiry(until, months) <= now;
   const result = await rewriteFile(
@@ -437,7 +440,8 @@ export async function forgetWaitlistEmail(file, email) {
   return withWaitlistLock(file, async (path) => {
     await removeLeftovers(path);
     const total = { kept: 0, removed: 0, unreadable: 0 };
-    for (const store of await storeFiles(path)) {
+    const stores = await storeFiles(path);
+    for (const [index, store] of stores.entries()) {
       let result;
       try {
         result = await rewriteFile(
@@ -451,8 +455,17 @@ export async function forgetWaitlistEmail(file, email) {
           (line) => line.toString('utf8').toLowerCase().includes(target),
         );
       } catch (error) {
-        // Files already rewritten stay changed: say so, even when this one failed before replacing anything.
-        throw total.removed && !error?.replaced ? afterChange(error) : error;
+        const changed = total.removed > 0 || Boolean(error?.replaced);
+        if (!changed) {
+          // Nothing was rewritten yet: nothing changed.
+          throw error;
+        }
+        if (error?.replaced && index === stores.length - 1) {
+          // Every file was processed; only flushing the last one is in doubt.
+          throw error;
+        }
+        // Some files were rewritten, but this one failed or later ones weren't reached: records may remain.
+        throw Object.assign(new Error(error?.message ?? String(error)), { replaced: true, partial: true, cause: error });
       }
       total.kept += result.kept;
       total.removed += result.removed;

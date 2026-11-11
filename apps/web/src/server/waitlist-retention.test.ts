@@ -456,13 +456,13 @@ it('waits while another process holds the lock, and gets it as soon as that proc
   expect(await emails()).toEqual(['after-crash@example.test']);
 }, 30_000);
 
-it.skipIf(process.platform === 'win32')('says when a failure came after the store had already changed', async () => {
+/** Runs `test` with a fresh copy of waitlist/file.mjs whose directory syncs fail with EIO, as on a failing disk. */
+async function withFailingDirectorySync(test: (fresh: typeof import('../../waitlist/file.mjs')) => Promise<void>) {
   vi.resetModules();
   vi.doMock('node:fs/promises', async (original) => {
     const real = (await original()) as typeof import('node:fs/promises');
     return {
       ...real,
-      // Opening a directory to flush the rename fails, as on a failing disk.
       open: (async (path: string, flags?: string, mode?: number) => {
         if (flags === 'r' && (await real.stat(path)).isDirectory()) {
           throw Object.assign(new Error('EIO: i/o error, fsync'), { code: 'EIO' });
@@ -472,16 +472,82 @@ it.skipIf(process.platform === 'win32')('says when a failure came after the stor
     };
   });
   try {
-    const fresh = await import('../../waitlist/file.mjs');
+    await test(await import('../../waitlist/file.mjs'));
+  } finally {
+    vi.doUnmock('node:fs/promises');
+    vi.resetModules();
+  }
+}
+
+it.skipIf(process.platform === 'win32')('says when a failure came after the store had already changed', async () => {
+  await withFailingDirectorySync(async (fresh) => {
     await fresh.appendWaitlistRecord(file, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
     await fresh.appendWaitlistRecord(file, record('keep-me@example.test', '2026-11-01T01:00:00.000Z'));
     await expect(fresh.forgetWaitlistEmail(file, 'forget-me@example.test')).rejects.toMatchObject({ replaced: true });
     // The deletion did happen; only its durability is in doubt.
     expect(await emails()).toEqual(['keep-me@example.test']);
-  } finally {
-    vi.doUnmock('node:fs/promises');
-    vi.resetModules();
+  });
+});
+
+it.skipIf(process.platform === 'win32')('fails the cleanup when the legacy cutoff marker cannot be made durable', async () => {
+  await writeFile(file, `${JSON.stringify({ email: 'undated@example.test', interest: 'cloud' })}\n`);
+  await withFailingDirectorySync(async (fresh) => {
+    // A marker that might not survive a power cut must not be relied on: the run fails and the next one tries again.
+    await expect(fresh.pruneWaitlist(file, at('2026-11-10T00:00:00.000Z'), 24)).rejects.toMatchObject({ code: 'EIO' });
+  });
+  expect(await readFile(file, 'utf8')).toContain('undated@example.test');
+});
+
+it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+  'reports a partial deletion when a later file fails after an earlier one was rewritten',
+  async () => {
+    const { chmod } = await import('node:fs/promises');
+    await appendWaitlistRecord(file, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
+    await appendWaitlistRecord(file, record('forget-me@example.test', '2026-11-02T00:00:00.000Z'));
+    const second = join(waitlistDays(file), '2026-11-02.jsonl');
+    await chmod(second, 0o000);
+    try {
+      await expect(forgetWaitlistEmail(file, 'forget-me@example.test')).rejects.toMatchObject({ partial: true, replaced: true });
+    } finally {
+      await chmod(second, 0o600);
+    }
+    // The first day was rewritten; the second still holds the record, so rerunning finishes the job.
+    expect(await forgetWaitlistEmail(file, 'forget-me@example.test')).toMatchObject({ removed: 1 });
+  },
+);
+
+it('the admin script follows a symlinked WAITLIST_FILE whose old single file the cleanup removed', async (context) => {
+  const target = join(dir, 'real', 'waitlist.jsonl');
+  const link = join(dir, 'link.jsonl');
+  await mkdir(join(dir, 'real'));
+  await writeFile(target, `${JSON.stringify(record('expired@example.test', '2020-01-01T00:00:00.000Z'))}\n`);
+  try {
+    await symlink(target, link, 'file');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+      context.skip();
+    }
+    throw error;
   }
+  await appendWaitlistRecord(link, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
+  // The cleanup empties and removes the old single file: the symlink now dangles, the day files remain.
+  await pruneWaitlist(link, at('2026-11-10T00:00:00.000Z'), 24);
+  await expect(stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+  const admin = fileURLToPath(new URL('../../waitlist/admin.mjs', import.meta.url));
+  const { stdout } = await promisify(execFile)(process.execPath, [admin, 'forget', 'forget-me@example.test'], {
+    env: { ...process.env, WAITLIST_FILE: link },
+  });
+  expect(stdout).toContain('Removed 1 submission(s)');
+  expect(await emails(target)).toEqual([]);
+});
+
+it('the admin script says when there is no store at WAITLIST_FILE, and deletes nothing', async () => {
+  const admin = fileURLToPath(new URL('../../waitlist/admin.mjs', import.meta.url));
+  await expect(
+    promisify(execFile)(process.execPath, [admin, 'forget', 'someone@example.test'], {
+      env: { ...process.env, WAITLIST_FILE: join(dir, 'nowhere.jsonl') },
+    }),
+  ).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('No form submissions store') });
 });
 
 it('the admin script deletes one address and prints counts only', async () => {
