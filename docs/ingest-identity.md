@@ -242,7 +242,8 @@ runs `compactIngestReceiptIndex`:
   existing Redis connection with a 24-hour TTL. Hourly jobs return and log
   `skipped_backoff` until it expires, avoiding repeated expensive copies. While backed
   off, each hourly run still drops an invalid copy a failed rebuild left behind (every
-  receipt write would otherwise keep maintaining it), but never builds a new one. Both Redis
+  receipt write would otherwise keep maintaining it), but never builds a new one. A
+  cleanup that times out while backed off is logged at info and doesn't renew the back-off. Both Redis
   hints have a one-second client deadline and stop waiting immediately on abort.
   A Redis error or stall does not disable compaction or block shutdown: a failed
   GET means no back-off, and a timed-out SET is logged. An aborted rebuild does

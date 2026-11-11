@@ -166,6 +166,20 @@ it('neither renews the back-off nor warns again for an undroppable copy while ba
   );
 });
 
+it.each(['57014', '55P03'])('keeps an active back-off quiet when its cleanup attempt times out (%s)', async (code) => {
+  for (let hour = 0; hour < 3; hour++) {
+    redis.get.mockResolvedValueOnce(String(Date.now()));
+    compact.mockRejectedValueOnce(Object.assign(new Error('qa cleanup timeout'), { code }));
+    await expect(runReceiptIndexCompaction(redis, key, 0, abort.signal)).resolves.toBeUndefined();
+  }
+  expect(compact).toHaveBeenCalledWith({ signal: abort.signal, cleanupOnly: true });
+  // Neither renewed (which would postpone rebuilding forever) nor reported as an hourly error.
+  expect(redis.set).not.toHaveBeenCalled();
+  expect(console.error).not.toHaveBeenCalled();
+  expect(console.log).toHaveBeenCalledTimes(3);
+  expect(console.log).toHaveBeenCalledWith(JSON.stringify({ level: 'info', event: 'ingest.receipt_index_cleanup_deferred', code }));
+});
+
 it('never writes a 24 h backoff for an aborted rebuild', async () => {
   compact.mockImplementationOnce(async () => {
     abort.abort();

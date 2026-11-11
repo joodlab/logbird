@@ -856,7 +856,9 @@ Reserve free disk for about the index's live size during an online rebuild. A
 57014 statement timeout or 55P03 lock timeout stores a timestamp in the existing
 Redis connection under `<BULLMQ_PREFIX>:ingest-receipt-index-compaction:backoff`
 with a 24-hour TTL. Hourly jobs log and return `skipped_backoff` until it expires; they
-still drop an invalid copy a failed rebuild left behind, but never build a new one.
+still drop an invalid copy a failed rebuild left behind, but never build a new one. A
+cleanup attempt that times out while backed off logs `ingest.receipt_index_cleanup_deferred`
+at info level and does not renew the back-off.
 Both Redis hints have a one-second client deadline and stop waiting immediately
 on abort. A Redis error or stall does not disable compaction or block shutdown:
 a failed GET means no back-off; a timed-out SET is logged. An aborted rebuild does

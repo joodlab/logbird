@@ -27,9 +27,10 @@ async function backoffHint<T>(operation: Promise<T>, signal: AbortSignal, comman
 /** Best effort, one attempt per hourly job; independent of recovery and fence lifting. */
 export async function runReceiptIndexCompaction(redis: Pick<Redis, 'get' | 'set'>, backoffKey: string, attemptsMade: number, signal: AbortSignal) {
   if (attemptsMade > 0 || signal.aborted) return;
+  let backedOff: string | null | undefined;
   try {
     // Redis is only a backoff hint: an outage must not disable maintenance.
-    const backedOff = await backoffHint(redis.get(backoffKey), signal, 'get');
+    backedOff = await backoffHint(redis.get(backoffKey), signal, 'get');
     if (signal.aborted) return;
     // While backed off, still drop an invalid copy a failed rebuild left behind (every receipt write maintains it).
     const result = await compactIngestReceiptIndex({ signal, cleanupOnly: Boolean(backedOff) });
@@ -50,7 +51,14 @@ export async function runReceiptIndexCompaction(redis: Pick<Redis, 'get' | 'set'
       console.info(JSON.stringify({ level: 'info', event: 'ingest.receipt_index_compaction_aborted' }));
       return;
     }
-    if (code === '57014' || code === '55P03') await backoffHint(redis.set(backoffKey, String(Date.now()), 'EX', BACKOFF_SECONDS), signal, 'set');
+    const timedOut = code === '57014' || code === '55P03';
+    if (timedOut && backedOff) {
+      // An hourly cleanup attempt that waits behind a long transaction is expected while backed off: don't renew the
+      // back-off (that would postpone rebuilding indefinitely) or report an error every hour.
+      console.log(JSON.stringify({ level: 'info', event: 'ingest.receipt_index_cleanup_deferred', code }));
+      return;
+    }
+    if (timedOut) await backoffHint(redis.set(backoffKey, String(Date.now()), 'EX', BACKOFF_SECONDS), signal, 'set');
     console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_compaction_failed', code }));
   }
 }
