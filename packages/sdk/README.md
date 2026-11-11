@@ -135,11 +135,9 @@ const beforeSend = event => event.action === 'health.checked' ? null : hide(even
 
 `signWebhook`, `verifyWebhook`, `generateWebhookSecret` and
 `WebhookVerificationError` are exported from `@logbird/sdk`. Signing and verification
-are async. Signing uses Web Crypto HMAC-SHA256. Verification uses Node's
-`timingSafeEqual` on equal-length signatures, or Web Crypto `subtle.verify` in
-browsers and edge runtimes. Node crypto is loaded lazily only in Node; there are
-no runtime dependencies. Browser bundlers must externalize the optional
-`node:crypto` import (Vite does this automatically).
+are async. Both use Web Crypto HMAC-SHA256 (`subtle.sign` and the constant-time
+`subtle.verify`), which Node 22+, browsers and edge runtimes all provide, so there are
+no runtime dependencies and no `node:crypto` import for a bundler to handle.
 
 Verify the **raw body** before parsing it. This Hono receiver returns the parsed
 public `AuditEvent` (the type in `@logbird/sdk/read`); verification authenticates

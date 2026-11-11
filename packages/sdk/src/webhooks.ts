@@ -108,20 +108,12 @@ export async function verifyWebhook(options: VerifyWebhookOptions): Promise<Audi
     if (signature?.length === 32) signatures.push(signature);
   }
   const message = new TextEncoder().encode(`${id}.${timestamp}.${payload}`);
-  // Lazy loading keeps Node crypto out of the SDK's import-time requirements.
-  // Browsers/edge use native Web Crypto verification instead.
-  const nodeCrypto = typeof process !== 'undefined' && process.versions?.node ? await import('node:crypto') : undefined;
+  // Web Crypto's HMAC verify compares in constant time and exists in Node 22+, browsers and edge runtimes alike, so
+  // the SDK needs no `node:crypto` import that a browser bundler would have to externalize.
   for (const key of keys) {
-    let matches: (signature: Uint8Array<ArrayBuffer>) => boolean | Promise<boolean>;
-    if (nodeCrypto) {
-      const expected = nodeCrypto.createHmac('sha256', key).update(message).digest();
-      matches = (signature) => signature.length === expected.length && nodeCrypto.timingSafeEqual(signature, expected);
-    } else {
-      const verificationKey = await importKey(key, 'verify');
-      matches = (signature) => crypto.subtle.verify('HMAC', verificationKey, signature, message);
-    }
+    const verificationKey = await importKey(key, 'verify');
     for (const signature of signatures) {
-      if (await matches(signature)) {
+      if (await crypto.subtle.verify('HMAC', verificationKey, signature, message)) {
         try {
           return JSON.parse(payload) as AuditEvent;
         } catch {
