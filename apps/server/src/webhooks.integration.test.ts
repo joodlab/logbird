@@ -132,16 +132,29 @@ it('rotates with default, zero and maximum overlap without extending already exp
     expect(decryptWebhookSecret(active[0].ciphertext, webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY))).toBe(next.secret);
     previous = active[0];
   }
-  // A later rotation caps every earlier expiry at its own window and never extends one.
+  // The secrets the zero-overlap rotation retired were deleted by the next one: only the 7-day one is still waiting.
   const before = await prisma.webhookSecret.findMany({ where: { endpointId: endpoint.id, expiresAt: { not: null } } });
-  const start = Date.now();
+  expect(before).toHaveLength(1);
+  // A later rotation caps every earlier expiry at its own window: exactly that window, neither later nor sooner.
+  let start = Date.now();
   await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', { overlapSeconds: 5 });
-  for (const old of before) {
-    const after = (await prisma.webhookSecret.findUniqueOrThrow({ where: { id: old.id } })).expiresAt?.getTime() ?? Number.NaN;
-    expect(after).toBeLessThanOrEqual(old.expiresAt?.getTime() ?? Number.NaN);
-    expect(after).toBeLessThanOrEqual(Date.now() + 5_000);
-    if ((old.expiresAt?.getTime() ?? 0) < start) expect(after).toBe(old.expiresAt?.getTime());
+  let end = Date.now();
+  const capped = await prisma.webhookSecret.findMany({ where: { endpointId: endpoint.id, expiresAt: { not: null } } });
+  expect(capped.map((row) => row.id)).toEqual(expect.arrayContaining([...before.map((row) => row.id), previous.id]));
+  for (const row of capped) {
+    expect(row.expiresAt?.getTime()).toBeGreaterThanOrEqual(start + 5000);
+    expect(row.expiresAt?.getTime()).toBeLessThanOrEqual(end + 5000);
   }
+  // A longer window never extends an expiry that's already sooner, and a secret still inside its window is kept.
+  start = Date.now();
+  await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', { overlapSeconds: 3600 });
+  end = Date.now();
+  for (const row of capped)
+    expect((await prisma.webhookSecret.findUniqueOrThrow({ where: { id: row.id } })).expiresAt?.getTime()).toBe(row.expiresAt?.getTime());
+  const latest = await prisma.webhookSecret.findMany({ where: { endpointId: endpoint.id, expiresAt: { gt: new Date(end + 5000) } } });
+  expect(latest).toHaveLength(1);
+  expect(latest[0]?.expiresAt?.getTime()).toBeGreaterThanOrEqual(start + 3_600_000);
+  expect(latest[0]?.expiresAt?.getTime()).toBeLessThanOrEqual(end + 3_600_000);
   for (const overlapSeconds of [-1, 604_801, 1.5])
     expect((await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', { overlapSeconds })).status).toBe(422);
 });
@@ -156,7 +169,7 @@ it('a zero-overlap rotation retires every earlier secret, including one still in
   expect((await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', { overlapSeconds: 0 })).status).toBe(200);
   for (const id of [first.id, second.id]) {
     expect((await prisma.webhookSecret.findUniqueOrThrow({ where: { id } })).expiresAt?.getTime()).toBeLessThanOrEqual(Date.now());
-    expect((await prisma.webhookSecret.findUniqueOrThrow({ where: { id } })).expiresAt?.getTime()).toBeGreaterThanOrEqual(now - 1_000);
+    expect((await prisma.webhookSecret.findUniqueOrThrow({ where: { id } })).expiresAt?.getTime()).toBeGreaterThanOrEqual(now - 1000);
   }
   expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id, expiresAt: null } })).toBe(1);
 });
@@ -166,14 +179,12 @@ it.each(['owner', 'admin'])('%s can manage endpoints', async (role) => {
   expect((await request(`${base()}/${endpoint.id}/rotate-secret`, 'POST', {}, role)).status).toBe(200);
   expect((await request(`${base()}/${endpoint.id}`, 'DELETE', undefined, role)).status).toBe(204);
 });
-it.each(['member', 'viewer', 'unknown'])('%s reads without secrets and cannot manage endpoints', async (role) => {
+// A stored URL can itself be a credential (a Slack or Zapier hook path), so reading endpoints needs owner/admin too.
+it.each(['member', 'viewer', 'unknown'])('%s can neither read nor manage endpoints', async (role) => {
   const { endpoint } = await create();
-  for (const path of [base(), `${base()}/${endpoint.id}`]) {
-    const response = await request(path, 'GET', undefined, role);
-    expect(response.status).toBe(200);
-    expect(await response.text()).not.toMatch(/secret|ciphertext|whsec_/i);
-  }
   for (const [path, method, body] of [
+    [base(), 'GET', undefined],
+    [`${base()}/${endpoint.id}`, 'GET', undefined],
     [base(), 'POST', { url: receiver }],
     [`${base()}/${endpoint.id}`, 'PATCH', { enabled: false }],
     [`${base()}/${endpoint.id}`, 'DELETE', undefined],
@@ -224,9 +235,9 @@ it('writes safe, atomic own-audit events and records manual state changes', asyn
     'enabled',
   ]);
   expect(rows.map((r) => r.payload)).toContainEqual(
-    expect.objectContaining({ action: 'webhook.disabled', metadata: { webhook: { url: 'https://8.8.8.8/qa-events', reason: 'manual' } } }),
+    expect.objectContaining({ action: 'webhook.disabled', metadata: { webhook: { url: 'https://8.8.8.8', reason: 'manual' } } }),
   );
-  expect(JSON.stringify(rows)).not.toMatch(/qa-private-token|whsec_|ciphertext/);
+  expect(JSON.stringify(rows)).not.toMatch(/qa-events|qa-private-token|whsec_|ciphertext/);
   expect(JSON.stringify(rows)).not.toContain(secret);
 });
 it('rolls back create, update, rotation and deletion when audit storage fails', async () => {

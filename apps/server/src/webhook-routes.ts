@@ -18,6 +18,7 @@ import { env } from './env';
 import { ApiError } from './errors';
 import { audit } from './ingest';
 import { requireProjectAccess, requireSession } from './middlewares';
+import { requireRole } from './middlewares/require-role';
 import { doc, routeDoc } from './openapi';
 import type { AppEnv } from './types';
 
@@ -59,12 +60,13 @@ const webhookBody = (result: { success: boolean; error?: readonly { path?: reado
     throw new ApiError(400, 'webhook_url_not_allowed', 'Webhook URL must be a string of 1–2048 characters.');
   invalidBody(result);
 };
-/** Serialize endpoint mutations and the project limit; keep DNS outside the transaction. */
+/** Serialize endpoint mutations and the project limit; keep DNS outside the transaction. NO KEY UPDATE still serializes these
+ * transactions but doesn't block the FOR KEY SHARE that foreign-key inserts into the project's other child tables take. */
 async function lockedProject<T>(c: Context<AppEnv>, work: (tx: Prisma.TransactionClient) => Promise<T>) {
   return prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<
       { id: string }[]
-    >`SELECT id FROM "Project" WHERE id=${c.get('project').id} AND "organizationId"=${c.get('activeOrganizationId')} FOR UPDATE`;
+    >`SELECT id FROM "Project" WHERE id=${c.get('project').id} AND "organizationId"=${c.get('activeOrganizationId')} FOR NO KEY UPDATE`;
     if (!rows.length) throw new ApiError(404, 'not_found', 'Project not found.');
     return work(tx);
   });
@@ -88,7 +90,8 @@ function record(c: Context<AppEnv>, tx: Prisma.TransactionClient, action: string
         { type: 'webhook', id: endpoint.id },
         { type: 'project', id: project.id, name: project.name },
       ],
-      metadata: { webhook: { url: `${url.origin}${url.pathname}`, ...(reason ? { reason } : {}) } },
+      // Origin only: receivers such as Slack or Zapier carry their credential in the path or query.
+      metadata: { webhook: { url: url.origin, ...(reason ? { reason } : {}) } },
     },
     tx,
   );
@@ -98,7 +101,9 @@ export const webhookRoutes = new Hono<AppEnv>()
   .use('*', requireSession)
   .use('/projects/:projectId/webhooks', requireProjectAccess)
   .use('/projects/:projectId/webhooks/*', requireProjectAccess)
+  // Reads are owner/admin only too: a stored URL can itself be a credential (a Slack or Zapier hook path).
   .get(base, doc('List webhook endpoints (no secrets)', listWebhooksResponseSchema), async (c) => {
+    await requireRole(c);
     const endpoints = await prisma.webhookEndpoint.findMany({
       where: { projectId: c.get('project').id },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -138,10 +143,15 @@ export const webhookRoutes = new Hono<AppEnv>()
       return c.json({ endpoint: serialize(endpoint), secret }, 201);
     },
   )
-  .get(`${base}/:id`, doc('Get webhook endpoint (no secrets)', webhookEndpointSchema), async (c) => c.json(serialize(await findEndpoint(c))))
+  .get(`${base}/:id`, doc('Get webhook endpoint (no secrets)', webhookEndpointSchema), async (c) => {
+    await requireRole(c);
+    return c.json(serialize(await findEndpoint(c)));
+  })
   .patch(`${base}/:id`, doc('Update webhook endpoint', webhookEndpointSchema), validator('json', updateWebhookSchema, webhookBody), async (c) => {
     const input = c.req.valid('json');
     if (input.filterQuery !== undefined) compileQuery(input.filterQuery);
+    // A missing endpoint is a 404 before any DNS lookup; the locked re-read below still decides.
+    if (input.url !== undefined) await findEndpoint(c);
     const url = input.url === undefined ? undefined : await allowedUrl(input.url);
     const endpoint = await lockedProject(c, async (tx) => {
       const before = await findEndpoint(c, tx);
@@ -188,7 +198,10 @@ export const webhookRoutes = new Hono<AppEnv>()
         // Every earlier secret stops working by the end of this overlap: the current one and any still inside an earlier
         // rotation's window. An expiry already sooner is left alone, so a rotation never extends a secret's life, and a
         // zero overlap retires every earlier secret at once.
-        const until = new Date(Date.now() + overlapSeconds * 1000);
+        const now = new Date();
+        const until = new Date(now.getTime() + overlapSeconds * 1000);
+        // Secrets past their window can never sign again: drop them so rotations don't accumulate rows.
+        await tx.webhookSecret.deleteMany({ where: { endpointId: endpoint.id, expiresAt: { lte: now } } });
         await tx.webhookSecret.updateMany({
           where: { endpointId: endpoint.id, OR: [{ expiresAt: null }, { expiresAt: { gt: until } }] },
           data: { expiresAt: until },

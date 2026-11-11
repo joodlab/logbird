@@ -104,6 +104,7 @@ it.each([
   'https://2130706433',
   'https://0x7f000001',
   'https://[::ffff:169.254.169.254]',
+  'https://receiver.example.test:0/events',
   `https://receiver.example.test/${'a'.repeat(2048)}`,
 ])('rejects disallowed URL %s', async (url) => {
   await expect(validateWebhookUrl(url, false, publicLookup)).rejects.toMatchObject({ code: 'webhook_url_not_allowed' });
@@ -127,4 +128,21 @@ it('fails closed on mixed DNS answers, no answers and DNS failure', async () => 
       throw new Error('DNS unavailable');
     }),
   ).rejects.toBeInstanceOf(WebhookUrlError);
+});
+it('gives up on a lookup that never answers, and uses at most two lookups at once', async () => {
+  const never: { settle: () => void }[] = [];
+  const hanging = vi.fn(
+    () => new Promise<{ address: string; family: number }[]>((resolve) => never.push({ settle: () => resolve([{ address: '8.8.8.8', family: 4 }]) })),
+  );
+  const timedOut = { message: 'Webhook hostname lookup timed out; try again.' };
+  // Two hung lookups take both slots and time out; a third waits for a slot, then times out without starting a lookup.
+  const attempts = await Promise.allSettled([1, 2, 3].map(() => validateWebhookUrl('https://receiver.example.test', false, hanging, 50)));
+  expect(attempts).toEqual([1, 2, 3].map(() => ({ status: 'rejected', reason: expect.objectContaining(timedOut) })));
+  expect(hanging).toHaveBeenCalledTimes(2);
+  // The slots stay taken until the hung lookups really end, because their pool threads are still busy.
+  await expect(validateWebhookUrl('https://receiver.example.test', false, publicLookup, 50)).rejects.toMatchObject(timedOut);
+  for (const lookup of never) lookup.settle();
+  await vi.waitFor(async () =>
+    expect(await validateWebhookUrl('https://receiver.example.test/', false, publicLookup, 50)).toBe('https://receiver.example.test/'),
+  );
 });

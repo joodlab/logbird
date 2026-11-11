@@ -376,7 +376,8 @@ whose email matches the invitation.
 
 `GET/POST /api/projects/:projectId/webhooks`, `GET/PATCH/DELETE .../webhooks/:id`,
 and `POST .../webhooks/:id/rotate-secret` manage up to 10 endpoints per project.
-Owners/admins manage; workspace members can list/read without secrets. Create
+Only owners/admins can list, read or manage endpoints: a stored URL can itself be a
+credential (Slack- or Zapier-style hook paths). Create
 returns `{ endpoint, secret }`, rotate returns `{ secret }`, both once only with
 `Cache-Control: no-store`. The secret is encrypted with AES-256-GCM, with an optional
 stable `WEBHOOK_SECRET_KEY` or HKDF-SHA256 from `BETTER_AUTH_SECRET`. See
@@ -386,8 +387,10 @@ Endpoint configuration includes URL, description, enabled state/disabled reason,
 Logbird `filterQuery`, and optional `{ tenantId?, target?: { type, id } }` scope.
 PATCH scope replaces the whole scope (`null` clears it); absent fields preserve
 stored values. URLs require HTTPS unless `WEBHOOKS_ALLOW_HTTP=true`; every resolved
-address must be public unicast. Rejections return 400 `webhook_url_not_allowed`.
-Rotation overlap defaults to 86400 seconds, with integer bounds 0?604800. This API
+address must be public unicast, and the save-time lookup gives up after 3 seconds.
+Rejections return 400 `webhook_url_not_allowed`. A scope needs a `tenantId` or a
+`target`; `{}` is rejected (use `null` for no scope).
+Rotation overlap defaults to 86400 seconds, with integer bounds 0–604800; secrets already past their window are deleted then. This API
 stores configuration only; delivery, cursors and delivery logs arrive separately.
 
 ### 5.1 Query language (`q`)

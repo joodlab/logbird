@@ -50,8 +50,62 @@ export class WebhookUrlError extends Error {
 }
 export type WebhookLookup = (hostname: string, options: { all: true }) => Promise<{ address: string; family: number }[]>;
 
+/** `dns.lookup` runs getaddrinfo on libuv's small thread pool (4 threads by default), shared with fs, crypto and password
+ * hashing. A hostname whose nameserver never answers holds a thread for the resolver's own timeout, so save-time lookups
+ * get a deadline and at most two pool threads per process; requests over that wait for a slot within the same deadline. */
+export const WEBHOOK_LOOKUP_TIMEOUT_MS = 3000;
+const MAX_CONCURRENT_LOOKUPS = 2;
+let activeLookups = 0;
+const lookupWaiters: (() => void)[] = [];
+function releaseLookup() {
+  // The slot passes straight to the next waiter, if any.
+  const next = lookupWaiters.shift();
+  if (next) next();
+  else activeLookups--;
+}
+function acquireLookup(ms: number) {
+  if (activeLookups < MAX_CONCURRENT_LOOKUPS) {
+    activeLookups++;
+    return Promise.resolve(true);
+  }
+  return new Promise<boolean>((resolve) => {
+    const grant = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      lookupWaiters.splice(lookupWaiters.indexOf(grant), 1);
+      resolve(false);
+    }, ms);
+    lookupWaiters.push(grant);
+  });
+}
+async function boundedLookup(resolve: WebhookLookup, hostname: string, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  if (!(await acquireLookup(timeoutMs))) throw new WebhookUrlError('Webhook hostname lookup timed out; try again.');
+  // The slot is held until the lookup really settles, not just until the deadline: its pool thread is busy until then.
+  const pending = Promise.resolve().then(() => resolve(hostname, { all: true }));
+  pending.then(releaseLookup, releaseLookup);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new WebhookUrlError('Webhook hostname lookup timed out; try again.')), Math.max(0, deadline - Date.now()));
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Save-time check only. Senders must resolve and pin an allowed address again at connect time. */
-export async function validateWebhookUrl(raw: string, allowHttp = false, resolve: WebhookLookup = lookup): Promise<string> {
+export async function validateWebhookUrl(
+  raw: string,
+  allowHttp = false,
+  resolve: WebhookLookup = lookup,
+  timeoutMs = WEBHOOK_LOOKUP_TIMEOUT_MS,
+): Promise<string> {
   const reject = (reason: string): never => {
     throw new WebhookUrlError(reason);
   };
@@ -65,14 +119,16 @@ export async function validateWebhookUrl(raw: string, allowHttp = false, resolve
   if (url.protocol !== 'https:' && !(allowHttp && url.protocol === 'http:')) reject('Webhook URL must use HTTPS.');
   if (url.username || url.password) reject('Webhook URL must not contain credentials.');
   if (raw.includes('#')) reject('Webhook URL must not contain a fragment.');
+  if (url.port === '0') reject('Webhook URL port must be between 1 and 65535.');
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
   if (isIP(hostname)) {
     if (!isAllowedWebhookAddress(hostname)) reject('Webhook URL address is not public unicast.');
   } else {
     let addresses: Awaited<ReturnType<WebhookLookup>>;
     try {
-      addresses = await resolve(hostname, { all: true });
-    } catch {
+      addresses = await boundedLookup(resolve, hostname, timeoutMs);
+    } catch (error) {
+      if (error instanceof WebhookUrlError) throw error;
       return reject('Webhook hostname could not be resolved.');
     }
     if (!addresses.length || addresses.some(({ address }) => !isAllowedWebhookAddress(address)))

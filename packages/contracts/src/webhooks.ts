@@ -9,7 +9,8 @@ export const webhookScopeSchema = z
       .strict()
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine((scope) => scope.tenantId !== undefined || scope.target !== undefined, 'A scope needs a tenantId or a target; use null for none.');
 const webhookFields = {
   url: z.string().min(1).max(2048),
   description: z.string().max(1000).nullable().optional(),
