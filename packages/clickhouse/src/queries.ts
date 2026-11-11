@@ -621,9 +621,9 @@ export const DELETE_ATTEMPTS = 3;
  * one containing OR) can reach another project. Every statement is tagged as `projectId`'s maintenance so project
  * deletion can stop it.
  *
- * Scoped deletes (a filter) require the project's exclusive lock, so no new matching rows can arrive between attempts:
- * a retry only re-applies a mutation that ClickHouse skipped (ClickHouse#124167). A whole-project purge by a script
- * with no live writers needs no lock; with a live writer it can only fail closed after the retries.
+ * Any caller whose project can have live writers must hold the project's exclusive lock, so no new matching rows can
+ * arrive between attempts: a retry only re-applies a mutation that ClickHouse skipped (ClickHouse#124167). Only a
+ * whole-project purge with no writers (e.g. a test or script fixture) needs none.
  */
 export async function deleteAndVerify(client: ClickHouseClient, projectId: string, table: string, filter = '', params: Params = {}) {
   if ('p' in params) throw new Error('deleteAndVerify binds p to projectId itself; do not pass params.p');

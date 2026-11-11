@@ -526,7 +526,7 @@ docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_ST
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.event_index_stale_pointers"'
 ```
 
-Then, separately (a match here triggers the check below; it does not block by itself):
+Then, separately (informational: a match does not block, and the version check below runs either way):
 
 ```sh
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.delete_retry"'
@@ -538,29 +538,39 @@ zero. A running receipt needs more time; a failure or guard log blocks cutover. 
 `clickhouse.event_index_stale_pointers`: stale identity pointers remain and need investigation
 (ineffective normalization is one possible cause, repeated concurrent-mutation skips another).
 A `clickhouse.delete_retry` during the gate does not block by itself, because a retry can
-also succeed on a restored part that only slightly outranks the new mutations. In a
-non-replicated MergeTree, inserts and mutations share one block counter, so compare only
-*mutated* parts (`data_version > max_block_number`; a plain inserted part's `data_version`
-is its first block and is naturally newer) with the newest mutation created during the gate:
+also succeed on a restored part that only slightly outranks the new mutations. Whether or not
+it logged, run the version check below before cutover. In a non-replicated MergeTree, inserts
+and mutations share one block counter, so it compares only *mutated* parts
+(`data_version > max_block_number`; a plain inserted part's `data_version` is its first block
+and is naturally newer) with the newest mutation each table received during the gate. Tables
+without a gate mutation are skipped.
 
-```sql
-SELECT p.table, max(p.data_version) AS mutated_part_version,
-       (SELECT max(toUInt64(extract(m.mutation_id, '(\d+)'))) FROM system.mutations m
-        WHERE m.database = 'logbird' AND m.table = p.table AND m.create_time >= '$GATE_STARTED') AS newest_gate_mutation
-FROM system.parts p
-WHERE p.database = 'logbird' AND p.active AND p.data_version > p.max_block_number
-GROUP BY p.table;
+```sh
+cat > .tmp/backups/mutation-versions.sql <<SQL
+SELECT m.table,
+       maxOrNull(p.data_version) AS mutated_part_version,
+       max(toUInt64(extract(m.mutation_id, '(\d+)'))) AS newest_gate_mutation,
+       mutated_part_version > newest_gate_mutation AS blocks_cutover
+FROM system.mutations m
+LEFT JOIN (SELECT table, data_version FROM system.parts
+           WHERE database = 'logbird' AND active AND data_version > max_block_number) p ON p.table = m.table
+WHERE m.database = 'logbird' AND m.create_time >= parseDateTimeBestEffort('$GATE_STARTED')
+GROUP BY m.table
+ORDER BY m.table
+SETTINGS join_use_nulls = 1
+SQL
+docker compose --env-file .env.restore -p logbird-restore cp .tmp/backups/mutation-versions.sql clickhouse:/tmp/mutation-versions.sql
+docker compose --env-file .env.restore -p logbird-restore exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --queries-file /tmp/mutation-versions.sql'
 ```
 
-Block cutover and normalize if `mutated_part_version` is higher than `newest_gate_mutation`
-for any table that logged a retry.
+Block cutover and normalize if any row has `blocks_cutover = 1`.
 Inspect `retention.completed` too; a queue job completion alone does not establish
 every project receipt. Repeat the receipt query until the cycle ends.
 
 The blocking grep checks pass with **no output**; grep exits 1 for no match. If using
 `set -e`, run them in an `if` condition or handle that expected exit explicitly.
-Matching failure/guard lines block cutover (the `delete_retry` grep instead triggers the
-version check above); a log-read error is not a clean pass.
+Matching failure/guard lines block cutover (a `delete_retry` match is informational; the
+version check above decides); a log-read error is not a clean pass.
 
 Save this SQL as `.tmp/backups/logical-totals.sql`:
 

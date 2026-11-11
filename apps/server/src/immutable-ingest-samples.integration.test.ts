@@ -1,4 +1,4 @@
-﻿import { getEvent, insertEvents, read } from '@logbird/clickhouse';
+﻿import { deleteAndVerify, getEvent, insertEvents, read } from '@logbird/clickhouse';
 import { prisma, pruneIngestReceipts, withProjectLock } from '@logbird/database';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clickhouse } from './clickhouse';
@@ -50,11 +50,8 @@ it('upgraded legacy sample/customer collisions retain and rebuild the customer f
   expect((await f.post(customer)).status).toBe(202);
   const sample = f.row({ id: customer.id, action: 'old.sample', source: 'logbird-sample', occurredAt: new Date().toISOString() });
   await insertEvents(clickhouse, [sample]);
-  await clickhouse.command({
-    query: 'DELETE FROM event_ids WHERE project_id={p:String}',
-    query_params: { p: f.project },
-    clickhouse_settings: { mutations_sync: '2', lightweight_deletes_sync: '2' },
-  });
+  // Verified: a skipped mutation on the shared server must not leave the old pointers behind.
+  await deleteAndVerify(clickhouse, f.project, 'event_ids');
   await clickhouse.insert({
     table: 'event_ids',
     format: 'JSONEachRow',

@@ -14,9 +14,11 @@ const TABLE = 'qa95_mutation_race';
 const CONCURRENCY = 16;
 const ROWS_PER_PROJECT = 200;
 const MAX_PENDING_MUTATIONS = 100;
-// Absolute time budget inside the 330 s test timeout, with every statement capped at 10 s (client and server side):
-// - no round (and no DELETE burst) starts after 150 s; the worst round is 2 guard queries + insert + 3 x (DELETE +
-//   probe) + verify, each at the cap: 2x10 + 10 + 3x(10+10) + backoff + 10 ~ 100 s, so the workload ends by ~250 s;
+// Absolute time budget inside the 330 s test timeout. The pool has one socket per concurrent DELETE (no queueing), and
+// every statement is bounded by a 10 s socket-idle timeout (a mutations_sync wait sends nothing, so it is bounded too)
+// plus max_execution_time for query execution:
+// - the deadline is rechecked right before each DELETE burst, so no burst starts after 150 s; a burst is at most
+//   3 x (DELETE + probe) + 0.15 s backoff = ~60 s, plus a 10 s verify, so the workload ends by ~220 s;
 // - cleanup polls pending mutations only until 275 s, then DROP (<= 10 s) and close still finish before 330 s.
 const STATEMENT_SECONDS = 10;
 const ROUND_START_DEADLINE_MS = 150_000;
@@ -36,6 +38,8 @@ it.runIf(process.env.LOGBIRD_MUTATION_RACE_STRESS === '1' && process.env.CLICKHO
       username: process.env.CLICKHOUSE_USER,
       password: process.env.CLICKHOUSE_PASSWORD,
       request_timeout: STATEMENT_SECONDS * 1000,
+      // One socket per concurrent DELETE: the @clickhouse/client default pool (10) would queue the burst.
+      max_open_connections: CONCURRENCY,
       clickhouse_settings: { max_execution_time: STATEMENT_SECONDS },
     });
     const run = randomUUID().slice(0, 8);
