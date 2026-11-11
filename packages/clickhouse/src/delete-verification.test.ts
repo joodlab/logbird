@@ -108,6 +108,31 @@ it('still propagates storage errors from the stale-pointer delete', async () => 
   await expect(
     repairEventIndex({ command, query: vi.fn(), insert } as unknown as ClickHouseClient, 'qa95-index', ['absent'], new Map()),
   ).rejects.toBe(failure);
+  expect(insert).not.toHaveBeenCalled();
+});
+
+it('deletes stale pointers once without a warning when the delete takes effect', async () => {
+  const command = vi.fn().mockResolvedValue({});
+  const query = vi.fn().mockResolvedValue({ json: async () => [{ n: 0 }] });
+  const insert = vi.fn();
+  await settle(repairEventIndex({ command, query, insert } as unknown as ClickHouseClient, 'qa95-index', ['absent'], new Map()));
+  expect(insert).not.toHaveBeenCalled();
+  expect(command).toHaveBeenCalledTimes(1);
+  expect(console.warn).not.toHaveBeenCalled();
+});
+
+it.each([
+  { label: 'a different params.p', projectId: 'qa95-a', predicate: 'project_id={p:String}', params: { p: 'qa95-b' } },
+  { label: 'a missing params.p', projectId: 'qa95-a', predicate: 'project_id={p:String}', params: {} },
+  { label: 'an unscoped predicate', projectId: 'qa95-a', predicate: 'event_id={id:String}', params: { p: 'qa95-a', id: 'x' } },
+])('rejects $label before any statement', async ({ projectId, predicate, params }) => {
+  const command = vi.fn();
+  const query = vi.fn();
+  await expect(deleteAndVerify({ command, query } as unknown as ClickHouseClient, projectId, 'events', predicate, params)).rejects.toThrow(
+    /project_id=\{p:String\}/,
+  );
+  expect(command).not.toHaveBeenCalled();
+  expect(query).not.toHaveBeenCalled();
 });
 
 it.each(['events_by_minute', 'entities', 'attribute_keys'])('refuses to rebuild when completed deletes leave rows in %s', async (table) => {

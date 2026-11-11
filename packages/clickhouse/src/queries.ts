@@ -624,7 +624,9 @@ export const DELETE_ATTEMPTS = 3;
  * rows written after the first attempt.
  */
 export async function deleteAndVerify(client: ClickHouseClient, projectId: string, table: string, predicate: string, params: Params) {
-  if ('p' in params && params.p !== projectId) throw new Error('deleteAndVerify: params.p must match projectId');
+  // Project-scoped by construction: the predicate starts with the project filter, bound to this project id.
+  if (params.p !== projectId || !predicate.startsWith('project_id={p:String}'))
+    throw new Error('deleteAndVerify: predicate must start with project_id={p:String} and params.p must equal projectId');
   const ch = projectMaintenance(client, projectId);
   for (let attempt = 1; attempt <= DELETE_ATTEMPTS; attempt++) {
     await ch.command({

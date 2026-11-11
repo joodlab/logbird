@@ -18,7 +18,8 @@
  * run if the plan would touch them, and it never changes retention. ClickHouse deletes are always project-scoped and
  * run under the project lock: whole projects go through `purgeProject` (the same code retention and project deletion
  * use); activity rows in kept workspaces use the same verified delete (`deleteAndVerify`) on raw events only. That
- * targeted delete keeps the rows' event_ids pointers and ingest receipts (harmless: lookups fall back to raw rows) and
+ * targeted delete keeps the rows' event_ids pointers (harmless: lookups fall back to raw rows) and ingest receipts
+ * (harmless: these random-id workspace-activity events are never resent) and
  * does not rebuild the workspace's rollups, so entity/attribute counts there can stay slightly high.
  */
 import { parseArgs } from 'node:util';

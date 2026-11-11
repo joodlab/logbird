@@ -425,8 +425,8 @@ Transient [concurrent-mutation skips](https://github.com/ClickHouse/ClickHouse/p
 are retried automatically with a fresh DELETE, up to three total attempts (logged as
 `clickhouse.delete_retry`). If the error still appears, retry the operation (retention
 runs again on its own). Only a failure that persists on a natively restored database
-needs the normalization procedure below. Sample-data removal now fails closed with the
-same error instead of reporting success, and ingest recovery logs
+needs the normalization procedure below. Sample-data removal fails closed with the same
+error, and ingest recovery or sample-data removal logs
 `clickhouse.event_index_stale_pointers` when it cannot delete stale identity pointers.
 The pinned 26.9 line has no upstream fix for that race; ClickHouse 26.10 and later include it.
 Moving the pin is tracked in [#147](https://github.com/joodlab/logbird/issues/147).
@@ -524,13 +524,18 @@ docker compose --env-file .env.restore -p logbird-restore exec -T postgres sh -c
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep 'retention.run_failed'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep '"errorCode":"LOGBIRD_DELETE_INCOMPLETE"'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.event_index_stale_pointers"'
+docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.delete_retry"'
 ```
 
 The receipt table is Prisma's `"RetentionRun"`. Wait until each restored project's
 latest run is `completed`, started after GATE_STARTED, and the missing count is
 zero. A running receipt needs more time; a failure or guard log blocks cutover. So does
-`clickhouse.event_index_stale_pointers`: ingest recovery could not delete identity pointers,
-which on restored data means normalization did not take effect.
+`clickhouse.event_index_stale_pointers`: stale identity pointers remain and need investigation
+(ineffective normalization is one possible cause, repeated concurrent-mutation skips another).
+A `clickhouse.delete_retry` during the gate does not block by itself, because a retry can
+also succeed on a restored part that only slightly outranks the new mutations. Before cutover,
+compare the affected tables' maximum `data_version` in `system.parts` with the latest
+`system.mutations` entry, and normalize if restored parts still outrank new mutations.
 Inspect `retention.completed` too; a queue job completion alone does not establish
 every project receipt. Repeat the receipt query until the cycle ends.
 
