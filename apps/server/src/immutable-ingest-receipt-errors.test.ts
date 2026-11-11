@@ -184,14 +184,14 @@ it.each(['claim', 'classify', 'empty', 'insert'] as const)('maps a failed claim 
   }
   const batch = site === 'claim' ? [...candidates, { ...candidates[0], row: { ...candidates[0]?.row, event_id: 'qa-competitor' } }] : candidates;
   const error = await insertImmutableEvents('qa-project', 'qa-org', batch as IngestCandidate[]).catch((error: unknown) => error);
-  expect(error).toMatchObject({ status: 503, code: 'ingest_unavailable', retryAfter: 1 });
+  // After parse isolation (#150) has an outcome, a failed release keeps it: the row whose claim stays held is pending,
+  // with a lease-aware Retry-After. Before any outcome exists, the release failure is the retryable 503 itself.
+  if (site === 'insert') expect(error).toMatchObject({ status: 503, code: 'ingest_pending', retryAfter: 90, details: { indices: [3] } });
+  else expect(error).toMatchObject({ status: 503, code: 'ingest_unavailable', retryAfter: 1 });
   expect(fake.release).toHaveBeenCalledTimes(1);
   expect(console.error).toHaveBeenCalledWith(
     expect.stringContaining('"event":"ingest.claim_release_failed","name":"PrismaClientKnownRequestError","code":"P2024"'),
   );
-  // With parse isolation (#150) a definite storage refusal is an isolation outcome; the refused row's claim is released
-  // afterwards, and a failed release is the same retryable 503.
-  if (site === 'insert') expect((error as Error).message).toBe('Event identity claims could not be released. Retry this batch.');
 });
 
 it('preserves the original ApiError when classification and release both fail and logs both codes', async () => {

@@ -148,6 +148,24 @@ it.each(['get', 'set'] as const)('returns promptly when shutdown interrupts a ne
   expect(vi.getTimerCount()).toBe(0);
 });
 
+it('neither renews the back-off nor warns again for an undroppable copy while backed off', async () => {
+  redis.get.mockResolvedValueOnce(String(Date.now()));
+  compact.mockResolvedValueOnce({ action: 'skipped_invalid_copy', indexPages: 81_920, droppedInvalid: 0 });
+  await runReceiptIndexCompaction(redis, key, 0, abort.signal);
+  expect(compact).toHaveBeenCalledExactlyOnceWith({ signal: abort.signal, cleanupOnly: true });
+  expect(redis.set).not.toHaveBeenCalled();
+  expect(console.warn).not.toHaveBeenCalled();
+  expect(console.log).toHaveBeenCalledWith(
+    JSON.stringify({
+      level: 'info',
+      event: 'ingest.receipt_index_compaction',
+      action: 'skipped_invalid_copy',
+      indexPages: 81_920,
+      droppedInvalid: 0,
+    }),
+  );
+});
+
 it('never writes a 24 h backoff for an aborted rebuild', async () => {
   compact.mockImplementationOnce(async () => {
     abort.abort();

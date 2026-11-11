@@ -47,18 +47,22 @@ async function releaseClaims(projectId: string, owned: Map<string, IngestReceipt
     });
 }
 
+function logClaimReleaseFailure(error: unknown, originalError?: unknown) {
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      event: 'ingest.claim_release_failed',
+      ...receiptErrorDetails(error),
+      original: originalError === undefined ? undefined : receiptErrorDetails(originalError),
+    }),
+  );
+}
+
 async function releaseClaimsSafely(projectId: string, owned: Map<string, IngestReceipt>, originalError?: unknown) {
   try {
     await releaseClaims(projectId, owned);
   } catch (error) {
-    console.error(
-      JSON.stringify({
-        level: 'error',
-        event: 'ingest.claim_release_failed',
-        ...receiptErrorDetails(error),
-        original: originalError === undefined ? undefined : receiptErrorDetails(originalError),
-      }),
-    );
+    logClaimReleaseFailure(error, originalError);
     // Keep the more informative request outcome, even when cleanup also failed.
     if (originalError instanceof ApiError) throw originalError;
     if (isDatabaseFailure(error))
@@ -254,7 +258,7 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
     return { written: [], rejected: [], pending: [], unavailable: [], unresolved: [], limited: false, unconfirmed: false };
   }
   const releasable = new Map(owned);
-  let failure: unknown;
+  let persisted: Awaited<ReturnType<typeof isolateIngestRows>> & { unconfirmed: boolean };
   try {
     const expiresAt = Math.min(
       ...[...owned.values()].filter((c) => !c.confirmedAt).map((c) => (c.claimedAt?.getTime() ?? 0) + INGEST_CLAIM_LEASE_MS),
@@ -295,20 +299,35 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
           eventAt: new Date(row.timestamp),
         })),
       );
+      persisted = { ...outcome, unconfirmed: false };
     } catch (error) {
       // ClickHouse acknowledged these rows, so any confirmation failure (a receipt conflict, infrastructure or even a
       // bug) keeps their claims and reports them as pending; composeIngestOutcome adds indices and Retry-After.
       if (!(error instanceof ApiError)) logReceiptPhaseFailure('confirm', error);
-      return { ...outcome, written: [], pending: [...outcome.pending, ...outcome.written], unconfirmed: outcome.written.length > 0 };
+      persisted = { ...outcome, written: [], pending: [...outcome.pending, ...outcome.written], unconfirmed: outcome.written.length > 0 };
     }
-    return { ...outcome, unconfirmed: false };
   } catch (error) {
-    failure = error;
+    // Isolation catches every insert outcome, so this is unexpected: release only proven-unwritten claims.
+    await releaseClaimsSafely(projectId, releasable, error);
     throw error;
-  } finally {
-    // Release only proven-unwritten claims; a failed release keeps the more informative original error.
-    await releaseClaimsSafely(projectId, releasable, failure);
   }
+  try {
+    await releaseClaims(projectId, releasable);
+  } catch (error) {
+    logClaimReleaseFailure(error);
+    if (!isDatabaseFailure(error)) throw error;
+    // Those claims stay held until their lease lets recovery settle them. Keep the composed outcome (indices,
+    // settled results) and report the affected retryable rows as pending, so Retry-After follows the held lease.
+    // Proven-bad rows stay rejected: their outcome is terminal whatever happens to the claim.
+    const held = (row: EventRow) => releasable.has(row.event_id);
+    persisted = {
+      ...persisted,
+      pending: [...persisted.pending, ...persisted.unavailable.filter(held), ...persisted.unresolved.filter(held)],
+      unavailable: persisted.unavailable.filter((row) => !held(row)),
+      unresolved: persisted.unresolved.filter((row) => !held(row)),
+    };
+  }
+  return persisted;
 }
 
 /** Caller holds a project lock: exclusive during recovery, shared otherwise. Receipts fence every API process. */
