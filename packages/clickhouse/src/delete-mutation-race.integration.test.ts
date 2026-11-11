@@ -8,6 +8,7 @@ import { deleteAndVerify, read } from './queries';
  * register their mutations out of order, and the skipped one still reports done. Never runs by default or in CI
  * (needs LOGBIRD_MUTATION_RACE_STRESS=1). It applies real mutation-pool pressure: run it only with the owner's
  * approval, the `heavy` lock and no other pending mutations. It uses one throwaway table and drops it afterwards.
+ * The idle-pool guard reads system.mutations, which shows only tables the user can see: run it as the admin user.
  */
 const TABLE = 'qa95_mutation_race';
 const CONCURRENCY = 16;

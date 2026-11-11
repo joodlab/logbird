@@ -524,6 +524,11 @@ docker compose --env-file .env.restore -p logbird-restore exec -T postgres sh -c
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep 'retention.run_failed'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker | grep '"errorCode":"LOGBIRD_DELETE_INCOMPLETE"'
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.event_index_stale_pointers"'
+```
+
+Then, separately (a match here triggers the check below; it does not block by itself):
+
+```sh
 docker compose --env-file .env.restore -p logbird-restore logs --since "$GATE_STARTED" worker server | grep '"event":"clickhouse.delete_retry"'
 ```
 
@@ -533,15 +538,29 @@ zero. A running receipt needs more time; a failure or guard log blocks cutover. 
 `clickhouse.event_index_stale_pointers`: stale identity pointers remain and need investigation
 (ineffective normalization is one possible cause, repeated concurrent-mutation skips another).
 A `clickhouse.delete_retry` during the gate does not block by itself, because a retry can
-also succeed on a restored part that only slightly outranks the new mutations. Before cutover,
-compare the affected tables' maximum `data_version` in `system.parts` with the latest
-`system.mutations` entry, and normalize if restored parts still outrank new mutations.
+also succeed on a restored part that only slightly outranks the new mutations. In a
+non-replicated MergeTree, inserts and mutations share one block counter, so compare only
+*mutated* parts (`data_version > max_block_number`; a plain inserted part's `data_version`
+is its first block and is naturally newer) with the newest mutation created during the gate:
+
+```sql
+SELECT p.table, max(p.data_version) AS mutated_part_version,
+       (SELECT max(toUInt64(extract(m.mutation_id, '(\d+)'))) FROM system.mutations m
+        WHERE m.database = 'logbird' AND m.table = p.table AND m.create_time >= '$GATE_STARTED') AS newest_gate_mutation
+FROM system.parts p
+WHERE p.database = 'logbird' AND p.active AND p.data_version > p.max_block_number
+GROUP BY p.table;
+```
+
+Block cutover and normalize if `mutated_part_version` is higher than `newest_gate_mutation`
+for any table that logged a retry.
 Inspect `retention.completed` too; a queue job completion alone does not establish
 every project receipt. Repeat the receipt query until the cycle ends.
 
-The grep checks pass with **no output**; grep exits 1 for no match. If using
+The blocking grep checks pass with **no output**; grep exits 1 for no match. If using
 `set -e`, run them in an `if` condition or handle that expected exit explicitly.
-Matching failure/guard lines block cutover; a log-read error is not a clean pass.
+Matching failure/guard lines block cutover (the `delete_retry` grep instead triggers the
+version check above); a log-read error is not a clean pass.
 
 Save this SQL as `.tmp/backups/logical-totals.sql`:
 
