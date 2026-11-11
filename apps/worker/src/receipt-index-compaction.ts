@@ -37,8 +37,12 @@ export async function runReceiptIndexCompaction(redis: Pick<Redis, 'get' | 'set'
     return result;
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
-    if (!signal.aborted && (code === '57014' || code === '55P03'))
-      await backoffHint(redis.set(backoffKey, String(Date.now()), 'EX', BACKOFF_SECONDS), signal, 'set');
+    if (signal.aborted) {
+      // Shutdown cancelled the run on purpose; the next run drops any invalid copy left behind.
+      console.info(JSON.stringify({ level: 'info', event: 'ingest.receipt_index_compaction_aborted' }));
+      return;
+    }
+    if (code === '57014' || code === '55P03') await backoffHint(redis.set(backoffKey, String(Date.now()), 'EX', BACKOFF_SECONDS), signal, 'set');
     console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_compaction_failed', code }));
   }
 }

@@ -108,3 +108,24 @@ it('does not classify programming errors or ClickHouse codes as database failure
   expect(isDatabaseFailure({ code: 'LOGBIRD_INGEST_RECEIPT_CONFLICT' })).toBe(false);
   expect(isDatabaseFailure(null)).toBe(false);
 });
+
+it.each([
+  'Connection terminated',
+  'Connection terminated unexpectedly',
+  'Connection terminated due to connection timeout',
+  'Client has encountered a connection error and is not queryable',
+  'Client was closed and is not queryable',
+  'Query read timeout',
+  'timeout expired',
+  'timeout exceeded when trying to connect',
+])('classifies pg connection loss passed through without a code: %s', (message) => {
+  // adapter-pg rethrows these unchanged (no SQLSTATE, no socket code) and Prisma passes them through.
+  expect(isDatabaseFailure(new Error(message))).toBe(true);
+});
+
+it('matches pg connection messages exactly, on plain uncoded Errors only', () => {
+  expect(isDatabaseFailure(new Error('Connection terminated by fictional storage'))).toBe(false);
+  expect(isDatabaseFailure(new TypeError('Connection terminated'))).toBe(false);
+  expect(isDatabaseFailure(Object.assign(new Error('Connection terminated'), { code: '42601' }))).toBe(false);
+  expect(isDatabaseFailure({ message: 'Connection terminated' })).toBe(false);
+});

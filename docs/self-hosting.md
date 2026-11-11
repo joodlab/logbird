@@ -818,8 +818,14 @@ with five-second connect/query timeouts. The original session remains open while
 REINDEX settles with 57014; cancellation and cleanup have a ten-second deadline
 before sockets close. The maintenance session sets `client_connection_check_interval`
 to one second as a disconnect fallback where supported (PostgreSQL 14+).
-Its invalid copy is dropped after cancellation, or next run if cleanup is
-interrupted. `REINDEX INDEX CONCURRENTLY` requires the worker role to own the table
+Only a running REINDEX is cancelled; catalog queries and the invalid-copy cleanup
+are left to finish within that deadline, and connection setup closes its socket
+(15-second setup deadline). Its invalid copy is dropped after cancellation, or next
+run if cleanup is interrupted. **Before a release whose migrations alter
+`IngestReceipt`, stop the worker first:** a running rebuild holds SHARE UPDATE
+EXCLUSIVE for up to its 15-minute statement timeout, and a migration's ACCESS EXCLUSIVE
+request would queue behind it and block every receipt read and write (ingest) until
+it ends. The release notes say when a migration touches that table. `REINDEX INDEX CONCURRENTLY` requires the worker role to own the table
 (or have the table's `MAINTAIN` privilege on PostgreSQL 17+, as documented for
 [REINDEX](https://www.postgresql.org/docs/17/sql-reindex.html)). A non-owner role
 without that privilege logs `ingest.receipt_index_compaction_failed` with code

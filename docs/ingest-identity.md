@@ -222,8 +222,13 @@ runs `compactIngestReceiptIndex`:
   with 57014. Cancellation and cleanup have a ten-second shutdown deadline; then
   sockets close. Each maintenance session also sets `client_connection_check_interval`
   to one second as a disconnect fallback (unsupported on PostgreSQL before 14).
-  Closing a socket alone is not the cancellation mechanism. An invalid copy is
-  dropped after cancellation, or by the next run if shutdown interrupts cleanup.
+  Closing a socket alone is not the cancellation mechanism. Only a running REINDEX
+  is cancelled: catalog queries and the `DROP INDEX CONCURRENTLY` cleanup are left to
+  finish within the same ten-second deadline, and no new step starts after shutdown.
+  Connection setup (connect plus the session `SET`s) has its own 15-second deadline
+  and closes its socket on shutdown, since no server-side work runs yet. An invalid
+  copy is dropped after cancellation, or by the next run if the deadline interrupts
+  cleanup. An aborted run logs `ingest.receipt_index_compaction_aborted` at info level.
 - Reserve free disk for about the index's live size while the copy is built.
   After a statement timeout (57014) or lock timeout (55P03), the worker stores a
   timestamp under `<BULLMQ_PREFIX>:ingest-receipt-index-compaction:backoff` in its

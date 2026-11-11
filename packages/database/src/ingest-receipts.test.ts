@@ -16,6 +16,7 @@ import {
   INGEST_RECEIPT_SWEEP_BUDGET_MS,
   IngestReceiptConflictError,
   pruneIngestReceipts,
+  RECEIPT_CAS_RETRY_TRANSACTION,
   RECEIPT_PROBE_TRANSACTION,
   sweepIngestReceipts,
 } from './ingest-receipts';
@@ -123,6 +124,8 @@ it('ids lost to a concurrent row update are re-sought once more, never silently 
   expect(query.mock.calls[1]?.[0].values).toContainEqual(['b']);
   // The retry keeps the first attempt's confirmation clock.
   expect(query.mock.calls[1]?.[0].values.at(-1)).toBe(query.mock.calls[0]?.[0].values.at(-1));
+  // Only the first attempt may wait a full minute for a pool connection; a re-seek fails fast to the retryable 503.
+  expect(transaction.mock.calls.map(([, options]) => options)).toEqual([RECEIPT_PROBE_TRANSACTION, RECEIPT_CAS_RETRY_TRANSACTION]);
   // A renewed receipt drops out of the expiry re-seek (found 0) instead of being deleted.
   query.mockResolvedValueOnce(cas(2, ['b'])).mockResolvedValueOnce(cas(0));
   await expireIngestReceipts('project', ['a', 'b', 'a'], new Date());

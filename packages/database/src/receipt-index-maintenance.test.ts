@@ -24,7 +24,13 @@ vi.mock('./keys', () => ({
   keys: () => ({ DATABASE_URL: 'postgresql://fixture.invalid/qa?options=-c%20statement_timeout%3D0&application_name=qa-url' }),
 }));
 
-import { compactIngestReceiptIndex, INGEST_RECEIPT_PKEY, neededIndexPages, RECEIPT_INDEX_COMPACTION } from './receipt-index-maintenance';
+import {
+  compactIngestReceiptIndex,
+  INGEST_RECEIPT_PKEY,
+  neededIndexPages,
+  RECEIPT_INDEX_COMPACTION,
+  RECEIPT_INDEX_SETUP_TIMEOUT_MS,
+} from './receipt-index-maintenance';
 
 type Row = Record<string, unknown>;
 function fakeDb(state: {
@@ -281,4 +287,96 @@ it('does not issue maintenance statements if shutdown happened while connecting'
   await expect(compactIngestReceiptIndex({ signal: abort.signal })).rejects.toMatchObject({ name: 'AbortError' });
   expect(connection.query.mock.calls.some(([sql]) => String(sql).includes('pg_try_advisory_lock'))).toBe(false);
   expect(connection.end).toHaveBeenCalledTimes(1);
+});
+
+it('closes the socket when shutdown arrives while a setup query is stalled', async () => {
+  const abort = new AbortController();
+  connection.connect.mockResolvedValue(undefined);
+  let failSetup: ((error: Error) => void) | undefined;
+  connection.query.mockImplementation(
+    () =>
+      new Promise((_resolve, reject) => {
+        failSetup = reject;
+      }),
+  );
+  // pg's end() destroys the socket under an active query, which rejects it.
+  connection.end.mockImplementation(async () => failSetup?.(new Error('Connection terminated')));
+  const compacting = compactIngestReceiptIndex({ signal: abort.signal });
+  await vi.waitFor(() => expect(failSetup).toBeTypeOf('function'));
+  abort.abort();
+  await expect(compacting).rejects.toMatchObject({ name: 'AbortError' });
+  expect(connection.end).toHaveBeenCalledTimes(1);
+  expect(cancelConnection.connect).not.toHaveBeenCalled();
+});
+
+it('bounds a stalled setup with its own deadline even without shutdown', async () => {
+  vi.useFakeTimers();
+  try {
+    connection.connect.mockResolvedValue(undefined);
+    let failSetup: ((error: Error) => void) | undefined;
+    connection.query.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          failSetup = reject;
+        }),
+    );
+    connection.end.mockImplementation(async () => failSetup?.(new Error('Connection terminated')));
+    const compacting = compactIngestReceiptIndex();
+    const outcome = expect(compacting).rejects.toThrow('Connection terminated');
+    await vi.advanceTimersByTimeAsync(RECEIPT_INDEX_SETUP_TIMEOUT_MS - 1);
+    expect(connection.end).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await outcome;
+    expect(connection.end).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('never cancels the cleanup drop after an independent REINDEX failure', async () => {
+  const abort = new AbortController();
+  connection.connect.mockResolvedValue(undefined);
+  const invalid: string[] = [];
+  const { query } = fakeDb({ pages: [RECEIPT_INDEX_COMPACTION.minPages * 10], live: 1000, keyBytes: 60, invalid });
+  let dropStarted: (() => void) | undefined;
+  const dropping = new Promise<void>((resolve) => {
+    dropStarted = resolve;
+  });
+  let finishDrop: (() => void) | undefined;
+  connection.query.mockImplementation(async (sql: string, params?: unknown[]) => {
+    if (sql.startsWith('REINDEX')) {
+      invalid.push('IngestReceipt_pkey_ccnew');
+      throw Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' });
+    }
+    if (sql.startsWith('DROP INDEX')) {
+      dropStarted?.();
+      await new Promise<void>((resolve) => {
+        finishDrop = resolve;
+      });
+    }
+    return query(sql, params);
+  });
+  const compacting = compactIngestReceiptIndex({ signal: abort.signal });
+  await dropping;
+  abort.abort();
+  finishDrop?.();
+  await expect(compacting).rejects.toMatchObject({ code: '57014' });
+  // The late shutdown neither opened a cancel connection nor interrupted the drop.
+  expect(cancelConnection.connect).not.toHaveBeenCalled();
+  expect(query).toHaveBeenCalledWith('DROP INDEX CONCURRENTLY IF EXISTS "qa_current"."IngestReceipt_pkey_ccnew"', undefined);
+});
+
+it('does not cancel catalog work when shutdown arrives before REINDEX, and never starts it', async () => {
+  const abort = new AbortController();
+  connection.connect.mockResolvedValue(undefined);
+  const { query } = fakeDb({ pages: [RECEIPT_INDEX_COMPACTION.minPages * 10], live: 1000, keyBytes: 60 });
+  connection.query.mockImplementation(async (sql: string, params?: unknown[]) => {
+    if (sql.includes('pg_stat_activity')) abort.abort();
+    return query(sql, params);
+  });
+  await expect(compactIngestReceiptIndex({ signal: abort.signal })).rejects.toMatchObject({ name: 'AbortError' });
+  expect(cancelConnection.connect).not.toHaveBeenCalled();
+  expect(query.mock.calls.some(([sql]) => sql.startsWith('REINDEX'))).toBe(false);
+  expect(query).toHaveBeenCalledWith('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [expect.stringContaining('IngestReceipt_pkey')]);
 });

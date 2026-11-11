@@ -13,6 +13,7 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  vi.spyOn(console, 'info').mockImplementation(() => undefined);
   abort = new AbortController();
   redis.get.mockResolvedValue(null);
   redis.set.mockResolvedValue('OK');
@@ -129,4 +130,7 @@ it('never writes a 24 h backoff for an aborted rebuild', async () => {
   });
   await runReceiptIndexCompaction(redis, key, 0, abort.signal);
   expect(redis.set).not.toHaveBeenCalled();
+  // A shutdown is not a failure: no error-level log, an info-level abort instead.
+  expect(console.error).not.toHaveBeenCalledWith(expect.stringContaining('ingest.receipt_index_compaction_failed'));
+  expect(console.info).toHaveBeenCalledWith(JSON.stringify({ level: 'info', event: 'ingest.receipt_index_compaction_aborted' }));
 });

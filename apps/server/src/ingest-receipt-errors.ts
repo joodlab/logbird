@@ -8,6 +8,18 @@ const INFRASTRUCTURE_KINDS = new Set([
   'TooManyConnections',
   'TransactionWriteConflict',
 ]);
+// adapter-pg rethrows pg errors without a SQLSTATE or socket code unchanged, and Prisma passes them through. These
+// are pg 8 / pg-pool's fixed connection-loss and timeout messages (node_modules/pg/lib, pg-pool/index.js).
+const PG_CONNECTION_MESSAGES = new Set([
+  'Connection terminated',
+  'Connection terminated unexpectedly',
+  'Connection terminated due to connection timeout',
+  'Client has encountered a connection error and is not queryable',
+  'Client was closed and is not queryable',
+  'Query read timeout',
+  'timeout expired',
+  'timeout exceeded when trying to connect',
+]);
 const record = (value: unknown): Record<string, unknown> => (value && typeof value === 'object' ? (value as Record<string, unknown>) : {});
 const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
 
@@ -29,6 +41,8 @@ export function isDatabaseFailure(error: unknown) {
   const { name, code, kind } = receiptErrorDetails(error);
   if (name === 'PrismaClientInitializationError' || name === 'PrismaClientRustPanicError') return true;
   if (code && INFRASTRUCTURE_CODES.has(code)) return true;
+  // Exact match on a plain Error only: a Prisma class, a coded error or a reworded message never qualifies.
+  if (error instanceof Error && error.constructor === Error && code === undefined && PG_CONNECTION_MESSAGES.has(error.message)) return true;
   if (code !== 'P2010' && code !== 'P2039' && name !== 'DriverAdapterError') return false;
   const source = record(error);
   const sqlstate = text(adapterCause(error).originalCode) ?? text(record(source.meta).code);

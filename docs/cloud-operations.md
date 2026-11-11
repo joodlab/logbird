@@ -367,7 +367,9 @@ failed or cancelled rebuild. An operator's in-progress manual REINDEX CONCURRENT
 SHARE UPDATE EXCLUSIVE on the table, so the job's drop fails with 55P03 and logs the
 failure. A 55P03 lock timeout or 57014 statement timeout sets a 24-hour Redis
 back-off; later hourly jobs log `skipped_backoff` until it expires. Pause the worker
-during a manual rebuild. Before building, a run checks for transactions older
+during a manual rebuild, and stop it before deploying a migration that alters
+`IngestReceipt`: a running rebuild holds SHARE UPDATE EXCLUSIVE for up to 15 minutes,
+and the migration's ACCESS EXCLUSIVE request would queue behind it and stall ingest. Before building, a run checks for transactions older
 than one minute that hold a snapshot or a lock on the receipt table (for example
 a backup), and logs `skipped_old_transactions` when one exists. Transactions with
 neither do not block the pre-check; autovacuum workers and launchers are excluded.

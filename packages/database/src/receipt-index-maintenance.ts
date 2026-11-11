@@ -48,7 +48,9 @@ export function neededIndexPages(liveTuples: number, keyBytes: number, fill = 0.
 }
 
 type Queryable = Pick<pg.Client, 'query'>;
-async function connect() {
+/** Connection plus session setup. A stalled server can hang a setup query, so abort and a deadline close the socket. */
+export const RECEIPT_INDEX_SETUP_TIMEOUT_MS = 15_000;
+async function connect(signal?: AbortSignal) {
   const client = new pg.Client({
     connectionString: keys().DATABASE_URL,
     application_name: 'logbird-receipt-index-maintenance',
@@ -59,8 +61,18 @@ async function connect() {
     const code = 'code' in error ? String(error.code) : undefined;
     console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_connection_failed', code }));
   });
+  // Setup runs no long server work, so closing the socket is enough: pg's end() destroys it mid-connect or mid-query.
+  let closing: Promise<void> | undefined;
+  const close = () => {
+    closing ??= client.end().catch(() => undefined);
+    return closing;
+  };
+  const deadline = setTimeout(() => void close(), RECEIPT_INDEX_SETUP_TIMEOUT_MS);
+  signal?.addEventListener('abort', close, { once: true });
   try {
+    signal?.throwIfAborted();
     await client.connect();
+    signal?.throwIfAborted();
     // URL options override pg's constructor config. Apply bounds to the connected session.
     await client.query(`SET statement_timeout = ${RECEIPT_INDEX_COMPACTION.statementTimeoutMs}`);
     await client.query(`SET lock_timeout = ${RECEIPT_INDEX_COMPACTION.lockTimeoutMs}`);
@@ -72,10 +84,16 @@ async function connect() {
       if ((error as { code?: string }).code !== '42704') throw error;
     }
     const { rows } = await client.query<{ pid: number }>('SELECT pg_backend_pid() pid');
+    signal?.throwIfAborted();
     return { client, pid: rows[0]?.pid as number };
   } catch (error) {
-    await client.end().catch(() => undefined);
+    await close();
+    // An abort or the deadline surfaces as the socket error it caused; report the cause instead.
+    signal?.throwIfAborted();
     throw error;
+  } finally {
+    clearTimeout(deadline);
+    signal?.removeEventListener('abort', close);
   }
 }
 
@@ -134,16 +152,20 @@ export async function compactIngestReceiptIndex({
   db?: Queryable;
   signal?: AbortSignal;
 } = {}): Promise<ReceiptIndexCompaction> {
-  const { client, pid } = db ? { client: db, pid: undefined } : await connect();
+  const { client, pid } = db ? { client: db, pid: undefined } : await connect(signal);
   let cancellation: Promise<void> | undefined;
   let activeReindex: Promise<unknown> | undefined;
   let abortDeadline: ReturnType<typeof setTimeout> | undefined;
+  let reindexRunning = false;
   const abort = () => {
     if (db || pid === undefined) return;
-    cancellation = cancelBackend(pid, activeReindex).catch((error: unknown) => {
-      const code = (error as { code?: string }).code;
-      console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_cancel_failed', code }));
-    });
+    // Only the REINDEX is cancelled server-side. Catalog queries and DROP INDEX CONCURRENTLY cleanup are left to
+    // finish (the next step checks the signal), so a late shutdown never cancels the drop of an invalid copy.
+    if (reindexRunning && activeReindex)
+      cancellation = cancelBackend(pid, activeReindex).catch((error: unknown) => {
+        const code = (error as { code?: string }).code;
+        console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_cancel_failed', code }));
+      });
     // pg.end() alone is not a server cancellation. It is only the bounded fallback if cancellation/cleanup stalls.
     abortDeadline = setTimeout(() => void (client as pg.Client).end().catch(() => undefined), 10_000);
   };
@@ -164,7 +186,8 @@ export async function compactIngestReceiptIndex({
     const target = { ...requestedTarget, schema };
     // Isolate private integration targets while keeping workers on the same real index single-flight.
     lockKey = `${LOCK_KEY}:${quote(schema)}.${quote(target.index)}`;
-    locked = (await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock(hashtext($1)) locked', [lockKey])).rows[0]?.locked === true;
+    locked =
+      (await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock(hashtextextended($1, 0)) locked', [lockKey])).rows[0]?.locked === true;
     const pages = await indexPages(client, target);
     if (pages === null) return { action: 'skipped_missing', indexPages: 0, droppedInvalid: 0 };
     if (!locked) return { action: 'skipped_busy', indexPages: pages, droppedInvalid: 0 };
@@ -197,14 +220,16 @@ export async function compactIngestReceiptIndex({
     const started = Date.now();
     signal?.throwIfAborted();
     try {
+      reindexRunning = true;
       const reindexing = client.query(`REINDEX INDEX CONCURRENTLY ${quote(target.schema)}.${quote(target.index)}`);
-      activeReindex = reindexing.then(
-        () => undefined,
-        () => undefined,
-      );
+      // Registered before the await below, so the flag is cleared before the catch block's cleanup can start.
+      const stopped = () => {
+        reindexRunning = false;
+      };
+      activeReindex = reindexing.then(stopped, stopped);
       await reindexing;
     } catch (error) {
-      // Do not let a late cancel interrupt DROP instead of REINDEX.
+      // A cancel sent while REINDEX ran must land before cleanup starts; later aborts no longer cancel anything.
       await cancellation;
       // Timeout or cancellation: never leave a maintained invalid copy behind.
       await dropInvalidCopies(client, target).catch(() => undefined);
@@ -222,7 +247,7 @@ export async function compactIngestReceiptIndex({
   } finally {
     signal?.removeEventListener('abort', abort);
     await cancellation;
-    if (locked) await client.query('SELECT pg_advisory_unlock(hashtext($1))', [lockKey]).catch(() => undefined);
+    if (locked) await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [lockKey]).catch(() => undefined);
     if (!db) await (client as pg.Client).end().catch(() => undefined);
     clearTimeout(abortDeadline);
   }

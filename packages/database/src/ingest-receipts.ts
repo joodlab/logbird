@@ -43,8 +43,13 @@ export const RECEIPT_SEEK_GUARD = Prisma.sql`SELECT set_config('enable_seqscan',
  * the exclusive lock, cannot run concurrently.
  */
 export const RECEIPT_PROBE_TRANSACTION = { maxWait: 60_000, timeout: 60_000 } as const;
-async function guarded<T>(statement: Prisma.Sql) {
-  const [, rows] = await prisma.$transaction([prisma.$executeRaw(RECEIPT_SEEK_GUARD), prisma.$queryRaw<T>(statement)], RECEIPT_PROBE_TRANSACTION);
+/**
+ * A CAS re-seek covers only the few ids a concurrent writer touched, inside a request that holds the project lock.
+ * Waiting another full minute for a pool connection there adds nothing: fail fast to the retryable 503 instead.
+ */
+export const RECEIPT_CAS_RETRY_TRANSACTION = { maxWait: 5000, timeout: 60_000 } as const;
+async function guarded<T>(statement: Prisma.Sql, options: { maxWait: number; timeout: number } = RECEIPT_PROBE_TRANSACTION) {
+  const [, rows] = await prisma.$transaction([prisma.$executeRaw(RECEIPT_SEEK_GUARD), prisma.$queryRaw<T>(statement)], options);
   return rows;
 }
 
@@ -182,7 +187,7 @@ async function compareAndSet<T extends string | { eventId: string }>(
 ) {
   let remaining = items;
   for (let attempt = 1; remaining.length; attempt++) {
-    const [result] = await guarded<CasResult[]>(statement(remaining));
+    const [result] = await guarded<CasResult[]>(statement(remaining), attempt === 1 ? RECEIPT_PROBE_TRANSACTION : RECEIPT_CAS_RETRY_TRANSACTION);
     if (!result || result.changed + result.skipped.length !== result.found) throw new IngestReceiptConflictError(operation);
     if (!result.skipped.length) return;
     if (attempt >= CAS_ATTEMPTS) throw new IngestReceiptConflictError(operation);
