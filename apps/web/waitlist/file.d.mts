@@ -1,7 +1,7 @@
 export interface WaitlistRewrite {
   kept: number;
   removed: number;
-  /** Lines in the legacy file that are not JSON: kept, never deleted, so an operator can deal with them. */
+  /** Lines that aren't valid JSON and were kept: the legacy file's (until its cutoff passes) or, for forget, any file's. */
   unreadable: number;
 }
 export function withWaitlistLock<T>(file: string, task: (path: string) => Promise<T>): Promise<T>;

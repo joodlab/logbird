@@ -147,15 +147,43 @@ it('treats a missing store as empty', async () => {
 it('waits before the first cleanup, then sweeps', async () => {
   await appendWaitlistRecord(file, record('old@example.test', '2020-01-01T00:00:00.000Z'));
   const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-  const stop = scheduleWaitlistRetention(file, { firstAfterMs: 300 });
-  await new Promise((done) => setTimeout(done, 100));
-  expect(log).not.toHaveBeenCalled();
-  expect(await emails()).toEqual(['old@example.test']);
-  // Wait for the sweep's own log line rather than polling the files, which a running sweep may be replacing.
-  await vi.waitFor(() => expect(log).toHaveBeenCalledWith(expect.stringContaining('"event":"waitlist.retention"')), { timeout: 5000 });
-  stop();
-  log.mockRestore();
+  const timeout = vi.spyOn(globalThis, 'setTimeout');
+  const stop = scheduleWaitlistRetention(file, { firstAfterMs: 200 });
+  try {
+    // Nothing runs at once: the first sweep is a timer for the configured delay.
+    expect(timeout).toHaveBeenCalledWith(expect.any(Function), 200);
+    await Promise.resolve();
+    expect(log).not.toHaveBeenCalled();
+    // Wait for the sweep's own log line rather than polling the files, which a running sweep may be replacing.
+    await vi.waitFor(() => expect(log).toHaveBeenCalledWith(expect.stringContaining('"event":"waitlist.retention"')), { timeout: 5000 });
+  } finally {
+    stop();
+    timeout.mockRestore();
+    log.mockRestore();
+  }
   expect(await emails()).toEqual([]);
+});
+
+it('expires undated and unreadable legacy lines from the moment day files began, and removes an emptied legacy file', async () => {
+  // A legacy file (from before day files) with a dated record, an undated one and a torn line.
+  await writeFile(
+    file,
+    [
+      JSON.stringify(record('dated@example.test', '2026-01-15T00:00:00.000Z')),
+      JSON.stringify({ email: 'undated@example.test', interest: 'cloud' }),
+      '{"email":"torn@exa',
+      '',
+    ].join('\n'),
+  );
+  // The first cleanup finds the legacy file and records when day files began: every legacy line is older than that.
+  const start = at('2026-03-01T00:00:00.000Z');
+  expect(await pruneWaitlist(file, start, 1)).toEqual({ kept: 2, removed: 1, unreadable: 1 });
+  expect((await readFile(`${file}.legacy-until`, 'utf8')).trim()).toBe('2026-03-01T00:00:00.000Z');
+  // Before a month has passed since then, undated and unreadable lines stay.
+  expect((await pruneWaitlist(file, at('2026-03-31T23:59:59.999Z'), 1)).removed).toBe(0);
+  // Once it has, they go, and the emptied legacy file and its marker are removed.
+  expect(await pruneWaitlist(file, at('2026-04-01T00:00:00.000Z'), 1)).toEqual({ kept: 0, removed: 2, unreadable: 0 });
+  expect((await readdir(dir)).sort()).toEqual([]);
 });
 
 it('starts a new line after a torn last line, so the next submission stays readable', async () => {

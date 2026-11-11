@@ -6,6 +6,7 @@
 // Run it in the container that serves the site, so it shares the lock with new submissions. From a source checkout:
 // `pnpm --filter @logbird/web waitlist:forget someone@example.com`. Reads WAITLIST_FILE (the image sets
 // /data/waitlist.jsonl; the day files are in /data/waitlist.jsonl.d). Prints only counts, never the records.
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { forgetWaitlistEmail } from './file.mjs';
 
@@ -14,6 +15,11 @@ const file = process.env.WAITLIST_FILE ? resolve(process.env.WAITLIST_FILE) : re
 if (command !== 'forget' || !email) {
   console.error('Usage: node waitlist/admin.mjs forget <email>');
   process.exit(2);
+}
+if (!existsSync(file) && !existsSync(`${file}.d`)) {
+  // Usually the wrong WAITLIST_FILE, or the command run outside the site's container.
+  console.error(`No form submissions store at ${file}; set WAITLIST_FILE to the site's store. Nothing was deleted.`);
+  process.exit(1);
 }
 try {
   const { removed, kept, unreadable } = await forgetWaitlistEmail(file, email);

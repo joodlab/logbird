@@ -13,8 +13,9 @@ export default definePlugin((nitroApp) => {
   if (import.meta.dev || import.meta.prerender || process.env.TSS_PRERENDERING === 'true') {
     return;
   }
-  const configured = process.env.WAITLIST_FILE?.trim();
-  if (!configured || process.env.NODE_ENV !== 'production') {
+  // Exactly the value the writers and admin.mjs use (no trimming), so all of them reach the same store.
+  const configured = process.env.WAITLIST_FILE;
+  if (!configured?.trim() || process.env.NODE_ENV !== 'production') {
     return;
   }
   const started = import('../../src/server/waitlist-retention')

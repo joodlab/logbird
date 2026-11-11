@@ -142,10 +142,16 @@ every six hours, logging `waitlist.retention` with counts only.
 - A day's file is deleted whole once even its last moment is past the period, so a
   submission is never deleted early. Counting the six-hourly runs, it goes at most about
   30 hours after it expires; the privacy policy says "within two days".
-- The older single file is trimmed record by record. A `warn` level means that file
-  has lines that aren't valid JSON (say, from a crash mid-write). They are never
-  deleted automatically, so check the file and remove them by hand. In day files
-  such lines go with their day.
+- The older single file is trimmed record by record. Lines in it that can't be
+  dated (not valid JSON, say from a crash mid-write, or without a `receivedAt`) are
+  older than the moment day files began. The first cleanup records that moment in
+  `/data/waitlist.jsonl.legacy-until`, and such lines go once the period has passed
+  for it. Until then the log line is `warn` with an `unreadable` count. When the
+  older file is empty, it and the marker are removed. In day files, unreadable lines
+  go with their day.
+- Backups of the `/data` volume hold copies of submissions until they rotate out.
+  The privacy policy says deleted data can remain in a backup until that backup
+  expires on its regular rotation, so keep that rotation short.
 - The cleanup never touches today's file, the only one new submissions go into, so
   it can't lose one, even if two site containers ever shared the volume.
 - It runs only in the production server with `WAITLIST_FILE` set, which the site
@@ -178,7 +184,9 @@ docker exec <site container> node waitlist/admin.mjs forget someone@example.com
 ```
 
 It removes that address from every day's file and the older file, and prints how
-many submissions it removed, never their contents. Lines that aren't valid JSON
+many submissions it removed, never their contents. If there's no store at
+`WAITLIST_FILE` (the wrong path, or run outside the site's container), it says so
+and deletes nothing. Lines that aren't valid JSON
 are removed too when they contain the address; any others are counted, so check
 them by hand. It rewrites files new submissions may still go into. It shares a lock
 with the site's writers in that container, so it never loses a submission. Don't

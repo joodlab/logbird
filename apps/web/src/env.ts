@@ -91,7 +91,8 @@ function formRetentionMonths(value: string | undefined): number {
   if (!text) {
     return 24;
   }
-  const months = Number(text);
+  // Whole digits only: Number() alone would also accept "0x18", "1e1" or "24.0".
+  const months = /^\d+$/.test(text) ? Number(text) : Number.NaN;
   if (!(Number.isInteger(months) && months >= 1 && months <= 120)) {
     throw new Error('WEB_FORM_RETENTION_MONTHS must be a whole number of months from 1 to 120.');
   }

@@ -93,7 +93,7 @@ export async function resolveWaitlistPath(file) {
   for (let hops = 0; hops <= 40; hops += 1) {
     const missing = [];
     let existing = path;
-    let info = await lstat(existing).catch(() => undefined);
+    let info = await orMissing(() => lstat(existing), undefined);
     while (!info) {
       const parent = dirname(existing);
       if (parent === existing) {
@@ -101,7 +101,7 @@ export async function resolveWaitlistPath(file) {
       }
       missing.unshift(basename(existing));
       existing = parent;
-      info = await lstat(existing).catch(() => undefined);
+      info = await orMissing(() => lstat(existing), undefined);
     }
     try {
       return join(await realpath(existing), ...missing);
@@ -267,13 +267,6 @@ async function removeLeftovers(path) {
   }
 }
 
-/**
- * Rewrites one file keeping only the records `keep` accepts: a new, uniquely named mode-600 file, flushed to disk,
- * renamed over the old one, so a reader (or a reboot after a power cut) sees either the old file or the new one.
- * Lines that aren't JSON are kept, because this never deletes what it can't read, and counted as `unreadable`. Run as
- * root (say `docker exec -u root`), the new file keeps the old one's owner, so the site can still append to it. A
- * failed rewrite removes its temporary file. Must run under the store's lock.
- */
 /** The non-blank lines of a file, as the bytes they hold (no decoding, so nothing is altered when written back). */
 function splitLines(bytes) {
   const lines = [];
@@ -288,6 +281,13 @@ function splitLines(bytes) {
   return lines;
 }
 
+/**
+ * Rewrites one file keeping only the records `keep` accepts: a new, uniquely named mode-600 file, flushed to disk,
+ * renamed over the old one, so a reader (or a reboot after a power cut) sees either the old file or the new one.
+ * Lines that aren't JSON are kept unless `dropUnreadable` says otherwise, and the kept ones are counted as
+ * `unreadable`. Run as root (say `docker exec -u root`), the new file keeps the old one's owner, so the site can still
+ * append to it. A failed rewrite removes its temporary file. Must run under the store's lock.
+ */
 async function rewriteFile(path, keep, dropUnreadable = () => false) {
   let bytes;
   try {
@@ -371,12 +371,55 @@ export function pruneWaitlist(file, now, months) {
         throw afterChange(error);
       }
     }
-    const legacy = await rewriteFile(path, (record) => {
-      const receivedAt = typeof record?.receivedAt === 'string' ? Date.parse(record.receivedAt) : Number.NaN;
-      return Number.isNaN(receivedAt) || retentionExpiry(receivedAt, months) > now;
-    });
+    const legacy = await pruneLegacy(path, now, months);
     return { kept: kept + legacy.kept, removed: removed + legacy.removed, unreadable: legacy.unreadable };
   });
+}
+
+/**
+ * Trims the legacy file. A record with a readable `receivedAt` goes once its own period has passed. A line that can't
+ * be read, or a record without a date, can't be dated by itself, but nothing appends to the legacy file since day files
+ * began, so every line in it is older than that moment. `<store>.legacy-until` records it (written by the first
+ * cleanup that finds the legacy file), and such lines go once the period has passed for it: late, never early. When
+ * the legacy file is empty, it and the marker are removed.
+ */
+async function pruneLegacy(path, now, months) {
+  const present = await orMissing(async () => (await stat(path)).isFile(), false);
+  if (!present) {
+    return { kept: 0, removed: 0, unreadable: 0 };
+  }
+  const marker = `${path}.legacy-until`;
+  let until = Date.parse((await orMissing(() => readFile(marker, 'utf8'), '')).trim());
+  if (Number.isNaN(until)) {
+    until = now;
+    const temporary = `${marker}${TEMPORARY}${randomUUID()}`;
+    try {
+      await writeDurably(temporary, `${new Date(until).toISOString()}\n`);
+      await rename(temporary, marker);
+    } catch (error) {
+      await rm(temporary, { force: true });
+      throw error;
+    }
+  }
+  const undatedExpired = retentionExpiry(until, months) <= now;
+  const result = await rewriteFile(
+    path,
+    (record) => {
+      const receivedAt = typeof record?.receivedAt === 'string' ? Date.parse(record.receivedAt) : Number.NaN;
+      return Number.isNaN(receivedAt) ? !undatedExpired : retentionExpiry(receivedAt, months) > now;
+    },
+    () => undatedExpired,
+  );
+  if (result.kept === 0) {
+    await rm(path, { force: true });
+    await rm(marker, { force: true });
+    try {
+      await syncDirectory(dirname(path));
+    } catch (error) {
+      throw afterChange(error);
+    }
+  }
+  return result;
 }
 
 /**
@@ -403,6 +446,8 @@ export async function forgetWaitlistEmail(file, email) {
             String(record?.email ?? '')
               .trim()
               .toLowerCase() !== target,
+          // A substring match: it may also catch a torn line holding a longer address that contains this one. Deleting a
+          // broken line too many is the safe side for a deletion request.
           (line) => line.toString('utf8').toLowerCase().includes(target),
         );
       } catch (error) {

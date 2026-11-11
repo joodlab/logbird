@@ -37,7 +37,7 @@ describe('public configuration', () => {
   it('reads the form retention period as whole months from 1 to 120, 24 when unset', () => {
     expect(siteConfigFrom({}).FORM_RETENTION_MONTHS).toBe(24);
     expect(siteConfigFrom({ WEB_FORM_RETENTION_MONTHS: ' 12 ' }).FORM_RETENTION_MONTHS).toBe(12);
-    for (const value of ['0', '121', '1.5', 'two years']) {
+    for (const value of ['0', '121', '1.5', 'two years', '0x18', '1e1', '24.0']) {
       expect(() => siteConfigFrom({ WEB_FORM_RETENTION_MONTHS: value }), value).toThrow(/WEB_FORM_RETENTION_MONTHS/);
     }
   });
