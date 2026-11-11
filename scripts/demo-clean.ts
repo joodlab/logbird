@@ -121,7 +121,9 @@ try {
     if (values.orphans) for (const r of orphans) await purge(r.project_id);
     for (const a of activity) {
       if (!a.n) continue;
-      await withProjectLock(a.params.p, () => deleteAndVerify(ch, a.params.p, 'events', a.where, a.params));
+      const filter = 'hasAny(target_ids,{targets:Array(String)}) OR actor_id IN {actors:Array(String)}';
+      const { targets, actors } = a.params;
+      await withProjectLock(a.params.p, () => deleteAndVerify(ch, a.params.p, 'events', filter, { targets, actors }));
     }
     if (dropInvitations.length) await prisma.invitation.deleteMany({ where: { id: { in: dropInvitations.map((i) => i.id) } } });
     if (users.length) {

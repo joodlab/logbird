@@ -80,9 +80,7 @@ it.runIf(process.env.LOGBIRD_MUTATION_RACE_STRESS === '1' && process.env.CLICKHO
         // Re-check right before the burst: the guard queries and insert may have used up the start window.
         if (Date.now() - started >= ROUND_START_DEADLINE_MS) break;
         const before = warn.mock.calls.length;
-        const results = await Promise.allSettled(
-          projects.map((project) => deleteAndVerify(ch, project, TABLE, 'project_id={p:String}', { p: project })),
-        );
+        const results = await Promise.allSettled(projects.map((project) => deleteAndVerify(ch, project, TABLE)));
         const retryEvents = warn.mock.calls
           .slice(before)
           .map(([message]) => {

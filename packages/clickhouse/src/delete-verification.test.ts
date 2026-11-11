@@ -35,12 +35,8 @@ it.each([
   for (const n of visible) query.mockResolvedValueOnce({ json: async () => [{ n }] });
   // An untagged client: deleteAndVerify must tag every statement itself (demo-clean passes a plain client).
   const ch = { command, query } as unknown as ClickHouseClient;
-  const result = settle(
-    deleteAndVerify(ch, 'qa95-retry', 'entities', 'project_id={p:String} AND entity_id IN {ids:Array(String)}', {
-      p: 'qa95-retry',
-      ids: ['private-value-not-for-logs'],
-    }),
-  );
+  const sleep = vi.spyOn(globalThis, 'setTimeout');
+  const result = settle(deleteAndVerify(ch, 'qa95-retry', 'entities', 'entity_id IN {ids:Array(String)}', { ids: ['private-value-not-for-logs'] }));
   if (visible.at(-1) === 0) await expect(result).resolves.toBeUndefined();
   else
     await expect(result).rejects.toMatchObject({
@@ -52,12 +48,14 @@ it.each([
   expect(command).toHaveBeenCalledTimes(attempts);
   expect(query).toHaveBeenCalledTimes(attempts);
   for (const [args] of command.mock.calls) {
-    expect(args.query).toBe('DELETE FROM entities WHERE project_id={p:String} AND entity_id IN {ids:Array(String)}');
+    expect(args.query).toBe('DELETE FROM entities WHERE project_id={p:String} AND (entity_id IN {ids:Array(String)})');
     expect(args.query_params).toEqual({ p: 'qa95-retry', ids: ['private-value-not-for-logs'] });
     expect(args.clickhouse_settings).toEqual({ mutations_sync: '2', lightweight_deletes_sync: '2' });
     expect(args.query_id.startsWith(maintenanceQueryPrefix('qa95-retry'))).toBe(true);
   }
   expect(new Set(command.mock.calls.map(([args]) => args.query_id)).size).toBe(attempts);
+  // Backoff between attempts: 50 ms, then 100 ms.
+  expect(sleep.mock.calls.map(([, ms]) => ms)).toEqual([50, 100].slice(0, attempts - 1));
   expect(console.warn).toHaveBeenCalledTimes(attempts - 1);
   for (let i = 0; i < attempts - 1; i++)
     expect(console.warn).toHaveBeenNthCalledWith(
@@ -121,18 +119,41 @@ it('deletes stale pointers once without a warning when the delete takes effect',
   expect(console.warn).not.toHaveBeenCalled();
 });
 
-it.each([
-  { label: 'a different params.p', projectId: 'qa95-a', predicate: 'project_id={p:String}', params: { p: 'qa95-b' } },
-  { label: 'a missing params.p', projectId: 'qa95-a', predicate: 'project_id={p:String}', params: {} },
-  { label: 'an unscoped predicate', projectId: 'qa95-a', predicate: 'event_id={id:String}', params: { p: 'qa95-a', id: 'x' } },
-])('rejects $label before any statement', async ({ projectId, predicate, params }) => {
+it('rejects a caller-supplied params.p before any statement', async () => {
   const command = vi.fn();
   const query = vi.fn();
-  await expect(deleteAndVerify({ command, query } as unknown as ClickHouseClient, projectId, 'events', predicate, params)).rejects.toThrow(
-    /project_id=\{p:String\}/,
-  );
+  await expect(
+    deleteAndVerify({ command, query } as unknown as ClickHouseClient, 'qa95-a', 'events', 'event_id={id:String}', { p: 'qa95-b', id: 'x' }),
+  ).rejects.toThrow(/binds p to projectId/);
   expect(command).not.toHaveBeenCalled();
   expect(query).not.toHaveBeenCalled();
+});
+
+it('keeps an OR filter inside the project scope', async () => {
+  const command = vi.fn().mockResolvedValue({});
+  const query = vi.fn().mockResolvedValue({ json: async () => [{ n: 0 }] });
+  await deleteAndVerify({ command, query } as unknown as ClickHouseClient, 'qa95-a', 'events', 'actor_id={a:String} OR tenant_id={t:String}', {
+    a: 'x',
+    t: 'y',
+  });
+  expect(command.mock.calls[0]?.[0].query).toBe('DELETE FROM events WHERE project_id={p:String} AND (actor_id={a:String} OR tenant_id={t:String})');
+  expect(command.mock.calls[0]?.[0].query_params).toEqual({ a: 'x', t: 'y', p: 'qa95-a' });
+  expect(query.mock.calls[0]?.[0].query).toContain('WHERE project_id={p:String} AND (actor_id={a:String} OR tenant_id={t:String}) LIMIT 1');
+});
+
+it('continues the purge after a delete that succeeds on its second attempt', async () => {
+  const command = vi.fn().mockResolvedValue({});
+  const probes = [1, 0, 0, 0, 0, 0];
+  const query = vi.fn().mockImplementation(async () => ({ json: async () => [{ n: probes.shift() ?? 0 }] }));
+  await settle(purgeProject({ command, query } as unknown as ClickHouseClient, 'qa95-purge'));
+  expect(command.mock.calls.map(([args]) => args.query.split(' WHERE ')[0])).toEqual([
+    'DELETE FROM events',
+    'DELETE FROM events',
+    'DELETE FROM event_ids',
+    'DELETE FROM events_by_minute',
+    'DELETE FROM entities',
+    'DELETE FROM attribute_keys',
+  ]);
 });
 
 it.each(['events_by_minute', 'entities', 'attribute_keys'])('refuses to rebuild when completed deletes leave rows in %s', async (table) => {

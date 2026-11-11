@@ -31,10 +31,7 @@ export async function removeSampleData(projectId: string) {
     'SELECT DISTINCT event_id FROM events WHERE project_id={p:String} AND source IN {source:Array(String)}',
     { p: projectId, source: SAMPLE_DATA_SOURCES },
   );
-  await deleteAndVerify(clickhouse, projectId, 'events', 'project_id={p:String} AND source IN {source:Array(String)}', {
-    p: projectId,
-    source: SAMPLE_DATA_SOURCES,
-  });
+  await deleteAndVerify(clickhouse, projectId, 'events', 'source IN {source:Array(String)}', { source: SAMPLE_DATA_SOURCES });
   // Remove only identities whose raw rows were intentionally deleted, while writers remain excluded.
   for (let offset = 0; offset < removed.length; offset += 1000) {
     const ids = removed.slice(offset, offset + 1000).map((r) => r.event_id);
