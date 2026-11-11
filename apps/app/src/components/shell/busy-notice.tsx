@@ -22,7 +22,7 @@ export function BusyNotice() {
         <Loader2Icon className="size-3.5 shrink-0 animate-spin text-outcome-denied" />
         <span>
           <span className="font-medium">Project is busy</span>
-          <span className="hidden text-muted-foreground sm:inline"> — a retention purge is running. Retrying automatically…</span>
+          <span className="sr-only text-muted-foreground sm:not-sr-only"> — a retention purge is running. Retrying automatically…</span>
         </span>
       </div>
     </div>
