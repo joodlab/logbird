@@ -74,7 +74,14 @@ it('writes one serialized byte body under backpressure and consumes the acknowle
       .split('\n')
       .map((line) => JSON.parse(line)),
   ).toEqual(rows);
-  expect(exec.mock.calls[0]?.[0]).toMatchObject({ query: 'INSERT INTO events FORMAT JSONEachRow', clickhouse_settings: INGEST_INSERT_SETTINGS });
+  expect(exec.mock.calls[0]?.[0]).toMatchObject({
+    query: 'INSERT INTO events FORMAT JSONEachRow',
+    clickhouse_settings: {
+      ...INGEST_INSERT_SETTINGS,
+      input_format_allow_errors_num: '0',
+      input_format_allow_errors_ratio: 0,
+    },
+  });
   expect(acknowledged).toBe(true);
 });
 it.each([21_000, 61_000])('refuses body handoff after a %i ms socket-acquisition pause', async (pause) => {

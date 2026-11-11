@@ -856,12 +856,12 @@ stopped and investigate with the journal; recover all three stores from the same
 backup boundary rather than mixing old and new writes. The script is offline and
 idempotent, not a distributed transaction or an online migration.
 
-
 ## Ingest insert settings
 
 Every ingest INSERT pins `async_insert_max_data_size=67108864` (64 MiB),
-`min_insert_block_size_bytes=268402944`, `min_insert_block_size_rows=1048449`
-and `max_insert_block_size=1048449` at query level, together with
+`min_insert_block_size_bytes=268402944`, `min_insert_block_size_rows=1048449`,
+`max_insert_block_size=1048449`, `input_format_allow_errors_num=0` and
+`input_format_allow_errors_ratio=0` at query level, together with
 `async_insert=1` and `wait_for_async_insert=1`. The 5 MiB request limit does not
 bound the normalized statement to 5 MiB: duplicated changes and the escaped payload
 expand it, to about 15 MiB in the worst realistic case. These are thresholds, not
@@ -870,6 +870,8 @@ falls back to synchronous insertion, which otherwise can partially write before 
 late parser failure (measured on 26.9: 2300 of 3000 rows written with small blocks).
 A statement larger than 64 MiB (only possible with absurd flattened attribute paths)
 is never isolated: its parse error is treated as ambiguous and reconciled by recovery.
+The two error-tolerance pins prevent operator profiles from silently skipping bad
+rows while acknowledging success, which would lose those events.
 
 Query-level pins win over ordinary user profiles. Operators should allow these
 settings for the writer and avoid server constraints that reject them. ClickHouse
@@ -880,3 +882,9 @@ when the serialized body fits the pinned async limit, its error names
 `WaitForAsyncInsert`, and it is not a materialized-view failure. Changed server
 wording fails safe as pending/recovery. Do not infer pre-write safety from the
 parse code alone. No new migration or settings profile is needed.
+
+Exact-row isolation assumes `(at row N)` is statement-relative and 1-based,
+including when multiple bodies share an async flush. The shared-flush test in
+`apps/server/src/ingest-parse-isolation.integration.test.ts` verifies this on
+ClickHouse 26.9. Other versions must retain that behavior; run the test after
+every ClickHouse upgrade before accepting ingest traffic.

@@ -39,8 +39,11 @@ export const INSERT_LEASE_BUDGET_MS = INSERT_MAX_EXECUTION_SECONDS * 1000 + ASYN
 // (e.g. hundreds of attribute paths repeating a huge key prefix) can exceed it: the byte guard in insertEvents then
 // treats a parse error as ambiguous (claims kept, recovery reconciles) instead of isolating it, so it still fails safe.
 export const INGEST_ASYNC_MAX_DATA_SIZE = 64 * 1024 * 1024;
-// UInt64 settings travel as strings in @clickhouse/client.
+// UInt64 settings travel as strings; Float settings use numbers in @clickhouse/client.
 export const INGEST_INSERT_SETTINGS = {
+  // Never acknowledge a statement that silently skipped malformed rows under an operator profile.
+  input_format_allow_errors_num: '0',
+  input_format_allow_errors_ratio: 0,
   async_insert_max_data_size: String(INGEST_ASYNC_MAX_DATA_SIZE),
   // ClickHouse 26.9 defaults, pinned explicitly: well above the 1000-row / 64 MiB statement maximum.
   min_insert_block_size_rows: '1048449',

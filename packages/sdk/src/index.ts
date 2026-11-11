@@ -148,15 +148,21 @@ export class Logbird {
     (this.timer as unknown as { unref?: () => void }).unref?.();
   }
   private async send(batch: EventInput[]) {
-    const body = JSON.stringify({ events: batch });
+    const serialized = batch.map((event) => JSON.stringify(event));
+    let attemptIndices = batch.map((_, index) => index);
+    const serializeBody = () => `{"events":[${attemptIndices.map((index) => serialized[index]).join(',')}]}`;
+    let body = serializeBody();
     const settledIndices = new Set<number>();
-    const reject = (rejections?: { index: number; reason: string }[]) => {
+    const reject = (rejections: unknown) => {
+      if (!Array.isArray(rejections)) return;
       const fresh: { index: number; reason: string }[] = [];
-      for (const rejection of rejections ?? []) {
-        if (!Number.isInteger(rejection.index) || !batch[rejection.index] || settledIndices.has(rejection.index)) continue;
-        settledIndices.add(rejection.index);
+      for (const rejection of rejections) {
+        if (!rejection || typeof rejection !== 'object' || !Number.isInteger(rejection.index) || typeof rejection.reason !== 'string') continue;
+        const index = attemptIndices[rejection.index];
+        if (index === undefined || settledIndices.has(index)) continue;
+        settledIndices.add(index);
         fresh.push(rejection);
-        this.drop(batch[rejection.index]!);
+        this.drop(batch[index]!);
       }
       if (fresh.length) this.report(new Error(`${fresh.length} events rejected by Logbird: ${fresh.map((r) => r.reason).join('; ')}`));
     };
@@ -179,7 +185,7 @@ export class Logbird {
           return;
         }
         if (response?.status === 503) {
-          // Keep the wire body identical across retries; settled indices only affect later requeuing.
+          // Retry the identical body unless the server settled rows; then resend only unsettled rows.
           const result = (await response.json().catch(() => null)) as {
             error?: {
               code?: string;
@@ -199,18 +205,41 @@ export class Logbird {
             if (
               details &&
               Array.isArray(details.ids) &&
+              details.ids.every((id) => typeof id === 'string') &&
               details.accepted === details.ids.length &&
               Array.isArray(details.rejected) &&
+              details.rejected.every(
+                (r) =>
+                  r && typeof r === 'object' && Number.isInteger(r.index) && attemptIndices[r.index] !== undefined && typeof r.reason === 'string',
+              ) &&
               Array.isArray(details.indices) &&
+              details.indices.every((index) => Number.isInteger(index) && attemptIndices[index] !== undefined) &&
               Array.isArray(details.eventIds) &&
+              details.eventIds.every((id) => typeof id === 'string') &&
               details.indices.length === details.eventIds.length &&
+              new Set(details.indices).size === details.indices.length &&
+              new Set(details.rejected.map((r) => r.index)).size === details.rejected.length &&
+              details.indices.every((index, position) => {
+                const id = batch[attemptIndices[index]!]!.id;
+                return typeof id === 'string' && details.eventIds?.[position] === id.trim() && !details.rejected?.some((r) => r.index === index);
+              }) &&
               Array.isArray(details.warnings)
             ) {
               const accepted = new Set(details.ids);
               const unresolved = new Set(details.indices);
-              batch.forEach((event, index) => {
-                if (!unresolved.has(index) && event.id && accepted.has(event.id)) settledIndices.add(index);
+              attemptIndices.forEach((index, wireIndex) => {
+                const event = batch[index]!;
+                if (!unresolved.has(wireIndex) && typeof event.id === 'string' && accepted.has(event.id.trim())) settledIndices.add(index);
               });
+              // Require every omitted position to be settled; malformed details must keep the previous body.
+              if (attemptIndices.every((index, wireIndex) => unresolved.has(wireIndex) || settledIndices.has(index))) {
+                const remaining = attemptIndices.filter((index) => !settledIndices.has(index));
+                if (!remaining.length) return;
+                if (remaining.length < attemptIndices.length) {
+                  attemptIndices = remaining;
+                  body = serializeBody();
+                }
+              }
             }
           }
         }

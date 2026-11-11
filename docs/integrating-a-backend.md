@@ -142,9 +142,9 @@ your own dispatcher.
 
 The SDK retries network failures, 429 and 5xx with backoff and jitter. It retains
 the identical serialized event, including ID, timestamp and job attempt. After
-the retry budget, `flush()` rejects and the batch remains queued; retry later.
-Non-retryable HTTP 4xx responses (all except 429) drop the entire batch and
-invoke `onDrop` for each event plus `onError`; `flush()` then continues. Successful
+the retry budget, `flush()` rejects and only unsettled events remain queued; retry later.
+Non-retryable HTTP 4xx responses (all except 429) drop remaining unsettled events and
+invoke `onDrop` for each plus `onError`; `flush()` then continues. Successful
 responses can still reject individual events, reported through the same callbacks.
 Monitor both callbacks with safe messages, without logging their event/error arguments.
 
@@ -186,7 +186,9 @@ Use a current timestamp when creating an event. Send a single event, an array or
 `rejected` lists individual failures and `warnings` reports normalization.
 Definite native storage parse failures are isolated into `invalid_event` rejections
 with zero-based indices and code-first reasons. Healthy siblings remain accepted;
-an all-rejected batch still returns 202 with `accepted: 0`. Isolation is bounded; if
+the server inserts the parse-proven prefix before rejecting the named bad row and
+continuing with the suffix. Prefix writes consume the same isolation budgets.
+An all-rejected batch still returns 202 with `accepted: 0`. Isolation is bounded; if
 it runs out of its 64-extra-statement, four-original-body byte budget for additional
 statements, ten-second wall-clock or lease budget,
 unchecked events return retryable `503 ingest_pending` indices, with settled 202
@@ -195,14 +197,26 @@ Ambiguous siblings keep their claims and determine lease-aware Retry-After.
 A `503 ingest_pending` response means some immutable event IDs are still being
 settled. Its `details` include the settled 202 response fields plus pending
 `indices` (zero-based batch positions) and `eventIds`; every index outside
-`indices` is settled. Retry the saved body on transient errors and honor
+`indices` is settled. Retry the saved events on transient errors and honor
 `Retry-After`; do not mark pending outbox entries delivered. The SDK retries the
-identical serialized batch, including settled siblings, safely. Fix permanent validation
-failures instead of retrying indefinitely. Retries are convergent because confirmed
-rows leave the work set. A pathological identical batch with more bad rows than
-one attempt can isolate ends in SDK retry exhaustion (`onError`); send smaller
-batches. The SDK sends individually rejected rows to `onDrop` once per send,
-including settled rejections on a 503, and never drops unchecked healthy rows.
+previous body unless complete 503 details settle some events; then its next attempt
+resends only unsettled events. It caches each event's serialized JSON once per send,
+preserving every event byte-identically (including id and occurredAt), and maps each
+response's indices back to the original events. Incomplete or malformed details
+keep the previous body unchanged. The SDK sends individually rejected rows to
+`onDrop` once per send, including rejections on a 503, and never drops unchecked
+healthy rows. After retry exhaustion (`onError`), only unsettled events are requeued.
+Fix permanent validation failures instead of retrying indefinitely.
+
+For raw HTTP clients, honor settled rejections and resend only `details.indices`
+(or the remaining unsettled events), keeping each event's JSON byte-identical,
+including id and occurredAt. Indices in the next response refer to that smaller
+request. This makes progress through isolation limits. Confirmed rows are skipped
+on an identical-body retry, but rejected rows have released claims and are checked
+again, so an identical body can repeat the same isolation limit. Older SDK versions
+keep the identical-body behavior and may exhaust retries on pathological batches;
+upgrade or send smaller batches. Definite non-parse storage failures with no held
+claims use a five-second Retry-After; claim-held responses retain lease-aware timing.
 
 Search columns use `toWellFormed()` to replace invalid Unicode, including changes,
 target arrays and rejected occurredAt copies. Payload and v1 identity retain raw

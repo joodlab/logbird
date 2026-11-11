@@ -321,7 +321,7 @@ after handoff, even if that exception reports no written rows.
 Failures proven to precede any write release this attempt's claims. This includes
 before-body transport errors and an explicit server-code allowlist: async-proven parse codes
 6,25,27,38,41,53,69,72 (per-index invalid_event), and unknown table/database, syntax,
-readonly, ACL/auth codes 60,62,81,164,497,516 (503 ingest_unavailable). A code wrapped
+readonly, settings-constraint and ACL/auth codes 60,62,81,164,452,497,516 (503 ingest_unavailable). A code wrapped
 by an MV failure is ambiguous even if its underlying code is on that list.
 All other errors after handoff retain the claim, including timeout 159, memory
 limit 241, and client timeout/reset. A server exception can follow a committed
@@ -330,7 +330,8 @@ raw write or only some materialized destinations. Identity-read errors return
 
 A parser code alone does not prove that nothing was written. Each insert pins
 `async_insert_max_data_size=67108864` (64 MiB), `min_insert_block_size_bytes=268402944`,
-`min_insert_block_size_rows=1048449` and `max_insert_block_size=1048449` at query
+`min_insert_block_size_rows=1048449`, `max_insert_block_size=1048449`,
+`input_format_allow_errors_num=0` and `input_format_allow_errors_ratio=0` at query
 level. Realistic 5 MiB requests normalize to at most about 15 MiB (duplicated
 changes, twice-escaped payload); 64 MiB adds headroom without letting the async
 queue buffer gigabytes. Only an absurd body (hundreds of flattened attribute paths
@@ -345,9 +346,14 @@ that force synchronous fallback, changed error wording, oversize internal
 statements and view failures remain ambiguous after handoff, retaining claims
 for recovery. See [self-hosting](self-hosting.md#ingest-insert-settings).
 
-Isolation uses the native 1-based `(at row N)` to reject exactly that event,
-then resends the remainder under the original claims and lease: k+1 statements
-for k bad rows. Missing/out-of-range row reports use bisection; a written left
+Isolation trusts that native `(at row N)` is statement-relative and 1-based. The
+shared-flush integration test in `apps/server/src/ingest-parse-isolation.integration.test.ts`
+pins this behavior on ClickHouse 26.9, including when two bodies share one async
+flush. Other ClickHouse versions must preserve it; run that test after an upgrade.
+The server inserts the parse-proven prefix through the normal visit path, then
+rejects the named row and continues with its suffix under the original claims and
+lease. Prefix writes have the same ambiguous, unavailable and lease semantics as
+any other insert. Missing/out-of-range row reports use bisection; a written left
 sibling proves the right contains a failure, so it is split without resending
 that known-failing body. No identical body is sent twice within an attempt.
 Only individual proven failures become `invalid_event`, including a 202 with
@@ -357,25 +363,36 @@ Only individual proven failures become `invalid_event`, including a 202 with
 A 64-extra-statement cap, an isolation byte budget of four times the original
 statement's UTF-8 bytes (excluding that original statement), a ten-second isolation
 wall clock and the original lease's remaining 40-second finish budget bound the work.
-Rows are serialized once; subsets join cached JSON lines. Typed pre-body lease
+Rows are serialized once; subsets join cached JSON lines. Prefix writes count
+against both the statement and byte budgets. Typed pre-body lease
 exhaustion or any cap leaves unchecked rows retryable: `503 ingest_pending`
 includes settled `{accepted,ids,rejected,warnings}` plus their `indices` and
 `eventIds`. Claims for these proven-unwritten rows are released. Only truly
 ambiguous/competing claim-held ids determine Retry-After; unresolved-only
-responses use one second. The server logs `ingest.parse_isolation_limited`
+responses use one second. Definite non-parse failures without held claims use five
+seconds for `ingest_unavailable`. The server logs `ingest.parse_isolation_limited`
 with the limiting reason immediately after isolation, even when another failure
 takes response precedence.
 
 Ambiguous children are never split or retried within an attempt. Their claims
 stay leased while siblings settle; confirmation failures also preserve every
-acknowledged child's claim. Retries are convergent as confirmed rows leave the
-work set; there is no virtual partition-tree charge. A client can retry only the
-unresolved indices after honoring settled rejections. An identical batch with
-more poison rows than one attempt can isolate can repeatedly hit the same cap:
-the SDK eventually reports retry exhaustion through `onError`. Send smaller
-batches in that case. The SDK reports individually rejected rows through `onDrop`
-once per send, including settled rejections in a retryable 503; healthy rows are
-never dropped because isolation ran out of budget.
+acknowledged child's claim. Confirmed rows leave the work set, but released bad
+claims are checked again on identical-body retries, which can repeat the same
+isolation limit. Raw HTTP clients must honor settled rejections and resend only
+the unresolved indices or remaining unsettled events, each with byte-identical
+JSON, id and occurredAt, to make progress. The next response's indices refer to
+that smaller request. There is no virtual partition-tree charge.
+
+After complete `ingest_pending` or `ingest_unavailable` 503 details, the SDK's next
+attempt within the same send resends only unsettled events. It serializes each
+event once per send and builds subset bodies from those cached strings, remapping
+response indices to original batch positions for acceptance, drop-once reporting
+and final requeue. Incomplete or malformed details keep the previous body unchanged.
+Older SDK versions retain identical-body retries and may exhaust retries on
+pathological batches. The SDK reports individually rejected rows through `onDrop`
+once per send; healthy rows are never dropped because isolation ran out of budget.
+If the retry budget is exhausted, `onError` reports it and only unsettled events
+are requeued for a later `flush()`.
 
 Search strings use `toWellFormed()` to replace lone surrogates with U+FFFD,
 including targets, changes and `logbird.occurredAt.rejected`. Caps do not split
@@ -430,11 +447,13 @@ Healthy siblings commit before 503 ingest_pending. Its details are a superset of
 the 202 response: `{accepted,ids,rejected,warnings,indices,eventIds}`. Each rejected
 entry includes `code` and a code-first explanatory `reason`. Every input index
 outside `indices` is settled, including permanent rejections; retrying the entire
-identical batch is safe. Retry-After reflects only truly pending claims: the longest remaining lease
+identical batch is idempotent but may repeat an isolation limit. Omit settled events
+to make progress. Retry-After for held claims reflects the longest remaining lease
 plus flush bound. Ready receipts report the remaining ten-minute grace, and
 throttled flushes report the remaining minute, with a one-second minimum. A different-content retry against
 an unresolved claimant stays pending until the original outcome is known. The
-SDK retries the identical body and honors Retry-After. Permanent conflicts reach
+SDK honors Retry-After and resends only unsettled events after complete 503 details;
+otherwise it keeps the previous body. Permanent conflicts reach
 onDrop/onError; a structured SDK LogbirdError class is tracked in [#89](https://github.com/joodlab/logbird/issues/89).
 
 ## Sample and retention lifecycle

@@ -73,7 +73,8 @@ repairs that finish during a read. Readers hold neither a project lock nor a Pos
 connection across ClickHouse I/O. Raw-event reads retain the existing **not a snapshot**
 semantics: concurrent ingest/retention can change results, and rebuilds do not empty raw events.
 
-The SDK retries the identical body. See [ingest-identity.md](ingest-identity.md) for
+The SDK retries the identical body unless complete 503 details settle events, then
+resends only unsettled events with byte-identical JSON. See [ingest-identity.md](ingest-identity.md) for
 migration, failure classification, permissions, cleanup and proof limits.
 
 ## 3. Recommended event envelope
@@ -127,6 +128,9 @@ Semantics worth documenting to users:
   are per-event `invalid_event_id` rejections, so healthy siblings can proceed.
 - A storage parser rejection proven to precede writes is isolated per event using
   the native body row number, with sibling-inference bisection as a fallback.
+  The server first inserts the parse-proven prefix through the normal insert path,
+  then rejects the named row and continues with the suffix. Prefix writes count
+  against the same statement, byte, clock and lease limits.
   Healthy siblings return in `ids`; individually proven offending indices appear
   in `rejected` with `code: invalid_event`, including a 202 with `accepted: 0` when
   all events fail. A 64-extra-statement cap, a four-original-body UTF-8 byte budget
@@ -137,8 +141,14 @@ Semantics worth documenting to users:
   `indices`/`eventIds`; they are never `invalid_event`. Unresolved-only Retry-After
   is one second. Ambiguous writes keep their claims and determine lease-aware
   Retry-After; definite non-parse errors return `503 ingest_unavailable` with settled
-  siblings. Retries skip confirmed rows and are convergent; pathological identical
-  batches can exhaust SDK retries (`onError`) and should be sent in smaller batches.
+  siblings and a five-second Retry-After when no claims are held. Retries skip
+  confirmed rows. After complete 503 details, the SDK resends only unsettled events,
+  mapping response indices back to the original batch. Each event is serialized once
+  per send and reused byte-identically, including id and occurredAt. Incomplete or
+  malformed details preserve the previous body. Raw HTTP clients must similarly omit
+  settled indices to make progress: identical bodies revisit released bad rows and
+  can repeat the same isolation limit. Older SDKs keep identical bodies and may
+  exhaust retries on pathological batches; exhausted retries requeue only unsettled events.
 - **actor = who caused it** (person, API key, scheduler…); **executor = who performed it** (api, worker, job,
   attempt). A worker doing work requested by Lina has `actor=Lina`, `executor=crm-worker`. Scheduled runs use
   `actor.type=system`.

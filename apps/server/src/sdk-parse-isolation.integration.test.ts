@@ -50,7 +50,7 @@ it.each([3, 80])('drives the real in-process ingest app with %i poison events an
     apiKey: 'fictional',
     endpoint: 'http://in-process.invalid',
     batchSize: 1000,
-    maxRetries: 1,
+    maxRetries: badCount,
     flushIntervalMs: 60_000,
     onDrop: (e) => dropped.push(e.id!),
     onError: (e) => errors.push(e),
@@ -64,17 +64,35 @@ it.each([3, 80])('drives the real in-process ingest app with %i poison events an
     expect(await fixture.count()).toBe(1000 - badCount);
     await sdk.shutdown();
   } else {
-    await expect(sdk.flush()).rejects.toThrow('Logbird HTTP 503');
-    await vi.waitFor(() => expect(errors.some((e) => e.message === 'Logbird HTTP 503')).toBe(true));
-    expect(responses.map((r) => r.status)).toEqual([503, 503]);
-    expect(bodies[0]).toBe(bodies[1]);
-    const first = responses[0]!.body as { error: { details: { rejected: { index: number }[]; ids: string[] } } };
-    expect(dropped).toEqual(first.error.details.rejected.map((r) => batch[r.index]!.id));
-    expect(dropped.length).toBeGreaterThan(0);
-    expect(dropped.length).toBeLessThanOrEqual(65);
-    expect(sdk.queueSize).toBe(1000 - dropped.length - seeded.length);
-    expect(await fixture.count()).toBe(10);
-    expect(first.error.details.ids).toEqual(seeded.map((e) => e.id));
+    await sdk.flush();
+    expect(responses.length).toBeGreaterThan(1);
+    expect(responses.length).toBeLessThanOrEqual(badCount + 1);
+    expect(responses.at(-1)!.status).toBe(202);
+    const expectedDropped: string[] = [];
+    for (let attempt = 0; attempt < responses.length - 1; attempt++) {
+      expect(responses[attempt]!.status).toBe(503);
+      const wire = responses[attempt]!.body as {
+        error: { code: string; details: { rejected: { index: number }[]; ids: string[]; indices: number[] } };
+      };
+      expect(wire.error.code).toBe('ingest_pending');
+      const sent = JSON.parse(bodies[attempt]!).events as typeof batch;
+      const next = JSON.parse(bodies[attempt + 1]!).events as typeof batch;
+      expectedDropped.push(...wire.error.details.rejected.map((r) => sent[r.index]!.id));
+      expect(wire.error.details.rejected.length).toBeGreaterThan(0);
+      expect(next).toEqual(wire.error.details.indices.map((index) => sent[index]));
+      expect(next.length).toBeLessThan(sent.length);
+      // These leading poison rows cannot hide forever: each response settles more original events.
+      expect(new Set(expectedDropped).size).toBe(expectedDropped.length);
+    }
+    const final = responses.at(-1)!.body as { rejected: { index: number }[] };
+    const finalSent = JSON.parse(bodies.at(-1)!).events as typeof batch;
+    expectedDropped.push(...final.rejected.map((r) => finalSent[r.index]!.id));
+    expect(dropped).toEqual(expectedDropped);
+    expect(dropped).toHaveLength(badCount);
+    expect(sdk.queueSize).toBe(0);
+    expect(await fixture.count()).toBe(1000 - badCount);
+    expect(errors.every((error) => error.message.includes('events rejected by Logbird:'))).toBe(true);
+    await sdk.shutdown();
   }
   expect(dropped.every((id) => Number(id.slice(4)) < badCount)).toBe(true);
   expect(new Set(dropped).size).toBe(dropped.length);

@@ -10,6 +10,7 @@ export default defineConfig({
       'src/export-outcomes.test.ts',
       'src/delete-errors.test.ts',
       'src/ingest-parse-isolation.test.ts',
+      'src/immutable-ingest.test.ts',
     ],
     maxWorkers: 1,
     fileParallelism: false,

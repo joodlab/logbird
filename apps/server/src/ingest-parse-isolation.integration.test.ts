@@ -213,20 +213,23 @@ it('keeps acknowledged child claims if Postgres confirmation fails', async () =>
 
 const badEvent = (id: string) => ({ ...event(id), metadata: { fixture: 'qa91', '\ud800': 'bad' } });
 it.each([3, 20, 80])('isolates a real 1000-row body with %i bad keys without rejecting a healthy row', async (badCount) => {
-  const batch = Array.from({ length: 1000 }, (_, i) => (i < badCount ? badEvent(`bad-${i}`) : event(`healthy-${i}`)));
+  const badIndices = new Set(Array.from({ length: badCount }, (_, index) => Math.floor(((index + 1) * 1000) / (badCount + 1))));
+  const batch = Array.from({ length: 1000 }, (_, i) => (badIndices.has(i) ? badEvent(`bad-${i}`) : event(`healthy-${i}`)));
+  const healthyIds = batch.filter((_, index) => !badIndices.has(index)).map((e) => e.id);
   const writes = vi.spyOn(clickhouse, 'exec');
   const warnings = vi.spyOn(console, 'warn');
   const response = await f.post(batch);
   const wire = await response.json();
   const details = response.status === 202 ? wire : wire.error.details;
-  expect(details.rejected.every((r: { index: number }) => r.index < badCount)).toBe(true);
+  expect(details.rejected.every((r: { index: number }) => badIndices.has(r.index))).toBe(true);
+  expect(details.ids.length).toBeGreaterThan(0); // Prefix writes survive a later isolation limit.
   if (badCount === 3) {
     expect(response.status).toBe(202);
     expect(details.rejected).toHaveLength(badCount);
-    expect(writes).toHaveBeenCalledTimes(badCount + 1);
-    await assertHealthy(batch.slice(badCount).map((e) => e.id));
+    expect(writes).toHaveBeenCalledTimes(2 * badCount + 1);
+    await assertHealthy(healthyIds);
     expect((await f.post(batch)).status).toBe(202);
-    await assertHealthy(batch.slice(badCount).map((e) => e.id));
+    await assertHealthy(healthyIds);
   } else {
     expect(response.status).toBe(503);
     expect(wire.error.code).toBe('ingest_pending');
@@ -238,23 +241,31 @@ it.each([3, 20, 80])('isolates a real 1000-row body with %i bad keys without rej
         return warning.event === 'ingest.parse_isolation_limited' && warning.projectId === f.project && warning.reason === 'bytes';
       }),
     ).toBe(true);
-    expect(await prisma.ingestReceipt.count({ where: { projectId: f.project } })).toBe(0);
+    expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, confirmedAt: { not: null } } })).toBe(details.ids.length);
+    await assertHealthy(details.ids);
     // Respect settled per-index results when resubmitting the unfinished work.
-    let remaining = details.indices.map((i: number) => batch[i]);
+    let remaining: ReturnType<typeof event>[] = details.indices.map((i: number) => batch[i]);
+    let rejectedCount = details.rejected.length;
     // The byte budget may require several attempts. Only resubmit the unresolved indices from each response.
     for (let attempt = 0; ; attempt++) {
       expect(attempt).toBeLessThan(badCount);
       const retry = await f.post(remaining);
       const retryBody = await retry.json();
+      const retryDetails = retry.status === 202 ? retryBody : retryBody.error.details;
+      expect(retryDetails.rejected.every((r: { index: number }) => remaining[r.index]!.id.startsWith('bad-'))).toBe(true);
+      rejectedCount += retryDetails.rejected.length;
       if (retry.status === 202) break;
       expect(retry.status).toBe(503);
       expect(retryBody.error.code).toBe('ingest_pending');
       expect(retryBody.error.details.rejected.length).toBeGreaterThan(0);
-      remaining = retryBody.error.details.indices.map((i: number) => remaining[i]);
+      const next = retryBody.error.details.indices.map((i: number) => remaining[i]);
+      expect(next.length).toBeLessThan(remaining.length);
+      remaining = next;
     }
-    await assertHealthy(batch.slice(badCount).map((e) => e.id));
+    expect(rejectedCount).toBe(badCount);
+    await assertHealthy(healthyIds);
     expect((await f.post(batch)).status).toBe(503);
-    await assertHealthy(batch.slice(badCount).map((e) => e.id));
+    await assertHealthy(healthyIds);
   }
 });
 it('repairs a lone surrogate in occurredAt and search columns without changing raw input', async () => {

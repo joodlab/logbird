@@ -1,6 +1,6 @@
 import { AmbiguousInsertError, type EventRow, INSERT_LEASE_BUDGET_MS, InsertLeaseExhaustedError, isPrewriteParseError } from '@logbird/clickhouse';
 
-// Extra statements after the original failure; exact row reports need k+1 total for k bad rows.
+// Extra statements after the original failure, including parse-proven prefix writes.
 export const MAX_PARSE_ISOLATION_STATEMENTS = 64;
 export const MAX_PARSE_ISOLATION_MS = 10_000;
 export const MAX_PARSE_ISOLATION_BYTE_MULTIPLIER = 4;
@@ -42,8 +42,11 @@ export async function isolateIngestRows(rows: EventRow[], leaseExpiresAt: number
     const match = error instanceof Error ? /\(at row (\d+)\)/i.exec(error.message) : null;
     const index = match ? Number(match[1]) - 1 : -1;
     if (Number.isSafeInteger(index) && index >= 0 && index < part.length) {
+      // ClickHouse reports a statement-relative, 1-based row. Persist its parse-proven prefix
+      // before continuing, so confirmed rows leave the next attempt even if a limit stops us.
+      await visit(part.slice(0, index));
       rejected.push(part[index] as EventRow);
-      await visit(part.filter((_, i) => i !== index));
+      await visit(part.slice(index + 1));
       return;
     }
     const middle = Math.floor(part.length / 2);

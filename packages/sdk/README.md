@@ -175,13 +175,29 @@ event with the same id is rejected with `duplicate_id_conflict: ...`; the origin
 is kept. Send a correction with a new id and `context.parentEventId` pointing to it.
 The SDK calls `onDrop` for that event and `onError` with the reason.
 
-`503 ingest_pending` and `503 ingest_unavailable` mean retry the identical batch,
+`503 ingest_pending` and `503 ingest_unavailable` mean retry unsettled events,
 honoring `Retry-After`. Healthy siblings commit before a pending response and remain
 idempotent on retry. Pending details include `accepted`, `ids`, `rejected`, `warnings`,
 `indices` and `eventIds`. Every index outside `indices` is settled. Each rejected
-entry has a `code` plus a code-first explanation in `reason`. The SDK retries these
-responses with an identical wire body; rejections call `onDrop` once. After its
-retry budget, only unsettled events stay queued and `flush()` rejects.
+entry has a `code` plus a code-first explanation in `reason`. On an exact-row storage
+parse failure, the server inserts the parse-proven prefix before rejecting the bad
+row and continuing with the suffix, all within the original isolation budgets.
+The SDK retries with the identical previous body unless complete 503 details settle
+events; then it resends only unsettled events within the same send. It serializes
+each event once per send and reuses that exact JSON (including id and occurredAt)
+in every subset body. Response indices are mapped back to the original events,
+so rejections call `onDrop` once per send. Incomplete or malformed details keep
+the previous body unchanged. After its retry budget, only unsettled events stay
+queued and `flush()` rejects.
+
+Raw HTTP clients must honor settled rejections and resend only `details.indices`
+or the remaining unsettled events to make progress. Preserve each event's JSON
+byte-identically, including id and occurredAt; response indices then refer to the
+smaller request. An identical body revisits rejected rows with released claims
+and can repeat the same isolation limit. Older SDK versions keep identical-body
+retries and may exhaust retries on pathological batches. Upgrade or use smaller
+batches if affected.
+
 Retry `flush()` later. Unresolved writes recover automatically per project after a
 bounded lease and ClickHouse queue drain. An id containing NUL, a lone surrogate,
 or more than 256 UTF-16 code units after trimming is rejected individually as
@@ -199,8 +215,8 @@ Rejection codes appear in `rejected[].code`; retryable HTTP codes appear in
 | `invalid_event_id` | Unsafe or oversized string id. | Use valid Unicode without NUL, at most 256 UTF-16 units after trimming. |
 | `duplicate_id_conflict` | The id belongs to different content. | Keep the original; send corrections with a new id and context.parentEventId. |
 | `stored_event_unreadable` | Retained evidence cannot be compared. | Keep the evidence. Send a correction with a new id; ask the operator to inspect storage. |
-| `ingest_pending (503)` | Some writes remain unresolved. | Retry the identical batch with Retry-After: about 70 seconds for ambiguity, up to 10 minutes for a ready claim. |
-| `ingest_unavailable (503)` | Identity lookup or storage is unavailable. | Retry the identical batch with Retry-After; the operator may need to restore service. |
+| `ingest_pending (503)` | Some writes remain unresolved. | Retry unsettled events with Retry-After: one second for unchecked rows, about 70 seconds for ambiguity, up to 10 minutes for a ready claim. |
+| `ingest_unavailable (503)` | Identity lookup or storage is unavailable. | Retry unsettled events with Retry-After; definite non-parse storage failures without held claims use five seconds. The operator may need to restore service. |
 | `project_busy (503)` | A project maintenance lock is held. | Retry with Retry-After after the current operation releases its lock. |
 | `retention_unavailable (503)` | Project data is being rebuilt. | Retry reads with Retry-After. Interrupted repairs resume through the worker; the hourly sweep is the fallback. |
 

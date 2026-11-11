@@ -333,7 +333,7 @@ async function pendingError(
   const now = Date.now();
   const held = pending.filter((p) => pendingIds.has(p.eventId));
   const retryAfter = Math.max(
-    1,
+    !held.length && code === 'ingest_unavailable' ? 5 : 1,
     held.some((p) => receipts.get(p.eventId)?.claimedAt) ? await ingestRecoveryRetryAfter(projectId) : 0,
     ...held.map((p) => {
       const receipt = receipts.get(p.eventId);
