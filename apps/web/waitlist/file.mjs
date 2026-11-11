@@ -8,7 +8,7 @@
 // (development) it is a loopback TCP port derived from the file's path (20000-29999); if an unrelated program happens to hold that
 // port, writes wait and then fail with an error, never proceed unlocked.
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFile, lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { hostname } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -132,49 +132,69 @@ export function withWaitlistLock(file, task) {
 }
 
 // The socket lock keeps writers apart inside one container. Two containers sharing the volume (a deploy that starts
-// the new one before stopping the old) each have their own lock, so they also announce themselves next to the file:
-// every writer touches `<file>.writers/<hostname>`, the site server every 30 s while it runs and on every append. A
-// rewrite (the cleanup or `forget`) refuses to run while another host has done so in the last 90 s, checking before it
-// reads and again just before it renames. Appends never need to wait: they only add lines.
+// the new one before stopping the old) each have their own lock, so they also coordinate through files next to the
+// submissions file, in `<file>.writers/`:
+//
+// - `host-<hostname>`: a container announcing it writes the file. The site server touches it on start, every 30 s
+//   and on every append; an announcement older than 90 s belongs to a container that has stopped.
+// - `rewrite-<hostname>`: a container rewriting the file right now (the cleanup or `forget`).
+//
+// A rewrite writes its marker first and then looks for another container's announcement; an append writes its
+// announcement first and then looks for another container's marker. Each writes its own flag before reading the
+// other's, so at least one of them sees the other: the rewrite backs off (it refuses, and the cleanup tries again on
+// its next pass), or the append waits until the rewrite has finished. A foreign append can therefore never land in a
+// file that a rewrite is about to replace. The volume must be local to one machine (one clock, one file system), as a
+// Docker volume is.
 const WRITER_FRESH_MS = 90_000;
+/** A rewrite takes well under a second; a marker older than this was left by a container that crashed mid-rewrite. */
+const REWRITE_STALE_MS = 60_000;
 const writers = (path) => `${path}.writers`;
+const announcement = (host) => `host-${host}`;
+const marker = (host) => `rewrite-${host}`;
 
-async function touchWriter(path) {
+async function touch(path, name) {
   await mkdir(writers(path), { recursive: true });
-  await writeFile(join(writers(path), hostname()), `${Date.now()}\n`, { mode: 0o600 });
+  await writeFile(join(writers(path), name), `${Date.now()}\n`, { mode: 0o600 });
 }
 
-async function assertSoleWriter(path) {
+/** Other hosts with an entry of `kind` touched within `freshMs`. */
+async function othersWith(path, kind, freshMs) {
   const names = await readdir(writers(path)).catch(() => []);
+  const prefix = `${kind}-`;
   const others = [];
-  for (const name of names.filter((entry) => entry !== hostname())) {
+  for (const name of names.filter((entry) => entry.startsWith(prefix) && entry !== `${prefix}${hostname()}`)) {
     const info = await stat(join(writers(path), name)).catch(() => undefined);
-    if (info && Date.now() - info.mtimeMs < WRITER_FRESH_MS) {
-      others.push(name);
+    if (info && Date.now() - info.mtimeMs < freshMs) {
+      others.push(name.slice(prefix.length));
     }
   }
-  if (others.length) {
-    throw new Error(`Another site container (${others.join(', ')}) is writing this file; not rewriting it until it stops.`);
-  }
+  return others;
 }
 
 /** Announces this host as a writer of `file` until the returned function is called (the site server does this). */
 export async function registerWaitlistWriter(file, everyMs = 30_000) {
   const path = await resolveWaitlistPath(file);
-  await touchWriter(path);
-  const timer = setInterval(() => touchWriter(path).catch(() => undefined), everyMs);
+  await touch(path, announcement(hostname()));
+  const timer = setInterval(() => touch(path, announcement(hostname())).catch(() => undefined), everyMs);
   timer.unref();
   return async () => {
     clearInterval(timer);
-    await rm(join(writers(path), hostname()), { force: true });
+    await rm(join(writers(path), announcement(hostname())), { force: true });
   };
 }
 
-/** Appends one record as a JSONL line. */
+/** Appends one record as a JSONL line, after any rewrite another container is running has finished. */
 export function appendWaitlistRecord(file, record) {
   return withWaitlistLock(file, async (path) => {
     await mkdir(dirname(path), { recursive: true });
-    await touchWriter(path);
+    await touch(path, announcement(hostname()));
+    const deadline = Date.now() + LOCK_WAIT_MS;
+    while ((await othersWith(path, 'rewrite', REWRITE_STALE_MS)).length) {
+      if (Date.now() > deadline) {
+        throw new Error('Another site container kept rewriting the form submissions file for 30 s.');
+      }
+      await new Promise((done) => setTimeout(done, 20));
+    }
     await appendFile(path, `${JSON.stringify(record)}\n`, { mode: 0o600 });
   });
 }
@@ -224,47 +244,42 @@ async function syncDirectory(path) {
  * operator can deal with them. Run as root (say `docker exec -u root`), the new file keeps the old one's owner, so
  * the site can still append to it. A failed rewrite removes its temporary file; one left by a crash (rewrites only
  * happen under the lock, so any that exists now is a leftover) is deleted first, so no copy of a deleted record
- * survives. It refuses while another container writes the file (see `assertSoleWriter`), and any line that still
- * reached the old file after it was read is copied into the new one after the rename.
+ * survives. It refuses while another container writes the file (see above).
+ *
+ * An error thrown before the new file replaced the old one means nothing changed. One thrown after carries
+ * `replaced: true`: the deletion happened, but it may not survive a crash.
  */
 export function rewriteWaitlist(file, keep) {
   return withWaitlistLock(file, async (path) => {
-    await assertSoleWriter(path);
-    const prefix = `${basename(path)}${TEMPORARY}`;
-    const leftovers = await readdir(dirname(path)).catch(() => []);
-    for (const name of leftovers.filter((entry) => entry.startsWith(prefix))) {
-      await rm(join(dirname(path), name), { force: true });
-    }
-    let old;
+    await touch(path, marker(hostname()));
     try {
-      old = await open(path, 'r');
-    } catch (error) {
-      if (error?.code === 'ENOENT') {
-        return { kept: 0, removed: 0, unreadable: 0 };
+      const others = await othersWith(path, 'host', WRITER_FRESH_MS);
+      if (others.length) {
+        throw new Error(`Another site container (${others.join(', ')}) is writing this file; not rewriting it until it stops.`);
       }
-      throw error;
-    }
-    let closed = false;
-    const close = async () => {
-      if (!closed) {
-        closed = true;
-        await old.close();
-      }
-    };
-    try {
-      return await rewriteOpen(path, old, close, prefix, keep);
+      return await rewriteAlone(path, keep);
     } finally {
-      await close();
+      await rm(join(writers(path), marker(hostname())), { force: true });
     }
   });
 }
 
-async function rewriteOpen(path, old, closeOld, prefix, keep) {
-  const read = await old.readFile();
-  const lines = read
-    .toString('utf8')
-    .split('\n')
-    .filter((line) => line.trim());
+async function rewriteAlone(path, keep) {
+  const prefix = `${basename(path)}${TEMPORARY}`;
+  const leftovers = await readdir(dirname(path)).catch(() => []);
+  for (const name of leftovers.filter((entry) => entry.startsWith(prefix))) {
+    await rm(join(dirname(path), name), { force: true });
+  }
+  let text;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return { kept: 0, removed: 0, unreadable: 0 };
+    }
+    throw error;
+  }
+  const lines = text.split('\n').filter((line) => line.trim());
   let unreadable = 0;
   const kept = lines.filter((line) => {
     let record;
@@ -281,36 +296,24 @@ async function rewriteOpen(path, old, closeOld, prefix, keep) {
     return { kept: kept.length, removed, unreadable };
   }
   const temporary = join(dirname(path), `${prefix}${randomUUID()}`);
-  const current = await old.stat();
+  const current = await stat(path);
   const owner = process.getuid?.() === 0 ? { uid: current.uid, gid: current.gid } : undefined;
-  // Windows can't rename over a file that is still open, so there the old file is closed first and the merge below is
-  // skipped. It only matters for a writer in another container, which means Linux: the site image.
-  const keepOldOpen = process.platform !== 'win32';
   try {
     await writeDurably(temporary, kept.map((line) => `${line}\n`).join(''), owner);
-    await assertSoleWriter(path);
-    if (!keepOldOpen) {
-      await closeOld();
-    }
     await rename(temporary, path);
   } catch (error) {
     await rm(temporary, { force: true });
     throw error;
   }
-  await syncDirectory(dirname(path));
-  // Lines appended to the old file after it was read (by a writer that opened it before the rename) move across.
-  const grown = keepOldOpen ? (await old.stat()).size : read.length;
-  let added = 0;
-  if (grown > read.length) {
-    const tail = Buffer.alloc(grown - read.length);
-    await old.read(tail, 0, tail.length, read.length);
-    await appendFile(path, tail, { mode: 0o600 });
-    added = tail
-      .toString('utf8')
-      .split('\n')
-      .filter((line) => line.trim()).length;
+  try {
+    await syncDirectory(dirname(path));
+  } catch (error) {
+    throw Object.assign(new Error(`The file was rewritten, but flushing that to disk failed: ${error?.message ?? error}`), {
+      replaced: true,
+      cause: error,
+    });
   }
-  return { kept: kept.length + added, removed, unreadable };
+  return { kept: kept.length, removed, unreadable };
 }
 
 /** Deletes records whose retention period has ended by `now`. A record without a readable `receivedAt` is kept. */

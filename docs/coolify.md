@@ -138,11 +138,14 @@ variable and redeploy the site; the policy text and the cleanup change together.
 Run **one** site container per `site-data` volume; don't scale the site service
 beyond one replica. Writers in one container share a lock. Across containers (a
 deploy that starts the new one before the old one stops), each running site
-announces itself in `/data/waitlist.jsonl.writers/`. While another container has
-done so in the last 90 seconds, the cleanup and `forget` refuse to rewrite the file
-(logged as `waitlist.retention_failed`, or an error from `forget`); new submissions
-are still stored. They go ahead once the old container has stopped. The cleanup
-runs on its next pass; rerun `forget`.
+announces itself in `/data/waitlist.jsonl.writers/`, and a rewrite marks itself
+there while it runs. While another container has announced itself in the last 90
+seconds, the cleanup and `forget` refuse to rewrite the file. That's logged as
+`waitlist.retention_failed`, and `forget` prints "Nothing was deleted". A new
+submission arriving during another container's rewrite waits the moment it takes,
+so none is lost. Rewrites go ahead once the old container has stopped: the cleanup
+on its next pass, and `forget` when you run it again. The volume must be local to
+the machine, as a Docker volume is.
 
 To delete one person's submissions on request, run this in the site container:
 
@@ -150,8 +153,11 @@ To delete one person's submissions on request, run this in the site container:
 docker exec <site container> node waitlist/admin.mjs forget someone@example.com
 ```
 
-It prints how many submissions it removed, never their contents. Also delete the
-notification emails for that address from the team mailbox. From a source checkout,
+It prints how many submissions it removed, never their contents. On failure it
+prints "Nothing was deleted: …" when the file is unchanged. It prints "The
+submissions were removed, but the result may not be on disk yet: …" when the file
+was replaced but flushing to disk failed: check the disk and run it again, which is
+safe. Also delete the notification emails for that address from the team mailbox. From a source checkout,
 `pnpm --filter @logbird/web waitlist:forget someone@example.com` does the same for
 the `WAITLIST_FILE` in the root `.env` (default `apps/web/.data/waitlist.jsonl`).
 Writes to the file (new submissions, the cleanup and this command) take one lock,

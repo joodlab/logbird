@@ -207,21 +207,74 @@ it('loses nothing when processes create the file through different aliases while
 it('refuses to rewrite while another container writes the same file, and resumes once it has stopped', async () => {
   await appendWaitlistRecord(file, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
   // This host's own announcement (made by the append) never blocks it.
-  expect(await readdir(`${file}.writers`)).toEqual([hostname()]);
-  const other = join(`${file}.writers`, 'other-container');
+  expect(await readdir(`${file}.writers`)).toEqual([`host-${hostname()}`]);
+  const other = join(`${file}.writers`, 'host-other-container');
   await writeFile(other, '');
   await expect(forgetWaitlistEmail(file, 'forget-me@example.test')).rejects.toThrow('Another site container (other-container)');
   await expect(pruneWaitlist(file, Date.now() + 100 * 365 * 86_400_000, 1)).rejects.toThrow(/Another site container/);
   expect(await emails()).toEqual(['forget-me@example.test']);
+  // A refused rewrite leaves no marker behind, so it never holds up appends.
+  expect(await readdir(`${file}.writers`)).not.toContain(`rewrite-${hostname()}`);
   // An announcement older than 90 s belongs to a container that has stopped.
   const old = new Date(Date.now() - 120_000);
   await utimes(other, old, old);
   expect(await forgetWaitlistEmail(file, 'forget-me@example.test')).toMatchObject({ removed: 1 });
 });
 
+it('an append waits while another container is rewriting the file, and goes ahead once it has finished', async () => {
+  await appendWaitlistRecord(file, record('first@example.test', '2026-11-01T00:00:00.000Z'));
+  // Another container announced a rewrite after this one's append announced itself: the append must wait.
+  const rewriting = join(`${file}.writers`, 'rewrite-other-container');
+  await writeFile(rewriting, '');
+  let stored = false;
+  const pending = appendWaitlistRecord(file, record('waiting@example.test', '2026-11-02T00:00:00.000Z')).then(() => {
+    stored = true;
+  });
+  await new Promise((done) => setTimeout(done, 300));
+  expect(stored).toBe(false);
+  expect(await emails()).toEqual(['first@example.test']);
+  await rm(rewriting);
+  await pending;
+  expect(await emails()).toEqual(['first@example.test', 'waiting@example.test']);
+  // A marker older than 60 s was left by a container that crashed mid-rewrite and never holds anything up.
+  await writeFile(rewriting, '');
+  const old = new Date(Date.now() - 120_000);
+  await utimes(rewriting, old, old);
+  await appendWaitlistRecord(file, record('after-crash@example.test', '2026-11-03T00:00:00.000Z'));
+  expect(await emails()).toHaveLength(3);
+});
+
+it.skipIf(process.platform === 'win32')('says when a failure came after the file was already replaced', async () => {
+  vi.resetModules();
+  vi.doMock('node:fs/promises', async (original) => {
+    const real = (await original()) as typeof import('node:fs/promises');
+    return {
+      ...real,
+      // Opening the directory to flush the rename fails, as on a failing disk.
+      open: (async (path: string, flags?: string, mode?: number) => {
+        if (flags === 'r' && (await real.stat(path)).isDirectory()) {
+          throw Object.assign(new Error('EIO: i/o error, fsync'), { code: 'EIO' });
+        }
+        return real.open(path, flags, mode);
+      }) as typeof real.open,
+    };
+  });
+  try {
+    const fresh = await import('../../waitlist/file.mjs');
+    await fresh.appendWaitlistRecord(file, record('forget-me@example.test', '2026-11-01T00:00:00.000Z'));
+    await fresh.appendWaitlistRecord(file, record('keep-me@example.test', '2026-11-02T00:00:00.000Z'));
+    await expect(fresh.forgetWaitlistEmail(file, 'forget-me@example.test')).rejects.toMatchObject({ replaced: true });
+    // The deletion did happen; only its durability is in doubt.
+    expect(await emails()).toEqual(['keep-me@example.test']);
+  } finally {
+    vi.doUnmock('node:fs/promises');
+    vi.resetModules();
+  }
+});
+
 it('announces the site server as a writer until it stops', async () => {
   const unregister = await registerWaitlistWriter(file, 50);
-  expect(await readdir(`${file}.writers`)).toEqual([hostname()]);
+  expect(await readdir(`${file}.writers`)).toEqual([`host-${hostname()}`]);
   await unregister();
   expect(await readdir(`${file}.writers`)).toEqual([]);
 });

@@ -19,8 +19,15 @@ try {
   console.log(`Removed ${removed} submission(s) for that address; ${kept} other submission(s) kept in ${file}.`);
   console.log('Also delete the notification emails for that address from the team mailbox.');
 } catch (error) {
-  // Nothing was deleted. The likely cause is another site container still running on this volume (a deploy in
-  // progress): try again once it has stopped.
-  console.error(`Nothing was deleted: ${error instanceof Error ? error.message : String(error)}`);
+  const reason = error instanceof Error ? error.message : String(error);
+  if (error?.replaced) {
+    // The submissions are gone from the file, but the change may not survive a crash: check the disk, then run the
+    // command again (it is safe to repeat).
+    console.error(`The submissions were removed, but the result may not be on disk yet: ${reason}`);
+  } else {
+    // Nothing changed. The usual cause is another site container still running on this volume (a deploy in
+    // progress): try again once it has stopped.
+    console.error(`Nothing was deleted: ${reason}`);
+  }
   process.exit(1);
 }
