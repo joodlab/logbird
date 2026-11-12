@@ -182,7 +182,11 @@ async function cancelBackend(pid: number, settled?: Promise<unknown>) {
  */
 async function otherIndexBuild(db: Queryable, target: ReceiptIndexTarget & { schema: string }) {
   const { rows } = await db.query<{ building: boolean }>(
-    'SELECT EXISTS (SELECT 1 FROM pg_stat_progress_create_index WHERE relid = to_regclass($1) AND pid <> pg_backend_pid()) building',
+    // Without pg_read_all_stats, another role's build shows a NULL relid. Treat any invisible build in this database
+    // as one on our table: skipping an hour is cheap, aborting an operator's rebuild is not.
+    `SELECT EXISTS (SELECT 1 FROM pg_stat_progress_create_index
+       WHERE pid <> pg_backend_pid() AND datid = (SELECT oid FROM pg_database WHERE datname = current_database())
+         AND (relid = to_regclass($1) OR relid IS NULL)) building`,
     [`${quote(target.schema)}.${quote(target.table)}`],
   );
   return rows[0]?.building === true;

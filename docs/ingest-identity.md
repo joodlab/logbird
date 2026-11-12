@@ -74,7 +74,8 @@ metadata when present, and the response depends on where it happened:
   infrastructure failure or receipt conflict is the usual retryable 503, an `ApiError` keeps
   its status, and a programming error surfaces as a server error instead of a retry loop.
 - **After parse isolation:** the composed outcome stands; retryable rows whose claims
-  couldn't be released are reported as pending, with a lease-aware Retry-After.
+  couldn't be released are reported as pending, with a lease-aware Retry-After (for
+  database infrastructure failures; any other release error surfaces).
 - **With nothing to insert:** every row is already settled, so the settled response stands
   (for database infrastructure failures; any other release error surfaces).
 Unreleased claims remain held until abandoned-claim recovery. Nothing on
@@ -258,7 +259,8 @@ runs `compactIngestReceiptIndex`:
   both before each run and after a failure, unless another backend is building an
   index on the table (`pg_stat_progress_create_index`): then the run reports
   `skipped_busy`, because a drop queued behind that build's lock could deadlock its
-  snapshot wait and abort an operator's manual rebuild. Still pause the worker during a
+  snapshot wait and abort an operator's manual rebuild. A build whose table the worker
+  role can't see (another role's, without `pg_read_all_stats`) counts as busy too. Still pause the worker during a
   manual rebuild.
 - The lock timeout also bounds REINDEX's waits for older transactions. Before building,
   the job therefore skips (`skipped_old_transactions`, logged) when another

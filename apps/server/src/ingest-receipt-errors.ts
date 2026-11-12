@@ -36,6 +36,10 @@ const NETWORK_CODES = new Set([
   'EPIPE',
   'ETIMEDOUT',
 ]);
+// Exact codes from classes that also hold data errors: serialization, deadlock and unknown commit outcome (40, not
+// 40002's deferred-constraint failure); system and I/O errors (58, not 58P01/58P02's file errors); plus lock and
+// idle-transaction timeouts.
+const INFRASTRUCTURE_SQLSTATES = new Set(['40001', '40P01', '40003', '58000', '58030', '55P03', '25P03', '25P04']);
 const record = (value: unknown): Record<string, unknown> => (value && typeof value === 'object' ? (value as Record<string, unknown>) : {});
 const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
 
@@ -63,7 +67,7 @@ export function isDatabaseFailure(error: unknown) {
   const source = record(error);
   const sqlstate = text(adapterCause(error).originalCode) ?? text(record(source.meta).code);
   // An explicit SQLSTATE takes precedence over a contradictory adapter kind.
-  if (sqlstate) return /^(08|53|57|40|58)[0-9A-Z]{3}$/.test(sqlstate) || ['55P03', '25P03', '25P04'].includes(sqlstate);
+  if (sqlstate) return /^(08|53|57)[0-9A-Z]{3}$/.test(sqlstate) || INFRASTRUCTURE_SQLSTATES.has(sqlstate);
   return kind !== undefined && INFRASTRUCTURE_KINDS.has(kind);
 }
 

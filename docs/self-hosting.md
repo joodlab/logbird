@@ -852,8 +852,10 @@ The hourly job drops invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copies left b
 failed or cancelled rebuild. While another backend is building an index on the table
 (an operator's manual REINDEX CONCURRENTLY, say), the job leaves the table alone and
 reports `skipped_busy`: dropping that build's in-progress copy, or queueing a drop behind
-its lock, could abort the manual rebuild. Still pause the worker during a manual rebuild,
-since a run already past that check can't see a rebuild that starts afterwards. The
+its lock, could abort the manual rebuild. Without `pg_read_all_stats`, the worker role can't see
+which table another role's build is on, so any such build in the database counts as busy (it
+only skips an hour). Still pause the worker during a manual rebuild, since a run already past
+that check can't see a rebuild that starts afterwards. The
 job also skips a run while another transaction older than its one-minute lock timeout
 holds a snapshot or a lock on the receipt table (for example a running `pg_dump`), or an
 old prepared (two-phase) transaction exists, instead of building a copy it couldn't

@@ -577,6 +577,9 @@ it('leaves the table alone while another backend builds an index on it', async (
   expect(busy.calls.some((sql) => sql.startsWith('DROP INDEX') || sql.startsWith('REINDEX'))).toBe(false);
   const check = busy.query.mock.calls.find(([sql]) => String(sql).includes('pg_stat_progress_create_index'));
   expect(check?.[0]).toContain('pid <> pg_backend_pid()');
+  // Another role's build hides its relid without pg_read_all_stats: an invisible build in this database counts too.
+  expect(check?.[0]).toContain('(relid = to_regclass($1) OR relid IS NULL)');
+  expect(check?.[0]).toContain('datid = (SELECT oid FROM pg_database WHERE datname = current_database())');
   expect(check?.[1]).toEqual(['"qa_current"."IngestReceipt"']);
   expect(busy.calls.at(-1)).toContain('pg_advisory_unlock');
 });

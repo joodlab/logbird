@@ -45,7 +45,7 @@ const wrapped = (sqlstate: string) => [
   }),
 ];
 
-it.each(['08006', '53300', '57014', '57P01', '40001', '40P01', '58030', '55P03', '25P03', '25P04'])(
+it.each(['08006', '53300', '57014', '57P01', '40001', '40P01', '40003', '58000', '58030', '55P03', '25P03', '25P04'])(
   'classifies infrastructure SQLSTATE %s in every supported wrapper',
   (sqlstate) => {
     for (const error of wrapped(sqlstate)) expect(isDatabaseFailure(error)).toBe(true);
@@ -67,7 +67,7 @@ it.each([
   ).toBe(true);
 });
 
-it.each(['42601', '42703', '42883', '22P02', '42501', '23505', '23503', '23502'])(
+it.each(['42601', '42703', '42883', '22P02', '42501', '23505', '23503', '23502', '40002', '58P01', '58P02'])(
   'does not mask SQL/API error %s in any supported wrapper',
   (sqlstate) => {
     for (const error of wrapped(sqlstate)) expect(isDatabaseFailure(error)).toBe(false);
