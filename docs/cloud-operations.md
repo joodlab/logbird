@@ -173,7 +173,7 @@ that copy's `deploy/k3s` directory:
    | Secret | Keys / purpose |
    | --- | --- |
    | `logbird-runtime` | API: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `REDIS_URL`, `BETTER_AUTH_SECRET`, `CLICKHOUSE_QUERY_PASSWORD` (64 lowercase hex); `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` as required by the selected provider |
-   | `logbird-worker` | Retention/health/queue only: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `REDIS_URL`. The manifest names these five `secretKeyRef` entries explicitly; no API auth secret, restricted-query password or SMTP credentials are mounted |
+   | `logbird-worker` | Retention/health/queue only: `DATABASE_URL` (a direct, session-mode connection: receipt-index compaction needs one session for its lock, settings, pid and REINDEX, so not a transaction-mode pooler), `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `REDIS_URL`. The manifest names these five `secretKeyRef` entries explicitly; no API auth secret, restricted-query password or SMTP credentials are mounted |
    | `logbird-migration` | One-shot schema/access tooling: `DATABASE_URL`, `CLICKHOUSE_URL`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, preserved `CLICKHOUSE_QUERY_PASSWORD`; no auth or mail credentials |
 
    Back up the three object names, key inventories and encrypted recovery references
@@ -315,6 +315,15 @@ If the Job fails or times out, stop: preserve its status/logs, investigate appli
 use the recovery decision below. Do not automatically rerun, delete evidence or unblock traffic.
 The Job has no automatic retries and a 20-minute deadline. It uses the image CMD to deploy
 Postgres migrations, ClickHouse migrations and query-user grants in that order.
+The immutable-id upgrade (ClickHouse 006–009) is the exception to that deadline on
+large histories. Each copy statement has its own 600-second server budget
+(`CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS`, which may be set in the migration
+Secret). Its final coverage pass grows roughly with the square of retained events:
+measured at about 62 seconds for 10M and extrapolated to about 80 minutes at
+100M. See the [upgrade copy limits](self-hosting.md#upgrade-copy-limits). Time a
+restored production copy first, and when the estimate exceeds the Job's 20-minute
+`activeDeadlineSeconds`, raise it for that one release's Job. A deadline kill
+mid-copy is safe to rerun, but it repeats a pre-swap copy from the start.
 If nothing starts within about one minute, inspect
 `kubectl -n logbird get pods -l job-name="$MIGRATION_JOB"` for ImagePullBackOff or
 unschedulable Pods rather than waiting silently for the deadline.
@@ -343,6 +352,32 @@ combined peak RSS/cgroup usage with concurrent retention and a probe, and leave
 headroom or change the probe design before qualifying that image (OPS-02).
 Verify `worker.ready`, its scheduler and a real completed retention job. The 300-second worker
 grace period needs long-running retention/drain evidence before relying on it.
+
+An independent hourly `ingest-receipt-index.compact` job compacts a bloated receipt
+primary key on its own queue and worker (concurrency 1, one attempt), so recovery
+and project retention can continue during a rebuild. `REINDEX INDEX CONCURRENTLY`
+requires table ownership, or the table's
+`MAINTAIN` privilege on PostgreSQL 17+ (see [REINDEX](https://www.postgresql.org/docs/17/sql-reindex.html)). A non-owner worker without that grant logs
+`ingest.receipt_index_compaction_failed` with code `42501` once the index qualifies for a rebuild
+(smaller indexes skip silently); recovery and retention continue. Dropping invalid `_ccnew`/`_ccold` reindex copies additionally requires
+ownership of the table/index (see [DROP INDEX](https://www.postgresql.org/docs/17/sql-dropindex.html)), so a maintenance-only role needs owner-assisted
+cleanup when a cancelled rebuild leaves a copy; until then runs report `skipped_invalid_copy` once per 24-hour
+back-off.
+The hourly job drops only invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copies left by a
+failed or cancelled rebuild. While another backend builds an index on the table (an operator's
+manual REINDEX CONCURRENTLY), the job reports `skipped_busy` and drops nothing, so it can't abort
+that rebuild. Old prepared (two-phase) transactions count as blocking the pre-check, like long
+transactions do. A 55P03 lock timeout or 57014 statement timeout sets a 24-hour Redis
+back-off; later hourly jobs log `skipped_backoff` until it expires (they still drop a
+leftover invalid copy, but never rebuild). Pause the worker
+during a manual rebuild, and stop it before deploying a migration that alters
+`IngestReceipt`: a running rebuild holds SHARE UPDATE EXCLUSIVE for up to 15 minutes,
+and the migration's ACCESS EXCLUSIVE request would queue behind it and stall ingest. After stopping
+it, confirm no `application_name = 'logbird-receipt-index-maintenance'` backend is still active (a cancel that
+failed on PostgreSQL < 14 leaves the REINDEX running; see `ingest.receipt_index_shutdown_fallback`). Before building, a run checks for transactions older
+than one minute that hold a snapshot or a lock on the receipt table (for example
+a backup), and logs `skipped_old_transactions` when one exists. Transactions with
+neither do not block the pre-check; autovacuum workers and launchers are excluded.
 
 ## Acceptance and rollback
 

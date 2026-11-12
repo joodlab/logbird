@@ -137,7 +137,8 @@ it("a confirmation waiting on a row lock past Prisma's 5 s batch default still c
     let confirmation: Promise<void> | undefined;
     await prisma.$transaction(
       async (tx) => {
-        // A sweep batch or another writer holds the row while the post-ClickHouse confirmation arrives.
+        // Stand-in for a slow confirmation: another writer holds the row (in practice, pool queueing or a large
+        // batch) while the post-ClickHouse confirmation arrives.
         await tx.$queryRaw`SELECT 1 FROM "IngestReceipt" WHERE "projectId"=${project} AND "eventId"='locked' FOR UPDATE`;
         const [holder] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() pid`;
         confirmation = confirmIngestReceipts(project, [{ eventId: 'locked', fingerprint: 'v1:new', receivedAt: new Date(1), eventAt: new Date(2) }]);

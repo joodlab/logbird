@@ -8,11 +8,15 @@ vi.mock('./index', async () => ({
 }));
 
 import {
+  claimIngestReceipts,
   confirmIngestReceipts,
   expireIngestReceipts,
   findIngestReceipts,
+  INGEST_RECEIPT_BACKSTOP_BUDGET_MS,
   INGEST_RECEIPT_SWEEP_BUDGET_MS,
+  IngestReceiptConflictError,
   pruneIngestReceipts,
+  RECEIPT_CAS_RETRY_TRANSACTION,
   RECEIPT_PROBE_TRANSACTION,
   sweepIngestReceipts,
 } from './ingest-receipts';
@@ -23,6 +27,51 @@ beforeEach(() => {
   transaction.mockImplementation((run) => (typeof run === 'function' ? run({ $executeRaw: execute }) : Promise.all(run)));
 });
 afterEach(() => vi.restoreAllMocks());
+
+it.each([
+  { code: 'P2002' },
+  { code: '23505' },
+  { code: 'P2010', meta: { code: '23505' } },
+  // Prisma 7 + adapter-pg raw query shape (rethrowAsUserFacingRawError).
+  { code: 'P2010', meta: { driverAdapterError: { cause: { kind: 'UniqueConstraintViolation', originalCode: '23505' } } } },
+  { code: 'P2010', meta: { driverAdapterError: { cause: { originalCode: '23505' } } } },
+  // An unwrapped adapter error (e.g. inside an interactive transaction).
+  { name: 'DriverAdapterError', cause: { kind: 'UniqueConstraintViolation', originalCode: '23505' } },
+])('turns claim uniqueness failures into retryable receipt conflicts (%j)', async (error) => {
+  query.mockRejectedValueOnce(error);
+  await expect(
+    claimIngestReceipts('qa-project', 'qa-org', [
+      {
+        eventId: 'qa-event',
+        fingerprint: 'v1:qa',
+        receivedAt: new Date(0),
+        eventAt: new Date(0),
+        confirmedAt: null,
+        claimedAt: new Date(0),
+      },
+    ]),
+  ).rejects.toMatchObject({ code: 'LOGBIRD_INGEST_RECEIPT_CONFLICT', operation: 'claim' });
+  expect(query).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { code: 'P2010', meta: { code: '57014' } },
+  { code: 'P2010', meta: { driverAdapterError: { cause: { kind: 'postgres', originalCode: '57014' } } } },
+])('preserves unrelated claim failures (%j)', async (error) => {
+  query.mockRejectedValueOnce(error);
+  await expect(
+    claimIngestReceipts('qa-project', 'qa-org', [
+      {
+        eventId: 'qa-event',
+        fingerprint: 'v1:qa',
+        receivedAt: new Date(0),
+        eventAt: new Date(0),
+        confirmedAt: null,
+        claimedAt: new Date(0),
+      },
+    ]),
+  ).rejects.toBe(error);
+});
 
 it('empty lookups and confirmations do no SQL; receipt reads preserve the returned clocks', async () => {
   expect(await findIngestReceipts('project', [])).toEqual([]);
@@ -35,36 +84,61 @@ it('empty lookups and confirmations do no SQL; receipt reads preserve the return
   expect(query).toHaveBeenCalledTimes(1);
 });
 
-it('every per-id probe runs right after its transaction-local plan guard', async () => {
-  query.mockResolvedValue([]);
-  execute.mockResolvedValue(0);
+const cas = (found: number, skipped: string[] = []) => [{ found, changed: found - skipped.length, skipped }];
+
+it('every per-id probe runs right after its transaction-local plan guard, with explicit bounds', async () => {
+  query.mockResolvedValueOnce([]).mockResolvedValueOnce(cas(1)).mockResolvedValueOnce(cas(1));
   await findIngestReceipts('project', ['a']);
   await confirmIngestReceipts('project', [{ eventId: 'a', fingerprint: 'v1:x', receivedAt: new Date(), eventAt: new Date() }]);
   await expireIngestReceipts('project', ['a'], new Date());
   expect(transaction).toHaveBeenCalledTimes(3);
-  // Batch positions: Prisma executes batch entries sequentially in one transaction, so the guard (first) is
-  // planned before the probe (second). The mock cannot prove that execution order; the real-PG plan test does.
+  // Batch positions (identity, not deep equality): Prisma executes batch entries sequentially in one
+  // transaction, so the guard (first) is planned before the probe (second). The mock proves positions only;
+  // the real-PG plan test covers execution.
   for (const [n, [batch, options]] of transaction.mock.calls.entries()) {
-    expect(batch).toEqual([execute.mock.results[n]?.value, query.mock.results[n]?.value]);
-    // Explicit bounds replace Prisma's 2 s / 5 s batch-transaction defaults.
-    expect(options).toEqual(RECEIPT_PROBE_TRANSACTION);
+    expect(batch).toHaveLength(2);
+    expect(batch[0]).toBe(execute.mock.results[n]?.value);
+    expect(batch[1]).toBe(query.mock.results[n]?.value);
+    expect(batch[0]).not.toBe(batch[1]);
+    expect(options).toBe(RECEIPT_PROBE_TRANSACTION);
   }
-  const guards = execute.mock.calls;
-  expect(guards).toHaveLength(3);
-  expect(query).toHaveBeenCalledTimes(3);
-  for (const [sql] of guards)
+  expect(execute).toHaveBeenCalledTimes(3);
+  for (const [sql] of execute.mock.calls)
     for (const setting of ['enable_seqscan', 'enable_bitmapscan', 'enable_sort', 'enable_incremental_sort', 'jit'])
       expect(sql.sql).toContain(`set_config('${setting}','off',true)`);
 });
 
 it('a full targeted request batch never loops', async () => {
-  execute.mockResolvedValueOnce(5000).mockResolvedValueOnce(5000).mockResolvedValue(0);
+  query.mockResolvedValueOnce(cas(5000)).mockResolvedValue(cas(0));
   const ids = Array.from({ length: 5000 }, (_, n) => `receipt-${n}`);
   await expireIngestReceipts(randomUUID(), ids, new Date());
-  expect(transaction).toHaveBeenCalledTimes(1);
-  expect(execute).toHaveBeenCalledTimes(1); // The plan guard.
   expect(query).toHaveBeenCalledTimes(1);
   expect(query.mock.calls[0]?.[0].values).toContainEqual(ids);
+});
+
+it('ids lost to a concurrent row update are re-sought once more, never silently skipped', async () => {
+  query.mockResolvedValueOnce(cas(3, ['b'])).mockResolvedValueOnce(cas(1));
+  const identities = ['a', 'b', 'c'].map((eventId) => ({ eventId, fingerprint: 'v1:x', receivedAt: new Date(1), eventAt: new Date(2) }));
+  await confirmIngestReceipts('project', identities);
+  expect(query).toHaveBeenCalledTimes(2);
+  expect(query.mock.calls[1]?.[0].values).toContainEqual(['b']);
+  // The retry keeps the first attempt's confirmation clock.
+  expect(query.mock.calls[1]?.[0].values.at(-1)).toBe(query.mock.calls[0]?.[0].values.at(-1));
+  // Only the first attempt may wait a full minute for a pool connection; a re-seek fails fast to the retryable 503.
+  expect(transaction.mock.calls.map(([, options]) => options)).toEqual([RECEIPT_PROBE_TRANSACTION, RECEIPT_CAS_RETRY_TRANSACTION]);
+  // A renewed receipt drops out of the expiry re-seek (found 0) instead of being deleted.
+  query.mockResolvedValueOnce(cas(2, ['b'])).mockResolvedValueOnce(cas(0));
+  await expireIngestReceipts('project', ['a', 'b', 'a'], new Date());
+  expect(query.mock.calls[2]?.[0].values).toContainEqual(['a', 'b']);
+  expect(query.mock.calls[3]?.[0].values).toContainEqual(['b']);
+});
+
+it('persistent conflicts and impossible counts fail loudly', async () => {
+  query.mockResolvedValue(cas(1, ['a']));
+  await expect(expireIngestReceipts('project', ['a'], new Date())).rejects.toBeInstanceOf(IngestReceiptConflictError);
+  expect(query).toHaveBeenCalledTimes(3);
+  query.mockReset().mockResolvedValueOnce([{ found: 2, changed: 1, skipped: [] }]);
+  await expect(expireIngestReceipts('project', ['a', 'b'], new Date())).rejects.toBeInstanceOf(IngestReceiptConflictError);
 });
 
 it('fresh ids do no expiry SQL and oversized cleanup is rejected before storage', async () => {
@@ -85,13 +159,38 @@ it('targeted expiry propagates storage errors before claiming an expired id', as
   expect(query).toHaveBeenCalledTimes(1);
 });
 
-it('the hourly backstop drains 5000-row batches using one fixed cutoff', async () => {
-  execute.mockResolvedValueOnce(5000).mockResolvedValueOnce(5000).mockResolvedValueOnce(3);
-  await pruneIngestReceipts();
-  expect(execute).toHaveBeenCalledTimes(3);
-  const cutoffs = execute.mock.calls.map(([sql]) => sql.values[0]);
-  expect(new Set(cutoffs).size).toBe(1);
-  expect(execute.mock.calls.every(([sql]) => sql.values.includes(5000))).toBe(true);
+it('the hourly backstop drains guarded 5000-row batches using one fixed cutoff', async () => {
+  // Each batch: the transaction-local guard, then the DELETE.
+  execute.mockResolvedValueOnce(0).mockResolvedValueOnce(5000).mockResolvedValueOnce(0).mockResolvedValueOnce(5000);
+  execute.mockResolvedValueOnce(0).mockResolvedValueOnce(3);
+  expect(await pruneIngestReceipts()).toEqual({ removed: 10_003, batches: 3, limited: false });
+  expect(transaction).toHaveBeenCalledTimes(3);
+  const guards = execute.mock.calls.filter((_, n) => n % 2 === 0).map(([sql]) => sql.sql);
+  for (const guard of guards)
+    for (const setting of [
+      'statement_timeout',
+      'lock_timeout',
+      'enable_seqscan',
+      'enable_bitmapscan',
+      'enable_sort',
+      'enable_incremental_sort',
+      'jit',
+    ])
+      expect(guard).toContain(setting);
+  const deletes = execute.mock.calls.filter((_, n) => n % 2 === 1);
+  expect(new Set(deletes.map(([sql]) => sql.values[0])).size).toBe(1);
+  expect(deletes.every(([sql]) => sql.values.includes(5000))).toBe(true);
+});
+
+it('the hourly backstop stops at its own work budget', async () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(2_000_000);
+  execute.mockResolvedValue(5000);
+  transaction.mockImplementation(async (run) => {
+    const result = await run({ $executeRaw: execute });
+    clock.mockReturnValue(2_000_000 + INGEST_RECEIPT_BACKSTOP_BUDGET_MS);
+    return result;
+  });
+  expect(await pruneIngestReceipts(randomUUID())).toEqual({ removed: 5000, batches: 1, limited: true });
 });
 
 it('the minute sweep caps work between batches and bounds each transaction', async () => {
@@ -105,16 +204,7 @@ it('the minute sweep caps work between batches and bounds each transaction', asy
   expect(await sweepIngestReceipts(randomUUID())).toEqual({ removed: 5000, batches: 1, limited: true });
   expect(transaction).toHaveBeenCalledTimes(1);
   expect(transaction.mock.calls[0]?.[1]).toEqual({ maxWait: 1000, timeout: 6000 });
-  const guard = execute.mock.calls[0]?.[0].sql;
-  for (const setting of [
-    "'statement_timeout','5s'",
-    "'enable_seqscan','off'",
-    "'enable_bitmapscan','off'",
-    "'enable_sort','off'",
-    "'enable_incremental_sort','off'",
-    "'jit','off'",
-  ])
-    expect(guard).toContain(`set_config(${setting},true)`);
+  expect(execute.mock.calls[0]?.[0].sql).toContain("set_config('statement_timeout','5s',true)");
 });
 
 it('the minute sweep stops on a partial batch and propagates storage failure', async () => {

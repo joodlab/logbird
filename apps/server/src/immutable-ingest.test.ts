@@ -1,5 +1,12 @@
-import { AmbiguousInsertError, eventFingerprint, INGEST_CLAIM_LEASE_MS, insertEvents, normalizeEvent } from '@logbird/clickhouse';
-import { claimIngestReceipts, findIngestReceipts, prisma } from '@logbird/database';
+import {
+  AmbiguousInsertError,
+  ASYNC_INSERT_FLUSH_BOUND_MS,
+  eventFingerprint,
+  INGEST_CLAIM_LEASE_MS,
+  insertEvents,
+  normalizeEvent,
+} from '@logbird/clickhouse';
+import { claimIngestReceipts, confirmIngestReceipts, findIngestReceipts, prisma } from '@logbird/database';
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { afterEach, expect, it, vi } from 'vitest';
 import { insertImmutableEvents, UNVERIFIED_PARSE_REJECTION, uncheckedIngestPolicy } from './immutable-ingest';
@@ -83,6 +90,44 @@ it('waits 5 s when storage refused rows, even with unchecked rows in the same re
   const result = await insertImmutableEvents('qa91-unit', 'qa91-org', input, true).catch((error: unknown) => error);
   expect(result).toMatchObject({ status: 503, code: 'ingest_pending', retryAfter: 5, details: { indices: [2, 3] } });
   expect(ingestRecoveryRetryAfter).not.toHaveBeenCalled();
+});
+
+it('keeps the composed outcome when confirmation and the claim release both fail', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const input = candidates();
+  vi.mocked(claimIngestReceipts).mockImplementation(async (projectId, organizationId, values) =>
+    values.map((value) => ({ ...value, projectId, organizationId, expiresAt: new Date(Date.now() + 300_000) })),
+  );
+  vi.spyOn(isolation, 'isolateIngestRows').mockResolvedValue({
+    written: [input[0]!.row],
+    rejected: [input[1]!.row],
+    unresolved: [input[2]!.row],
+    pending: [],
+    unavailable: [input[3]!.row],
+    limited: true,
+    limitReason: 'bytes',
+  });
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  // Postgres goes away after the write: confirmation fails, then releasing the proven-unwritten claims fails too.
+  vi.mocked(confirmIngestReceipts).mockImplementation(async (_projectId, identities) => {
+    if (identities.length) throw Object.assign(new Error('qa database failure'), { code: 'P1001' });
+  });
+  vi.mocked(prisma.ingestReceipt.deleteMany).mockRejectedValueOnce(Object.assign(new Error('qa pool timeout'), { code: 'P2024' }));
+  const error = await insertImmutableEvents('qa91-unit', 'qa91-org', input, true)
+    .catch((failure: unknown) => failure)
+    .finally(() => {
+      vi.mocked(confirmIngestReceipts).mockReset();
+      vi.mocked(prisma.ingestReceipt.deleteMany).mockReset();
+    });
+  // The written row keeps its claim; the rows whose claims couldn't be released are held too. All three are pending,
+  // the proven-bad row stays rejected, and Retry-After follows the held lease instead of a generic 503.
+  expect(error).toMatchObject({
+    status: 503,
+    code: 'ingest_pending',
+    message: expect.stringContaining('receipt confirmation is unresolved'),
+    details: { indices: [0, 2, 3], rejected: [{ index: 1, code: 'invalid_event' }] },
+  });
+  expect((error as { retryAfter: number }).retryAfter).toBe(Math.ceil((INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS) / 1000));
 });
 
 function candidates() {

@@ -446,18 +446,23 @@ Use the authenticated source/restore client configs, never change the shared sto
 ```sql
 SELECT name,applied_at FROM logbird.migrations ORDER BY name;
 SELECT name,engine,create_table_query FROM system.tables
-WHERE database='logbird' AND name IN ('event_ids','event_ids_mv','event_ids_v2','event_ids_v2_mv')
+WHERE database='logbird'
+  AND name IN ('event_ids','event_ids_mv','event_ids_v2','event_ids_v2_mv','event_ids_v3','event_ids_v3_mv')
 ORDER BY name;
 ```
+
+`event_ids_v2*` are the temporary objects of 007 and `event_ids_v3*` those of 008.
+Any of the four left behind means an interrupted online migration.
 
 | Recorded inventory and observed state | Export and verification |
 | --- | --- |
 | 001-005; no event_ids objects | Record absence; skip receipt SQL only |
-| 006 present, 007 absent; event_ids is ReplacingMergeTree; no v2 leftovers | Profile 006: export logical map with FINAL; use `cloud-dr-event-ids-006.sql` |
-| 006 and completed 007 present; event_ids is plain MergeTree; no v2 leftovers | Profile 007: no FINAL; export distinct full tuples; use `cloud-dr-event-ids-007.sql` |
-| Missing/unknown engine, inventory mismatch or interrupted v2 objects | Stop; preserve evidence and use the accepted migration recovery procedure. Do not guess a profile or rewrite inventory |
+| 006 present, 007 absent; event_ids is ReplacingMergeTree; no v2/v3 leftovers | Profile 006: export logical map with FINAL; use `cloud-dr-event-ids-006.sql` |
+| 006 and completed 007 present (with or without completed 008/009); event_ids is plain MergeTree; no v2/v3 leftovers | Profile 007+: no FINAL; export distinct full tuples; use `cloud-dr-event-ids-007.sql`. 008 changes only `index_granularity` and 009 adds a skip index; neither changes the logical tuple profile |
+| Missing/unknown engine, inventory mismatch, or any interrupted `event_ids_v2`, `event_ids_v2_mv`, `event_ids_v3` or `event_ids_v3_mv` object | Stop; preserve evidence and use the accepted migration recovery procedure. Do not guess a profile or rewrite inventory |
 
-Both scripts independently reject an engine/inventory mismatch. Save/review the MV
+Both scripts independently reject an engine/inventory mismatch, and both reject
+v2/v3 leftovers, so final verification fails closed even if this step is skipped. Save/review the MV
 `TO` destination with the schema receipt. On the fictional **source**, choose the
 matching export, keeping `project_id,event_id,received_at,timestamp` column order:
 

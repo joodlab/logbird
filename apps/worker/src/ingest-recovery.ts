@@ -7,7 +7,7 @@ import {
   repairEventIndex,
   retryFingerprint,
 } from '@logbird/clickhouse';
-import { confirmIngestReceipts, INGEST_RECEIPT_WINDOW_MS, ProjectBusyError, prisma, withProjectLock } from '@logbird/database';
+import { confirmIngestReceipts, INGEST_RECEIPT_WINDOW_MS, type Prisma, ProjectBusyError, prisma, withProjectLock } from '@logbird/database';
 import { rebuildProjectReadModel } from './project-repair';
 
 const FLUSH_INTERVAL_MS = 60_000;
@@ -74,6 +74,74 @@ export interface IngestRecoveryOptions {
   replay?: () => Promise<void>;
   candidates?: { input: unknown; eventId: string }[];
 }
+type ReceiptScope = Prisma.IngestReceiptWhereInput;
+function abandonedReceipts(projectId: string, now: number, eventIds?: string[]) {
+  const expiredAt = new Date(now - INGEST_CLAIM_LEASE_MS - ASYNC_INSERT_FLUSH_BOUND_MS);
+  const eligible: ReceiptScope = {
+    projectId,
+    confirmedAt: null,
+    OR: [{ claimedAt: { lt: expiredAt } }, { claimedAt: null }],
+    ...(eventIds ? { eventId: { in: eventIds } } : {}),
+  };
+  return { expiredAt, readyCutoff: new Date(now - INGEST_RECEIPT_WINDOW_MS), eligible };
+}
+
+/** Caller holds EXCLUSIVE. Undefined when the process-wide flush throttle refuses the required proof. */
+async function proveAbandonedWrites(ch: ClickHouseClient, eligible: ReceiptScope, expiredAt: Date) {
+  const newestClaim = await prisma.ingestReceipt.findFirst({ where: { ...eligible, claimedAt: { lt: expiredAt } }, orderBy: { claimedAt: 'desc' } });
+  const requiredProof = newestClaim?.claimedAt ? newestClaim.claimedAt.getTime() + INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS : 0;
+  if (requiredProof && !(await flushAfter(ch, requiredProof))) return;
+  return { claimed: !!newestClaim };
+}
+
+/** Caller holds EXCLUSIVE and rebuilt every derived destination after the flush proof. */
+async function settleAbandonedReceipts(ch: ClickHouseClient, projectId: string, eligible: ReceiptScope, readyCutoff: Date) {
+  let after: string | undefined;
+  while (true) {
+    const receipts = await prisma.ingestReceipt.findMany({
+      where: { ...eligible, ...(after ? { AND: { eventId: { gt: after } } } : {}) },
+      orderBy: { eventId: 'asc' },
+      take: 1000,
+    });
+    if (!receipts.length) break;
+    const confirmations: { eventId: string; fingerprint: string; receivedAt: Date; eventAt: Date }[] = [];
+    const missing: string[] = [];
+    const obsolete: string[] = [];
+    const ids = receipts.map((r) => r.eventId);
+    const stored = await rawEventIdentities(ch, projectId, ids);
+    await repairEventIndex(ch, projectId, ids, stored);
+    for (const receipt of receipts) {
+      const identity = stored.get(receipt.eventId);
+      // Stored evidence wins even when the abandoned claimant had different content.
+      if (identity) confirmations.push({ eventId: receipt.eventId, ...identity });
+      else if (!receipt.claimedAt && receipt.receivedAt < readyCutoff) obsolete.push(receipt.eventId);
+      else missing.push(receipt.eventId);
+    }
+    await confirmIngestReceipts(projectId, confirmations);
+    // A missing write becomes a ready receipt: the client's next exact retry replays it.
+    if (missing.length)
+      await prisma.ingestReceipt.updateMany({ where: { projectId, eventId: { in: missing }, confirmedAt: null }, data: { claimedAt: null } });
+    if (obsolete.length)
+      await prisma.ingestReceipt.deleteMany({ where: { projectId, eventId: { in: obsolete }, confirmedAt: null, claimedAt: null } });
+    after = receipts.at(-1)?.eventId;
+  }
+}
+
+/**
+ * Caller holds EXCLUSIVE and is about to rebuild every derived destination itself (retention completing a
+ * failed repair). Proving the abandoned writes flushed BEFORE that rebuild lets the same rebuild cover them,
+ * so the returned step settles their receipts without a second full rebuild by a later retry.
+ * Undefined when nothing is abandoned or the flush throttle refuses proof; retries and the hourly sweep remain.
+ */
+export async function prepareReceiptSettlement(client: ClickHouseClient, projectId: string) {
+  // Tagged as this project's maintenance (idempotent if the caller already tagged it): deletion can stop it.
+  const ch = projectMaintenance(client, projectId);
+  const { expiredAt, readyCutoff, eligible } = abandonedReceipts(projectId, Date.now());
+  if (!(await prisma.ingestReceipt.findFirst({ where: eligible, select: { eventId: true } }))) return;
+  if (!(await proveAbandonedWrites(ch, eligible, expiredAt))) return;
+  return () => settleAbandonedReceipts(ch, projectId, eligible, readyCutoff);
+}
+
 /** Run outside a shared lock. Only matching retries, terminal grace cleanup and operators enter recovery. */
 export async function recoverProjectIngest(
   client: ClickHouseClient,
@@ -84,14 +152,7 @@ export async function recoverProjectIngest(
   // stop a rebuild or index repair that a failed call left running in ClickHouse.
   const ch = projectMaintenance(client, projectId);
   const now = Date.now();
-  const expiredAt = new Date(now - INGEST_CLAIM_LEASE_MS - ASYNC_INSERT_FLUSH_BOUND_MS);
-  const readyCutoff = new Date(now - INGEST_RECEIPT_WINDOW_MS);
-  const eligible = {
-    projectId,
-    confirmedAt: null,
-    OR: [{ claimedAt: { lt: expiredAt } }, { claimedAt: null }],
-    ...(eventIds ? { eventId: { in: eventIds } } : {}),
-  };
+  const { expiredAt, readyCutoff, eligible } = abandonedReceipts(projectId, now, eventIds);
   const preview = await prisma.ingestReceipt.findMany({ where: eligible, take: 1000, orderBy: { claimedAt: { sort: 'desc', nulls: 'last' } } });
   if (!preview.length) return false;
   const actionable =
@@ -113,42 +174,11 @@ export async function recoverProjectIngest(
   return withProjectLock(projectId, async () => {
     // A repair can fail while this request is acquiring the lock. Its queued retention job owns recovery.
     if (await hasFailedRepair(projectId)) return false;
-    const newestClaim = await prisma.ingestReceipt.findFirst({
-      where: { ...eligible, claimedAt: { lt: expiredAt } },
-      orderBy: { claimedAt: 'desc' },
-    });
-    const requiredProof = newestClaim?.claimedAt ? newestClaim.claimedAt.getTime() + INGEST_CLAIM_LEASE_MS + ASYNC_INSERT_FLUSH_BOUND_MS : 0;
-    if (requiredProof && !(await flushAfter(ch, requiredProof))) return false;
+    const proof = await proveAbandonedWrites(ch, eligible, expiredAt);
+    if (!proof) return false;
     // A failed MV can commit any subset of destinations. Repair before confirming any page.
-    if (newestClaim) await rebuildProjectReadModel(ch, projectId);
-    let after: string | undefined;
-    while (true) {
-      const receipts = await prisma.ingestReceipt.findMany({
-        where: { ...eligible, ...(after ? { AND: { eventId: { gt: after } } } : {}) },
-        orderBy: { eventId: 'asc' },
-        take: 1000,
-      });
-      if (!receipts.length) break;
-      const confirmations: { eventId: string; fingerprint: string; receivedAt: Date; eventAt: Date }[] = [];
-      const missing: string[] = [];
-      const obsolete: string[] = [];
-      const ids = receipts.map((r) => r.eventId);
-      const stored = await rawEventIdentities(ch, projectId, ids);
-      await repairEventIndex(ch, projectId, ids, stored);
-      for (const receipt of receipts) {
-        const identity = stored.get(receipt.eventId);
-        // Stored evidence wins even when the abandoned claimant had different content.
-        if (identity) confirmations.push({ eventId: receipt.eventId, ...identity });
-        else if (!receipt.claimedAt && receipt.receivedAt < readyCutoff) obsolete.push(receipt.eventId);
-        else missing.push(receipt.eventId);
-      }
-      await confirmIngestReceipts(projectId, confirmations);
-      if (missing.length)
-        await prisma.ingestReceipt.updateMany({ where: { projectId, eventId: { in: missing }, confirmedAt: null }, data: { claimedAt: null } });
-      if (obsolete.length)
-        await prisma.ingestReceipt.deleteMany({ where: { projectId, eventId: { in: obsolete }, confirmedAt: null, claimedAt: null } });
-      after = receipts.at(-1)?.eventId;
-    }
+    if (proof.claimed) await rebuildProjectReadModel(ch, projectId);
+    await settleAbandonedReceipts(ch, projectId, eligible, readyCutoff);
     if (replay) {
       await replay();
       return true;

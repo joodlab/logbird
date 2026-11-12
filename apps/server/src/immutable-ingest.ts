@@ -25,6 +25,7 @@ import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { clickhouse } from './clickhouse';
 import { ApiError } from './errors';
 import { isolateIngestRows, STORAGE_PARSE_REJECTION } from './ingest-parse-isolation';
+import { ingestReceiptFailureResponse, isDatabaseFailure, receiptErrorDetails } from './ingest-receipt-errors';
 
 export type IngestCandidate = { index: number; input: unknown; row: EventRow };
 export const DUPLICATE_ID_CONFLICT =
@@ -44,6 +45,35 @@ async function releaseClaims(projectId: string, owned: Map<string, IngestReceipt
     await prisma.ingestReceipt.deleteMany({
       where: { projectId, eventId: { in: [...owned.keys()] }, confirmedAt: null },
     });
+}
+
+function logClaimReleaseFailure(error: unknown, originalError?: unknown) {
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      event: 'ingest.claim_release_failed',
+      ...receiptErrorDetails(error),
+      original: originalError === undefined ? undefined : receiptErrorDetails(originalError),
+    }),
+  );
+}
+
+/** Releases claims while a request is already failing with `originalError`, which always stands. */
+async function releaseClaimsSafely(projectId: string, owned: Map<string, IngestReceipt>, originalError: unknown) {
+  try {
+    await releaseClaims(projectId, owned);
+  } catch (error) {
+    logClaimReleaseFailure(error, originalError);
+    // Keep the original outcome, even when cleanup also failed: an ApiError or infrastructure failure is mapped by its
+    // caller (claimEvents, app.onError), and a programming error must surface as one, not as a retryable 503 that a
+    // client would repeat every second. The claims stay held until recovery settles them.
+    throw originalError;
+  }
+}
+
+function logReceiptPhaseFailure(phase: 'claim' | 'confirm', error: unknown) {
+  const level = phase === 'claim' && ingestReceiptFailureResponse(error) ? 'warn' : 'error';
+  console[level](JSON.stringify({ level, event: 'ingest.receipt_phase_failed', phase, ...receiptErrorDetails(error) }));
 }
 
 async function upgradeLegacyReceipts(projectId: string, cached: Map<string, IngestReceipt>, stored: Awaited<ReturnType<typeof lookup>>) {
@@ -86,8 +116,20 @@ async function recheckAfterPause(projectId: string, owned: Map<string, IngestRec
   return true;
 }
 
-/** Claim/recheck owns release until it hands the claims to the insert phase. */
+/** Before insert, release owned claims on failure; a failed release leaves abandoned claims for recovery. */
 async function claimEvents(projectId: string, organizationId: string, candidates: IngestCandidate[], fingerprint: (row: EventRow) => string) {
+  try {
+    return await claimPhase(projectId, organizationId, candidates, fingerprint);
+  } catch (error) {
+    if (!(error instanceof ApiError)) logReceiptPhaseFailure('claim', error);
+    if (!(error instanceof ApiError) && isDatabaseFailure(error))
+      throw new ApiError(503, 'ingest_unavailable', 'Event identity cache is unavailable. Retry this batch.', undefined, 1);
+    throw error;
+  }
+}
+
+/** Claim/recheck owns release until it hands the claims to the insert phase. */
+async function claimPhase(projectId: string, organizationId: string, candidates: IngestCandidate[], fingerprint: (row: EventRow) => string) {
   const unique = new Map<string, EventRow>();
   for (const { row } of candidates) if (!unique.has(row.event_id)) unique.set(row.event_id, row);
   const eventIds = [...unique.keys()].sort();
@@ -95,15 +137,11 @@ async function claimEvents(projectId: string, organizationId: string, candidates
   const cacheCutoff = new Date(Date.now() - INGEST_RECEIPT_WINDOW_MS);
   const expired = prior.filter((r) => r.confirmedAt && r.confirmedAt < cacheCutoff);
   if (expired.length) {
-    try {
-      await expireIngestReceipts(
-        projectId,
-        expired.map((r) => r.eventId),
-        cacheCutoff,
-      );
-    } catch {
-      throw new ApiError(503, 'ingest_unavailable', 'Event identity cache is unavailable. Retry this batch.');
-    }
+    await expireIngestReceipts(
+      projectId,
+      expired.map((r) => r.eventId),
+      cacheCutoff,
+    );
   }
   const cached = new Map(prior.filter((r) => !r.confirmedAt || r.confirmedAt >= cacheCutoff).map((r) => [r.eventId, r]));
   const lookupAt = Date.now();
@@ -136,10 +174,16 @@ async function claimEvents(projectId: string, organizationId: string, candidates
     // can have changed the remaining identities while the shared project lock is held.
     const receipts = new Map(owned);
     const reloadIds = rechecked ? eventIds : eventIds.filter((id) => !owned.has(id));
-    if (reloadIds.length) for (const receipt of await findIngestReceipts(projectId, reloadIds)) receipts.set(receipt.eventId, receipt);
+    if (reloadIds.length) {
+      // A paused request must re-apply the receipt window: an expired confirmation is no longer authoritative.
+      // Its id stays pending (retryable); the retry expires it and consults stored evidence instead.
+      const reloadCutoff = new Date(Date.now() - INGEST_RECEIPT_WINDOW_MS);
+      for (const receipt of await findIngestReceipts(projectId, reloadIds))
+        if (owned.has(receipt.eventId) || !receipt.confirmedAt || receipt.confirmedAt >= reloadCutoff) receipts.set(receipt.eventId, receipt);
+    }
     return { owned, receipts };
   } catch (error) {
-    await releaseClaims(projectId, owned);
+    await releaseClaimsSafely(projectId, owned, error);
     throw error;
   }
 }
@@ -209,11 +253,20 @@ function classifyCandidates(
 
 /** Insert owns release before send and on definite failure. Unproven write outcomes retain the lease. */
 async function persistRows(projectId: string, rows: EventRow[], owned: Map<string, IngestReceipt>, fingerprint: (row: EventRow) => string) {
+  const empty = { written: [], rejected: [], pending: [], unavailable: [], unresolved: [], limited: false, unconfirmed: false };
   if (!rows.length) {
-    await releaseClaims(projectId, owned);
-    return { written: [], rejected: [], pending: [], unavailable: [], unresolved: [], limited: false };
+    try {
+      await releaseClaims(projectId, owned);
+    } catch (error) {
+      logClaimReleaseFailure(error);
+      if (!isDatabaseFailure(error)) throw error;
+      // Nothing to insert: every row is already settled (confirmed elsewhere or terminally rejected), so a held claim
+      // can't change any result. Keep the settled response; recovery clears the claims after their lease.
+    }
+    return empty;
   }
   const releasable = new Map(owned);
+  let persisted: Awaited<ReturnType<typeof isolateIngestRows>> & { unconfirmed: boolean };
   try {
     const expiresAt = Math.min(
       ...[...owned.values()].filter((c) => !c.confirmedAt).map((c) => (c.claimedAt?.getTime() ?? 0) + INGEST_CLAIM_LEASE_MS),
@@ -244,19 +297,47 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
       );
     // After acknowledgement, a Postgres failure must preserve the claim for a visibility retry.
     for (const row of [...outcome.written, ...outcome.pending]) releasable.delete(row.event_id);
-    await confirmIngestReceipts(
-      projectId,
-      outcome.written.map((row) => ({
-        eventId: row.event_id,
-        fingerprint: fingerprint(row),
-        receivedAt: new Date(row.received_at),
-        eventAt: new Date(row.timestamp),
-      })),
-    );
-    return outcome;
-  } finally {
-    await releaseClaims(projectId, releasable);
+    try {
+      await confirmIngestReceipts(
+        projectId,
+        outcome.written.map((row) => ({
+          eventId: row.event_id,
+          fingerprint: fingerprint(row),
+          receivedAt: new Date(row.received_at),
+          eventAt: new Date(row.timestamp),
+        })),
+      );
+      persisted = { ...outcome, unconfirmed: false };
+    } catch (error) {
+      // ClickHouse acknowledged these rows, so any confirmation failure (a receipt conflict, infrastructure or even a
+      // bug) keeps their claims and reports them as pending; composeIngestOutcome adds indices and Retry-After.
+      if (!(error instanceof ApiError)) logReceiptPhaseFailure('confirm', error);
+      persisted = { ...outcome, written: [], pending: [...outcome.pending, ...outcome.written], unconfirmed: outcome.written.length > 0 };
+    }
+  } catch (error) {
+    // Isolation catches every insert outcome, so this is unexpected: release only proven-unwritten claims.
+    await releaseClaimsSafely(projectId, releasable, error);
+    throw error;
   }
+  try {
+    await releaseClaims(projectId, releasable);
+  } catch (error) {
+    logClaimReleaseFailure(error);
+    if (!isDatabaseFailure(error)) throw error;
+    // Those claims stay held until their lease lets recovery settle them. Keep the composed outcome (indices,
+    // settled results) and report the affected retryable rows as pending, so Retry-After follows the held lease.
+    // Proven-bad rows stay rejected: their outcome is terminal whatever happens to the claim. While Postgres is failing,
+    // this also turns #150's terminal unverified_after_parse_failure into a retry for old clients; that is bounded by
+    // the lease and returns to normal once the database does.
+    const held = (row: EventRow) => releasable.has(row.event_id);
+    persisted = {
+      ...persisted,
+      pending: [...persisted.pending, ...persisted.unavailable.filter(held), ...persisted.unresolved.filter(held)],
+      unavailable: persisted.unavailable.filter((row) => !held(row)),
+      unresolved: persisted.unresolved.filter((row) => !held(row)),
+    };
+  }
+  return persisted;
 }
 
 /** Caller holds a project lock: exclusive during recovery, shared otherwise. Receipts fence every API process. */
@@ -277,7 +358,7 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
   try {
     result = classifyCandidates(projectId, candidates, receipts, owned, fingerprint);
   } catch (error) {
-    await releaseClaims(projectId, owned);
+    await releaseClaimsSafely(projectId, owned, error);
     throw error;
   }
   const outcome = await persistRows(projectId, result.rows, owned, fingerprint);
@@ -341,9 +422,21 @@ async function composeIngestOutcome(
       pendingIds.size || unresolvedIds.size ? 'ingest_pending' : 'ingest_unavailable',
       outcome.limited,
       unavailableIds.size > 0,
+      outcome.unconfirmed,
     );
   }
   return { ids, rejected: result.rejected };
+}
+
+/** Best effort: a failed lookup must not lose the pending response; the per-receipt bounds below still apply. */
+async function recoveryRetryAfter(projectId: string) {
+  try {
+    return await ingestRecoveryRetryAfter(projectId);
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined;
+    console.warn(JSON.stringify({ level: 'warn', event: 'ingest.retry_after_unavailable', projectId, code }));
+    return 1;
+  }
 }
 
 async function pendingError(
@@ -356,6 +449,7 @@ async function pendingError(
   code: 'ingest_pending' | 'ingest_unavailable',
   limited = false,
   storageRefused = code === 'ingest_unavailable',
+  unconfirmed = false,
 ) {
   const details = ingestPendingDetailsSchema.parse({
     accepted: ids.length,
@@ -370,7 +464,7 @@ async function pendingError(
   const retryAfter = Math.max(
     // Storage definitely refused some rows: don't retry it every second, even when unchecked rows ride along.
     !held.length && storageRefused ? 5 : 1,
-    held.some((p) => receipts.get(p.eventId)?.claimedAt) ? await ingestRecoveryRetryAfter(projectId) : 0,
+    held.some((p) => receipts.get(p.eventId)?.claimedAt) ? await recoveryRetryAfter(projectId) : 0,
     ...held.map((p) => {
       const receipt = receipts.get(p.eventId);
       if (!receipt) return 1;
@@ -383,9 +477,11 @@ async function pendingError(
   return new ApiError(
     503,
     code,
-    limited
-      ? 'Some events need a retry; listed indices are unresolved. Send smaller batches if isolation repeatedly reaches its limit.'
-      : 'Some events need a retry; listed indices are unresolved.',
+    unconfirmed
+      ? 'Storage accepted some events but receipt confirmation is unresolved. Retry this batch; listed indices are unresolved.'
+      : limited
+        ? 'Some events need a retry; listed indices are unresolved. Send smaller batches if isolation repeatedly reaches its limit.'
+        : 'Some events need a retry; listed indices are unresolved.',
     details,
     retryAfter,
   );

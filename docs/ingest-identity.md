@@ -26,7 +26,14 @@ retain the old normalized-column comparison until stored evidence or reinsertion
 upgrades them. Frozen legacy fixtures and literal legacy/v1 digest vectors protect
 this compatibility path.
 
-Confirmed receipts are authoritative for ten minutes. After reading the requested
+Confirmed receipts are authoritative for ten minutes. The window is measured on
+each process's own clock: the API compares `confirmedAt` with its clock, and the
+worker sweep with the worker's. Clock skew between them makes receipts expire
+early (or late) by the skew. That is harmless: an expired receipt is never
+authoritative, so the request falls back to the ClickHouse identity lookup. A
+request that pauses for more than half the window rechecks storage and re-applies
+the window when it reloads receipts. A receipt that expired during the pause is not
+trusted; its id is reported pending and an exact retry resolves it. After reading the requested
 ids, ingest expires only those with an old non-null `confirmedAt`, in one guarded
 DELETE. Public batches contain at most 1000 ids; the helper rejects more than
 5000 rather than looping. Fresh ids execute no cleanup SQL, even when unrelated
@@ -38,16 +45,63 @@ of four bind parameters per event. UTC strings keep session timezone independent
 Only competing identities and pause rechecks need a subsequent receipt read.
 Receipt reads seek to `("projectId","eventId") >= (project,id)` in primary-key
 order with `LIMIT 1`, then check the exact project and event id outside the limit.
-The limit keeps the equality filter from being pushed into the seek. Confirmation
-and expiry lock the matching tuple only after checking its exact key; a missing
-key's successor, including another project's row, must never be locked or changed.
-Confirmation retains key order and the original project/id ownership conditions.
+The limit keeps the equality filter from being pushed into the seek.
 
-An equality-only LATERAL probe can choose the project/confirmedAt secondary index
-once per event when project statistics are stale, filtering the entire project
-repeatedly. The ordered primary-key seek avoids that scan pattern. Verify plans
-for prior lookup, confirmation and targeted expiry with both stale and refreshed
-statistics; a short diagnostic with fresh statistics can miss the transition.
+Confirmation and expiry are compare-and-set statements. An unlocked seek first finds
+the exact key and its tuple id (`ctid`); a missing key's successor, including
+another project's row, is never locked or changed. The statement then locks that
+tuple with `FOR UPDATE`, re-checking the ctid and exact key (and, for expiry, the
+cutoff). The UPDATE/DELETE itself matches on `ctid` only: it does not repeat the
+project/id predicates. A concurrent update moves the row to a new ctid: either
+the TID recheck drops the row, or the UPDATE/DELETE by ctid cannot see the new
+version. Either way, the id is skipped and sought again. Each statement therefore
+returns how many keys it found, how many it changed and which ids it lost. Lost
+ids are sought again against the current version, up to three attempts. A renewed
+receipt drops out of the expiry re-seek because it no longer matches the cutoff;
+a concurrently changed receipt is confirmed with the requested identity. Counts
+that do not add up, or a conflict that persists for three attempts, raise
+`IngestReceiptConflictError` (a retryable 503 with `Retry-After` on the request
+path). After an acknowledged insert it returns `ingest_pending`, preserving the
+claims and the usual pending indices/event ids; before insertion it returns
+`ingest_unavailable`. Pre-insert database infrastructure failures also return
+`503 ingest_unavailable` with `Retry-After: 1`; SQL/API misuse surfaces as an error.
+Receipt phase failures log `ingest.receipt_phase_failed` with `phase: claim|confirm`
+and only the error name, code and adapter kind. After an acknowledged insert,
+even a programming error is logged and reported as `ingest_pending`, keeping claims.
+A failed release logs `ingest.claim_release_failed`, including the original error's
+metadata when present, and the response depends on where it happened:
+- **Before any outcome** (claim or classification failure): the original error stands. An
+  infrastructure failure or receipt conflict is the usual retryable 503, an `ApiError` keeps
+  its status, and a programming error surfaces as a server error instead of a retry loop.
+- **After parse isolation:** the composed outcome stands; retryable rows whose claims
+  couldn't be released are reported as pending, with a lease-aware Retry-After (for
+  database infrastructure failures; any other release error surfaces).
+- **With nothing to insert:** every row is already settled, so the settled response stands
+  (for database infrastructure failures; any other release error surfaces).
+Unreleased claims remain held until abandoned-claim recovery. Nothing on
+today's request path writes the same receipt concurrently, so a retry is an
+anomaly, not a normal branch.
+
+Plan choice must not depend on table statistics. Two separate fixtures back this,
+and they test different things:
+
+- **The shipped ordered seek under stale statistics:** the 33a0553 equality probe
+  regressed on a fresh project over real HTTP. An unchanged diagnostic run of 300
+  batches reproduced it (p95 1686.7 ms, max 3067.6 ms; one batch took 1373 ms in
+  prior lookup and 1494 ms in confirmation, against about 90 ms in ClickHouse).
+  Captured plans used the project/confirmedAt index until auto-ANALYZE refreshed
+  statistics. Queries were unnamed, pool waits were negligible, and the slow
+  statements were active without lock waits. The fixed 88f6e29 code repeated the
+  same fresh-project run: 300 × 1000 UUIDv4 events, p50/p95/p99 315/384/425 ms,
+  max 451 ms, every captured plan on the primary key. **This is the evidence for
+  the shipped SQL.**
+- **Before and after ANALYZE:** an owned 20000-row stale fixture showed the old
+  equality probe filtering 19999 rows per id (1.256 s for 1000 hits) against
+  4.2 ms for the ordered seek. On a separate fixture, all three helpers planned on
+  the primary key before and after ANALYZE (lookup/confirm/expiry about 8/23/10 ms
+  before, 9/22/11 ms after). The old query also used the primary key on that
+  fixture, so this proves the helpers are stable across ANALYZE there, not that
+  they survive the stale-statistics regression above.
 
 A bloated, nearly empty table defeats the ordered seek without a guard. After a large
 backlog is deleted or rolled back, autovacuum records few live rows while the heap
@@ -65,11 +119,14 @@ plus confirmation adds six. Confirmation and expiry also hold their row locks fo
 more round trip, until COMMIT. The local timings in #111 do not measure a remote
 database's round-trip time. The transaction is bounded at 60 seconds for both the
 connection wait and execution (`RECEIPT_PROBE_TRANSACTION`), not Prisma's 2 s/5 s
-batch defaults. These were unbounded plain statements before. 60 seconds matches the
-claim lease and ingest ClickHouse socket budget. It also lets a confirmation after an
-acknowledged ClickHouse write wait behind a sweep batch (at most about six seconds)
-instead of being rolled back, which would report a stored write as failed and force
-recovery.
+batch defaults. These were unbounded plain statements before. A confirmation after an
+acknowledged ClickHouse write mostly waits on a saturated connection pool, or runs
+slowly for a large batch. The sweep never locks unconfirmed claims; its row
+contention applies to targeted expiry. Rolling such a confirmation back would report
+a stored write as failed and force recovery, so the bound is generous: 60 seconds,
+the same order as the ingest ClickHouse socket budget. A late confirmation stays
+safe because the request still holds the shared project lock, and recovery needs the
+exclusive one.
 Minute-sweep batches use the same guard plus their five-second timeout, so they walk
 a `confirmedAt`-ordered index. The `receipt-plan-guard` real-PG test plans the
 shipped SQL against an owned temp table that shadows `IngestReceipt` with fresh,
@@ -83,15 +140,20 @@ can settle or remove an unresolved receipt.
 A separate `ingest-receipts` BullMQ queue runs every minute with global concurrency
 one, independently of long ClickHouse retention jobs. Each worker batch deletes
 at most 5000 rows with `FOR UPDATE SKIP LOCKED`, yields 10 ms, and stops after a
-20-second work budget. Each batch has a five-second SQL timeout inside a
-six-second transaction with a one-second connection-wait limit, so the last
-in-flight batch can extend the work budget. Tuple ids are used only inside the
+20-second work budget. Each batch has a five-second SQL timeout and a one-second lock
+timeout inside a six-second transaction with a one-second connection-wait limit,
+so the last in-flight batch can extend the work budget. Tuple ids are used only inside the
 row-locked DELETE statement, never as persistent event identity. Worker batches
-use transaction-local `set_config(..., true)` (SET LOCAL semantics) to disable
-bitmap scans: stale estimates must not turn ordered LIMIT into a history-sized
-bitmap and sort. The existing `(projectId, confirmedAt)` and global `confirmedAt`
-indexes serve the expiry scans; settings revert at commit. Hourly/project retention
-keeps a batched, yielding bulk sweep as a backstop.
+use the same transaction-local `set_config(..., true)` guard as the probes
+(`SWEEP_GUARD`: sequential scans, bitmaps, sorts, incremental sorts and JIT off).
+Stale or bloated estimates must not turn the ordered LIMIT into a scan of the whole
+history plus a sort. The existing `(projectId, confirmedAt)` and global
+`confirmedAt` indexes serve the expiry scans; settings revert at commit. The hourly
+global and per-project retention backstop runs the same guarded batches with a
+60-second budget instead of an unguarded loop. A stale estimate during a minute-queue
+outage can no longer stall retention behind it. A backstop that removes rows logs
+`ingest.receipts_pruned` with `scope: backstop`, and at `warn` when its budget left
+expired rows behind.
 
 Capacity depends on aggregate expiry across all projects. At 5000 receipts/second,
 ten live minutes contain about three million confirmed receipts. With on-time
@@ -107,6 +169,183 @@ targeted request cleanup only helps ids being retried. If only the minute queue
 fails, a healthy on-time hourly backstop can still leave about 18 million expired
 receipts between sweeps. Restore worker health rather than relying on that
 degraded mode.
+
+### Expired-backlog re-measure (#110)
+
+This in-process run used owned fictional projects on the shared development
+services, under the `heavy` lock, on 2026-11-08. It is not HTTP acceptance.
+Each project carried 600,000 confirmed receipts, aged past the window as in the
+#62 probe. Fresh batches were 1000 events through the shipped
+`insertImmutableEvents` path (receipts and ClickHouse). Statement-level runs
+compared #62's SQL as merged (unguarded) with this code. The shared table started
+bloated: 31 live rows, a 14,364-page heap and a 137,302-page (about 1.07 GB)
+primary key, against 128 MB of `shared_buffers`.
+
+| State | #62 SQL (unguarded) | This code |
+| --- | --- | --- |
+| No backlog, bloated table | lookup p95 6181 ms, Postgres total p95 11.6 s | lookup p95 15 ms; batch p50/p95 269/373 ms |
+| First batch after aging | lookup 215 ms (1923 shared reads) | lookup 219 ms (2121 reads); **first batch 469 ms** |
+| 30 steady batches with the backlog | Postgres total p95 439 ms | Postgres total p95 413 ms; batch p50/p95 319/1316 ms |
+| Batches during the sweep (666,000 removed in 18.1 s, 134 batches, not limited) | — | batch p50/p95 653/846 ms (29 samples) |
+| After the drain and ANALYZE | lookup p95 1009 ms (5 samples) | batch p50/p95 269/315 ms |
+
+Every guarded plan was the primary-key seek, with no JIT and at most 1.6 ms
+planning. The first fresh batch now stays below one second. The remaining
+backlog cost is buffer I/O, not plan choice, planning or a missing index. Each
+fresh lookup reads about 2000–7400 primary-key and heap pages that do not fit in
+`shared_buffers`, because this bloated index is about eight times its size. On
+this machine, the steady and during-sweep p95 therefore stay above twice the
+matched baseline (242 ms), and #110's latency gate remains open. The run shares a
+busy machine, so the steady p95 includes outliers.
+
+VACUUM recycles empty index pages but never shrinks a B-tree below its high-water
+mark. Random-UUID leaf pages left half empty by a drained backlog stay in the index,
+so only a rebuild restores a compact primary key. The hourly worker job therefore
+runs `compactIngestReceiptIndex`:
+
+- It runs in its own hourly `ingest-receipt-index.compact` job on the
+  `ingest-receipt-index-compaction` queue and worker (concurrency 1), using the same
+  BullMQ prefix and Redis connection as other worker queues. It has one attempt and
+  never retries; retention retries cannot repeat a rebuild. Recovery and fence lifting
+  run on their own worker, so a long rebuild cannot delay their queued jobs.
+  A source-scan unit test guards server call sites
+  against references to it; this does not prove runtime process isolation.
+- It is single-flight across workers through a session advisory try-lock, and uses
+  its own connection, because `REINDEX CONCURRENTLY` cannot run inside a transaction
+  or a pooled Prisma call.
+- It estimates the pages the live entries need from the larger of `reltuples` and
+  `pg_stat_all_tables.n_live_tup` (so a stale ANALYZE during an ingest burst never makes a
+  growing table look bloated) and the analyzed key widths, at a 90% leaf fill. It rebuilds with `REINDEX INDEX CONCURRENTLY
+  "IngestReceipt_pkey"` only when the index is at least 64 MiB **and** at least
+  three times that estimate. Otherwise it does nothing. The threshold comes from the
+  experiment below: steady churn stays under 2×, and a drained backlog leaves
+  about 4×.
+- The rebuild is online: reads and writes continue, and the new index is swapped
+  in at the end. It is bounded by a 15-minute statement timeout and a one-minute
+  lock timeout. Connection attempts have a five-second timeout; connection errors
+  are logged rather than emitted without a listener.
+  Shutdown opens a separate connection (five-second connect and query timeouts,
+  eight seconds in all) and sends `pg_cancel_backend` for the recorded rebuild
+  backend pid only, and only while `pg_stat_activity` still shows that pid as this
+  maintenance session running REINDEX. The original connection stays open while cancellation completes
+  and REINDEX settles with 57014; its ten-second shutdown deadline is longer than the
+  cancel budget, so the pid can't be reused before the cancel runs: the cancel socket
+  is destroyed by eight seconds and the original session's by ten, and the run settles
+  within about fifteen seconds of shutdown. Every close is bounded to five seconds: pg's graceful close on an idle
+  session waits for the server, so past that the socket is destroyed. Each maintenance session also sets `client_connection_check_interval`
+  to one second as a disconnect fallback (unsupported on PostgreSQL before 14).
+  Closing a socket alone is not the cancellation mechanism. Only a running REINDEX
+  is cancelled: catalog queries and the `DROP INDEX CONCURRENTLY` cleanup are left to
+  finish within the same ten-second deadline. The run checks for shutdown at each step
+  boundary (after the schema lookup, after the lock, before cleanup and before the
+  statistics), so no new step starts after shutdown. Connection setup (connect plus the
+  session `SET`s) has its own 15-second deadline; shutdown or the deadline rejects it
+  directly, because pg never calls back a connect that `end()` interrupted. An invalid
+  copy is dropped after cancellation, or by the next run if the deadline interrupts
+  cleanup. An aborted run logs `ingest.receipt_index_compaction_aborted` at info level.
+- Reserve free disk for about the index's live size while the copy is built.
+  After a statement timeout (57014) or lock timeout (55P03), the worker stores a
+  timestamp under `<BULLMQ_PREFIX>:ingest-receipt-index-compaction:backoff` in its
+  existing Redis connection with a 24-hour TTL. Hourly jobs return and log
+  `skipped_backoff` until it expires, avoiding repeated expensive copies. While backed
+  off, each hourly run still drops an invalid copy a failed rebuild left behind (every
+  receipt write would otherwise keep maintaining it), but never builds a new one. A
+  cleanup that times out while backed off is logged at info and doesn't renew the back-off. Both Redis
+  hints have a one-second client deadline and stop waiting immediately on abort.
+  A Redis error or stall does not disable compaction or block shutdown: a failed
+  GET means no back-off, and a timed-out SET is logged. An aborted rebuild does
+  not request the 24-hour back-off.
+- An interrupted rebuild's invalid `_ccnew`/`_ccold` copy is dropped concurrently,
+  both before each run and after a failure, unless another backend is building an
+  index on the table (`pg_stat_progress_create_index`): then the run reports
+  `skipped_busy`, because a drop queued behind that build's lock could deadlock its
+  snapshot wait and abort an operator's manual rebuild. A build whose table the worker
+  role can't see (another role's, without `pg_read_all_stats`) counts as busy too. Still pause the worker during a
+  manual rebuild.
+- The lock timeout also bounds REINDEX's waits for older transactions. Before building,
+  the job therefore skips (`skipped_old_transactions`, logged) when another
+  transaction in the database is older than the lock timeout and holds a snapshot
+  (`backend_xmin`) or a lock on the schema-qualified receipt table. An old transaction
+  with neither does not block this pre-check. Background workers and logical walsenders
+  are included (physical walsenders have no database, and REINDEX doesn't wait for them); autovacuum workers and launchers are excluded. Otherwise the rebuild
+  would fail after building a full copy, every hour. The check sees only sessions the worker role may
+  inspect (`pg_read_all_stats` widens it); an invisible old transaction still makes that
+  run fail and enter the 24-hour timeout backoff.
+- It logs `ingest.receipt_index_compaction` with page counts, ratio and duration
+  when it rebuilds (`info`), is busy, lacks analyzed key widths
+  (`skipped_no_statistics`, `warn`), or cannot resolve its table/index
+  (`skipped_missing`, `warn`), and `ingest.receipt_index_compaction_failed` with
+  only an error code. Failures are never thrown or retried. Both hourly and
+  per-project receipt-prune backstops are also best effort: a timeout or pool
+  failure logs `ingest.receipts_prune_failed` with its code and retention continues.
+  A failed pending-project or project-list query logs `ingest.pending_projects_failed`
+  or `retention.projects_failed`, respectively. Remaining retention phases still run;
+  essential phase failures are reported together at the end. Compaction is independent.
+
+During REINDEX CONCURRENTLY, the not-yet-valid `_ccnew` unique index still enforces
+uniqueness but cannot arbitrate `INSERT ... ON CONFLICT`. Concurrent claims for the
+same project/event can therefore raise a unique violation (23505). With Prisma 7 and
+adapter-pg the raw claim query surfaces it as P2010 with
+`meta.driverAdapterError.cause.originalCode = '23505'`; `isUniqueViolation` also accepts
+P2002 and bare 23505, and a real-Postgres test proves the adapter shape. The atomic claim statement rolls back, so this attempt
+holds no claims. (A connection lost after a claim commits but before its acknowledgement
+can still leave claims the request doesn't know about; a retry sees them as pending until
+recovery settles them after their lease.) Logbird returns retryable `503 ingest_unavailable` with `Retry-After: 1`.
+
+The regular-table `receipt-index-maintenance.integration` fixtures use a unique
+private `qa_compaction_<creation-ms>_<uuid>` schema and drop it in `finally`. They exercise
+concurrent writer progress, rebuild sizing and validity, and invalid `_ccnew`
+cleanup after cancelling only their own reindex backend. The former temporary-table
+fixture covered rebuild sizing/validity, compact-index skipping and advisory-lock
+contention; Postgres reindexes temporary tables non-concurrently, so it did not
+establish concurrent writer progress or cancellation cleanup.
+
+These fixtures are opt-in (`LOGBIRD_RECEIPT_COMPACTION_IT=1`, plus `DATABASE_URL`).
+They require at least 5 GiB free RAM and 10 GiB free disk on the repository drive
+before connecting or creating anything. The row count defaults to 200,000;
+`LOGBIRD_RECEIPT_COMPACTION_ROWS` accepts integers from 100,000 to 400,000.
+Only the 64 MiB size gate is lowered in these fixtures (covered separately by unit
+tests); the real bloat threshold and concurrent rebuild remain exercised. An open
+writer holds the observed REINDEX barrier until cancellation, avoiding fixed sleeps
+and oversized fixtures. JSON logs record rows, setup/rebuild/cancel timing and schemas
+before/after. Startup sweeps only exact timestamped test names older than one hour.
+For manual cleanup, inspect the generated commands before executing them in psql:
+
+```sql
+SELECT format('DROP SCHEMA %I CASCADE;', nspname) FROM pg_namespace
+WHERE nspname ~ '^qa_compaction_[0-9]{13}_[0-9a-f]{32}$'
+AND substring(nspname from '^qa_compaction_([0-9]{13})_')::bigint
+    < extract(epoch FROM clock_timestamp() - interval '1 hour') * 1000;
+-- After inspection, use psql's \gexec to run the generated commands.
+```
+
+Legacy `qa_compaction_<uuid>` schemas have no creation timestamp; inspect ownership
+and inactivity manually before removing any of them.
+
+A churn experiment backs both the job and its threshold. It used session-local temp
+tables with the receipt schema, 200,000 live receipts, 150 one-minute churn cycles
+of 4000 claims, confirmations and sweeps, then a 400,000-receipt backlog drained in
+5000-row batches followed by 50 more cycles. Autovacuum's trigger was replayed as
+explicit VACUUMs. The estimate (2713 pages) was within 3% of a fresh rebuild (2791
+pages).
+
+| Primary-key pages | Default autovacuum (25 runs) | Tuned per table (scale 0.01, 150 runs) |
+| --- | ---: | ---: |
+| Steady churn | 5317 (1.9×) | 4584 (1.6×) |
+| After the drained backlog and churn | 10,911 (3.9×) | 10,944 (3.9×) |
+| After REINDEX | 2791 | 2791 |
+
+More aggressive per-table autovacuum gains about 14% at steady state and nothing
+after a backlog. Default autovacuum already runs about once a minute under steady
+churn, because each receipt leaves two dead tuples (confirmation and sweep) within
+a window that holds ten minutes of inserts. No storage-parameter migration is
+shipped; only a rebuild returns the index to its compact size.
+
+Sizing: give `shared_buffers` room for the receipt primary key at the live window's
+size. A healthy ten-minute window at 5000 events/second holds about three million
+receipts, roughly 30,000 primary-key pages (about 250 MiB) when compact. Keep the
+minute worker healthy so a backlog does not build up. Operators can still run the
+same `REINDEX INDEX CONCURRENTLY` by hand.
 
 A smaller real-service proof used 600000 live receipts, a 300000-row initial
 expired backlog and 375000 receipts crossing expiry naturally at 5000/second over
@@ -187,7 +426,10 @@ earlier, and verifies the cutoff invariant. Legacy replacing-index collapse is
 repaired during upgrade, rather than during every exclusive retention lock.
 
 Migration and cold-maintenance clients have a 15-minute socket-idle timeout and
-progress headers, separate from the ten-minute server query budget. The normal
+progress headers (every 30 seconds), separate from the ten-minute per-statement server
+budget. `CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS` can raise that budget for
+very large histories; see [upgrade copy limits](self-hosting.md#upgrade-copy-limits)
+for measured copy and coverage-pass scaling. The normal
 60-second socket-idle timeout applies to all client operations, not just inserts.
 Before the atomic exchange, resuming an interrupted copy synchronously retires
 the temporary MV/table and creates a fresh table UUID before repeating the full
@@ -469,7 +711,43 @@ is rebuilt, before replay. Reads return `503 retention_unavailable` with the neu
 message "Project data is being rebuilt". Failed or abandoned repairs remain read
 fenced until a complete repair or retention rebuild succeeds. The existing abandoned
 run path enqueues retention, whose rebuild completes the outstanding repair records.
-Settings lastRun includes only kind=retention. Sample removal uses the same repair
+That same retention job also settles the abandoned receipts, so one failure costs
+at most one more full rebuild. While it holds the exclusive lock, before rebuilding,
+it proves that the abandoned claims' async writes are flushed. Its rebuild then
+covers them, and it confirms stored ids, readies missing ones for an exact replay
+and deletes obsolete ready receipts, exactly as request recovery does. A retry that
+was waiting for the lock finds nothing abandoned and does not rebuild again. If the
+flush throttle refuses proof, or settlement fails after the read model is
+consistent, the receipts wait for the next retry or hourly sweep, as before.
+Recovery re-checks for a failed repair after acquiring the exclusive lock. A
+repair that fails while another request waits for the lock therefore wins: the
+waiter returns without rebuilding, and retention owns the recovery.
+
+Settings lastRun includes only kind=retention, and the retention status endpoint
+is itself read-fenced. Failed repairs are therefore surfaced in `/readyz` as
+non-failing details: `maintenance.failedIngestRepairs` reports `fencedProjects`
+(projects with a failed `ingest_repair`), plus `stale` when the details are older than
+the cache. Readiness is unauthenticated, so it reports the count only, with no timestamps,
+and never names a project. Operators find the failed runs in `RetentionRun`. It is cached
+for 30 seconds per API process because RetentionRun history is never pruned.
+Refreshes are single-flight, including after the 250 ms response deadline. The
+query itself uses a 200 ms statement timeout and a 100 ms lock timeout. A slow or
+failed refresh returns last-known counts with `stale: true`, or `{ unavailable: true }`
+when no counts are known; these details never change readiness status. A
+non-zero count means some project's reads return `503 retention_unavailable` until
+retention completes the repair. To list those projects, operators query
+`SELECT "projectId", max("startedAt") FROM "RetentionRun" WHERE kind='ingest_repair'
+AND status='failed' GROUP BY 1`. The `RetentionRun (projectId, kind, status)` index
+serves the per-project failed-repair checks, read fences and retention counts. It
+does not efficiently serve the global readiness filter without a leading project
+id. The additive `RetentionRun_failed_ingest_repair` partial index on
+`(projectId, startedAt) WHERE kind='ingest_repair' AND status='failed'` covers the
+global readiness query's literal predicates and aggregate columns, without indexing
+all historical runs. The bounded timeouts still apply. This is the first raw-SQL-only
+partial index in these Prisma migrations; existing receipt sweep indexes are full
+indexes represented in `schema.prisma`. The partial index is recorded only in its
+migration (and a schema comment), so inspect future `migrate dev`/diff output and
+preserve it if a generated migration proposes a drop or replacement. Sample removal uses the same repair
 fence. Workspace activity reads raw rows only, so its unused rollups need no Project
 read fence; its writes remain serialized by the workspace advisory lock.
 
@@ -478,6 +756,15 @@ falls through to shared ingestion: unresolved ids stay pending and healthy sibli
 commit. Writes may continue while an ingest repair's reads are fenced; an active
 exclusive repair still excludes writers. Regular live retention continues to fence
 writes. Worker startup probes the flush grant and logs an actionable error on failure.
+
+Recovery that starts inside an ingest request holds the project's EXCLUSIVE lock for
+its whole duration, using the long-timeout maintenance ClickHouse client. A large
+rebuild can therefore hold the lock for up to the ten-minute server budget (or a
+raised `CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS`) per statement. Meanwhile,
+other ingest and maintenance for that project returns `503` with Retry-After
+(`project_busy`) after its three-second lock wait. Other projects are unaffected.
+Only an exact retry of an expired ambiguous claim, the hourly worker and the
+operator script enter this path.
 
 Global SYSTEM FLUSH attempts, including failures, are throttled to once per minute
 per server/worker process. Successful proof is reused only for leases it covers.

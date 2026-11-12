@@ -1,5 +1,6 @@
 import { type ClickHouseClient, projectMaintenance, rebuildProjectRollups } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
+import { createFailedRepairStatus } from './failed-repair-status';
 import { enqueueProjectRetention } from './queue';
 
 export function heartbeatMaintenanceRun(runId: string) {
@@ -10,6 +11,24 @@ export function heartbeatMaintenanceRun(runId: string) {
   }, 30_000);
   return () => clearInterval(timer);
 }
+
+/**
+ * A failed ingest repair fences every read route of its project, including retention status, until retention
+ * completes the repair. Counts only: readiness is unauthenticated, so it never names a project. RetentionRun
+ * history is never pruned and this filter has no leading project id, so probes share one cached read.
+ */
+export const failedRepairStatus = createFailedRepairStatus(() =>
+  prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT set_config('statement_timeout', '200ms', true), set_config('lock_timeout', '100ms', true)`;
+      const [row] = await tx.$queryRaw<{ fencedProjects: bigint }[]>`
+      SELECT count(DISTINCT "projectId") AS "fencedProjects"
+      FROM "RetentionRun" WHERE kind='ingest_repair' AND status='failed'`;
+      return { fencedProjects: Number(row?.fencedProjects ?? 0) };
+    },
+    { maxWait: 200, timeout: 500 },
+  ),
+);
 
 /** Caller holds EXCLUSIVE. Keep the durable read fence until every derived destination is rebuilt. */
 export async function rebuildProjectReadModel(client: ClickHouseClient, projectId: string) {

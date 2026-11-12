@@ -11,6 +11,7 @@ import {
 } from '@logbird/database';
 import { recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enforceProjectRetention } from '@logbird/worker/retention';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { legacyFingerprint3a1541f, normalizeEvent3a1541f } from '../../../packages/clickhouse/src/fixtures/identity-3a1541f';
 import { clickhouse } from './clickhouse';
@@ -91,8 +92,18 @@ it('targeted expiry preserves a concurrently renewed receipt after waiting for i
   let expiry: Promise<void> | undefined;
   await prisma.$transaction(async (tx) => {
     await tx.ingestReceipt.updateMany({ where: { projectId: f.project }, data: { confirmedAt: new Date() } });
+    const [renewer] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() pid`;
     expiry = expireIngestReceipts(f.project, [original.id], new Date(Date.now() - 600_000));
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    void expiry.catch(() => undefined); // Awaited after the renewal commits.
+    // Barrier: commit the renewal only once expiry is actually waiting on this row lock.
+    for (let attempt = 0; ; attempt++) {
+      const [row] = await prisma.$queryRaw<
+        { n: number }[]
+      >`SELECT count(*)::int n FROM pg_stat_activity WHERE ${renewer?.pid}=ANY(pg_blocking_pids(pid))`;
+      if (row?.n) break;
+      if (attempt >= 500) throw new Error('Expiry never waited on the renewed row lock');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   });
   await expiry;
   const [renewed] = await findIngestReceipts(f.project, [original.id]);
@@ -420,10 +431,17 @@ it('rechecks expired confirmed cache ids without needing a prior bulk sweep', as
 it('returns a retryable error when targeted expiry fails before a claim', async () => {
   expect((await f.post(original)).status).toBe(202);
   await prisma.ingestReceipt.updateMany({ where: { projectId: f.project }, data: { confirmedAt: new Date(0) } });
-  const expire = vi.spyOn(await import('@logbird/database'), 'expireIngestReceipts').mockRejectedValueOnce(new Error('fictional storage failure'));
+  const expire = vi.spyOn(await import('@logbird/database'), 'expireIngestReceipts').mockRejectedValueOnce(
+    new PrismaClientKnownRequestError('fictional unreachable database', {
+      code: 'P1001',
+      clientVersion: '7.10.0',
+      meta: { driverAdapterError: { name: 'DriverAdapterError', cause: { kind: 'DatabaseNotReachable', host: 'qa.invalid', port: 5432 } } },
+    }),
+  );
   try {
     const response = await f.post(original);
     expect(response.status).toBe(503);
+    expect(response.headers.get('Retry-After')).toBe('1');
     expect(await response.json()).toMatchObject({ error: { code: 'ingest_unavailable' } });
     expect(await f.count()).toBe(1);
   } finally {
@@ -431,4 +449,52 @@ it('returns a retryable error when targeted expiry fails before a claim', async 
   }
   expect((await (await f.post(original)).json()).accepted).toBe(1);
   expect(await f.count()).toBe(1);
+});
+
+it.each([
+  ['a programming error happens before any outcome', 'classify'],
+  ['nothing is left to insert', 'settled'],
+] as const)('handles a model-query cancellation in releaseClaims deleteMany when %s', async (_label, site) => {
+  const database = await import('@logbird/database');
+  const originalClaim = database.claimIngestReceipts;
+  const claim = vi.spyOn(database, 'claimIngestReceipts').mockImplementationOnce(async (...args) => {
+    const owned = await originalClaim(...args);
+    // Keep a real owned claim for releaseClaims, then either break classification or settle the row terminally.
+    return owned.map((receipt) =>
+      site === 'classify' ? { ...receipt, eventAt: new Date(Number.NaN) } : { ...receipt, fingerprint: 'unreadable:qa-release' },
+    );
+  });
+  const release = vi.spyOn(prisma.ingestReceipt, 'deleteMany').mockRejectedValueOnce(
+    new PrismaClientKnownRequestError('fictional model-query cancellation', {
+      code: 'P2039',
+      clientVersion: '7.10.0',
+      meta: {
+        modelName: 'IngestReceipt',
+        driverAdapterError: {
+          name: 'DriverAdapterError',
+          cause: { kind: 'postgres', originalCode: '57014', code: '57014', severity: 'ERROR', message: 'qa cancellation' },
+        },
+      },
+    }),
+  );
+  try {
+    const response = await f.post(original);
+    if (site === 'classify') {
+      // A programming error before any outcome surfaces as a server error, not a retryable 503 a client would repeat;
+      // the claim the failed release left behind stays held for recovery.
+      expect(response.status).toBe(500);
+      expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, eventId: original.id, confirmedAt: null } })).toBe(1);
+    } else {
+      // Nothing to insert: the row is already settled (terminally rejected), so the settled response stands and the
+      // held claim is left for recovery after its lease.
+      expect(response.status).toBe(202);
+      expect(await response.json()).toMatchObject({ accepted: 0, rejected: [{ index: 0, code: 'stored_event_unreadable' }] });
+      expect(await prisma.ingestReceipt.count({ where: { projectId: f.project, eventId: original.id, confirmedAt: null } })).toBe(1);
+    }
+    expect(release).toHaveBeenCalledWith({ where: { projectId: f.project, eventId: { in: [original.id] }, confirmedAt: null } });
+    expect(await f.count()).toBe(0);
+  } finally {
+    claim.mockRestore();
+    release.mockRestore();
+  }
 });

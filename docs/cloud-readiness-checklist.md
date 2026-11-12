@@ -69,6 +69,32 @@ body consumption too, not just response headers. Run export separately with an
 explicit size/sample count; an empty or truncated export is failure, not a fast
 result. Record client-visible and storage timings separately where available.
 
+### Expired-receipt backlog scenario
+
+Immutable ids keep a ten-minute receipt cache that a minute worker sweeps. Also
+measure the adversarial backlog left by a worker outage. Keep the receipt worker on a
+private BullMQ prefix and stopped. Then, through the real API, build at least
+600,000 genuine confirmed receipts in the fixture project, and age only that
+project's `confirmedAt` past the window. Before each step, record the
+`IngestReceipt` and `IngestReceipt_pkey` `reltuples`/`relpages`, live/dead tuples
+and last (auto)analyze/vacuum. Measure, with 1000-event batches:
+
+1. the first fresh batch after aging (gate: under 1 s);
+2. an exact replay of 1000 expired ids: 202, only those receipts refreshed, and no
+   duplicate raw rows or pointers;
+3. 30 steady fresh batches with the backlog in place (gate: p95 at most 2× the
+   matched master baseline);
+4. every batch while the scoped worker sweep drains the backlog, reporting how
+   many overlapped the sweep (same gate);
+5. 30 batches after the drain, once `ANALYZE` (or autovacuum) leaves a bloated,
+   nearly empty table (same gate).
+
+Capture `EXPLAIN (ANALYZE, BUFFERS, SETTINGS)` of the receipt lookup and
+confirmation for the first batch and the first batch after the drain, under the
+same transaction-local guard the server uses. Report planning time, shared
+hit/read blocks and any JIT timing, so a slow batch can be attributed to cold
+buffers, planning or plan shape. Unguarded plans are evidence only.
+
 Lower retention with slug confirmation, measure the actual completed purge, and
 verify expired raw rows plus all aggregate tables. Percentiles require repeated
 purges on independently populated windows; one purge yields a duration only.

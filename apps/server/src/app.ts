@@ -2,6 +2,7 @@ import { auth, authAuditContext, clearSessionCookies, setAuthAuditHandler } from
 import { QueryError } from '@logbird/clickhouse';
 import { queryErrorDetailsSchema } from '@logbird/contracts';
 import { Prisma, ProjectBusyError, prisma } from '@logbird/database';
+import { failedRepairStatus } from '@logbird/worker/project-repair';
 import { connection } from '@logbird/worker/queue';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -19,6 +20,7 @@ import { dataRoutes, publicRoutes } from './data-routes';
 import { deleteFailureResponse } from './delete-errors';
 import { env } from './env';
 import { ApiError } from './errors';
+import { ingestReceiptFailureResponse } from './ingest-receipt-errors';
 import { invitationRoutes } from './invitation-routes';
 import { inviteLinkRoutes } from './invite-link-routes';
 import { authorizeMutation } from './middlewares/require-role';
@@ -81,6 +83,11 @@ app.onError((error, c) => {
 
   if (error instanceof QueryError)
     return c.json({ error: { code: 'invalid_query', message: error.message, details: queryErrorDetailsSchema.parse(error.details) } }, 422);
+  const receiptFailure = ingestReceiptFailureResponse(error);
+  if (receiptFailure) {
+    c.header('Retry-After', receiptFailure.retryAfter);
+    return c.json(receiptFailure.body, receiptFailure.status);
+  }
   if (error instanceof ApiError) {
     // Any error that knows when to retry says so (e.g. 503 maintenance_pending); these codes default to 1 s.
     if (
@@ -188,8 +195,13 @@ app.get('/readyz', async (c) => {
     connection.ping(),
   ]);
   const ready = checks.every((r) => r.status === 'fulfilled');
-  const audit = await auditDrainStatus().catch(() => ({ unavailable: true }));
-  return c.json({ status: ready ? 'ok' : 'degraded', audit }, ready ? 200 : 503);
+  const [audit, repairs] = await Promise.all([
+    auditDrainStatus().catch(() => ({ unavailable: true })),
+    failedRepairStatus().catch(() => ({ unavailable: true })),
+  ]);
+  // Non-failing details: a fenced project needs operator attention, not removal of this replica from routing.
+  // Unauthenticated: the details carry only a cross-tenant count (no timestamps, never a project id).
+  return c.json({ status: ready ? 'ok' : 'degraded', audit, maintenance: { failedIngestRepairs: repairs } }, ready ? 200 : 503);
 });
 app.get(
   '/health',

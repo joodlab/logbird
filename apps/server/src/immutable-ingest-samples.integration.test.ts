@@ -10,9 +10,10 @@ beforeEach(async () => {
   f = await immutableFixture();
   await f.authorize();
 });
+// The 60-second cleanup budget applies after every test in this file, not only the first: each cleanup runs two
+// synchronous stream purges (project and workspace) that share the local ClickHouse two-slot mutation pool.
 afterEach(async () => {
   await f.cleanup();
-  // Two synchronous stream purges share the local ClickHouse two-slot mutation pool.
 }, 60_000);
 it('sample API preserves a retained customer sample-event-N identity', async () => {
   expect((await f.post({ id: 'sample-event-0', action: 'customer.original' })).status).toBe(202);

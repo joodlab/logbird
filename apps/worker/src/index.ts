@@ -1,41 +1,19 @@
-import { projectMaintenance } from '@logbird/clickhouse';
-import { closeProjectLocks, prisma, pruneIngestReceipts, sweepExpiredAuthRecords, sweepIngestReceipts } from '@logbird/database';
+import { closeProjectLocks, prisma, sweepExpiredAuthRecords, sweepIngestReceipts } from '@logbird/database';
 import { Queue, Worker } from 'bullmq';
 import { env } from './env';
-import { logIngestRecoveryFailure, probeIngestRecovery, recoverProjectIngest } from './ingest-recovery';
+import { probeIngestRecovery } from './ingest-recovery';
 import { closeRetentionQueue, connection, retentionQueue, retentionQueueName } from './queue';
+import { runReceiptIndexCompaction } from './receipt-index-compaction';
 import { clickhouse, enforceProjectRetention } from './retention';
+import { enforceRetention } from './retention-sweep';
 
 await probeIngestRecovery(clickhouse);
 const worker = new Worker(
   retentionQueueName,
   async (job) => {
     if (job.name === 'retention.project') await enforceProjectRetention(job.data.projectId);
-    else if (job.name === 'retention.enforce') {
-      await pruneIngestReceipts(); // Includes idle workspace audit streams.
-      const failures: unknown[] = [];
-      for (const pending of await prisma.ingestReceipt.findMany({
-        where: { confirmedAt: null },
-        distinct: ['projectId'],
-        select: { projectId: true },
-      })) {
-        try {
-          // Tagged per project: deletion can stop a recovery statement left running by a failed call.
-          await recoverProjectIngest(projectMaintenance(clickhouse, pending.projectId), pending.projectId);
-        } catch (error) {
-          logIngestRecoveryFailure(error, pending.projectId);
-          failures.push(error);
-        }
-      }
-      for (const project of await prisma.project.findMany({ select: { id: true } })) {
-        try {
-          await enforceProjectRetention(project.id);
-        } catch (error) {
-          failures.push(error);
-        }
-      }
-      if (failures.length) throw new AggregateError(failures, 'Retention sweep failed for some projects');
-    } else throw new Error('Unknown retention job');
+    else if (job.name === 'retention.enforce') await enforceRetention();
+    else throw new Error('Unknown retention job');
   },
   { connection, prefix: env.BULLMQ_PREFIX, concurrency: 1 },
 );
@@ -97,6 +75,37 @@ receiptWorker.on('failed', (job, error) =>
 receiptWorker.on('error', () => console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_worker_error' })));
 await receiptQueue.upsertJobScheduler('ingest-receipts-minute', { every: 60_000 }, { name: 'ingest-receipts.prune', data: {} });
 await receiptQueue.upsertJobScheduler('auth-records-hourly', { every: 3_600_000 }, { name: 'auth-records.sweep', data: {} });
+// Recovery and fence lifting have their own worker; an online rebuild cannot occupy their queue.
+const compactionQueueName = 'ingest-receipt-index-compaction';
+const compactionQueue = new Queue(compactionQueueName, {
+  connection,
+  prefix: env.BULLMQ_PREFIX,
+  defaultJobOptions: { attempts: 1, removeOnComplete: 100, removeOnFail: 100 },
+});
+await compactionQueue.setGlobalConcurrency(1);
+const compactionAbort = new AbortController();
+const compactionWorker = new Worker(
+  compactionQueueName,
+  async (job) => {
+    if (job.name !== 'ingest-receipt-index.compact') throw new Error('Unknown receipt index compaction job');
+    await runReceiptIndexCompaction(
+      connection,
+      `${env.BULLMQ_PREFIX}:ingest-receipt-index-compaction:backoff`,
+      job.attemptsMade,
+      compactionAbort.signal,
+    );
+  },
+  { connection, prefix: env.BULLMQ_PREFIX, concurrency: 1 },
+);
+compactionWorker.on('failed', (job) =>
+  console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_compaction_job_failed', jobId: job?.id })),
+);
+compactionWorker.on('error', () => console.error(JSON.stringify({ level: 'error', event: 'ingest.receipt_index_compaction_worker_error' })));
+await compactionQueue.upsertJobScheduler(
+  'ingest-receipt-index-hourly',
+  { every: 3_600_000 },
+  { name: 'ingest-receipt-index.compact', data: {}, opts: { attempts: 1 } },
+);
 // Startup sweep uses the same locked recovery path as hourly and on-demand jobs.
 for (const run of await prisma.retentionRun.findMany({ where: { status: 'running' }, distinct: ['projectId'], select: { projectId: true } }))
   await retentionQueue.add('retention.project', { projectId: run.projectId });
@@ -105,8 +114,10 @@ let stopping = false;
 async function shutdown() {
   if (stopping) return;
   stopping = true;
-  await Promise.all([worker.close(), receiptWorker.close()]);
-  await receiptQueue.close();
+  // Cancel the owned PostgreSQL backend before waiting for workers; Redis hints are abortable too.
+  compactionAbort.abort();
+  await Promise.all([worker.close(), receiptWorker.close(), compactionWorker.close()]);
+  await Promise.all([receiptQueue.close(), compactionQueue.close()]);
   const results = await Promise.allSettled([closeRetentionQueue(), closeProjectLocks(), clickhouse.close(), prisma.$disconnect()]);
   if (results.some((r) => r.status === 'rejected')) process.exitCode = 1;
 }

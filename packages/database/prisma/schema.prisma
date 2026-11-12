@@ -227,6 +227,11 @@ model RetentionRun {
   error         String?
 
   @@index([projectId, startedAt])
+  @@index([projectId, kind, status])
+
+  // Not expressible here: the raw-SQL partial index "RetentionRun_failed_ingest_repair" (migration
+  // 20261111120000_retention_run_failed_ingest_repair) serves /readyz. A generated migration that drops it must be
+  // edited out; packages/database/src/migrations-guard.test.ts fails if a migration drops it.
 }
 
 model InviteLink {

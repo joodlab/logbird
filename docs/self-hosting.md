@@ -64,7 +64,7 @@ export LOGBIRD_INGEST_KEY=lb_ingest_...
 curl http://localhost:4600/v1/events -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" -H 'Content-Type: application/json' -d '{"action":"document.updated"}'
 ```
 
-Expect HTTP 202 and the event in Explorer. Only action is required. Never send secrets. `/livez` checks the API process; `/readyz` checks Postgres, ClickHouse and Redis through the app.
+Expect HTTP 202 and the event in Explorer. Only action is required. Never send secrets. `/livez` checks the API process; `/readyz` checks Postgres, ClickHouse and Redis through the app; its non-failing `maintenance.failedIngestRepairs` details count projects whose reads are fenced by a failed ingest repair (see [immutable ids](ingest-identity.md#bounded-ambiguous-writes)).
 
 Init supports POSIX sh on Linux/macOS/Git Bash, creates .env if absent, fills only empty/missing secrets, preserves populated values and sets mode 600. Manual generation: `openssl rand -hex 32`, then paste privately into .env. Init falls back to /dev/urandom without OpenSSL. Never commit credentials.
 
@@ -83,6 +83,7 @@ One .env.example serves source development and containers. Empty URL overrides l
 | DATABASE_URL | Optional complete URL; otherwise composed from credentials |
 | CLICKHOUSE_URL / CLICKHOUSE_USER / CLICKHOUSE_DATABASE | http://clickhouse:8123 / logbird / logbird; keep database logbird because restricted policies name it explicitly |
 | REDIS_URL / BULLMQ_PREFIX | redis://redis:6379/0 / {logbird} |
+| CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS | 600; per-statement ClickHouse budget for migration copies and cold maintenance, 600-86400. Raise only for very large histories ([upgrade copy limits](#upgrade-copy-limits)) |
 | SMTP_HOST / SMTP_PORT / SMTP_SECURE | No host default / 587 / false (STARTTLS); true for implicit TLS, usually 465 |
 | SMTP_REQUIRE_TLS | false; true requires STARTTLS before AUTH and fails closed when the server does not offer it. Set true for a provider on 587 (Postmark); false only for a local sink such as Mailpit |
 | SMTP_USER / SMTP_PASSWORD / MAIL_FROM | Provider credentials / verified sender |
@@ -279,7 +280,7 @@ server/worker writers; pull and start as in step 5 above. The migrate gate appli
 008 makes a temporary derived-index copy: allow disk space for both copies and
 time proportional to retained history. Migration/maintenance clients use a
 15-minute socket-idle timeout, progress headers and a ten-minute server query
-budget. A failed pre-swap copy is discarded and copied again on retry; after the
+budget per statement (see the limits below). A failed pre-swap copy is discarded and copied again on retry; after the
 atomic swap, retries resume forward without swapping back. Do not start the new
 server until the migration gate completes. Restore checks must reject leftover
 `event_ids_v2`/`event_ids_v3` tables or temporary MVs, even if the stable table exists.
@@ -299,6 +300,35 @@ grants. Recovery currently supports one ClickHouse node; a load-balanced cluster
 needs a coordinated per-node drain. The worker probes the flush grant at startup.
 See the [targeted rollback](ingest-identity.md#deployment-rollback-and-proof-limits).
 Replace `logbird` in example SQL with your configured `CLICKHOUSE_DATABASE`.
+
+#### Upgrade copy limits
+
+Each migration copy statement runs under one per-statement server budget: the 006
+backfill, the 007 and 008 full index copies, and 009's index materialization. It is
+600 seconds by default (`CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS`, accepted
+600–86400). A copy that needs longer fails the same way on every retry, and the
+server cannot start until the migration gate completes. Raise the value for the
+migration run only; it also applies to the worker's cold maintenance client and
+the server's `maintenanceClickhouse` client used by in-request recovery. The
+socket-idle timeout grows to the budget plus five minutes. Progress headers are
+spaced so a statement emits at most about 20 (every 30 seconds at the default),
+well under Node's 16 KiB response-header limit. A proxy between the worker and
+ClickHouse must therefore allow at least that long without bytes (raise its idle timeout above
+30 seconds, or above budget/20 for larger budgets), or it cuts long statements. The final 007/008 coverage pass
+runs in id-hash buckets, each capped at one fifth of the budget (120 seconds by
+default). Each bucket rescans both raw and index tables, so per-bucket time grows
+linearly with history and the whole pass roughly with its square.
+
+Measured on the 10M online 008 fixture (narrow rows, shared development machine):
+the bounded copy took 3.4 seconds, and the coverage pass took 32 buckets × about
+1.9 seconds (62 seconds). By linear extrapolation, a single copy reaches 600 seconds
+only around 1.7 billion rows. The coverage pass is the practical limit: about
+256 buckets × 19 seconds (roughly 80 minutes in total) at 100M rows, with a single
+bucket reaching 120 seconds near 600M rows. These are extrapolations from one
+machine, not guarantees. Wide rows, slower disks or concurrent load reduce them,
+so time a restored copy of production first. Beyond tens of millions of retained
+events, budget the coverage pass's total time and raise the per-statement budget
+before upgrading.
 
 ### Native backup and fresh-storage restore
 
@@ -779,6 +809,69 @@ dead tuples, WAL, queue lag and `ingest.receipts_pruned` logs, especially repeat
 backstop can accumulate about 18 million between successful sweeps. Requests
 expire only their own requested ids in a bounded statement; fresh batches never
 drain unrelated backlog. See [receipt coordination](ingest-identity.md#coordination-and-identity).
+
+The worker's `DATABASE_URL` must be a direct, session-mode connection (not a
+transaction-mode pooler such as PgBouncer in transaction mode): compaction relies on one
+session for its advisory lock, session settings, backend pid and REINDEX. Keep
+PostgreSQL's `track_activities` on (the default): shutdown only cancels a rebuild that
+`pg_stat_activity` shows as this session's active REINDEX; without it, shutdown falls back to
+closing the socket, and on PostgreSQL before 14 the rebuild then runs on until its timeout.
+The worker runs receipt-index compaction on its own hourly queue and worker with
+concurrency 1 and one attempt, so retention retries never repeat it and queued
+recovery/fence-lifting jobs can run during a rebuild. On shutdown a separate
+connection calls `pg_cancel_backend` for the recorded rebuild backend pid only, and only
+while `pg_stat_activity` still shows it as the maintenance session running REINDEX,
+with five-second connect/query timeouts; its socket is destroyed by eight seconds. The
+original session remains open while REINDEX settles with 57014; cancellation and cleanup
+have a ten-second deadline before its socket is destroyed, and the run settles within
+about fifteen seconds of shutdown. Every close is bounded to five seconds,
+since a graceful close on an idle session can wait on an unreachable server. The maintenance session sets `client_connection_check_interval`
+to one second as a disconnect fallback where supported (PostgreSQL 14+).
+Only a running REINDEX is cancelled; catalog queries and the invalid-copy cleanup
+are left to finish within that deadline, and connection setup closes its socket
+(15-second setup deadline). Its invalid copy is dropped after cancellation, or next
+run if cleanup is interrupted. **Before a release whose migrations alter
+`IngestReceipt`, stop the worker first:** a running rebuild holds SHARE UPDATE
+EXCLUSIVE for up to its 15-minute statement timeout, and a migration's ACCESS EXCLUSIVE
+request would queue behind it and block every receipt read and write (ingest) until
+it ends. Then confirm no rebuild is still running server-side (on PostgreSQL < 14 a REINDEX whose
+cancel failed keeps running; the worker logs `ingest.receipt_index_shutdown_fallback` with its pid):
+`SELECT pid FROM pg_stat_activity WHERE application_name = 'logbird-receipt-index-maintenance' AND state = 'active'`
+must return no rows. The release notes say when a migration touches that table. `REINDEX INDEX CONCURRENTLY` requires the worker role to own the table
+(or have the table's `MAINTAIN` privilege on PostgreSQL 17+, as documented for
+[REINDEX](https://www.postgresql.org/docs/17/sql-reindex.html)). A non-owner role
+without that privilege logs `ingest.receipt_index_compaction_failed` with code
+`42501` on each hourly run once the index qualifies for a rebuild (at least 64 MiB and three
+times its live size); below that, runs skip silently, so a missing log line doesn't prove the
+role is sufficient. Retention continues, but automatic compaction cannot proceed. The same
+worker must be permitted to [drop invalid reindex copies](https://www.postgresql.org/docs/17/sql-dropindex.html) (index ownership follows
+the table owner); a maintenance-only role may require the owner to clean those up. Until the owner
+drops such a copy, runs report `skipped_invalid_copy` at warn level once per 24-hour back-off instead of
+rebuilding.
+The hourly job drops invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copies left by a
+failed or cancelled rebuild. While another backend is building an index on the table
+(an operator's manual REINDEX CONCURRENTLY, say), the job leaves the table alone and
+reports `skipped_busy`: dropping that build's in-progress copy, or queueing a drop behind
+its lock, could abort the manual rebuild. Without `pg_read_all_stats`, the worker role can't see
+which table another role's build is on, so any such build in the database counts as busy (it
+only skips an hour). Still pause the worker during a manual rebuild, since a run already past
+that check can't see a rebuild that starts afterwards. The
+job also skips a run while another transaction older than its one-minute lock timeout
+holds a snapshot or a lock on the receipt table (for example a running `pg_dump`), or an
+old prepared (two-phase) transaction exists, instead of building a copy it couldn't
+swap in.
+
+Reserve free disk for about the index's live size during an online rebuild. A
+57014 statement timeout or 55P03 lock timeout stores a timestamp in the existing
+Redis connection under `<BULLMQ_PREFIX>:ingest-receipt-index-compaction:backoff`
+with a 24-hour TTL. Hourly jobs log and return `skipped_backoff` until it expires; they
+still drop an invalid copy a failed rebuild left behind, but never build a new one. A
+cleanup attempt that times out while backed off logs `ingest.receipt_index_cleanup_deferred`
+at info level and does not renew the back-off.
+Both Redis hints have a one-second client deadline and stop waiting immediately
+on abort. A Redis error or stall does not disable compaction or block shutdown:
+a failed GET means no back-off; a timed-out SET is logged. An aborted rebuild does
+not request the 24-hour back-off. BullMQ's shared connection settings are unchanged.
 
 ## Disposable acceptance fixture
 
