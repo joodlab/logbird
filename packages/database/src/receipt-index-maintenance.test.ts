@@ -65,6 +65,7 @@ function fakeDb(state: {
   missingTable?: boolean;
   missingIndex?: boolean;
   oldTransactions?: number;
+  otherBuild?: boolean;
 }) {
   const pages = [...state.pages];
   const calls: string[] = [];
@@ -77,6 +78,7 @@ function fakeDb(state: {
     else if (sql.includes('pg_relation_size')) rows = [{ pages: state.missingIndex ? null : String(pages.length > 1 ? pages.shift() : pages[0]) }];
     else if (sql.includes('NOT i.indisvalid')) rows = (state.invalid ?? []).map((name) => ({ name }));
     else if (sql.includes('reltuples')) rows = [{ live: state.live, key_bytes: state.keyBytes }];
+    else if (sql.includes('pg_stat_progress_create_index')) rows = [{ building: state.otherBuild ?? false }];
     else if (sql.includes('pg_stat_activity')) rows = [{ n: state.oldTransactions ?? 0 }];
     else if (sql.startsWith('REINDEX') && state.reindexFails)
       throw Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' });
@@ -295,13 +297,13 @@ it('bounds shutdown to ten seconds when REINDEX does not acknowledge cancellatio
   }
 });
 
-it.each(['42704', '42501'])('ignores only an unsupported connection-check setting (%s)', async (code) => {
+it.each(['42704', '22023', '42501'])('ignores only an unsupported connection-check setting (%s)', async (code) => {
   const { query } = fakeDb({ pages: [1], live: 0, keyBytes: null });
   connection.query.mockImplementation((sql: string, params?: unknown[]) => {
     if (sql.includes('client_connection_check_interval')) return Promise.reject(Object.assign(new Error('SET failed'), { code }));
     return query(sql, params);
   });
-  if (code === '42704') await expect(compactIngestReceiptIndex()).resolves.toMatchObject({ action: 'skipped_compact' });
+  if (code !== '42501') await expect(compactIngestReceiptIndex()).resolves.toMatchObject({ action: 'skipped_compact' });
   else await expect(compactIngestReceiptIndex()).rejects.toMatchObject({ code });
   expect(connection.end).toHaveBeenCalledTimes(1);
 });
@@ -560,4 +562,45 @@ it('only drops leftover invalid copies while backed off, never rebuilding', asyn
   expect(query).toHaveBeenCalledWith('DROP INDEX CONCURRENTLY IF EXISTS "qa_current"."IngestReceipt_pkey_ccnew"', undefined);
   expect(query.mock.calls.some(([sql]) => sql.startsWith('REINDEX') || sql.includes('reltuples'))).toBe(false);
   expect(query).toHaveBeenCalledWith('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [expect.any(String)]);
+});
+
+it('leaves the table alone while another backend builds an index on it', async () => {
+  const busy = fakeDb({
+    pages: [RECEIPT_INDEX_COMPACTION.minPages * 10],
+    live: 1000,
+    keyBytes: 60,
+    invalid: ['IngestReceipt_pkey_ccnew'],
+    otherBuild: true,
+  });
+  await expect(compactIngestReceiptIndex({ db: busy.db })).resolves.toMatchObject({ action: 'skipped_busy', droppedInvalid: 0 });
+  // Dropping an operator's in-progress copy, or queueing behind its lock, could abort the manual rebuild.
+  expect(busy.calls.some((sql) => sql.startsWith('DROP INDEX') || sql.startsWith('REINDEX'))).toBe(false);
+  const check = busy.query.mock.calls.find(([sql]) => String(sql).includes('pg_stat_progress_create_index'));
+  expect(check?.[0]).toContain('pid <> pg_backend_pid()');
+  expect(check?.[1]).toEqual(['"qa_current"."IngestReceipt"']);
+  expect(busy.calls.at(-1)).toContain('pg_advisory_unlock');
+});
+
+it('does not drop after a failed rebuild while another backend has started an index build', async () => {
+  const state = { pages: [RECEIPT_INDEX_COMPACTION.minPages * 10], live: 1000, keyBytes: 60, invalid: [] as string[], otherBuild: false };
+  const { db, calls, query } = fakeDb(state);
+  query.mockImplementation(async (sql: string, _params?: unknown[]) => {
+    calls.push(sql);
+    if (sql.startsWith('REINDEX')) {
+      // Our rebuild fails; meanwhile an operator starts their own build on the table.
+      state.invalid.push('IngestReceipt_pkey_ccnew');
+      state.otherBuild = true;
+      throw Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' });
+    }
+    if (sql.includes('pg_stat_progress_create_index')) return { rows: [{ building: state.otherBuild }] };
+    if (sql.includes('n.nspname AS schema')) return { rows: [{ schema: 'qa_current' }] };
+    if (sql.includes('pg_try_advisory_lock')) return { rows: [{ locked: true }] };
+    if (sql.includes('pg_relation_size')) return { rows: [{ pages: String(state.pages[0]) }] };
+    if (sql.includes('NOT i.indisvalid')) return { rows: state.invalid.map((name) => ({ name })) };
+    if (sql.includes('reltuples')) return { rows: [{ live: state.live, key_bytes: state.keyBytes }] };
+    if (sql.includes('pg_stat_activity')) return { rows: [{ n: 0 }] };
+    return { rows: [] };
+  });
+  await expect(compactIngestReceiptIndex({ db })).rejects.toMatchObject({ code: '57014' });
+  expect(calls.some((sql) => sql.startsWith('DROP INDEX'))).toBe(false);
 });

@@ -364,9 +364,10 @@ ownership of the table/index (see [DROP INDEX](https://www.postgresql.org/docs/1
 cleanup when a cancelled rebuild leaves a copy; until then runs report `skipped_invalid_copy` once per 24-hour
 back-off.
 The hourly job drops only invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copies left by a
-failed or cancelled rebuild. An operator's in-progress manual REINDEX CONCURRENTLY holds
-SHARE UPDATE EXCLUSIVE on the table, so the job's drop fails with 55P03 and logs the
-failure. A 55P03 lock timeout or 57014 statement timeout sets a 24-hour Redis
+failed or cancelled rebuild. While another backend builds an index on the table (an operator's
+manual REINDEX CONCURRENTLY), the job reports `skipped_busy` and drops nothing, so it can't abort
+that rebuild. Old prepared (two-phase) transactions count as blocking the pre-check, like long
+transactions do. A 55P03 lock timeout or 57014 statement timeout sets a 24-hour Redis
 back-off; later hourly jobs log `skipped_backoff` until it expires (they still drop a
 leftover invalid copy, but never rebuild). Pause the worker
 during a manual rebuild, and stop it before deploying a migration that alters

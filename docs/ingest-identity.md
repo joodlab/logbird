@@ -75,7 +75,8 @@ metadata when present, and the response depends on where it happened:
   its status, and a programming error surfaces as a server error instead of a retry loop.
 - **After parse isolation:** the composed outcome stands; retryable rows whose claims
   couldn't be released are reported as pending, with a lease-aware Retry-After.
-- **With nothing to insert:** every row is already settled, so the settled response stands.
+- **With nothing to insert:** every row is already settled, so the settled response stands
+  (for database infrastructure failures; any other release error surfaces).
 Unreleased claims remain held until abandoned-claim recovery. Nothing on
 today's request path writes the same receipt concurrently, so a retry is an
 anomaly, not a normal branch.
@@ -254,10 +255,11 @@ runs `compactIngestReceiptIndex`:
   GET means no back-off, and a timed-out SET is logged. An aborted rebuild does
   not request the 24-hour back-off.
 - An interrupted rebuild's invalid `_ccnew`/`_ccold` copy is dropped concurrently,
-  both before each run and after a failure. It cannot touch an operator's in-progress
-  manual rebuild: that rebuild holds SHARE UPDATE EXCLUSIVE on the table, so the
-  worker's drop waits out its lock timeout and fails with 55P03, then backs off for
-  24 hours. Pause the worker during a manual rebuild to avoid that noise.
+  both before each run and after a failure, unless another backend is building an
+  index on the table (`pg_stat_progress_create_index`): then the run reports
+  `skipped_busy`, because a drop queued behind that build's lock could deadlock its
+  snapshot wait and abort an operator's manual rebuild. Still pause the worker during a
+  manual rebuild.
 - The lock timeout also bounds REINDEX's waits for older transactions. Before building,
   the job therefore skips (`skipped_old_transactions`, logged) when another
   transaction in the database is older than the lock timeout and holds a snapshot

@@ -849,13 +849,15 @@ the table owner); a maintenance-only role may require the owner to clean those u
 drops such a copy, runs report `skipped_invalid_copy` at warn level once per 24-hour back-off instead of
 rebuilding.
 The hourly job drops invalid `IngestReceipt_pkey_ccnew*`/`_ccold*` copies left by a
-failed or cancelled rebuild. It cannot drop an operator's in-progress manual REINDEX
-CONCURRENTLY copy: the rebuild holds SHARE UPDATE EXCLUSIVE on the table, so the job's
-drop fails with 55P03 and logs `ingest.receipt_index_compaction_failed`, then backs off
-for 24 hours. Pause the worker during a manual rebuild to avoid that noise. The
-job also skips a run while another transaction is older than its one-minute lock
-timeout and holds a snapshot or a lock on the receipt table (for example a running
-`pg_dump`), instead of building a copy it couldn't swap in.
+failed or cancelled rebuild. While another backend is building an index on the table
+(an operator's manual REINDEX CONCURRENTLY, say), the job leaves the table alone and
+reports `skipped_busy`: dropping that build's in-progress copy, or queueing a drop behind
+its lock, could abort the manual rebuild. Still pause the worker during a manual rebuild,
+since a run already past that check can't see a rebuild that starts afterwards. The
+job also skips a run while another transaction older than its one-minute lock timeout
+holds a snapshot or a lock on the receipt table (for example a running `pg_dump`), or an
+old prepared (two-phase) transaction exists, instead of building a copy it couldn't
+swap in.
 
 Reserve free disk for about the index's live size during an online rebuild. A
 57014 statement timeout or 55P03 lock timeout stores a timestamp in the existing

@@ -58,7 +58,8 @@ function logClaimReleaseFailure(error: unknown, originalError?: unknown) {
   );
 }
 
-async function releaseClaimsSafely(projectId: string, owned: Map<string, IngestReceipt>, originalError?: unknown) {
+/** Releases claims while a request is already failing with `originalError`, which always stands. */
+async function releaseClaimsSafely(projectId: string, owned: Map<string, IngestReceipt>, originalError: unknown) {
   try {
     await releaseClaims(projectId, owned);
   } catch (error) {
@@ -66,10 +67,7 @@ async function releaseClaimsSafely(projectId: string, owned: Map<string, IngestR
     // Keep the original outcome, even when cleanup also failed: an ApiError or infrastructure failure is mapped by its
     // caller (claimEvents, app.onError), and a programming error must surface as one, not as a retryable 503 that a
     // client would repeat every second. The claims stay held until recovery settles them.
-    if (originalError !== undefined) throw originalError;
-    if (isDatabaseFailure(error))
-      throw new ApiError(503, 'ingest_unavailable', 'Event identity claims could not be released. Retry this batch.', undefined, 1);
-    throw error;
+    throw originalError;
   }
 }
 

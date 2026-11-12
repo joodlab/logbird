@@ -118,8 +118,10 @@ async function connect(signal?: AbortSignal) {
     try {
       await client.query("SET client_connection_check_interval = '1s'");
     } catch (error) {
-      // PostgreSQL < 14 does not have this setting. Permission and connection failures must still surface.
-      if ((error as { code?: string }).code !== '42704') throw error;
+      // PostgreSQL < 14 lacks this setting (42704); platforms that can't detect a closed socket reject a nonzero value
+      // (22023). It is only a fallback, so both are ignored. Permission and connection failures must still surface.
+      const code = (error as { code?: string }).code;
+      if (code !== '42704' && code !== '22023') throw error;
     }
     const { rows } = await client.query<{ pid: number }>('SELECT pg_backend_pid() pid');
     return rows[0]?.pid as number;
@@ -171,6 +173,19 @@ async function cancelBackend(pid: number, settled?: Promise<unknown>) {
     await closeClient(cancel);
     clearTimeout(deadline);
   }
+}
+
+/**
+ * Another backend building an index on the table (an operator's manual REINDEX CONCURRENTLY, say). Its in-progress
+ * copy is invalid too, and a DROP INDEX CONCURRENTLY that queues behind its lock can deadlock its snapshot wait and
+ * abort it, so the job leaves the table alone while any such build runs.
+ */
+async function otherIndexBuild(db: Queryable, target: ReceiptIndexTarget & { schema: string }) {
+  const { rows } = await db.query<{ building: boolean }>(
+    'SELECT EXISTS (SELECT 1 FROM pg_stat_progress_create_index WHERE relid = to_regclass($1) AND pid <> pg_backend_pid()) building',
+    [`${quote(target.schema)}.${quote(target.table)}`],
+  );
+  return rows[0]?.building === true;
 }
 
 /** An interrupted REINDEX CONCURRENTLY leaves an invalid copy that every write still maintains. */
@@ -255,7 +270,7 @@ export async function compactIngestReceiptIndex({
       (await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock(hashtextextended($1, 0)) locked', [lockKey])).rows[0]?.locked === true;
     const pages = await indexPages(client, target);
     if (pages === null) return { action: 'skipped_missing', indexPages: 0, droppedInvalid: 0 };
-    if (!locked) return { action: 'skipped_busy', indexPages: pages, droppedInvalid: 0 };
+    if (!locked || (await otherIndexBuild(client, target))) return { action: 'skipped_busy', indexPages: pages, droppedInvalid: 0 };
     signal?.throwIfAborted();
     let droppedInvalid: number;
     try {
@@ -313,7 +328,7 @@ export async function compactIngestReceiptIndex({
       // A cancel sent while REINDEX ran must land before cleanup starts; later aborts no longer cancel anything.
       await cancellation;
       // Timeout or cancellation: never leave a maintained invalid copy behind.
-      await dropInvalidCopies(client, target).catch(() => undefined);
+      if (!(await otherIndexBuild(client, target).catch(() => true))) await dropInvalidCopies(client, target).catch(() => undefined);
       throw error;
     }
     // A cancel sent just as REINDEX finished must land before the size query, not on it.
