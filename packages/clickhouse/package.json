@@ -15,13 +15,13 @@
     "create-query-user": "node --env-file-if-exists=../../.env --import tsx scripts/create-query-user.ts"
   },
   "dependencies": {
-    "@clickhouse/client": "1.23.1",
+    "@clickhouse/client": "1.25.0",
     "@logbird/contracts": "workspace:*"
   },
   "devDependencies": {
     "@logbird/tsconfig": "workspace:*",
-    "@types/node": "^22.20.1",
+    "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.1.0"
   }
 }
