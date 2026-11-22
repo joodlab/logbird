@@ -1,9 +1,17 @@
-import { formatRecordTerm } from '@logbird/contracts';
+import { formatRecordTerm, quoteQueryValue } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import { normalizeEvent } from './normalize';
 import { compileQuery, parseQuery, QueryError } from './query';
 
+const literalValues = ['a\tb', 'a\nb', 'a\rb', '"', '\\', ':', 'a b', ' surrounded ', '*', '(', ')', 'OR', 'العربية', '🦜'];
+
 describe('query language', () => {
+  it('round-trips generated quoted field values through the lexer', () => {
+    for (const value of literalValues) {
+      expect(parseQuery(`actor:${quoteQueryValue(value)}`).at(-1)).toMatchObject({ kind: 'value', value });
+    }
+  });
+
   it.each([
     [
       'action:hotel.* -env:staging',
@@ -106,7 +114,7 @@ describe('record selector', () => {
 
   it('round-trips generated selectors across punctuation, whitespace and Unicode', () => {
     const types = ['order', 'order:archived', 'trailing\\', String.raw`slash\:colon`, '"a type"', 'مَلَفّ:📃', ':start', '/type/'];
-    const ids = ['A1', ':A:1', 'a\\b', '"quote" and space', '/home/', '(nested)', '*', 'الغرفة-🏨', 'a\nb'];
+    const ids = [...literalValues, 'A1', ':A:1', 'a\\b', '"quote" and space', '/home/', '(nested)'];
     for (const type of types) {
       for (const id of ids) {
         const q = formatRecordTerm(type, id);

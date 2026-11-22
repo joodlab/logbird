@@ -114,6 +114,12 @@ it('keeps literal whitespace, quotes and escapes when Explorer applies a facet o
   expect(toggleTerm(q, 'outcome', 'success', 'include')).toBe(`${record} ${filters} outcome:success`);
 });
 
+it('keeps OR before unary NOT when Explorer applies an outcome facet', () => {
+  const q = 'record:page:7 OR NOT record:site:9';
+  expect(toggleTerm(q, 'outcome', 'success', 'include')).toBe(`(${q}) outcome:success`);
+  expect(removeTerm(`(${q}) outcome:success`, 'outcome')).toBe(`(${q})`);
+});
+
 describe('highlightQuery', () => {
   it('covers the input exactly', () => {
     const q = 'action:booking.* attempt:>2 -tenant:* (a OR b) "x y" actor.name:"Omar N"';

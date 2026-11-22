@@ -9,10 +9,22 @@ import { QueryInput } from './query-input';
 vi.mock(import('@tanstack/react-router'), async (original) => ({ ...(await original()), useNavigate: () => vi.fn() }));
 
 it.each([
-  ['record: page:7', "(has(target_ids, '7') AND arrayExists((t, i) -> t = 'page' AND i = '7', target_types, target_ids))"],
-  ['record:!page:7', null],
-  ['free text', null],
-])('switches to SQL only with a faithful translation of %s', (value, sql) => {
+  {
+    name: 'record pair',
+    value: 'record: page:7',
+    sql: "(has(target_ids, '7') AND arrayExists((t, i) -> t = 'page' AND i = '7', target_types, target_ids))",
+  },
+  { name: 'unsupported record syntax', value: 'record:!page:7', message: 'no exact SQL translation' },
+  { name: 'free text', value: 'free text', message: 'no exact SQL translation' },
+  { name: 'unfinished presence operand', value: '_exists_:"record', message: 'no exact SQL translation' },
+  { name: 'invalid bare presence operand', value: '_exists_:record:page', message: 'no exact SQL translation' },
+  {
+    name: 'long record group',
+    value: `record:(${Array.from({ length: 50 }, (_, i) => `p:${i + 1}`).join(' OR ')})`,
+    message: '4096-byte SQL limit',
+  },
+  { name: 'multibyte record ID', value: `record:p:${'🦜'.repeat(600)}`, message: '4096-byte SQL limit' },
+])('switches to SQL only with a usable translation of $name', ({ value, sql, message }) => {
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
@@ -31,10 +43,11 @@ it.each([
     const button = [...host.querySelectorAll('button')].find((item) => item.textContent === 'SQL');
     expect(button).toBeDefined();
     act(() => button?.click());
-    if (sql === null) {
+    if (message) {
       expect(submit).not.toHaveBeenCalled();
       expect(host.querySelector('textarea')?.value).toBe(value);
-      expect(error).toHaveBeenCalledWith('Could not switch to SQL', expect.anything());
+      expect(host.querySelector('textarea')?.getAttribute('aria-label')).toBe('Query');
+      expect(error).toHaveBeenCalledWith('Could not switch to SQL', { description: expect.stringContaining(message) });
     } else {
       expect(submit).toHaveBeenCalledExactlyOnceWith(sql, 'sql');
       expect(error).not.toHaveBeenCalled();

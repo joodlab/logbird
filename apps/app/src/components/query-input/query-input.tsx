@@ -1,4 +1,4 @@
-import type { QueryLang } from '@logbird/contracts';
+import { type QueryLang, SQL_MAX_QUERY_BYTES } from '@logbird/contracts';
 import { Kbd } from '@logbird/ui/components/ui/kbd';
 import { SegmentedControl, SegmentedControlItem } from '@logbird/ui/components/ui/segmented-control';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
@@ -237,11 +237,15 @@ export function QueryInput({
       submit('', next);
     } else if (next === 'sql') {
       const sql = translateQueryToSql(applyFixes(draft, autoFixes(completions.fixes)));
-      if (sql) {
+      if (!sql) {
+        toast.error('Could not switch to SQL', { description: 'This filter has no exact SQL translation. Your query is still active.' });
+      } else if (new TextEncoder().encode(sql).byteLength > SQL_MAX_QUERY_BYTES) {
+        toast.error('Could not switch to SQL', {
+          description: `The translation exceeds the ${SQL_MAX_QUERY_BYTES}-byte SQL limit. Shorten the filter and try again. Your query is still active.`,
+        });
+      } else {
         submit(sql, 'sql');
         toast.success('Translated to SQL', { description: sql, action: restore });
-      } else {
-        toast.error('Could not switch to SQL', { description: 'This filter has no exact SQL translation. Your query is still active.' });
       }
     } else {
       submit('', 'query');

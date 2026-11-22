@@ -290,7 +290,9 @@ function EventDetailBody({
   const link = useCopy();
   const curl = useCopy();
   const shareUrl =
-    typeof window === 'undefined' ? '' : `${window.location.origin}/p/${projectId}/events?q=${encodeURIComponent(`id:${e.id}`)}&ev=${e.id}`;
+    typeof window === 'undefined'
+      ? ''
+      : `${window.location.origin}/p/${projectId}/events?${new URLSearchParams({ q: formatTerm('id', e.id), ev: e.id })}`;
   const attributes = Object.entries(e.attributes).sort(([a], [b]) => a.localeCompare(b));
   const ctx = e.context;
 

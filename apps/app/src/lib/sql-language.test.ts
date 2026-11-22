@@ -1,5 +1,5 @@
 import { compileQuery } from '@logbird/clickhouse';
-import { formatRecordTerm } from '@logbird/contracts';
+import { formatRecordTerm, QUERY_FIELDS } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import { sqlColumn } from './query-catalog';
 import { translateQueryToSql } from './query-translate';
@@ -293,6 +293,28 @@ describe('translateQueryToSql', () => {
     expect(translateQueryToSql('record:(/site:12/)')).toBeNull();
   });
 
+  it.each(QUERY_FIELDS.filter((field) => field.type === 'array'))('matches compiler presence for $key', ({ key, column }) => {
+    const presence = `arrayExists(x -> x != '', ${column})`;
+    for (const term of [`${key}:*`, `${key}:"*"`, `_exists_:${key}`, `_exists_:"${key}"`]) {
+      expect(compileQuery(term).sql).toBe(`(${presence})`);
+      expect(translateQueryToSql(term)).toBe(presence);
+      expect(translateQueryToSql(`NOT ${term}`)).toBe(`NOT ${presence}`);
+      expect(translateQueryToSql(`-${term}`)).toBe(`NOT ${presence}`);
+    }
+    expect(translateQueryToSql(`${key}:(value OR "*")`)).toBe(`(has(${column}, 'value') OR ${presence})`);
+  });
+
+  it('preserves presence alongside exact records and on scalar or attribute filters', () => {
+    const q = 'record:page:7 target.name:"*"';
+    expect(translateQueryToSql(q)).toBe(
+      "(has(target_ids, '7') AND arrayExists((t, i) -> t = 'page' AND i = '7', target_types, target_ids)) AND arrayExists(x -> x != '', target_names)",
+    );
+    expect(translateQueryToSql('record:*')).toBe('notEmpty(target_ids)');
+    expect(translateQueryToSql('_exists_:"record"')).toBe('notEmpty(target_ids)');
+    expect(translateQueryToSql('attempt:* NOT _exists_:"timestamp"')).toBe('1 = 1 AND NOT 1 = 1');
+    expect(translateQueryToSql('-_exists_:"metadata.plan"')).toBe("NOT attributes['metadata.plan'] != ''");
+  });
+
   it.each([
     ['record: page:7', 'page', '7'],
     ['record \t:  page:7', 'page', '7'],
@@ -305,6 +327,7 @@ describe('translateQueryToSql', () => {
     ['record:"page:/home/(.*)/"', 'page', '/home/(.*)/'],
     [String.raw`record:order\:archived:A1`, 'order:archived', 'A1'],
     [formatRecordTerm('نَوْع:\\', 'مُعرِّف🪴 "a"'), 'نَوْع:\\', 'مُعرِّف🪴 "a"'],
+    [formatRecordTerm('page:section\\v2', ' x\t\n\r:y"\\ '), 'page:section\\v2', ' x\t\n\r:y"\\ '],
   ])('translates the same literal pair as the compiler for %s', (q, type, id) => {
     const compiled = compileQuery(q);
     expect(compiled.params).toEqual({ recordType0: type, recordId0: id });
@@ -332,6 +355,8 @@ describe('translateQueryToSql', () => {
     'action:a&&env:prod',
     'NOT',
     'record:page:7 OR',
+    '_exists_:"record',
+    '_exists_:record:page',
   ])('rejects invalid query syntax consistently for %s', (q) => {
     expect(() => compileQuery(q)).toThrow();
     expect(translateQueryToSql(q)).toBeNull();

@@ -49,7 +49,7 @@ export function lintQuery(q: string, isField: (name: string) => boolean): QueryF
     const next = solid[i + 1];
 
     // Lucene `_exists_:field` / `NOT _exists_:field` → `field:*` / `-field:*`.
-    if (t.kind === 'field' && t.field === '_exists_' && t.valueKind === 'plain' && t.value) {
+    if (t.kind === 'field' && t.field === '_exists_' && t.valueKind === 'plain' && t.value && /^[A-Za-z_][\w.$@-]*$/.test(t.value)) {
       fixes.push({
         start: t.start,
         end: t.end,

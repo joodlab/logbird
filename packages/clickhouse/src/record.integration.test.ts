@@ -30,7 +30,7 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
         outcome: 'failure',
         actor: { id: 'different-actor' },
         targets: [
-          { type: 'page', id: '12' },
+          { type: 'page', id: '12', name: 'Page 12' },
           { type: 'site', id: '7' },
         ],
       },
@@ -120,6 +120,30 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
     60_000,
   );
 
+  it.runIf(process.env.CLICKHOUSE_QUERY_USER && process.env.CLICKHOUSE_QUERY_PASSWORD)(
+    'matches the same events for legacy array presence in query and SQL mode',
+    async () => {
+      const sqlClient = createQueryClickHouseClient();
+      if (!sqlClient) throw new Error('The restricted ClickHouse query user is required for presence verification');
+      const pairs = "has(target_ids, '12') AND arrayExists((t, i) -> (t = 'page' OR t = 'site') AND i = '12', target_types, target_ids)";
+      const presence = "arrayExists(x -> x != '', target_names)";
+      try {
+        for (const [term, predicate, id] of [
+          ['target.name:"*"', presence, 'separate'],
+          ['NOT _exists_:"target.name"', `NOT ${presence}`, 'paired'],
+        ] as const) {
+          const query = await searchEvents(ch, projectId, { ...range, limit: 10, order: 'asc', q: `record:(page:12 OR site:12) ${term}` });
+          const sql = await searchEvents(sqlClient, projectId, { ...range, limit: 10, order: 'asc', q: `(${pairs}) AND ${predicate}`, lang: 'sql' });
+          expect(query.data.map((e) => e.id)).toEqual([id]);
+          expect(sql.data.map((e) => e.id)).toEqual([id]);
+        }
+      } finally {
+        await sqlClient.close();
+      }
+    },
+    60_000,
+  );
+
   it('keeps histories and names separate when two pairs share the directory key', async () => {
     const collisionProject = `record-collision-${randomUUID()}`;
     const sqlClient = createQueryClickHouseClient();
@@ -127,6 +151,8 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
       { eventId: 'archived-order', type: 'order:archived', id: 'A1', name: 'Archived order' },
       { eventId: 'regular-order', type: 'order', id: 'archived:A1', name: 'Regular order' },
       { eventId: 'long-record', type: `${'t'.repeat(63)}:`, id: 'i'.repeat(150), name: 'Long record name' },
+      { eventId: 'control-id', type: 'page:section\\v2', id: 'a\tb\nc\rd', name: 'Literal control characters' },
+      { eventId: 'plain-id', type: 'page:section\\v2', id: 'atbncrd', name: 'Plain characters' },
     ];
     try {
       await insertEvents(

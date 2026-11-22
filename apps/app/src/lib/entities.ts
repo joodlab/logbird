@@ -1,5 +1,6 @@
 import { type EntityKind, formatRecordTerm } from '@logbird/contracts';
 import { Bot, Building2, Cog, type LucideIcon, Package, User } from 'lucide-react';
+import { formatTerm } from './query-language';
 
 /**
  * URL segment ↔ entity kind. The `/workers` URL is kept for compatibility, but the UI calls every executor
@@ -57,18 +58,11 @@ export function sectionForKind(kind: EntityKind): EntitySection {
 
 /** Query that selects every event involving the entity. Target ids are "<type>:<id>". */
 export function entityQuery(kind: EntityKind, id: string, targetType?: string): string {
-  if (kind === 'target') {
-    if (id.includes(':')) {
-      const pair = splitTargetId(id, targetType);
-      return formatRecordTerm(pair.type, pair.id);
-    }
-    return `target:${quote(id)}`;
+  if (kind === 'target' && id.includes(':')) {
+    const pair = splitTargetId(id, targetType);
+    return formatRecordTerm(pair.type, pair.id);
   }
-  return `${kind}:${quote(id)}`;
-}
-
-function quote(v: string): string {
-  return /[\s()"]/.test(v) ? `"${v.replaceAll('"', '\\"')}"` : v;
+  return formatTerm(kind, id);
 }
 
 export function targetEntityId(type: string, id: string): string {

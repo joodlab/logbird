@@ -40,9 +40,14 @@ function ordered(t: Target, sample: string): string {
   return DATE.test(sample) ? `parseDateTime64BestEffortOrNull(${t.ref}, 3, 'UTC')` : `toFloat64OrNull(${t.ref})`;
 }
 
+function presence(t: Target): string {
+  if (t.type === 'array') return `arrayExists(x -> x != '', ${t.ref})`;
+  if (t.type === 'number' || t.type === 'date') return '1 = 1';
+  return `${t.ref} != ''`;
+}
+
 function equals(t: Target, value: string): string | null {
-  if (value === '*')
-    return t.type === 'array' ? `notEmpty(${t.ref})` : t.type === 'number' || t.type === 'date' ? `isNotNull(${t.ref})` : `${t.ref} != ''`;
+  if (value === '*') return presence(t);
   if (value.endsWith('*')) {
     const prefix = sqlString(value.slice(0, -1));
     return t.type === 'array' ? `arrayExists(x -> startsWith(x, ${prefix}), ${t.ref})` : `startsWith(${t.ref}, ${prefix})`;
@@ -88,20 +93,28 @@ function isBareValue(raw: string): boolean {
   return BARE_VALUE.test(raw) && !/^(?:AND|OR|NOT|TO)(?=:|$)|&&|\|\|/.test(raw) && !QUERY_DIALECT_PREFIX.test(raw);
 }
 
+function isSimpleOperand(token: QueryToken, raw: string, start: number): boolean {
+  if (token.valueKind === 'quoted') return QUOTED_VALUE.test(raw);
+  return token.valueKind === 'plain' && isBareValue(raw) && !(raw.startsWith('-') && /\s/.test(token.raw[start - 1] ?? ''));
+}
+
 function termToSql(token: QueryToken): string | null {
   const start = (token.valueStart ?? token.start) - token.start;
   const raw = token.raw.slice(start);
+  const value = token.value ?? '';
   if (token.field === 'record') return recordTermToSql(token, raw);
-  if (token.field === '_exists_' && token.value === 'record') return 'notEmpty(target_ids)';
+  if (token.field === '_exists_') {
+    if (!isSimpleOperand(token, raw, start) || (token.valueKind === 'plain' && raw.includes(':'))) return null;
+    if (value === 'record') return 'notEmpty(target_ids)';
+    const target = targetFor(value);
+    return target ? presence(target) : null;
+  }
   const t = targetFor(token.field ?? '');
   if (!t) return null;
-  const value = token.value ?? '';
   switch (token.valueKind) {
     case 'plain':
-      if (!isBareValue(raw) || (raw.startsWith('-') && /\s/.test(token.raw[start - 1] ?? ''))) return null;
-      return equals(t, value);
     case 'quoted':
-      return QUOTED_VALUE.test(raw) ? equals(t, value) : null;
+      return isSimpleOperand(token, raw, start) ? equals(t, value) : null;
     case 'compare': {
       const operand = raw.slice(token.op?.length ?? 0);
       if (t.type === 'string' || t.type === 'array' || (!NUMBER.test(value) && !DATE.test(value)) || /^\s+-/.test(operand)) return null;

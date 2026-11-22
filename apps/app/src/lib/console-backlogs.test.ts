@@ -176,6 +176,16 @@ describe('OPS-17/18 saved views', () => {
     expect(labelChips(regularQuery, [archivedLabel])).toEqual([]);
   });
 
+  it('preserves literal IDs from entity links through saved-view labels and URLs', () => {
+    const type = 'page:section\\v2';
+    const id = ' x\t\n\r:y"\\ 🦜 ';
+    const q = entityQuery('target', `${type}:${id}`, type);
+    expect(nameableTerms(q)).toEqual([{ field: 'record', value: encodeRecordPair(type, id) }]);
+    expect(nameableTerms(entityQuery('actor', id))).toEqual([{ field: 'actor', value: id }]);
+    const href = viewHref('proj_1', { id: 'view_1', state: { q, range: '7d' } }, 'https://console.example.test');
+    expect(new URL(href).searchParams.get('q')).toBe(q);
+  });
+
   it('resolves a long record label from the metadata endpoint alone', async () => {
     const type = 't'.repeat(64);
     const id = 'i'.repeat(150);

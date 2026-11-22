@@ -5,7 +5,7 @@
  * query bar, drive autocomplete, and add/remove filter terms from facets, charts and entity pages
  * without destroying what the user typed.
  */
-import { scanBareRecordValue } from '@logbird/contracts';
+import { quoteQueryValue, scanBareRecordValue } from '@logbird/contracts';
 import { attributeKey, coreField } from './query-catalog';
 
 export type TokenKind = 'field' | 'text' | 'phrase' | 'regex' | 'operator' | 'paren' | 'space';
@@ -188,10 +188,10 @@ export function canonicalField(field: string): string {
 }
 
 /** The server lexer splits on whitespace and `():[]{}<>`; values containing them (or starting like a regex) need quotes. */
-const NEEDS_QUOTES = /[\s()"\\:[\]{}<>]|^\/|^$/;
+const NEEDS_QUOTES = /[\s()"\\:[\]{}<>]|&&|\|\||^\/|^TO$|^$/;
 
 export function quoteIfNeeded(value: string): string {
-  return NEEDS_QUOTES.test(value) || OPERATORS.has(value) ? `"${value.replace(/["\\]/g, '\\$&')}"` : value;
+  return NEEDS_QUOTES.test(value) || OPERATORS.has(value) ? quoteQueryValue(value) : value;
 }
 
 export function formatTerm(field: string, value: string, negated = false): string {
@@ -211,7 +211,8 @@ function tidy(tokens: QueryToken[]): QueryToken[] {
       const prev = solid[i - 1];
       const next = solid[i + 1];
       const opens = (x?: QueryToken) => x?.kind === 'paren' && x.raw !== ')';
-      if (t.kind === 'operator' && t.raw !== 'NOT' && (!prev || !next || opens(prev) || next.raw === ')' || next.kind === 'operator')) drop.add(t);
+      const nextIsBinary = next?.kind === 'operator' && next.raw !== 'NOT';
+      if (t.kind === 'operator' && t.raw !== 'NOT' && (!prev || !next || opens(prev) || next.raw === ')' || nextIsBinary)) drop.add(t);
       if (t.raw === 'NOT' && (!next || next.raw === ')' || (next.kind === 'operator' && next.raw !== 'NOT'))) drop.add(t);
       if (opens(t) && next?.raw === ')') {
         drop.add(t);

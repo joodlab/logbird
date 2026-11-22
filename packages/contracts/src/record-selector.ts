@@ -26,7 +26,12 @@ export function scanBareRecordValue(input: string, start: number): number {
   return start + (operator?.index ?? bare.length);
 }
 
+/** Inside query quotes, a backslash escapes only the next character. Keep whitespace literal. */
+export function quoteQueryValue(value: string): string {
+  return `"${value.replace(/["\\]/g, '\\$&')}"`;
+}
+
 /** Quotes use standard query escaping around the already encoded pair. */
 export function formatRecordTerm(type: string, id: string): string {
-  return `record:"${encodeRecordPair(type, id).replace(/["\\]/g, '\\$&')}"`;
+  return `record:${quoteQueryValue(encodeRecordPair(type, id))}`;
 }

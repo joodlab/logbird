@@ -21,6 +21,7 @@ import { overviewQuery, projectQuery, projectSetupQuery } from '@/lib/api/querie
 import { eventSentence } from '@/lib/events';
 import { delta, formatNumber, formatPercent } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
+import { formatTerm } from '@/lib/query-language';
 import { DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
 
@@ -308,7 +309,7 @@ function ProblemRow({ event, projectId }: { event: AuditEvent; projectId: string
       <Link
         className="flex flex-col gap-1 px-4 py-2.5 outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 sm:flex-row sm:items-center sm:gap-3"
         params={{ projectId }}
-        search={(prev) => ({ range: prev.range, ev: event.id, q: `id:${event.id}` })}
+        search={(prev) => ({ range: prev.range, ev: event.id, q: formatTerm('id', event.id) })}
         to="/p/$projectId/events"
       >
         <span className="flex min-w-0 flex-1 items-center gap-2.5">

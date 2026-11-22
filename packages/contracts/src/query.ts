@@ -16,6 +16,7 @@ export const QUERY_DIALECT_PREFIX = /^(?:([\w.]+)\s+(!=|=)\s*("(?:[^"\\]|\\.)*"|
  *           A free-form SQL console is intentionally out of scope (docs/query-language.md).
  */
 export const QUERY_LANGS = ['query', 'sql'] as const;
+export const SQL_MAX_QUERY_BYTES = 4096;
 export const queryLangSchema = z.enum(QUERY_LANGS);
 export type QueryLang = z.infer<typeof queryLangSchema>;
 
