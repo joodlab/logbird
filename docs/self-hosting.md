@@ -277,7 +277,8 @@ for signal handling; its live acceptance is pending in #77.
 
 Migration 010 adds a minmax skip index on `events.received_at` and materializes it. Arrival-time reads (webhook
 discovery, alert windows, the live view) then skip granules whose arrival range misses the requested range instead of
-reading every granule of the project that the partition and primary-key steps keep, which do not know arrival time. Event values are preserved, but the physical work is
+reading every granule of the project that the partition and primary-key steps keep, which do not know arrival time
+(how much that is, and how it grows with retained history, depends on the data; it was not measured). Event values are preserved, but the physical work is
 not free: `MATERIALIZE INDEX` writes the new index files for every part, and ClickHouse rewrites the full column data
 of compact parts while doing so, competing with merges and retention mutations. It runs as a background mutation
 (the statement pins `mutations_sync = 0`, so a migration user whose profile waits for mutations does not block):
