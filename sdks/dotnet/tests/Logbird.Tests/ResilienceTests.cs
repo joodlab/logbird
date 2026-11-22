@@ -238,9 +238,16 @@ public class ResilienceTests
         {
             client.Track(new AuditEvent("pending"));
             Assert.False(client.Flush(TimeSpan.FromMilliseconds(50)));
-            await Task.Delay(200);
             var waiters = typeof(Internal.EventQueue).GetField("_waiters", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             var queue = typeof(LogbirdClient).GetField("_queue", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(client)!;
+
+            // The flush may start late on a busy pool; once it has, its already-cancelled wait is removed at once.
+            var watch = Stopwatch.StartNew();
+            while (((System.Collections.ICollection)waiters.GetValue(queue)!).Count > 0 && watch.Elapsed < TimeSpan.FromSeconds(5))
+            {
+                await Task.Delay(20);
+            }
+
             Assert.Empty((System.Collections.ICollection)waiters.GetValue(queue)!);
         }
         finally

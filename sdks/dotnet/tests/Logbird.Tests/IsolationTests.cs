@@ -216,6 +216,21 @@ public class IsolationTests
     }
 
     [Fact]
+    public async Task Throwing_callbacks_are_swallowed_and_counted()
+    {
+        await using var client = Client(Options(o =>
+        {
+            o.MaxQueueSize = 1;
+            o.OnDrop = _ => throw new InvalidOperationException("fictional");
+            o.OnError = _ => throw new InvalidOperationException("fictional");
+        }), new FakeServer());
+        client.Track(new AuditEvent("kept"));
+        client.Track(new AuditEvent("dropped") { Actor = AuditActor.User(" spaced ") });
+        Assert.True(await client.FlushAsync());
+        Assert.True(client.CallbackFailures >= 2, client.CallbackFailures.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
     public void Non_finite_and_tiny_doubles_are_written_like_javascript()
     {
         Assert.Equal("null", Internal.JsJson.Shortest(double.NaN));

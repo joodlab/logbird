@@ -43,6 +43,13 @@ public interface ILogbirdClient
 /// identical bytes so the server never stores an event twice.</para>
 /// <para>Nothing Logbird does can throw into your code: problems go to <see cref="LogbirdOptions.OnError"/>,
 /// <see cref="LogbirdOptions.OnDrop"/>, the logger and the <c>Logbird</c> meter.</para>
+/// <para>Threading contract: <c>Track</c> runs your <see cref="LogbirdOptions.BeforeSend"/> hook and redaction patterns
+/// synchronously on the calling thread (they must be fast; a throwing hook drops the event). <see cref="LogbirdOptions.OnDrop"/>,
+/// <see cref="LogbirdOptions.OnError"/> and logging run in order on one background thread; their exceptions are swallowed
+/// and counted, and if they fall behind by more than <see cref="LogbirdOptions.MaxQueueSize"/> (at least 1,000)
+/// notifications, further ones are skipped and counted. Metric instruments are observable, so listeners only run when they
+/// collect. <c>FlushAsync()</c> has no time limit of its own; use <see cref="LogbirdClientExtensions.Flush"/> or a token
+/// for one. <c>DisposeAsync</c> returns within <see cref="LogbirdOptions.ShutdownTimeout"/> plus at most 7 seconds.</para>
 /// <para>The queue lives in memory. A crash before delivery loses what is queued. For events that must survive a crash,
 /// save them in your database in the same transaction as the change (an outbox) and send them from there, keeping their ids.</para>
 /// </remarks>
@@ -93,6 +100,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private long _failedSends;
     private long _warnings;
     private long _notificationsLost;
+    private long _callbackFailures;
     private readonly long[] _droppedByReason = new long[DropReasonCount];
 
     [ThreadStatic]
@@ -126,7 +134,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         _onError = options.OnError;
         _onDrop = options.OnDrop;
         _logger = logger ?? NullLogger.Instance;
-        _notifier = new Notifier(Math.Max(1_000, options.MaxQueueSize), lost => Interlocked.Add(ref _notificationsLost, lost));
+        _notifier = new Notifier(Math.Max(1_000, options.MaxQueueSize), lost => Interlocked.Add(ref _notificationsLost, lost), () => Interlocked.Increment(ref _callbackFailures));
         if (!_enabled)
         {
             return;
@@ -714,6 +722,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     internal long NotificationsLost => Interlocked.Read(ref _notificationsLost);
 
+    internal long CallbackFailures => Interlocked.Read(ref _callbackFailures);
+
     internal void AddDroppedByReason(long[] totals)
     {
         for (var i = 0; i < totals.Length && i < _droppedByReason.Length; i++)
@@ -751,6 +761,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     private void ReportCore(Exception error, bool log)
     {
+        // Logger and OnError are separate host code: a failure in one is counted and does not skip the other.
         if (log)
         {
             try
@@ -759,7 +770,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             }
             catch
             {
-                // Logging must never break capture.
+                Interlocked.Increment(ref _callbackFailures);
             }
         }
 
@@ -774,7 +785,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
         catch
         {
-            // A diagnostic hook must never break capture.
+            Interlocked.Increment(ref _callbackFailures);
         }
     }
 

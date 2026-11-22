@@ -156,6 +156,41 @@ timestamp would be a different event and is rejected as `duplicate_id_conflict`.
 Logbird's own HTTP calls, log messages and callbacks never record events. If your host audits all outgoing HTTP
 or forwards logs to Logbird, there is no feedback loop.
 
+## The contract with your code
+
+Logbird runs code you supply: a `BeforeSend` hook, redaction patterns, `OnDrop`/`OnError`, your `ILogger`, metric
+listeners and, if you pass one, your `HttpClient`'s handlers. This is where each runs, what Logbird does when it fails,
+and what bounds apply. **Your code must not block, and should be fast.** The bounds below are what Logbird guarantees
+even when it does not.
+
+| Your code | Runs on | If it throws | If it blocks or runs long |
+| --- | --- | --- | --- |
+| `BeforeSend`, `Redaction.Keys`/`ChangeFields` patterns | The thread calling `Track`, synchronously | The event is dropped (`DropReason.Invalid`) and reported | `Track` waits for it. No bound: keep hooks fast, and give custom `Regex` patterns a match timeout |
+| `OnDrop`, `OnError`, your `ILogger` | One Logbird background thread, in order | Swallowed and counted (`logbird.callbacks.failed`) | Later notifications queue up to `MaxQueueSize` (at least 1,000), then are skipped and counted (`logbird.notifications.lost`). `Track`, delivery and shutdown are never held |
+| Metric listeners | The listener's own thread, when it collects (all instruments are observable) | Not Logbird's concern; publishing a new instrument that fails disables that instrument | Never on Logbird's paths |
+| `HttpClient` handlers you supply | The thread pool | Treated as a network error and retried | Each request is limited by `RequestTimeout` plus up to 2 seconds; at most 4 abandoned requests are kept, further sends fail fast until they finish |
+
+What the client's own methods guarantee:
+
+- **`Track`** never throws and never waits for the network. It serializes the event on your thread (tens of
+  microseconds for a typical event) and returns. Your own `BeforeSend` and redaction patterns are the only code that
+  can make it slower.
+- **`FlushAsync()`** never throws. It returns `true` when every event queued before the call is stored or permanently
+  settled, after the `OnDrop`/`OnError` callbacks for those events have run. It has **no time limit of its own**:
+  delivery of each batch is bounded (`MaxRetries`, `RequestTimeout`, five minutes per batch), and a blocking callback
+  holds it. Pass a token or use `FlushAsync(TimeSpan)` / `Flush(TimeSpan)` for a hard limit.
+- **`Flush(TimeSpan)`** blocks for at most the timeout (the deadline starts on your thread, even when the thread pool is
+  busy) and cannot deadlock on a UI or classic ASP.NET synchronization context. Called from inside an `OnDrop`/`OnError`
+  callback, it returns `false` at once instead of waiting on itself.
+- **`DisposeAsync`** returns within `ShutdownTimeout` (10 seconds by default) plus at most 2 seconds to unwind a
+  cancelled request, plus at most 5 seconds for pending callbacks. **`Dispose`** waits at most `ShutdownTimeout` plus 10
+  seconds. Events not sent by then are reported once each through `OnDrop` (`DropReason.Shutdown`).
+- **Memory** is bounded: at most `MaxQueueSize` queued events (each at most 256 KB), one in-flight batch (at most 5 MB),
+  at most 4 abandoned requests, and at most `MaxQueueSize` (at least 1,000) pending callback notifications.
+- **Secrets** never appear in Logbird's exception messages, log messages, metric tags or `ToString()` output: keys are only
+  sent in the `Authorization` header, and messages name fields and codes, never values. `DroppedEvent.Json` and
+  `LogbirdEventWarning.Reason` carry event data (after redaction) for your own handling.
+
 ## Redaction
 
 Secrets are redacted by default. A key matching passwords, secrets, tokens, one-time codes, API keys,

@@ -12,7 +12,7 @@ namespace Logbird.Internal;
 /// bounded: past the capacity, new notifications are skipped and counted (the client's counters still record every
 /// drop). No thread is held while idle.
 /// </summary>
-internal sealed class Notifier(int capacity, Action<int> lost)
+internal sealed class Notifier(int capacity, Action<int> lost, Action failed)
 {
     private readonly object _gate = new();
     private readonly Queue<Action> _pending = new();
@@ -125,7 +125,15 @@ internal sealed class Notifier(int capacity, Action<int> lost)
             }
             catch
             {
-                // A diagnostic hook must never break capture.
+                // A diagnostic hook must never break capture: swallow and count.
+                try
+                {
+                    failed();
+                }
+                catch
+                {
+                    // Counting is best effort.
+                }
             }
 
             List<TaskCompletionSource<bool>>? done = null;

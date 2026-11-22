@@ -30,6 +30,8 @@ internal static class LogbirdMetrics
         Create(() => Meter?.CreateObservableCounter("logbird.events.dropped", DroppedByReason, "{event}", "Events that will not be stored, by reason.")),
         Create(() => Meter?.CreateObservableCounter(
             "logbird.notifications.lost", () => Sum(client => client.NotificationsLost), "{notification}", "OnDrop/OnError notifications skipped because the callbacks fell too far behind.")),
+        Create(() => Meter?.CreateObservableCounter(
+            "logbird.callbacks.failed", () => Sum(client => client.CallbackFailures), "{exception}", "Exceptions thrown by OnDrop, OnError or a logger; each was swallowed.")),
         Create(() => Meter?.CreateObservableUpDownCounter("logbird.queue.length", () => Sum(client => client.Stats.QueueLength), "{event}", "Events waiting to be sent.")),
     ];
 

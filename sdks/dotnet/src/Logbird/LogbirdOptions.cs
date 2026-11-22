@@ -41,6 +41,7 @@ public sealed class LogbirdOptions
     /// <summary>
     /// Runs on a copy of every event after defaults, id and timestamp are applied and before redaction. Return the event
     /// (changed or not) to send it, or <see langword="null"/> to skip it. If it throws, the event is dropped and reported.
+    /// It runs synchronously on the thread calling <c>Track</c>, so it must be fast and must not block.
     /// </summary>
     public Func<AuditEvent, AuditEvent?>? BeforeSend { get; set; }
 
