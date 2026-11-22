@@ -293,7 +293,7 @@ it('delivers a late non-UTC insert once, signs stored text and catches up on dis
     // Advance this fixture's outbox clock across an SMTP outage without interrupting shared Mailpit.
     const outage = new Date(Date.now() - 31 * 86_400_000);
     await prisma.webhookDisableNotice.updateMany({ where: { endpoint: { projectId: id } }, data: { createdAt: outage, nextAttemptAt: outage } });
-    await pruneWebhookLogs(new Date(), id);
+    await pruneWebhookLogs(id);
     expect(await prisma.webhookDisableNotice.count({ where: { endpoint: { projectId: id } } })).toBe(2);
     expect((await mailSearch()).messages).toEqual([]);
     await sendWebhookDisableNotices(id);

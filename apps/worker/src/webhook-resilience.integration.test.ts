@@ -17,12 +17,24 @@ const ch = createClickHouseClient();
 const secret = generateWebhookSecret();
 const key = webhookSecretKey(process.env.BETTER_AUTH_SECRET ?? '', process.env.WEBHOOK_SECRET_KEY || undefined);
 const requests: { path: string; payload: string; headers: IncomingHttpHeaders }[] = [];
+const acceptedIds: string[] = [];
+const rejectedRequests: unknown[] = [];
 const receiver = createServer(async (req, res) => {
   req.setEncoding('utf8');
   let payload = '';
   for await (const chunk of req) payload += chunk;
   const path = req.url ?? '';
   requests.push({ path, payload, headers: req.headers });
+  if (path === '/clock-skew') {
+    try {
+      const event = await verifyWebhook<{ id: string }>({ payload, headers: req.headers, secret, now: Math.floor(vi.getRealSystemTime() / 1000) });
+      acceptedIds.push(event.id);
+    } catch (error) {
+      rejectedRequests.push(error);
+      res.writeHead(401).end();
+      return;
+    }
+  }
   if (path === '/upgrade') res.writeHead(101, { Connection: 'Upgrade', Upgrade: 'qa-fixture' }).end();
   else res.writeHead(204).end();
 });
@@ -75,6 +87,8 @@ beforeAll(async () => {
 
 afterEach(async () => {
   requests.length = 0;
+  acceptedIds.length = 0;
+  rejectedRequests.length = 0;
   await prisma.webhookEndpoint.deleteMany({ where: { projectId } });
 });
 
@@ -126,7 +140,7 @@ it('sweeps old terminal records and attempts while an old pending event waits fo
     },
   });
   const terminal = await prisma.webhookDelivery.create({ data: { endpointId: hook.id, eventId: 'qa-expired', status: 'failed', expiresAt: old } });
-  await pruneWebhookLogs(new Date(), projectId);
+  await pruneWebhookLogs(projectId);
   expect(await prisma.webhookDelivery.findUnique({ where: { id: terminal.id } })).toBeNull();
   expect(await log(pending.id)).toMatchObject({ status: 'pending', attempts: [] });
   await tick();
@@ -255,13 +269,12 @@ it('keeps scan time monotonic and delivers relative-time matches once on a worke
     await discoverWebhookDeliveries(ch, failed, clock);
     expect(await refetch()).toMatchObject({ cursorReviewRequired: false });
     expect(await queuedIds()).toEqual(['qa-after-failure', 'qa-before-failure']);
-    // A delayed send is outside the window by its own clock. Recheck at the discovery instant.
-    vi.setSystemTime(+now + 8 * 60_000);
+    vi.setSystemTime(vi.getRealSystemTime() - 8 * 60_000);
     await tick();
     await tick();
     await tick();
-    const ids = await Promise.all(requests.map(async (request) => (await verifyWebhook<{ id: string }>({ ...request, secret })).id));
-    expect(ids.sort()).toEqual(['qa-after-failure', 'qa-before-failure']);
+    expect(rejectedRequests).toEqual([]);
+    expect(acceptedIds.sort()).toEqual(['qa-after-failure', 'qa-before-failure']);
   } finally {
     vi.useRealTimers();
     await limited.close();

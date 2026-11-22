@@ -1,7 +1,9 @@
 import { Prisma, prisma } from '@logbird/database';
 import { WEBHOOK_LOG_RETENTION_MS } from '@logbird/database/webhooks';
+import { webhookDatabaseTime } from './webhook-clock';
 
-export async function pruneWebhookLogs(now = new Date(), projectId?: string) {
+export async function pruneWebhookLogs(projectId?: string) {
+  const now = await webhookDatabaseTime();
   const expired = new Date(+now - WEBHOOK_LOG_RETENTION_MS);
   const endpoint = projectId ? { projectId } : undefined;
   await prisma.$transaction([

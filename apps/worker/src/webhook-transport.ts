@@ -30,11 +30,11 @@ export async function postWebhook(
   id: string,
   payload: string,
   secrets: readonly string[],
+  getSigningTime: () => Promise<Date | undefined>,
   options: WebhookTransportOptions = {},
-  stillCurrent?: () => Promise<boolean>,
 ): Promise<AttemptResult | undefined> {
   const controller = new AbortController();
-  const attempt: AttemptContext = { started: Date.now(), signal: controller.signal, requestStarted: false };
+  const attempt: AttemptContext = { started: performance.now(), signal: controller.signal, requestStarted: false };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<AttemptResult>((resolve) => {
     timer = setTimeout(() => {
@@ -43,7 +43,7 @@ export async function postWebhook(
     }, options.totalTimeoutMs ?? TOTAL_TIMEOUT_MS);
   });
   try {
-    return await Promise.race([deadline, sendWebhook(rawUrl, id, payload, secrets, options, stillCurrent, attempt)]);
+    return await Promise.race([deadline, sendWebhook(rawUrl, id, payload, secrets, getSigningTime, options, attempt)]);
   } finally {
     clearTimeout(timer);
   }
@@ -54,18 +54,11 @@ async function sendWebhook(
   id: string,
   payload: string,
   secrets: readonly string[],
+  getSigningTime: () => Promise<Date | undefined>,
   options: WebhookTransportOptions,
-  stillCurrent: (() => Promise<boolean>) | undefined,
   attempt: AttemptContext,
 ): Promise<AttemptResult | undefined> {
   const { started, signal } = attempt;
-  const timestamp = Math.floor(started / 1000);
-  let signature: string;
-  try {
-    signature = await signWebhook({ id, timestamp, payload, secrets });
-  } catch {
-    return { error: 'signing_failed' };
-  }
   let destination: Awaited<ReturnType<typeof resolveWebhookDestination>>;
   try {
     destination = await resolveWebhookDestination(rawUrl, options);
@@ -73,8 +66,18 @@ async function sendWebhook(
     return { error: error instanceof WebhookLookupBusyError ? 'lookup_failed' : 'destination_rejected' };
   }
   if (signal.aborted) return { error: 'lookup_failed' };
-  if (stillCurrent && !(await stillCurrent())) return;
-  if (signal.aborted || Date.now() - started >= CONNECT_TIMEOUT_MS) return { error: 'lookup_failed' };
+  const signingTime = await getSigningTime();
+  if (!signingTime) return;
+  if (signal.aborted || performance.now() - started >= CONNECT_TIMEOUT_MS) return { error: 'lookup_failed' };
+  const timestamp = Math.floor(+signingTime / 1000);
+  let signature: string;
+  try {
+    signature = await signWebhook({ id, timestamp, payload, secrets });
+  } catch {
+    return { error: 'signing_failed' };
+  }
+  const connectTimeout = CONNECT_TIMEOUT_MS - (performance.now() - started);
+  if (signal.aborted || connectTimeout <= 0) return { error: 'lookup_failed' };
   const { url, address, family } = destination;
   const https = url.protocol === 'https:';
   return new Promise((resolve) => {
@@ -122,13 +125,10 @@ async function sendWebhook(
       },
     );
     attempt.requestStarted = true;
-    const connectTimer = setTimeout(
-      () => {
-        finish({ error: 'timeout' });
-        request.destroy();
-      },
-      CONNECT_TIMEOUT_MS - (Date.now() - started),
-    );
+    const connectTimer = setTimeout(() => {
+      finish({ error: 'timeout' });
+      request.destroy();
+    }, connectTimeout);
     request.once('socket', (socket) => socket.once(https ? 'secureConnect' : 'connect', () => clearTimeout(connectTimer)));
     request.once('upgrade', (response, socket) => {
       finish({ error: 'network_error', responseCode: response.statusCode });
