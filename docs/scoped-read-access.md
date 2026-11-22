@@ -13,9 +13,11 @@ There are two ways to grant scoped access:
 The recommended pattern is **one unscoped `read` key on your server**. For every dashboard view, your server mints a
 viewer token for that business or website and gives only the token to the browser.
 
-> **Status.** In this release the scope is enforced in Logbird's query builders on every read path (below). A second,
-> independent layer (ClickHouse row policies on the tenant) follows in a later release. Until then, treat the query
-> builders as the single enforcement layer.
+> **Two layers.** The scope is enforced in Logbird's query builders on every read path (below). When the restricted
+> ClickHouse query user is configured (`CLICKHOUSE_QUERY_USER`, the same account SQL mode uses), scoped reads also
+> run as that user with the tenant bound in a row policy, so ClickHouse itself returns no other tenant's events even
+> if a query forgot the scope. Without that user, the query builders are the single layer. The row policy covers the
+> tenant; the target and action-prefix limits are enforced by the query builders.
 
 ## The scope
 
@@ -147,7 +149,10 @@ Authorization: Bearer lb_read_…
 
 `GET /v1/export?format=csv|jsonl|jsonl-evidence&q=&from=&to=` streams like the console export
 ([exports](exports.md)): `X-Logbird-Export-Id` and `X-Logbird-Export-Schema` headers, the same CSV columns, and the
-same admission limits (one running export per API key, two per workspace; a busy key answers 429 `export_busy`). There
+same admission limits (one running export per API key, two per workspace; a busy key answers 429 `export_busy`). When
+scoped reads run as the restricted query user (see "Two layers"), a scoped export takes both of the workspace's export
+slots by itself, like a console SQL export, so another key's export answers 429 `export_busy` while it runs, and each
+scoped query runs under that user's limits (10 s, 5,000,000 rows read and 1 GiB per query). There
 is no trailer: a complete download is one that ends normally (a non-empty file ends with a newline; no matching events
 gives an empty JSONL body or a CSV header only). A failure after the headers aborts the connection, so discard any
 download that ends with a transport error.

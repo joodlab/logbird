@@ -158,7 +158,7 @@ it('detail keeps oldest receipt first, with timestamp as its deterministic tie b
     .mockResolvedValueOnce({ json: async () => [original] })
     .mockResolvedValueOnce({ json: async () => [{ children: 0, size: 0 }] });
   const result = await getEvent({ query } as unknown as ClickHouseClient, 'qa-narrow-search', 'same');
-  expect(query.mock.calls[0]?.[0].query).toMatch(/ORDER BY received_at,timestamp LIMIT 1$/);
+  expect(query.mock.calls[0]?.[0].query).toMatch(/ORDER BY received_at,timestamp,sipHash64\(payload\) LIMIT 1$/);
   expect(result?.event.receivedAt).toBe('2026-11-07T10:03:00.000Z');
 });
 it('expiration probes stay narrow and bounded in both raw rows and the identity index', async () => {
