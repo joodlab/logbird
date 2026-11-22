@@ -225,7 +225,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
             </CommandItem>
             <CommandItem
               keywords={['activity', 'audit', 'management', 'history', 'log', 'who']}
-              onSelect={() => go(() => navigate({ to: '/p/$projectId/settings/activity', params: { projectId } }))}
+              onSelect={() => go(() => navigate({ to: '/workspace/activity' }))}
               value="Workspace activity"
             >
               <ActivityIcon />
@@ -233,7 +233,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
             </CommandItem>
             <CommandItem
               keywords={['invite', 'team', 'teammates', 'link', 'join', 'people']}
-              onSelect={() => go(() => navigate({ to: '/p/$projectId/settings/members', params: { projectId } }))}
+              onSelect={() => go(() => navigate({ to: '/workspace/members' }))}
               value="Members"
             >
               <UsersIcon />
