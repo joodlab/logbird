@@ -208,9 +208,10 @@ describe('content modules', () => {
     expect(openPublic.developers.otherStacks.link?.href).toBe('https://github.example.test/acme/logbird/tree/master/sdks/dotnet');
     for (const repoPublic of [true, false]) {
       for (const cloudOpen of [true, false]) {
-        const { description } = homeMetaFor(state({ repoPublic, cloudOpen }));
+        const { description, fullTitle } = homeMetaFor(state({ repoPublic, cloudOpen }));
         expect(description.length, description).toBeLessThanOrEqual(155);
         expect(/self-host it/i.test(description), description).toBe(repoPublic);
+        expect(/open-source/i.test(fullTitle), fullTitle).toBe(repoPublic);
       }
     }
     // No time claim until a measured, dated value exists (marketing/copy/home.md, Numbers).
@@ -270,7 +271,9 @@ describe('content modules', () => {
         expect(text, where).toContain('Join the waitlist');
       }
       if (!state.repoPublic) {
-        expect(text, where).not.toMatch(/open-source codebase|Open source and|self-host it\b/i);
+        // Anywhere on the page, the <title> and social titles included.
+        expect(text, where).not.toMatch(/open-source|Open source and|self-host it\b/i);
+        expect(page?.html ?? '', where).not.toMatch(/content="[^"]*open-source[^"]*"/i);
       }
       // No legal-hold roadmap claim, no unmeasured time, no assurance words.
       expect(text, where).not.toMatch(/on the roadmap|within seconds|tamper|immutable|certified|verify integrity/i);

@@ -12,6 +12,8 @@ import { byCloud, byRepo, type Cta, type Item, type Marked, SITE, type SiteState
 export function homeMetaFor(site: SiteState) {
   return {
     title: 'Home',
+    /** "Open-source" only while the source is public. */
+    fullTitle: byRepo(site, { public: 'Logbird — open-source audit logs for your product', private: 'Logbird — audit logs for your product' }),
     description: `The audit log your customers ask for, and the evidence your auditors ask for. ${byRepo(site, {
       public: byCloud(site, {
         open: 'Open source: self-host it, or ask for early access to Logbird Cloud.',

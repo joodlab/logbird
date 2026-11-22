@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { homeMeta } from '../content/home';
 import { SITE_URL, siteConfigFrom } from '../env';
 import { legalPagesReady, RELEASED_ENV } from '../test/launch-ready';
 import { llmsTxt, robotsTxt, sitemapXml } from './discovery';
@@ -38,9 +39,9 @@ describe('metadata', () => {
     expect(head.meta).toContainEqual({ property: 'og:image:width', content: '1200' });
     expect(head.meta).toContainEqual({ property: 'og:image:height', content: '630' });
     expect(head.meta).toContainEqual({ name: 'twitter:card', content: 'summary_large_image' });
-    expect(pageMeta({ title: 'Home', description: 'Description', path: '/' })).toContainEqual({
-      title: 'Logbird — open-source audit logs for your product',
-    });
+    expect(pageHead('/').meta).toContainEqual({ title: homeMeta.fullTitle });
+    expect(pageMeta({ title: 'Home', description: 'Description', path: '/', fullTitle: 'Whole title' })).toContainEqual({ title: 'Whole title' });
+    expect(pageMeta({ title: 'Home', description: 'Description', path: '/' })).toContainEqual({ title: 'Home · Logbird' });
   });
   it('keeps pages that are not ready out of search', () => {
     if (unready) {

@@ -15,6 +15,8 @@ export interface SitePage {
   inFooter?: boolean;
   /** Shorter label for the footer, when the title is long. */
   footerTitle?: string;
+  /** The whole <title>, when the page sets its own instead of "<title> · Logbird". */
+  fullTitle?: string;
   /**
    * Designed and approved for publishing. Pages that aren't ready render a placeholder, are `noindex`, and are left out
    * of the nav, footer, sitemap and llms.txt. Each page PR flips its own flag.
