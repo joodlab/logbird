@@ -122,18 +122,21 @@ internal sealed class AuditRequestFeature
 }
 
 /// <summary>
-/// Where <see cref="IAuditLog"/> records: the registered <see cref="ILogbirdClient"/>. For Logbird's own client it also
-/// reports drops and diagnostics; a client the host registered itself (a fake in tests, a decorator) only receives
-/// <see cref="ILogbirdClient.Track"/>.
+/// Where <see cref="IAuditLog"/> records: the registered <see cref="ILogbirdClient"/> receives the events (a client the
+/// host registered itself, such as a fake in tests or a decorator, included). Drops and diagnostics always go through
+/// Logbird's own client, so they reach <see cref="LogbirdOptions.OnDrop"/>, <see cref="LogbirdOptions.OnError"/>, the
+/// logger and the counters whichever client records.
 /// </summary>
 internal sealed class AuditSink
 {
     private readonly ILogbirdClient _client;
     private readonly LogbirdClient? _core;
+    private readonly LogbirdClient _reporter;
 
-    public AuditSink(ILogbirdClient client)
+    public AuditSink(ILogbirdClient client, LogbirdClient reporter)
     {
         _client = client;
+        _reporter = reporter;
         _core = client switch
         {
             HostedLogbirdClient hosted => hosted.Core,
@@ -162,9 +165,9 @@ internal sealed class AuditSink
         return auditEvent.Id ?? string.Empty;
     }
 
-    public void Diagnostic(string message) => _core?.ReportDiagnostic(message);
+    public void Diagnostic(string message) => (_core ?? _reporter).ReportDiagnostic(message);
 
-    public void Drop(DropReason reason, string? id, string? action, string detail) => _core?.DropUnrecorded(reason, id, action, detail);
+    public void Drop(DropReason reason, string? id, string? action, string detail) => (_core ?? _reporter).DropUnrecorded(reason, id, action, detail);
 }
 
 /// <summary>The path every <see cref="IAuditLog"/> records through: copy, fill, track, never throw.</summary>
@@ -180,10 +183,11 @@ internal static class Recording
         }
         catch (Exception e)
         {
-            // A half-built event would record wrong data, so it is not recorded; the drop is reported once.
-            var id = SafeId(auditEvent);
+            // A half-built event would record wrong data, so it is not recorded; the drop is reported once, under the id the
+            // callback set or a new one.
+            var id = SafeId(auditEvent) ?? LogbirdClient.NewEventId();
             client.Drop(DropReason.Invalid, id, name, "the configure callback threw " + e.GetType().Name + ".");
-            return id ?? string.Empty;
+            return id;
         }
 
         return Finish(client, auditEvent, fill);
@@ -200,20 +204,31 @@ internal static class Recording
         AuditEvent copy;
         try
         {
-            // The client's own depth and size limits apply before anything is copied: an event it would drop is handed
-            // over unchanged, and the client reports it.
-            if (JsonDepth.Measure(prepared, LogbirdClient.MaxEventBytes) != JsonDepth.Shape.Ok)
+            // The client's own depth and size limits apply before anything is copied: an event they would reject is dropped
+            // and reported here, under its id or a new one, without copying it or handing the caller's instance to any client.
+            var shape = JsonDepth.Measure(prepared, LogbirdClient.MaxEventBytes);
+            if (shape != JsonDepth.Shape.Ok)
             {
-                return client.Track(prepared);
+                var dropped = SafeId(prepared) ?? LogbirdClient.NewEventId();
+                if (shape == JsonDepth.Shape.TooLarge)
+                {
+                    client.Drop(DropReason.TooLarge, dropped, SafeAction(prepared), "the event exceeds 256 KB.");
+                }
+                else
+                {
+                    client.Drop(DropReason.Invalid, dropped, SafeAction(prepared), "the event is nested too deeply.");
+                }
+
+                return dropped;
             }
 
             copy = prepared.Clone();
         }
         catch (Exception e)
         {
-            var id = SafeId(prepared);
+            var id = SafeId(prepared) ?? LogbirdClient.NewEventId();
             client.Drop(DropReason.Invalid, id, SafeAction(prepared), "the event could not be copied (" + e.GetType().Name + ").");
-            return id ?? string.Empty;
+            return id;
         }
 
         return Finish(client, copy, fill);

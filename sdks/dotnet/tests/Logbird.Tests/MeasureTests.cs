@@ -51,4 +51,38 @@ public class MeasureTests
         Assert.Equal(JsonDepth.Shape.Ok, JsonDepth.Measure(built, bytes));
         Assert.Equal(JsonDepth.Shape.Ok, JsonDepth.Measure(parsed, bytes));
     }
+
+    [Fact]
+    public void A_parsed_array_over_the_limit_is_rejected_without_building_its_children()
+    {
+        var text = "[" + string.Join(",", System.Linq.Enumerable.Repeat("0", 1_000_000)) + "]";
+        var parsed = JsonNode.Parse(text)!;
+        var e = new AuditEvent("parsed") { Metadata = { ["zeroes"] = parsed } };
+#if !NETFRAMEWORK
+        var before = GC.GetAllocatedBytesForCurrentThread();
+#endif
+        Assert.Equal(JsonDepth.Shape.TooLarge, JsonDepth.Measure(e, LogbirdClient.MaxEventBytes));
+#if !NETFRAMEWORK
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // Building 1,000,000 child nodes would allocate tens of megabytes; the precheck streams from the document.
+        Assert.True(allocated < 2_000_000, "allocated " + allocated + " bytes");
+#endif
+    }
+
+    [Fact]
+    public void A_text_of_characters_the_writer_escapes_is_not_rejected_while_it_fits()
+    {
+        // DEL is one byte in Logbird's output but six when the writer escapes it; 200,000 of them still fit in 256 KB.
+        var e = new AuditEvent("del") { Metadata = { ["text"] = new string((char)0x7F, 200_000) } };
+        Assert.Equal(JsonDepth.Shape.Ok, JsonDepth.Measure(e, LogbirdClient.MaxEventBytes));
+        var nested = new AuditEvent("del") { Metadata = { ["obj"] = new JsonObject { ["text"] = new string((char)0x7F, 200_000) } } };
+        Assert.Equal(JsonDepth.Shape.Ok, JsonDepth.Measure(nested, LogbirdClient.MaxEventBytes));
+
+        // A supplementary character is four bytes in Logbird's output and twelve when the writer escapes it.
+        var emoji = char.ConvertFromUtf32(0x1F600);
+        var text = new System.Text.StringBuilder().Insert(0, emoji, 60_000).ToString();
+        var faces = new AuditEvent("emoji") { Metadata = { ["obj"] = new JsonObject { ["text"] = text } } };
+        Assert.Equal(JsonDepth.Shape.Ok, JsonDepth.Measure(faces, LogbirdClient.MaxEventBytes));
+    }
 }

@@ -102,7 +102,7 @@ public static class LogbirdServiceCollectionExtensions
         services.TryAddSingleton<ILogbirdClient>(provider => new HostedLogbirdClient(provider.GetRequiredService<LogbirdClientOwner>().Client));
 
         // IAuditLog records through whichever ILogbirdClient is registered, so a host's own (a fake in tests) receives it.
-        services.TryAddSingleton(provider => new AuditSink(provider.GetRequiredService<ILogbirdClient>()));
+        services.TryAddSingleton(provider => new AuditSink(provider.GetRequiredService<ILogbirdClient>(), provider.GetRequiredService<LogbirdClientOwner>().Client));
         services.TryAddScoped<IAuditLog, RequestAuditLog>();
         services.TryAddSingleton<IAuditLogFactory, AuditLogFactory>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, LogbirdShutdown>());

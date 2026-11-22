@@ -938,4 +938,50 @@ public class AspNetCoreTests
         Assert.Equal(DropReason.TooLarge, Assert.Single(await Eventually(drops, 1)).Reason);
         Assert.Null(prepared.Id);
     }
+
+    [Fact]
+    public async Task C1_with_a_host_provided_client_unrecordable_events_are_reported_and_the_callers_instance_is_never_handed_over()
+    {
+        var fake = new FakeLogbirdClient();
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        var prepared = new AuditEvent("oversized.prepared") { Description = new string('d', 262_145) };
+        var ids = new List<string>();
+        await using (var app = await App.StartAsync(
+            _ => { },
+            options: o => o.OnDrop = drops.Enqueue,
+            services: b => b.Services.AddSingleton<ILogbirdClient>(fake)))
+        {
+            var job = app.Host.Services.GetRequiredService<IAuditLogFactory>().ForJob(null, worker: "w");
+            ids.Add(job.Record("half.built", e =>
+            {
+                e.Id = "evt_fixture";
+                throw new InvalidOperationException("fictional");
+            }));
+            ids.Add(job.Record(prepared));
+            await Eventually(drops, 2);
+        }
+
+        Assert.Empty(fake.Tracked);
+        Assert.Equal("evt_fixture", ids[0]);
+        Assert.False(string.IsNullOrEmpty(ids[1]));
+        Assert.Null(prepared.Id);
+        Assert.Null(prepared.Executor);
+        Assert.Equal([DropReason.Invalid, DropReason.TooLarge], drops.Select(d => d.Reason).ToArray());
+        Assert.Equal(new[] { "evt_fixture", ids[1] }, drops.Select(d => d.Id!).ToArray());
+    }
+
+    [Fact]
+    public async Task C1_an_oversized_prepared_event_returns_an_id_even_when_capture_is_disabled()
+    {
+        string? id = null;
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) =>
+            {
+                id = audit.Record(new AuditEvent("oversized") { Description = new string('d', 262_145) });
+                return Results.Ok();
+            }),
+            options: o => o.Enabled = false);
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        Assert.False(string.IsNullOrEmpty(id));
+    }
 }
