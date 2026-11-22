@@ -273,6 +273,14 @@ export const suggestQuery = (projectId: string, field: string, prefix: string) =
     retry: false,
   });
 
+/** The project's webhook endpoints. Owners and admins only: a member gets 403 (never retried). */
+export const webhooksQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: [...keys.project(projectId), 'webhooks'] as const,
+    queryFn: ({ signal }) => api.webhooks.list(projectId, signal),
+    retry: shouldRetry,
+  });
+
 export const keysQuery = (projectId: string) =>
   queryOptions({
     queryKey: [...keys.project(projectId), 'keys'] as const,
