@@ -1,10 +1,12 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Logbird.Tests;
@@ -27,11 +29,26 @@ public class ScopedReadTests
 
     private static int Calls(FakeServer server, string path) => server.Requests.Count(r => r.Request.RequestUri!.AbsolutePath == path);
 
+    private static readonly DateTimeOffset Expiry = new(2026, 11, 23, 10, 15, 0, TimeSpan.Zero);
+
+    private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    /// <summary>A token shaped like the server's (<c>lbv1.&lt;payload&gt;.&lt;mac&gt;</c>), carrying a scope and expiry.</summary>
+    private static string Envelope(string scopeJson, long? exp = null, string version = "1")
+    {
+        var expires = exp ?? Expiry.ToUnixTimeSeconds();
+        var payload = $$"""{"v":{{version}},"kid":"key_fictional","p":"proj_fictional","s":{{scopeJson}},"iat":{{expires - 600}},"exp":{{expires}},"jti":"jti_fictional"}""";
+        return "lbv1." + Base64Url(Encoding.UTF8.GetBytes(payload)) + ".fictional-mac";
+    }
+
+    private static HttpResponseMessage Grant(string token, string scopeJson)
+        => FakeServer.Json((HttpStatusCode)201, $$"""{"token":"{{token}}","expiresAt":"2026-11-23T10:15:00.000Z","scope":{{scopeJson}}}""");
+
     private static HttpResponseMessage Minted(CapturedRequest request)
     {
         using var body = JsonDocument.Parse(request.Body);
         var scope = body.RootElement.GetProperty("scope").GetRawText();
-        return FakeServer.Json((HttpStatusCode)201, "{\"token\":\"lbv1.fictional.mac\",\"expiresAt\":\"2026-11-23T10:15:00.000Z\",\"scope\":" + scope + "}");
+        return Grant(Envelope(scope), scope);
     }
 
     [Fact]
@@ -53,8 +70,8 @@ public class ScopedReadTests
         Assert.Equal(
             "{\"scope\":{\"tenantId\":\"biz_5\",\"target\":{\"type\":\"website\",\"id\":\"site_42\"},\"actionPrefixes\":[\"booking.\",\"auth.\"],\"mask\":[\"ip\",\"actor_email\"]},\"ttlSeconds\":600}",
             request.Text);
-        Assert.Equal("lbv1.fictional.mac", token.Token);
-        Assert.Equal(new DateTimeOffset(2026, 11, 23, 10, 15, 0, TimeSpan.Zero), token.ExpiresAt);
+        Assert.Equal(Envelope("""{"tenantId":"biz_5","target":{"type":"website","id":"site_42"},"actionPrefixes":["booking.","auth."],"mask":["ip","actor_email"]}"""), token.Token);
+        Assert.Equal(Expiry, token.ExpiresAt);
         Assert.Equal(ViewerMask.Ip | ViewerMask.ActorEmail, token.Scope.Mask);
         Assert.DoesNotContain("lbv1", token.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("biz_5", token.Scope.ToString(), StringComparison.Ordinal);
@@ -103,7 +120,8 @@ public class ScopedReadTests
     [Fact]
     public async Task A_granted_scope_that_differs_from_the_request_is_refused_and_the_token_withheld()
     {
-        var server = Server(_ => FakeServer.Json((HttpStatusCode)201, "{\"token\":\"lbv1.fictional.mac\",\"expiresAt\":\"2026-11-23T10:15:00.000Z\",\"scope\":{\"tenantId\":\"biz_6\"}}"));
+        const string other = """{"tenantId":"biz_6"}""";
+        var server = Server(_ => Grant(Envelope(other), other));
         using var reader = Reader(server);
         var error = await Assert.ThrowsAsync<LogbirdApiException>(() => reader.MintViewerTokenAsync(new ViewerScope("biz_5")));
         Assert.Equal("scope_mismatch", error.Code);
@@ -131,6 +149,10 @@ public class ScopedReadTests
             new ViewerScope(new string('t', 251)),
             new ViewerScope("biz" + (char)0xFFFD),
             new ViewerScope("biz" + (char)0xD800),
+            new ViewerScope("biz" + (char)0),
+            new ViewerScope("biz_5") { Target = new ViewerScopeTarget("web" + (char)0 + "site", "site_42") },
+            new ViewerScope("biz_5") { Target = new ViewerScopeTarget("website", "site" + (char)0) },
+            new ViewerScope("biz_5") { ActionPrefixes = ["booking.", (char)0 + "auth."] },
             new ViewerScope("biz_5") { Target = new ViewerScopeTarget(new string('w', 61), "site_42") },
             new ViewerScope("biz_5") { Target = new ViewerScopeTarget("website", string.Empty) },
             new ViewerScope("biz_5") { ActionPrefixes = [] },
@@ -216,5 +238,197 @@ public class ScopedReadTests
         Assert.Equal("server_too_old", (await Assert.ThrowsAsync<LogbirdApiException>(() => reader.FacetsAsync(new FacetQuery("action")))).Code);
         Assert.Equal("server_too_old", (await Assert.ThrowsAsync<LogbirdApiException>(() => reader.ExportAsync(new ExportQuery(ExportFormat.Csv), file))).Code);
         Assert.Equal(0, Calls(server, "/v1/viewer-tokens") + Calls(server, "/v1/facets") + Calls(server, "/v1/export"));
+    }
+
+    [Theory]
+    [InlineData("0.2.0-rc.1")]
+    [InlineData("0.2.0-0")]
+    public async Task A_pre_release_of_0_2_0_is_not_0_2_0(string version)
+    {
+        var server = Server(_ => FakeServer.Json(HttpStatusCode.OK, "{}"), version);
+        using var reader = Reader(server);
+        using var file = new MemoryStream();
+        Assert.Equal("server_too_old", (await Assert.ThrowsAsync<LogbirdApiException>(() => reader.MintViewerTokenAsync(new ViewerScope("biz_5")))).Code);
+        Assert.Equal("server_too_old", (await Assert.ThrowsAsync<LogbirdApiException>(() => reader.FacetsAsync(new FacetQuery("action")))).Code);
+        Assert.Equal("server_too_old", (await Assert.ThrowsAsync<LogbirdApiException>(() => reader.ExportAsync(new ExportQuery(ExportFormat.Csv), file))).Code);
+        Assert.Equal(0, Calls(server, "/v1/viewer-tokens") + Calls(server, "/v1/facets") + Calls(server, "/v1/export"));
+    }
+
+    [Fact]
+    public async Task A_credential_that_is_not_a_viewer_token_for_this_grant_is_never_returned()
+    {
+        const string scope = """{"tenantId":"biz_5"}""";
+        var cases = new (string Token, string Code)[]
+        {
+            ("lb_read_fictionalkey", "invalid_response"),
+            ("lbv1.not-base64!.mac", "invalid_response"),
+            ("lbv1." + Base64Url(Encoding.UTF8.GetBytes("[]")) + ".mac", "invalid_response"),
+            ("lbv1." + Base64Url(Encoding.UTF8.GetBytes(scope)) + ".mac", "invalid_response"),
+            (Envelope(scope, version: "2"), "invalid_response"),
+            (Envelope("""{"tenantId":"biz_6"}"""), "scope_mismatch"),
+            (Envelope("""{"tenantId":"biz_5","mask":["ip"]}"""), "scope_mismatch"),
+            (Envelope(scope, exp: Expiry.ToUnixTimeSeconds() + 3600), "scope_mismatch"),
+        };
+        foreach (var (token, code) in cases)
+        {
+            var server = Server(_ => Grant(token, scope));
+            using var reader = Reader(server);
+            var error = await Assert.ThrowsAsync<LogbirdApiException>(() => reader.MintViewerTokenAsync(new ViewerScope("biz_5")));
+            Assert.Equal(code, error.Code);
+            Assert.DoesNotContain(token, error.ToString(), StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData("""{"tenantId":"biz_5","target":{"type":"website","id":"site_42"},"tenantIds":["biz_6"]}""")]
+    [InlineData("""{"tenantId":"biz_5","target":{"type":"website","id":"site_42","idPrefix":true}}""")]
+    public async Task A_granted_scope_with_a_member_this_SDK_does_not_know_is_refused(string granted)
+    {
+        var server = Server(_ => Grant(Envelope(granted), granted));
+        using var reader = Reader(server);
+        var scope = new ViewerScope("biz_5") { Target = new ViewerScopeTarget("website", "site_42") };
+        Assert.Equal("invalid_response", (await Assert.ThrowsAsync<LogbirdApiException>(() => reader.MintViewerTokenAsync(scope))).Code);
+    }
+
+    [Fact]
+    public async Task The_largest_valid_scopes_are_sent_compactly_enough_for_the_servers_16_KB_limit()
+    {
+        // Each prefix is 190 UTF-16 units. The default .NET escaping (each < as six bytes, each emoji as twelve) would
+        // send over 22 KB; written as JSON.stringify writes it, the request is well under the route's 16 KB limit.
+        var suffix = Enumerable.Range(0, 20).Select(i => i.ToString("D2", CultureInfo.InvariantCulture)).ToArray();
+        var sets = new[]
+        {
+            suffix.Select(s => new string('<', 188) + s).ToArray(),
+            suffix.Select(s => string.Concat(Enumerable.Repeat("😀", 94)) + s).ToArray(),
+        };
+        foreach (var prefixes in sets)
+        {
+            var server = Server(Minted);
+            using var reader = Reader(server);
+            var scope = new ViewerScope(new string('t', 250))
+            {
+                Target = new ViewerScopeTarget(new string('w', 60), new string('i', 250)),
+                ActionPrefixes = prefixes,
+                Mask = ViewerMask.Ip | ViewerMask.UserAgent | ViewerMask.ActorEmail,
+            };
+            var token = await reader.MintViewerTokenAsync(scope, TimeSpan.FromHours(1));
+
+            var sent = server.Requests.Single(r => r.Request.RequestUri!.AbsolutePath == "/v1/viewer-tokens").Body;
+            Assert.True(sent.Length < 16 * 1024, "request bytes: " + sent.Length);
+            using var parsed = JsonDocument.Parse(sent);
+            Assert.Equal(prefixes, parsed.RootElement.GetProperty("scope").GetProperty("actionPrefixes").EnumerateArray().Select(p => p.GetString()));
+            Assert.Equal(prefixes, token.Scope.ActionPrefixes);
+        }
+    }
+
+    [Fact]
+    public async Task Facets_accept_only_the_fields_and_lengths_the_server_does()
+    {
+        var server = Server(_ => FakeServer.Json(HttpStatusCode.OK, """{"field":"x","by":null,"values":[],"otherCount":0}"""));
+        using var reader = Reader(server);
+        var accepted = new[] { "action", "environment", "env", "actor.email", "occurredAt", "attr.metadata.plan", "attributes.a", "attr." + new string('p', 4096), "attributes." + new string('p', 4096) };
+        foreach (var field in accepted)
+        {
+            await reader.FacetsAsync(new FacetQuery(field) { By = field });
+        }
+
+        var refused = new[] { "record", "nope", "Action", "attr.", "attributes.", "attr." + (char)10 + "x", "attr." + (char)0x2028, "attr." + new string('p', 4097), "attributes." + new string('p', 4097) };
+        foreach (var field in refused)
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() => reader.FacetsAsync(new FacetQuery(field)));
+            await Assert.ThrowsAsync<ArgumentException>(() => reader.FacetsAsync(new FacetQuery("action") { By = field }));
+        }
+
+        await reader.FacetsAsync(new FacetQuery("action") { Query = new string('q', 4096) });
+        await Assert.ThrowsAsync<ArgumentException>(() => reader.FacetsAsync(new FacetQuery("action") { Query = new string('q', 4097) }));
+        using var file = new MemoryStream();
+        await Assert.ThrowsAsync<ArgumentException>(() => reader.ExportAsync(new ExportQuery(ExportFormat.Csv) { Query = new string('q', 4097) }, file));
+        Assert.Equal(accepted.Length + 1, Calls(server, "/v1/facets"));
+        Assert.Equal(0, Calls(server, "/v1/export"));
+    }
+
+    [Fact]
+    public async Task Cancelling_ends_an_export_whose_stream_ignores_cancellation()
+    {
+        var stalled = new StalledStream(Encoding.UTF8.GetBytes("""{"id":"evt_1"}""" + (char)10));
+        var server = Server(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stalled) });
+        using var reader = Reader(server);
+        using var file = new MemoryStream();
+        using var cancel = new CancellationTokenSource();
+        var export = reader.ExportAsync(new ExportQuery(ExportFormat.Jsonl), file, cancel.Token);
+
+        // The first line is written, then the download stalls in a read that ignores the token.
+        await Deadline.Within(TimeSpan.FromSeconds(30), () => stalled.Stalled);
+        cancel.Cancel();
+        await Deadline.Within(TimeSpan.FromSeconds(30), () => Assert.ThrowsAnyAsync<OperationCanceledException>(() => export));
+        Assert.True(file.Length > 0);
+    }
+
+    /// <summary>Returns its bytes, then stalls in a read that ignores cancellation and ends only when disposed.</summary>
+    private sealed class StalledStream(byte[] first) : Stream
+    {
+        private readonly TaskCompletionSource<int> _stall = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _stalled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _sent;
+
+        public Task Stalled => _stalled.Task;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer, offset, count, CancellationToken.None).GetAwaiter().GetResult();
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Exchange(ref _sent, 1) == 0)
+            {
+                Array.Copy(first, 0, buffer, offset, first.Length);
+                return Task.FromResult(first.Length);
+            }
+
+            _stalled.TrySetResult(true);
+            return _stall.Task;
+        }
+
+#if NET
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Exchange(ref _sent, 1) == 0)
+            {
+                first.CopyTo(buffer);
+                return new ValueTask<int>(first.Length);
+            }
+
+            _stalled.TrySetResult(true);
+            return new ValueTask<int>(_stall.Task);
+        }
+#endif
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            _stall.TrySetException(new ObjectDisposedException(nameof(StalledStream)));
+            base.Dispose(disposing);
+        }
     }
 }

@@ -272,6 +272,7 @@ var token = await reader.MintViewerTokenAsync(
     new ViewerScope(businessId) { Target = new ViewerScopeTarget("website", websiteId), Mask = ViewerMask.Ip },
     lifetime: TimeSpan.FromMinutes(15));
 // Hand token.Token to the browser (never in a URL); it sends it as "Authorization: Bearer".
+// The browser's exact origin (https://app.example.com) must be on the minting key's embed origins.
 
 // Or read with the token from another server:
 using var scoped = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = endpoint, ReadKey = token.Token });
@@ -283,11 +284,16 @@ await scoped.ExportAsync(new ExportQuery(ExportFormat.Csv), file);
 - A scope names a tenant and, optionally, one target (type and id together), action prefixes and masks (`Ip`,
   `UserAgent`, `ActorEmail`; any mask also hides the original payload). Ids must be as Logbird stored them; the client
   rejects a scope that could never match before sending it.
-- Minting fails with `scope_mismatch` (and returns no token) if the server grants a different scope than requested.
-  `ViewerToken.ToString()` never prints the token.
-- `FacetsAsync` counts events by any query field (optionally split by a second); `ExportAsync` streams CSV, JSONL or
-  JSONL with payloads (`JsonlEvidence`, refused for a masked scope) into your stream. The read `Timeout` covers the
-  start of an export; pass a cancellation token to bound the download.
+- A browser can use a viewer token only from an origin listed in the minting key's **embed origins** (set when the key
+  is created, as `https://host[:port]`, lowercase, no path). From any other origin every read answers
+  `403 origin_not_allowed`. A server-to-server call sends no `Origin` and is not affected.
+- Minting fails with `scope_mismatch` (and returns no token) if the server grants a different scope than requested,
+  or if the token's own scope or expiry differs from the grant. `ViewerToken.ToString()` never prints the token.
+- `FacetsAsync` counts events by a stored field (such as `action`, `outcome`, `tenant`, `target.type`) or an attribute
+  (`attr.<path>`), optionally split by a second. Virtual selectors such as `record` work in `Query` but cannot be
+  counted. `ExportAsync` streams CSV, JSONL or JSONL with payloads (`JsonlEvidence`, refused for a masked scope) into
+  your stream. Queries are at most 4,096 characters. The read `Timeout` covers the start of an export; pass a
+  cancellation token to bound the download.
 
 ## Verify webhooks
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Xunit.Abstractions;
 
@@ -11,6 +12,9 @@ namespace Logbird.IntegrationTests;
 /// <summary>Viewer tokens, facets and exports against a real Logbird 0.2.0 or later (fictional tenants only).</summary>
 public class ScopedReadLiveTests(ITestOutputHelper output)
 {
+    private const string Ip = "203.0.113.7";
+    private const string UserAgent = "Fictional/1.0";
+
     [LiveFact]
     public async Task A_viewer_token_reads_only_its_scope_with_masks_on_every_route()
     {
@@ -25,43 +29,71 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
         var tenant = "biz_a_" + run;
         var other = "biz_b_" + run;
         var site = "site_" + run;
+        var elsewhere = "elsewhere_" + run;
+        var email = "fictional." + run + "@example.invalid";
         var inScope = new List<string>();
+
+        // Two controls, each with its own action, so a facet or export that counted them would show it: the same tenant
+        // on another website, and another tenant on the same website id. Both carry the same IP, agent and email.
+        var sameTenantOtherSite = LogbirdClient.NewEventId();
+        var otherTenantSameSite = LogbirdClient.NewEventId();
         await using (var client = new LogbirdClient(LiveServer.Options()))
         {
             for (var i = 0; i < 2; i++)
             {
                 var id = LogbirdClient.NewEventId();
                 inScope.Add(id);
-                client.Track(new AuditEvent("booking.created")
-                {
-                    Id = id,
-                    Actor = AuditActor.User("user_" + run, "Fictional User", "fictional." + run + "@example.invalid"),
-                    Tenant = new AuditTenant(tenant),
-                    Context = { Ip = "203.0.113.7", UserAgent = "Fictional/1.0" },
-                }.Target("website", site));
+                client.Track(Fixture("booking.created", id, tenant, site));
             }
 
-            // Out of scope: the same tenant on another website, and another tenant on the same website id.
-            client.Track(new AuditEvent("booking.created") { Tenant = new AuditTenant(tenant) }.Target("website", "elsewhere_" + run));
-            client.Track(new AuditEvent("booking.created") { Tenant = new AuditTenant(other) }.Target("website", site));
+            client.Track(Fixture("booking.control_site", sameTenantOtherSite, tenant, elsewhere));
+            client.Track(Fixture("booking.control_tenant", otherTenantSameSite, other, site));
             Assert.True(await client.FlushAsync());
             Assert.Equal(4, client.Stats.Delivered);
         }
 
+        AuditEvent Fixture(string action, string id, string tenantId, string website)
+            => new AuditEvent(action)
+            {
+                Id = id,
+                Actor = AuditActor.User("user_" + run, "Fictional User", email),
+                Tenant = new AuditTenant(tenantId),
+                Context = { Ip = Ip, UserAgent = UserAgent },
+            }.Target("website", website);
+
+        // Unscoped, every fixture is stored as sent: the right tenant and website, and the clear values the masks hide.
         using var reader = LiveServer.Reader();
-        foreach (var id in inScope)
+        var expected = new Dictionary<string, (string Tenant, string Website)>
         {
-            await LiveServer.WaitForEventAsync(reader, id);
+            [inScope[0]] = (tenant, site),
+            [inScope[1]] = (tenant, site),
+            [sameTenantOtherSite] = (tenant, elsewhere),
+            [otherTenantSameSite] = (other, site),
+        };
+        foreach (var pair in expected)
+        {
+            var stored = await LiveServer.WaitForEventAsync(reader, pair.Key);
+            Assert.Equal(pair.Value.Tenant, stored.Event.Tenant?.Id);
+            var target = Assert.Single(stored.Event.Targets);
+            Assert.Equal(("website", pair.Value.Website), (target.Type, target.Id));
+            Assert.Equal(Ip, stored.Event.Context.Ip);
+            Assert.Equal(UserAgent, stored.Event.Context.UserAgent);
+            Assert.Equal(email, stored.Event.Actor?.Email);
+            Assert.NotEqual(JsonValueKind.Null, stored.Payload.ValueKind);
         }
 
         var token = await reader.MintViewerTokenAsync(
-            new ViewerScope(tenant) { Target = new ViewerScopeTarget("website", site), Mask = ViewerMask.Ip | ViewerMask.ActorEmail },
+            new ViewerScope(tenant)
+            {
+                Target = new ViewerScopeTarget("website", site),
+                Mask = ViewerMask.Ip | ViewerMask.UserAgent | ViewerMask.ActorEmail,
+            },
             TimeSpan.FromMinutes(5));
         Assert.True(token.ExpiresAt > DateTimeOffset.UtcNow);
         using var scoped = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = new Uri(LiveServer.Endpoint!), ReadKey = token.Token });
         var from = DateTimeOffset.UtcNow.AddHours(-1);
 
-        // Search: exactly the in-scope events, masked; a query naming the other tenant stays inside the scope.
+        // Search: exactly the in-scope events, each masked; a query naming the other tenant stays inside the scope.
         var found = new List<StoredEvent>();
         await foreach (var e in scoped.SearchAllAsync(new EventSearch { From = from, Limit = 200 }))
         {
@@ -69,26 +101,39 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
         }
 
         Assert.Equal(inScope.OrderBy(x => x, StringComparer.Ordinal), found.Select(e => e.Id).OrderBy(x => x, StringComparer.Ordinal));
-        Assert.All(found, e => Assert.True(string.IsNullOrEmpty(e.Context.Ip)));
-        Assert.All(found, e => Assert.StartsWith("masked:", e.Actor!.Email));
+        Assert.All(found, AssertMasked);
         Assert.Empty((await scoped.SearchAsync(new EventSearch { From = from, Query = "tenant:" + other })).Events);
 
-        // Detail: the payload is hidden by the mask.
+        // Detail: masked, with no payload; neither control can be read by id.
         var detail = await scoped.GetAsync(inScope[0]);
         Assert.NotNull(detail);
-        Assert.Equal(System.Text.Json.JsonValueKind.Null, detail!.Payload.ValueKind);
+        AssertMasked(detail!.Event);
+        Assert.Equal(JsonValueKind.Null, detail.Payload.ValueKind);
+        Assert.Null(await scoped.GetAsync(sameTenantOtherSite));
+        Assert.Null(await scoped.GetAsync(otherTenantSameSite));
 
-        // Facets count in-scope events only.
+        // Facets count the in-scope action only: a control's action would appear as its own value.
         var facets = await scoped.FacetsAsync(new FacetQuery("action") { From = from });
-        Assert.Equal(2, facets.Values.Sum(v => v.Count) + facets.OtherCount);
+        var value = Assert.Single(facets.Values);
+        Assert.Equal(("booking.created", 2L), (value.Value, value.Count));
+        Assert.Equal(0, facets.OtherCount);
 
-        // Exports: in-scope rows only; an evidence export of a masked scope is refused.
+        // Exports: exactly the in-scope rows, each masked; an evidence export of a masked scope is refused.
         using (var file = new MemoryStream())
         {
             await scoped.ExportAsync(new ExportQuery(ExportFormat.Jsonl) { From = from }, file);
-            var lines = Encoding.UTF8.GetString(file.ToArray()).Split(['\n'], StringSplitOptions.RemoveEmptyEntries);
-            Assert.Equal(2, lines.Length);
-            Assert.All(inScope, id => Assert.Contains(lines, line => line.Contains(id, StringComparison.Ordinal)));
+            var lines = Encoding.UTF8.GetString(file.ToArray()).Split([(char)10], StringSplitOptions.RemoveEmptyEntries);
+            var rows = lines.Select(Parse).ToArray();
+            Assert.Equal(inScope.OrderBy(x => x, StringComparer.Ordinal), rows.Select(r => r.GetProperty("id").GetString()).OrderBy(x => x, StringComparer.Ordinal));
+            foreach (var row in rows)
+            {
+                Assert.True(string.IsNullOrEmpty(Text(row, "context", "ip")), "export ip");
+                Assert.True(string.IsNullOrEmpty(Text(row, "context", "userAgent")), "export user agent");
+                Assert.StartsWith("masked:", Text(row, "actor", "email"), StringComparison.Ordinal);
+            }
+
+            Assert.DoesNotContain(Ip, Encoding.UTF8.GetString(file.ToArray()), StringComparison.Ordinal);
+            Assert.DoesNotContain(email, Encoding.UTF8.GetString(file.ToArray()), StringComparison.Ordinal);
         }
 
         using (var evidence = new MemoryStream())
@@ -97,6 +142,25 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
             Assert.Equal("masked_export", refused.Code);
         }
 
-        output.WriteLine($"server {version}: viewer token read {found.Count} in-scope events (masked), facets and export scoped, evidence export refused");
+        output.WriteLine($"server {version}: viewer token read {found.Count} in-scope events (ip, agent, email masked on search, detail and export), controls hidden, facets scoped, evidence export refused");
     }
+
+    private static void AssertMasked(StoredEvent e)
+    {
+        Assert.True(string.IsNullOrEmpty(e.Context.Ip), "ip");
+        Assert.True(string.IsNullOrEmpty(e.Context.UserAgent), "user agent");
+        Assert.StartsWith("masked:", e.Actor!.Email, StringComparison.Ordinal);
+    }
+
+    private static JsonElement Parse(string line)
+    {
+        using var document = JsonDocument.Parse(line);
+        return document.RootElement.Clone();
+    }
+
+    private static string? Text(JsonElement row, string objectName, string property)
+        => row.TryGetProperty(objectName, out var inner) && inner.ValueKind == JsonValueKind.Object
+            && inner.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 }

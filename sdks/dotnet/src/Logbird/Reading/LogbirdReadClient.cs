@@ -57,7 +57,7 @@ public sealed class LogbirdReadClient : IDisposable
     private readonly string _viewerTokensUrl;
     private readonly string _facetsUrl;
     private readonly string _exportUrl;
-    private Lazy<Task<Version?>>? _serverVersion;
+    private Lazy<Task<ServerVersion?>>? _serverVersion;
     private readonly AuthenticationHeaderValue _authorization;
     private readonly TimeSpan _timeout;
     private readonly int? _maxPages;
@@ -137,8 +137,8 @@ public sealed class LogbirdReadClient : IDisposable
         var probe = Volatile.Read(ref _serverVersion);
         if (probe is null)
         {
-            Lazy<Task<Version?>>? created = null;
-            created = new Lazy<Task<Version?>>(() => ProbeAsync(created!), LazyThreadSafetyMode.ExecutionAndPublication);
+            Lazy<Task<ServerVersion?>>? created = null;
+            created = new Lazy<Task<ServerVersion?>>(() => ProbeAsync(created!), LazyThreadSafetyMode.ExecutionAndPublication);
             probe = Interlocked.CompareExchange(ref _serverVersion, created, null) ?? created;
         }
 
@@ -148,14 +148,14 @@ public sealed class LogbirdReadClient : IDisposable
             throw new LogbirdApiException(null, "server_version_unknown", what + " needs Logbird 0.2.0 or later, and the server's version could not be read; nothing was sent.");
         }
 
-        if (version < new Version(0, 2, 0))
+        if (!version.Value.AtLeast(new Version(0, 2, 0)))
         {
-            throw new LogbirdApiException(null, "server_too_old", what + " needs Logbird 0.2.0 or later; the server reports " + version + ", so nothing was sent.");
+            throw new LogbirdApiException(null, "server_too_old", what + " needs Logbird 0.2.0 or later; the server reports " + version.Value + ", so nothing was sent.");
         }
     }
 
     /// <summary>Runs one version read; a failed or unreadable read removes this probe (and only this one) from the cache.</summary>
-    private async Task<Version?> ProbeAsync(Lazy<Task<Version?>> self)
+    private async Task<ServerVersion?> ProbeAsync(Lazy<Task<ServerVersion?>> self)
     {
         try
         {
@@ -193,7 +193,7 @@ public sealed class LogbirdReadClient : IDisposable
         return await task.ConfigureAwait(false);
     }
 
-    private async Task<Version?> ReadServerVersionAsync()
+    private async Task<ServerVersion?> ReadServerVersionAsync()
     {
         using var timeout = new CancellationTokenSource(_timeout);
         using var request = new HttpRequestMessage(HttpMethod.Get, _openApiUrl);
@@ -226,14 +226,17 @@ public sealed class LogbirdReadClient : IDisposable
                     && document.RootElement.TryGetProperty("info", out var info) && info.ValueKind == JsonValueKind.Object
                     && info.TryGetProperty("version", out var versionElement) && versionElement.ValueKind == JsonValueKind.String)
                 {
-                    // A pre-release or build suffix (0.2.0-rc.1, 0.2.0+abc) is ignored: only the numbers are compared.
+                    // Build metadata (0.2.0+abc) is ignored; a pre-release (0.2.0-rc.1) comes before its release, as in SemVer.
                     var text = versionElement.GetString()!;
-                    var end = text.IndexOfAny(['-', '+']);
-                    return Version.TryParse(end >= 0 ? text.Substring(0, end) : text, out var parsed) ? parsed : null;
+                    var build = text.IndexOf('+');
+                    text = build >= 0 ? text.Substring(0, build) : text;
+                    var dash = text.IndexOf('-');
+                    return Version.TryParse(dash >= 0 ? text.Substring(0, dash) : text, out var parsed) ? new ServerVersion(parsed, dash >= 0) : null;
                 }
             }
-            catch (JsonException)
+            catch (Exception e) when (e is JsonException or InvalidOperationException)
             {
+                // InvalidOperationException: the version string escapes a lone surrogate, which .NET cannot decode.
             }
 
             return null;
@@ -273,8 +276,13 @@ public sealed class LogbirdReadClient : IDisposable
         }
 
         await RequireServer020Async("Minting a viewer token", cancellationToken).ConfigureAwait(false);
-        var body = JsonSerializer.SerializeToUtf8Bytes(new MintViewerTokenRequest { Scope = requested.ToWire(), TtlSeconds = ttlSeconds }, ScopedJsonContext.Default.MintViewerTokenRequest);
-        using var content = new ByteArrayContent(body);
+        var request = new System.Text.Json.Nodes.JsonObject { ["scope"] = requested.ToJson() };
+        if (ttlSeconds is { } ttl)
+        {
+            request["ttlSeconds"] = ttl;
+        }
+
+        using var content = new ByteArrayContent(JsJson.ToUtf8(request));
         content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         var response = await SendAsync(HttpMethod.Post, _viewerTokensUrl, content, ScopedJsonContext.Default.MintViewerTokenResponse, cancellationToken).ConfigureAwait(false);
         if (response?.Token is not { Length: > 0 } token || response.Scope is null
@@ -289,7 +297,40 @@ public sealed class LogbirdReadClient : IDisposable
             throw new LogbirdApiException(null, "scope_mismatch", "Logbird granted a different scope than requested; the token was not returned.");
         }
 
+        // The token itself carries its scope and expiry; check them too, so a response that pairs the requested scope with
+        // another credential (a read key, or a token for another scope) is never handed out as this grant.
+        if (ReadTokenPayload(token) is not { } payload || payload.V != 1 || payload.S is null || payload.Exp is not { } exp)
+        {
+            throw new LogbirdApiException(null, "invalid_response", "Logbird returned a credential that is not a viewer token; it was not returned.");
+        }
+
+        if (!ViewerScope.FromWire(payload.S).SameAccessAs(requested) || exp < -62135596800L || exp > 253402300799L || DateTimeOffset.FromUnixTimeSeconds(exp) != expiresAt)
+        {
+            throw new LogbirdApiException(null, "scope_mismatch", "The viewer token's own scope or expiry differs from the grant; the token was not returned.");
+        }
+
         return new ViewerToken(token, expiresAt, granted);
+    }
+
+    /// <summary>The payload of a <c>lbv1.&lt;base64url payload&gt;.&lt;mac&gt;</c> token, or null when it has another shape.</summary>
+    private static ViewerTokenPayloadWire? ReadTokenPayload(string token)
+    {
+        var parts = token.Split('.');
+        if (parts.Length != 3 || parts[0] != "lbv1" || parts[1].Length == 0 || parts[2].Length == 0)
+        {
+            return null;
+        }
+
+        var base64 = parts[1].Replace('-', '+').Replace('_', '/');
+        base64 += new string('=', (4 - (base64.Length % 4)) % 4);
+        try
+        {
+            return JsonSerializer.Deserialize(Convert.FromBase64String(base64), ScopedJsonContext.Default.ViewerTokenPayloadWire);
+        }
+        catch (Exception e) when (e is FormatException or JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -366,6 +407,9 @@ public sealed class LogbirdReadClient : IDisposable
                 throw LogbirdApiException.FromResponse(response.StatusCode, error);
             }
 
+            // Cancelling disposes the response, which ends a body read the stream itself would not cancel (as on
+            // .NET Framework), so the caller's token always ends a stalled download.
+            using var abort = cancellationToken.Register(static state => ((HttpResponseMessage)state!).Dispose(), response);
             try
             {
                 if (response.Content is null)
@@ -402,7 +446,12 @@ public sealed class LogbirdReadClient : IDisposable
             {
                 throw;
             }
-            catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException)
+            catch (Exception e) when (cancellationToken.IsCancellationRequested && e is HttpRequestException or System.IO.IOException or ObjectDisposedException)
+            {
+                // The read failed because cancelling disposed the response: report the cancellation, not a network fault.
+                throw new OperationCanceledException("The export was cancelled.", e, cancellationToken);
+            }
+            catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException or ObjectDisposedException)
             {
                 throw new LogbirdApiException(response.StatusCode, "unreachable", "The export download failed part way: " + e.GetType().Name);
             }
@@ -560,6 +609,15 @@ public sealed class LogbirdReadClient : IDisposable
             }
         }
     }
+}
+
+/// <summary>A server's reported version: its numbers, and whether it is a pre-release of them.</summary>
+internal readonly record struct ServerVersion(Version Numbers, bool PreRelease)
+{
+    /// <summary>Whether this version is <paramref name="minimum"/> or later; 0.2.0-rc.1 is not 0.2.0 or later.</summary>
+    public bool AtLeast(Version minimum) => Numbers > minimum || (Numbers == minimum && !PreRelease);
+
+    public override string ToString() => Numbers + (PreRelease ? " (pre-release)" : string.Empty);
 }
 
 /// <summary>A read request failed.</summary>

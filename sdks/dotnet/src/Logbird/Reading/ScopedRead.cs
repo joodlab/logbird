@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Logbird.Internal;
 
@@ -49,8 +50,8 @@ public sealed class ViewerScopeTarget
 /// nothing in a query can widen it. See <c>docs/scoped-read-access.md</c>.
 /// </summary>
 /// <remarks>
-/// Identifiers must be in the form Logbird stored them: no surrounding whitespace, no U+FFFD replacement character, no
-/// lone surrogate, and at most 250 characters (60 for a target type, 190 for an action prefix). The client checks this
+/// Identifiers must be in the form Logbird stored them: no surrounding whitespace, no U+0000, no U+FFFD replacement
+/// character, no lone surrogate, and at most 250 characters (60 for a target type, 190 for an action prefix). The client checks this
 /// before sending, so a scope that could never match fails at once instead of silently showing nothing.
 /// </remarks>
 public sealed class ViewerScope
@@ -113,13 +114,31 @@ public sealed class ViewerScope
         }
     }
 
-    internal ViewerScopeWire ToWire() => new()
+    /// <summary>
+    /// The scope as JSON, written the way <c>JSON.stringify</c> writes it (non-ASCII and <c>&lt;</c>, <c>&gt;</c>,
+    /// <c>&amp;</c> stay raw). The default .NET escaping can make a valid scope several times longer and push the request
+    /// over the server's 16 KB limit for this route.
+    /// </summary>
+    internal JsonObject ToJson()
     {
-        TenantId = TenantId,
-        Target = Target is null ? null : new ViewerScopeTargetWire { Type = Target.Type, Id = Target.Id },
-        ActionPrefixes = ActionPrefixes?.ToList(),
-        Mask = MaskNames(Mask),
-    };
+        var json = new JsonObject { ["tenantId"] = TenantId };
+        if (Target is not null)
+        {
+            json["target"] = new JsonObject { ["type"] = Target.Type, ["id"] = Target.Id };
+        }
+
+        if (ActionPrefixes is not null)
+        {
+            json["actionPrefixes"] = new JsonArray(ActionPrefixes.Select(p => (JsonNode?)JsonValue.Create(p)).ToArray());
+        }
+
+        if (MaskNames(Mask) is { } names)
+        {
+            json["mask"] = new JsonArray(names.Select(n => (JsonNode?)JsonValue.Create(n)).ToArray());
+        }
+
+        return json;
+    }
 
     internal static ViewerScope FromWire(ViewerScopeWire wire) => new(wire.TenantId ?? string.Empty)
     {
@@ -203,6 +222,12 @@ public sealed class ViewerScope
         for (var i = 0; i < value.Length; i++)
         {
             var c = value[i];
+            if (c == (char)0)
+            {
+                // Logbird cannot store U+0000, so no stored id contains it; the server refuses it in a scope.
+                throw new ArgumentException(name + " must not contain U+0000 (NUL).", name);
+            }
+
             if (c == (char)0xFFFD)
             {
                 throw new ArgumentException(name + " must not contain the Unicode replacement character.", name);
@@ -247,7 +272,10 @@ public sealed class ViewerToken
 public sealed class FacetQuery
 {
     /// <summary>Creates a facet request for a field.</summary>
-    /// <param name="field">A query field such as <c>action</c>, <c>actor</c> or <c>target.type</c>, or <c>attr.&lt;path&gt;</c>.</param>
+    /// <param name="field">
+    /// A stored field such as <c>action</c>, <c>actor</c>, <c>tenant</c> or <c>target.type</c>, or an attribute as
+    /// <c>attr.&lt;path&gt;</c>. Virtual selectors such as <c>record</c> cannot be counted; use them in <see cref="Query"/>.
+    /// </param>
     public FacetQuery(string field)
     {
         Field = field;
@@ -281,6 +309,13 @@ public sealed class FacetQuery
             throw new ArgumentException("A facet needs a field.", nameof(Field));
         }
 
+        FacetFields.Check(Field, nameof(Field));
+        if (By is not null)
+        {
+            FacetFields.Check(By, nameof(By));
+        }
+
+        Query2.CheckQuery(Query, nameof(Query));
         if (Limit is < 1 or > 100)
         {
             throw new ArgumentException("Limit must be between 1 and 100.", nameof(Limit));
@@ -385,21 +420,80 @@ public sealed class ExportQuery
     /// <summary>The end of the range.</summary>
     public DateTimeOffset? To { get; init; }
 
-    internal string ToQueryString() => Query2.Build(
-        ("from", From is { } from ? EventJson.FormatTimestamp(from) : null),
-        ("to", To is { } to ? EventJson.FormatTimestamp(to) : null),
-        ("q", Query),
-        ("format", Format switch
+    internal string ToQueryString()
+    {
+        Query2.CheckQuery(Query, nameof(Query));
+        return Query2.Build(
+            ("from", From is { } from ? EventJson.FormatTimestamp(from) : null),
+            ("to", To is { } to ? EventJson.FormatTimestamp(to) : null),
+            ("q", Query),
+            ("format", Format switch
+            {
+                ExportFormat.Csv => "csv",
+                ExportFormat.Jsonl => "jsonl",
+                ExportFormat.JsonlEvidence => "jsonl-evidence",
+                _ => throw new ArgumentException("Unknown ExportFormat.", nameof(Format)),
+            }));
+    }
+}
+
+/// <summary>
+/// The fields <c>GET /v1/facets</c> accepts (contracts <c>facetFieldSchema</c>). The list is compared with the
+/// contracts' <c>FACETABLE_FIELDS</c> by a golden file (<c>tests/cross-sdk/facet-fields.ts</c>).
+/// </summary>
+internal static class FacetFields
+{
+    /// <summary>The stored fields and their aliases, in the contracts' order.</summary>
+    internal static readonly string[] Named =
+    [
+        "action", "category", "outcome", "severity", "environment", "actor.type", "actor", "impersonator", "tenant",
+        "executor", "executor.type", "target", "target.type", "source", "env", "actor.id", "actor.name", "actor.email",
+        "tenant.name", "executor.name", "job", "attempt", "target.name", "changes.field", "operation", "parent", "request",
+        "trace", "id", "ip", "conformance", "occurredAt", "timestamp", "receivedAt", "description",
+    ];
+
+    private static readonly HashSet<string> NamedSet = new(Named, StringComparer.Ordinal);
+
+    /// <summary>The longest attribute path after <c>attr.</c> or <c>attributes.</c> (the query bound).</summary>
+    internal const int MaxAttributePath = 4096;
+
+    internal static void Check(string field, string name)
+    {
+        if (NamedSet.Contains(field))
         {
-            ExportFormat.Csv => "csv",
-            ExportFormat.Jsonl => "jsonl",
-            ExportFormat.JsonlEvidence => "jsonl-evidence",
-            _ => throw new ArgumentException("Unknown ExportFormat.", nameof(Format)),
-        }));
+            return;
+        }
+
+        var path = field.StartsWith("attr.", StringComparison.Ordinal) ? field.Substring(5)
+            : field.StartsWith("attributes.", StringComparison.Ordinal) ? field.Substring(11)
+            : null;
+
+        // The server's pattern (^(?:attr|attributes)\..+) needs a first path character that is not a line break.
+        if (path is null || path.Length == 0 || path[0] is (char)10 or (char)13 or (char)0x2028 or (char)0x2029)
+        {
+            throw new ArgumentException(name + " must be a stored field (such as action, tenant or target.type) or attr.<path>.", name);
+        }
+
+        if (path.Length > MaxAttributePath)
+        {
+            throw new ArgumentException(name + " has an attribute path longer than 4096 characters.", name);
+        }
+    }
 }
 
 internal static class Query2
 {
+    /// <summary>The longest <c>q</c> the read routes accept.</summary>
+    internal const int MaxQueryLength = 4096;
+
+    public static void CheckQuery(string? query, string name)
+    {
+        if (query is { Length: > MaxQueryLength })
+        {
+            throw new ArgumentException(name + " must be at most 4096 characters.", name);
+        }
+    }
+
     public static string Build(params (string Key, string? Value)[] pairs)
     {
         var parts = pairs.Where(p => p.Value is not null).Select(p => p.Key + "=" + Uri.EscapeDataString(p.Value!)).ToArray();
@@ -407,6 +501,9 @@ internal static class Query2
     }
 }
 
+// A granted scope with a member this SDK does not know (a newer server's restriction) is refused, never silently dropped:
+// dropping it would report a different grant as the one requested.
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed class ViewerScopeWire
 {
     public string? TenantId { get; set; }
@@ -418,18 +515,12 @@ internal sealed class ViewerScopeWire
     public List<string>? Mask { get; set; }
 }
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed class ViewerScopeTargetWire
 {
     public string? Type { get; set; }
 
     public string? Id { get; set; }
-}
-
-internal sealed class MintViewerTokenRequest
-{
-    public ViewerScopeWire? Scope { get; set; }
-
-    public int? TtlSeconds { get; set; }
 }
 
 internal sealed class MintViewerTokenResponse
@@ -441,9 +532,19 @@ internal sealed class MintViewerTokenResponse
     public ViewerScopeWire? Scope { get; set; }
 }
 
+/// <summary>The parts of a viewer token's payload (<c>lbv1.&lt;payload&gt;.&lt;mac&gt;</c>) the client checks.</summary>
+internal sealed class ViewerTokenPayloadWire
+{
+    public int? V { get; set; }
+
+    public ViewerScopeWire? S { get; set; }
+
+    public long? Exp { get; set; }
+}
+
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
-[JsonSerializable(typeof(MintViewerTokenRequest))]
 [JsonSerializable(typeof(MintViewerTokenResponse))]
+[JsonSerializable(typeof(ViewerTokenPayloadWire))]
 [JsonSerializable(typeof(FacetResult))]
 internal sealed partial class ScopedJsonContext : JsonSerializerContext
 {
