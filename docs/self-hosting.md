@@ -299,8 +299,8 @@ again. If the mutation was killed or failed, fix the cause shown in `latest_fail
 
 Known limit: during a large historical import (old event times arriving now), a slice that overlaps the import's
 arrival window still reads the granules the import touched, because each of them now spans that window. Draining such
-a slice in small pages repeats that read per page (see #209 for measurements), so arrival-time readers should fetch
-large pages during catch-up.
+a slice in small pages repeats that read per page (see #209 for measurements), so larger pages mean fewer repeated
+reads during catch-up.
 
 ### Upgrading to immutable ids
 
