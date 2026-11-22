@@ -14,12 +14,13 @@ export interface SetupProjectFacts {
   retentionReviewedAt: Date | null;
   setupDismissedAt: Date | null;
   setupCompletedAt: Date | null;
-  keys: { kind: string; createdAt: Date }[];
+  keys: { kind: string; createdAt: Date; scope?: unknown }[];
 }
 export function computeSetup(project: SetupProjectFacts, events: SetupEventFacts, team: ProjectSetup['team']): ProjectSetup {
   const keys = (kind: string) => project.keys.filter((k) => k.kind === kind).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const ingest = keys('ingest'),
-    read = keys('read');
+    // A scoped read key (non-null scope) reads one tenant only; the read-key step asks for a project-wide one.
+    read = keys('read').filter((k) => k.scope === null || k.scope === undefined);
   const reviewedAt = project.retentionReviewedAt?.toISOString() ?? null;
   const done: Record<SetupStepId, boolean> = {
     ingest_key: ingest.length > 0,

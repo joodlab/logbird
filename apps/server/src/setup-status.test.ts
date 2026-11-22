@@ -78,3 +78,9 @@ describe('setup computation', () => {
     expect(s.operations.coverage).toBe(0.5);
   });
 });
+
+it('#180: only an unscoped read key completes the read-key step', () => {
+  const read = (scope: unknown) => computeSetup({ ...project, keys: [{ kind: 'read', createdAt: new Date(0), scope }] }, events, team);
+  expect(read(null).steps.find((s) => s.id === 'read_key')?.status).toBe('done');
+  expect(read({ tenantId: 't1' }).steps.find((s) => s.id === 'read_key')?.status).not.toBe('done');
+});
