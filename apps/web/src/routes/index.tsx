@@ -73,7 +73,7 @@ function HomePage() {
             <SectionHeader
               eyebrow="For developers"
               id="developers-title"
-              lead="Only an action string is required, and each event must fit the ingest limits. Add the fields you have: who did it, in which customer account, to which records, what changed. Logbird lifts the fields it knows into indexed columns and indexes your other fields as attributes, within the ingest limits. Recommended fields are optional: an event is never rejected for missing them."
+              lead="Only an action string is required, and each event must fit the ingest limits. Add the fields you have: who did it, in which customer account, to which records, what changed. Logbird lifts the fields it knows into indexed columns. Custom top-level fields and anything under metadata are searchable as attributes within the indexing limits, and the full parsed event is available as JSON. Recommended fields are optional: an event is never rejected for missing them."
               title="One call per action. No schema to migrate."
             />
             <ul className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
