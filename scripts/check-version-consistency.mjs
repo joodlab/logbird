@@ -12,10 +12,22 @@ export function checkVersions(manifests, tag) {
   return version;
 }
 
+/** Reads the .NET SDK version from an MSBuild props file (`<VersionPrefix>X.Y.Z</VersionPrefix>`). */
+export function msbuildVersion(text) {
+  const matches = [...text.matchAll(/<VersionPrefix>\s*([^<\s]*)\s*<\/VersionPrefix>/g)];
+  return matches.length === 1 ? matches[0][1] : undefined;
+}
+
+export const DOTNET_VERSION_FILE = 'sdks/dotnet/Directory.Build.props';
+
 export function repositoryVersion(tag) {
   const files = execFileSync('git', ['ls-files', '-z', '--', 'package.json', '**/package.json'], { encoding: 'utf8' }).split('\0').filter(Boolean);
+  const dotnet = execFileSync('git', ['ls-files', '--', DOTNET_VERSION_FILE], { encoding: 'utf8' }).trim();
   return checkVersions(
-    files.map((file) => [file, JSON.parse(readFileSync(file, 'utf8'))]),
+    [
+      ...files.map((file) => [file, JSON.parse(readFileSync(file, 'utf8'))]),
+      ...(dotnet ? [[DOTNET_VERSION_FILE, { version: msbuildVersion(readFileSync(DOTNET_VERSION_FILE, 'utf8')) }]] : []),
+    ],
     tag,
   );
 }
