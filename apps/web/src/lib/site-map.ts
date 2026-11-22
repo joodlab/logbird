@@ -80,8 +80,8 @@ export const siteMap: SitePage[] = [
     path: '/cloud',
     title: 'Cloud',
     description: CLOUD_OPEN
-      ? `Logbird Cloud runs the same ${GITHUB_PUBLIC ? 'open-source ' : ''}codebase for you. Early access for invited teams: request access or sign in. Pricing isn't set yet.`
-      : `Logbird Cloud will run the same ${GITHUB_PUBLIC ? 'open-source ' : ''}codebase for you. It isn't open yet. Join the waitlist. Pricing isn't set yet.`,
+      ? `Logbird Cloud runs the same ${GITHUB_PUBLIC ? 'open-source ' : ''}codebase for you. Early access for invited teams: request access or sign in. ${pricing.cloud.metaNote}`
+      : `Logbird Cloud will run the same ${GITHUB_PUBLIC ? 'open-source ' : ''}codebase for you. It isn't open yet. Join the waitlist. ${pricing.cloud.metaNote}`,
     section: 'product',
     priority: 0.9,
     changefreq: 'weekly',

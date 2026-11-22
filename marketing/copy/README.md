@@ -86,7 +86,8 @@ elements rather than loose text. Change a claim in the copy and on the page in t
 - **Citations.** `[S1–S4]` is written out as `[S1, S2, S3, S4]`, the way the page renders it.
 - **Placeholders.** Values from configuration or the release list are written as named placeholders, resolved from the
   test's configuration and `releases.ts`: `<latest release>`, `<latest release date>`, `<first release>`,
-  `<first release date>`, `<supported line>`, `<security contact>`, `<contact email>`, `<sign-in URL>`. Any other
+  `<first release date>`, `<supported line>`, `<security contact>`, `<contact email>`, `<sign-in URL>`, and the pricing
+  words from `apps/web/src/content/pricing.ts`: `<pricing heading>`, `<pricing summary>`, `<pricing status>`. Any other
   `<…>` is literal text.
 - **Variants.**
   - Wording shown only while Logbird Cloud is open goes in a field named `… (when Cloud is open)`, which is checked

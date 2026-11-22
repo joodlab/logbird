@@ -189,6 +189,8 @@ export function pricingContent(site: SiteState, approved = PRICING_APPROVED) {
         ? 'Self-hosting is free under the MIT licence. Logbird Cloud is free during early access; its pricing after that will be published before billing starts.'
         : "Self-hosting is free under the MIT licence. Logbird Cloud's prices are on the pricing page.",
       note: 'Nothing on this page is an offer.',
+      /** The last sentence of /cloud's meta description (lib/site-map.ts). */
+      metaNote: unset ? "Pricing isn't set yet." : 'Prices are on the pricing page.',
       more: { label: 'See pricing', to: '/pricing' } satisfies Cta,
       status: {
         label: 'Pricing',
