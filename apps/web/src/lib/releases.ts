@@ -40,3 +40,6 @@ export const releaseUrl = (githubUrl: string, release: Pick<Release, 'version'>)
 
 /** The newest published release, which the self-host quickstart pins. */
 export const latestRelease: Release | undefined = [...releases].sort(byVersionDesc)[0];
+
+/** The supported line (`major.minor`) of the newest release, e.g. `0.2` for 0.2.0; undefined before any release. */
+export const supportedLine: string | undefined = latestRelease?.version.split('.').slice(0, 2).join('.');

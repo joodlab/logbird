@@ -8,7 +8,7 @@ import { SecurityContact } from '../components/marketing/security-contact';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { StackedTable } from '../components/marketing/stacked-table';
 import { GITHUB_PUBLIC, GITHUB_URL, ORG_NAME } from '../env';
-import { latestRelease } from '../lib/releases';
+import { latestRelease, supportedLine } from '../lib/releases';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/open-source')({ head: () => pageHead('/open-source'), component: OpenSourcePage });
@@ -203,7 +203,7 @@ function OpenSourcePage() {
             <SectionHeader
               eyebrow="Versions"
               id="versions-title"
-              lead={`Version 0.1 is the first supported line.${latestRelease ? ` The latest release is ${latestRelease.version}, with Docker images on GHCR for amd64 and arm64.` : ''} The SDK and the integrations aren't on npm yet: use them from source.`}
+              lead={`${latestRelease && supportedLine ? `The supported line is ${supportedLine}, and the latest release is ${latestRelease.version}, with Docker images on GHCR for amd64 and arm64. ` : ''}The SDK and the integrations share the platform's version. They aren't on npm yet: use them from source.`}
               title="Where the project is today."
             />
             <div>
@@ -214,7 +214,7 @@ function OpenSourcePage() {
           </div>
           <dl className="panel grid grid-cols-2 overflow-hidden">
             {[
-              { label: 'Supported line', value: '0.1' },
+              { label: 'Supported line', value: supportedLine ?? '—' },
               { label: 'Latest release', value: latestRelease ? latestRelease.version : '—' },
               { label: 'Docker images', value: 'GHCR' },
               { label: 'npm packages', value: 'Not yet' },

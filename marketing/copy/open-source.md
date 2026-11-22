@@ -95,11 +95,12 @@ path: /open-source
 - **id:** `versions`
 - **eyebrow:** Versions
 - **heading:** Where the project is today.
-- **body:** Version 0.1 is the first supported line. The latest release is `<latest release>`, with Docker images on
-  GHCR for amd64 and arm64. The SDK and the integrations aren't on npm yet: use them from source.
+- **body:** The supported line is `<major.minor of the latest release>`, and the latest release is `<latest release>`,
+  with Docker images on GHCR for amd64 and arm64. The SDK and the integrations share the platform's version. They
+  aren't on npm yet: use them from source.
   <!-- the version comes from the release list (apps/web/src/lib/releases.ts); packages/*/package.json are 0.1.3 -->
-  <!-- source: SECURITY.md ("Version 0.1.x is the initial supported line"); CHANGELOG.md (both "Unreleased"); packages/sdk/package.json (0.2.0) -->
-- **facts panel:** Supported line — 0.1 · Latest release — `<latest release>` · Docker images — GHCR · npm packages —
+  <!-- source: the release list (apps/web/src/lib/releases.ts, `supportedLine` and `latestRelease`); packages/*/package.json share the platform version; npm registry 404 for @logbird/sdk on 2026-11-22 -->
+- **facts panel:** Supported line — `<major.minor>` · Latest release — `<latest release>` · Docker images — GHCR · npm packages —
   Not yet.
 - **cta:** Read the changelog → `/changelog`
 - **visual:** none
