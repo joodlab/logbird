@@ -44,12 +44,18 @@ export function loosePairNotice(q: string, lang: 'query' | 'sql' | undefined): {
   const terms = fieldTerms(q);
   const targets = terms.filter((t) => canonicalField(t.field ?? '') === 'target');
   const types = terms.filter((t) => canonicalField(t.field ?? '') === 'target.type');
-  // The statement is about terms that select ids and types: a positive term with a value (not `-target:…`, and not a
-  // presence check such as `target:*` or `_exists_:target`). Without one of each, the query has no loose pair.
-  const selects = (t: (typeof terms)[number]) => !t.negated && !(t.wildcard && t.value === '*');
+  const topLevel = new Set(fieldTerms(q, true).map((t) => t.start));
+  // The statement is about terms that select ids and types: at the top level of the query (never inside a group, whose
+  // negation or OR could change what the term means), positive, and naming a value (plain, quoted, a prefix wildcard or a
+  // regex; not a presence check such as `target:*`, `_exists_:target` or a value group). Without one of each, the query
+  // has no loose pair and nothing is said.
+  const selects = (t: (typeof terms)[number]) =>
+    topLevel.has(t.start) &&
+    !t.negated &&
+    (t.valueKind === 'plain' || t.valueKind === 'quoted' || t.valueKind === 'regex') &&
+    !(t.wildcard && t.value === '*');
   if (!targets.some(selects) || !types.some(selects)) return null;
   const [id, type] = [targets[0], types[0]];
-  const topLevel = new Set(fieldTerms(q, true).map((t) => t.start));
   // An empty quoted id or type (`target:""`) is a real value too.
   const simple = (t: (typeof terms)[number] | undefined) =>
     t !== undefined &&

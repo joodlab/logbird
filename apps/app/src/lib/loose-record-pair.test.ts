@@ -14,6 +14,7 @@ it('explains a loose record pair and offers its exact record: form, from the que
   expect(loosePairNotice('target:"a b" target.type:"x:y"', 'query')).toEqual({ exact: formatRecordTerm('x:y', 'a b') });
   // An empty quoted id is a real value: record:"site:" matches type site with the empty id.
   expect(loosePairNotice('target:"" target.type:site', 'query')).toEqual({ exact: formatRecordTerm('site', '') });
+  expect(loosePairNotice('target:12 target.type:""', 'query')).toEqual({ exact: formatRecordTerm('', '12') });
   // Every exact version matches type and id on the same target.
   for (const [q, type, id] of [
     ['target:12 target.type:site', 'site', '12'],
@@ -23,6 +24,7 @@ it('explains a loose record pair and offers its exact record: form, from the que
     ['target:12 target.type:site (outcome:failure OR action:x)', 'site', '12'],
     ['target:"a b" target.type:"x:y"', 'x:y', 'a b'],
     ['target:"" target.type:site', 'site', ''],
+    ['target:12 target.type:""', '', '12'],
   ] as const) {
     const exact = loosePairNotice(q, 'query')?.exact ?? '';
     const compiled = compileQuery(exact);
@@ -39,9 +41,7 @@ it('explains without a button when the pair has no single unambiguous record: fo
     'target:12 target.type:site target.type:page',
     'target:12 target.type:site OR outcome:failure',
     'target:12 OR target.type:site',
-    '(target:12 target.type:site) outcome:failure',
     'target:1* target.type:site',
-    'target:(12 OR 13) target.type:site',
   ])
     expect(loosePairNotice(q, 'query'), q).toEqual({ exact: null });
 });
@@ -61,6 +61,13 @@ it('says nothing when there is no loose pair', () => {
     '-target:12 -target.type:site',
     'target:12 -target.type:site',
     '-target:12 target.type:site',
+    // Inside a group, a negation or OR can change what the terms mean: nothing is claimed.
+    '-(target:12 OR target.type:site)',
+    'NOT (target:12 target.type:site)',
+    '(target:12 target.type:site) outcome:failure',
+    // Value groups (including presence inside one) are not single values.
+    'target:(*) target.type:(*)',
+    'target:(12 OR 13) target.type:site',
   ])
     expect(loosePairNotice(q, 'query'), q).toBeNull();
   expect(loosePairNotice("has(target_ids, '12')", 'sql')).toBeNull();
