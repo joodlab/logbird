@@ -4,7 +4,7 @@ import { resolveWebhookDestination, WebhookLookupBusyError } from '@logbird/data
 import manifest from '../package.json' with { type: 'json' };
 
 const CONNECT_TIMEOUT_MS = 5000;
-const TOTAL_TIMEOUT_MS = 10_000;
+export const TOTAL_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const LOG_BYTES = 2048;
 export type AttemptResult = {

@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { deliverWebhooks } from './webhook-delivery';
 import { discoverWebhookDeliveries } from './webhook-discovery';
 import { pruneWebhookLogs } from './webhook-retention';
+import { TOTAL_TIMEOUT_MS } from './webhook-transport';
 
 const projectId = `qa-webhook-resilience-${randomUUID()}`;
 const ch = createClickHouseClient();
@@ -187,6 +188,7 @@ it.each([5.3, 10.8])(
     const hook = await endpoint('slow-eligibility');
     const delivery = await enqueue(hook, `qa-slow-eligibility-${seconds}`, time);
     let checks = 0;
+    let slept = false;
     let eligibility: Promise<unknown> | undefined;
     try {
       const { totalTimeoutMs: _, ...transport } = options.transport;
@@ -199,13 +201,21 @@ it.each([5.3, 10.8])(
           // delivery locks: make that transaction slow, past the connect (5 s) or total (10 s) budget.
           beforeRequest: async (tx) => {
             checks++;
-            eligibility = tx.$executeRaw`SELECT pg_sleep(${seconds}::double precision)`.catch(() => undefined);
+            // The sleep must succeed: the transaction outlives the attempt's deadlines, which alone decide the outcome.
+            eligibility = tx.$executeRaw`SELECT pg_sleep(${seconds}::double precision)`;
             await eligibility;
+            slept = true;
           },
         },
         projectId,
       );
       expect(checks).toBe(1);
+      expect(slept).toBe(true);
+      // 5.3 s spends the 5-second connect budget, so the paused attempt never starts; at 10.8 s the 10-second total
+      // deadline settles the attempt while dispatch is still paused in PostgreSQL.
+      const [paused] = (await log(delivery.id)).attempts;
+      expect(paused?.latencyMs).toBeGreaterThanOrEqual(seconds < 10 ? seconds * 1000 : TOTAL_TIMEOUT_MS);
+      expect(paused?.latencyMs).toBeLessThan(seconds < 10 ? TOTAL_TIMEOUT_MS : seconds * 1000);
       expect(await log(delivery.id)).toMatchObject({
         status: 'pending',
         leaseUntil: null,

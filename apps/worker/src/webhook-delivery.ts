@@ -7,7 +7,7 @@ import { MAX_WEBHOOK_SIGNATURES, signWebhook } from '@logbird/sdk';
 import { webhookDatabaseTime } from './webhook-clock';
 import { webhookEvent } from './webhook-discovery';
 import { RETRY_WINDOW_MS, webhookRetryDelay } from './webhook-policy';
-import { type AttemptResult, legacyWebhookHeaderId, postWebhook, type WebhookTransportOptions } from './webhook-transport';
+import { type AttemptResult, legacyWebhookHeaderId, postWebhook, TOTAL_TIMEOUT_MS, type WebhookTransportOptions } from './webhook-transport';
 
 const LEASE_MS = 120_000;
 const MAX_ENDPOINT_ATTEMPTS_PER_SECOND = 50;
@@ -322,7 +322,7 @@ async function attemptDelivery(
         if (performance.now() - clockStarted >= timeRemaining) return;
         // The response promise is boxed so Prisma commits without waiting for the receiver.
         return startRequest(timestamp, signature);
-      }),
+      }, dispatchTransactionOptions(options.transport)),
     options.transport,
   );
   if (overlapAt) {
@@ -341,6 +341,16 @@ async function attemptDelivery(
   }
   return result;
 }
+
+/**
+ * The dispatch transaction only locks and reads; it ends once the request has started. The attempt's own deadlines
+ * (connect budget, total timeout) decide a slow final check, so the transaction outlives the total timeout by a margin
+ * instead of Prisma's default 5 seconds, then closes even if PostgreSQL never answers.
+ */
+const DISPATCH_TRANSACTION_MARGIN_MS = 2000;
+const dispatchTransactionOptions = (transport?: WebhookTransportOptions) => ({
+  timeout: (transport?.totalTimeoutMs ?? TOTAL_TIMEOUT_MS) + DISPATCH_TRANSACTION_MARGIN_MS,
+});
 
 async function sendClaim(ch: ClickHouseClient, { delivery, expired }: Claim, options: DeliveryOptions) {
   const start = performance.now();
