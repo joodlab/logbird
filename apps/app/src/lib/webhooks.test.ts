@@ -16,6 +16,7 @@ import {
   lenientDeliveriesSchema,
   scopeOf,
   scopeSummary,
+  sendBlockedCopy,
   storedScope,
   validateWebhookForm,
   webhookErrorCopy,
@@ -53,6 +54,19 @@ describe('webhook copy', () => {
       path: '/services/T0/B0/secret?…',
     });
     expect(displayUrl('https://example.com/')).toEqual({ host: 'example.com', path: '' });
+  });
+  it('names every step still needed before anything can be sent, since fixing one hold alone leaves the others', () => {
+    const e = (enabled: boolean, filter: boolean, scope: boolean) => ({
+      enabled,
+      filterWarning: filter ? ('webhook_filter_review_required' as const) : undefined,
+      scopeWarning: scope ? ('webhook_invalid_scope' as const) : undefined,
+    });
+    expect(sendBlockedCopy(e(true, false, false), 'send a delivery again')).toBeNull();
+    expect(sendBlockedCopy(e(false, false, false), 'send a delivery again')).toBe('To send a delivery again, turn this endpoint on.');
+    expect(sendBlockedCopy(e(true, true, true), 'send a delivery again')).toBe('To send a delivery again, confirm its filter and fix its scope.');
+    expect(sendBlockedCopy(e(false, true, true), 'send a test ping')).toBe(
+      'To send a test ping, turn this endpoint on, confirm its filter and fix its scope.',
+    );
   });
 });
 

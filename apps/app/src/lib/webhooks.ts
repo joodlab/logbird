@@ -189,6 +189,24 @@ export const scopeOf = (f: Form) => {
 /** Where the operator procedure lives (self-hosting docs, on GitHub). */
 export const CURSOR_REVIEW_DOCS = 'https://github.com/joodlab/logbird/blob/master/docs/self-hosting.md#reconcile-a-webhook-discovery-cursor';
 
+/**
+ * Why the API would refuse to send a delivery again (or a test ping) right now, naming every step still needed:
+ * fixing one hold alone leaves the others in force. Null when nothing stands in the way (a cursor review does not).
+ */
+export function sendBlockedCopy(
+  e: Pick<WebhookEndpoint, 'enabled' | 'filterWarning' | 'scopeWarning'>,
+  what: 'send a delivery again' | 'send a test ping',
+): string | null {
+  const steps = [
+    ...(e.enabled ? [] : ['turn this endpoint on']),
+    ...(e.filterWarning ? ['confirm its filter'] : []),
+    ...(e.scopeWarning ? ['fix its scope'] : []),
+  ];
+  if (!steps.length) return null;
+  const list = steps.length === 1 ? steps[0] : `${steps.slice(0, -1).join(', ')} and ${steps.at(-1)}`;
+  return `To ${what}, ${list}.`;
+}
+
 export type EndpointState = {
   key: 'filter' | 'scope' | 'cursor' | 'secrets';
   /** A hold pauses delivery; a warning does not. */

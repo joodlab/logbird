@@ -43,6 +43,7 @@ import {
   OVERLAP_CHOICES,
   scopeOf,
   scopeSummary,
+  sendBlockedCopy,
   storedScope,
   validateWebhookForm,
   webhookErrorCopy,
@@ -256,7 +257,7 @@ function EndpointCard({
   const states = endpointStates(endpoint);
   const held = states.find((s) => s.kind === 'hold');
   // The API refuses a test ping while the endpoint is off or held for its filter or scope; cursor review allows it.
-  const testBlocked = states.find((s) => s.key === 'filter' || s.key === 'scope');
+  const testBlocked = sendBlockedCopy(endpoint, 'send a test ping');
   const busy = [toggle, remove, confirmFilter, test].some((m) => m.isPending && m.failureCount > 0);
   return (
     <li className="flex min-w-0 flex-col gap-3 rounded-lg border p-4" data-testid="webhook-endpoint">
@@ -319,10 +320,10 @@ function EndpointCard({
           Delivery log
         </Button>
         <Button
-          disabled={test.isPending || off || Boolean(testBlocked)}
+          disabled={test.isPending || testBlocked !== null}
           onClick={() => test.mutate()}
           size="sm"
-          title={off ? 'Turn the endpoint on first.' : testBlocked ? 'Confirm the filter or fix the scope first.' : undefined}
+          title={testBlocked ?? undefined}
           variant="outline"
         >
           {test.isPending ? <Loader2Icon className="animate-spin" /> : null}
@@ -359,13 +360,7 @@ function EndpointCard({
         onOpenChange={setLogOpen}
         open={logOpen}
         projectId={projectId}
-        sendBlocked={
-          off
-            ? 'This endpoint is off: turn it on to send a delivery again.'
-            : testBlocked
-              ? 'This endpoint is held: confirm its filter or fix its scope to send a delivery again.'
-              : null
-        }
+        sendBlocked={sendBlockedCopy(endpoint, 'send a delivery again')}
       />
     </li>
   );
