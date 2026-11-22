@@ -96,19 +96,17 @@ public class ResilienceTests
         }), new FakeServer());
         try
         {
-            var watch = Stopwatch.StartNew();
-            for (var i = 0; i < 50; i++)
-            {
-                client.Track(new AuditEvent("overflow"));
-            }
-
             // OnDrop blocks forever, so a Track that waited on it would never return: any finite limit proves the point.
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), watch.Elapsed.ToString());
-            watch.Restart();
-            await client.DisposeAsync();
+            await Deadline.Within(TimeSpan.FromSeconds(30), () =>
+            {
+                for (var i = 0; i < 50; i++)
+                {
+                    client.Track(new AuditEvent("overflow"));
+                }
+            });
 
             // Documented bound: ShutdownTimeout + 2 s + 5 s for pending callbacks.
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), watch.Elapsed.ToString());
+            await Deadline.Within(TimeSpan.FromSeconds(15), () => client.DisposeAsync().AsTask());
             Assert.Equal(49, client.Stats.Dropped);
         }
         finally
@@ -235,25 +233,43 @@ public class ResilienceTests
     }
 
     [Fact]
-    public async Task A_timed_out_synchronous_flush_is_forgotten()
+    public async Task A_cancelled_or_timed_out_flush_is_forgotten()
     {
         using var release = new ManualResetEventSlim();
         var client = Client(Options(o => o.ShutdownTimeout = TimeSpan.Zero), new BlockingHandler(release));
         try
         {
             client.Track(new AuditEvent("pending"));
-            Assert.False(client.Flush(TimeSpan.FromMilliseconds(50)));
             var waiters = typeof(Internal.EventQueue).GetField("_waiters", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             var queue = typeof(LogbirdClient).GetField("_queue", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(client)!;
+            int Count() => ((System.Collections.ICollection)waiters.GetValue(queue)!).Count;
 
-            // The flush may start late on a busy pool; once it has, its already-cancelled wait is removed at once.
-            var watch = Stopwatch.StartNew();
-            while (((System.Collections.ICollection)waiters.GetValue(queue)!).Count > 0 && watch.Elapsed < TimeSpan.FromSeconds(30))
+            // A flush registers its waiter (established first), and cancelling it removes the waiter.
+            using (var cancel = new CancellationTokenSource())
             {
-                await Task.Delay(20);
+                var flush = client.FlushAsync(cancel.Token);
+                await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
+                {
+                    while (Count() == 0)
+                    {
+                        await Task.Delay(10);
+                    }
+                });
+                Assert.Equal(1, Count());
+                cancel.Cancel();
+                Assert.False(await flush);
+                Assert.Equal(0, Count());
             }
 
-            Assert.Empty((System.Collections.ICollection)waiters.GetValue(queue)!);
+            // A timed-out synchronous flush takes the same path and leaves no waiter behind.
+            Assert.False(client.Flush(TimeSpan.FromMilliseconds(50)));
+            await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
+            {
+                while (Count() > 0)
+                {
+                    await Task.Delay(20);
+                }
+            });
         }
         finally
         {

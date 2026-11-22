@@ -83,17 +83,18 @@ public class IsolationTests
         try
         {
             var client = Client(Options(o => o.MaxQueueSize = 5), new FakeServer());
-            var watch = Stopwatch.StartNew();
-            for (var i = 0; i < 100; i++)
-            {
-                client.Track(new AuditEvent("measured"));
-            }
-
-            Assert.True(await client.FlushAsync(TimeSpan.FromSeconds(30)));
-            await client.DisposeAsync();
 
             // The listener blocks forever, so a regression would hang; the limit only has to separate that from success.
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), watch.Elapsed.ToString());
+            await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
+            {
+                for (var i = 0; i < 100; i++)
+                {
+                    client.Track(new AuditEvent("measured"));
+                }
+
+                Assert.True(await client.FlushAsync(TimeSpan.FromSeconds(20)));
+                await client.DisposeAsync();
+            });
             Assert.Equal(95, client.Stats.Dropped);
         }
         finally

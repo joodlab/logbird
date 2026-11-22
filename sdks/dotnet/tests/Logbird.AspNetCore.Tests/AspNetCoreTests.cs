@@ -463,12 +463,13 @@ public class AspNetCoreTests
             fake: new FakeServer { Fallback = _ => new TaskCompletionSource<HttpResponseMessage>().Task });
         (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
         var client = app.Client;
-        var watch = Stopwatch.StartNew();
-        await app.Host.StopAsync();
-        await app.Host.DisposeAsync();
 
         // The host's 300 ms budget ends shutdown; a regression would wait out the client's 20-second ShutdownTimeout.
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), watch.Elapsed.ToString());
+        await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
+        {
+            await app.Host.StopAsync();
+            await app.Host.DisposeAsync();
+        });
 
         // The report runs in the background once the host's budget ends.
         Assert.Equal(DropReason.Shutdown, Assert.Single(await Eventually(drops, 1)).Reason);
@@ -544,9 +545,7 @@ public class AspNetCoreTests
         try
         {
             // The Logbird logger stays blocked while the request runs, so a request that waited on it would never finish.
-            var request = app.Http.PostAsync("/", null);
-            Assert.Same(request, await Task.WhenAny(request, Task.Delay(TimeSpan.FromSeconds(30))));
-            (await request).EnsureSuccessStatusCode();
+            await Deadline.Within(TimeSpan.FromSeconds(30), async () => (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode());
         }
         finally
         {
@@ -802,6 +801,15 @@ public class AspNetCoreTests
     public async Task R2_a_large_backlog_never_holds_the_host_and_is_reported_in_the_background()
     {
         const int Count = 100_000;
+
+        // The report starts by cancelling the in-flight request; that cancellation blocks on a gate until the host has
+        // stopped, so a shutdown that waited for the report could not finish while the gate is closed.
+        using var reportGate = new ManualResetEventSlim();
+        var fake = new FakeServer
+        {
+            Fallback = _ => new TaskCompletionSource<HttpResponseMessage>().Task,
+            OnRequestToken = token => token.Register(() => reportGate.Wait()),
+        };
         var app = await App.StartAsync(
             _ => { },
             options: o =>
@@ -810,26 +818,44 @@ public class AspNetCoreTests
                 o.ShutdownTimeout = TimeSpan.FromSeconds(20);
             },
             services: b => b.Services.Configure<HostOptions>(h => h.ShutdownTimeout = TimeSpan.FromMilliseconds(300)),
-            fake: new FakeServer { Fallback = _ => new TaskCompletionSource<HttpResponseMessage>().Task });
+            fake: fake);
         var client = app.Client;
         for (var i = 0; i < Count; i++)
         {
             client.Track(new AuditEvent("backlog.recorded"));
         }
 
-        var watch = Stopwatch.StartNew();
-        await app.Host.StopAsync();
-        var stopped = watch.Elapsed;
-        await app.Host.DisposeAsync();
-        // The host's 300 ms budget ends both; a regression would wait out the 20-second ShutdownTimeout (or the backlog).
-        Assert.True(stopped < TimeSpan.FromSeconds(10), "StopAsync took " + stopped);
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), "the host lifecycle took " + watch.Elapsed);
-        var deadline = DateTime.UtcNow.AddSeconds(20);
-        while (client.Stats.Dropped < Count && DateTime.UtcNow < deadline)
+        // A full batch is sent as soon as the queue reaches the batch size; wait until that request is in flight.
+        await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
         {
-            await Task.Delay(50);
+            while (fake.Requests.IsEmpty)
+            {
+                await Task.Delay(10);
+            }
+        });
+
+        try
+        {
+            // The host's 300 ms budget ends shutdown; a regression would wait for the report (held here) or for the
+            // 20-second ShutdownTimeout.
+            await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
+            {
+                await app.Host.StopAsync();
+                await app.Host.DisposeAsync();
+            });
+        }
+        finally
+        {
+            reportGate.Set();
         }
 
+        await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
+        {
+            while (client.Stats.Dropped < Count)
+            {
+                await Task.Delay(50);
+            }
+        });
         Assert.Equal(Count, client.Stats.Dropped);
         Assert.Equal(Count, client.Stats.Tracked);
     }
