@@ -19,12 +19,16 @@ concurrency:
 
 jobs:
   docker:
-    name: Docker (${{ matrix.role }})
-    runs-on: ubuntu-latest
+    name: Docker (${{ matrix.role }}${{ matrix.arch == 'arm64' && ', arm64' || '' }})
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
+        role: [server, worker, app, migrate, site]
+        arch: [amd64, arm64]
+        exclude:
+          - {role: site, arch: arm64}
         include:
           - {role: server, dockerfile: apps/server/Dockerfile, target: runtime}
           - {role: worker, dockerfile: apps/worker/Dockerfile, target: runtime}
@@ -53,8 +57,21 @@ jobs:
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
           build-args: ${{ matrix.build-args }}
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
           push: false
-          outputs: type=oci,dest=${{ runner.temp }}/logbird-${{ matrix.role }}.tar
-          cache-from: type=gha,scope=pr-${{ matrix.role }}
-          cache-to: type=gha,mode=max,scope=pr-${{ matrix.role }}
+          outputs: ${{ matrix.role == 'worker' && 'type=docker,name=logbird-worker:pr' || format('type=oci,dest={0}/logbird-{1}.tar', runner.temp, matrix.role) }}
+          cache-from: type=gha,scope=pr-${{ matrix.role }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=pr-${{ matrix.role }}-${{ matrix.arch }}
+      - name: Verify MessagePack in the worker image
+        if: matrix.role == 'worker'
+        run: |
+          docker run --rm --pull=never --network=none --entrypoint node -i logbird-worker:pr --input-type=commonjs - <<'NODE'
+          const assert = require('node:assert/strict');
+          const { createRequire } = require('node:module');
+          require('bullmq');
+          const { Packr, isNativeAccelerationEnabled } = createRequire(require.resolve('bullmq'))('msgpackr');
+          const packer = new Packr({ useRecords: false });
+          const job = { name: 'image-smoke-test', data: { count: 1 } };
+          assert.deepEqual(packer.unpack(packer.pack(job)), job);
+          console.log(`BullMQ MessagePack round trip passed on ${process.version} (${process.arch}); native acceleration: ${isNativeAccelerationEnabled}`);
+          NODE
