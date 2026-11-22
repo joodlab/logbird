@@ -18,7 +18,7 @@ import type {
   SearchQuery,
   SearchResponse,
 } from '@logbird/contracts';
-import { EXPORT_SCHEMA_VERSION, pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
+import { EXPORT_SCHEMA_VERSION, parseJsonExact, pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import { isQueryClient } from './client';
@@ -257,7 +257,7 @@ export async function getEvent(ch: ClickHouseClient, projectId: string, eventId:
   )[0];
   return {
     event: toEvent(row),
-    payload: JSON.parse(row.payload),
+    payload: parseJsonExact(row.payload),
     parents,
     childCount: Number(counts?.children ?? 0),
     operationSize: Number(counts?.size ?? 0),

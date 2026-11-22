@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { isRawJson, rawJsonText } from '@logbird/contracts';
 import { resolveTimestamp } from './timestamp';
 
 function uuidv7() {
@@ -10,8 +11,9 @@ function uuidv7() {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
+// A raw JSON number (parseJsonExact keeps digits a double cannot hold) is a leaf value, never an object.
 const object = (v: unknown): Record<string, unknown> =>
-  v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  v !== null && typeof v === 'object' && !Array.isArray(v) && !isRawJson(v) ? (v as Record<string, unknown>) : {};
 const isHigh = (code: number) => code >= 0xd8_00 && code <= 0xdb_ff;
 const isLow = (code: number) => code >= 0xdc_00 && code <= 0xdf_ff;
 // A valid pair straddling a cap must not become a native JSONEachRow parse rejection.
@@ -19,9 +21,16 @@ const capText = (s: string, cap: number) => s.slice(0, isHigh(s.charCodeAt(cap -
 // Search columns are lossy by design: a lone surrogate (which ClickHouse rejects as invalid UTF-8, code 25) becomes
 // U+FFFD, like String.prototype.toWellFormed. The raw payload and v1 identity keep the original input.
 const wellFormed = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
-const text = (v: unknown, cap = 512): string => (typeof v === 'string' ? capText(wellFormed(v.trim()), cap) : '');
+// Numbers (ids from integer keys, numeric names) are indexed by their exact decimal text, like a string would be.
+// Legacy (pre-v1) receipt fingerprints froze the old columns, where a number indexed as ''.
+const textOf = (v: unknown, cap: number, numbers: boolean): string => {
+  const s = typeof v === 'string' ? v : numbers ? rawJsonText(v) : null;
+  return s === null ? '' : capText(wellFormed(s.trim()), cap);
+};
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
-export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string }) {
+const isNumber = (v: unknown) => typeof v === 'number' || isRawJson(v);
+export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string; legacyColumns?: boolean }) {
+  const text = (v: unknown, cap = 512) => textOf(v, cap, !ctx.legacyColumns);
   // Search normalization is intentionally lossy. Identity v1 hashes canonical raw input, NOT these columns.
   // Changing caps/flattening must not change v1 or remove the legacy receipt compatibility path.
   const e = object(input);
@@ -94,11 +103,12 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   const warning =
     [
       occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,
-      typeof e.id === 'number' ? 'Numeric id is not a stable event id; send a string id for safe retries.' : null,
+      isNumber(e.id) ? 'Numeric id is not a stable event id; send a string id for safe retries.' : null,
     ]
       .filter(Boolean)
       .join('; ') || null;
-  const id = text(e.id, 256) || uuidv7();
+  // A numeric id is not a stable id (spec): it gets a fresh one and a warning, unlike numeric entity ids.
+  const id = (typeof e.id === 'string' ? text(e.id, 256) : '') || uuidv7();
   const row = {
     project_id: ctx.projectId,
     event_id: id,
@@ -119,7 +129,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     executor_id: text(executor.id, 256),
     executor_name: text(executor.name),
     job_id: text(executor.jobId, 256),
-    job_attempt: typeof executor.attempt === 'number' ? Math.min(65_535, Math.max(0, Math.trunc(executor.attempt) || 0)) : 0,
+    job_attempt: isNumber(executor.attempt) ? Math.min(65_535, Math.max(0, Math.trunc(Number(rawJsonText(executor.attempt) ?? 0)) || 0)) : 0,
     tenant_id: text(tenant.id, 256),
     tenant_name: text(tenant.name),
     source: text(e.source, 128),

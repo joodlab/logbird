@@ -159,7 +159,7 @@ export type AuditEvent = z.infer<typeof eventSchema>;
 
 export const eventDetailSchema = z.object({
   event: eventSchema,
-  payload: z.unknown(), // raw JSON exactly as received
+  payload: z.unknown(), // stored original JSON: same values and exact number digits; formatting not preserved
   parents: z.array(eventSchema), // causation chain root -> direct parent
   childCount: z.number().int(),
   operationSize: z.number().int(), // events sharing context.operationId

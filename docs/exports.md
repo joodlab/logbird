@@ -39,8 +39,9 @@ Admission and final validation retry only contention, with 25–75 ms jitter and
 ## Which format?
 
 - **Complete (original payloads)** — `jsonl-evidence`. Each line contains `exportSchemaVersion: 1`, the normalized
-  `event`, and the stored original JSON in `payload`. The latter preserves accepted nested/unknown/long values;
-  it does not preserve HTTP whitespace, compression or the batch wrapper. Normalized fields and payload are selected
+  `event`, and the stored original JSON in `payload`. The latter preserves accepted nested/unknown/long values and
+  the exact digits of every number, including 64-bit integers and long decimals; it does not preserve HTTP
+  whitespace, number spelling (`1e3` is stored as `1000`), compression or the batch wrapper. Normalized fields and payload are selected
   from the same physical row, including legacy versions with tied timestamps. Missing or malformed stored JSON fails
   the export. Literal CR/LF in externally inserted payload text also fails, protecting JSONL framing. Syntax validation
   does not reserialize valid JSON or change large-number text.

@@ -188,7 +188,11 @@ Normalization rules (server):
   targets/context) is flattened to `attributes` with dot paths (`metadata.plan.tier`), max depth 6, max 256 keys,
   values stringified and capped at 2 KB. Arrays become JSON strings.
 - Every stored attribute key must be valid Unicode. Keys beyond the 256-attribute cap are not stored or checked. A lone surrogate in a stored key rejects the event before INSERT as `invalid_event: Attribute keys must be valid Unicode`; valid surrogate pairs remain verbatim. Keys are never repaired, avoiding replacement collisions. Changes values, target arrays and rejected occurredAt search copies also use `toWellFormed()`; raw input and v1 identity are unchanged.
-- Raw document (as received, ≤ 256 KB) is stored in `payload` (ZSTD).
+- The original document (≤ 256 KB) is stored in `payload` (ZSTD) with the same values it was sent with, including
+  numbers a double cannot hold (64-bit ids, long decimals), which keep their exact digits. Formatting is not
+  preserved: whitespace, key spacing and number spelling such as `1e3` or `19.90` come back as `1000` and `19.9`.
+  Numbers are indexed by their exact decimal text, so `actor.id: 42` is searchable as `actor:42`; a numeric event
+  `id` still gets a fresh id and a warning.
 - `conformance` = % of {occurredAt, actor.id, actor.type, outcome, targets[≥1], tenant.id, executor.type,
   context.operationId|requestId, description} present.
 - Unknown `outcome`/`severity` strings are kept verbatim (accept anything) — UI shows them neutrally.

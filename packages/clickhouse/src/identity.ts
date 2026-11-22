@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isRawJson, parseJsonExact } from '@logbird/contracts';
 import type { ClickHouseClient } from './client';
 import { projectMaintenance } from './maintenance-tag';
 import { type EventRow, normalizeEvent } from './normalize';
@@ -7,6 +8,9 @@ import { resolveTimestamp } from './timestamp';
 
 function sorted(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sorted);
+  // Raw JSON numbers serialize as their exact digits. Doubles that round-trip stay plain numbers, so identity of
+  // events without such numbers is unchanged.
+  if (isRawJson(value)) return value;
   if (value && typeof value === 'object')
     return Object.fromEntries(
       Object.entries(value)
@@ -68,7 +72,7 @@ export function canonicalFingerprint(input: unknown, timestamp: string) {
 }
 /** v1 hashes parsed input and resolved time, never search columns or admission rules. */
 export function eventFingerprint(row: EventRow) {
-  return canonicalFingerprint(JSON.parse(row.payload), row.timestamp);
+  return canonicalFingerprint(parseJsonExact(row.payload), row.timestamp);
 }
 export function retryFingerprint(input: unknown, projectId: string, receivedAt: Date, eventId: string, expected = 'v1:', eventAt?: Date) {
   if (expected.startsWith('unreadable:')) return null;
@@ -76,7 +80,8 @@ export function retryFingerprint(input: unknown, projectId: string, receivedAt: 
     const occurredAt = input && typeof input === 'object' ? (input as Record<string, unknown>).occurredAt : undefined;
     return canonicalFingerprint(input, (eventAt ?? resolveTimestamp(occurredAt, receivedAt).timestamp).toISOString());
   }
-  const result = normalizeEvent(input, { projectId, receivedAt });
+  // Unversioned claims hashed 3a1541f columns: keep their numeric-id indexing frozen.
+  const result = normalizeEvent(input, { projectId, receivedAt, legacyColumns: true });
   if (!result.ok) return null;
   result.row.event_id = eventId;
   return legacyEventFingerprint(result.row);
@@ -93,7 +98,7 @@ function identities(rows: EventRow[]) {
       const normalized = { ...row, timestamp: eventAt.toISOString() };
       let fingerprint: string;
       try {
-        fingerprint = canonicalFingerprint(JSON.parse(row.payload), eventAt.toISOString());
+        fingerprint = canonicalFingerprint(parseJsonExact(row.payload), eventAt.toISOString());
       } catch {
         fingerprint = `unreadable:${digest({ payload: row.payload, timestamp: eventAt.toISOString() })}`;
       }

@@ -1,0 +1,81 @@
+import { exportEvents, searchEvents } from '@logbird/clickhouse';
+import { prisma } from '@logbird/database';
+import { afterEach, beforeEach, expect, it } from 'vitest';
+import { clickhouse } from './clickhouse';
+import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
+import { generateApiKey } from './keys';
+
+let f: ImmutableFixture;
+let readSecret = '';
+beforeEach(async () => {
+  f = await immutableFixture('qa-exact-numbers');
+  const key = generateApiKey('read');
+  await prisma.apiKey.create({ data: { projectId: f.project, name: 'QA read', kind: 'read', hash: key.hash, prefix: key.prefix } });
+  readSecret = key.secret;
+});
+afterEach(async () => {
+  await f.cleanup();
+});
+
+const occurredAt = new Date(Date.now() - 60_000).toISOString();
+const body = `{"id":"exact-1","action":"order.paid","occurredAt":"${occurredAt}","actor":{"type":"user","id":42},"targets":[{"type":"order","id":9007199254740993}],"metadata":{"snowflake":1234567890123456789,"rate":0.12345678901234567890123,"plain":19.90},"changes":[{"field":"balance","before":12345678901234567891,"after":0.1}]}`;
+const replica = () => {
+  const app = f.replicas[0];
+  if (!app) throw new Error('fixture replica missing');
+  return app;
+};
+const rawPost = (text: string) =>
+  replica().request('/v1/events', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${f.key.secret}` },
+    body: text,
+  });
+const range = { from: new Date(Date.now() - 3_600_000).toISOString(), to: new Date(Date.now() + 60_000).toISOString() };
+
+it('keeps exact digits from ingest through storage, the read API, search and the evidence export', async () => {
+  const first = await rawPost(body);
+  expect(first.status).toBe(202);
+  expect(await first.json()).toMatchObject({ accepted: 1, ids: ['exact-1'], rejected: [] });
+
+  const detail = await replica().request('/v1/events/exact-1', { headers: { Authorization: `Bearer ${readSecret}` } });
+  expect(detail.status).toBe(200);
+  const text = await detail.text();
+  // JSON numbers with the exact digits, not strings.
+  expect(text).toContain('"snowflake":1234567890123456789');
+  expect(text).toContain('"rate":0.12345678901234567890123');
+  expect(text).toContain('"before":12345678901234567891');
+  expect(text).toContain('"id":9007199254740993');
+  expect(text).toContain('"plain":19.9');
+  expect(text).toContain('"metadata.snowflake":"1234567890123456789"');
+  expect(text).toContain('"before":"12345678901234567891"');
+
+  for (const q of [
+    'metadata.snowflake:1234567890123456789',
+    'actor:42',
+    'target:9007199254740993 target.type:order',
+    'attr.metadata.rate:0.12345678901234567890123',
+  ]) {
+    const found = await searchEvents(clickhouse, f.project, { ...range, q, limit: 10, order: 'desc' });
+    expect(found.data.map((e) => e.id)).toEqual(['exact-1']);
+  }
+  expect(
+    (await searchEvents(clickhouse, f.project, { ...range, q: 'metadata.snowflake:1234567890123456800', limit: 10, order: 'desc' })).data,
+  ).toEqual([]);
+
+  const lines: string[] = [];
+  for await (const chunk of exportEvents(clickhouse, f.project, { ...range, format: 'jsonl-evidence' })) lines.push(chunk);
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toContain('"payload":{"id":"exact-1"');
+  expect(lines[0]).toContain('"snowflake":1234567890123456789');
+});
+
+it('treats an identical raw retry as the same event and the rounded number as different content', async () => {
+  expect((await rawPost(body)).status).toBe(202);
+  const retry = await rawPost(body);
+  expect(await retry.json()).toMatchObject({ accepted: 1, ids: ['exact-1'], rejected: [] });
+  const rounded = await rawPost(body.replace('1234567890123456789', '1234567890123456800'));
+  const roundedBody = await rounded.json();
+  expect(roundedBody.accepted).toBe(0);
+  expect(roundedBody.rejected[0].code).toBe('duplicate_id_conflict');
+  expect(await f.count()).toBe(1);
+});
