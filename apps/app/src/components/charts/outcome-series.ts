@@ -1,6 +1,7 @@
 import type { HistogramResponse } from '@logbird/contracts';
 import type { ChartConfig } from '@logbird/ui/components/ui/chart';
-import { formatClock, formatDate, formatDayTime, formatMonthDay, formatMonthYear, zoneOffsetMs } from '@/lib/format';
+import { formatClock, formatDate, formatDayTime, formatMonthDay, formatMonthYear, formatOffset, localDayKey, zoneOffsetMs } from '@/lib/format';
+import { NAMED_OUTCOMES } from '@/lib/overview-queries';
 
 export const SERIES = ['success', 'partial', 'denied', 'failure', 'unknown'] as const;
 export type SeriesKey = (typeof SERIES)[number];
@@ -32,7 +33,8 @@ export function toSeries(h: HistogramResponse | undefined): SeriesRow[] {
   return h.buckets.map((b) => {
     const row: SeriesRow = { ts: Date.parse(b.ts), total: b.total, success: 0, partial: 0, denied: 0, failure: 0, unknown: 0 };
     for (const [outcome, count] of Object.entries(b.byOutcome)) {
-      if ((SERIES as readonly string[]).includes(outcome)) row[outcome as SeriesKey] += count;
+      // The named bands; everything else (unknown and custom outcomes) is Other, which `outcomeBandQuery('unknown')` opens.
+      if ((NAMED_OUTCOMES as readonly string[]).includes(outcome)) row[outcome as (typeof NAMED_OUTCOMES)[number]] += count;
       else row.unknown += count;
     }
     return row;
@@ -98,10 +100,21 @@ export function timeTicks(rows: SeriesRow[], intervalSeconds: number, target = 7
 /** Bars tick on bucket starts too; kept as its own name for the category axis. */
 export const bucketTicks = (rows: SeriesRow[], intervalSeconds: number) => timeTicks(rows, intervalSeconds);
 
+/**
+ * A bucket's span in the console zone. Buckets are aligned to UTC (see `timeTicks`): in UTC, and in zones whose
+ * midnight falls on a bucket start, day buckets name their days; elsewhere a day bucket spans two local dates, so it
+ * names both ends with their times ("Nov 21, 16:00 – Nov 22, 16:00" in Los Angeles).
+ */
 export function bucketLabel(ts: number, intervalSeconds: number): string {
   const end = ts + intervalSeconds * 1000;
-  // A multi-day bucket names the days it covers (its end is exclusive).
-  if (intervalSeconds > 86_400) return `${formatDate(new Date(ts).toISOString())} – ${formatDate(new Date(end - 1).toISOString())}`;
-  if (intervalSeconds >= 86_400) return formatMonthDay(ts);
-  return `${formatDayTime(ts)} – ${formatClock(end)}`;
+  const atMidnight = (ms: number) => (ms + localOffset(ms)) % DAY === 0;
+  if (intervalSeconds >= 86_400 && atMidnight(ts) && atMidnight(end)) {
+    // A multi-day bucket names the days it covers (its end is exclusive).
+    if (intervalSeconds > 86_400) return `${formatDate(new Date(ts).toISOString())} – ${formatDate(new Date(end - 1).toISOString())}`;
+    return formatMonthDay(ts);
+  }
+  const shift = localOffset(ts) === localOffset(end) ? '' : ` (${formatOffset(ts)} → ${formatOffset(end)})`;
+  if (intervalSeconds > 86_400)
+    return `${formatDate(new Date(ts).toISOString())} ${formatClock(ts)} – ${formatDate(new Date(end).toISOString())} ${formatClock(end)}${shift}`;
+  return `${localDayKey(ts) === localDayKey(end) ? `${formatDayTime(ts)} – ${formatClock(end)}` : `${formatDayTime(ts)} – ${formatDayTime(end)}`}${shift}`;
 }

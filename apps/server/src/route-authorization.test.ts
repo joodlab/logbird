@@ -11,7 +11,10 @@ vi.mock('./rate-limit', () => ({
   clientAddress: () => undefined,
   rateLimit: (_c: unknown, next: () => Promise<void>) => next(),
   requestRateLimit: () => (_c: unknown, next: () => Promise<void>) => next(),
-  publicRateLimits: { authenticated: () => (_c: unknown, next: () => Promise<void>) => next() },
+  publicRateLimits: {
+    authenticated: () => (_c: unknown, next: () => Promise<void>) => next(),
+    mint: () => (_c: unknown, next: () => Promise<void>) => next(),
+  },
 }));
 vi.mock('@logbird/worker/queue', () => ({ connection: {}, retentionQueue: {} }));
 
@@ -34,6 +37,11 @@ it('accounts for every concrete /api and /v1 route and contract', () => {
       .sort(),
   ).toEqual(expected);
   expect(new Set(expected).size).toBe(expected.length);
+});
+
+it('requires the same project session for entity metadata as for the full profile', () => {
+  expect(routes.entities.metadata.auth).toBe('session');
+  expect(consoleMatrix).toContainEqual(['GET', routes.entities.metadata.path, 'project']);
 });
 
 it('accounts for every configured auth capability, including methods that are server-only', () => {

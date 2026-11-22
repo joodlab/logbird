@@ -33,7 +33,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api/client';
 import { projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { ENTITY_SECTIONS, sectionForKind } from '@/lib/entities';
-import { formatExactTerm } from '@/lib/query-language';
+import { formatTerm } from '@/lib/query-language';
 import { PROJECT_NAV } from './nav';
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
@@ -126,9 +126,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
             {looksLikeEvent ? (
               <CommandItem
                 onSelect={() =>
-                  go(() =>
-                    navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: formatExactTerm('id', trimmed), ev: trimmed } }),
-                  )
+                  go(() => navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: formatTerm('id', trimmed), ev: trimmed } }))
                 }
                 value={`event ${trimmed}`}
               >
@@ -165,8 +163,9 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                   onSelect={() =>
                     go(() =>
                       navigate({
-                        to: `/p/$projectId/${section}/$entityId` as '/p/$projectId/actors/$entityId',
+                        to: `/p/$projectId/${section}/$entityId` as '/p/$projectId/records/$entityId',
                         params: { projectId: projectId ?? '', entityId: e.id },
+                        search: e.kind === 'target' ? { targetType: e.type } : {},
                       }),
                     )
                   }
@@ -224,22 +223,6 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
               Retention
             </CommandItem>
             <CommandItem
-              keywords={['activity', 'audit', 'management', 'history', 'log', 'who']}
-              onSelect={() => go(() => navigate({ to: '/p/$projectId/settings/activity', params: { projectId } }))}
-              value="Workspace activity"
-            >
-              <ActivityIcon />
-              Workspace activity
-            </CommandItem>
-            <CommandItem
-              keywords={['invite', 'team', 'teammates', 'link', 'join', 'people']}
-              onSelect={() => go(() => navigate({ to: '/p/$projectId/settings/members', params: { projectId } }))}
-              value="Members"
-            >
-              <UsersIcon />
-              Members &amp; invites
-            </CommandItem>
-            <CommandItem
               keywords={['setup', 'quickstart', 'docs', 'sdk', 'onboarding', 'checklist', 'query', 'language', 'help', 'integration', 'guide']}
               onSelect={() => go(() => navigate({ to: '/p/$projectId/setup', params: { projectId } }))}
               value="Setup integration guide"
@@ -249,6 +232,25 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
             </CommandItem>
           </CommandGroup>
         ) : null}
+        {/* Workspace settings belong to the workspace: reachable from any page, with or without a project. */}
+        <CommandGroup heading="Workspace">
+          <CommandItem
+            keywords={['activity', 'audit', 'management', 'history', 'log', 'who']}
+            onSelect={() => go(() => navigate({ to: '/workspace/activity' }))}
+            value="Workspace activity"
+          >
+            <ActivityIcon />
+            Workspace activity
+          </CommandItem>
+          <CommandItem
+            keywords={['invite', 'team', 'teammates', 'link', 'join', 'people']}
+            onSelect={() => go(() => navigate({ to: '/workspace/members' }))}
+            value="Members"
+          >
+            <UsersIcon />
+            Members &amp; invites
+          </CommandItem>
+        </CommandGroup>
         {views.data && views.data.length > 0 ? (
           <CommandGroup heading="Saved views">
             {views.data.map((view) => (

@@ -25,7 +25,8 @@ export const keys = {
   me: ['me'] as const,
   projects: ['projects'] as const,
   project: (projectId: string) => ['projects', projectId] as const,
-  workspaceActivity: (range: string, q: string) => ['workspace-activity', range, q] as const,
+  /** Keyed by workspace: the session's active workspace can change in another tab, and answers never cross workspaces. */
+  workspaceActivity: (workspaceId: string, range: string, q: string) => ['workspace-activity', workspaceId, range, q] as const,
   workspaceSetup: ['workspace-setup'] as const,
   organization: ['organization'] as const,
 };
@@ -82,6 +83,18 @@ export const meQuery = () =>
       return api.me();
     },
     staleTime: 60_000,
+    retry: shouldRetry,
+  });
+
+/**
+ * The projects of one workspace, keyed by its id: the session's active workspace can change in another tab, and a list
+ * cached for the previous workspace must never answer for this one. Under `projects`, so creating or deleting a project
+ * (which invalidates `keys.projects`) refreshes it too.
+ */
+export const workspaceProjectsQuery = (workspaceId: string) =>
+  queryOptions({
+    queryKey: [...keys.projects, 'workspace', workspaceId] as const,
+    queryFn: ({ signal }) => api.projects.list(signal),
     retry: shouldRetry,
   });
 
@@ -159,12 +172,16 @@ export const histogramQuery = (projectId: string, range: string, q: string, lang
     retry: shouldRetry,
   });
 
-export const facetQuery = (projectId: string, field: string, range: string, q: string, limit = 8, lang: QueryLang = 'query') =>
+export const facetQuery = (projectId: string, field: string, range: string, q: string, limit = 8, lang: QueryLang = 'query', by?: string) =>
   queryOptions({
-    queryKey: [...keys.project(projectId), 'facet', field, range, q, limit, q ? lang : 'query'] as const,
+    queryKey: [...keys.project(projectId), 'facet', field, range, q, limit, q ? lang : 'query', by ?? null] as const,
     queryFn: ({ signal }) => {
       const r = resolveRange(range);
-      return api.events.facets(projectId, { field, from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, limit }, signal);
+      return api.events.facets(
+        projectId,
+        { field, from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, limit, ...(by ? { by } : {}) },
+        signal,
+      );
     },
     placeholderData: keepPreviousInProject(projectId),
     staleTime: 30_000,
@@ -176,6 +193,8 @@ export const eventQuery = (projectId: string, eventId: string) =>
     queryKey: [...keys.project(projectId), 'event', eventId] as const,
     queryFn: ({ signal }) => api.events.get(projectId, eventId, signal),
     staleTime: 5 * 60_000,
+    // Structural sharing would copy a changed raw JSON number (exact 64-bit digits) into a plain object.
+    structuralSharing: false,
     retry: shouldRetry,
   });
 
@@ -218,16 +237,18 @@ export const entityListQuery = (projectId: string, kind: EntityKind, q: string, 
     retry: shouldRetry,
   });
 
-export const entityProfileQuery = (projectId: string, kind: EntityKind, entityId: string, range: string) =>
-  queryOptions({
-    queryKey: [...keys.project(projectId), 'entity', kind, entityId, range] as const,
+export const entityProfileQuery = (projectId: string, kind: EntityKind, entityId: string, range: string, targetType?: string) => {
+  const entityKey = [...keys.project(projectId), 'entity', kind, entityId, targetType] as const;
+  return queryOptions({
+    queryKey: [...entityKey, range] as const,
     queryFn: ({ signal }) => {
       const r = resolveRange(range);
-      return api.entities.profile(projectId, kind, entityId, { from: r.from, to: r.to }, signal);
+      return api.entities.profile(projectId, kind, entityId, { from: r.from, to: r.to, targetType }, signal);
     },
-    placeholderData: keepPreviousInProject(projectId),
+    placeholderData: (previous, query) => (entityKey.every((key, i) => query?.queryKey[i] === key) ? previous : undefined),
     retry: shouldRetry,
   });
+};
 
 export const fieldsQuery = (projectId: string, range: string) =>
   queryOptions({
@@ -266,9 +287,9 @@ export const viewsQuery = (projectId: string) =>
     retry: shouldRetry,
   });
 
-export const workspaceActivityQuery = (range: string, q: string) =>
+export const workspaceActivityQuery = (workspaceId: string, range: string, q: string) =>
   infiniteQueryOptions({
-    queryKey: keys.workspaceActivity(range, q),
+    queryKey: keys.workspaceActivity(workspaceId, range, q),
     queryFn: ({ pageParam, signal }) => {
       const r = resolveRange(range);
       return api.workspaceActivity({ from: r.from, to: r.to, q: q || undefined, cursor: pageParam, limit: PAGE_SIZE }, signal);

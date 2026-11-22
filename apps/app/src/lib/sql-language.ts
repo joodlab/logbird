@@ -248,8 +248,8 @@ export type SqlCompletion =
   | { kind: 'operand'; column: string }
   | { kind: 'none' };
 
-function unquoteSql(raw: string): string {
-  return raw.replace(/\\(.)/g, '$1').replaceAll("''", "'");
+export function unquoteSql(raw: string): string {
+  return raw.replace(/\\([\s\S])/g, (_, escaped: string) => (escaped === 'r' ? '\r' : escaped)).replaceAll("''", "'");
 }
 
 /** A column reference ending at solid index `k`: an allowed identifier or `attributes['key']`. */
@@ -395,7 +395,7 @@ export function sqlCallAt(q: string, caret: number): { name: string; arg: number
 
 /** ClickHouse single-quoted string literal. */
 export function sqlString(value: string): string {
-  return `'${value.replace(/[\\']/g, '\\$&')}'`;
+  return `'${value.replace(/[\\']/g, '\\$&').replaceAll('\r', '\\r')}'`;
 }
 
 /**
@@ -465,7 +465,10 @@ function joinConjuncts(parts: string[]): string {
   return parts.map((p) => (hasTopLevelOr(p) && !isWrapped(p) ? `(${p})` : p)).join(' AND ');
 }
 
-const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
+const normalize = (s: string) =>
+  tokenizeSql(s.trim())
+    .map((token) => (token.kind === 'space' ? ' ' : token.raw))
+    .join('');
 
 export function hasSqlPredicate(q: string, predicate: string): boolean {
   const p = normalize(predicate);

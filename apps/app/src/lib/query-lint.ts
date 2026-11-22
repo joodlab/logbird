@@ -42,7 +42,6 @@ function rewrite(field: string, op: string, value: string, negated: boolean): { 
 export function lintQuery(q: string, isField: (name: string) => boolean): QueryFix[] {
   const fixes: QueryFix[] = [];
   const solid = tokenize(q).filter((t) => t.kind !== 'space');
-  const raw = (t?: QueryToken) => t?.raw ?? '';
   const valueRaw = (t?: QueryToken) => (t && (t.kind === 'text' || t.kind === 'phrase') && !t.negated ? t.raw : null);
 
   for (let i = 0; i < solid.length; i += 1) {
@@ -50,7 +49,7 @@ export function lintQuery(q: string, isField: (name: string) => boolean): QueryF
     const next = solid[i + 1];
 
     // Lucene `_exists_:field` / `NOT _exists_:field` → `field:*` / `-field:*`.
-    if (t.kind === 'field' && t.field === '_exists_' && t.valueKind === 'plain' && t.value) {
+    if (t.kind === 'field' && t.field === '_exists_' && t.valueKind === 'plain' && t.value && /^[A-Za-z_][\w.$@-]*$/.test(t.value)) {
       fixes.push({
         start: t.start,
         end: t.end,
@@ -60,17 +59,13 @@ export function lintQuery(q: string, isField: (name: string) => boolean): QueryF
       continue;
     }
 
-    // `field: value` / `field : value` (Kibana spacing): the server reads it as field:value; write it that way.
-    if (t.kind === 'field' && t.valueKind === 'plain' && t.value === '' && next && next.start > t.end && valueRaw(next) !== null) {
-      const v = raw(next);
-      fixes.push({ start: t.start, end: next.end, replacement: `${raw(t)}${v}`, message: 'No space after the colon' });
-      i += 1;
-      continue;
-    }
-    if (t.kind === 'text' && !t.negated && isField(t.raw) && next?.kind === 'text' && next.raw.startsWith(':') && next.start > t.end) {
-      fixes.push({ start: t.start, end: next.end, replacement: `${t.raw}${next.raw}`, message: 'No space before the colon' });
-      i += 1;
-      continue;
+    // Canonicalize optional spacing without changing the value or how it is lexed.
+    if (t.kind === 'field' && t.value && t.valueStart !== undefined) {
+      const prefix = `${t.negated ? '-' : ''}${t.field}:`;
+      const value = t.raw.slice(t.valueStart - t.start);
+      if (t.raw !== prefix + value && !/^[-!]|^[\w.]+:/.test(value)) {
+        fixes.push({ start: t.start, end: t.end, replacement: prefix + value, message: 'Remove space around the colon' });
+      }
     }
 
     // `!field:x` → `-field:x`.

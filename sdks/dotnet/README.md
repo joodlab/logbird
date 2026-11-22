@@ -189,7 +189,9 @@ What the client's own methods guarantee:
   cancelled request, plus at most 5 seconds for pending callbacks. **`Dispose`** waits at most `ShutdownTimeout` plus 10
   seconds. Events not sent by then are reported once each through `OnDrop` (`DropReason.Shutdown`).
 - **Memory** is bounded: at most `MaxQueueSize` queued events (each at most 256 KB), one in-flight batch (at most 5 MB),
-  at most 4 abandoned requests, and at most `MaxQueueSize` (at least 1,000) pending callback notifications.
+  at most 4 abandoned requests, and at most `MaxQueueSize` (at least 1,000) pending callback notifications. Very large
+  pre-parsed JSON (`JsonNode.Parse`) in metadata or change values is measured before it is refused, which builds its
+  nodes in memory first, so do not pass untrusted, unbounded documents as event data (#212).
 - **Secrets** never appear in Logbird's exception messages, log messages, metric tags or `ToString()` output: keys are only
   sent in the `Authorization` header, and messages name fields and codes, never values. `DroppedEvent.Json` and
   `LogbirdEventWarning.Reason` carry event data (after redaction) for your own handling.

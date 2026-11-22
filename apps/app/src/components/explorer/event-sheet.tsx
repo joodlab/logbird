@@ -1,4 +1,4 @@
-import type { AuditEvent, EventDetail } from '@logbird/contracts';
+import { type AuditEvent, type EventDetail, encodeRecordPair, formatRecordTerm } from '@logbird/contracts';
 import { OutcomeBadge, OutcomeDot, SeverityBadge, TypePill } from '@logbird/ui/components/badges';
 import { CopyButton, CopyValue } from '@logbird/ui/components/copy-button';
 import { EntityAvatar, EntityChip } from '@logbird/ui/components/entity-chip';
@@ -39,11 +39,21 @@ import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery, oldestStoredQuery, operationQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
-import { actorAttributeHint, causedCount, directChildren, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
+import {
+  actorAttributeHint,
+  causedCount,
+  directChildren,
+  eventSentence,
+  outcomeWasSent,
+  parentActor,
+  personLabel,
+  roundsLargeNumbers,
+} from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
-import { andQuery, formatExactTerm } from '@/lib/query-language';
+import { andQuery, formatTerm } from '@/lib/query-language';
 import { admittedRange } from '@/lib/range';
 import { eventCurl } from '@/lib/snippets';
+import { useConsoleZone } from '@/lib/time-zone';
 
 interface EventSheetProps {
   projectId?: string;
@@ -165,7 +175,7 @@ function TargetList({ targets, projectId, onFilter }: { targets: AuditEvent['tar
   return (
     <ul className="flex flex-col divide-y rounded-lg border">
       {visible.map((t) => (
-        <li className="group/kv flex items-center gap-2 px-3 py-2" key={`${t.type}:${t.id}`}>
+        <li className="group/kv flex items-center gap-2 px-3 py-2" key={encodeRecordPair(t.type, t.id)}>
           <EntityAvatar icon={typeIcon('target', t.type)} id={targetEntityId(t.type, t.id)} name={t.name || t.id} size="md" square />
           <div className="flex min-w-0 flex-1 flex-col">
             {projectId ? (
@@ -174,6 +184,7 @@ function TargetList({ targets, projectId, onFilter }: { targets: AuditEvent['tar
                 id={targetEntityId(t.type, t.id)}
                 kind="target"
                 projectId={projectId}
+                type={t.type}
               >
                 {t.name || t.id}
               </EntityProfileLink>
@@ -185,12 +196,18 @@ function TargetList({ targets, projectId, onFilter }: { targets: AuditEvent['tar
               <span className="truncate font-mono">{t.id}</span>
             </span>
           </div>
-          <FilterButton onFilter={onFilter} term={formatExactTerm('target', t.id)} />
+          <FilterButton onFilter={onFilter} term={formatRecordTerm(t.type, t.id)} />
           {projectId ? (
             <Button
               aria-label={`Follow ${t.name || t.id}`}
               nativeButton={false}
-              render={<Link params={{ projectId, entityId: targetEntityId(t.type, t.id) }} to="/p/$projectId/records/$entityId" />}
+              render={
+                <Link
+                  params={{ projectId, entityId: targetEntityId(t.type, t.id) }}
+                  search={{ targetType: t.type }}
+                  to="/p/$projectId/records/$entityId"
+                />
+              }
               size="icon-xs"
               variant="ghost"
             >
@@ -336,7 +353,7 @@ function ChildEvents({ caused: c, event: e, projectId, indent }: { caused: Child
             // out of its own search. The oldest-row lookup only widens the window; the link never waits on it.
             search={{
               range: admittedRange(Date.now(), oldest.data),
-              q: andQuery(formatExactTerm('parent', e.id), e.context.parentEventId === e.id ? formatExactTerm('id', e.id, true) : ''),
+              q: andQuery(formatTerm('parent', e.id), e.context.parentEventId === e.id ? formatTerm('id', e.id, true) : ''),
             }}
             to="/p/$projectId/events"
           >
@@ -513,6 +530,7 @@ function EventDetailBody({
   onFilter?: (term: string) => void;
   onRetry: () => void;
 }) {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const link = useCopy();
   const curl = useCopy();
   const router = useRouter();
@@ -521,7 +539,7 @@ function EventDetailBody({
     typeof window === 'undefined' || !projectId
       ? ''
       : `${window.location.origin}${
-          router.buildLocation({ to: '/p/$projectId/events', params: { projectId }, search: { q: formatExactTerm('id', e.id), ev: e.id } }).href
+          router.buildLocation({ to: '/p/$projectId/events', params: { projectId }, search: { q: formatTerm('id', e.id), ev: e.id } }).href
         }`;
   const attributes = Object.entries(e.attributes).sort(([a], [b]) => a.localeCompare(b));
   const ctx = e.context;
@@ -680,7 +698,7 @@ function EventDetailBody({
                 {projectId ? <EntityLink id={e.tenant.id} kind="tenant" name={e.tenant.name} projectId={projectId} /> : <span>{e.tenant.name}</span>}
                 <span className="hidden truncate font-mono text-muted-foreground text-xs sm:inline">{e.tenant.id}</span>
               </div>
-              <FilterButton onFilter={onFilter} term={formatExactTerm('tenant', e.tenant.id)} />
+              <FilterButton onFilter={onFilter} term={formatTerm('tenant', e.tenant.id)} />
             </div>
           ) : null}
         </Section>
@@ -799,11 +817,11 @@ function EventDetailBody({
 
         <Section title="Context">
           <dl className="flex flex-col">
-            <KV label="Event id" onFilter={onFilter} term={formatExactTerm('id', e.id)} value={e.id} />
-            <KV label="Operation" onFilter={onFilter} term={formatExactTerm('operation', ctx.operationId)} value={ctx.operationId} />
-            <KV label="Parent event" onFilter={onFilter} term={formatExactTerm('id', ctx.parentEventId)} value={ctx.parentEventId} />
-            <KV label="Request" onFilter={onFilter} term={formatExactTerm('request', ctx.requestId)} value={ctx.requestId} />
-            <KV label="Trace" onFilter={onFilter} term={formatExactTerm('trace', ctx.traceId)} value={ctx.traceId} />
+            <KV label="Event id" onFilter={onFilter} term={formatTerm('id', e.id)} value={e.id} />
+            <KV label="Operation" onFilter={onFilter} term={formatTerm('operation', ctx.operationId)} value={ctx.operationId} />
+            <KV label="Parent event" onFilter={onFilter} term={formatTerm('id', ctx.parentEventId)} value={ctx.parentEventId} />
+            <KV label="Request" onFilter={onFilter} term={formatTerm('request', ctx.requestId)} value={ctx.requestId} />
+            <KV label="Trace" onFilter={onFilter} term={formatTerm('trace', ctx.traceId)} value={ctx.traceId} />
             <KV label="IP" value={ctx.ip} />
             <KV label="User agent" mono={false} value={ctx.userAgent} />
             <KV
@@ -821,7 +839,7 @@ function EventDetailBody({
           <Section title={`Attributes · ${attributes.length}`}>
             <dl className="flex flex-col">
               {attributes.map(([k, v]) => (
-                <KV key={k} label={k} onFilter={onFilter} term={formatExactTerm(`attr.${k}`, v)} value={v} />
+                <KV key={k} label={k} onFilter={onFilter} term={formatTerm(`attr.${k}`, v)} value={v} />
               ))}
             </dl>
           </Section>
@@ -836,6 +854,11 @@ function EventDetailBody({
             </CollapsibleTrigger>
             {detail ? <CopyButton label="Copy JSON" value={JSON.stringify(detail.payload, null, 2)} /> : null}
           </div>
+          {detail && roundsLargeNumbers ? (
+            <p className="mt-1 text-muted-foreground text-xs">
+              This browser may round long numbers here and in Copy JSON. The stored event and the Complete export keep their exact digits.
+            </p>
+          ) : null}
           <CollapsibleContent className="pt-3">
             {detailError ? (
               <ErrorState error={detailError} onRetry={onRetry} size="sm" title="Could not load the raw payload" />

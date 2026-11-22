@@ -1,10 +1,12 @@
 export * from './client';
+export { CSV_COLUMNS } from './export';
 export * from './identity';
 export * from './maintenance-tag';
 export * from './migrations';
 export * from './normalize';
 export * from './queries';
 export * from './query';
+export * from './scope';
 export * from './setup';
 export * from './sql-guard';
 export * from './suggest';

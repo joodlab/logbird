@@ -60,6 +60,7 @@ export function SuggestionPanel({
   lang,
   listId,
   loading,
+  stale = false,
   onAccept,
   onHover,
   onRemoveRecent,
@@ -70,6 +71,8 @@ export function SuggestionPanel({
   lang: QueryLang;
   listId: string;
   loading: boolean;
+  /** The listed values are a previous prefix's, kept while this one loads: dimmed, and announced as busy. */
+  stale?: boolean;
   onAccept: (s: Suggestion) => void;
   onHover: (index: number) => void;
   onRemoveRecent: (r: RecentQuery) => void;
@@ -79,7 +82,12 @@ export function SuggestionPanel({
     <div className="absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-lg border bg-popover shadow-lg" data-slot="query-suggestions">
       <HintRow hint={hint} lang={lang} loading={loading} />
       {suggestions.length ? (
-        <div className="max-h-80 overflow-auto p-1" id={listId} role="listbox">
+        <div
+          aria-busy={stale || undefined}
+          className={cn('max-h-80 overflow-auto p-1 transition-opacity', stale && 'opacity-60')}
+          id={listId}
+          role="listbox"
+        >
           {suggestions.map((s, i) => {
             const header = i === 0 || suggestions[i - 1]?.group !== s.group;
             const Icon = ICON[s.kind];

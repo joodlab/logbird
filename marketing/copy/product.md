@@ -58,7 +58,7 @@ path: /product
   - Fields are suggested from what your project actually sends, with how often each one appears.
   - Errors point at the exact token and say what was expected, for example "attempt is a number".
   - Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 attributes
-    and the first 2 KiB of each value; the full event is stored as received.
+    and the first 2 KiB of each value. Search limits apply to the index. You can inspect the full parsed event as JSON.
     <!-- source: docs/SPEC.md §3 (flattening); packages/clickhouse/src/normalize.ts -->
 - **visual:** `marketing/media/staydesk/query-suggestions-light.webp` (manifest id `query-suggestions`) under the query-language code sample.
 
@@ -123,7 +123,7 @@ path: /product
 - **bullets:**
   - Before and after values for each changed field, up to 256 changes per event.
   - The causation breadcrumb, with a link to the whole operation.
-  - Context ids (request, trace, IP), every custom attribute, and the raw JSON exactly as received.
+  - Context ids (request, trace, IP), the indexed attributes, and the full parsed event as JSON.
   - Copy a link, or copy the event as a curl command.
   - Support work stands out: rows show "via support", the Done by support filter lists them, and each support agent
     has a page.
@@ -182,8 +182,8 @@ path: /product
   days. A worker deletes expired events every hour. Before you lower the window, Logbird shows how many events will
   be deleted. To confirm, you type the project's slug, and the purge starts right away.
   <!-- source: docs/SPEC.md §1.4, §4, §5 retention preview, §6 (retentionDays=90), §7.1; packages/contracts/src/api.ts RETENTION_OPTIONS -->
-- **limit line:** Retention deletes are permanent. There's no archive and no undo. The preview count is
-  approximate, because storage is at least once.
+- **limit line:** Retention deletes are permanent. There's no archive and no undo. The count can change
+  between preview and deletion.
 - **visual:** `marketing/media/staydesk/retention-light.webp` (manifest id `retention`: the 30-day preview; nothing was confirmed).
 
 ## workspace-activity

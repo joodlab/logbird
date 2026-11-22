@@ -59,8 +59,9 @@ the actor and the worker is the executor. When support acts on her behalf, the s
 Lina is still the actor. Getting this right is most of what makes an audit log useful, so the SDK carries the actor
 from the request into the job for you.
 
-**Write the guarantees down.** When the server answers `202`, the event is in ClickHouse. Delivery is at least once,
-so counts may include duplicates. The SDK's queue lives in memory, so a crash before that `202` can lose events.
+**Write the guarantees down.** When the server answers `202`, it lists the accepted event IDs in `ids` and the
+rejected events in `rejected`. Delivery is at least once when the client retries unsettled events, as the SDK does, and an exact retry with the same valid, non-blank `id` reuses
+the stored event while the project retains it. The SDK's queue lives in memory, so a crash before that `202` can lose events.
 Retention deletes are permanent: when you lower a project's window, you type its slug, and the expired events are
 gone. We'd rather you read those sentences now than discover them during an incident.
 

@@ -62,10 +62,12 @@ Unknown prefixes remain attribute keys. Histogram buckets zero-fill the half-ope
 Live polling uses received_at >= since, ordered by arrival descending and deduped by
 event ID. Clients should overlap polls and dedupe IDs across responses.
 
-Search totals are exact through 10,000 and return **10001 meaning 10k+** above
-that threshold. The bounded distinct subquery has a one-second guard; timeout
-propagates, never fabricates a successful count. Other reads have ten-second
-guards. The contract currently has no total-status field.
+Search totals come from a distinct count capped at 10,001 that runs after the rows,
+with a one-second budget. The rows never fail because of it: when the count is
+capped, times out or fails, the response sets `totalExact: false` and `total` is a
+lower bound (at least the rows returned, plus one when there is a next page). A page
+can therefore take up to one second longer than its rows. Other reads have
+ten-second guards.
 
 Minute rollups drive the ingestion sparkline. Filtered charts and KPIs read raw
 columns because arbitrary filters and partial minutes cannot be represented by

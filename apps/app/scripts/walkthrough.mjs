@@ -798,10 +798,9 @@ async function invite() {
   const invitee = `setup-invitee-${RUN}@logbird.local`;
   const other = `setup-other-${RUN}@logbird.local`;
   const { context, page, settle, shot, step, close } = await session('invite-owner', { video: false, storageState: owner.state });
-  const P = `${BASE}/p/${owner.projectId}`;
   let link = '';
-  await step('owner invites an admin from Settings → Members', async () => {
-    await page.goto(`${P}/settings/members`);
+  await step('owner invites an admin from Workspace settings → Members', async () => {
+    await page.goto(`${BASE}/workspace/members`);
     await settle(1200);
     await page.getByPlaceholder('teammate@company.com').fill(invitee);
     await page.getByLabel('Role').selectOption('admin');
@@ -859,7 +858,7 @@ async function invite() {
   await guest.close();
 
   await step('owner sees the new admin; a canceled invitation stops working', async () => {
-    await page.goto(`${P}/settings/members`);
+    await page.goto(`${BASE}/workspace/members`);
     await settle(1200);
     await page.getByTestId('members-list').getByText(invitee).waitFor();
     await page.getByPlaceholder('teammate@company.com').fill(other);

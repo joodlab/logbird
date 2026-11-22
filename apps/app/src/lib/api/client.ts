@@ -1,13 +1,14 @@
 import {
   type ApiKey,
   acceptInviteLinkResponseSchema,
-  apiKeySchema,
-  createApiKeyResponseSchema,
+  type createApiKeySchema,
   createProjectResponseSchema,
   type EntityKind,
+  type EntityProfileQuery,
   type EntitySort,
   type ExportQuery,
   entityListResponseSchema,
+  entityMetadataSchema,
   entityProfileSchema,
   eventDetailSchema,
   eventSchema,
@@ -23,10 +24,12 @@ import {
   meResponseSchema,
   overviewResponseSchema,
   type Project,
+  parseJsonExact,
   projectSchema,
   projectSetupSchema,
   type QueryLang,
   retentionStatusSchema,
+  type rollApiKeySchema,
   routes,
   type SavedView,
   sampleDataResponseSchema,
@@ -37,6 +40,7 @@ import {
   workspaceSetupSchema,
 } from '@logbird/contracts';
 import { z } from 'zod';
+import { issuedKeyResponseSchema, issuedKeySchema } from '@/lib/api-keys';
 import { timeoutError, toApiError } from './errors';
 
 type Query = Record<string, string | number | boolean | null | undefined>;
@@ -62,7 +66,7 @@ export function withQuery(path: string, query?: Query): string {
   if (!query) return path;
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null || value === '') continue;
+    if (value === undefined || value === null || (value === '' && key !== 'targetType')) continue;
     params.set(key, String(value));
   }
   const qs = params.toString();
@@ -95,7 +99,8 @@ async function request<S extends z.ZodType>(schema: S, method: string, path: str
     });
     if (!response.ok) throw await toApiError(response);
     if (response.status === 204) return schema.parse({ ok: true });
-    const json: unknown = await response.json();
+    // Exact parsing keeps digits a double cannot hold (64-bit ids in raw payloads) as the server sent them.
+    const json: unknown = parseJsonExact(await response.text());
     const parsed = schema.safeParse(json);
     if (!parsed.success) {
       console.error(`[api] ${method} ${path} returned an unexpected shape`, parsed.error.issues);
@@ -195,12 +200,17 @@ export const api = {
 
   keys: {
     list: (projectId: string, signal?: AbortSignal) =>
-      request(listOf(apiKeySchema), 'GET', pathFor(routes.keys.list.path, { projectId }), { signal }) as Promise<ApiKey[]>,
-    create: (projectId: string, body: { name: string; kind: 'ingest' | 'read' }) =>
-      request(createApiKeyResponseSchema, 'POST', pathFor(routes.keys.create.path, { projectId }), { body }),
+      request(listOf(issuedKeySchema), 'GET', pathFor(routes.keys.list.path, { projectId }), { signal }) as Promise<ApiKey[]>,
+    // Tolerant of servers older than scoped keys: the secret is never lost to a parse error (see issuedKeySchema).
+    create: (projectId: string, body: z.input<typeof createApiKeySchema>) =>
+      request(issuedKeyResponseSchema, 'POST', pathFor(routes.keys.create.path, { projectId }), { body }),
     revoke: (projectId: string, keyId: string) => request(ok, 'DELETE', pathFor(routes.keys.revoke.path, { projectId, keyId })),
-    /** Replacement with the same name and kind; the old key stays valid until revoked. Secret returned once. */
-    roll: (projectId: string, keyId: string) => request(createApiKeyResponseSchema, 'POST', pathFor(routes.keys.roll.path, { projectId, keyId })),
+    /**
+     * Replacement with the same name, kind, scope and origins; the old key stays valid until revoked. Without
+     * `expiresAt` it keeps the old key's expiry (an expired key needs a new one: 409 `key_expired`). Secret returned once.
+     */
+    roll: (projectId: string, keyId: string, body: z.input<typeof rollApiKeySchema> = {}) =>
+      request(issuedKeyResponseSchema, 'POST', pathFor(routes.keys.roll.path, { projectId, keyId }), { body }),
   },
 
   events: {
@@ -213,7 +223,7 @@ export const api = {
       request(z.array(eventSchema), 'GET', pathFor(routes.events.live.path, { projectId }), { query: { ...query }, signal }),
     histogram: (projectId: string, query: RangeParams & { interval?: number }, signal?: AbortSignal) =>
       request(histogramResponseSchema, 'GET', pathFor(routes.events.histogram.path, { projectId }), { query: { ...query }, signal }),
-    facets: (projectId: string, query: RangeParams & { field: string; limit?: number }, signal?: AbortSignal) =>
+    facets: (projectId: string, query: RangeParams & { field: string; limit?: number; by?: string }, signal?: AbortSignal) =>
       request(facetResponseSchema, 'GET', pathFor(routes.events.facets.path, { projectId }), { query: { ...query }, signal }),
     /** Every event sharing `context.operationId`, oldest first. */
     operation: (projectId: string, operationId: string, signal?: AbortSignal) =>
@@ -231,8 +241,10 @@ export const api = {
       query: { kind: EntityKind; q?: string; type?: string; sort?: EntitySort; limit?: number; cursor?: string },
       signal?: AbortSignal,
     ) => request(entityListResponseSchema, 'GET', pathFor(routes.entities.list.path, { projectId }), { query: { ...query }, signal }),
-    profile: (projectId: string, kind: EntityKind, entityId: string, query: RangeParams, signal?: AbortSignal) =>
+    profile: (projectId: string, kind: EntityKind, entityId: string, query: EntityProfileQuery, signal?: AbortSignal) =>
       request(entityProfileSchema, 'GET', pathFor(routes.entities.profile.path, { projectId, kind, entityId }), { query: { ...query }, signal }),
+    metadata: (projectId: string, kind: EntityKind, entityId: string, targetType?: string, signal?: AbortSignal) =>
+      request(entityMetadataSchema, 'GET', pathFor(routes.entities.metadata.path, { projectId, kind, entityId }), { query: { targetType }, signal }),
   },
 
   fields: (projectId: string, query: RangeParams, signal?: AbortSignal) =>

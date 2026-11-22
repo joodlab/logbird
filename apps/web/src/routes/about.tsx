@@ -15,14 +15,17 @@ export const Route = createFileRoute('/about')({ head: () => pageHead('/about'),
 // maintainers keep the published origin story and partner attribution unnamed (see marketing/copy/README.md).
 const principles: { title: string; body: string }[] = [
   {
-    title: 'Accept anything.',
-    body: 'Any JSON object with an `action` is a valid event. We recommend a shape; we never reject an event for missing it.',
+    title: 'Require only an action.',
+    body: 'An `action` string is the only required field, and each event must fit the ingest limits. We recommend a shape; we never reject an event for missing it.',
   },
   {
     title: "Capture is your code's job.",
     body: 'We give you the SDK, the integrations and the patterns. Our guarantee starts at the `202`.',
   },
-  { title: 'History starts when capture starts.', body: "There's no backfill." },
+  {
+    title: 'Your code sends the history.',
+    body: "Logbird doesn't rebuild history from your database. Import past events by sending them with their original `occurredAt`, up to 3650 days back; an older value is stored at receive time with a warning, and project retention still applies.",
+  },
   { title: 'Retention means deletion.', body: 'Expired events are deleted for good.' },
   { title: 'We audit ourselves.', body: "Logbird records its own management actions in your workspace's activity stream." },
 ];

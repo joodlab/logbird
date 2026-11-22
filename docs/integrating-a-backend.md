@@ -67,7 +67,7 @@ SDK error objects that may contain sensitive details.
 | `targets` | Affected records | Document ID and safe display name |
 | `context.operationId` | Correlation across a request and its jobs | A UUID carried through job data |
 | `context.parentEventId` | The event that caused this event | The request event ID |
-| `source` | Upstream system supplying the change | `catalog-service` |
+| `source` | Upstream system supplying the change. Values beginning with `logbird-` are reserved for events Logbird generates (sample data, console tests): they are stored, but do not count toward the Setup integration steps, and removing sample data deletes rows tagged `logbird-sample`. | `catalog-service` |
 | `changes` | Allowed before/after values | Draft changing to published |
 
 Copy only allowlisted fields. Avoid request bodies, session objects, customer
@@ -79,6 +79,53 @@ to retain default secret protection while adding personal-data fields.
 `changeFields` defaults to that same combined pattern. Inspect the stored raw
 payload as well as attributes.
 See [SDK redaction options](../packages/sdk/README.md#host-context-options-02).
+
+### Numbers and ids
+
+Logbird stores every number with its exact value, including 64-bit integers and long
+decimals, and returns them as JSON numbers with those digits (the spelling may change:
+`19.90` comes back as `19.9`, `1e3` as `1000`). Search matches them exactly:
+`metadata.orderId:9007199254740993`. Equality on a number is exact; greater-than and
+less-than comparisons (`metadata.orderId:>9007199254740992`) compare at double precision,
+so for 64-bit ids use equality. Entity ids may be numbers, so integer primary keys
+work as sent. A numeric id is stored as the plain decimal text of its exact value (`42`,
+`42.0` and `4.2e1` are all stored as `"42"`) when that adds at most 32 zeros to its
+digits and is at most 254 characters long; otherwise as its scientific spelling (`1e33`,
+`1e300`) when that is at most 254 characters; otherwise the id is not indexed (never
+truncated: a longer string id cut to the 256-character cap can never equal an indexed
+number), and such a target, with its extra fields, is left out of the record columns
+and attributes. The spelling depends only on the value, never on how it was sent.
+Numeric attribute values follow the same rule with a 2,044-character limit (string
+values are cut at 2 KB). A composite
+attribute value (an array, or an object deeper than the flattening limit) is indexed as
+its first 2 KB; a number cut by that limit is left out of the indexed copy instead of
+keeping partial digits; digits inside strings are text and follow the usual 2 KB prefix
+(cut at a UTF-8 boundary, so a character at the edge, including U+FFFD, can drop). The normalized `executor.attempt` is the whole part of its exact
+value. A string id is indexed as sent, with surrounding whitespace trimmed and a
+256-character cap (the original payload always keeps it exactly). An event nested more
+than 1,000 levels deep that holds a number a double cannot keep (anywhere in the event)
+is rejected on its own
+(`invalid_event: numbers nested deeper than 1,000 levels cannot be stored exactly`); its
+siblings in the batch are stored. An event's own `id` must be a string (a numeric event
+id gets a fresh id and a warning).
+
+Send `occurredAt` as an ISO-8601 string or as an integer number of epoch milliseconds,
+never as a fractional epoch value: a sub-millisecond fraction (`1763800000000.99999`)
+is resolved at double precision and can land on the next millisecond.
+
+JavaScript numbers cannot hold integers above 2^53 − 1 (`Number.MAX_SAFE_INTEGER`):
+`9007199254740993` is already `9007199254740992` in your process before any SDK sees it.
+From TypeScript, send such ids **as strings** (`String(row.id)` from a `bigint` or a
+database driver's string mode). The TypeScript SDK copies events through JSON, so it does
+not carry `JSON.rawJSON` values or other exact-number wrappers; use strings. Backends with
+exact 64-bit types (.NET `long` and `decimal`, Java `long`, Go `int64`) can send numbers
+directly over HTTP. Logbird never rounds a number it stores; what a client rounded
+before sending cannot be recovered.
+
+An event first stored before this release that contains such a number had its digits
+rounded; a retry of it now answers `duplicate_id_conflict` (its content differs from what
+was stored). Retries normally happen within minutes, so this only affects retries across
+the upgrade.
 
 ## Capture a committed change
 
@@ -248,3 +295,9 @@ repeated delivery, an outage and shutdown with fictional data. If customers read
 history, keep read keys server-side and authorize tenant and target on every
 request, including cursor requests. A search filter alone is not authorization.
 See [framework integrations](integrations.md).
+
+## Show customers their own audit trail
+
+To show each business or website only its own events, keep one `read` key on your server and mint short-lived
+viewer tokens for each dashboard view. The server enforces the scope on search, detail, facets and export. See
+[scoped read access](scoped-read-access.md).
