@@ -7,7 +7,7 @@
 ### Highlights
 
 - One event the event store can't parse no longer fails its whole batch: healthy events are stored and each bad one is listed in `rejected`, and the TypeScript SDK resends only the events that are still unsettled.
-- Manage up to 10 webhook endpoints per project through the API, with validated receiver URLs, filters and rotatable signing secrets, and sign or verify Standard Webhooks with the SDK. Delivery follows in the next release.
+- Manage up to 10 webhook endpoints per project through the API, with validated receiver URLs, filters and rotatable signing secrets, and sign or verify Standard Webhooks with the SDK. This release does not deliver webhooks yet.
 - Upkeep runs on its own: expired sessions, sign-in codes and invitations are purged hourly, ingest stays fast after a large receipt backlog drains, and a delete that ClickHouse skips during overlapping purges is retried.
 
 ### Changes
@@ -25,32 +25,64 @@ rebuilds, fenced projects show in `/readyz`, and every receipt conflict is a
 retryable 503.
 
 The website deletes contact and early-access submissions after the privacy
-policy's retention period (`WEB_FORM_RETENTION_MONTHS`, default 24), is English
-only, and the sign-in screen links the terms and privacy policy. Console controls
-and sections no longer shift when their state changes.
+policy's retention period and is English only. The sign-in screen links your terms
+and privacy policy when `LOGBIRD_TERMS_URL` and `LOGBIRD_PRIVACY_URL` are set (or
+the console forwards a marketing site). Console controls and sections no longer
+shift when their state changes.
 
 ### Upgrade and known limits
 
-- Run migrations as usual. They are additive: indexes on `RetentionRun`, `session`,
-  `verification` and `invitation`, and new webhook endpoint tables. Then set
-  `LOGBIRD_VERSION` to `0.1.2` (the Compose default) and redeploy.
-- The worker's `DATABASE_URL` must be a direct, session-mode connection (not a
-  transaction pooler), PostgreSQL `track_activities` must stay on, and the worker's
-  role should own `IngestReceipt` (or have `MAINTAIN` on PostgreSQL 17+) for the
-  automatic index rebuild. Pause the worker during a manual `REINDEX CONCURRENTLY`
-  on that table. See [self-hosting](docs/self-hosting.md).
-- Ingest pins its ClickHouse insert settings per query. Don't add server
-  constraints on them: ClickHouse then rejects the insert and ingest answers
-  `503 ingest_unavailable`. Allow the `Logbird-Retry` request header through any
-  proxy that strips headers.
-- Webhook endpoints can be created and rotated, but nothing is delivered yet. If
+This is a patch release: the default Compose installation upgrades without any
+change to its settings. Two less common setups need a setting checked first; both
+are listed under "Check before upgrading".
+
+- **Upgrade order.** Follow [Upgrades and backups](docs/self-hosting.md#upgrades-and-backups):
+  stop `app`, `server` and `worker`, take the matched backups, select this release,
+  set `LOGBIRD_VERSION` to `0.1.2` (the Compose default), then
+  `docker compose pull` and `docker compose up -d --no-build`. The `0.1.2` migrate
+  image applies four additive migrations before the new services start: indexes on
+  `RetentionRun`, `session`, `verification` and `invitation`, and the webhook
+  endpoint tables. Setting the version first matters: an older migrate image doesn't
+  contain these migrations.
+- **Check before upgrading.**
+  - A proxy between Logbird and ClickHouse must allow more than 30 seconds without
+    bytes (above budget/20 if you raised `CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS`).
+    Long maintenance statements now send a progress header every 30 seconds instead
+    of every 10, so a shorter idle timeout cuts them. The default Compose stack has
+    no such proxy.
+  - The marketing site container (`docker-compose.site.yml`, not a release image)
+    now defaults `SMTP_PORT` to `587`. If it relied on the old implicit `1025`, set
+    `SMTP_PORT=1025`.
+  - The same site container deletes submissions older than its retention period
+    about ten minutes after it first starts, then every six hours. To keep a
+    different period, set `WEB_FORM_RETENTION_MONTHS` (a build variable, default
+    24) before upgrading. New submissions go to `<WAITLIST_FILE>.d/`; keep backing
+    up the whole `/data` volume. On the Cloudflare build, records written before
+    this release have no expiry and must be deleted by hand; see
+    [Form submissions](docs/coolify.md#form-submissions).
+- **Worker requirements.** The worker's `DATABASE_URL` must be a direct,
+  session-mode connection (not a transaction pooler), PostgreSQL `track_activities`
+  must stay on, and the worker's role should own `IngestReceipt` (or have
+  `MAINTAIN` on PostgreSQL 17+) for the automatic index rebuild; without it the
+  rebuild is skipped and logged, and nothing else changes. Pause the worker during
+  a manual `REINDEX CONCURRENTLY` on that table.
+- **Ingest settings.** Ingest pins its ClickHouse insert settings per query. Don't
+  add server constraints on them: ClickHouse then rejects the insert and ingest
+  answers `503 ingest_unavailable`. Allow the `Logbird-Retry` request header through
+  any proxy that strips headers.
+- **Webhooks.** Endpoints can be created and rotated, but nothing is delivered. If
   you later change `BETTER_AUTH_SECRET` without a stable `WEBHOOK_SECRET_KEY`,
   rotate endpoint secrets.
-- Parse isolation handles about five leading bad events per attempt; clients that
-  don't send `Logbird-Retry: subset` get the unchecked events rejected in a
-  terminal `202` and must resend them individually.
-- Restore operators: the ClickHouse restore cutover gate has a new mandatory
-  `data_version` check.
+- **Parse isolation.** It handles about five leading bad events per attempt. A
+  client that doesn't send `Logbird-Retry: subset` gets the events that isolation
+  left unchecked rejected in a terminal `202` (resend them individually) when every
+  other event in the batch is settled; if another event is still ambiguous, held or
+  unavailable, the answer is a retryable `503` and those events stay retryable. See
+  [ingest identity](docs/ingest-identity.md).
+- **Restores.** The ClickHouse restore cutover gate has new mandatory steps: a
+  `data_version` check, and blocking log checks for incomplete or unverified
+  deletes and stale event-index pointers. Follow the complete gate in
+  [self-hosting](docs/self-hosting.md) before cutting over a restored database.
 
 ## 0.1.1
 

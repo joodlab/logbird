@@ -776,14 +776,21 @@ test('release and dependency automation is never credited, even as a GitHub User
   assert.match(output, /· 1 change from 1 contributor/);
 });
 
-test('commits reverted inside the range are left out of the notes by full hash only', () => {
-  const [omitted] = omittedCommits;
-  const record = (sha, subject) => `${sha}Alicealice@users.noreply.github.com${subject}`;
-  const commits = parseLog(record(omitted, 'chore: add ci helper') + record('b'.repeat(40), 'fix: keep this change'), config);
-  assert.deepEqual(
-    withoutOmitted(commits).map((item) => item.description),
-    ['keep this change'],
-  );
-  assert.equal(withoutOmitted(parseLog(record(omitted.slice(0, 39), 'fix: a prefix is not a match'), config)).length, 1);
-  for (const sha of omittedCommits) assert.match(sha, /^[0-9a-f]{40}$/);
+test('commits reverted inside the range are left out only by full hash and only when all of them are in range', () => {
+  const record = (sha, subject) => `${sha}\x1fAlice\x1falice@users.noreply.github.com\x1f\x1f${subject}\x1e`;
+  const omitted = [...omittedCommits];
+  for (const sha of omitted) assert.match(sha, /^[0-9a-f]{40}$/);
+  const kept = record('b'.repeat(40), 'fix: keep this change');
+  const descriptions = (log) => withoutOmitted(parseLog(log, config)).map((item) => item.description);
+
+  // The whole reverted set is in range: every one of them is dropped, the unrelated commit stays.
+  assert.deepEqual(descriptions(omitted.map((sha) => record(sha, 'chore: add ci helper')).join('') + kept), ['keep this change']);
+  // A range that ends partway through still contains the change, so nothing is hidden.
+  for (let count = 1; count < omitted.length; count += 1) {
+    const partial = omitted.slice(0, count).map((sha) => record(sha, 'chore: add ci helper'));
+    assert.equal(descriptions(partial.join('') + kept).length, count + 1);
+  }
+  // A hash prefix is not a match, so the set is incomplete and everything is listed.
+  const prefixed = omitted.map((sha, index) => record(index === 0 ? sha.slice(0, 39) : sha, 'chore: add ci helper'));
+  assert.equal(descriptions(prefixed.join('')).length, omitted.length);
 });
