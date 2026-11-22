@@ -452,6 +452,7 @@ export function QueryInput({
           lang={lang}
           listId={listId}
           loading={completions.loading}
+          stale={completions.stale}
           onAccept={accept}
           onHover={(i) => {
             if (i !== activeIndex) {

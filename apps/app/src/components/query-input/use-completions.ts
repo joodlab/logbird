@@ -61,6 +61,8 @@ export interface Completions {
   /** What the user typed for the current completion (Enter accepts only partial matches). */
   prefix: string;
   loading: boolean;
+  /** The value suggestions are the previous prefix's, kept while this prefix loads: show them dimmed and busy. */
+  stale: boolean;
   context: QueryCompletion | SqlCompletion;
   /** Lucene / KQL spellings found in the draft (query language only). */
   fixes: QueryFix[];
@@ -235,6 +237,7 @@ export function useCompletions({
   // The previous prefix's suggestions stay while the next prefix loads (same field only), with the loading indicator on.
   const valuesData = rawPrefix && !complete ? (shownDimmed(narrowed) ?? base.data) : base.data;
   const valuesLoading = Boolean(valueField) && (base.isFetching || (Boolean(rawPrefix) && !complete && narrowed.isFetching));
+  const valuesStale = Boolean(valueField) && Boolean(rawPrefix) && !complete && narrowed.isPlaceholderData;
 
   /* ---------------- free text that names an entity (`rawd` → tenant:biz_2 Rawda Suites) ---------------- */
   const word =
@@ -264,7 +267,7 @@ export function useCompletions({
   }, [word, ...entityData]);
 
   return useMemo<Completions>(() => {
-    const empty: Completions = { suggestions: [], hint: null, prefix: '', loading: false, context, fixes };
+    const empty: Completions = { suggestions: [], hint: null, prefix: '', loading: false, stale: false, context, fixes };
     if (!open) return empty;
     const values = valuesData?.field === valueField ? (valuesData?.values ?? []) : [];
     const call = lang === 'sql' ? sqlCallAt(draft, caret) : null;
@@ -291,10 +294,28 @@ export function useCompletions({
       hint,
       prefix: 'prefix' in context ? context.prefix : '',
       loading: valuesLoading || (open && fieldsLoading),
+      stale: valuesStale,
       context,
       fixes,
     };
-  }, [open, context, draft, caret, lang, fixes, attributes, coverage, valuesData, valueField, valuesLoading, recent, views, entities, fieldsLoading]);
+  }, [
+    open,
+    context,
+    draft,
+    caret,
+    lang,
+    fixes,
+    attributes,
+    coverage,
+    valuesData,
+    valueField,
+    valuesLoading,
+    valuesStale,
+    recent,
+    views,
+    entities,
+    fieldsLoading,
+  ]);
 }
 
 interface Input {

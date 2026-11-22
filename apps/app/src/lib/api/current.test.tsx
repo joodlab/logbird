@@ -104,6 +104,39 @@ function initializerAt(src: string, start: number): string {
   return src.slice(start);
 }
 
+/** A `placeholderData` property in an options object: `placeholderData: …` or the shorthand `placeholderData`. */
+const SETS_PLACEHOLDER = /\bplaceholderData\s*(?::|,|\})/;
+
+/** Index just past the `)` that closes the call opening at `open` (an index of `(`), or -1. */
+function callEnd(text: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')' && --depth === 0) return i + 1;
+  }
+  return -1;
+}
+/** `q(...)` and nothing after it (not `q(...).queryKey`). */
+function isWholeCall(init: string, q: string): boolean {
+  if (!init.startsWith(`${q}(`)) return false;
+  return init.slice(callEnd(init, q.length)).trim() === '';
+}
+/** An object literal with `...q(...)` as one of its own (top-level) properties: the spread call ends at `,` or `}`. */
+function spreadsCall(init: string, q: string): boolean {
+  if (!init.startsWith('{')) return false;
+  let depth = 0;
+  for (let i = 0; i < init.length; i++) {
+    const c = init[i];
+    if (c === '(' || c === '{' || c === '[') depth++;
+    else if (c === ')' || c === '}' || c === ']') depth--;
+    else if (depth === 1 && init.startsWith(`...${q}(`, i)) {
+      const end = callEnd(init, i + 3 + q.length);
+      if (end > 0 && /^\s*[,}]/.test(init.slice(end))) return true;
+    }
+  }
+  return false;
+}
+
 export function unguardedReads(src: string, queries: readonly string[]): string[] {
   const declarations = [...src.matchAll(/(?:const|let)\s+(\{[^}]*\}|\w+)\s*=\s*/g)].map((m) => ({
     target: m[1] ?? '',
@@ -113,12 +146,11 @@ export function unguardedReads(src: string, queries: readonly string[]): string[
   // (`{ enabled, ...fieldsQuery(...) }`). A value that merely mentions a factory (`!!getQueryData(fieldsQuery(...).queryKey)`)
   // is not options.
   const sources = [...queries];
-  const isOptions = (init: string) =>
-    sources.some((q) => new RegExp(String.raw`^${q}\(`).test(init) || (init.startsWith('{') && new RegExp(String.raw`\.\.\.\s*${q}\(`).test(init)));
+  const isOptions = (init: string) => sources.some((q) => isWholeCall(init.trim(), q) || spreadsCall(init.trim(), q));
   for (const d of declarations) if (/^\w+$/.test(d.target) && !/^use(?:Infinite)?Query\(/.test(d.init) && isOptions(d.init)) sources.push(d.target);
   // A result is placeholder-enabled when its options come from such a query, or when the call sets `placeholderData` itself.
   const built = (init: string) =>
-    /^use(?:Infinite)?Query\(/.test(init) && (/\bplaceholderData\s*:/.test(init) || sources.some((q) => new RegExp(String.raw`\b${q}\b`).test(init)));
+    /^use(?:Infinite)?Query\(/.test(init) && (SETS_PLACEHOLDER.test(init) || sources.some((q) => new RegExp(String.raw`\b${q}\b`).test(init)));
   const problems: string[] = [];
   const results: string[] = [];
   for (const d of declarations) {
@@ -193,6 +225,22 @@ describe('the guard catches direct reads', () => {
     ].join('\n');
     expect(unguardedReads(src, ['fieldsQuery'])).toEqual([]);
   });
+  it("does not take a factory's query key for options", () => {
+    const src = [
+      'const key = fieldsQuery(p, r).queryKey;',
+      'const project = useQuery({ ...projectQuery(p), enabled: Boolean(key.length) });',
+      'return project.data?.name;',
+    ].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toEqual([]);
+  });
+  it('treats a shorthand call-site placeholderData as placeholder-enabled', () => {
+    const src = [
+      'const placeholderData = keepPreviousData;',
+      'const preview = useQuery({ ...retentionQuery(id, days), placeholderData });',
+      'return preview.data?.count;',
+    ].join('\n');
+    expect(unguardedReads(src, [])).toHaveLength(1);
+  });
   it('accepts reads through the helpers', () => {
     const src = [
       'const list = useInfiniteQuery(entityListQuery(p, k));',
@@ -214,7 +262,7 @@ describe('every consumer of a placeholder-enabled query reads it through current
   // Every file using a placeholder-enabled factory, or setting `placeholderData` on a query call itself.
   const files = sourceFiles(root).filter((file) => {
     const src = readFileSync(file, 'utf8');
-    return queries.some((q) => src.includes(`${q}(`)) || /use(?:Infinite)?Query\([\s\S]*?placeholderData\s*:/.test(src);
+    return queries.some((q) => src.includes(`${q}(`)) || /use(?:Infinite)?Query\([\s\S]*?\bplaceholderData\s*(?::|,|\})/.test(src);
   });
   it.each(files.map((f) => [relative(root, f).replaceAll('\\', '/'), f]))('%s', (_name, file) => {
     expect(unguardedReads(readFileSync(file, 'utf8'), queries)).toEqual([]);
