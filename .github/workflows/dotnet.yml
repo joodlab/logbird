@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'sdks/dotnet/**'
+      - 'examples/aspnetcore/**'
       - 'packages/sdk/src/**'
       - 'packages/contracts/src/record-selector.ts'
       - '.github/workflows/dotnet.yml'
@@ -11,6 +12,7 @@ on:
     branches: [master]
     paths:
       - 'sdks/dotnet/**'
+      - 'examples/aspnetcore/**'
       - 'packages/sdk/src/**'
       - 'packages/contracts/src/record-selector.ts'
       - '.github/workflows/dotnet.yml'
