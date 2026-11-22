@@ -554,9 +554,9 @@ async function stopWriters(writers: Writer[], deadline: number) {
       return [];
     }
     for (const writer of alive()) {
-      if (!writer.process.kill(signal)) {
-        writer.failure ??= `could not deliver ${signal} to pid ${writer.process.pid}`;
-      }
+      // kill() can return false for a writer that is exiting on its own right now; only one that never closes counts,
+      // and the unreaped check below catches it.
+      writer.process.kill(signal);
     }
   }
   // A writer can take a while to close after SIGKILL on a loaded machine: give it what is left of the helper's budget.
@@ -650,7 +650,7 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
     Server.prototype.listen = listen;
     renameGate.hold = undefined;
     const unreaped = await stopWriters(writers, deadline);
-    // A writer can exit unexpectedly after its last `done`, or a signal can fail to reach it: that fails the test too.
+    // A writer can exit unexpectedly after its last `done`: that fails the test too.
     const failed = writers.filter((writer) => writer.failure !== undefined);
     if (failed.length && !outcome) {
       // biome-ignore lint/correctness/noUnsafeFinally: a writer that failed must fail the test
