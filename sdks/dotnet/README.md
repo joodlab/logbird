@@ -91,20 +91,22 @@ one, and `AuditChange.Secret("password")` records that a secret changed without 
 ### Identifiers
 
 Actor, impersonator, executor and tenant ids and each target's type and id are **sent exactly as you give them**:
-never trimmed, truncated or converted. The text is the identity, so `"user_42"` and `" user_42 "` are different
-actors. Before sending, the client applies the server's identifier rule (servers before that rule ships may still trim
-identifiers when they store them; the client never does):
+never trimmed, truncated or converted, so `"user_42"` and `" user_42 "` reach Logbird as different strings. Logbird
+servers up to 0.2.x keep each as sent in the stored payload but index both as the same actor `user_42`, so a search for
+`" user_42 "` does not find the event ([#269](https://github.com/joodlab/logbird/issues/269)). They also index only the
+first 64 targets of an event. Before sending, the client checks every identifier:
 
-- An identifier that cannot be stored as sent drops the event with `DropReason.InvalidEntityId` (reason
-  `invalid_entity_id`): longer than 256 UTF-16 code units (64 for a target type), containing a lone surrogate, or more
-  than 256 targets on one event.
-- Surrounding whitespace is kept and reported as a `LogbirdEventWarning` through `OnError` and the logger.
-- An empty string means the field is absent.
+- One that Logbird would not index as given is refused by the SDK, and the event is not sent: it is dropped with
+  `DropReason.InvalidEntityId` (reason `invalid_entity_id`). That is an identifier longer than 256 UTF-16 code units (64
+  for a target type) or containing a lone surrogate, or more than 256 targets on one event.
+- Surrounding whitespace is sent as given and reported as a `LogbirdEventWarning` through `OnError` and the logger.
+- An empty string is not checked and is sent as `""`; Logbird treats an empty id as no id when it indexes the event.
 
 Identifiers are strings in this SDK. For a numeric id, pass an integer's invariant text, for example
 `userId.ToString(CultureInfo.InvariantCulture)` for a `long` gives `"42"`. Avoid formatting a `decimal` (`42.0m` keeps its
-scale and becomes `"42.0"`). The server stores a numeric identifier as the plain decimal text of its value, so the string
-`"42"` and the number `42` are the same identity, while `"42.0"` is a different one. For a `Guid`, pick one format
+scale and becomes `"42.0"`). Logbird 0.2.x indexes a JSON-number id such as `42` (sent by another SDK) as `42`, so the
+string `"42"` from this SDK and the number `42` match, while `"42.0"` does not. A very large number can be indexed in
+another spelling (for example `1e33`), so keep such ids as strings everywhere. For a `Guid`, pick one format
 (`guid.ToString()` gives lowercase `d0c4…`) and keep it, because a different format is a different identity.
 
 The server can also attach warnings to stored events (for example an `occurredAt` outside the accepted window, stored
