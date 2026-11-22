@@ -10,6 +10,8 @@ export function useRange(): {
   explicit: boolean;
   /** Drop the chosen range, back to the page default. */
   clearRange: () => void;
+  /** Entity pages with no range chosen show the entity's whole History; `range` scopes only their summary: say so where it is named. */
+  wholeHistory: boolean;
 } {
   const search = useSearch({ strict: false }) as { range?: string };
   const pageDefault = useMatches({ select: (matches) => matches.findLast((m) => m.staticData?.defaultRange)?.staticData.defaultRange });
@@ -35,5 +37,5 @@ export function useRange(): {
     () => navigate({ to: '.', search: ((prev: Record<string, unknown>) => ({ ...prev, range: undefined })) as never }),
     [navigate],
   );
-  return { range, setRange, explicit, clearRange };
+  return { range, setRange, explicit, clearRange, wholeHistory: keepChosen && !explicit };
 }
