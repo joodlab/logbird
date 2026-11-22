@@ -13,11 +13,16 @@ import { type AttemptResult, legacyWebhookHeaderId, postWebhook, TOTAL_TIMEOUT_M
 const LEASE_MS = 120_000;
 const DISPATCH_MAX_MS = 9000;
 const DISPATCH_DEADLINE_MARGIN_MS = 250;
-const SETTLE_TX = { maxWait: 2000, timeout: 15_000 };
-const SETTLE_RETRIES_MS = [100, 300];
-const SETTLE_RESERVE_MS = (SETTLE_RETRIES_MS.length + 1) * (SETTLE_TX.maxWait + SETTLE_TX.timeout) + 1000;
+const DISPATCH_TX_TIMEOUT_MS = DISPATCH_MAX_MS + 1000;
+// A dispatch can hold the only pool connection through its deadline and transaction cleanup.
+const SETTLE_MAX_WAIT_MS = Math.max(TOTAL_TIMEOUT_MS, DISPATCH_TX_TIMEOUT_MS) + DISPATCH_DEADLINE_MARGIN_MS + 2000;
+const SETTLE_TX_TIMEOUT_MS = 15_000;
+const SETTLE_MAX_BACKOFF_MS = 1000;
+const SETTLE_LEASE_MARGIN_MS = 1000;
+// Leave room for two full settlement transactions, including acquisition, and a retry backoff.
+const SETTLE_RESERVE_MS = 2 * (SETTLE_MAX_WAIT_MS + SETTLE_TX_TIMEOUT_MS) + SETTLE_MAX_BACKOFF_MS + SETTLE_LEASE_MARGIN_MS;
 const MAX_ENDPOINT_ATTEMPTS_PER_SECOND = 50;
-type Claim = { delivery: WebhookDelivery; expired: boolean };
+type Claim = { delivery: WebhookDelivery; expired: boolean; leaseDeadline: number };
 type ScopeColumns = Parameters<typeof storedWebhookScope>[0];
 type DeliveryResult = Omit<AttemptResult, 'error'> & { error?: AttemptResult['error'] | 'scope_mismatch' };
 type DeliveryOptions = {
@@ -40,6 +45,8 @@ const scopeWhere = ({ scopeTenantId, scopeTargetType, scopeTargetId, scopeMask }
 export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'concurrency' | 'perEndpoint'>, projectId?: string) {
   const held = new Map<string, { scope: ScopeColumns; updatedAt: Date }>();
   const claims = await prisma.$transaction(async (tx) => {
+    // Sample before PostgreSQL's clock so the local retry deadline is conservative and immune to host clock skew.
+    const leaseDeadline = performance.now() + LEASE_MS;
     const now = await webhookDatabaseTime(tx);
     // The delivery queue's global concurrency is one. Limit each endpoint independently and exclude live leases
     // from its allowance, even after a worker restarts while some requests are still in flight.
@@ -98,7 +105,7 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
       });
       if (!expired)
         await tx.webhookAttempt.create({ data: { deliveryId: row.id, number: delivery.attemptNumber, startedAt: now, status: 'sending' } });
-      claims.push({ delivery, expired });
+      claims.push({ delivery, expired, leaseDeadline });
     }
     return claims;
   });
@@ -128,11 +135,13 @@ async function settle(
   result: DeliveryResult | undefined,
   latencyMs: number,
   failureLimit: number,
+  maxWait = 2000,
 ) {
   const skipped = result?.error === 'scope_mismatch';
   const success = isSuccess(result);
   const gone = result?.responseCode === 410;
   const localFailure = result?.error === 'event_unavailable' || skipped;
+  const transactionOptions = { maxWait, timeout: SETTLE_TX_TIMEOUT_MS };
   // Keep one lock order for endpoint mutations and settlement. The lease's sequence fences stale results.
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL lock_timeout = '11s'`;
@@ -228,7 +237,7 @@ async function settle(
     await tx.webhookDisableNotice.createMany({
       data: [...recipients].map((userId) => ({ endpointId: endpoint.id, recipientId: userId, reason })),
     });
-  }, SETTLE_TX);
+  }, transactionOptions);
 }
 
 function testEvent(delivery: WebhookDelivery, projectId: string) {
@@ -343,10 +352,10 @@ async function attemptDelivery(
           // Account for time spent preparing the signature without relying on the worker's wall clock.
           if (performance.now() - clockStarted >= timeRemaining) return;
           if (performance.now() >= dispatchDeadline) return { error: 'lookup_failed' } as const;
-          // The response promise is boxed so Prisma commits without waiting for the receiver.
+          // Start under the locks so Prisma can release them without waiting for the receiver.
           return startRequest(timestamp, signature);
         },
-        { timeout: DISPATCH_MAX_MS + 1000 },
+        { timeout: DISPATCH_TX_TIMEOUT_MS },
       ),
     options.transport,
   );
@@ -375,7 +384,7 @@ async function warnSecretOverlap(endpoint: WebhookEndpoint, overlapAt: Date) {
   }
 }
 
-async function sendClaim(ch: ClickHouseClient, { delivery, expired }: Claim, options: DeliveryOptions) {
+async function sendClaim(ch: ClickHouseClient, { delivery, expired, leaseDeadline }: Claim, options: DeliveryOptions) {
   const start = performance.now();
   let endpoint: WebhookEndpoint | null | undefined;
   let result: DeliveryResult | undefined;
@@ -401,15 +410,19 @@ async function sendClaim(ch: ClickHouseClient, { delivery, expired }: Claim, opt
     return prisma.$transaction((tx) => interruptClaim(tx, delivery, reason));
   }
   const latencyMs = Math.round(performance.now() - start);
-  for (const backoff of [0, ...SETTLE_RETRIES_MS]) {
-    if (backoff) await delay(backoff);
+  const acquireBy = leaseDeadline - SETTLE_TX_TIMEOUT_MS - SETTLE_LEASE_MARGIN_MS;
+  for (let backoff = 100; ; backoff = Math.min(backoff * 2, SETTLE_MAX_BACKOFF_MS)) {
+    const maxWait = Math.min(SETTLE_MAX_WAIT_MS, Math.floor(acquireBy - performance.now()));
+    if (maxWait <= 0) break;
     try {
-      await settle(delivery, endpoint, result, latencyMs, options.failureLimit);
+      await settle(delivery, endpoint, result, latencyMs, options.failureLimit, maxWait);
       if (endpoint && overlapAt) await warnSecretOverlap(endpoint, overlapAt);
       return;
     } catch {
       // Retry this result under the same delivery lease and sequence.
     }
+    if (performance.now() + backoff >= acquireBy) break;
+    await delay(backoff);
   }
   console.error(
     JSON.stringify({

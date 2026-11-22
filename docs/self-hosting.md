@@ -1120,6 +1120,7 @@ applies the current scope and filter to the stored occurrence. A present event t
 no longer matches is recorded as `skipped` with `scope_mismatch`, without an HTTP
 request or a charge to the endpoint's failure counters.
 Saved endpoint settings apply to every HTTP attempt that starts after the save, including retries, resends and test pings.
+Each delivery claim has a two-minute lease. Before a POST starts, the worker reserves 56.5 seconds of that lease to store the outcome. Each settlement can wait up to 12.25 seconds for a PostgreSQL connection, and the worker retries the same result within the lease when settlement fails.
 
 On very large projects delivery can stall until the arrival-time index is present.
 The cursor never skips events when a scan exceeds its read budget.

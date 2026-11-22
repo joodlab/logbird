@@ -1,6 +1,7 @@
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
 import { generateWebhookSecret, signWebhook, verifyWebhook } from '@logbird/sdk';
 import { expect, it } from 'vitest';
 import { postWebhook } from './webhook-transport';
@@ -140,4 +141,35 @@ it('still rejects when the dispatch fails before any request started', async () 
       { allowHttp: true, lookup: async () => [{ address: '127.0.0.1', family: 4 }], allowAddress: () => true },
     ),
   ).rejects.toThrow('lock failed');
+});
+
+it('keeps a completed 204 when dispatch acknowledges the commit after the total deadline', async () => {
+  const receiver = createServer((request, response) => {
+    request.resume();
+    request.on('end', () => response.writeHead(204).end());
+  });
+  let acknowledgement: Promise<void> | undefined;
+  try {
+    receiver.listen(0, '127.0.0.1');
+    await once(receiver, 'listening');
+    const { port } = receiver.address() as AddressInfo;
+    const totalTimeoutMs = 400;
+    const result = await postWebhook(
+      `http://127.0.0.1:${port}/event`,
+      'signed-id',
+      '{}',
+      async (startRequest, deadline) => {
+        const started = await sign('signed-id', '{}')(startRequest, deadline);
+        acknowledgement = delay(totalTimeoutMs + 200);
+        await acknowledgement;
+        return started;
+      },
+      { allowHttp: true, allowAddress: (address) => address === '127.0.0.1', totalTimeoutMs },
+    );
+    expect(result).toEqual({ responseCode: 204, responseBody: '' });
+  } finally {
+    receiver.closeAllConnections();
+    await new Promise<void>((resolve) => receiver.close(() => resolve()));
+    await acknowledgement;
+  }
 });

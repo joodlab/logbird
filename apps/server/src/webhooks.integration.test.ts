@@ -257,10 +257,6 @@ it('holds legacy filters and resumes the reviewed matches without moving the hel
   for (const fixture of cases) {
     const { endpoint } = await create('owner', { url: receiver, filterQuery: fixture.legacy });
     legacy.push({ id: endpoint.id, fixture });
-    await prisma.webhookEndpoint.update({
-      where: { id: endpoint.id },
-      data: { filterReviewRequired: true, cursorReceivedAt, createdAt: cursorReceivedAt },
-    });
   }
   try {
     await withLocalReceiver(current.id, async (received) => {
@@ -278,14 +274,36 @@ it('holds legacy filters and resumes the reviewed matches without moving the hel
       const queued = await prisma.webhookDelivery.create({
         data: { endpointId: first.id, eventId: first.fixture.id, receivedAt: time, expiresAt },
       });
+      const completed = await prisma.webhookDelivery.create({
+        data: {
+          endpointId: first.id,
+          eventId: 'qa-completed-before-filter-hold',
+          status: 'succeeded',
+          attemptNumber: 1,
+          windowAttempts: 1,
+          nextAttemptAt: null,
+          expiresAt,
+          attempts: { create: { number: 1, startedAt: time, status: 'succeeded', responseCode: 204 } },
+        },
+        include: { attempts: true },
+      });
       for (const { id } of legacy) {
-        await prisma.webhookEndpoint.update({ where: { id }, data: { url: liveReceiver } });
+        await prisma.webhookEndpoint.update({
+          where: { id },
+          data: { url: liveReceiver, filterReviewRequired: true, cursorReceivedAt, createdAt: cursorReceivedAt },
+        });
         const path = `${base()}/${id}`;
         expect(await (await request(path)).json()).toMatchObject({ filterWarning: warning });
-        expect((await request(`${path}/test`, 'POST')).status).toBe(409);
+        const ping = await request(`${path}/test`, 'POST');
+        expect(ping.status).toBe(409);
+        expect(await ping.json()).toMatchObject({ error: { code: warning } });
         await discoverWebhookDeliveries(clickhouse, await lookup(id));
         expect(await lookup(id)).toMatchObject({ cursorReceivedAt, cursorEventId: null, lastScannedAt: null });
       }
+      const resend = await request(`${base()}/${first.id}/deliveries/${completed.id}/resend`, 'POST');
+      expect(resend.status).toBe(409);
+      expect(await resend.json()).toMatchObject({ error: { code: warning } });
+      expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: completed.id }, include: { attempts: true } })).toEqual(completed);
       const list = listWebhooksResponseSchema.parse(await (await request(base())).json()).data;
       expect(
         list

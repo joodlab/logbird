@@ -17,11 +17,7 @@ export type WebhookTransportOptions = NonNullable<Parameters<typeof resolveWebho
   totalTimeoutMs?: number;
 };
 type AttemptContext = { started: number; deadline: number; signal: AbortSignal; requestStarted: boolean; responseCode?: number };
-type StartedRequest = { response: Promise<AttemptResult> };
-type Dispatch = (
-  startRequest: (timestamp: number, signature: string) => StartedRequest,
-  deadline: number,
-) => Promise<StartedRequest | AttemptResult | undefined>;
+type Dispatch = (startRequest: (timestamp: number, signature: string) => undefined, deadline: number) => Promise<AttemptResult | undefined>;
 
 export function legacyWebhookHeaderId(id: string) {
   // Reserve the prefix in both branches so a literal ID can never collide with an encoded ID.
@@ -69,20 +65,12 @@ async function sendWebhook(
     return { error: error instanceof WebhookLookupBusyError ? 'lookup_failed' : 'destination_rejected' };
   }
   if (attempt.signal.aborted) return { error: 'lookup_failed' };
-  let started: StartedRequest | undefined;
-  let result: Awaited<ReturnType<Dispatch>>;
-  try {
-    result = await dispatch((timestamp, signature) => {
-      started = { response: startWebhook(destination, id, payload, timestamp, signature, attempt) };
-      return started;
-    }, attempt.deadline);
-  } catch (error) {
-    // The dispatch transaction only holds locks once the request has started, so a failed commit changes nothing: the
-    // receiver's answer (under the same total deadline) is still this attempt's outcome, never a retryable lookup error.
-    if (started) return started.response;
-    throw error;
-  }
-  return result && 'response' in result ? result.response : result;
+  return new Promise((resolve, reject) => {
+    dispatch((timestamp, signature) => {
+      // Once dispatch hands off to HTTP, this promise adopts the response immediately. Later commit results are ignored.
+      resolve(startWebhook(destination, id, payload, timestamp, signature, attempt));
+    }, attempt.deadline).then(resolve, reject);
+  });
 }
 
 function startWebhook(
