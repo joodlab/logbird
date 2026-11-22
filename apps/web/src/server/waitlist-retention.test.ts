@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -333,19 +334,23 @@ it('resolves every alias of a store to one path, before and after its directory 
  * Concurrent rewrite proof, driven step by step so no schedule can fail a correct lock or pass a broken one.
  *
  * Each writer is a separate process that appends one record when the parent tells it to (`append <tag>` on stdin) and
- * prints `done <tag>` once the append returned. A test-only patch in the writer reports `contended <tag>` whenever its
- * lock attempt for that append fails with EADDRINUSE: the address is held by someone else, the real signal of waiting.
+ * prints `done <tag>` once the append returned. Two test-only patches in the writer report what its lock really does:
+ * `contended <tag>` whenever a lock bind fails with EADDRINUSE (the address is held elsewhere: it must wait), and
+ * `opened <tag> <address>` when the append opens the day file, naming the lock address the writer is listening on at
+ * that moment (`none` if it holds none). The parent records the addresses its own lock listens on the same way.
  *
  * First every writer appends at once (`init`), so they race to create the store. Then, for each of REWRITES rewrites
  * (append a victim, then forget it), the parent pauses its own rewrite between reading the day file and renaming the
  * rewritten copy over it (the `rename` gate above), while it holds the lock, and only then tells every writer to
  * append for that pass. It keeps the lock until every writer has reported contention for that pass, and fails if any
- * of those appends reports done first: an append started under the lock can only finish after the lock is released.
- * After the rewrite returns it waits for every append of the pass. The expected records are exact (one per writer
- * per step), and every record shares one `receivedAt`, so all of them land in one day file whatever the time of day.
+ * of those appends has opened the day file or reported done first. After the rewrite returns it waits for every
+ * append of the pass. At the end every append must have opened the day file while holding the same lock address the
+ * rewriter used, so a writer that gave up waiting and wrote unlocked fails the test even after a genuine collision.
+ * The expected records are exact (one per writer per step), and every record shares one `receivedAt`, so all of them
+ * land in one day file whatever the time of day.
  *
- * Every wait is bounded by one deadline on the parent's monotonic clock, and the writers are killed and awaited in
- * `finally` whatever happened.
+ * Every wait, including the parent's own append and rewrite, is bounded by one deadline on the parent's monotonic
+ * clock, and the writers are stopped, killed if needed and reaped (with bounded waits) in `finally`.
  */
 const REWRITES = 3;
 const RECEIVED_AT = '2026-01-15T12:00:00.000Z';
@@ -358,8 +363,12 @@ interface Writer {
   /** Tags whose append reported `done`, and tags whose lock attempt hit EADDRINUSE at least once. */
   done: Set<string>;
   contended: Set<string>;
+  /** The lock address held when each append opened the day file (`none` when it held none). */
+  opened: Map<string, string>;
   failure?: string;
-  closed: Promise<number | null>;
+  stopping: boolean;
+  exit?: { code: number | null; signal: NodeJS.Signals | null };
+  closed: Promise<void>;
   stderr: () => string;
 }
 
@@ -376,19 +385,65 @@ async function until(condition: () => boolean, what: string, deadline: number, w
   }
 }
 
+/** `work` bounded by the deadline; the timer never outlives it. */
+async function within<T>(work: Promise<T>, what: string, deadline: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, fail) => {
+    timer = setTimeout(() => fail(new Error(`Timed out waiting for ${what}.`)), Math.max(0, deadline - performance.now()));
+  });
+  try {
+    return await Promise.race([work, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Resolves true once every writer has closed, false after `ms`; the timer never outlives it. */
+async function allClosed(writers: Writer[], ms: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.all(writers.map((writer) => writer.closed)).then(() => true),
+      new Promise<boolean>((done) => {
+        timer = setTimeout(() => done(false), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const lockKey = (address: unknown) => JSON.stringify(address);
+
 function startWriter(path: string, index: number): Writer {
   const body = `const net = await import('node:net');
     const { createInterface } = await import('node:readline');
-    // Test-only: report each lock attempt that finds the address taken, tagged with the append it belongs to.
+    const { syncBuiltinESMExports } = await import('node:module');
+    // Test-only: report what the lock really does, tagged with the append it belongs to.
     let tag = '';
+    let owned = 'none';
     const listen = net.Server.prototype.listen;
     net.Server.prototype.listen = function (...args) {
       const current = tag;
+      const key = JSON.stringify(args[0]);
       this.once('error', (error) => {
         if (error?.code === 'EADDRINUSE' && current) console.log('contended ' + current);
       });
+      this.once('listening', () => {
+        owned = key;
+        this.once('close', () => {
+          if (owned === key) owned = 'none';
+        });
+      });
       return listen.apply(this, args);
     };
+    const fsp = process.getBuiltinModule('node:fs/promises');
+    const open = fsp.open;
+    fsp.open = function (file, flags, ...rest) {
+      if (flags === 'a+' && String(file).endsWith('.jsonl') && tag) console.log('opened ' + tag + ' ' + owned);
+      return open.call(this, file, flags, ...rest);
+    };
+    syncBuiltinESMExports();
     createInterface({ input: process.stdin }).on('line', async (line) => {
       const [command, value] = line.split(' ');
       if (command === 'exit') process.exit(0);
@@ -414,14 +469,24 @@ function startWriter(path: string, index: number): Writer {
     process: proc,
     done: new Set(),
     contended: new Set(),
+    opened: new Map(),
+    stopping: false,
     stderr: () => stderr,
-    closed: new Promise((resolveClosed) => proc.once('close', (code) => resolveClosed(code))),
+    closed: Promise.resolve(),
   };
+  writer.closed = new Promise((resolveClosed) =>
+    proc.once('close', (code, signal) => {
+      writer.exit = { code, signal };
+      if (!writer.stopping) writer.failure ??= `exited unexpectedly (code ${code}, signal ${signal})`;
+      resolveClosed();
+    }),
+  );
   proc.once('error', (error) => {
-    writer.failure = `spawn error: ${error.message}`;
+    writer.failure ??= `process error: ${error.message}`;
   });
-  void writer.closed.then((code) => {
-    writer.failure ??= `exited with code ${code}`;
+  // A writer can close its pipe before its exit is seen: a write then fails with EPIPE on stdin, not on the process.
+  proc.stdin?.on('error', (error) => {
+    if (!writer.stopping) writer.failure ??= `stdin error: ${error.message}`;
   });
   if (proc.stdout) {
     createInterface({ input: proc.stdout }).on('line', (line) => {
@@ -432,40 +497,57 @@ function startWriter(path: string, index: number): Writer {
         writer.done.add(value);
       } else if (kind === 'contended' && value) {
         writer.contended.add(value);
+      } else if (kind === 'opened' && value) {
+        writer.opened.set(value, rest.join(' '));
       } else if (kind === 'failed') {
-        writer.failure = `append ${value} failed: ${rest.join(' ')}`;
+        writer.failure ??= `append ${value} failed: ${rest.join(' ')}`;
       }
     });
   }
   return writer;
 }
 
-const send = (writer: Writer, line: string) => writer.process.stdin?.write(`${line}\n`);
+function send(writer: Writer, line: string) {
+  try {
+    writer.process.stdin?.write(`${line}\n`);
+  } catch (error) {
+    writer.failure ??= `could not send "${line}": ${(error as Error).message}`;
+  }
+}
 
+/** Stops every writer, escalating to SIGTERM and SIGKILL. Returns the writers that still aren't reaped. */
 async function stopWriters(writers: Writer[]) {
+  const alive = () => writers.filter((writer) => writer.exit === undefined);
   for (const writer of writers) {
-    if (writer.process.exitCode === null && writer.process.signalCode === null) {
-      send(writer, 'exit');
-    }
+    writer.stopping = true;
+    if (writer.exit === undefined) send(writer, 'exit');
   }
-  const settled = (ms: number) =>
-    Promise.race([Promise.all(writers.map((writer) => writer.closed)).then(() => true), new Promise((done) => setTimeout(() => done(false), ms))]);
-  if (!(await settled(KILL_GRACE_MS))) {
-    for (const writer of writers) {
-      if (writer.process.exitCode === null && writer.process.signalCode === null) writer.process.kill('SIGTERM');
+  for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
+    if (await allClosed(writers, KILL_GRACE_MS)) {
+      return [];
     }
-    if (!(await settled(KILL_GRACE_MS))) {
-      for (const writer of writers) {
-        if (writer.process.exitCode === null && writer.process.signalCode === null) writer.process.kill('SIGKILL');
+    for (const writer of alive()) {
+      if (!writer.process.kill(signal)) {
+        writer.failure ??= `could not deliver ${signal} to pid ${writer.process.pid}`;
       }
-      await Promise.all(writers.map((writer) => writer.closed));
     }
   }
+  await allClosed(writers, KILL_GRACE_MS);
+  return alive();
 }
 
 async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
   const deadline = performance.now() + HELPER_DEADLINE_MS;
   const writers: Writer[] = [];
+  // The addresses this process's own lock listens on, recorded the same way as in the writers.
+  const parentLocks = new Set<string>();
+  const listen = Server.prototype.listen;
+  Server.prototype.listen = function (this: Server, ...args: Parameters<Server['listen']>) {
+    const key = lockKey(args[0]);
+    this.once('listening', () => parentLocks.add(key));
+    return listen.apply(this, args);
+  } as Server['listen'];
+  let outcome: Error | undefined;
   try {
     for (const [index, path] of paths.entries()) {
       writers.push(startWriter(path, index));
@@ -480,7 +562,7 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
       const tag = `pass${pass}`;
       tags.push(tag);
       const victim = `victim-${pass}@example.test`;
-      await appendWaitlistRecord(rewriteVia, record(victim, RECEIVED_AT));
+      await within(appendWaitlistRecord(rewriteVia, record(victim, RECEIVED_AT)), `the victim append of rewrite ${pass}`, deadline);
       let held = false;
       renameGate.hold = async (to) => {
         if (!to.endsWith('.jsonl')) {
@@ -491,24 +573,39 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
         // This rewrite holds the lock. Every append started now must find the address taken and wait.
         for (const writer of writers) send(writer, `append ${tag}`);
         await until(
-          () => writers.every((writer) => writer.contended.has(tag) || writer.done.has(tag)),
+          () => writers.every((writer) => writer.contended.has(tag) || writer.opened.has(tag) || writer.done.has(tag)),
           `every writer to contend for the lock during rewrite ${pass}`,
           deadline,
           writers,
         );
-        // Still inside the gate, so the lock is still held: a `done` already here was written under it.
-        const finishedUnderLock = writers.filter((writer) => writer.done.has(tag)).map((writer) => writer.index);
-        expect(finishedUnderLock, `writers whose append finished while rewrite ${pass} held the lock`).toEqual([]);
+        // Still inside the gate, so the lock is still held: an append that got this far did it under the lock.
+        const pastTheLock = writers.filter((writer) => writer.opened.has(tag) || writer.done.has(tag)).map((writer) => writer.index);
+        expect(pastTheLock, `writers that wrote while rewrite ${pass} held the lock`).toEqual([]);
       };
-      const { removed } = await forgetWaitlistEmail(rewriteVia, victim);
+      const { removed } = await within(forgetWaitlistEmail(rewriteVia, victim), `rewrite ${pass}`, deadline);
       expect(held, `rewrite ${pass} via ${rewriteVia} never renamed a day file`).toBe(true);
       expect(removed, `rewrite ${pass} via ${rewriteVia} removed its victim`).toBe(1);
       await until(() => writers.every((writer) => writer.done.has(tag)), `the appends of rewrite ${pass} to finish`, deadline, writers);
     }
+    // Every append opened the day file while listening on the lock address the rewriter itself used.
+    expect(parentLocks.size, 'lock addresses the rewriter listened on').toBe(1);
+    for (const writer of writers) {
+      for (const tag of tags) {
+        expect(writer.opened.get(tag), `writer ${writer.index}, append ${tag}: lock held when it opened the day file`).toBe([...parentLocks][0]);
+      }
+    }
     return writers.flatMap((writer) => tags.map((tag) => `new-${writer.index}-${tag}@example.test`)).sort();
+  } catch (error) {
+    outcome = error as Error;
+    throw error;
   } finally {
+    Server.prototype.listen = listen;
     renameGate.hold = undefined;
-    await stopWriters(writers);
+    const unreaped = await stopWriters(writers);
+    if (unreaped.length && !outcome) {
+      // biome-ignore lint/correctness/noUnsafeFinally: a writer we couldn't reap must fail the test
+      throw new Error(`Writers not reaped: ${unreaped.map((writer) => `${writer.index} (pid ${writer.process.pid})`).join(', ')}`);
+    }
   }
 }
 
