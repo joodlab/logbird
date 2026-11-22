@@ -54,6 +54,10 @@ export const consoleMatrix = [
   ['POST', '/v1/events', 'ingest-key'],
   ['GET', '/v1/events', 'read-key'],
   ['GET', '/v1/events/:eventId', 'read-key'],
+  // #138/#140: read or scoped-read keys and viewer tokens; minting takes a read key only (scope enforced in-route).
+  ['GET', '/v1/facets', 'read-key'],
+  ['GET', '/v1/export', 'read-key'],
+  ['POST', '/v1/viewer-tokens', 'read-key'],
 ] as const;
 
 // better-auth's wildcard must not hide new HTTP or server-only capabilities.

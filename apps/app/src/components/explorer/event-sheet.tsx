@@ -53,6 +53,7 @@ import { formatTimeMs } from '@/lib/format';
 import { andQuery, formatExactTerm } from '@/lib/query-language';
 import { admittedRange } from '@/lib/range';
 import { eventCurl } from '@/lib/snippets';
+import { useConsoleZone } from '@/lib/time-zone';
 
 interface EventSheetProps {
   projectId?: string;
@@ -522,6 +523,7 @@ function EventDetailBody({
   onFilter?: (term: string) => void;
   onRetry: () => void;
 }) {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const link = useCopy();
   const curl = useCopy();
   const router = useRouter();

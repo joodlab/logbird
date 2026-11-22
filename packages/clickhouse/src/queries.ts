@@ -15,18 +15,20 @@ import type {
   histogramQuerySchema,
   OverviewResponse,
   RangeQuery,
+  ReadScope,
   SearchQuery,
   SearchResponse,
 } from '@logbird/contracts';
 import { EXPORT_SCHEMA_VERSION, parseJsonExact, pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
-import { isQueryClient } from './client';
+import { boundTenant, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
 import { projectMaintenance } from './maintenance-tag';
 import type { EventRow } from './normalize';
 import { columns, compileQuery, QueryError } from './query';
 import { rollupSql } from './rollup-sql';
+import { CursorError, cursorBinding, scopePredicate } from './scope';
 import { freezeSqlClock, sqlSyntaxError, validateSql } from './sql-guard';
 
 const sqlExpression = Symbol('sqlExpression');
@@ -39,7 +41,12 @@ async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }, no
 }
 
 type Params = Record<string, unknown>;
-export type ExportExecution = { signal: AbortSignal; cancelQuery: (queryId: string) => Promise<void> };
+export type ExportExecution = {
+  signal: AbortSignal;
+  cancelQuery: (queryId: string) => Promise<void>;
+  /** Recorded as ClickHouse `log_comment` on every page query (e.g. the export id), for audits and tests. */
+  tag?: string;
+};
 export async function read<T>(
   ch: ClickHouseClient,
   query: string,
@@ -47,6 +54,8 @@ export async function read<T>(
   guard = 10,
   exportBudget = false,
   execution?: ExportExecution,
+  /** Aborting closes the HTTP request; ClickHouse then cancels the read-only statement. */
+  abortSignal?: AbortSignal,
 ): Promise<T[]> {
   const query_params = { ...parameters };
   for (const key of ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff', 'exportReceivedBefore']) {
@@ -57,6 +66,14 @@ export async function read<T>(
   // expression. Bind per HTTP query, not on the shared client's session.
   const project = query_params.project ?? query_params.p;
   if (isQueryClient(ch) && (typeof project !== 'string' || !project)) throw new Error('Restricted query requires one project');
+  // A tenant-bound client always sends its tenant; a scope predicate in the query must name the same tenant.
+  const bound = boundTenant(ch);
+  if (bound !== undefined && typeof query_params.scope_tenant === 'string' && query_params.scope_tenant !== bound)
+    throw new Error('Scope tenant does not match the bound tenant');
+  const tenant = bound ?? (typeof query_params.scope_tenant === 'string' ? query_params.scope_tenant : '');
+  // Error reports name the language the caller used: SQL-mode filters carry the expression symbol, and the unbound
+  // restricted client serves only the console's SQL mode (its auxiliary reads too); tenant-bound clients serve /v1.
+  const lang = sqlExpression in query_params || (isQueryClient(ch) && bound === undefined) ? 'sql' : 'query';
   execution?.signal.throwIfAborted();
   const queryId = execution ? randomUUID() : undefined;
   let cancellation: Promise<void> | undefined;
@@ -67,23 +84,34 @@ export async function read<T>(
     });
   };
   execution?.signal.addEventListener('abort', cancel, { once: true });
+  let closeOnAbort: (() => void) | undefined;
   try {
-    const rows = await (
-      await ch.query({
-        query,
-        query_id: queryId,
-        query_params,
-        format: 'JSONEachRow',
-        clickhouse_settings: {
-          max_execution_time: isQueryClient(ch) ? 10 : guard,
-          // Restricted SQL's CONST profile supplies 1-GiB memory/read limits and reserves both API admission slots.
-          ...(exportBudget && !isQueryClient(ch)
-            ? { max_memory_usage: '134217728', max_bytes_to_read: '268435456', read_overflow_mode: 'throw' as const, max_threads: 2 }
-            : {}),
-          ...(isQueryClient(ch) ? { SQL_logbird_project: project as string } : {}),
-        },
-      })
-    ).json<T>();
+    const resultSet = await ch.query({
+      query,
+      query_id: queryId,
+      query_params,
+      format: 'JSONEachRow',
+      abort_signal: abortSignal,
+      clickhouse_settings: {
+        ...(abortSignal ? { cancel_http_readonly_queries_on_client_close: 1 } : {}),
+        ...(execution?.tag ? { log_comment: execution.tag } : {}),
+        max_execution_time: isQueryClient(ch) ? 10 : guard,
+        // Restricted SQL's CONST profile supplies 1-GiB memory/read limits and reserves both API admission slots.
+        ...(exportBudget && !isQueryClient(ch)
+          ? { max_memory_usage: '134217728', max_bytes_to_read: '268435456', read_overflow_mode: 'throw' as const, max_threads: 2 }
+          : {}),
+        // Scoped reads bind their tenant so the row policy enforces it too (#138 phase 2).
+        ...(isQueryClient(ch) ? { SQL_logbird_project: project as string, SQL_logbird_tenant: tenant } : {}),
+      },
+    });
+    // The driver stops watching abort_signal once headers arrive; close the body stream ourselves so a stalled body
+    // cannot outlive an abort.
+    if (abortSignal) {
+      closeOnAbort = () => resultSet.close();
+      if (abortSignal.aborted) closeOnAbort();
+      else abortSignal.addEventListener('abort', closeOnAbort, { once: true });
+    }
+    const rows = await resultSet.json<T>();
     execution?.signal.throwIfAborted();
     return rows;
   } catch (error) {
@@ -93,16 +121,17 @@ export async function read<T>(
       )
     )
       throw new QueryError('Query exceeded its resource budget', {
-        lang: isQueryClient(ch) ? 'sql' : 'query',
+        lang,
         reason: 'limit',
         start: null,
         end: null,
         hint: 'Narrow the time range or filter',
       });
-    if (isQueryClient(ch) && /SYNTAX_ERROR|Syntax error/.test(error instanceof Error ? error.message : ''))
+    if (lang === 'sql' && /SYNTAX_ERROR|Syntax error/.test(error instanceof Error ? error.message : ''))
       throw sqlSyntaxError(error, query, (query_params as Record<symbol, string>)[sqlExpression] ?? '');
     throw error;
   } finally {
+    if (closeOnAbort) abortSignal?.removeEventListener('abort', closeOnAbort);
     execution?.signal.removeEventListener('abort', cancel);
     // Keep the original response open: aborting HTTP alone does not prove the SELECT stopped.
     // An early KILL with no match still waits for this read to finish before releasing capacity.
@@ -115,11 +144,19 @@ export function timeRange(q: RangeQuery, now = Date.now()) {
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
   return { from: from.toISOString(), to: to.toISOString() };
 }
-export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery, compiled?: Awaited<ReturnType<typeof filter>>) {
+export async function where(
+  ch: ClickHouseClient,
+  projectId: string,
+  q: RangeQuery,
+  compiled?: Awaited<ReturnType<typeof filter>>,
+  scope?: ReadScope | null,
+) {
   const c = compiled ?? (await filter(ch, q));
+  const s = scopePredicate(scope);
+  // The scope is ANDed outside the user's filter: nothing inside `(c.sql)` can widen it.
   return {
-    sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${c.sql})`,
-    params: { project: projectId, ...timeRange(q), ...c.params },
+    sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${c.sql}) AND (${s.sql})`,
+    params: { project: projectId, ...timeRange(q), ...c.params, ...s.params },
   };
 }
 const iso = (s: string) => new Date(s.endsWith('Z') ? s : `${s.replace(' ', 'T')}Z`).toISOString();
@@ -160,14 +197,80 @@ export function toEvent(r: EventRow & { category?: string }): AuditEvent {
   };
 }
 const encode = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
-function cursor(s: string): [string, string] {
+/**
+ * Search cursors are `[timestamp, eventId, binding]`: the binding ties them to the project, and to the scope when
+ * minted by a scoped caller. Two-element cursors (issued before bindings existed) stay valid for unscoped readers only.
+ */
+function cursor(s: string, projectId: string, scope?: ReadScope | null): [string, string] {
+  const bound = cursorBinding(projectId, scope);
   try {
     const a: unknown = JSON.parse(Buffer.from(s, 'base64url').toString());
-    if (Array.isArray(a) && a.length === 2 && a.every((v) => typeof v === 'string')) return a as [string, string];
+    // A cursor only pages within the project and scope that minted it: another project, unscoped ↔ scoped and
+    // scope A ↔ scope B are rejected, and so is a malformed position (it would otherwise fail later as a 500 or be
+    // silently normalized, e.g. February 30).
+    const binds = Array.isArray(a) && (a.length === 3 ? a[2] === bound : a.length === 2 && !scope);
+    if (binds && a.every((v) => typeof v === 'string')) {
+      const [ts, id] = a as [string, string];
+      const date = new Date(ts);
+      if (
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(ts) &&
+        Number.isFinite(date.getTime()) &&
+        date.toISOString() === ts &&
+        id &&
+        id.length <= 1024
+      )
+        return [ts, id];
+    }
   } catch {
     /* Report malformed cursors with a stable public error below. */
   }
-  throw new Error('Invalid cursor');
+  throw new CursorError();
+}
+/** Distinct matches up to the 10,001 cap. `exact` is false when capped, past its budget, cancelled or failed. */
+export const COUNT_CAP = 10_001;
+/** Wall-clock budget for the count, also for restricted SQL whose CONST profile allows statements 10 seconds. */
+export const COUNT_BUDGET_MS = 1000;
+type CountResult = { n: number; exact: boolean };
+/**
+ * The count settles by its deadline whatever its HTTP request is doing (stalled headers or body): the deadline resolves
+ * the lower-bound fallback and aborts the request. Server cleanup differs by client: the writable client's statement
+ * stops at its one-second max_execution_time; the restricted readonly client's statement is cancelled when ClickHouse
+ * notices the closed connection (cooperative), bounded by its CONST ten-second profile.
+ */
+function countMatches(ch: ClickHouseClient, w: { sql: string; params: Params }) {
+  const controller = new AbortController();
+  const fallback: CountResult = { n: 0, exact: false };
+  let stopped: 'budget' | 'settled' | undefined;
+  let settle: (value: CountResult) => void = () => undefined;
+  const deadline = new Promise<CountResult>((resolve) => {
+    settle = resolve;
+  });
+  const stop = (why: 'budget') => {
+    if (stopped) return;
+    stopped = why;
+    console.warn(JSON.stringify({ level: 'warn', event: 'search.count_unavailable', reason: why }));
+    controller.abort();
+    settle(fallback);
+  };
+  const timer = setTimeout(() => stop('budget'), COUNT_BUDGET_MS);
+  const counted = (async (): Promise<CountResult> => {
+    try {
+      const sql = `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT ${COUNT_CAP})`;
+      const n = Number((await read<{ n: number }>(ch, sql, w.params, 1, false, undefined, controller.signal))[0]?.n ?? 0);
+      stopped ??= 'settled'; // a later cancel() is a no-op
+      return { n, exact: n < COUNT_CAP };
+    } catch (error) {
+      if (!stopped) {
+        stopped = 'settled';
+        const reason = error instanceof QueryError ? error.details.reason : 'error';
+        console.warn(JSON.stringify({ level: 'warn', event: 'search.count_unavailable', reason }));
+      }
+      return fallback;
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
+  return { result: Promise.race([counted, deadline]) };
 }
 async function searchPage(
   ch: ClickHouseClient,
@@ -177,9 +280,10 @@ async function searchPage(
   includePayload = false,
   exportClock?: string,
   execution?: ExportExecution,
+  scope?: ReadScope | null,
 ): Promise<{ page: SearchResponse; payloads: string[] }> {
   const start = performance.now(),
-    w = await where(ch, projectId, q, compiled),
+    w = await where(ch, projectId, q, compiled, scope),
     asc = q.order === 'asc',
     op = asc ? '>' : '<',
     order = asc ? 'ASC' : 'DESC';
@@ -190,32 +294,42 @@ async function searchPage(
     params.exportReceivedBefore = exportClock;
   }
   if (q.cursor) {
-    const [ts, id] = cursor(q.cursor);
+    const [ts, id] = cursor(q.cursor, projectId, scope);
     params.cursorTs = ts;
     params.cursorId = id;
     tail = ` AND (timestamp,event_id) ${op} ({cursorTs:DateTime64(3)},{cursorId:String})`;
   }
-  const rows = await read<EventRow>(
-    ch,
-    // Select pairs in the MergeTree's timestamp/id order; resolve receipt ties only in the bounded fetch.
-    // Legacy versions can share the entire pointer tuple; recheck their filters before outer dedupe.
-    `SELECT * EXCEPT(${includePayload ? 'search_text' : 'payload,search_text'}) FROM events WHERE ${w.sql} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
-    params,
-    10,
-    Boolean(exportClock),
-    execution,
-  );
+  const readRows = () =>
+    read<EventRow>(
+      ch,
+      // Select pairs in the MergeTree's timestamp/id order; resolve receipt ties only in the bounded fetch.
+      // Legacy versions can share the entire pointer tuple; recheck their filters before outer dedupe.
+      `SELECT * EXCEPT(${includePayload ? 'search_text' : 'payload,search_text'}) FROM events WHERE ${w.sql} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
+      params,
+      10,
+      Boolean(exportClock),
+      execution,
+    );
+  // Rows first and alone, as before: the optional count never competes with them for a ClickHouse query slot, and a
+  // row error surfaces unchanged. The count then gets at most COUNT_BUDGET_MS and can only lower the total's precision.
+  const rows = await readRows();
   const hasMore = rows.length > q.limit,
     data = rows.slice(0, q.limit).map(toEvent),
     last = data.at(-1);
-  const total = exportClock
-    ? 0
-    : Number(
-        (await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT 10001)`, w.params, 1))[0]
-          ?.n ?? 0,
-      );
+  const count = exportClock ? undefined : await countMatches(ch, w).result;
+  // Lower bound when the count did not finish: the rows seen, plus the extra row that proves there are more.
+  const seen = data.length + (hasMore ? 1 : 0);
+  // A count from an earlier snapshot can be below what this page proves; never report less than that.
+  const total = count === undefined ? 0 : Math.max(count.n, seen);
+  const totalExact = count === undefined ? true : count.exact && count.n >= seen;
   return {
-    page: { data, total, nextCursor: hasMore && last ? encode([last.timestamp, last.id]) : null, tookMs: performance.now() - start },
+    page: {
+      data,
+      total,
+      totalExact,
+      nextCursor: hasMore && last ? encode([last.timestamp, last.id, cursorBinding(projectId, scope)]) : null,
+      tookMs: performance.now() - start,
+    },
     payloads: includePayload ? rows.slice(0, q.limit).map((row) => row.payload) : [],
   };
 }
@@ -224,35 +338,68 @@ export async function searchEvents(
   projectId: string,
   q: SearchQuery,
   compiled?: Awaited<ReturnType<typeof filter>>,
+  scope?: ReadScope | null,
 ): Promise<SearchResponse> {
-  return (await searchPage(ch, projectId, q, compiled)).page;
+  return (await searchPage(ch, projectId, q, compiled, false, undefined, undefined, scope)).page;
 }
-async function eventRow(ch: ClickHouseClient, p: string, id: string) {
-  return (
-    await read<EventRow>(ch, 'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp LIMIT 1', {
-      p,
-      id,
-    })
-  )[0];
+async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: ReadScope | null, canonicalClient?: ClickHouseClient) {
+  // Oldest receipt first, then timestamp, then a hash of the stored document: a deterministic canonical version even
+  // for legacy rows that tie on both timestamps.
+  const canonical =
+    'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1';
+  if (!scope) return (await read<EventRow>(ch, canonical, { p, id }))[0];
+  const s = scopePredicate(scope);
+  if (canonicalClient && canonicalClient !== ch) {
+    // A row-policy-bound client only sees its tenant's rows, so it would pick the oldest version *of its tenant* as
+    // canonical. Choose the canonical version project-wide and test the scope on it in the same lookup (a pointer and
+    // a flag, nothing else). An unknown id and an out-of-scope id both end here, with one query and the same answer;
+    // only an in-scope version is then fetched, exactly, through the bound client.
+    const [pointer] = await read<{ received_at: string; timestamp: string; h: string; in_scope: number }>(
+      canonicalClient,
+      `SELECT received_at, timestamp, toString(sipHash64(payload)) h, (${s.sql}) in_scope FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1`,
+      { p, id, ...s.params },
+    );
+    if (!pointer || !Number(pointer.in_scope)) return;
+    return (
+      await read<EventRow>(
+        ch,
+        `SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} AND received_at={pointerReceived:DateTime64(3, 'UTC')} AND timestamp={pointerTimestamp:DateTime64(3, 'UTC')} AND sipHash64(payload)={pointerHash:UInt64} AND ${s.sql} LIMIT 1`,
+        { p, id, pointerReceived: pointer.received_at, pointerTimestamp: pointer.timestamp, pointerHash: pointer.h, ...s.params },
+      )
+    )[0];
+  }
+  // Pick the canonical stored row first, then test the scope on it: a scoped caller sees exactly the row an unscoped
+  // reader sees, or nothing (never a different stored version that happens to match).
+  return (await read<EventRow>(ch, `SELECT * FROM (${canonical}) WHERE ${s.sql}`, { p, id, ...s.params }))[0];
 }
-export async function getEvent(ch: ClickHouseClient, projectId: string, eventId: string): Promise<EventDetail | null> {
-  const row = await eventRow(ch, projectId, eventId);
+/** With a scope, an out-of-scope id is indistinguishable from an unknown one (null → 404). */
+export async function getEvent(
+  ch: ClickHouseClient,
+  projectId: string,
+  eventId: string,
+  scope?: ReadScope | null,
+  /** With a row-policy-bound `ch`: the unrestricted client that picks the canonical version of each id. */
+  canonicalClient?: ClickHouseClient,
+): Promise<EventDetail | null> {
+  const row = await eventRow(ch, projectId, eventId, scope, canonicalClient);
   if (!row) return null;
   const parents: AuditEvent[] = [],
     seen = new Set([eventId]);
   let parent = row.parent_event_id;
   while (parent && !seen.has(parent) && parents.length < 100) {
     seen.add(parent);
-    const r = await eventRow(ch, projectId, parent);
+    // The chain stops at the first parent outside the scope.
+    const r = await eventRow(ch, projectId, parent, scope, canonicalClient);
     if (!r) break;
     parents.unshift(toEvent(r));
     parent = r.parent_event_id;
   }
+  const s = scopePredicate(scope);
   const counts = (
     await read<{ children: number; size: number }>(
       ch,
-      `SELECT uniqExactIf(event_id,parent_event_id={id:String}) children,uniqExactIf(event_id,operation_id={op:String} AND operation_id!='') size FROM events WHERE project_id={p:String} AND (parent_event_id={id:String} OR operation_id={op:String})`,
-      { p: projectId, id: eventId, op: row.operation_id },
+      `SELECT uniqExactIf(event_id,parent_event_id={id:String}) children,uniqExactIf(event_id,operation_id={op:String} AND operation_id!='') size FROM events WHERE project_id={p:String} AND (parent_event_id={id:String} OR operation_id={op:String}) AND (${s.sql})`,
+      { p: projectId, id: eventId, op: row.operation_id, ...s.params },
     )
   )[0];
   return {
@@ -300,36 +447,80 @@ export async function histogram(ch: ClickHouseClient, p: string, q: z.infer<type
   }
   return { interval, buckets: [...buckets.values()] };
 }
-export async function facets(ch: ClickHouseClient, p: string, q: z.infer<typeof facetQuerySchema>): Promise<FacetResponse> {
-  const w = await where(ch, p, q),
-    col = Object.hasOwn(columns, q.field) ? columns[q.field] : undefined;
-  let expr = col;
-  if (!expr) {
-    expr = 'attributes[{attr:String}]';
-  }
+const TARGET_COLUMNS = ['target_ids', 'target_types', 'target_names'];
+/** Two target-level facets expand ONE (id, type, name) tuple, so an id is never paired with another target's type. */
+const SHARED_TARGETS = 'ARRAY JOIN arrayZip(target_ids,target_types,target_names) AS facet_targets';
+/** SQL for one facet level: the grouped value, its display label and an optional ARRAY JOIN. */
+function facetLevel(field: string, n: number, sharedTargets = false) {
+  const col = Object.hasOwn(columns, field) ? columns[field] : undefined;
+  let expr = col ?? `attributes[{attr${n}:String}]`;
   let join = '';
   let label = expr;
-  if (expr === 'target_ids') {
-    join = 'ARRAY JOIN arrayZip(target_ids,target_names) AS target';
-    expr = 'target.1';
-    label = 'target.2';
+  if (sharedTargets && col && TARGET_COLUMNS.includes(col)) {
+    // The caller adds SHARED_TARGETS once for both levels.
+    expr = `facet_targets.${TARGET_COLUMNS.indexOf(col) + 1}`;
+    label = col === 'target_ids' ? 'facet_targets.3' : expr;
+  } else if (expr === 'target_ids') {
+    join = `ARRAY JOIN arrayZip(target_ids,target_names) AS facet_target${n}`;
+    expr = `facet_target${n}.1`;
+    label = `facet_target${n}.2`;
   } else if (['target_types', 'target_names', 'changes_fields'].includes(expr)) {
     expr = `arrayJoin(${expr})`;
     label = expr;
-  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(q.field)) label = `${q.field}_name`;
+  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(field)) label = `${field}_name`;
+  else if (!col) {
+    // Array-valued attributes are stored as JSON text ("[\"a\",\"b\"]"): count each element (#140). Strings unwrap;
+    // other element types keep their JSON text. An empty array contributes no group.
+    const a = `attributes[{attr${n}:String}]`;
+    // JSON whitespace (space, tab, LF, CR) may precede the array; the scalar fallback keeps the original text.
+    const lead = `trimLeft(replaceAll(replaceAll(replaceAll(${a},char(9),' '),char(10),' '),char(13),' '))`;
+    expr = `arrayJoin(if(startsWith(${lead},'[') AND isValidJSON(${a}),arrayMap(x -> if(JSONType(x)='String',JSONExtractString(x),x),JSONExtractArrayRaw(${a})),[${a}]))`;
+    label = expr;
+  }
   if (QUERY_FIELDS.some((f) => f.column === col && ['number', 'date'].includes(f.type))) {
     expr = `toString(${expr})`;
     label = expr;
   }
+  return { expr, label, join, column: col, params: col ? {} : { [`attr${n}`]: field.replace(/^(attr|attributes)\./, '') } };
+}
+/** The stored column a facet field reads (undefined for attributes). */
+export const facetColumn = (field: string) => (Object.hasOwn(columns, field) ? columns[field] : undefined);
+export async function facets(
+  ch: ClickHouseClient,
+  p: string,
+  q: Omit<z.infer<typeof facetQuerySchema>, 'byLimit'> & { byLimit?: number },
+  scope?: ReadScope | null,
+): Promise<FacetResponse> {
+  const w = await where(ch, p, q, undefined, scope);
+  const one = facetLevel(q.field, 1);
   // Only the top `limit` groups leave ClickHouse; the window sum (computed before LIMIT) keeps otherCount exact.
   const rows = await read<{ value: string; label: string; count: number; total: number }>(
     ch,
-    `SELECT ${expr} value,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),value) label,count() count,sum(count()) OVER () total FROM events ${join} WHERE ${w.sql} GROUP BY value ORDER BY count DESC,value LIMIT {facetLimit:UInt32}`,
-    { ...w.params, attr: q.field.replace(/^(attr|attributes)\./, ''), facetLimit: q.limit },
+    `SELECT ${one.expr} value,coalesce(nullIf(argMaxIf(${one.label},received_at,${one.label}!=''),''),value) label,count() count,sum(count()) OVER () total FROM events ${one.join} WHERE ${w.sql} GROUP BY value ORDER BY count DESC,value LIMIT {facetLimit:UInt32}`,
+    { ...w.params, ...one.params, facetLimit: q.limit },
   );
-  const values = rows.map((r) => ({ value: r.value, label: r.label, count: Number(r.count) }));
+  const values: FacetResponse['values'] = rows.map((r) => ({ value: r.value, label: r.label, count: Number(r.count) }));
   const total = Number(rows[0]?.total ?? 0);
-  return { field: q.field, values, otherCount: Math.max(total - values.reduce((n, v) => n + v.count, 0), 0) };
+  const otherCount = Math.max(total - values.reduce((n, v) => n + v.count, 0), 0);
+  if (!q.by || !values.length) return { field: q.field, by: q.by ?? null, values, otherCount };
+  // Second level (#140): the top `byLimit` values of `by` within each returned value, and the count of the rest.
+  // One bounded query: the outer filter keeps only the returned first-level values.
+  const isTarget = (field: string) => TARGET_COLUMNS.includes(facetColumn(field) ?? '');
+  const shared = isTarget(q.field) && isTarget(q.by);
+  const both = shared ? { one: facetLevel(q.field, 1, true), two: facetLevel(q.by, 2, true) } : { one, two: facetLevel(q.by, 2) };
+  const two = both.two;
+  const joins = shared ? SHARED_TARGETS : `${one.join} ${two.join}`;
+  const groups = await read<{ value: string; grp: string; label: string; count: number; total: number }>(
+    ch,
+    `SELECT value,grp,coalesce(nullIf(argMaxIf(glabel,received_at,glabel!=''),''),grp) label,count() count,sum(count()) OVER (PARTITION BY value) total FROM (SELECT ${both.one.expr} value,${two.expr} grp,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE value IN {facetValues:Array(String)} GROUP BY value,grp ORDER BY value,count DESC,grp LIMIT {byLimit:UInt32} BY value`,
+    { ...w.params, ...one.params, ...two.params, facetValues: values.map((v) => v.value), byLimit: q.byLimit ?? 5 },
+  );
+  for (const v of values) {
+    const mine = groups.filter((g) => g.value === v.value);
+    v.groups = mine.map((g) => ({ value: g.grp, label: g.label, count: Number(g.count) }));
+    v.groupsOtherCount = Math.max(Number(mine[0]?.total ?? 0) - v.groups.reduce((n, g) => n + g.count, 0), 0);
+  }
+  return { field: q.field, by: q.by, values, otherCount };
 }
 async function metrics(ch: ClickHouseClient, p: string, q: RangeQuery) {
   const w = await where(ch, p, q);
@@ -552,7 +743,16 @@ export async function prepareExport(ch: ClickHouseClient, q: ExportQuery, clock 
   return { range, compiled, clock: new Date(clock).toISOString() };
 }
 export type ExportPlan = Awaited<ReturnType<typeof prepareExport>>;
-export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQuery, plan?: ExportPlan, execution?: ExportExecution) {
+/** Scoped exports (#138): the scope predicate is ANDed into every page; `map` applies field masks before encoding. */
+export type ExportScope = { scope?: ReadScope | null; map?: (event: AuditEvent) => AuditEvent };
+export async function* exportEvents(
+  ch: ClickHouseClient,
+  p: string,
+  q: ExportQuery,
+  plan?: ExportPlan,
+  execution?: ExportExecution,
+  scoped: ExportScope = {},
+) {
   const frozen = plan ?? (await prepareExport(ch, q));
   const query = { ...q, ...frozen.range };
   let nextCursor: string | undefined;
@@ -566,7 +766,9 @@ export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQu
       q.format === 'jsonl-evidence',
       frozen.clock,
       execution,
+      scoped.scope,
     );
+    if (scoped.map) page.data = page.data.map(scoped.map);
     if (first && q.format === 'csv') yield `${CSV_COLUMNS.join(',')}\n`;
     first = false;
     for (const [index, e] of page.data.entries()) {

@@ -13,14 +13,17 @@ import { toast } from 'sonner';
 import { EventHistogram } from '@/components/charts/event-histogram';
 import { EventListContext } from '@/components/impersonation';
 import { QueryInput, type QueryInputHandle } from '@/components/query-input/query-input';
+import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import { andQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
-import { absoluteRange, isValidRange, rangeLabel, resolveRange } from '@/lib/range';
+import { ALL_RANGE, absoluteRange, isValidRange, rangeInSentence, rangeLabel, resolveRange } from '@/lib/range';
+import { explorerTotal, formatSearchTotal, searchTotal } from '@/lib/search-total';
 import { appendSqlPredicate } from '@/lib/sql-language';
+import { useConsoleZone } from '@/lib/time-zone';
 import { EventSheet } from './event-sheet';
 import { EventsTable, type EventsTableHandle } from './events-table';
 import { ColumnPicker, ExplorerOverflowMenu, ExportMenu, SaveViewButton } from './explorer-toolbar';
@@ -47,10 +50,15 @@ interface ExplorerProps {
   embedded?: boolean;
   /** Offer SQL mode. Off for embedded timelines: their locked base filter is query language. */
   allowSql?: boolean;
+  /** How to name the range in counts and empty states, when the range string is not what the reader chose ("All history"). */
+  rangeLabel?: string;
+  /** The range already covers everything there is (an entity's full history): never suggest widening it. */
+  rangeComplete?: boolean;
   className?: string;
 }
 
 const FACETS_KEY = 'logbird.explorer.facets';
+const EMPTY_ROWS: AuditEvent[] = [];
 
 /**
  * The `EventsTable` result-set key: every input of the events query. That is the project, the range and the effective
@@ -92,13 +100,19 @@ function ProjectExplorer({
   baseLabel,
   embedded = false,
   allowSql = !embedded && !baseQuery,
+  rangeLabel: rangeLabelOverride,
+  rangeComplete = false,
   className,
 }: ExplorerProps) {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const { q, range, columns, ev, live } = state;
+  const rangeName = rangeLabelOverride ?? rangeLabel(range);
+  const complete = rangeComplete || range === ALL_RANGE;
   const lang: QueryLang = allowSql && state.lang === 'sql' ? 'sql' : 'query';
   // The base filter (an entity or support agent) must constrain all of `q`, even one with a top-level OR.
   const effectiveQ = andQuery(baseQuery ?? '', q);
   const queryBar = useRef<QueryInputHandle>(null);
+  const results = useRef<HTMLDivElement>(null);
   const eventsTable = useRef<EventsTableHandle>(null);
   const [facetsOpen, setFacetsOpen] = useState(() => {
     if (embedded || typeof window === 'undefined') return false;
@@ -125,10 +139,21 @@ function ProjectExplorer({
     histogram?: HistogramResponse;
     query?: { q: string; lang: QueryLang };
     range?: string;
+    /** The locked filter (an entity page's) the last good result was searched with. */
+    base?: string;
+    /** The range and locked filter each part was searched over: rows and bars arrive independently. */
+    pagesScope?: string;
+    histogramScope?: string;
     resultKey?: string;
   }>({});
-  if (events.data && !events.isError) lastGood.current.pages = events.data.pages;
+  // Only settled results become "last good" (a placeholder is another search's data).
+  const scope = `${range}|${baseQuery ?? ''}`;
+  if (events.data && !events.isError && !events.isPlaceholderData) {
+    lastGood.current.pages = events.data.pages;
+    lastGood.current.pagesScope = scope;
+  }
   if (events.isSuccess && !events.isPlaceholderData) {
+    lastGood.current.base = baseQuery ?? '';
     lastGood.current.query = { q, lang };
     lastGood.current.range = range;
     lastGood.current.resultKey = explorerResultKey(projectId, range, effectiveQ, lang);
@@ -137,29 +162,44 @@ function ProjectExplorer({
   // range are committed, so the table starts that set at the top even when it shares rows with the old one (e.g. moving
   // between two entity profiles, where `q` stays empty but `baseQuery` changes).
   const resultKey = lastGood.current.resultKey;
-  if (histogram.data && !histogram.isError) lastGood.current.histogram = histogram.data;
+  if (histogram.data && !histogram.isError && !histogram.isPlaceholderData) {
+    lastGood.current.histogram = histogram.data;
+    lastGood.current.histogramScope = scope;
+  }
+  // A rejected query falls back to the last good result only when it was searched over this same range and locked
+  // filter (the query itself is what was rejected): never another range's or another entity's rows or bars.
+  const fallbackPages = problem && lastGood.current.pagesScope === scope ? lastGood.current.pages : undefined;
+  const fallbackHistogram = problem && lastGood.current.histogramScope === scope ? lastGood.current.histogram : undefined;
   // Nothing valid to save or export while the query is rejected (the export would fail the same way).
   const saveBlocked = problem ? 'Fix the query first — a view must run without errors.' : null;
   const exportBlocked = problem ? 'Fix the query first — the export runs the same query.' : null;
-  const pages = problem ? lastGood.current.pages : events.data?.pages;
-  const histogramData = problem ? lastGood.current.histogram : histogram.data;
+  // Rows from a previous search (a placeholder while the new range or query loads) are never shown or selectable as
+  // this one's; a rejected query keeps the last good rows, labelled as such.
+  const pages = problem ? fallbackPages : events.isPlaceholderData ? undefined : events.data?.pages;
+  const resultsLoading = (events.isPending || events.isPlaceholderData) && !problem;
+  // A rejected query shows the last good bars, labelled as such; otherwise bars from a previous search (a placeholder
+  // while the new range or query loads) are never drawn as if they were this one's.
+  const histogramData = problem ? fallbackHistogram : histogram.isPlaceholderData ? undefined : histogram.data;
 
   /* ---------------- live tail ---------------- */
   const relative = isValidRange(range) && !range.includes('..');
   const liveActive = live && relative;
-  const [liveRows, setLiveRows] = useState<AuditEvent[]>([]);
+  // Streamed rows belong to one search (project, range, query, language): they are only ever shown with that search.
+  const liveKey = `${explorerResultKey(projectId, range, effectiveQ, lang)}|${live}`;
+  const [liveBuffer, setLiveBuffer] = useState<{ key: string; rows: AuditEvent[] }>({ key: liveKey, rows: [] });
+  const liveRows = liveBuffer.key === liveKey ? liveBuffer.rows : EMPTY_ROWS;
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const sinceRef = useRef<string | null>(null);
   const liveRowsRef = useRef<AuditEvent[]>([]);
   liveRowsRef.current = liveRows;
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset the tail whenever the result set identity changes
   useEffect(() => {
-    setLiveRows([]);
+    setLiveBuffer({ key: liveKey, rows: [] });
     sinceRef.current = null;
   }, [effectiveQ, lang, range, live]);
 
   // The tail follows *arrival* (`receivedAt`), so late or back-dated events still stream in.
-  const firstPage = problem ? undefined : events.data?.pages[0]?.data;
+  const firstPage = problem || events.isPlaceholderData ? undefined : events.data?.pages[0]?.data;
   useEffect(() => {
     if (!sinceRef.current && firstPage) sinceRef.current = newestArrival(firstPage) ?? new Date().toISOString();
   }, [firstPage]);
@@ -182,7 +222,7 @@ function ProjectExplorer({
       const incoming = data.filter((e) => !known.has(e.id));
       sinceRef.current = newestArrival(data) ?? since;
       if (incoming.length) {
-        setLiveRows((prev) => [...incoming, ...prev].slice(0, 2000));
+        setLiveBuffer((prev) => ({ key: liveKey, rows: [...incoming, ...(prev.key === liveKey ? prev.rows : [])].slice(0, 2000) }));
         setFresh(new Set(incoming.map((e) => e.id)));
       }
       return incoming.length;
@@ -196,11 +236,13 @@ function ProjectExplorer({
     return [...liveRows, ...paged.filter((e) => !seen.has(e.id))];
   }, [pages, liveRows]);
   // Search totals are capped for huge ranges; the histogram counts every match exactly.
-  const searchTotal = pages?.[0]?.total ?? 0;
+  const pagedCount = pages?.reduce((n, p) => n + p.data.length, 0) ?? 0;
+  const known = searchTotal(pages, pagedCount, events.hasNextPage);
   const histogramTotal =
     histogramData && (problem || !histogram.isPlaceholderData) ? histogramData.buckets.reduce((n, b) => n + b.total, 0) : undefined;
-  const total = (histogramTotal ?? searchTotal) + liveRows.length;
-  const totalCapped = histogramTotal === undefined && searchTotal > 10_000;
+  const label = explorerTotal({ histogramTotal, search: known, pagedCount, hasNextPage: events.hasNextPage, visibleRows: rows.length });
+  const total = label.count;
+  const totalLowerBound = !label.exact;
 
   /* ---------------- selection ---------------- */
   const selectedIndex = ev ? rows.findIndex((e) => e.id === ev) : -1;
@@ -274,11 +316,14 @@ function ProjectExplorer({
       description={
         q ? (
           <>
-            Nothing in <span className="font-medium text-foreground">{rangeLabel(range).toLowerCase()}</span> matches{' '}
-            <span className="font-mono text-foreground">{q}</span>. Try a wider range or remove a filter.
+            Nothing in <span className="font-medium text-foreground">{rangeInSentence(rangeName)}</span> matches{' '}
+            <span className="font-mono text-foreground">{q}</span>.{' '}
+            {complete ? 'Remove a filter to see more.' : 'Try a wider range or remove a filter.'}
           </>
+        ) : complete ? (
+          `No events in ${rangeInSentence(rangeName)}.`
         ) : (
-          `No events in ${rangeLabel(range).toLowerCase()}. Widen the range, or send events with your ingest key.`
+          `No events in ${rangeInSentence(rangeName)}. Widen the range, or send events with your ingest key.`
         )
       }
       icon={SearchXIcon}
@@ -289,7 +334,7 @@ function ProjectExplorer({
           Clear query
         </Button>
       ) : null}
-      {range !== '30d' ? (
+      {range !== '30d' && !complete ? (
         <Button onClick={() => onChange({ range: '30d' })} size="sm" variant="outline">
           Search last 30 days
         </Button>
@@ -315,6 +360,7 @@ function ProjectExplorer({
       projectId={projectId}
       q={q}
       range={range}
+      scope={baseQuery}
     />
   );
 
@@ -452,15 +498,21 @@ function ProjectExplorer({
                   </button>
                 ) : null}
               </>
-            ) : events.isPending ? (
+            ) : events.isPending || events.isPlaceholderData ? (
               'Searching…'
             ) : (
               <>
-                <span className="font-medium text-foreground">{totalCapped ? '10,000+' : formatNumber(total)}</span> events · {rangeLabel(range)}
+                <span className="font-medium text-foreground">
+                  {totalLowerBound ? formatSearchTotal({ count: total, exact: false }) : formatNumber(total)}
+                </span>{' '}
+                {!totalLowerBound && total === 1 ? 'event' : 'events'} · {rangeName}
                 {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>
             )}
+            {/* Below md the table has no column header (useIsMobile): name the zone here (and switch it) in every state,
+                including the last good rows shown after a rejected query. */}
+            <TimeZoneInline className="md:hidden" />
           </span>
           <button
             aria-expanded={showChart}
@@ -479,7 +531,6 @@ function ProjectExplorer({
             data={histogramData}
             height={embedded ? 96 : 112}
             loading={histogram.isFetching && !histogram.isPending}
-            // Clamp to the search's own end (which can lie ahead of now), so a bar's events stay in the zoomed range.
             onZoom={
               // Bars from the previous range linger while the new one loads: no zooming on them.
               histogram.isPlaceholderData
@@ -514,7 +565,11 @@ function ProjectExplorer({
             {facetsPanel}
           </div>
         ) : null}
-        <div className={cn('relative flex min-h-0 min-w-0 flex-1 flex-col transition-opacity', problem && rows.length > 0 && 'opacity-45')}>
+        <div
+          className={cn('relative flex min-h-0 min-w-0 flex-1 flex-col outline-none transition-opacity', problem && rows.length > 0 && 'opacity-45')}
+          ref={results}
+          tabIndex={-1}
+        >
           {liveActive && liveRows.length > 0 ? (
             <div className="pointer-events-none absolute inset-x-0 top-10 z-20 flex justify-center">
               <span className="pointer-events-auto flex items-center gap-1.5 rounded-full border bg-popover px-3 py-1 text-xs shadow-md">
@@ -534,7 +589,7 @@ function ProjectExplorer({
               freshIds={fresh}
               hasMore={!problem && events.hasNextPage}
               loadMore={() => events.fetchNextPage()}
-              loading={events.isPending && !problem}
+              loading={resultsLoading}
               onCursorChange={setCursorId}
               resultKey={resultKey}
               onSelect={(e) => {
@@ -554,7 +609,8 @@ function ProjectExplorer({
         event={selected}
         // Back to the row the sheet showed last (it may differ from the one opened, after j/k): never to <body>.
         // With no rows left (a refetch emptied the list meanwhile), to the query bar.
-        finalFocus={() => eventsTable.current?.cursorElement() ?? queryBar.current?.element() ?? true}
+        // Back to the row; while the new result loads (no rows yet), to the results region, never away to the query bar.
+        finalFocus={() => eventsTable.current?.cursorElement() ?? (resultsLoading ? results.current : null) ?? queryBar.current?.element() ?? true}
         onFilter={(term) => {
           addFilter(term);
         }}

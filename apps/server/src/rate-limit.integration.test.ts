@@ -64,3 +64,36 @@ it('shares project buckets across peers, isolates projects/kinds, and counts onl
   expect((await request('read', '192.0.2.3', keys[3].secret)).status).toBe(429);
   expect((await request('ingest', '192.0.2.3', keys[3].secret)).status).toBe(429);
 });
+
+it('#138: a throttled tenant does not drain the project read budget (real Redis, one atomic script)', async () => {
+  const tenantLimits = createPublicRateLimits({ prefix, readLimit: 5, viewerReadLimit: 2, now: () => 61_000 });
+  const viewer = new Hono<AppEnv>().get(
+    '/read/:who',
+    async (c, next) => {
+      const who = c.req.param('who');
+      c.set('project', { id: `limiter-${id}` } as AppEnv['Variables']['project']);
+      c.set(
+        'reader',
+        who === 'key'
+          ? { via: 'key', keyId: 'k1', keyName: 'k', scope: null, embedOrigins: [] }
+          : { via: 'token', keyId: 'k1', keyName: 'k', scope: { tenantId: who }, embedOrigins: [] },
+      );
+      await next();
+    },
+    tenantLimits.authenticated('read'),
+    (c) => c.json({ ok: true }),
+  );
+  const statuses = async (who: string, n: number) => {
+    const out: number[] = [];
+    for (let i = 0; i < n; i++) out.push((await viewer.request(`/read/${who}`)).status);
+    return out;
+  };
+  // Tenant A: 2 admitted, then refused by its own bucket without charging the project.
+  expect(await statuses('a', 6)).toEqual([200, 200, 429, 429, 429, 429]);
+  // Tenant B still has its budget, and so does the project (2 + 2 of 5 used).
+  expect(await statuses('b', 3)).toEqual([200, 200, 429]);
+  const last = await viewer.request('/read/key');
+  expect(last.status).toBe(200);
+  expect(last.headers.get('RateLimit-Remaining')).toBe('0');
+  expect((await viewer.request('/read/key')).status).toBe(429);
+});

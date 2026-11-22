@@ -4,7 +4,8 @@
  * "<isoFrom>..<isoTo>" window (what drag-to-zoom and the custom picker produce).
  */
 
-import { formatClock, formatDate, formatMonthDay, localDayKey } from './format';
+import { formatClock, formatDate, formatMonthDay, formatOffset, isRepeatedWallTime, localDayKey, zoneOffsetMs } from './format';
+import { consoleTimeZone, shortZoneLabel } from './time-zone';
 
 export const RANGE_PRESETS = [
   { value: '15m', label: 'Last 15 minutes', short: '15m' },
@@ -29,8 +30,16 @@ export interface ResolvedRange {
   relative: boolean;
 }
 
+/**
+ * "Everything the project stores": entity pages pass it on when they link out of a full history, so following another
+ * entity from there never inherits a computed window (like "2d") the reader did not choose.
+ */
+export const ALL_RANGE = 'all';
+/** 2000-01-01T00:00:00Z: earlier than any event ingest can admit (3650 days before receipt) until 2035. */
+const ALL_FROM_MS = Date.UTC(2000, 0, 1);
+
 export function isValidRange(range: string): boolean {
-  if (RELATIVE_RE.test(range)) return true;
+  if (range === ALL_RANGE || RELATIVE_RE.test(range)) return true;
   const [a, b] = range.split('..');
   return Boolean(a && b && !Number.isNaN(Date.parse(a)) && !Number.isNaN(Date.parse(b)) && Date.parse(a) < Date.parse(b));
 }
@@ -42,6 +51,12 @@ export function rangeDurationMs(range: string): number {
 
 /** Resolve to concrete ISO bounds. Relative ranges end "now" (rounded down to the second). */
 export function resolveRange(range: string, now = Date.now()): ResolvedRange {
+  if (range === ALL_RANGE) {
+    // Everything stored: from a fixed early bound (before any timestamp ingest can have admitted, and stable, so the
+    // window never creeps forward past a row the purge has not removed yet) to two days ahead (ingest admits a day).
+    const toMs = Math.floor(now / 1000) * 1000 + 2 * UNIT_MS.d;
+    return { from: new Date(ALL_FROM_MS).toISOString(), to: new Date(toMs).toISOString(), fromMs: ALL_FROM_MS, toMs, relative: true };
+  }
   const rel = RELATIVE_RE.exec(range);
   if (rel) {
     const toMs = Math.floor(now / 1000) * 1000;
@@ -73,6 +88,7 @@ export function rangePhrase(range: string): string {
 }
 
 export function rangeLabel(range: string): string {
+  if (range === ALL_RANGE) return 'All time';
   const preset = RANGE_PRESETS.find((p) => p.value === range);
   if (preset) return preset.label;
   const rel = RELATIVE_RE.exec(range);
@@ -85,10 +101,20 @@ export function rangeLabel(range: string): string {
   const year = (ms: number) => localDayKey(ms).slice(0, 4);
   const withYear = year(r.fromMs) !== year(r.toMs) || year(r.fromMs) !== year(Date.now());
   const day = (ms: number) => (withYear ? formatDate(new Date(ms).toISOString()) : formatMonthDay(ms));
+  // An absolute window names the zone its clock times are in.
+  const zone = consoleTimeZone();
+  const inZone = zone === 'UTC' ? ' UTC' : ` ${shortZoneLabel(zone)} time`;
+  // Across a clock change (02:45 – 02:00 when the clocks go back) each end names its offset, so the window never reads backwards.
+  // Inside a repeated hour the clock alone is ambiguous too.
+  const withOffsets = zoneOffsetMs(r.fromMs) !== zoneOffsetMs(r.toMs) || isRepeatedWallTime(r.fromMs) || isRepeatedWallTime(r.toMs);
+  const clock = (ms: number) => (withOffsets ? `${formatClock(ms)} (${formatOffset(ms)})` : formatClock(ms));
   return localDayKey(r.fromMs) === localDayKey(r.toMs)
-    ? `${day(r.fromMs)}, ${formatClock(r.fromMs)} – ${formatClock(r.toMs)}`
-    : `${day(r.fromMs)} ${formatClock(r.fromMs)} – ${day(r.toMs)} ${formatClock(r.toMs)}`;
+    ? `${day(r.fromMs)}, ${clock(r.fromMs)} – ${clock(r.toMs)}${inZone}`
+    : `${day(r.fromMs)} ${clock(r.fromMs)} – ${day(r.toMs)} ${clock(r.toMs)}${inZone}`;
 }
+
+/** A range label inside a sentence: "last 7 days", "all time", but "Nov 22, 08:00 – 10:00 Berlin time" keeps its capitals. */
+export const rangeInSentence = (label: string): string => (/^(Last|All) /.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label);
 
 export function rangeShortLabel(range: string): string {
   const preset = RANGE_PRESETS.find((p) => p.value === range);
@@ -101,6 +127,22 @@ export function previousWindow(range: string): { from: string; to: string } {
   const r = resolveRange(range);
   const len = r.toMs - r.fromMs;
   return { from: new Date(r.fromMs - len).toISOString(), to: r.from };
+}
+
+/**
+ * A relative range that covers everything since `firstSeenIso` (whole days, plus one so the first event is inside),
+ * for an entity's full history. Relative, so live tail and "now" keep working; the string only changes once a day.
+ */
+export function historyRange(firstSeenIso: string, now = Date.now(), lastSeenIso?: string): string {
+  const first = Date.parse(firstSeenIso);
+  if (Number.isNaN(first)) return '90d';
+  const days = Math.max(1, Math.ceil((now - first) / UNIT_MS.d) + 1);
+  // Ingest admits events stamped up to a day ahead; a relative range ends now and would hide them.
+  const last = lastSeenIso ? Date.parse(lastSeenIso) : Number.NaN;
+  // A relative range ends at now rounded down to the second (exclusive): a last event at or after that point would be
+  // cut off. Bounds then come from the entity's own timestamps only, so the range (and every query key) is stable.
+  if (!Number.isNaN(last) && last >= Math.floor(now / 1000) * 1000) return absoluteRange(first - UNIT_MS.d, last + 1);
+  return `${days}d`;
 }
 
 /**

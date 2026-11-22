@@ -67,7 +67,7 @@ SDK error objects that may contain sensitive details.
 | `targets` | Affected records | Document ID and safe display name |
 | `context.operationId` | Correlation across a request and its jobs | A UUID carried through job data |
 | `context.parentEventId` | The event that caused this event | The request event ID |
-| `source` | Upstream system supplying the change | `catalog-service` |
+| `source` | Upstream system supplying the change. Values beginning with `logbird-` are reserved for events Logbird generates (sample data, console tests): they are stored, but do not count toward the Setup integration steps, and removing sample data deletes rows tagged `logbird-sample`. | `catalog-service` |
 | `changes` | Allowed before/after values | Draft changing to published |
 
 Copy only allowlisted fields. Avoid request bodies, session objects, customer
@@ -291,3 +291,9 @@ repeated delivery, an outage and shutdown with fictional data. If customers read
 history, keep read keys server-side and authorize tenant and target on every
 request, including cursor requests. A search filter alone is not authorization.
 See [framework integrations](integrations.md).
+
+## Show customers their own audit trail
+
+To show each business or website only its own events, keep one `read` key on your server and mint short-lived
+viewer tokens for each dashboard view. The server enforces the scope on search, detail, facets and export. See
+[scoped read access](scoped-read-access.md).

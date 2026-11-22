@@ -31,10 +31,20 @@ describe('setup computation', () => {
   });
   it('reports samples, stopped ingestion and low conformance as attention', () => {
     expect(computeSetup(project, { ...events, sampleEvents: 2000 }, team).steps[1]?.status).toBe('attention');
-    const s = computeSetup(project, { ...events, firstEventAt: new Date(0).toISOString(), sampledEvents: 1, avgConformance: 11 }, team);
+    const s = computeSetup(
+      project,
+      { ...events, firstEventAt: new Date(0).toISOString(), lastEventAt: new Date(0).toISOString(), sampledEvents: 1, avgConformance: 11 },
+      team,
+    );
     expect(s.steps[2]?.status).toBe('attention');
     expect(s.steps[3]?.status).toBe('attention');
     expect(s.steps[4]?.status).toBe('todo');
+  });
+  it('keeps "events flowing" to do when only a console test event ever arrived', () => {
+    // firstEventAt counts the console test; lastEventAt counts only the integration's own events.
+    const s = computeSetup(project, { ...events, firstEventAt: new Date(0).toISOString(), lastEventAt: null }, team);
+    expect(s.steps[1]?.status).toBe('done');
+    expect(s.steps[2]?.status).toBe('todo');
   });
   it('sorts fields by missing coverage and completes with pending teammate', () => {
     const date = new Date(0);
@@ -67,4 +77,10 @@ describe('setup computation', () => {
     expect(s.envelope.fields[0]?.field).toBe('tenant');
     expect(s.operations.coverage).toBe(0.5);
   });
+});
+
+it('#180: only an unscoped read key completes the read-key step', () => {
+  const read = (scope: unknown) => computeSetup({ ...project, keys: [{ kind: 'read', createdAt: new Date(0), scope }] }, events, team);
+  expect(read(null).steps.find((s) => s.id === 'read_key')?.status).toBe('done');
+  expect(read({ tenantId: 't1' }).steps.find((s) => s.id === 'read_key')?.status).not.toBe('done');
 });

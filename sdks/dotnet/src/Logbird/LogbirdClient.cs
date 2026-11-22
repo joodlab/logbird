@@ -87,6 +87,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private readonly object _disposeGate = new();
     private readonly object _abandonGate = new();
     private Task? _disposeTask;
+    private Task? _abandonNow;
     private volatile bool _closing;
     private volatile bool _flushRequested;
     private long _firstQueuedAtTicks;
@@ -191,17 +192,23 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     public static string NewEventId() => UuidV7.NewId();
 
     /// <inheritdoc />
-    public void Track(AuditEvent auditEvent)
+    public void Track(AuditEvent auditEvent) => TrackCore(auditEvent);
+
+    /// <summary>
+    /// <see cref="Track"/>, returning the id the event was queued or reported under (after <see cref="LogbirdOptions.BeforeSend"/>
+    /// and the repair of a blank id), or the caller's id when the event was not processed.
+    /// </summary>
+    internal string? TrackCore(AuditEvent auditEvent)
     {
         if (!_enabled)
         {
-            return;
+            return auditEvent?.Id;
         }
 
         if (InsideLogbird.Value)
         {
             Interlocked.Increment(ref _filtered);
-            return;
+            return auditEvent?.Id;
         }
 
         string? id = null;
@@ -215,13 +222,13 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             {
                 Drop(DropReason.Shutdown, auditEvent!.Id, action, null, "The client is shut down.");
                 Report(new ObjectDisposedException(nameof(LogbirdClient), "Logbird is shut down; the event was not recorded."));
-                return;
+                return id ?? auditEvent?.Id;
             }
 
             var source = auditEvent!;
             if (CheckShape(source, auditEvent!.Id, action))
             {
-                return;
+                return id ?? auditEvent?.Id;
             }
 
             id = source.Id ?? UuidV7.NewId();
@@ -244,7 +251,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 if (result is null)
                 {
                     Interlocked.Increment(ref _filtered);
-                    return;
+                    return id ?? auditEvent?.Id;
                 }
 
                 source = result;
@@ -256,7 +263,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 fullEnvelope = false;
                 if (CheckShape(source, id, action))
                 {
-                    return;
+                    return id ?? auditEvent?.Id;
                 }
             }
 
@@ -274,7 +281,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             {
                 Drop(DropReason.InvalidEntityId, id, action, null, invalidEntity);
                 Report(new LogbirdDeliveryException("An audit event was dropped: " + invalidEntity));
-                return;
+                return id ?? auditEvent?.Id;
             }
 
             var node = EventJson.ToJsonObject(source, id, occurredAt, environment, defaultSource, fullEnvelope);
@@ -285,7 +292,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 // The payload is not kept: holding oversized bodies in the callback backlog could exhaust memory.
                 Drop(DropReason.TooLarge, id, action, null, "The event exceeds 256 KB.");
                 Report(new LogbirdDeliveryException("An audit event exceeds 256 KB and was dropped."));
-                return;
+                return id ?? auditEvent?.Id;
             }
 
             var eventId = id;
@@ -296,7 +303,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             {
                 Drop(DropReason.Shutdown, eventId, eventAction, eventJson, "The client is shut down.");
                 Report(new ObjectDisposedException(nameof(LogbirdClient), "Logbird is shut down; the event was not recorded."));
-                return;
+                return id ?? auditEvent?.Id;
             }
 
             if (added is not null)
@@ -340,6 +347,85 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         finally
         {
             InsideLogbird.Value = false;
+        }
+
+        return id ?? auditEvent?.Id;
+    }
+
+    /// <summary>
+    /// Reports an SDK-owned diagnostic through the background notifier (logger and OnError), off the caller's thread.
+    /// Ignored on Logbird's own delivery flow, like <see cref="Track"/>, so a callback cannot feed itself.
+    /// </summary>
+    internal void ReportDiagnostic(string message)
+    {
+        if (!InsideLogbird.Value)
+        {
+            Report(new LogbirdDeliveryException(message));
+        }
+    }
+
+    /// <summary>
+    /// Counts and reports, once, an event that an integration could not hand to <see cref="Track"/>. On Logbird's own
+    /// delivery flow (an OnDrop or OnError callback) it is counted as filtered instead, exactly as <see cref="Track"/>
+    /// treats events recorded there, so a callback cannot keep the notifier busy.
+    /// </summary>
+    internal void DropUnrecorded(DropReason reason, string? id, string? action, string detail)
+    {
+        if (!_enabled)
+        {
+            return;
+        }
+
+        if (InsideLogbird.Value)
+        {
+            Interlocked.Increment(ref _filtered);
+            return;
+        }
+
+        Drop(reason, id, action ?? string.Empty, null, detail);
+        Report(new LogbirdDeliveryException("An audit event was dropped: " + detail));
+    }
+
+    /// <summary>
+    /// For a host whose own shutdown budget ran out: stops accepting events at once and, on the thread pool, stops the
+    /// sender (no further attempt or retry starts) and then reports everything still unsent, once each, instead of
+    /// waiting for <see cref="LogbirdOptions.ShutdownTimeout"/>. The caller does not wait for the report; the returned
+    /// task completes when it is done. A late response is ignored.
+    /// </summary>
+    internal Task AbandonNow()
+    {
+        Task dispose;
+        try
+        {
+            dispose = StartDispose();
+        }
+        catch (Exception e)
+        {
+            Report(new LogbirdDeliveryException("Logbird shutdown step failed: " + e.GetType().Name));
+            return Task.CompletedTask;
+        }
+
+        if (dispose.IsCompleted || _queue is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        lock (_disposeGate)
+        {
+            return _abandonNow ??= Task.Run(() =>
+            {
+                try
+                {
+                    // Stop first: cancellation reaches the backoff and the request, so nothing is sent after the report.
+                    _stop.Cancel();
+                }
+                catch (Exception e)
+                {
+                    Report(new LogbirdDeliveryException("Logbird shutdown step failed: " + e.GetType().Name));
+                }
+
+                AbandonRemaining();
+            });
         }
     }
 

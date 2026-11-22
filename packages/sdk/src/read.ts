@@ -36,6 +36,8 @@ export interface SearchResponse {
   data: AuditEvent[];
   nextCursor: string | null;
   total: number;
+  /** False when `total` is a lower bound (capped at 10,001, or the count did not finish). */
+  totalExact?: boolean;
   tookMs: number;
 }
 

@@ -3,17 +3,23 @@ import { Button } from '@logbird/ui/components/ui/button';
 import { Kbd } from '@logbird/ui/components/ui/kbd';
 import { Separator } from '@logbird/ui/components/ui/separator';
 import { SidebarTrigger } from '@logbird/ui/components/ui/sidebar';
+import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useMatches, useParams } from '@tanstack/react-router';
 import { ChevronRightIcon, SearchIcon } from 'lucide-react';
 import { useMemo } from 'react';
 import { projectQuery } from '@/lib/api/queries';
 import { useCrumb } from '@/lib/crumbs';
+import { zoneOffsetMs } from '@/lib/format';
 import { modKeyLabel, useIsMac } from '@/lib/platform';
 import { absoluteRange, RANGE_PRESETS, rangeLabel, rangeShortLabel, resolveRange } from '@/lib/range';
+import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
 
 export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
+  // Range labels and the custom range editor follow the console zone; re-render when the reader switches it.
+  const zone = useConsoleZone();
+  const pickerZone = useMemo(() => ({ offsetMs: zoneOffsetMs, label: zone }), [zone]);
   const matches = useMatches();
   const params = useParams({ strict: false }) as { projectId?: string };
   const project = useQuery({ ...projectQuery(params.projectId ?? ''), enabled: Boolean(params.projectId) });
@@ -53,7 +59,8 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         {sections.map((s, i) => {
           const last = i === sections.length - 1 && !dynamicCrumb;
           return (
-            <span className="flex min-w-0 items-center gap-1" key={s.id}>
+            // Section crumbs ("Actors", "Settings") stay whole; only the page's own name truncates.
+            <span className={cn('flex min-w-0 items-center gap-1', !last && 'sm:shrink-0')} key={s.id}>
               {i === 0 && !params.projectId ? null : (
                 <ChevronRightIcon
                   className={i === 0 ? 'hidden size-3.5 shrink-0 text-muted-foreground/60 sm:block' : 'size-3.5 shrink-0 text-muted-foreground/60'}
@@ -94,6 +101,7 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
             resolved={resolved}
             toAbsolute={(from, to) => absoluteRange(from.getTime(), to.getTime())}
             value={range}
+            zone={pickerZone}
           />
         ) : null}
         <Button
