@@ -78,12 +78,14 @@ public static class LogbirdServiceCollectionExtensions
         configureRequests?.Invoke(requestOptions);
         services.AddHttpContextAccessor();
 
-        // A long-lived client: connections are recycled by the handler, redirects are never followed by this handler
-        // (they could forward the audit body to another origin), and the factory's request logging never prints header
-        // values, so the Authorization header cannot reach a log on any runtime.
+        // A long-lived client: connections are recycled by the handler, and redirects are never followed by this handler
+        // (they could forward the audit body to another origin). The factory's request loggers are removed: their
+        // structured state carries the raw headers, the Authorization header (the ingest key) included, on .NET 8.
+        // Redaction stays on for any logger a host adds back.
         services.AddHttpClient(LogbirdHttpClientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false })
             .SetHandlerLifetime(Timeout.InfiniteTimeSpan)
+            .RemoveAllLoggers()
             .RedactLoggedHeaders(static _ => true);
 
         services.TryAddSingleton(provider =>
@@ -98,6 +100,9 @@ public static class LogbirdServiceCollectionExtensions
 
         // Not disposable: the owner alone decides how shutdown waits, so disposing the container cannot wait again.
         services.TryAddSingleton<ILogbirdClient>(provider => new HostedLogbirdClient(provider.GetRequiredService<LogbirdClientOwner>().Client));
+
+        // IAuditLog records through whichever ILogbirdClient is registered, so a host's own (a fake in tests) receives it.
+        services.TryAddSingleton(provider => new AuditSink(provider.GetRequiredService<ILogbirdClient>()));
         services.TryAddScoped<IAuditLog, RequestAuditLog>();
         services.TryAddSingleton<IAuditLogFactory, AuditLogFactory>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, LogbirdShutdown>());

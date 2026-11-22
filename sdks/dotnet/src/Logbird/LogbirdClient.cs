@@ -87,6 +87,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private readonly object _disposeGate = new();
     private readonly object _abandonGate = new();
     private Task? _disposeTask;
+    private Task? _abandonNow;
     private volatile bool _closing;
     private volatile bool _flushRequested;
     private long _firstQueuedAtTicks;
@@ -351,14 +352,33 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         return id ?? auditEvent?.Id;
     }
 
-    /// <summary>Reports an SDK-owned diagnostic through the background notifier (logger and OnError), off the caller's thread.</summary>
-    internal void ReportDiagnostic(string message) => Report(new LogbirdDeliveryException(message));
+    /// <summary>
+    /// Reports an SDK-owned diagnostic through the background notifier (logger and OnError), off the caller's thread.
+    /// Ignored on Logbird's own delivery flow, like <see cref="Track"/>, so a callback cannot feed itself.
+    /// </summary>
+    internal void ReportDiagnostic(string message)
+    {
+        if (!InsideLogbird.Value)
+        {
+            Report(new LogbirdDeliveryException(message));
+        }
+    }
 
-    /// <summary>Counts and reports, once, an event that an integration could not hand to <see cref="Track"/>.</summary>
+    /// <summary>
+    /// Counts and reports, once, an event that an integration could not hand to <see cref="Track"/>. On Logbird's own
+    /// delivery flow (an OnDrop or OnError callback) it is counted as filtered instead, exactly as <see cref="Track"/>
+    /// treats events recorded there, so a callback cannot keep the notifier busy.
+    /// </summary>
     internal void DropUnrecorded(DropReason reason, string? id, string? action, string detail)
     {
         if (!_enabled)
         {
+            return;
+        }
+
+        if (InsideLogbird.Value)
+        {
+            Interlocked.Increment(ref _filtered);
             return;
         }
 
@@ -367,22 +387,45 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     }
 
     /// <summary>
-    /// For a host whose own shutdown budget ran out: stops accepting events and reports everything still unsent now, once
-    /// each, instead of waiting for <see cref="LogbirdOptions.ShutdownTimeout"/>. A late response is ignored.
+    /// For a host whose own shutdown budget ran out: stops accepting events at once and, on the thread pool, stops the
+    /// sender (no further attempt or retry starts) and then reports everything still unsent, once each, instead of
+    /// waiting for <see cref="LogbirdOptions.ShutdownTimeout"/>. The caller does not wait for the report; the returned
+    /// task completes when it is done. A late response is ignored.
     /// </summary>
-    internal void AbandonNow()
+    internal Task AbandonNow()
     {
+        Task dispose;
         try
         {
-            var dispose = StartDispose();
-            if (!dispose.IsCompleted && _queue is not null)
-            {
-                AbandonRemaining();
-            }
+            dispose = StartDispose();
         }
         catch (Exception e)
         {
             Report(new LogbirdDeliveryException("Logbird shutdown step failed: " + e.GetType().Name));
+            return Task.CompletedTask;
+        }
+
+        if (dispose.IsCompleted || _queue is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        lock (_disposeGate)
+        {
+            return _abandonNow ??= Task.Run(() =>
+            {
+                try
+                {
+                    // Stop first: cancellation reaches the backoff and the request, so nothing is sent after the report.
+                    _stop.Cancel();
+                }
+                catch (Exception e)
+                {
+                    Report(new LogbirdDeliveryException("Logbird shutdown step failed: " + e.GetType().Name));
+                }
+
+                AbandonRemaining();
+            });
         }
     }
 

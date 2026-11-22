@@ -18,9 +18,9 @@ public sealed class LogbirdRequestOptions
     public string? ServiceName { get; set; }
 
     /// <summary>
-    /// Which empty fields every event is filled with, unless a <c>Record</c> call passes its own. Defaults to
-    /// <see cref="AuditFill.All"/>; remove <see cref="AuditFill.Ip"/> or <see cref="AuditFill.UserAgent"/>, for example,
-    /// to never record them.
+    /// Which empty fields an event is filled with when its <c>Record</c> call passes no <c>fill</c> of its own (a call's own
+    /// value replaces this one). Defaults to <see cref="AuditFill.All"/>; remove <see cref="AuditFill.Ip"/> or
+    /// <see cref="AuditFill.UserAgent"/>, for example, to leave them out by default.
     /// </summary>
     public AuditFill Fill { get; set; } = AuditFill.All;
 

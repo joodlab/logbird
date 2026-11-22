@@ -23,8 +23,9 @@ internal sealed class LogbirdClientOwner(LogbirdClient client) : IAsyncDisposabl
         }
         catch (OperationCanceledException)
         {
-            // The host's budget ran out first: report everything still unsent now rather than outlive the host.
-            Client.AbandonNow();
+            // The host's budget ran out first: stop sending and report everything still unsent on the thread pool, without
+            // holding the host any longer.
+            _ = Client.AbandonNow();
         }
     }
 
@@ -32,8 +33,8 @@ internal sealed class LogbirdClientOwner(LogbirdClient client) : IAsyncDisposabl
     {
         if (Volatile.Read(ref _hostStopping) == 1)
         {
-            // The host already stopped Logbird within its budget; whatever is left is reported now, without waiting.
-            Client.AbandonNow();
+            // The host already stopped Logbird within its budget; whatever is left is reported in the background.
+            _ = Client.AbandonNow();
             return default;
         }
 
@@ -45,7 +46,7 @@ internal sealed class LogbirdClientOwner(LogbirdClient client) : IAsyncDisposabl
     {
         if (Volatile.Read(ref _hostStopping) == 1)
         {
-            Client.AbandonNow();
+            _ = Client.AbandonNow();
             return;
         }
 
@@ -56,6 +57,8 @@ internal sealed class LogbirdClientOwner(LogbirdClient client) : IAsyncDisposabl
 /// <summary>The registered <see cref="ILogbirdClient"/>: the owner's client, without a way to dispose it.</summary>
 internal sealed class HostedLogbirdClient(LogbirdClient client) : ILogbirdClient
 {
+    public LogbirdClient Core => client;
+
     public LogbirdStats Stats => client.Stats;
 
     public void Track(AuditEvent auditEvent) => client.Track(auditEvent);
@@ -64,14 +67,14 @@ internal sealed class HostedLogbirdClient(LogbirdClient client) : ILogbirdClient
 }
 
 /// <summary>Captures the request's audit context once per request.</summary>
-internal sealed class LogbirdMiddleware(RequestDelegate next, LogbirdRequestOptions options, LogbirdClientOwner owner)
+internal sealed class LogbirdMiddleware(RequestDelegate next, LogbirdRequestOptions options, AuditSink sink)
 {
     public Task InvokeAsync(HttpContext context)
     {
         try
         {
             // Get-or-create: a re-executed pipeline (an exception handler) keeps the request's first operation id.
-            RequestContext.GetOrCapture(context, options, owner.Client);
+            RequestContext.GetOrCapture(context, options, sink);
         }
         catch
         {

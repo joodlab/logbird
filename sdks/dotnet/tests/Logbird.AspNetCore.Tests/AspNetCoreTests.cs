@@ -384,7 +384,31 @@ public class AspNetCoreTests
                     throw new InvalidOperationException("fictional broken log sink");
                 }
 
-                owner.Entries.Enqueue((category, formatter(state, exception)));
+                var text = new System.Text.StringBuilder(formatter(state, exception));
+                if (state is IEnumerable<KeyValuePair<string, object?>> pairs)
+                {
+                    foreach (var pair in pairs)
+                    {
+                        text.Append('|').Append(pair.Key).Append('=');
+                        if (pair.Value is IEnumerable<string> values)
+                        {
+                            text.Append(string.Join(",", values));
+                        }
+                        else if (pair.Value is IEnumerable<KeyValuePair<string, IEnumerable<string>>> headers)
+                        {
+                            foreach (var header in headers)
+                            {
+                                text.Append(header.Key).Append(':').Append(string.Join(",", header.Value)).Append(';');
+                            }
+                        }
+                        else
+                        {
+                            text.Append(pair.Value);
+                        }
+                    }
+                }
+
+                owner.Entries.Enqueue((category, text.ToString()));
             }
         }
     }
@@ -416,7 +440,8 @@ public class AspNetCoreTests
             });
         (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
         await app.FlushedEventsAsync();
-        Assert.Contains(logs.Entries, e => e.Category.StartsWith("System.Net.Http.HttpClient.Logbird", StringComparison.Ordinal));
+        Assert.NotEmpty(logs.Entries);
+        Assert.DoesNotContain(logs.Entries, e => e.Category.StartsWith("System.Net.Http.HttpClient.Logbird", StringComparison.Ordinal));
         Assert.DoesNotContain(logs.Entries, e => e.Message.Contains("lb_ingest_fictional", StringComparison.Ordinal));
     }
 
@@ -754,5 +779,163 @@ public class AspNetCoreTests
         (await app.Http.SendAsync(request)).EnsureSuccessStatusCode();
         var context = Assert.Single(await app.FlushedEventsAsync()).GetProperty("context");
         Assert.False(context.TryGetProperty("traceId", out var trace) && trace.GetString() == "4bf92f3577b34da6a3ce929d0e0e4736");
+    }
+
+    [Fact]
+    public async Task R2_a_large_backlog_never_holds_the_host_and_is_reported_in_the_background()
+    {
+        const int Count = 100_000;
+        var app = await App.StartAsync(
+            _ => { },
+            options: o =>
+            {
+                o.MaxQueueSize = Count;
+                o.ShutdownTimeout = TimeSpan.FromSeconds(20);
+            },
+            services: b => b.Services.Configure<HostOptions>(h => h.ShutdownTimeout = TimeSpan.FromMilliseconds(300)),
+            fake: new FakeServer { Fallback = _ => new TaskCompletionSource<HttpResponseMessage>().Task });
+        var client = app.Client;
+        for (var i = 0; i < Count; i++)
+        {
+            client.Track(new AuditEvent("backlog.recorded"));
+        }
+
+        var watch = Stopwatch.StartNew();
+        await app.Host.StopAsync();
+        var stopped = watch.Elapsed;
+        await app.Host.DisposeAsync();
+        Assert.True(stopped < TimeSpan.FromSeconds(1.5), "StopAsync took " + stopped);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), "the host lifecycle took " + watch.Elapsed);
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (client.Stats.Dropped < Count && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+        }
+
+        Assert.Equal(Count, client.Stats.Dropped);
+        Assert.Equal(Count, client.Stats.Tracked);
+    }
+
+    [Fact]
+    public async Task R5_no_retry_is_sent_after_the_host_deadline_reported_the_event_as_a_shutdown_drop()
+    {
+        var server = new FakeServer
+        {
+            Fallback = _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                Headers = { RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(2)) },
+            }),
+        };
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("retried.recorded"))),
+            options: o =>
+            {
+                o.ShutdownTimeout = TimeSpan.FromSeconds(20);
+                o.OnDrop = drops.Enqueue;
+            },
+            services: b => b.Services.Configure<HostOptions>(h => h.ShutdownTimeout = TimeSpan.FromMilliseconds(300)),
+            fake: server);
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        _ = app.Client.FlushAsync();
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (server.Requests.IsEmpty && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
+
+        // The sender is now in its two-second Retry-After backoff when the host's 300 ms budget ends.
+        await app.Host.StopAsync();
+        await app.Host.DisposeAsync();
+        Assert.Equal(DropReason.Shutdown, Assert.Single(await Eventually(drops, 1)).Reason);
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        Assert.Single(server.Requests);
+    }
+
+    [Fact]
+    public async Task R6_an_OnDrop_callback_that_records_a_failing_event_cannot_feed_itself()
+    {
+        IAuditLogFactory? factory = null;
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("first.failure", _ => throw new InvalidOperationException("fictional")))),
+            options: o => o.OnDrop = d =>
+            {
+                drops.Enqueue(d);
+                factory?.ForJob(null).Record("from.callback", _ => throw new InvalidOperationException("fictional"));
+            });
+        factory = app.Host.Services.GetRequiredService<IAuditLogFactory>();
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        await Eventually(drops, 1);
+        await Task.Delay(500);
+        Assert.Single(drops);
+        Assert.Equal(1, app.Client.Stats.Dropped);
+        Assert.Equal(1, app.Client.Stats.Filtered);
+    }
+
+    private sealed class FakeLogbirdClient : ILogbirdClient
+    {
+        public ConcurrentQueue<AuditEvent> Tracked { get; } = new();
+
+        public LogbirdStats Stats => default;
+
+        public void Track(AuditEvent auditEvent) => Tracked.Enqueue(auditEvent);
+
+        public Task<bool> FlushAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
+    }
+
+    [Fact]
+    public async Task R7_audit_logs_record_through_a_host_provided_client_and_return_the_id_even_when_disabled()
+    {
+        var fake = new FakeLogbirdClient();
+        string? returned = null;
+        await using (var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) =>
+            {
+                returned = audit.Record("faked.recorded");
+                return Results.Ok();
+            }),
+            user: User(("sub", "user_1")),
+            services: b => b.Services.AddSingleton<ILogbirdClient>(fake)))
+        {
+            (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        }
+
+        var tracked = Assert.Single(fake.Tracked);
+        Assert.Equal(returned, tracked.Id);
+        Assert.Equal("user_1", tracked.Actor!.Id);
+
+        string? disabledId = null;
+        await using (var disabled = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) =>
+            {
+                disabledId = audit.Record("disabled.recorded");
+                return Results.Ok();
+            }),
+            options: o => o.Enabled = false))
+        {
+            (await disabled.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        }
+
+        Assert.False(string.IsNullOrEmpty(disabledId));
+    }
+
+    [Fact]
+    public async Task R4_a_shallow_array_whose_separators_pass_the_limit_is_dropped_before_any_copy()
+    {
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        var zeroes = new JsonArray();
+        for (var i = 0; i < 150_000; i++)
+        {
+            zeroes.Add(0);
+        }
+
+        var prepared = new AuditEvent("zeroes.prepared") { Metadata = { ["zeroes"] = zeroes } };
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record(prepared))),
+            options: o => o.OnDrop = drops.Enqueue);
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        Assert.Equal(DropReason.TooLarge, Assert.Single(await Eventually(drops, 1)).Reason);
+        Assert.Null(prepared.Id);
     }
 }
