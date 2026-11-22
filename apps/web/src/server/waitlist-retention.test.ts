@@ -330,12 +330,14 @@ it('resolves every alias of a store to one path, before and after its directory 
 });
 
 /**
- * Concurrent rewrite proof. A writer process appends until told to stop, printing `attempt i` before each append and
- * `done i` after it. For each of REWRITES rewrites (append a victim, then forget it), the parent pauses its own rewrite
- * between reading the day file and renaming the rewritten copy over it (the `rename` gate above). It waits there until
- * every writer has an append in flight, which can only be waiting for the lock the rewrite holds. It then releases the
- * rewrite and checks that each of those appends finished afterwards. Every record shares one `receivedAt`, so all of
- * them land in one day file whatever the time of day.
+ * Concurrent rewrite proof. A writer process appends until told to stop, printing `attempt i <time>` before each append
+ * and `done i <time>` after it, with the system clock every process shares. For each of REWRITES rewrites (append a
+ * victim, then forget it), the parent pauses its own rewrite between reading the day file and renaming the rewritten
+ * copy over it (the `rename` gate above), while it holds the lock. It records that window and keeps the lock until
+ * every writer has an append in flight. Afterwards it checks, from the writers' own timestamps rather than when their
+ * lines happened to be read, that no append finished inside a window, and that every writer had an append that started
+ * before a window ended and finished after it, so each one really waited for the lock. Every record shares one
+ * `receivedAt`, so all of them land in one day file whatever the time of day.
  */
 const REWRITES = 3;
 const RECEIVED_AT = '2026-01-15T12:00:00.000Z';
@@ -345,7 +347,8 @@ interface Writer {
   process: ReturnType<typeof child>;
   /** The append this writer has started and not yet reported done, if any. */
   inFlight?: number;
-  /** Parent-side sequence number at which each `done i` line arrived. */
+  /** When each append started and finished, by the writer's clock (`Date.now()`, shared by every process here). */
+  attemptAt: Map<number, number>;
   doneAt: Map<number, number>;
   written?: number;
   closed: Promise<number | null>;
@@ -366,7 +369,6 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
   const go = join(dir, 'go');
   const stop = join(dir, 'stop');
   const deadline = Date.now() + HELPER_DEADLINE_MS;
-  let seq = 0;
   const writers: Writer[] = paths.map((path, index) => {
     const proc = child(
       `const { existsSync } = await import('node:fs');
@@ -374,9 +376,9 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
        while (!existsSync(${JSON.stringify(go)})) await new Promise((done) => setTimeout(done, 5));
        let i = 0;
        for (; i < 5000 && !existsSync(${JSON.stringify(stop)}); i++) {
-         console.log('attempt ' + i);
+         console.log('attempt ' + i + ' ' + Date.now());
          await waitlist.appendWaitlistRecord(${JSON.stringify(path)}, { email: 'new-${index}-' + i + '@example.test', interest: 'cloud', receivedAt: ${JSON.stringify(RECEIVED_AT)} });
-         console.log('done ' + i);
+         console.log('done ' + i + ' ' + Date.now());
        }
        console.log('written ' + i);`,
     );
@@ -386,6 +388,7 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
     });
     const writer: Writer = {
       process: proc,
+      attemptAt: new Map(),
       doneAt: new Map(),
       stderr: () => stderr,
       closed: new Promise((done) => proc.once('close', (code) => done(code))),
@@ -395,15 +398,15 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
       proc.once('error', fail);
       void writer.closed.then(() => fail(new Error(`Writer ${index} exited before it was ready: ${stderr}`)));
       createInterface({ input: proc.stdout }).on('line', (line) => {
-        const [kind, value] = line.split(' ');
+        const [kind, value, time] = line.split(' ');
         const i = Number(value);
         if (kind === 'ready') {
           done();
         } else if (kind === 'attempt') {
           writer.inFlight = i;
+          writer.attemptAt.set(i, Number(time));
         } else if (kind === 'done') {
-          seq += 1;
-          writer.doneAt.set(i, seq);
+          writer.doneAt.set(i, Number(time));
           writer.inFlight = undefined;
         } else if (kind === 'written') {
           writer.written = i;
@@ -415,7 +418,8 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
   try {
     await Promise.all(writers.map((writer) => writer.ready));
     await writeFile(go, '');
-    const blocked: { writer: Writer; i: number; releasedAt: number }[] = [];
+    /** Moments at which a rewrite certainly held the lock (it holds it from before the first until after the last). */
+    const windows: { pass: number; from: number; to: number }[] = [];
     for (let pass = 0; pass < REWRITES; pass += 1) {
       const victim = `victim-${pass}@example.test`;
       await appendWaitlistRecord(rewriteVia, record(victim, RECEIVED_AT));
@@ -426,8 +430,11 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
         }
         renameGate.hold = undefined;
         held = true;
-        // This rewrite holds the lock: an append in flight now can only be waiting for it. Wait until every writer has
-        // one, and until it is still in flight a moment later (so a `done` still in the pipe isn't mistaken for one).
+        const from = Date.now();
+        // This rewrite holds the lock. Keep it until every writer has an append in flight (it can only be waiting for the
+        // lock) and a moment longer. Whether any append finished meanwhile is decided afterwards from the writers' own
+        // timestamps: a `done` line read late (written before the lock was taken) can't fail the test, and one written
+        // under the lock can't hide.
         let attempts: (number | undefined)[] = [];
         await until(
           () => {
@@ -440,11 +447,7 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
           deadline,
         );
         await new Promise((done) => setTimeout(done, 50));
-        const releasedAt = seq;
-        for (const writer of writers) {
-          expect(writer.inFlight, 'an append finished while the rewrite held the lock').toBe(attempts[writers.indexOf(writer)]);
-          blocked.push({ writer, i: writer.inFlight as number, releasedAt });
-        }
+        windows.push({ pass, from, to: Date.now() });
       };
       const { removed } = await forgetWaitlistEmail(rewriteVia, victim);
       expect(held, `rewrite ${pass} via ${rewriteVia} never renamed a day file`).toBe(true);
@@ -452,9 +455,17 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
     }
     await writeFile(stop, '');
     expect(await Promise.all(writers.map((writer) => writer.closed))).toEqual(writers.map(() => 0));
-    // Each append that waited on a rewrite finished only after that rewrite let the lock go.
-    for (const { writer, i, releasedAt } of blocked) {
-      expect(writer.doneAt.get(i)).toBeGreaterThan(releasedAt);
+    expect(windows.map((window) => window.pass)).toEqual(Array.from({ length: REWRITES }, (_, pass) => pass));
+    for (const { pass, from, to } of windows) {
+      for (const [index, writer] of writers.entries()) {
+        // No append finished while the rewrite held the lock. The window is trimmed by a millisecond at each end: the
+        // clock has whole milliseconds, and the lock is held beyond both ends anyway.
+        const underLock = [...writer.doneAt].filter(([, at]) => at > from + 1 && at < to - 1).map(([i]) => i);
+        expect(underLock, `writer ${index}: appends that finished under the lock of rewrite ${pass}`).toEqual([]);
+        // And this writer really waited: one of its appends started before the window ended and finished after it.
+        const waited = [...writer.attemptAt].some(([i, at]) => at <= to && (writer.doneAt.get(i) ?? -1) >= to);
+        expect(waited, `writer ${index} had no append waiting on the lock of rewrite ${pass}`).toBe(true);
+      }
     }
     const written = writers.map((writer) => writer.written ?? -1);
     // A writer that reached the cap wasn't stopped by us, and one that wrote nothing proves nothing.
