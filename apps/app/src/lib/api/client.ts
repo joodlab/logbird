@@ -4,9 +4,11 @@ import {
   type createApiKeySchema,
   createProjectResponseSchema,
   type EntityKind,
+  type EntityProfileQuery,
   type EntitySort,
   type ExportQuery,
   entityListResponseSchema,
+  entityMetadataSchema,
   entityProfileSchema,
   eventDetailSchema,
   eventSchema,
@@ -64,7 +66,7 @@ export function withQuery(path: string, query?: Query): string {
   if (!query) return path;
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
-    if (value === undefined || value === null || value === '') continue;
+    if (value === undefined || value === null || (value === '' && key !== 'targetType')) continue;
     params.set(key, String(value));
   }
   const qs = params.toString();
@@ -221,7 +223,7 @@ export const api = {
       request(z.array(eventSchema), 'GET', pathFor(routes.events.live.path, { projectId }), { query: { ...query }, signal }),
     histogram: (projectId: string, query: RangeParams & { interval?: number }, signal?: AbortSignal) =>
       request(histogramResponseSchema, 'GET', pathFor(routes.events.histogram.path, { projectId }), { query: { ...query }, signal }),
-    facets: (projectId: string, query: RangeParams & { field: string; limit?: number }, signal?: AbortSignal) =>
+    facets: (projectId: string, query: RangeParams & { field: string; limit?: number; by?: string }, signal?: AbortSignal) =>
       request(facetResponseSchema, 'GET', pathFor(routes.events.facets.path, { projectId }), { query: { ...query }, signal }),
     /** Every event sharing `context.operationId`, oldest first. */
     operation: (projectId: string, operationId: string, signal?: AbortSignal) =>
@@ -239,8 +241,10 @@ export const api = {
       query: { kind: EntityKind; q?: string; type?: string; sort?: EntitySort; limit?: number; cursor?: string },
       signal?: AbortSignal,
     ) => request(entityListResponseSchema, 'GET', pathFor(routes.entities.list.path, { projectId }), { query: { ...query }, signal }),
-    profile: (projectId: string, kind: EntityKind, entityId: string, query: RangeParams, signal?: AbortSignal) =>
+    profile: (projectId: string, kind: EntityKind, entityId: string, query: EntityProfileQuery, signal?: AbortSignal) =>
       request(entityProfileSchema, 'GET', pathFor(routes.entities.profile.path, { projectId, kind, entityId }), { query: { ...query }, signal }),
+    metadata: (projectId: string, kind: EntityKind, entityId: string, targetType?: string, signal?: AbortSignal) =>
+      request(entityMetadataSchema, 'GET', pathFor(routes.entities.metadata.path, { projectId, kind, entityId }), { query: { targetType }, signal }),
   },
 
   fields: (projectId: string, query: RangeParams, signal?: AbortSignal) =>

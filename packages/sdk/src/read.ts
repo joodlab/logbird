@@ -1,4 +1,6 @@
-/** Structural public read types, checked against contracts in read.test.ts; no runtime dependencies. */
+import { formatRecordTerm, quoteQueryValue } from '@logbird/contracts/record-selector';
+
+/** Structural public read types, checked against contracts in read.test.ts. */
 export interface SearchQuery {
   from?: string;
   to?: string;
@@ -51,13 +53,12 @@ export interface TrailQuery {
   cursor?: string;
 }
 export function trailQuery(input: TrailQuery): Partial<SearchQuery> {
-  const quote = (value: string) => JSON.stringify(value);
+  const target = input.target;
   const terms = [
     input.q ? `(${input.q})` : '',
-    input.target ? `target:${quote(input.target.id)}` : '',
-    input.target?.type ? `target.type:${quote(input.target.type)}` : '',
-    input.actor ? `actor:${quote(input.actor)}` : '',
-    input.tenant ? `tenant:${quote(input.tenant)}` : '',
+    target?.type !== undefined ? formatRecordTerm(target.type, target.id) : target ? `target:${quoteQueryValue(target.id)}` : '',
+    input.actor ? `actor:${quoteQueryValue(input.actor)}` : '',
+    input.tenant ? `tenant:${quoteQueryValue(input.tenant)}` : '',
   ].filter(Boolean);
   return { ...input.range, q: terms.join(' AND '), limit: input.limit, cursor: input.cursor };
 }

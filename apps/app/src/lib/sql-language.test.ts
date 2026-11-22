@@ -1,3 +1,5 @@
+import { compileQuery } from '@logbird/clickhouse';
+import { formatRecordTerm, QUERY_FIELDS } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import { sqlColumn } from './query-catalog';
 import { translateQueryToSql } from './query-translate';
@@ -257,6 +259,16 @@ describe('predicates', () => {
     const ex = toggleSqlPredicate(toggleSqlPredicate('', "action != 'a'", 'action', 'exclude'), "action != 'b'", 'action', 'exclude');
     expect(ex).toBe("action != 'a' AND action != 'b'");
   });
+
+  it('compares predicate literals exactly when checking and toggling filters', () => {
+    const oneSpace = "NOT has(target_ids, 'page:A B')";
+    const twoSpaces = "NOT has(target_ids, 'page:A  B')";
+    expect(hasSqlPredicate(oneSpace, twoSpaces)).toBe(false);
+    expect(hasSqlPredicate("outcome  =\n'failure'", "outcome = 'failure'")).toBe(true);
+    const included = toggleSqlPredicate(oneSpace, twoSpaces, 'target_ids', 'exclude');
+    expect(included).toBe(`${oneSpace} AND ${twoSpaces}`);
+    expect(toggleSqlPredicate(included, twoSpaces, 'target_ids', 'exclude')).toBe(oneSpace);
+  });
 });
 
 describe('translateQueryToSql', () => {
@@ -271,11 +283,128 @@ describe('translateQueryToSql', () => {
   it('translates v2 comparisons, ranges, regexes and groups', () => {
     expect(translateQueryToSql('attempt:>2')).toBe('job_attempt > 2');
     expect(translateQueryToSql('attempt:[2 TO 5}')).toBe('(job_attempt >= 2 AND job_attempt < 5)');
-    expect(translateQueryToSql('metadata.channel:whatsapp')).toBe("attributes['metadata.channel'] = 'whatsapp'");
+    expect(translateQueryToSql('metadata.channel:whatsapp')).toBe(
+      "(mapContains(attributes, 'metadata.channel') AND attributes['metadata.channel'] = 'whatsapp')",
+    );
     expect(translateQueryToSql('duration_ms:>100')).toBe("toFloat64OrNull(attributes['duration_ms']) > 100");
     expect(translateQueryToSql('action:/booking\\.(created|cancelled)/')).toBe("match(action, '^(?:booking\\\\.(created|cancelled))$')");
     expect(translateQueryToSql('-outcome:(failure OR denied)')).toBe("NOT outcome IN ('failure', 'denied')");
     expect(translateQueryToSql('(action:a OR action:b) NOT severity:info')).toBe("(action = 'a' OR action = 'b') AND NOT severity = 'info'");
+  });
+
+  it('translates exact record pairs, presence and grouped negation', () => {
+    expect(translateQueryToSql('record:"order:A:1"')).toBe(
+      "(has(target_ids, 'A:1') AND arrayExists((t, i) -> t = 'order' AND i = 'A:1', target_types, target_ids))",
+    );
+    expect(translateQueryToSql('-record:(site:12 OR "page:home ( OR ) page")')).toBe(
+      "NOT ((has(target_ids, '12') AND arrayExists((t, i) -> t = 'site' AND i = '12', target_types, target_ids)) OR (has(target_ids, 'home ( OR ) page') AND arrayExists((t, i) -> t = 'page' AND i = 'home ( OR ) page', target_types, target_ids)))",
+    );
+    expect(translateQueryToSql('NOT _exists_:record')).toBe('NOT notEmpty(target_ids)');
+    expect(translateQueryToSql('record:site')).toBeNull();
+    expect(translateQueryToSql('record:"site:12')).toBeNull();
+    expect(translateQueryToSql('record:(/site:12/)')).toBeNull();
+  });
+
+  it.each(QUERY_FIELDS.filter((field) => field.type === 'array'))('matches compiler presence for $key', ({ key, column }) => {
+    const presence = `arrayExists(x -> x != '', ${column})`;
+    for (const term of [`${key}:*`, `${key}:"*"`, `_exists_:${key}`, `_exists_:"${key}"`]) {
+      expect(compileQuery(term).sql).toBe(`(${presence})`);
+      expect(translateQueryToSql(term)).toBe(presence);
+      expect(translateQueryToSql(`NOT ${term}`)).toBe(`NOT ${presence}`);
+      expect(translateQueryToSql(`-${term}`)).toBe(`NOT ${presence}`);
+    }
+    expect(translateQueryToSql(`${key}:(value OR "*")`)).toBe(`(has(${column}, 'value') OR ${presence})`);
+  });
+
+  it.each([
+    [String.raw`_exists_:attr.tag\*`, String.raw`tag\*`],
+    [String.raw`_exists_:"attr.tag\*"`, 'tag*'],
+  ])('uses the same escaped attribute key for %s in both modes', (q, field) => {
+    const compiled = compileQuery(q);
+    expect(compiled.params).toEqual({ q0: field });
+    const key = sqlString(field);
+    expect(translateQueryToSql(q)).toBe(`(mapContains(attributes, ${key}) AND attributes[${key}] != '')`);
+  });
+
+  it('preserves presence alongside exact records and on scalar or attribute filters', () => {
+    const q = 'record:page:7 target.name:"*"';
+    expect(translateQueryToSql(q)).toBe(
+      "(has(target_ids, '7') AND arrayExists((t, i) -> t = 'page' AND i = '7', target_types, target_ids)) AND arrayExists(x -> x != '', target_names)",
+    );
+    expect(translateQueryToSql('record:*')).toBe('notEmpty(target_ids)');
+    expect(translateQueryToSql('_exists_:"record"')).toBe('notEmpty(target_ids)');
+    expect(translateQueryToSql('attempt:* NOT _exists_:"timestamp"')).toBe('1 = 1 AND NOT 1 = 1');
+    expect(translateQueryToSql('-_exists_:"metadata.plan"')).toBe(
+      "NOT (mapContains(attributes, 'metadata.plan') AND attributes['metadata.plan'] != '')",
+    );
+  });
+
+  it.each([
+    ['attr.note:""', "attributes['note'] = ''"],
+    ['attr.note:/a*/', "match(attributes['note'], '^(?:a*)$')"],
+    ['attr.note:("" OR other)', "attributes['note'] IN ('', 'other')"],
+    ['attributes.note:("" OR prefix*)', "(attributes['note'] = '' OR startsWith(attributes['note'], 'prefix'))"],
+    ['attr.note:*', "attributes['note'] != ''"],
+  ])('requires an existing attribute for %s, including when negated', (q, valuePredicate) => {
+    const sql = `(mapContains(attributes, 'note') AND ${valuePredicate})`;
+    expect(translateQueryToSql(q)).toBe(sql);
+    expect(translateQueryToSql(`NOT ${q}`)).toBe(`NOT ${sql}`);
+  });
+
+  it.each([
+    [String.raw`tenant:team\*`, "tenant_id = 'team*'"],
+    [String.raw`tenant:"team\*"`, "tenant_id = 'team*'"],
+    [String.raw`target:(team\* OR "org*")`, "(has(target_ids, 'team*') OR arrayExists(x -> startsWith(x, 'org'), target_ids))"],
+    ['tenant:"team*"', "startsWith(tenant_id, 'team')"],
+  ])('translates wildcard and literal stars in %s', (q, sql) => {
+    expect(translateQueryToSql(q)).toBe(sql);
+  });
+
+  it.each([
+    ['record: page:7', 'page', '7'],
+    ['record \t:  page:7', 'page', '7'],
+    ['record: "!page:7"', '!page', '7'],
+    ['record:page:/home/', 'page', '/home/'],
+    [String.raw`record:page:/a\d+.*/`, 'page', String.raw`/a\d+.*/`],
+    ['record:page:home*', 'page', 'home*'],
+    ['record:page:*', 'page', '*'],
+    ['record:"page:section(2)"', 'page', 'section(2)'],
+    ['record:"page:/home/(.*)/"', 'page', '/home/(.*)/'],
+    [String.raw`record:order\:archived:A1`, 'order:archived', 'A1'],
+    [formatRecordTerm('نَوْع:\\', 'مُعرِّف🪴 "a"'), 'نَوْع:\\', 'مُعرِّف🪴 "a"'],
+    [formatRecordTerm('page:section\\v2', ' x\t\n\r:y"\\ '), 'page:section\\v2', ' x\t\n\r:y"\\ '],
+  ])('translates the same literal pair as the compiler for %s', (q, type, id) => {
+    const compiled = compileQuery(q);
+    expect(compiled.params).toEqual({ recordType0: type, recordId0: id });
+    const sql = compiled.sql.replace(/\{(recordType0|recordId0):String\}/g, (_, key) => sqlString(String(compiled.params[key])));
+    expect(translateQueryToSql(q)).toBe(sql);
+  });
+
+  it.each([
+    ['action :  "page  updated"', { q0: 'page  updated' }, "action = 'page  updated'"],
+    ['attempt: >= 2', { q0: 2 }, 'job_attempt >= 2'],
+    ['actor: user:7', { q0: 'user:7' }, "actor_id = 'user:7'"],
+  ])('translates spaced values according to the compiler for %s', (q, params, sql) => {
+    expect(compileQuery(q).params).toEqual(params);
+    expect(translateQueryToSql(q)).toBe(sql);
+  });
+
+  it.each([
+    'record:!page:7',
+    'record: !page:7',
+    'record: (page:8 OR !page:7)',
+    'env: !tenant:7',
+    'env:(prod OR !tenant:7)',
+    'env:AND',
+    'attempt: >= -2',
+    'action:a&&env:prod',
+    'NOT',
+    'record:page:7 OR',
+    '_exists_:"record',
+    '_exists_:record:page',
+  ])('rejects invalid query syntax consistently for %s', (q) => {
+    expect(() => compileQuery(q)).toThrow();
+    expect(translateQueryToSql(q)).toBeNull();
   });
 
   it('gives up on free text and the description field', () => {

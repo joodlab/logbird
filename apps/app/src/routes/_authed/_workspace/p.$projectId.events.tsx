@@ -2,7 +2,7 @@ import { queryLangSchema } from '@logbird/contracts';
 import { Button } from '@logbird/ui/components/ui/button';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { BookmarkIcon, LinkIcon, XIcon } from 'lucide-react';
+import { BookmarkIcon, InfoIcon, LinkIcon, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
 import { z } from 'zod';
 import { parseColumns, serializeColumns } from '@/components/explorer/columns';
@@ -11,7 +11,7 @@ import { SampleDataBanner } from '@/components/setup/sample-data-banner';
 import { eventsInfiniteQuery, histogramQuery, viewsQuery } from '@/lib/api/queries';
 import { DEFAULT_RANGE, isValidRange } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
-import { useCopyViewLink } from '@/lib/views';
+import { loosePairNotice, useCopyViewLink } from '@/lib/views';
 
 const searchSchema = z.object({
   q: z.string().optional(),
@@ -26,7 +26,8 @@ const searchSchema = z.object({
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/events')({
   validateSearch: searchSchema,
   staticData: { crumb: 'Explorer', range: true },
-  loaderDeps: ({ search }) => ({ q: search.q ?? '', lang: search.lang ?? 'query', range: search.range }),
+  // The explorer searches the trimmed query (scopedQuery): prefetch exactly that, so a padded saved query loads once.
+  loaderDeps: ({ search }) => ({ q: (search.q ?? '').trim(), lang: search.lang ?? 'query', range: search.range }),
   loader: ({ context, params, deps }) => {
     const range = deps.range && isValidRange(deps.range) ? deps.range : DEFAULT_RANGE;
     context.queryClient.prefetchInfiniteQuery(eventsInfiniteQuery(params.projectId, range, deps.q, deps.lang));
@@ -53,6 +54,9 @@ function ExplorerPage() {
       ? savedView
       : undefined;
   const copyLink = useCopyViewLink();
+  // A saved query with the loose record pair matches id and type separately: say so, from the query's shape alone. The
+  // view opens exactly as saved; "Open exact version" is the reader's choice, and saving it is their own click.
+  const loose = view ? loosePairNotice(view.state.q ?? '', view.state.lang) : null;
 
   const state: ExplorerState = {
     q: search.q ?? '',
@@ -107,6 +111,29 @@ function ExplorerPage() {
               Close view
             </Button>
           </span>
+        </div>
+      ) : null}
+      {view && loose ? (
+        <div
+          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b bg-muted/40 px-4 py-2 text-muted-foreground text-xs"
+          data-testid="loose-record-pair"
+          role="note"
+        >
+          <span className="flex min-w-0 items-start gap-2">
+            <InfoIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+            <span>
+              This view matches the target id and the target type separately, so it can include events where another record shares the id or the type.
+            </span>
+          </span>
+          {loose.exact ? (
+            <Button
+              onClick={() => navigate({ search: (prev) => ({ ...prev, q: loose.exact || undefined, view: undefined }) })}
+              size="xs"
+              variant="outline"
+            >
+              Open exact version
+            </Button>
+          ) : null}
         </div>
       ) : null}
       <SampleDataBanner className="border-b" projectId={projectId} />

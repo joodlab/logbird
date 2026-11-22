@@ -23,6 +23,7 @@ import { eventSentence, personLabel } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { firstEventCopy } from '@/lib/onboarding';
 import { useCan } from '@/lib/permissions';
+import { formatTerm } from '@/lib/query-language';
 import { curlSnippet, fetchSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
 import { useSessionKey } from './api-key-step';
 import { useInvalidateSetup, useSampleData, useTestEvent } from './use-setup';
@@ -234,7 +235,7 @@ export function SampleDataControl({ projectId, setup }: { projectId: string; set
           <>
             <Button
               nativeButton={false}
-              render={<Link params={{ projectId }} search={{ q: `source:${SAMPLE_DATA_SOURCE}`, range: '7d' }} to="/p/$projectId/events" />}
+              render={<Link params={{ projectId }} search={{ q: formatTerm('source', SAMPLE_DATA_SOURCE), range: '7d' }} to="/p/$projectId/events" />}
               size="sm"
               variant="outline"
             >

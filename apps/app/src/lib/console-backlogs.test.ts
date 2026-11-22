@@ -1,13 +1,14 @@
-import type { AuditEvent } from '@logbird/contracts';
-import { describe, expect, it } from 'vitest';
+import { type AuditEvent, encodeRecordPair, formatRecordTerm } from '@logbird/contracts';
+import { describe, expect, it, vi } from 'vitest';
 import { mustConfirmSecretClose } from '@/components/one-time-secret';
 import { entityViewName } from '@/components/views/save-entity-view-button';
 import { ApiRequestError } from './api/errors';
+import { entityQuery } from './entities';
 import { actorAttributeHint, outcomeWasSent, parentActor } from './events';
 import { sortProjectsByActivity } from './projects';
 import { queryProblem, queryProblemText } from './query-error';
 import { describeUserAgent } from './user-agent';
-import { labelChips, nameableTerms, viewHref } from './views';
+import { labelChips, nameableTerms, resolveViewLabel, viewHref } from './views';
 
 const syntax = (q: string, hint: string, start: number) =>
   queryProblem(
@@ -151,5 +152,55 @@ describe('OPS-17/18 saved views', () => {
   it('builds a shareable link that reopens the view', () => {
     const href = viewHref('proj_1', { id: 'view_1', state: { q: 'tenant:biz_5', range: '7d' } }, 'https://console.example.test');
     expect(href).toBe('https://console.example.test/p/proj_1/events?q=tenant%3Abiz_5&range=7d&view=view_1');
+  });
+
+  it('uses the complete pair for record history links and labels', () => {
+    const q = entityQuery('target', 'order:A:1');
+    expect(q).toBe('record:"order:A:1"');
+    expect(nameableTerms(q)).toEqual([{ field: 'record', value: 'order:A:1' }]);
+    const labels = [
+      { field: 'record' as const, value: 'order:A:1', label: 'Order One' },
+      { field: 'record' as const, value: 'page:A:1', label: 'Page One' },
+      { field: 'target' as const, value: 'A:1', label: 'Legacy label' },
+    ];
+    expect(labelChips(q, labels).map((c) => c.text)).toEqual(['Record: Order One']);
+    expect(labelChips('target:"A:1" target.type:order', labels).map((c) => c.text)).toEqual(['Record: Legacy label']);
+    const archivedQuery = entityQuery('target', 'order:archived:A1', 'order:archived');
+    const regularQuery = entityQuery('target', 'order:archived:A1', 'order');
+    expect(archivedQuery).toBe(String.raw`record:"order\\:archived:A1"`);
+    expect(regularQuery).toBe('record:"order:archived:A1"');
+    const [archived] = nameableTerms(String.raw`record:order\:archived:A1`);
+    if (!archived) throw new Error('Missing archived record term');
+    const archivedLabel = { ...archived, label: 'Archived order' };
+    expect(labelChips(archivedQuery, [archivedLabel]).map((c) => c.text)).toEqual(['Record: Archived order']);
+    expect(labelChips(regularQuery, [archivedLabel])).toEqual([]);
+  });
+
+  it('preserves literal IDs from entity links through saved-view labels and URLs', () => {
+    const type = 'page:section\\v2';
+    const id = ' x\t\n\r:y"\\ 🦜 ';
+    const q = entityQuery('target', `${type}:${id}`, type);
+    expect(nameableTerms(q)).toEqual([{ field: 'record', value: encodeRecordPair(type, id) }]);
+    expect(nameableTerms(entityQuery('actor', id))).toEqual([{ field: 'actor', value: id }]);
+    const href = viewHref('proj_1', { id: 'view_1', state: { q, range: '7d' } }, 'https://console.example.test');
+    expect(new URL(href).searchParams.get('q')).toBe(q);
+  });
+
+  it('resolves a long record label from the metadata endpoint alone', async () => {
+    const type = 't'.repeat(64);
+    const id = 'i'.repeat(150);
+    const entityId = `${type}:${id}`;
+    const fetch = vi.fn().mockResolvedValue(Response.json({ kind: 'target', id: entityId, type, name: 'Long record' }));
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const [term] = nameableTerms(formatRecordTerm(type, id));
+      if (!term) throw new Error('Missing long record term');
+      expect(await resolveViewLabel('demo', term)).toEqual({ field: 'record', value: encodeRecordPair(type, id), label: 'Long record' });
+      expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+        `/api/projects/demo/entities/target/${encodeURIComponent(entityId)}/metadata?targetType=${type}`,
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

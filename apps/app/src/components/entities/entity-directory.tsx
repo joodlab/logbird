@@ -258,7 +258,7 @@ function TypeChip({ label, active, onClick, count }: { label: string; active: bo
 }
 
 function EntityRow({ entity: e, projectId, section }: { entity: Entity; projectId: string; section: EntitySection }) {
-  const displayId = e.kind === 'target' ? splitTargetId(e.id).id : e.id;
+  const displayId = e.kind === 'target' ? splitTargetId(e.id, e.type).id : e.id;
   const showIcon = !(e.kind === 'actor' && (e.type === 'user' || e.type === 'anonymous'));
   return (
     <li>
@@ -268,7 +268,8 @@ function EntityRow({ entity: e, projectId, section }: { entity: Entity; projectI
           TYPE_FACET[e.kind] ? COLUMNS_WITH_TYPE : COLUMNS_WITHOUT_TYPE,
         )}
         params={{ projectId, entityId: e.id }}
-        to={`/p/$projectId/${section}/$entityId` as '/p/$projectId/actors/$entityId'}
+        search={e.kind === 'target' ? { targetType: e.type } : {}}
+        to={`/p/$projectId/${section}/$entityId` as '/p/$projectId/records/$entityId'}
       >
         <span className="flex min-w-0 items-center gap-2.5">
           <EntityAvatar

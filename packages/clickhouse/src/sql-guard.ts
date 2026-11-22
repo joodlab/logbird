@@ -1,4 +1,4 @@
-import { SQL_ALLOWED_COLUMNS, SQL_ALLOWED_FUNCTIONS } from '@logbird/contracts';
+import { SQL_ALLOWED_COLUMNS, SQL_ALLOWED_FUNCTIONS, SQL_MAX_QUERY_BYTES } from '@logbird/contracts';
 import type { ClickHouseClient } from './client';
 import { QueryError } from './query';
 
@@ -138,7 +138,7 @@ async function explain(ch: ClickHouseClient, q: string) {
   return parseTree(await result.text());
 }
 export async function validateSql(ch: ClickHouseClient, q = ''): Promise<string> {
-  if (Buffer.byteLength(q) > 4096) reject('too_complex', q, 'SQL exceeds 4096 bytes');
+  if (Buffer.byteLength(q) > SQL_MAX_QUERY_BYTES) reject('too_complex', q, `SQL exceeds ${SQL_MAX_QUERY_BYTES} bytes`);
   lexicalCheck(q);
   const statement = /^\s*(select|with)\b/i.exec(q);
   if (statement) reject('not_allowed', q, "Enter only a WHERE expression (e.g. outcome = 'failure')", ...locate(q, /\b(?:select|with)\b/i));

@@ -20,7 +20,7 @@ import { useSetCrumb } from '@/lib/crumbs';
 import { eventSentence } from '@/lib/events';
 import { formatDuration, formatNumber } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
-import { formatExactTerm } from '@/lib/query-language';
+import { formatTerm } from '@/lib/query-language';
 import { absoluteRange } from '@/lib/range';
 
 const NOT_IN_OPERATION = new ApiRequestError(404, 'not_found', 'Event not found in this operation');
@@ -134,7 +134,7 @@ function OperationPage() {
               render={
                 <Link
                   params={{ projectId }}
-                  search={(prev) => ({ range: prev.range, q: formatExactTerm('operation', operationId) })}
+                  search={(prev) => ({ range: prev.range, q: formatTerm('operation', operationId) })}
                   to="/p/$projectId/events"
                 />
               }
@@ -174,7 +174,7 @@ function OperationPage() {
               <Link
                 params={{ projectId }}
                 // The span of every event in the operation, not whatever range was open.
-                search={{ range: spanRange, q: formatExactTerm('operation', operationId) }}
+                search={{ range: spanRange, q: formatTerm('operation', operationId) }}
                 to="/p/$projectId/events"
               />
             }
