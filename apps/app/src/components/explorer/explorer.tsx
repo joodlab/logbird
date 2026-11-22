@@ -474,8 +474,9 @@ export function Explorer({
               histogram.isPlaceholderData
                 ? undefined
                 : (from, to) => {
-                    // Keep the selection inside the displayed search (its end can lie ahead of now).
-                    const shown = resolveRange(range);
+                    // Keep the selection inside the search that produced the visible bars (its end can lie ahead of
+                    // now, and a relative range has moved on since).
+                    const shown = histogram.data ?? resolveRange(range);
                     const start = Math.max(from, shown.fromMs);
                     const end = Math.min(to, shown.toMs);
                     if (start < end) onChange({ range: absoluteRange(start, end), live: undefined });

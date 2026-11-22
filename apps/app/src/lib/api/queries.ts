@@ -136,9 +136,15 @@ export const eventsInfiniteQuery = (projectId: string, range: string, q: string,
 export const histogramQuery = (projectId: string, range: string, q: string, lang: QueryLang = 'query', interval?: number) =>
   queryOptions({
     queryKey: [...keys.project(projectId), 'histogram', range, q, q ? lang : 'query', interval ?? null] as const,
-    queryFn: ({ signal }) => {
+    queryFn: async ({ signal }) => {
       const r = resolveRange(range);
-      return api.events.histogram(projectId, { from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, interval }, signal);
+      const data = await api.events.histogram(
+        projectId,
+        { from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, interval },
+        signal,
+      );
+      // The bounds these bars were counted over: a relative range moves on, the drawn bars do not.
+      return { ...data, fromMs: r.fromMs, toMs: r.toMs };
     },
     placeholderData: keepPreviousData,
     retry: shouldRetry,
@@ -160,6 +166,26 @@ export const eventQuery = (projectId: string, eventId: string) =>
   queryOptions({
     queryKey: [...keys.project(projectId), 'event', eventId] as const,
     queryFn: ({ signal }) => api.events.get(projectId, eventId, signal),
+    staleTime: 5 * 60_000,
+    retry: shouldRetry,
+  });
+
+/**
+ * The oldest event the project still stores (its timestamp), or null when it holds none: one ascending search row over
+ * every timestamp ingest can admit. Used to bound searches that must reach every stored match.
+ */
+export const oldestStoredQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: [...keys.project(projectId), 'oldest-stored'] as const,
+    queryFn: async ({ signal }) => {
+      const now = Date.now();
+      const page = await api.events.search(
+        projectId,
+        { from: new Date(now - 20 * 365 * 86_400_000).toISOString(), to: new Date(now + 2 * 86_400_000).toISOString(), order: 'asc', limit: 1 },
+        signal,
+      );
+      return page.data[0]?.timestamp ?? null;
+    },
     staleTime: 5 * 60_000,
     retry: shouldRetry,
   });

@@ -81,7 +81,7 @@ export function timeTicks(rows: SeriesRow[], intervalSeconds: number, target = 7
     const ticks = rows.filter((_, i) => i % stride === 0).map((r) => r.ts);
     return { ticks, format: (ts: number) => (span > 365 * DAY ? formatMonthYear(ts) : formatMonthDay(ts)) };
   }
-  const nice = fitted ?? Math.max(step, NICE_STEPS.at(-1) ?? DAY);
+  const nice = fitted;
   // Labels are centered on their tick: keep them clear of the plot edges so none is clipped.
   const edge = span * 0.035;
   const inside = (r: SeriesRow) => r.ts >= first + edge && r.ts <= last + step - edge;

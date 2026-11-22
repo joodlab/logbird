@@ -37,7 +37,7 @@ import { EntityLink, EntityProfileLink } from '@/components/entity-link';
 import { SupportAgentLink } from '@/components/impersonation';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
-import { eventQuery, operationQuery, retentionQuery } from '@/lib/api/queries';
+import { eventQuery, oldestStoredQuery, operationQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
 import { actorAttributeHint, causedCount, directChildren, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
@@ -244,13 +244,23 @@ function useChildren(detail: EventDetail | undefined, detailUpdatedAt: number, e
   // A disabled or failed query may still hold older cached data: only a successful lookup counts.
   const children = lookup && op.isSuccess ? directChildren(op.data, e.id) : [];
   const mismatch = `${e.id}:${counted}:${children.length}`;
+  const exceeds = lookup && op.isSuccess && children.length > counted;
   let refresh: 'detail' | 'operation' | null = null;
-  if (lookup && op.isSuccess && !op.isFetching && children.length > counted) {
+  if (exceeds && !op.isFetching) {
     const older = op.dataUpdatedAt >= detailUpdatedAt ? 'detail' : 'operation';
     const other = older === 'detail' ? 'operation' : 'detail';
     if (!tried.current.has(`${mismatch}:${older}`)) refresh = older;
     else if (!tried.current.has(`${mismatch}:${other}`)) refresh = other;
   }
+  // Attempts belong to one disagreement: once settled reads agree again (or another event opens), start afresh.
+  const consistent = lookup && op.isSuccess && !op.isFetching && !exceeds;
+  useEffect(() => {
+    if (consistent) tried.current.clear();
+  }, [consistent]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the event id is the trigger, not a value read inside.
+  useEffect(() => {
+    tried.current.clear();
+  }, [e.id]);
   useEffect(() => {
     if (!(refresh && projectId)) return;
     tried.current.add(`${mismatch}:${refresh}`);
@@ -269,7 +279,7 @@ function ChildEvents({ caused: c, event: e, projectId, indent }: { caused: Child
   const { total, shown, loading } = c;
   const needsLink = !loading && total > shown.length;
   // Only needed for the "View all" search, once the preview has settled: how far back the project still holds rows.
-  const retention = useQuery({ ...retentionQuery(projectId), enabled: needsLink });
+  const oldest = useQuery({ ...oldestStoredQuery(projectId), enabled: needsLink });
   return (
     <>
       {loading ? (
@@ -301,14 +311,14 @@ function ChildEvents({ caused: c, event: e, projectId, indent }: { caused: Child
       )}
       {needsLink ? (
         <li className="flex items-center gap-2 pt-1 text-xs" style={{ paddingInlineStart: indent }}>
-          {retention.isSuccess ? (
+          {oldest.isSuccess ? (
             <Link
               className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
               params={{ projectId }}
               // Every child, whatever its operation or timestamp: an exact parent search over every timestamp ingest
               // admits and every row the project still stores. A self-parented event is left out of its own search.
               search={{
-                range: admittedRange(Date.now(), retention.data.oldestEventAt),
+                range: admittedRange(Date.now(), oldest.data),
                 q: andQuery(formatExactTerm('parent', e.id), e.context.parentEventId === e.id ? formatExactTerm('id', e.id, true) : ''),
               }}
               to="/p/$projectId/events"
@@ -316,10 +326,10 @@ function ChildEvents({ caused: c, event: e, projectId, indent }: { caused: Child
               {shown.length > 0 ? `View all ${total}` : `View the ${total} event${total === 1 ? '' : 's'} it caused`} in the explorer
               <ArrowRightIcon className="size-3" />
             </Link>
-          ) : retention.isError ? (
+          ) : oldest.isError ? (
             <span className="text-muted-foreground">
               Could not read how far back this project's events go.{' '}
-              <button className="font-medium text-foreground underline-offset-2 hover:underline" onClick={() => retention.refetch()} type="button">
+              <button className="font-medium text-foreground underline-offset-2 hover:underline" onClick={() => oldest.refetch()} type="button">
                 Try again
               </button>
             </span>
