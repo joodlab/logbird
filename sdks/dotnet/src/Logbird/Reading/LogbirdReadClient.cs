@@ -47,6 +47,9 @@ public sealed class LogbirdReadClient : IDisposable
     private readonly AuthenticationHeaderValue _authorization;
     private readonly TimeSpan _timeout;
 
+    /// <summary>The largest response read (200 events with their attributes fit easily); a larger one fails the read.</summary>
+    internal const int MaxResponseBytes = 64 * 1024 * 1024;
+
     /// <summary>Creates a read client.</summary>
     /// <param name="options">The endpoint and read key.</param>
     /// <param name="httpClient">An <see cref="HttpClient"/> to use, for example from <c>IHttpClientFactory</c>. Not disposed by this client.</param>
@@ -89,10 +92,13 @@ public sealed class LogbirdReadClient : IDisposable
     public async IAsyncEnumerable<StoredEvent> SearchAllAsync(EventSearch? search = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var current = search ?? new EventSearch();
+        // A bounded window of recent cursors catches repeats and short cycles without growing with the result set.
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var order = new Queue<string>();
         if (!string.IsNullOrEmpty(current.Cursor))
         {
             seen.Add(current.Cursor!);
+            order.Enqueue(current.Cursor!);
         }
 
         while (true)
@@ -101,9 +107,18 @@ public sealed class LogbirdReadClient : IDisposable
 
             // Check the next cursor before yielding, so a cursor cycle never yields the same page twice.
             var next = page.NextCursor;
-            if (!string.IsNullOrEmpty(next) && !seen.Add(next!))
+            if (!string.IsNullOrEmpty(next))
             {
-                throw new LogbirdApiException(null, "pagination_stalled", "Logbird returned a cursor it had already returned; the results are incomplete.");
+                if (!seen.Add(next!))
+                {
+                    throw new LogbirdApiException(null, "pagination_stalled", "Logbird returned a cursor it had already returned; the results are incomplete.");
+                }
+
+                order.Enqueue(next!);
+                if (order.Count > CursorHistory)
+                {
+                    seen.Remove(order.Dequeue());
+                }
             }
 
             foreach (var item in page.Events)
@@ -119,6 +134,9 @@ public sealed class LogbirdReadClient : IDisposable
             current = current with { Cursor = next };
         }
     }
+
+    /// <summary>How many recent cursors <see cref="SearchAllAsync"/> remembers to detect a stalled pagination.</summary>
+    internal const int CursorHistory = 1_000;
 
     /// <summary>Gets one event with its raw payload and causation chain, or <see langword="null"/> when it does not exist.</summary>
     /// <param name="eventId">The event id.</param>
@@ -157,12 +175,8 @@ public sealed class LogbirdReadClient : IDisposable
         byte[] body;
         try
         {
-            response = await _http.SendAsync(request, timeout.Token).ConfigureAwait(false);
-#if NET8_0_OR_GREATER
-            body = response.Content is null ? [] : await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
-#else
-            body = response.Content is null ? [] : await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-#endif
+            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+            body = response.Content is null ? [] : await Internal.BatchSender.ReadCappedAsync(response.Content, MaxResponseBytes, timeout.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -170,7 +184,7 @@ public sealed class LogbirdReadClient : IDisposable
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException)
         {
-            throw new LogbirdApiException(null, "unreachable", "Logbird could not be reached.", e);
+            throw new LogbirdApiException(null, "unreachable", "Logbird could not be reached: " + e.GetType().Name);
         }
 
         using (response)
@@ -192,7 +206,7 @@ public sealed class LogbirdReadClient : IDisposable
             }
             catch (JsonException e)
             {
-                throw new LogbirdApiException(response.StatusCode, "invalid_response", "Logbird returned a response this SDK cannot read.", e);
+                throw new LogbirdApiException(response.StatusCode, "invalid_response", "Logbird returned a response this SDK cannot read: " + e.GetType().Name);
             }
         }
     }
@@ -213,6 +227,12 @@ public sealed class LogbirdApiException : Exception
         Code = code;
     }
 
+    /// <summary>
+    /// The server's own error message, if it sent one. Kept out of <see cref="Exception.Message"/> because it is response
+    /// text; log it only if your policy allows.
+    /// </summary>
+    public string? ServerMessage { get; private init; }
+
     /// <summary>The HTTP status, or <see langword="null"/> when the server could not be reached.</summary>
     public HttpStatusCode? StatusCode { get; }
 
@@ -222,7 +242,7 @@ public sealed class LogbirdApiException : Exception
     internal static LogbirdApiException FromResponse(HttpStatusCode status, byte[] body)
     {
         var code = "http_" + ((int)status).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var message = $"Logbird read failed with HTTP {(int)status}.";
+        string? serverMessage = null;
         try
         {
             using var document = JsonDocument.Parse(body);
@@ -232,20 +252,20 @@ public sealed class LogbirdApiException : Exception
             {
                 if (error.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String)
                 {
-                    code = codeElement.GetString()!;
+                    code = Internal.BatchSender.SafeCode(codeElement.GetString() ?? string.Empty);
                 }
 
                 if (error.TryGetProperty("message", out var messageElement) && messageElement.ValueKind == JsonValueKind.String)
                 {
-                    message = messageElement.GetString()!;
+                    serverMessage = messageElement.GetString();
                 }
             }
         }
-        catch (JsonException)
+        catch (Exception e) when (e is JsonException or InvalidOperationException)
         {
             // Not a Logbird error body (for example a proxy page): keep the generic message.
         }
 
-        return new LogbirdApiException(status, code, message);
+        return new LogbirdApiException(status, code, $"Logbird read failed with HTTP {(int)status} ({code}).") { ServerMessage = serverMessage };
     }
 }

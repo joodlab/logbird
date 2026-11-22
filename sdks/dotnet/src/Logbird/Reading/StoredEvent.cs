@@ -79,7 +79,15 @@ public sealed class StoredEvent
 /// <param name="Field">The field name.</param>
 /// <param name="Before">The previous value.</param>
 /// <param name="After">The new value.</param>
-public sealed record StoredChange(string Field, string Before, string After);
+public sealed record StoredChange(string Field, string Before, string After)
+{
+    /// <summary>Lists only the field name, never the values, so logging this object cannot leak them.</summary>
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Field = ").Append(Field);
+        return true;
+    }
+}
 
 /// <summary>One page of search results.</summary>
 public sealed class EventPage

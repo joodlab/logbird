@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -109,7 +110,7 @@ internal sealed class BatchSender
         catch (Exception e)
         {
             // Never lose settlement already recorded: only still-pending events go back to the queue.
-            return state.Fail(new LogbirdDeliveryException("Logbird delivery failed unexpectedly: " + e.GetType().Name, e));
+            return state.Fail(new LogbirdDeliveryException("Logbird delivery failed unexpectedly: " + e.GetType().Name));
         }
     }
 
@@ -131,6 +132,7 @@ internal sealed class BatchSender
             }
 
             var progressed = false;
+            var unacknowledged = false;
             var (response, responseBody, error) = await AttemptAsync(body, remaining < _requestTimeout ? remaining : _requestTimeout, stop).ConfigureAwait(false);
 
             using (response)
@@ -143,38 +145,61 @@ internal sealed class BatchSender
                 var status = response is null ? 0 : (int)response.StatusCode;
                 if (status is >= 200 and < 300)
                 {
-                    JsonDocument document;
-                    try
+                    // A success counts only for events the response acknowledges: rejected by index, or accepted by id. A
+                    // proxy or gateway answering 2xx without forwarding must never make events count as delivered.
+                    if (TryParse(responseBody, out var document))
                     {
-                        document = JsonDocument.Parse(responseBody);
+                        using (document)
+                        {
+                            var root = document.RootElement;
+                            if (root.ValueKind == JsonValueKind.Object
+                                && root.TryGetProperty("accepted", out var acceptedCount) && acceptedCount.ValueKind == JsonValueKind.Number
+                                && root.TryGetProperty("ids", out var ids) && ids.ValueKind == JsonValueKind.Array)
+                            {
+                                if (root.TryGetProperty("rejected", out var rejected))
+                                {
+                                    Reject(state, attempt, rejected);
+                                }
+
+                                if (root.TryGetProperty("warnings", out var warnings))
+                                {
+                                    Warn(state, attempt, warnings, unresolved: null);
+                                }
+
+                                var acknowledged = new HashSet<string>(StringComparer.Ordinal);
+                                foreach (var acceptedId in ids.EnumerateArray())
+                                {
+                                    if (acceptedId.ValueKind == JsonValueKind.String)
+                                    {
+                                        acknowledged.Add(Text(acceptedId));
+                                    }
+                                }
+
+                                foreach (var index in attempt)
+                                {
+                                    if (acknowledged.Contains(EventJson.JsTrim(batch[index].Id)))
+                                    {
+                                        state.Deliver(index);
+                                    }
+                                }
+                            }
+                        }
                     }
-                    catch (JsonException)
+
+                    var left = attempt.Where(index => !state.IsSettled(index)).ToArray();
+                    if (left.Length == 0)
                     {
-                        return state.Fail(new LogbirdDeliveryException($"Logbird HTTP {status} returned a response that is not JSON."));
+                        return state.Complete();
                     }
 
-                    using (document)
+                    // Resend only the unacknowledged events, byte-identical; the server keeps one copy per id.
+                    unacknowledged = true;
+                    progressed = left.Length < attempt.Length;
+                    if (progressed)
                     {
-                        if (document.RootElement.ValueKind == JsonValueKind.Null)
-                        {
-                            return state.Fail(new LogbirdDeliveryException($"Logbird HTTP {status} returned an empty result."));
-                        }
-
-                        if (document.RootElement.ValueKind == JsonValueKind.Object
-                            && document.RootElement.TryGetProperty("rejected", out var rejected))
-                        {
-                            Reject(state, attempt, rejected);
-                        }
-
-                        if (document.RootElement.ValueKind == JsonValueKind.Object
-                            && document.RootElement.TryGetProperty("warnings", out var warnings))
-                        {
-                            Warn(state, attempt, warnings, unresolved: null);
-                        }
+                        attempt = left;
+                        body = EventJson.BuildBatchBody(batch, attempt);
                     }
-
-                    state.DeliverRest(attempt);
-                    return state.Complete();
                 }
 
                 if (status == 503 && TryParse(responseBody, out var errorDocument))
@@ -242,7 +267,7 @@ internal sealed class BatchSender
                     }
                 }
 
-                var retryable = response is null || status == 429 || status >= 500;
+                var retryable = response is null || status == 429 || status >= 500 || unacknowledged;
                 if (!retryable)
                 {
                     foreach (var index in state.PendingIndices())
@@ -263,9 +288,26 @@ internal sealed class BatchSender
                 // non-progress failures consume MaxRetries; a hard total-attempt bound is kept as well.
                 if ((!progressed && retries >= _maxRetries) || attemptNumber >= batch.Length + _maxRetries - 1)
                 {
+                    if (unacknowledged)
+                    {
+                        // Never counted as delivered: report each event that is still unacknowledged.
+                        var count = 0;
+                        foreach (var index in state.PendingIndices())
+                        {
+                            if (state.TryReject(index))
+                            {
+                                count++;
+                                _drop(batch[index], DropReason.Unacknowledged, "The server answered HTTP " + status.ToString(CultureInfo.InvariantCulture) + " without acknowledging the event.");
+                            }
+                        }
+
+                        _report(new LogbirdDeliveryException($"Logbird HTTP {status} did not acknowledge {count} event(s) after retries; they were dropped.", (HttpStatusCode)status));
+                        return state.Complete();
+                    }
+
                     return state.Fail(error is null
                         ? new LogbirdDeliveryException($"Logbird HTTP {status}", (HttpStatusCode)status)
-                        : new LogbirdDeliveryException("Logbird could not be reached.", error));
+                        : new LogbirdDeliveryException("Logbird could not be reached: " + error.GetType().Name));
                 }
 
                 var delay = RetryAfter(response) ?? (Math.Min(30_000, 250 * Math.Pow(2, retries)) * (0.5 + _random()));
@@ -361,7 +403,7 @@ internal sealed class BatchSender
     private async Task<(HttpResponseMessage Response, byte[] Body)> SendOnceAsync(byte[] body, CancellationToken cancellationToken)
     {
         using var request = CreateRequest(body);
-        var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         try
         {
             // .NET Framework leaves Content null when a handler builds a response without a body.
@@ -370,18 +412,51 @@ internal sealed class BatchSender
                 return (response, []);
             }
 
-#if NET8_0_OR_GREATER
-            var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-#else
-            // SendAsync already buffered the body (ResponseContentRead), so no token is needed here.
-            var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-#endif
-            return (response, bytes);
+            return (response, await ReadCappedAsync(response.Content, MaxResponseBytes, cancellationToken).ConfigureAwait(false));
         }
         catch
         {
             response.Dispose();
             throw;
+        }
+    }
+
+    /// <summary>The largest ingest response read (a 1000-event answer is far smaller); a larger one is treated as a failure.</summary>
+    internal const int MaxResponseBytes = 4 * 1024 * 1024;
+
+    /// <summary>Reads a response body, failing (rather than buffering without bound) once it exceeds <paramref name="limit"/>.</summary>
+    internal static async Task<byte[]> ReadCappedAsync(HttpContent content, int limit, CancellationToken cancellationToken)
+    {
+        if (content.Headers.ContentLength is { } declared && declared > limit)
+        {
+            throw new InvalidDataException("The Logbird response is larger than expected.");
+        }
+
+#if NET8_0_OR_GREATER
+        using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+#else
+        using var stream = await content.ReadAsStreamAsync().ConfigureAwait(false);
+#endif
+        using var buffer = new MemoryStream();
+        var chunk = new byte[16 * 1024];
+        while (true)
+        {
+#if NET8_0_OR_GREATER
+            var read = await stream.ReadAsync(chunk.AsMemory(), cancellationToken).ConfigureAwait(false);
+#else
+            var read = await stream.ReadAsync(chunk, 0, chunk.Length, cancellationToken).ConfigureAwait(false);
+#endif
+            if (read == 0)
+            {
+                return buffer.ToArray();
+            }
+
+            if (buffer.Length + read > limit)
+            {
+                throw new InvalidDataException("The Logbird response is larger than expected.");
+            }
+
+            buffer.Write(chunk, 0, read);
         }
     }
 
@@ -425,7 +500,7 @@ internal sealed class BatchSender
 
             // Read everything that can throw before settling, so a malformed reason never settles an unreported event.
             var reason = Text(reasonElement);
-            var code = rejection.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String ? Text(codeElement) : "rejected";
+            var code = rejection.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String ? SafeCode(Text(codeElement)) : "rejected";
             var index = attempt[(int)wire];
             if (!state.TryReject(index))
             {
@@ -612,6 +687,25 @@ internal sealed class BatchSender
             var raw = element.GetRawText();
             return raw.Length >= 2 ? raw.Substring(1, raw.Length - 2) : raw;
         }
+    }
+
+    /// <summary>A rejection code from the response, kept only if it has the shape of a code (it reaches messages and logs).</summary>
+    internal static string SafeCode(string code)
+    {
+        if (code.Length is 0 or > 64 || code[0] is < 'a' or > 'z')
+        {
+            return "other";
+        }
+
+        foreach (var c in code)
+        {
+            if (c is not ((>= 'a' and <= 'z') or (>= '0' and <= '9') or '_'))
+            {
+                return "other";
+            }
+        }
+
+        return code;
     }
 
     private static bool TryParse(byte[]? body, out JsonDocument document)

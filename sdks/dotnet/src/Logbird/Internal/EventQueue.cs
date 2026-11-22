@@ -13,8 +13,8 @@ internal sealed class QueuedEvent(byte[] json, string id, string action, long se
     public const int Abandoned = 2;
 
     /// <summary>
-    /// <see cref="Pending"/> until exactly one party settles the event: the sender (stored, rejected or dropped) or
-    /// shutdown (abandoned and reported). Changed only with <see cref="TrySettle"/> or <see cref="TryAbandon"/>.
+    /// <see cref="Pending"/> until exactly one party settles the event: the sender (stored, rejected or dropped), the
+    /// queue (evicted) or shutdown (abandoned and reported). Changed only with <see cref="TrySettle"/> or <see cref="TryAbandon"/>.
     /// </summary>
     private int _state;
 
@@ -34,22 +34,35 @@ internal sealed class QueuedEvent(byte[] json, string id, string action, long se
     public bool TryAbandon() => Interlocked.CompareExchange(ref _state, Abandoned, Pending) == Pending;
 }
 
+/// <summary>One flush target, shared by every caller waiting for the same events.</summary>
+internal sealed class FlushWaiter(long target)
+{
+    public long Target { get; } = target;
+
+    public TaskCompletionSource<bool> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Callers still waiting; guarded by the queue lock.</summary>
+    public int Callers { get; set; } = 1;
+}
+
 /// <summary>
 /// The client's queue, its in-flight batch and its flush waiters, all guarded by one lock so that "is everything
-/// queued before this flush settled?" is always answered from a consistent snapshot. Failed batches go back to the
-/// front so order is kept; when the queue is over capacity the configured behaviour picks the victim, exactly like the
-/// TypeScript SDK. After <see cref="Abandon"/> (shutdown deadline) nothing is accepted or requeued again.
+/// queued before this flush settled and accounted for?" is always answered from a consistent snapshot. Evictions are
+/// accounted (counted and their notification posted) inside the lock, so no flush can complete before that. Failed
+/// batches go back to the front so order is kept; when the queue is over capacity the configured behaviour picks the
+/// victim, exactly like the TypeScript SDK. After <see cref="Abandon"/> (shutdown deadline) nothing is accepted or requeued.
 /// </summary>
-internal sealed class EventQueue(int capacity, QueueFullBehavior behavior)
+internal sealed class EventQueue(int capacity, QueueFullBehavior behavior, Action<QueuedEvent> evicted)
 {
     private readonly object _gate = new();
-    private readonly List<(long Target, TaskCompletionSource<bool> Completion)> _waiters = [];
+    private readonly List<FlushWaiter> _waiters = [];
     private QueuedEvent?[] _items = new QueuedEvent?[Math.Min(capacity, 256)];
     private QueuedEvent[]? _inFlight;
     private int _head;
     private int _count;
     private long _nextSequence;
     private bool _abandoned;
+    private bool _abandonReported;
 
     public int Count
     {
@@ -74,11 +87,10 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior)
         }
     }
 
-    /// <summary>Adds an event. Returns the dropped event when the queue was full (possibly the new one), else null.</summary>
-    /// <param name="create">Creates the event for its sequence number.</param>
-    /// <param name="added">The queued event, or null when the new event was not queued.</param>
-    /// <param name="countAfter">The queue length afterwards.</param>
-    /// <param name="shutDown">True when the queue no longer accepts events; the new event is then returned as dropped.</param>
+    /// <summary>
+    /// Adds an event. With <see cref="QueueFullBehavior.DropOldest"/> a full queue evicts its oldest event, accounted
+    /// inside the lock. Returns the new event when it was not queued (queue full with DropNewest, or shut down).
+    /// </summary>
     public QueuedEvent? Enqueue(Func<long, QueuedEvent> create, out QueuedEvent? added, out int countAfter, out bool shutDown)
     {
         lock (_gate)
@@ -91,12 +103,16 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior)
                 return create(0);
             }
 
-            var dropped = _count >= capacity ? RemoveFirst() : null;
+            if (_count >= capacity)
+            {
+                Evict(RemoveFirst());
+            }
+
             var item = create(++_nextSequence);
             AddLast(item);
             added = item;
             countAfter = _count;
-            return dropped;
+            return null;
         }
     }
 
@@ -134,20 +150,20 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior)
     }
 
     /// <summary>
-    /// Ends the in-flight batch, putting <paramref name="unsettled"/> events back at the front and trimming to capacity.
-    /// Returns the events that no longer fit, or null when shutdown has taken ownership of the batch (ignore the result).
+    /// Ends the in-flight batch, putting <paramref name="unsettled"/> events back at the front and evicting what no longer
+    /// fits (accounted inside the lock). Returns false when shutdown has taken ownership of the batch (ignore the result).
     /// </summary>
-    public List<QueuedEvent>? FinishBatch(IReadOnlyList<QueuedEvent> unsettled)
+    public bool FinishBatch(IReadOnlyList<QueuedEvent> unsettled, out int evictedCount)
     {
+        evictedCount = 0;
         lock (_gate)
         {
             _inFlight = null;
             if (_abandoned)
             {
-                return null;
+                return false;
             }
 
-            var dropped = new List<QueuedEvent>();
             for (var i = unsettled.Count - 1; i >= 0; i--)
             {
                 if (unsettled[i].IsPending)
@@ -158,36 +174,55 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior)
 
             while (_count > capacity)
             {
-                dropped.Add(behavior == QueueFullBehavior.DropNewest ? RemoveLast() : RemoveFirst());
+                Evict(behavior == QueueFullBehavior.DropNewest ? RemoveLast() : RemoveFirst());
+                evictedCount++;
             }
 
-            return dropped;
+            return true;
         }
     }
 
     /// <summary>
-    /// Registers a flush for everything queued so far. Returns null when nothing queued before now is outstanding.
+    /// Registers a flush for everything queued so far, sharing the waiter of a caller with the same target. Returns null
+    /// when nothing queued before now is outstanding.
     /// </summary>
-    public TaskCompletionSource<bool>? AddWaiter()
+    public FlushWaiter? AddWaiter()
     {
         lock (_gate)
         {
             var target = _nextSequence;
-            if (MinOutstanding() > target)
+
+            // While shutdown is reporting abandoned events, every flush waits for that report.
+            if (!(_abandoned && !_abandonReported) && MinOutstanding() > target)
             {
                 return null;
             }
 
-            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (_abandoned)
+            if (_waiters.Count > 0 && _waiters[_waiters.Count - 1].Target == target)
             {
-                completion.TrySetResult(false);
-                return completion;
+                var shared = _waiters[_waiters.Count - 1];
+                shared.Callers++;
+                return shared;
             }
 
-            _waiters.Add((target, completion));
-            return completion;
+            var waiter = new FlushWaiter(target);
+            _waiters.Add(waiter);
+            return waiter;
         }
+    }
+
+    /// <summary>One caller stopped waiting; the waiter is forgotten (completed with false) when no caller is left.</summary>
+    public void ReleaseWaiter(FlushWaiter waiter)
+    {
+        lock (_gate)
+        {
+            if (--waiter.Callers > 0 || !_waiters.Remove(waiter))
+            {
+                return;
+            }
+        }
+
+        waiter.Completion.TrySetResult(false);
     }
 
     /// <summary>Completes (with true) every flush whose events are all settled; the others keep waiting.</summary>
@@ -202,35 +237,29 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior)
     /// <summary>Completes every flush: true when its events are settled, otherwise <paramref name="outstandingResult"/>.</summary>
     public void CompleteAllWaiters(bool outstandingResult) => Complete(failOutstanding: true, outstandingResult);
 
-    /// <summary>Forgets a flush whose caller stopped waiting, so cancelled flushes do not accumulate.</summary>
-    public void RemoveWaiter(TaskCompletionSource<bool> completion)
-    {
-        lock (_gate)
-        {
-            _waiters.RemoveAll(waiter => waiter.Completion == completion);
-        }
-    }
-
     /// <summary>
     /// Shutdown deadline: stops accepting and requeueing, detaches the in-flight batch, and abandons every event that is
-    /// still pending, all under the lock so no flush can observe a half-abandoned state. Returns the abandoned events
-    /// (an in-flight event already settled by a response is not included), split into queued and in-flight.
+    /// still pending, all under the lock. Each existing flush is decided before anything is abandoned. Flushes that arrive
+    /// until <see cref="FinishAbandon"/> wait for the abandoned events to be reported.
     /// </summary>
-    public (List<QueuedEvent> Queued, List<QueuedEvent> InFlight, List<(TaskCompletionSource<bool> Completion, bool Result)> Waiters) Abandon()
+    public (List<QueuedEvent> Queued, List<QueuedEvent> InFlight, List<(FlushWaiter Waiter, bool Result)> Waiters) Abandon()
     {
         lock (_gate)
         {
-            _abandoned = true;
-
-            // Decide each flush before anything is abandoned: true only if its own events were already settled.
             var min = MinOutstanding();
-            var waiters = new List<(TaskCompletionSource<bool> Completion, bool Result)>(_waiters.Count);
+            var waiters = new List<(FlushWaiter Waiter, bool Result)>(_waiters.Count);
             foreach (var waiter in _waiters)
             {
-                waiters.Add((waiter.Completion, waiter.Target < min));
+                waiters.Add((waiter, waiter.Target < min));
             }
 
             _waiters.Clear();
+            if (!_abandoned)
+            {
+                _abandoned = true;
+                _abandonReported = false;
+            }
+
             var inFlight = new List<QueuedEvent>();
             if (_inFlight is not null)
             {
@@ -259,18 +288,39 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior)
         }
     }
 
-    private void Complete(bool failOutstanding, bool outstandingResult)
+    /// <summary>The abandoned events have been reported: complete the flushes that arrived meanwhile.</summary>
+    public void FinishAbandon(bool anyAbandoned)
     {
-        List<(TaskCompletionSource<bool> Completion, bool Result)>? done = null;
         lock (_gate)
         {
+            _abandonReported = true;
+        }
+
+        CompleteAllWaiters(outstandingResult: !anyAbandoned);
+    }
+
+    private void Evict(QueuedEvent item)
+    {
+        if (item.TrySettle())
+        {
+            // Counting and posting the notification never run host code, so this is safe under the lock.
+            evicted(item);
+        }
+    }
+
+    private void Complete(bool failOutstanding, bool outstandingResult)
+    {
+        List<(FlushWaiter Waiter, bool Result)>? done = null;
+        lock (_gate)
+        {
+            var reporting = _abandoned && !_abandonReported;
             var min = MinOutstanding();
             for (var i = _waiters.Count - 1; i >= 0; i--)
             {
-                var settled = _waiters[i].Target < min;
+                var settled = !reporting && _waiters[i].Target < min;
                 if (settled || failOutstanding)
                 {
-                    (done ??= []).Add((_waiters[i].Completion, settled || outstandingResult));
+                    (done ??= []).Add((_waiters[i], settled || outstandingResult));
                     _waiters.RemoveAt(i);
                 }
             }
@@ -278,9 +328,9 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior)
 
         if (done is not null)
         {
-            foreach (var (completion, result) in done)
+            foreach (var (waiter, result) in done)
             {
-                completion.TrySetResult(result);
+                waiter.Completion.TrySetResult(result);
             }
         }
     }

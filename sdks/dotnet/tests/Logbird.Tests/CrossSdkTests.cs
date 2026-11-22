@@ -99,6 +99,44 @@ public class CrossSdkTests
             },
         });
         Assert.True(await client.FlushAsync());
-        Assert.Equal(expected, server.Requests.SelectMany(r => r.RawEvents).ToArray());
+
+        // What a BeforeSend hook returns is sent as it is; a replacement event has no occurredAt, context or metadata.
+        var replacingServer = new FakeServer();
+        var replacingOptions = new LogbirdOptions
+        {
+            Endpoint = new Uri("https://audit.example.invalid"),
+            IngestKey = "lb_ingest_fictional",
+            BeforeSend = _ => new AuditEvent("replaced.by.hook") { Id = "0193f2b6-6c00-7abc-8def-0123456789af" },
+        };
+        replacingOptions.Redaction.Enabled = false;
+        await using (var replacing = new LogbirdClient(replacingOptions, new HttpClient(replacingServer)))
+        {
+            replacing.Track(new AuditEvent("original.event"));
+            Assert.True(await replacing.FlushAsync());
+        }
+
+        // Defaults apply before the hook; a hook that clears a default or the timestamp keeps it cleared.
+        var clearingServer = new FakeServer();
+        var clearingOptions = new LogbirdOptions
+        {
+            Endpoint = new Uri("https://audit.example.invalid"),
+            IngestKey = "lb_ingest_fictional",
+            Source = "default-service",
+            BeforeSend = e =>
+            {
+                e.OccurredAt = null;
+                e.Source = null;
+                return e;
+            },
+        };
+        clearingOptions.Redaction.Enabled = false;
+        await using (var clearing = new LogbirdClient(clearingOptions, new HttpClient(clearingServer)))
+        {
+            clearing.Track(new AuditEvent("cleared.by.hook") { Id = "0193f2b6-6c00-7abc-8def-0123456789b0" });
+            Assert.True(await clearing.FlushAsync());
+        }
+
+        var actual = server.Requests.Concat(replacingServer.Requests).Concat(clearingServer.Requests).SelectMany(r => r.RawEvents).ToArray();
+        Assert.Equal(expected, actual);
     }
 }

@@ -19,6 +19,15 @@ public enum SortOrder
 /// <summary>A search over stored events. Every property is optional.</summary>
 public sealed record EventSearch
 {
+    /// <summary>Lists no values (queries name customers and records), so logging this object cannot leak them.</summary>
+#pragma warning disable CA1822 // The compiler-generated record ToString calls this instance member by name.
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        _ = builder;
+        return false;
+    }
+#pragma warning restore CA1822
+
     /// <summary>The start of the time range (inclusive). Defaults to the server's default range.</summary>
     public DateTimeOffset? From { get; init; }
 
