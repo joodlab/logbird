@@ -524,7 +524,8 @@ internal sealed class BatchSender
     /// <summary>
     /// Credits accepted ids to entries, one acknowledgement per entry. Entries already delivered earlier in this batch
     /// (for example by an identical earlier 503) consume their acknowledgement first, so a repeated response can never
-    /// credit the same acknowledgement to a second entry with that id.
+    /// credit the same acknowledgement to a second entry with that id; entries the response marks unresolved are
+    /// excluded from both passes.
     /// </summary>
     private static void Credit(State state, int[] attempt, Dictionary<string, int> acknowledgements, Func<int, bool> eligible)
     {
@@ -532,7 +533,8 @@ internal sealed class BatchSender
         {
             var index = attempt[wire];
             var key = EventJson.JsTrim(state.Batch[index].Id);
-            if (state.WasDelivered(index) && acknowledgements.TryGetValue(key, out var times) && times > 0)
+            // An entry this response marks unresolved does not claim an acknowledgement, even if delivered earlier.
+            if (eligible(wire) && state.WasDelivered(index) && acknowledgements.TryGetValue(key, out var times) && times > 0)
             {
                 acknowledgements[key] = times - 1;
             }
