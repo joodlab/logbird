@@ -7,7 +7,7 @@
 ### Highlights
 
 - Jump to (Ctrl K) finds an entity by its id: the exact id leads the list, a record is found by its bare id (`article_27_2` for `article:article_27_2`), and "Search events for" runs the id query instead of free text.
-- When free text in the explorer is exactly an entity's id, the empty state says so and offers the id query; a wider range is offered only when older events match.
+- For a recognized entity ID entered as a single free-text term, the explorer's empty state offers the ID query. Otherwise, it offers "Search all time" when the all-time check finds matches outside the selected range.
 - The console forwards `/pricing` and `/use-cases` to the marketing site when one is configured.
 
 ### Changes
@@ -23,23 +23,30 @@ measurement, down from 0.85 to 1.35 s. The order is described in
 [docs/SPEC.md](docs/SPEC.md).
 
 **Console.** Jump to opens an entity whose id is exactly the typed text, across actors,
-tenants, executors and records. Free text is the fallback only after a complete lookup
-found no exact id; a failed lookup shows an error with a "Search as text" action. The
-query bar keeps the previous suggestions, dimmed, while the next ones load. Record pages
-say "Every event for this record since ...".
+tenants, executors and records. When "Search events for" finds no exact ID after a
+complete lookup, it opens the explorer with the query as typed. If the lookup fails or is
+partial and finds no exact ID, it offers "Search as text". While new entity suggestions
+load, previous suggestions that still match the input remain visible and dimmed. Record
+pages say "Every event for this record since ...".
 
 **Marketing site.** The console's forwarding list gains `/pricing` and `/use-cases`.
 `docker-compose.site.yml` and the site image accept an optional `WEB_CHECKOUT_URL`; leaving
 it unset changes nothing.
 
-**.NET.** `Stats` and the `Logbird` meter count every event a completed `FlushAsync()`
-covers by the time it returns. An ASP.NET Core example (`examples/aspnetcore`) and a
+**.NET.** When `FlushAsync()` returns `true`, `Stats` already reflects the delivered,
+rejected or dropped outcome of each event the flush covered. The `Logbird` meter reads
+those counters from live clients when collected. An ASP.NET Core example (`examples/aspnetcore`) and a
 [.NET guide](docs/sdk-dotnet.md) are added. The packages are not on nuget.org yet; the
 release workflow has a NuGet job that stays off until a maintainer enables it.
 
 ### Upgrade and known limits
 
-- No settings change and no migration. Set `LOGBIRD_VERSION=0.2.1` and redeploy.
+- Upgrading from 0.2.0 requires no new settings or database migrations. Follow
+  [Upgrades and backups](docs/self-hosting.md#upgrades-and-backups) for v0.2.1 and pin
+  `LOGBIRD_VERSION=0.2.1` when using published images. If you are upgrading from an
+  earlier version, also follow the 0.2.0 breaking-change and migration notes. If you host
+  the optional marketing site, deploy its matching revision separately to serve the new
+  pages.
 - The entity list is the console's own API; `/v1` callers see no change. Its cursor is now
   bound to whether the list was a search, so a console tab that was paging a search during
   the upgrade may need a reload.

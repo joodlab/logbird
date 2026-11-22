@@ -209,9 +209,11 @@ After the GitHub Release exists, the `nuget` job can publish `Logbird` and
 maintainers turn it on after the pre-publication gate; a release tag alone never
 publishes a package:
 
-- It publishes only when the repository variable `NUGET_PUBLISH_ENABLED` is exactly
+- It publishes only when the Actions variable `NUGET_PUBLISH_ENABLED` is exactly
   `true` (lowercase; Settings, Secrets and variables, Actions, Variables) and the
-  `NUGET_API_KEY` secret exists. When the variable is unset or `false`, the job is
+  `NUGET_API_KEY` secret exists. The workflow reads the variable as this repository
+  sees it: a repository variable, or an organization variable shared with the
+  repository when no repository variable has that name. When the variable is unset or `false`, the job is
   skipped. When it is another spelling of true (such as `TRUE`), or the secret is
   missing, the job runs, ends with a notice and publishes nothing.
 - It builds, runs the unit tests, packs both packages, and checks that each packed
@@ -235,7 +237,10 @@ Before the first publication, an owner:
    of `Logbird.*` would not match the `Logbird` package itself.
 3. Stores the key as the `NUGET_API_KEY` secret and sets `NUGET_PUBLISH_ENABLED=true`.
 
-Remove the variable to stop publishing.
+To stop publishing, set the repository variable `NUGET_PUBLISH_ENABLED` to `false`. A
+repository variable takes precedence over an organization variable of the same name, so
+this turns publishing off even if the organization defines it; removing the repository
+variable is enough only when the organization does not.
 
 ## First publication: make GHCR packages public
 

@@ -1381,7 +1381,7 @@
             "in": "query",
             "name": "q",
             "schema": {
-              "maxLength": 200,
+              "maxLength": 1024,
               "type": "string"
             }
           },
