@@ -8,12 +8,39 @@ const rolloutName = '20261122140000_webhook_deliveries';
 const repairName = '20261122150000_webhook_rollout_utc';
 const originalCursorRepairName = '20261122160000_webhook_repair_original_cursor';
 const reconciliationName = '20261122190000_webhook_reconciliation';
+const filterReviewName = '20261122200000_webhook_filter_review';
 const migration = async (name: string) =>
   (await readFile(new URL(`../../../packages/database/prisma/migrations/${name}/migration.sql`, import.meta.url), 'utf8'))
     .replace(/^\s*--.*$/gm, '')
     .split(';')
     .map((query) => query.trim())
     .filter((query) => query && query !== 'BEGIN' && query !== 'COMMIT');
+
+it('holds every non-empty legacy filter without changing its cursor and defaults new endpoints to ready', async () => {
+  const filters = ['record:site:12', String.raw`tag:team\*`, String.raw`line:"a\rb"`, 'number:1e-7', ''];
+  const queries = await migration(filterReviewName);
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`CREATE TEMP TABLE "WebhookEndpoint" (
+      "filterQuery" text NOT NULL, "cursorReceivedAt" timestamp(3) NOT NULL
+    ) ON COMMIT DROP`;
+    const cursor = new Date('2026-11-01T12:00:00Z');
+    for (const filter of filters) await tx.$executeRaw`INSERT INTO "WebhookEndpoint" VALUES (${filter}, ${cursor})`;
+    for (const query of queries) await tx.$executeRawUnsafe(query);
+    await tx.$executeRaw`INSERT INTO "WebhookEndpoint" ("filterQuery", "cursorReceivedAt") VALUES ('action:qa.new', ${cursor})`;
+    const rows = await tx.$queryRaw`SELECT * FROM "WebhookEndpoint"`;
+    expect(rows).toHaveLength(6);
+    expect(rows).toEqual(
+      expect.arrayContaining(
+        [...filters, 'action:qa.new'].map((filterQuery, index) => ({
+          filterQuery,
+          cursorReceivedAt: cursor,
+          filterReviewRequired: index < 4,
+          filterReviewNoticeClaimedAt: null,
+        })),
+      ),
+    );
+  });
+});
 
 it.each(['Pacific/Auckland', 'America/Los_Angeles'])('repairs untouched webhook rollout cursors in PostgreSQL session %s', async (zone) => {
   const [original, correction, originalCursorRepair] = await Promise.all([

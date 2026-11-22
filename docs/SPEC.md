@@ -519,6 +519,8 @@ returns 503 `webhook_lookup_busy` with `Retry-After: 3`. A scope needs a `tenant
 or a `target` and uses the same [stored-ID rules as scoped reads](security.md#scopes-name-stored-ids).
 An invalid legacy scope returns `scopeWarning: webhook_invalid_scope` and blocks discovery and delivery until corrected.
 Create and update reject filters on masked fields with HTTP 422 `invalid_query`.
+After upgrade, every existing non-empty filter returns `filterWarning: webhook_filter_review_required` and pauses discovery and delivery at the stored cursor.
+The worker sends one review notice per held endpoint to workspace owners and admins, and an explicit `filterQuery` in PATCH confirms the filter and resumes processing.
 
 Each endpoint starts at the creation millisecond, inclusive, or at rollout for existing endpoints.
 There is no historical backfill. The worker reads ClickHouse in
@@ -573,9 +575,7 @@ can contribute space-separated `v1,<base64>` signatures. A rotation above the li
 An endpoint with more than ten active secrets from an earlier version returns
 `secretOverlapWarning: webhook_secret_overlap_limit` and signs with the ten newest active secrets.
 The worker logs the condition once per endpoint.
-The header ID stays stable on retry and resend. Use it to deduplicate
-requests if a worker restarts after the receiver accepted a POST but before
-Logbird recorded the outcome.
+Receivers use the stable `webhook-id` to deduplicate retries and resends, including when a worker cannot record the outcome of an accepted POST.
 
 Each send resolves the destination again, checks all addresses against the
 save-time policy, and pins one validated address for the socket while preserving

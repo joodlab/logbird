@@ -4,7 +4,7 @@ import { env } from './env';
 import { connection } from './queue';
 import { deliverWebhooks } from './webhook-delivery';
 import { scanWebhooks } from './webhook-discovery';
-import { sendWebhookDisableNotices } from './webhook-notices';
+import { sendWebhookDisableNotices, sendWebhookFilterReviewNotices } from './webhook-notices';
 import { pruneWebhookLogs } from './webhook-retention';
 
 export async function startWebhookQueues(ch: ClickHouseClient, key: Buffer | null) {
@@ -27,7 +27,14 @@ export async function startWebhookQueues(ch: ClickHouseClient, key: Buffer | nul
           });
       },
     },
-    { name: 'webhook-notices', interval: 30_000, run: () => sendWebhookDisableNotices() },
+    {
+      name: 'webhook-notices',
+      interval: 30_000,
+      run: async () => {
+        await sendWebhookDisableNotices();
+        await sendWebhookFilterReviewNotices();
+      },
+    },
     { name: 'webhook-retention', interval: 60_000, run: () => pruneWebhookLogs() },
   ];
   const close: (() => Promise<void>)[] = [];

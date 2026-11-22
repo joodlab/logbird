@@ -15,9 +15,10 @@ import {
   updateWebhookSchema,
   type WebhookScope,
   webhookEndpointSchema,
-  webhookLookupBusySchema,
+  webhookMutationBusySchema,
   webhookScopeFromColumns,
   webhookSecretOverlapLimitSchema,
+  webhookUrlOrMutationBusySchema,
 } from '@logbird/contracts';
 import { Prisma, prisma, type WebhookAttempt, type WebhookEndpoint } from '@logbird/database';
 import {
@@ -36,6 +37,7 @@ import type { ZodType } from 'zod';
 import { env } from './env';
 import { ApiError } from './errors';
 import { audit } from './ingest';
+import { isDatabaseFailure } from './ingest-receipt-errors';
 import { requireProjectAccess, requireSession } from './middlewares';
 import { requireRole } from './middlewares/require-role';
 import { doc, routeDoc } from './openapi';
@@ -44,6 +46,16 @@ import type { AppEnv } from './types';
 const base = '/projects/:projectId/webhooks';
 const secretKey = webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY);
 const rotationSummary = 'Rotate webhook secret (shown once; default 24-hour overlap, maximum 7 days)';
+const retryAfterHeader = { 'Retry-After': { description: 'Seconds before retrying', schema: { type: 'integer' as const, example: 3 } } };
+const mutationBusy = {
+  description: 'Another operation is using the webhook or project. Retry after the indicated delay.',
+  headers: retryAfterHeader,
+  content: { 'application/json': { schema: resolver(webhookMutationBusySchema) } },
+};
+const mutationDoc = (summary: string, schema: ZodType, status: number) =>
+  routeDoc(summary, {
+    responses: { [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } }, 503: mutationBusy },
+  });
 const webhookUrlDoc = (summary: string, schema: ZodType, status = 200) =>
   routeDoc(summary, {
     responses: {
@@ -53,9 +65,9 @@ const webhookUrlDoc = (summary: string, schema: ZodType, status = 200) =>
         content: { 'application/json': { schema: resolver(apiErrorSchema) } },
       },
       503: {
-        description: 'Destination lookup capacity is busy. Retry after the indicated delay.',
-        headers: { 'Retry-After': { description: 'Seconds before retrying', schema: { type: 'integer', example: 3 } } },
-        content: { 'application/json': { schema: resolver(webhookLookupBusySchema) } },
+        description: 'Destination lookup capacity or the webhook is busy. Retry after the indicated delay.',
+        headers: retryAfterHeader,
+        content: { 'application/json': { schema: resolver(webhookUrlOrMutationBusySchema) } },
       },
     },
   });
@@ -68,6 +80,7 @@ function serialize(endpoint: WebhookEndpoint, activeSecretCount = 0) {
     ...(activeSecretCount > MAX_WEBHOOK_SIGNATURES && { secretOverlapWarning: 'webhook_secret_overlap_limit' }),
     ...(scope === undefined && { scopeWarning: 'webhook_invalid_scope' }),
     ...(endpoint.cursorReviewRequired && { cursorWarning: 'webhook_cursor_review_required' }),
+    ...(endpoint.filterReviewRequired && { filterWarning: 'webhook_filter_review_required' }),
     scope: responseScope,
     createdAt: endpoint.createdAt.toISOString(),
     updatedAt: endpoint.updatedAt.toISOString(),
@@ -99,6 +112,8 @@ function requireEnabled(endpoint: WebhookEndpoint) {
   if (!endpoint.enabled) throw new ApiError(409, 'webhook_disabled', 'Enable this webhook before queuing a delivery.');
   if (storedWebhookScope(endpoint) === undefined)
     throw new ApiError(409, 'webhook_invalid_scope', 'Correct the stored webhook scope before queuing a delivery.');
+  if (endpoint.filterReviewRequired)
+    throw new ApiError(409, 'webhook_filter_review_required', 'Review and confirm the stored filter before queuing a delivery.');
 }
 const invalidBody = (result: { success: boolean; error?: unknown }) => {
   if (!result.success) throw new ApiError(422, 'validation_error', 'Invalid request body.', result.error);
@@ -111,18 +126,25 @@ const webhookBody = (result: { success: boolean; error?: readonly { path?: reado
 /** Serialize endpoint mutations and the project limit; keep DNS outside the transaction. NO KEY UPDATE still serializes these
  * transactions but doesn't block the FOR KEY SHARE that foreign-key inserts into the project's other child tables take. */
 async function lockedProject<T>(c: Context<AppEnv>, work: (tx: Prisma.TransactionClient) => Promise<T>) {
-  return prisma.$transaction(async (tx) => {
-    const [project] = await tx.$queryRaw<
-      { id: string }[]
-    >`SELECT id FROM "Project" WHERE id=${c.get('project').id} AND "organizationId"=${c.get('activeOrganizationId')} FOR NO KEY UPDATE`;
-    if (!project) throw new ApiError(404, 'not_found', 'Project not found.');
-    const endpointId = c.req.param('id');
-    if (endpointId) {
-      // Dispatch holds a shared lock on this row until it starts the request. Automatic disable also takes this exclusive lock.
-      await tx.$queryRaw`SELECT id FROM "WebhookEndpoint" WHERE id = ${endpointId} AND "projectId" = ${project.id} FOR UPDATE`;
-    }
-    return work(tx);
-  });
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL lock_timeout = '1s'`;
+      await tx.$executeRaw`SET LOCAL statement_timeout = '2s'`;
+      const [project] = await tx.$queryRaw<
+        { id: string }[]
+      >`SELECT id FROM "Project" WHERE id=${c.get('project').id} AND "organizationId"=${c.get('activeOrganizationId')} FOR NO KEY UPDATE`;
+      if (!project) throw new ApiError(404, 'not_found', 'Project not found.');
+      const endpointId = c.req.param('id');
+      if (endpointId) {
+        // Dispatch holds a shared lock on this row until it starts the request. Automatic disable also takes this exclusive lock.
+        await tx.$queryRaw`SELECT id FROM "WebhookEndpoint" WHERE id = ${endpointId} AND "projectId" = ${project.id} FOR UPDATE`;
+      }
+      return work(tx);
+    });
+  } catch (error) {
+    if (isDatabaseFailure(error)) throw new ApiError(503, 'webhook_mutation_busy', 'The webhook or project is busy. Retry shortly.', undefined, 3);
+    throw error;
+  }
 }
 async function findEndpoint(c: Context<AppEnv>, tx: Prisma.TransactionClient = prisma) {
   const endpoint = await tx.webhookEndpoint.findFirst({ where: { id: c.req.param('id'), projectId: c.get('project').id } });
@@ -224,6 +246,7 @@ export const webhookRoutes = new Hono<AppEnv>()
       }
       const enabledChanged = input.enabled !== undefined && input.enabled !== before.enabled;
       const scopeCorrected = input.scope !== undefined && (before.scopeReviewRequired || storedWebhookScope(before) === undefined);
+      const filterConfirmed = input.filterQuery !== undefined && before.filterReviewRequired;
       const now = await databaseNow(tx);
       const after = await tx.webhookEndpoint.update({
         where: { id: before.id },
@@ -235,6 +258,7 @@ export const webhookRoutes = new Hono<AppEnv>()
           enabled: input.enabled,
           ...(input.scope !== undefined ? scopeColumns(input.scope) : {}),
           ...(scopeCorrected && { scopeReviewRequired: false }),
+          ...(filterConfirmed && { filterReviewRequired: false }),
           ...(enabledChanged ? { disabledReason: input.enabled ? null : 'manual', disabledAt: input.enabled ? null : now } : {}),
           ...((input.enabled && enabledChanged) || (url !== undefined && url !== before.url) ? { consecutiveFailures: 0, failingSince: null } : {}),
         },
@@ -253,7 +277,10 @@ export const webhookRoutes = new Hono<AppEnv>()
       const old = serialize(before),
         current = serialize(after);
       const fields = (['url', 'description', 'filterQuery', 'scope', 'enabled'] as const).filter(
-        (field) => (field === 'scope' && scopeCorrected) || JSON.stringify(old[field]) !== JSON.stringify(current[field]),
+        (field) =>
+          (field === 'scope' && scopeCorrected) ||
+          (field === 'filterQuery' && filterConfirmed) ||
+          JSON.stringify(old[field]) !== JSON.stringify(current[field]),
       );
       if (fields.length) await record(c, tx, 'webhook.updated', after, fields);
       if (enabledChanged) await record(c, tx, input.enabled ? 'webhook.enabled' : 'webhook.disabled', after, ['enabled'], 'manual');
@@ -261,7 +288,7 @@ export const webhookRoutes = new Hono<AppEnv>()
     });
     return c.json(serialize(endpoint, endpoint._count.secrets));
   })
-  .delete(`${base}/:id`, routeDoc('Delete webhook endpoint', { responses: { 204: { description: 'Deleted' } } }), async (c) => {
+  .delete(`${base}/:id`, routeDoc('Delete webhook endpoint', { responses: { 204: { description: 'Deleted' }, 503: mutationBusy } }), async (c) => {
     await lockedProject(c, async (tx) => {
       const endpoint = await findEndpoint(c, tx);
       await tx.webhookEndpoint.delete({ where: { id: endpoint.id } });
@@ -269,7 +296,7 @@ export const webhookRoutes = new Hono<AppEnv>()
     });
     return c.body(null, 204);
   })
-  .post(`${base}/:id/test`, doc('Queue a webhook test event', queuedWebhookDeliverySchema, 202), async (c) => {
+  .post(`${base}/:id/test`, mutationDoc('Queue a webhook test event', queuedWebhookDeliverySchema, 202), async (c) => {
     const row = await lockedProject(c, async (tx) => {
       const endpoint = await findEndpoint(c, tx);
       requireEnabled(endpoint);
@@ -323,7 +350,7 @@ export const webhookRoutes = new Hono<AppEnv>()
       );
     },
   )
-  .post(`${base}/:id/deliveries/:deliveryId/resend`, doc('Requeue a webhook delivery', queuedWebhookDeliverySchema, 202), async (c) => {
+  .post(`${base}/:id/deliveries/:deliveryId/resend`, mutationDoc('Requeue a webhook delivery', queuedWebhookDeliverySchema, 202), async (c) => {
     const row = await lockedProject(c, async (tx) => {
       const endpoint = await findEndpoint(c, tx);
       requireEnabled(endpoint);
@@ -351,6 +378,7 @@ export const webhookRoutes = new Hono<AppEnv>()
           description: `Rotation would exceed the limit of ${MAX_WEBHOOK_SIGNATURES} active secrets. Wait for an expiry or rotate with zero overlap.`,
           content: { 'application/json': { schema: resolver(webhookSecretOverlapLimitSchema) } },
         },
+        503: mutationBusy,
       },
     }),
     validator('json', rotateWebhookSecretSchema, invalidBody),

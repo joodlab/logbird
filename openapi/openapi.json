@@ -7952,6 +7952,11 @@
                           "filterQuery": {
                             "type": "string"
                           },
+                          "filterWarning": {
+                            "const": "webhook_filter_review_required",
+                            "description": "Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.",
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
                           },
@@ -8268,6 +8273,11 @@
                         "filterQuery": {
                           "type": "string"
                         },
+                        "filterWarning": {
+                          "const": "webhook_filter_review_required",
+                          "description": "Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.",
+                          "type": "string"
+                        },
                         "id": {
                           "type": "string"
                         },
@@ -8405,32 +8415,60 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
                       "properties": {
-                        "code": {
-                          "const": "webhook_lookup_busy",
-                          "type": "string"
-                        },
-                        "message": {
-                          "type": "string"
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "const": "webhook_lookup_busy",
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
                         }
                       },
                       "required": [
-                        "code",
-                        "message"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "const": "webhook_mutation_busy",
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "Destination lookup capacity is busy. Retry after the indicated delay.",
+            "description": "Destination lookup capacity or the webhook is busy. Retry after the indicated delay.",
             "headers": {
               "Retry-After": {
                 "description": "Seconds before retrying",
@@ -8508,6 +8546,46 @@
         "responses": {
           "204": {
             "description": "Deleted"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "const": "webhook_mutation_busy",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Another operation is using the webhook or project. Retry after the indicated delay.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds before retrying",
+                "schema": {
+                  "example": 3,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {
@@ -8630,6 +8708,11 @@
                       "type": "boolean"
                     },
                     "filterQuery": {
+                      "type": "string"
+                    },
+                    "filterWarning": {
+                      "const": "webhook_filter_review_required",
+                      "description": "Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.",
                       "type": "string"
                     },
                     "id": {
@@ -8943,6 +9026,11 @@
                     "filterQuery": {
                       "type": "string"
                     },
+                    "filterWarning": {
+                      "const": "webhook_filter_review_required",
+                      "description": "Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.",
+                      "type": "string"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -9070,32 +9158,60 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
+                  "anyOf": [
+                    {
                       "properties": {
-                        "code": {
-                          "const": "webhook_lookup_busy",
-                          "type": "string"
-                        },
-                        "message": {
-                          "type": "string"
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "const": "webhook_lookup_busy",
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
                         }
                       },
                       "required": [
-                        "code",
-                        "message"
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "error": {
+                          "properties": {
+                            "code": {
+                              "const": "webhook_mutation_busy",
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "error"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
-            "description": "Destination lookup capacity is busy. Retry after the indicated delay.",
+            "description": "Destination lookup capacity or the webhook is busy. Retry after the indicated delay.",
             "headers": {
               "Retry-After": {
                 "description": "Seconds before retrying",
@@ -9474,6 +9590,46 @@
             },
             "description": "Requeue a webhook delivery"
           },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "const": "webhook_mutation_busy",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Another operation is using the webhook or project. Retry after the indicated delay.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds before retrying",
+                "schema": {
+                  "example": 3,
+                  "type": "integer"
+                }
+              }
+            }
+          },
           "default": {
             "content": {
               "application/json": {
@@ -9607,6 +9763,46 @@
             },
             "description": "Rotation would exceed the limit of 10 active secrets. Wait for an expiry or rotate with zero overlap."
           },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "const": "webhook_mutation_busy",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Another operation is using the webhook or project. Retry after the indicated delay.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds before retrying",
+                "schema": {
+                  "example": 3,
+                  "type": "integer"
+                }
+              }
+            }
+          },
           "default": {
             "content": {
               "application/json": {
@@ -9706,6 +9902,46 @@
               }
             },
             "description": "Queue a webhook test event"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "const": "webhook_mutation_busy",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Another operation is using the webhook or project. Retry after the indicated delay.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds before retrying",
+                "schema": {
+                  "example": 3,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "default": {
             "content": {

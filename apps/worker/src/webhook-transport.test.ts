@@ -113,8 +113,8 @@ it.each([
       `http://127.0.0.1:${port}/event`,
       'signed-id',
       '{}',
-      async (startRequest) => {
-        await sign('signed-id', '{}')(startRequest);
+      async (startRequest, deadline) => {
+        await sign('signed-id', '{}')(startRequest, deadline);
         throw new Error('commit failed');
       },
       { allowHttp: true, allowAddress: (address) => address === '127.0.0.1', totalTimeoutMs: 400 },

@@ -9,6 +9,7 @@ import { type MemberJoinedEmailProps, memberJoined } from './templates/member-jo
 import { type RoleChangedEmailProps, roleChanged } from './templates/role-changed';
 import { type SignInCodeEmailProps, signInCode } from './templates/sign-in-code';
 import { type WebhookDisabledEmailProps, webhookDisabled } from './templates/webhook-disabled';
+import { type WebhookFilterReviewEmailProps, webhookFilterReview } from './templates/webhook-filter-review';
 
 if (env.AUTH_LOG_SIGN_IN_CODES === 'true')
   console.warn(
@@ -64,14 +65,14 @@ export interface SentEmail extends RenderedEmail {
 }
 
 /** Render `email` with `props` and send it to the address in its recipient prop. */
-export async function sendEmail<P extends { appUrl: string }>(email: EmailDefinition<P>, props: SendProps<P>): Promise<SentEmail> {
+export async function sendEmail<P extends { appUrl: string }>(email: EmailDefinition<P>, props: SendProps<P>, bcc?: string[]): Promise<SentEmail> {
   if (!env.SMTP_HOST) throw new Error('SMTP_HOST is not configured');
   const full = { ...props, appUrl: props.appUrl ?? env.APP_URL } as P;
   const to = String(full[email.recipient]);
   const rendered = await renderEmail(email, full);
   const info = await transport.sendMail({
     from: env.MAIL_FROM,
-    to,
+    ...(bcc ? { bcc } : { to }),
     subject: rendered.subject,
     html: rendered.html,
     text: rendered.text,
@@ -92,6 +93,8 @@ export const sendOrganizationInvitation = (props: SendProps<InvitationEmailProps
 export const sendMemberJoined = (props: SendProps<MemberJoinedEmailProps>) => sendEmail(memberJoined, props);
 export const sendRoleChanged = (props: SendProps<RoleChangedEmailProps>) => sendEmail(roleChanged, props);
 export const sendWebhookDisabled = (props: SendProps<WebhookDisabledEmailProps>) => sendEmail(webhookDisabled, props);
+export const sendWebhookFilterReview = (props: SendProps<WebhookFilterReviewEmailProps>, recipients: string[]) =>
+  sendEmail(webhookFilterReview, props, recipients);
 
 /** SMTP settings safe to print (never credentials). */
 export const smtpTarget = () => ({ host: env.SMTP_HOST, port: env.SMTP_PORT, tls: smtpTlsMode(env), from: env.MAIL_FROM, appUrl: env.APP_URL });

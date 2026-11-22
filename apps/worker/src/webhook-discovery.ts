@@ -99,11 +99,12 @@ export async function discoverWebhookDeliveries(
   endpoint: WebhookEndpoint,
   clock?: Awaited<ReturnType<typeof webhookCursorClock>>,
 ) {
-  if (!endpoint.enabled || endpoint.cursorReviewRequired) return;
+  if (!endpoint.enabled || endpoint.cursorReviewRequired || endpoint.filterReviewRequired) return;
   const cursorClock = clock ?? (await webhookCursorClock(prisma));
   const snapshot = {
     id: endpoint.id,
     enabled: true,
+    filterReviewRequired: false,
     updatedAt: endpoint.updatedAt,
     cursorReceivedAt: endpoint.cursorReceivedAt,
     cursorEventId: endpoint.cursorEventId,
@@ -178,7 +179,7 @@ export async function discoverWebhookDeliveries(
 
 export async function scanWebhooks(ch: ClickHouseClient) {
   const endpoints = await prisma.webhookEndpoint.findMany({
-    where: { enabled: true, cursorReviewRequired: false },
+    where: { enabled: true, cursorReviewRequired: false, filterReviewRequired: false },
     orderBy: [{ lastScannedAt: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
     take: 32,
   });

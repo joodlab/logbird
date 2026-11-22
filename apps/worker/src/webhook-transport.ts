@@ -16,9 +16,12 @@ export type AttemptResult = {
 export type WebhookTransportOptions = NonNullable<Parameters<typeof resolveWebhookDestination>[1]> & {
   totalTimeoutMs?: number;
 };
-type AttemptContext = { started: number; signal: AbortSignal; requestStarted: boolean; responseCode?: number };
+type AttemptContext = { started: number; deadline: number; signal: AbortSignal; requestStarted: boolean; responseCode?: number };
 type StartedRequest = { response: Promise<AttemptResult> };
-type Dispatch = (startRequest: (timestamp: number, signature: string) => StartedRequest) => Promise<StartedRequest | AttemptResult | undefined>;
+type Dispatch = (
+  startRequest: (timestamp: number, signature: string) => StartedRequest,
+  deadline: number,
+) => Promise<StartedRequest | AttemptResult | undefined>;
 
 export function legacyWebhookHeaderId(id: string) {
   // Reserve the prefix in both branches so a literal ID can never collide with an encoded ID.
@@ -34,13 +37,15 @@ export async function postWebhook(
   options: WebhookTransportOptions = {},
 ): Promise<AttemptResult | undefined> {
   const controller = new AbortController();
-  const attempt: AttemptContext = { started: performance.now(), signal: controller.signal, requestStarted: false };
+  const started = performance.now();
+  const timeout = options.totalTimeoutMs ?? TOTAL_TIMEOUT_MS;
+  const attempt: AttemptContext = { started, deadline: started + timeout, signal: controller.signal, requestStarted: false };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<AttemptResult>((resolve) => {
     timer = setTimeout(() => {
       resolve(attempt.requestStarted ? { error: 'timeout', responseCode: attempt.responseCode } : { error: 'lookup_failed' });
       controller.abort();
-    }, options.totalTimeoutMs ?? TOTAL_TIMEOUT_MS);
+    }, timeout);
   });
   try {
     return await Promise.race([deadline, sendWebhook(rawUrl, id, payload, dispatch, options, attempt)]);
@@ -70,7 +75,7 @@ async function sendWebhook(
     result = await dispatch((timestamp, signature) => {
       started = { response: startWebhook(destination, id, payload, timestamp, signature, attempt) };
       return started;
-    });
+    }, attempt.deadline);
   } catch (error) {
     // The dispatch transaction only holds locks once the request has started, so a failed commit changes nothing: the
     // receiver's answer (under the same total deadline) is still this attempt's outcome, never a retryable lookup error.

@@ -62,6 +62,10 @@ export const webhookEndpointSchema = z.object({
     .optional()
     .describe('Only the newest ten active secrets sign deliveries. Wait for an overlap to expire or rotate with overlapSeconds set to 0.'),
   scopeWarning: z.literal('webhook_invalid_scope').optional().describe('Delivery is blocked. Replace the scope with valid stored IDs and masks.'),
+  filterWarning: z
+    .literal('webhook_filter_review_required')
+    .optional()
+    .describe('Discovery and delivery are paused. Review the stored filter and include filterQuery in an endpoint PATCH to resume.'),
   cursorWarning: z
     .literal('webhook_cursor_review_required')
     .optional()
@@ -83,6 +87,10 @@ export const webhookSecretOverlapLimitSchema = z.object({
 export const webhookLookupBusySchema = z.object({
   error: z.object({ code: z.literal('webhook_lookup_busy'), message: z.string() }),
 });
+export const webhookMutationBusySchema = z.object({
+  error: z.object({ code: z.literal('webhook_mutation_busy'), message: z.string() }),
+});
+export const webhookUrlOrMutationBusySchema = z.union([webhookLookupBusySchema, webhookMutationBusySchema]);
 export type WebhookEndpoint = z.infer<typeof webhookEndpointSchema>;
 
 export const webhookDeliveryStatusSchema = z.enum(['pending', 'succeeded', 'failed', 'skipped']);

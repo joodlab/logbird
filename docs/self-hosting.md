@@ -1095,6 +1095,9 @@ logs `webhook.delivery_key_missing` and reports itself unready when neither is s
 notifications, give the worker the existing `SMTP_*`, `MAIL_FROM` and
 `APP_URL` settings. Keep both roles' `WEBHOOKS_ALLOW_HTTP` settings aligned.
 
+On upgrade, endpoints with existing non-empty filters pause at their saved cursor until an owner or admin reviews the query under the current syntax.
+Confirm the filter by saving it with `filterQuery` in PATCH, even if its text stays the same; the worker uses the existing SMTP settings to send one review notice per held endpoint to workspace owners and admins.
+
 | Worker environment variable | Default | Effect |
 | --- | --- | --- |
 | `WEBHOOKS_WORKER_CONCURRENCY` | `16` | Concurrent attempts across replicas sharing the same BullMQ prefix (1–32). |

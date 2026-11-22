@@ -18,6 +18,7 @@ import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { deliverWebhooks } from '../../worker/src/webhook-delivery';
 import { discoverWebhookDeliveries } from '../../worker/src/webhook-discovery';
+import { sendWebhookFilterReviewNotices } from '../../worker/src/webhook-notices';
 import { app } from './app';
 import { clickhouse, purgeProjectEvents } from './clickhouse';
 import { env } from './env';
@@ -198,6 +199,222 @@ it('creates, lists, reads, patches and deletes configuration; exposes the encryp
   expect((await request(`${base()}/${endpoint.id}`, 'DELETE')).status).toBe(204);
   expect((await request(`${base()}/${endpoint.id}`)).status).toBe(404);
   expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id } })).toBe(0);
+});
+
+it('returns a retryable 503 for PATCH, disable and rotation during a locked dispatch', async () => {
+  const { endpoint } = await create();
+  const path = `${base()}/${endpoint.id}`;
+  const dispatch = deferred<void>();
+  const release = deferred<void>();
+  const blocker = prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "WebhookEndpoint" WHERE id = ${endpoint.id} FOR SHARE`;
+      dispatch.resolve();
+      await release.promise;
+    },
+    { timeout: 20_000 },
+  );
+  try {
+    await dispatch.promise;
+    for (const [route, method, body] of [
+      [path, 'PATCH', { description: 'qa-new-description' }],
+      [path, 'PATCH', { enabled: false }],
+      [`${path}/rotate-secret`, 'POST', { overlapSeconds: 0 }],
+    ] as const) {
+      const response = await request(route, method, body);
+      expect(response.status).toBe(503);
+      expect(response.headers.get('Retry-After')).toBe('3');
+      expect(await response.json()).toMatchObject({ error: { code: 'webhook_mutation_busy' } });
+    }
+    expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } })).toMatchObject({ enabled: true, description: null });
+    expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id } })).toBe(1);
+  } finally {
+    release.resolve();
+    await blocker;
+  }
+  expect((await request(path, 'PATCH', { enabled: false })).status).toBe(200);
+});
+
+it('holds legacy filters and resumes the reviewed matches without moving the held cursors', async () => {
+  const cases = [
+    { legacy: 'record:site:12', confirmed: 'attr.record:"site:12"', id: 'qa-legacy-attribute', record: 'site:12' },
+    { legacy: String.raw`qaTag:team\*`, confirmed: String.raw`qaTag:team\*`, id: 'qa-legacy-star', qaTag: 'team*' },
+    { legacy: String.raw`qaLine:"a\rb"`, confirmed: String.raw`qaLine:"a\rb"`, id: 'qa-legacy-cr', qaLine: 'a\rb' },
+    { legacy: 'qaNumber:1e-7', confirmed: 'qaNumber:0.0000001', id: 'qa-legacy-number', qaNumber: 1e-7 },
+  ];
+  const target = { id: 'qa-new-target', targets: [{ type: 'site', id: '12' }] };
+  const time = new Date(Date.now() - 45_000);
+  const cursorReceivedAt = new Date(+time - 1000);
+  const expiresAt = new Date(Date.now() + 86_400_000);
+  const lookup = (id: string) => prisma.webhookEndpoint.findUniqueOrThrow({ where: { id } });
+  const warning = 'webhook_filter_review_required';
+  const { endpoint: current, secret } = await create('owner', { url: receiver, filterQuery: 'record:site:12' });
+  const { endpoint: empty } = await create();
+  expect(await lookup(empty.id)).toMatchObject({ filterReviewRequired: false, filterReviewNoticeClaimedAt: null });
+  expect(current).not.toHaveProperty('filterWarning');
+  const legacy: { id: string; fixture: (typeof cases)[number] }[] = [];
+  for (const fixture of cases) {
+    const { endpoint } = await create('owner', { url: receiver, filterQuery: fixture.legacy });
+    legacy.push({ id: endpoint.id, fixture });
+    await prisma.webhookEndpoint.update({
+      where: { id: endpoint.id },
+      data: { filterReviewRequired: true, cursorReceivedAt, createdAt: cursorReceivedAt },
+    });
+  }
+  try {
+    await withLocalReceiver(current.id, async (received) => {
+      const liveReceiver = (await lookup(current.id)).url;
+      await prisma.webhookEndpoint.update({ where: { id: current.id }, data: { cursorReceivedAt, createdAt: cursorReceivedAt } });
+      const rows = [...cases.map(({ legacy: _before, confirmed: _after, ...event }) => event), target].map((event) => {
+        const result = normalizeEvent({ ...event, action: 'qa.filter-review' }, { projectId, receivedAt: time });
+        if (!result.ok) throw new Error(result.reason);
+        return result.row;
+      });
+      await insertEvents(clickhouse, rows);
+      // A queued event also stays pending while the saved filter is held.
+      const [first] = legacy;
+      if (!first) throw new Error('Missing legacy filter fixture');
+      const queued = await prisma.webhookDelivery.create({
+        data: { endpointId: first.id, eventId: first.fixture.id, receivedAt: time, expiresAt },
+      });
+      for (const { id } of legacy) {
+        await prisma.webhookEndpoint.update({ where: { id }, data: { url: liveReceiver } });
+        const path = `${base()}/${id}`;
+        expect(await (await request(path)).json()).toMatchObject({ filterWarning: warning });
+        expect((await request(`${path}/test`, 'POST')).status).toBe(409);
+        await discoverWebhookDeliveries(clickhouse, await lookup(id));
+        expect(await lookup(id)).toMatchObject({ cursorReceivedAt, cursorEventId: null, lastScannedAt: null });
+      }
+      const list = listWebhooksResponseSchema.parse(await (await request(base())).json()).data;
+      expect(
+        list
+          .filter((endpoint) => endpoint.filterWarning === warning)
+          .map(({ id }) => id)
+          .sort(),
+      ).toEqual(legacy.map(({ id }) => id).sort());
+      await send();
+      expect(received).toHaveLength(0);
+      expect(await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: queued.id } })).toMatchObject({ status: 'pending', attemptNumber: 0 });
+      await discoverWebhookDeliveries(clickhouse, await lookup(current.id));
+      await send();
+      expect(received).toHaveLength(1);
+      const [targetWire] = received;
+      if (!targetWire) throw new Error('Missing target delivery');
+      expect(await verifyWebhook<{ id: string }>({ ...targetWire, secret })).toMatchObject({ id: target.id });
+
+      for (const [index, { id, fixture }] of legacy.entries()) {
+        const path = `${base()}/${id}`;
+        const patch = await request(path, 'PATCH', { filterQuery: fixture.confirmed });
+        expect(patch.status, await patch.clone().text()).toBe(200);
+        expect(await patch.json()).not.toHaveProperty('filterWarning');
+        expect(await lookup(id)).toMatchObject({ filterReviewRequired: false, cursorReceivedAt });
+        await discoverWebhookDeliveries(clickhouse, await lookup(id));
+        await send();
+        await send();
+        expect(received).toHaveLength(index + 2);
+        const wire = received.at(-1);
+        expect(wire && JSON.parse(wire.payload)).toMatchObject({ id: fixture.id });
+        const updates = await prisma.auditOutbox.findMany({
+          where: { stream: `ws:${org}`, payload: { path: ['action'], equals: 'webhook.updated' } },
+        });
+        expect(updates.map(({ payload }) => payload)).toContainEqual(
+          expect.objectContaining({ targets: expect.arrayContaining([{ type: 'webhook', id }]), changes: [{ field: 'filterQuery' }] }),
+        );
+      }
+    });
+  } finally {
+    await purgeProjectEvents(projectId);
+  }
+});
+
+it('sends one filter-review email per held endpoint across repeated worker passes', async () => {
+  expect(['127.0.0.1', 'localhost', '::1']).toContain(process.env.SMTP_HOST);
+  const mailpit = process.env.MAILPIT_URL || 'http://127.0.0.1:8025';
+  const administrators = await Promise.all(
+    users.slice(0, 2).map(async (id) => (await prisma.user.findUniqueOrThrow({ where: { id }, select: { email: true } })).email),
+  );
+  const fixture = `qa-notice-${projectId}`;
+  const search = async () => {
+    const response = await fetch(new URL(`/api/v1/search?query=${encodeURIComponent(fixture)}`, mailpit));
+    expect(response.ok).toBe(true);
+    const { messages } = (await response.json()) as { messages: { ID: string; Subject: string; Bcc: { Address: string }[] }[] };
+    return messages.filter(({ Subject }) => Subject === 'Review a webhook filter');
+  };
+  const held: string[] = [];
+  try {
+    for (const description of ['qa-legacy-first', 'qa-legacy-second']) {
+      const { endpoint } = await create('owner', { url: receiver, filterQuery: 'record:site:12', description: `${fixture} ${description}` });
+      await prisma.webhookEndpoint.update({ where: { id: endpoint.id }, data: { filterReviewRequired: true } });
+      held.push(endpoint.id);
+    }
+    const { endpoint: current } = await create('owner', { url: receiver, filterQuery: 'record:site:12', description: `${fixture} qa-new-endpoint` });
+    await Promise.all([sendWebhookFilterReviewNotices(projectId), sendWebhookFilterReviewNotices(projectId)]);
+    await sendWebhookFilterReviewNotices(projectId);
+    const messages = await search();
+    expect(messages).toHaveLength(2);
+    for (const { Bcc } of messages) expect(Bcc.map(({ Address }) => Address).sort()).toEqual(administrators.sort());
+    const bodies = await Promise.all(
+      messages.map(async ({ ID }) => {
+        const response = await fetch(new URL(`/api/v1/message/${ID}`, mailpit));
+        expect(response.ok).toBe(true);
+        return ((await response.json()) as { Text: string }).Text;
+      }),
+    );
+    expect(bodies.join('\n')).toMatch(/qa-legacy-first/);
+    expect(bodies.join('\n')).toMatch(/qa-legacy-second/);
+    for (const body of bodies) {
+      expect(body).toContain('8.8.8.8');
+      expect(body).toContain('Deliveries are paused');
+      expect(body).toContain(`/p/${projectId}/settings/webhooks`);
+      expect(body).not.toContain('qa-private-token');
+    }
+    expect(await prisma.webhookEndpoint.count({ where: { id: { in: held }, filterReviewNoticeClaimedAt: { not: null } } })).toBe(2);
+    for (const id of held) {
+      expect((await request(`${base()}/${id}`, 'PATCH', { filterQuery: 'record:site:12' })).status).toBe(200);
+    }
+    await sendWebhookFilterReviewNotices(projectId);
+    expect((await search()).map(({ ID }) => ID).sort()).toEqual(messages.map(({ ID }) => ID).sort());
+    expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: current.id } })).toMatchObject({ filterReviewNoticeClaimedAt: null });
+  } finally {
+    const messages = await search();
+    if (messages.length) {
+      const response = await fetch(new URL('/api/v1/messages', mailpit), {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ IDs: messages.map(({ ID }) => ID) }),
+      });
+      expect(response.ok).toBe(true);
+    }
+  }
+});
+
+it('retries settlement of a known 204 under the same claim without posting again', async () => {
+  const { endpoint } = await create();
+  expect((await request(`${base()}/${endpoint.id}/test`, 'POST')).status).toBe(202);
+  const transaction = vi.spyOn(prisma, '$transaction');
+  try {
+    await withLocalReceiver(
+      endpoint.id,
+      async (received) => {
+        await send();
+        await send();
+        expect(received).toHaveLength(1);
+        expect(await prisma.webhookDelivery.findFirstOrThrow({ where: { endpointId: endpoint.id }, include: { attempts: true } })).toMatchObject({
+          status: 'succeeded',
+          attemptNumber: 1,
+          leaseUntil: null,
+          attempts: [{ number: 1, status: 'succeeded', responseCode: 204 }],
+        });
+      },
+      {
+        beforeRespond: async () => {
+          transaction.mockRejectedValueOnce(new Error('QA transient database error after POST'));
+        },
+      },
+    );
+  } finally {
+    transaction.mockRestore();
+  }
 });
 
 it('sends an API test ping and resend with the same signed ID and protects the delivery log', async () => {

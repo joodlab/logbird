@@ -11,7 +11,6 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { deliverWebhooks } from './webhook-delivery';
 import { discoverWebhookDeliveries } from './webhook-discovery';
 import { pruneWebhookLogs } from './webhook-retention';
-import { TOTAL_TIMEOUT_MS } from './webhook-transport';
 
 const projectId = `qa-webhook-resilience-${randomUUID()}`;
 const ch = createClickHouseClient();
@@ -201,21 +200,22 @@ it.each([5.3, 10.8])(
           // delivery locks: make that transaction slow, past the connect (5 s) or total (10 s) budget.
           beforeRequest: async (tx) => {
             checks++;
-            // The sleep must succeed: the transaction outlives the attempt's deadlines, which alone decide the outcome.
             eligibility = tx.$executeRaw`SELECT pg_sleep(${seconds}::double precision)`;
             await eligibility;
+            // A completed statement alone cannot tell whether Prisma closed the transaction while it was running.
+            await tx.$queryRaw`SELECT 1`;
             slept = true;
           },
         },
         projectId,
       );
       expect(checks).toBe(1);
-      expect(slept).toBe(true);
-      // 5.3 s spends the 5-second connect budget, so the paused attempt never starts; at 10.8 s the 10-second total
-      // deadline settles the attempt while dispatch is still paused in PostgreSQL.
+      expect(slept).toBe(seconds < 10);
+      if (seconds > 10) await expect(eligibility).rejects.toThrow(/statement timeout|57014/);
+      // The shorter sleep spends the connect budget. PostgreSQL cancels the longer one before the total deadline.
       const [paused] = (await log(delivery.id)).attempts;
-      expect(paused?.latencyMs).toBeGreaterThanOrEqual(seconds < 10 ? seconds * 1000 : TOTAL_TIMEOUT_MS);
-      expect(paused?.latencyMs).toBeLessThan(seconds < 10 ? TOTAL_TIMEOUT_MS : seconds * 1000);
+      expect(paused?.latencyMs).toBeGreaterThanOrEqual(seconds < 10 ? seconds * 1000 : 8000);
+      expect(paused?.latencyMs).toBeLessThan(10_000);
       expect(await log(delivery.id)).toMatchObject({
         status: 'pending',
         leaseUntil: null,
@@ -233,11 +233,60 @@ it.each([5.3, 10.8])(
       expect(await prisma.webhookDisableNotice.count({ where: { endpointId: hook.id } })).toBe(0);
       expect(requests).toEqual([]);
     } finally {
-      await eligibility;
+      await eligibility?.catch(() => undefined);
       expect(requests).toEqual([]);
     }
   },
 );
+
+it('settles a sibling 204 once while PostgreSQL cancels a stalled dispatch', { timeout: 30_000 }, async () => {
+  const a = 'qa-stalled-sibling';
+  const b = 'qa-acknowledged-sibling';
+  const time = await storeEvents([a, b]);
+  const hook = await endpoint('sibling');
+  const stalled = await enqueue(hook, a, time);
+  const acknowledged = await enqueue(hook, b, time);
+  let locked!: () => void;
+  const holdingLocks = new Promise<void>((resolve) => {
+    locked = resolve;
+  });
+  let pause: Promise<unknown> | undefined;
+  await deliverWebhooks(
+    ch,
+    {
+      ...options,
+      concurrency: 2,
+      perEndpoint: 2,
+      transport: { ...options.transport, totalTimeoutMs: 10_000 },
+      beforeRequest: async (tx, delivery) => {
+        if (delivery.id === stalled.id) {
+          pause = tx.$executeRaw`SELECT pg_sleep(15)`;
+          locked();
+          await pause;
+        } else {
+          await holdingLocks;
+        }
+      },
+    },
+    projectId,
+  );
+  expect(pause).toBeDefined();
+  await expect(pause).rejects.toThrow(/statement timeout|57014/);
+  const delivered = await log(acknowledged.id);
+
+  // Simulate the lease elapsing on any stranded claim. A pending B would be eligible for a second POST on this pass.
+  const past = new Date(Date.now() - 1000);
+  await prisma.webhookDelivery.updateMany({
+    where: { id: acknowledged.id, status: 'pending', leaseUntil: { not: null } },
+    data: { leaseUntil: past },
+  });
+  await tick();
+
+  expect(delivered).toMatchObject({ status: 'succeeded', leaseUntil: null, attempts: [{ number: 1, status: 'succeeded', responseCode: 204 }] });
+  expect(await log(acknowledged.id)).toEqual(delivered);
+  expect(await log(stalled.id)).toMatchObject({ status: 'pending', leaseUntil: null, attempts: [{ number: 1, error: 'lookup_failed' }] });
+  expect(requests.map(({ headers }) => headers['webhook-id'])).toEqual([b]);
+});
 
 it('keeps scan time monotonic and delivers relative-time matches once on a worker clock behind PostgreSQL', async () => {
   const [{ now }] = await prisma.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;

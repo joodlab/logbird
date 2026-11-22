@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { type ClickHouseClient, maskEvent, normalizeEvent, toEvent } from '@logbird/clickhouse';
 import { storedWebhookScope, type WebhookScope } from '@logbird/contracts';
@@ -10,6 +11,11 @@ import { RETRY_WINDOW_MS, webhookRetryDelay } from './webhook-policy';
 import { type AttemptResult, legacyWebhookHeaderId, postWebhook, TOTAL_TIMEOUT_MS, type WebhookTransportOptions } from './webhook-transport';
 
 const LEASE_MS = 120_000;
+const DISPATCH_MAX_MS = 9000;
+const DISPATCH_DEADLINE_MARGIN_MS = 250;
+const SETTLE_TX = { maxWait: 2000, timeout: 15_000 };
+const SETTLE_RETRIES_MS = [100, 300];
+const SETTLE_RESERVE_MS = (SETTLE_RETRIES_MS.length + 1) * (SETTLE_TX.maxWait + SETTLE_TX.timeout) + 1000;
 const MAX_ENDPOINT_ATTEMPTS_PER_SECOND = 50;
 type Claim = { delivery: WebhookDelivery; expired: boolean };
 type ScopeColumns = Parameters<typeof storedWebhookScope>[0];
@@ -21,7 +27,7 @@ type DeliveryOptions = {
   perEndpoint: number;
   failureLimit: number;
   transport?: WebhookTransportOptions;
-  beforeRequest?: (tx: Prisma.TransactionClient) => Promise<void>;
+  beforeRequest?: (tx: Prisma.TransactionClient, delivery: WebhookDelivery) => Promise<void>;
 };
 
 const scopeWhere = ({ scopeTenantId, scopeTargetType, scopeTargetId, scopeMask }: ScopeColumns) => ({
@@ -64,7 +70,7 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
         ))
       ) candidate
       JOIN "WebhookDelivery" d ON d.id = candidate.id
-      WHERE e.enabled AND NOT e."scopeReviewRequired"
+      WHERE e.enabled AND NOT e."scopeReviewRequired" AND NOT e."filterReviewRequired"
         ${projectId ? Prisma.sql`AND e."projectId" = ${projectId}` : Prisma.empty}
       ORDER BY d."nextAttemptAt", d.id LIMIT ${capacity} FOR UPDATE OF d SKIP LOCKED`);
     const claims: Claim[] = [];
@@ -129,7 +135,12 @@ async function settle(
   const localFailure = result?.error === 'event_unavailable' || skipped;
   // Keep one lock order for endpoint mutations and settlement. The lease's sequence fences stale results.
   await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET LOCAL lock_timeout = '11s'`;
+    await tx.$executeRaw`SET LOCAL statement_timeout = '12s'`;
     await tx.$queryRaw`SELECT id FROM "WebhookEndpoint" WHERE id = ${delivery.endpointId} FOR UPDATE`;
+    // Once the endpoint is locked, leave time to commit even if a subsequent statement stalls.
+    await tx.$executeRaw`SET LOCAL lock_timeout = '1s'`;
+    await tx.$executeRaw`SET LOCAL statement_timeout = '2s'`;
     const now = await webhookDatabaseTime(tx);
     const retryUntil = delivery.retryUntil ?? now;
     const finished = !result || success || gone || localFailure || now >= retryUntil;
@@ -217,7 +228,7 @@ async function settle(
     await tx.webhookDisableNotice.createMany({
       data: [...recipients].map((userId) => ({ endpointId: endpoint.id, recipientId: userId, reason })),
     });
-  });
+  }, SETTLE_TX);
 }
 
 function testEvent(delivery: WebhookDelivery, projectId: string) {
@@ -252,6 +263,7 @@ function sameDispatchSettings(current: WebhookEndpoint, snapshot: WebhookEndpoin
   return (
     current.enabled &&
     !current.scopeReviewRequired &&
+    !current.filterReviewRequired &&
     +current.updatedAt === +snapshot.updatedAt &&
     current.url === snapshot.url &&
     current.filterQuery === snapshot.filterQuery &&
@@ -268,6 +280,7 @@ async function attemptDelivery(
   endpoint: WebhookEndpoint,
   scope: WebhookScope | null,
   options: DeliveryOptions,
+  warnOverlap: (time: Date) => void,
 ): Promise<DeliveryResult | undefined> {
   if (scope?.mask?.includes('actor_email') && !options.maskKey) return { error: 'signing_failed' } as const;
   const event = delivery.receivedAt
@@ -277,92 +290,105 @@ async function attemptDelivery(
   if (event === 'scope_mismatch') return { error: event };
   const webhookId = delivery.webhookId ?? legacyWebhookHeaderId(delivery.eventId);
   const body = JSON.stringify(maskEvent(event, scope?.mask, options.maskKey));
-  let overlapAt: Date | undefined;
-  const result = await postWebhook(
+  return postWebhook(
     endpoint.url,
     webhookId,
     body,
-    (startRequest) =>
-      prisma.$transaction(async (tx) => {
-        // Endpoint writers take their lock before touching deliveries. Hold both rows until the request starts.
-        const [current] = await tx.$queryRaw<WebhookEndpoint[]>`SELECT * FROM "WebhookEndpoint" WHERE id = ${endpoint.id} FOR SHARE`;
-        if (!current || !sameDispatchSettings(current, endpoint)) return;
-        const [live] = await tx.$queryRaw<Pick<WebhookDelivery, 'attemptNumber' | 'leaseUntil' | 'retryUntil'>[]>`
+    (startRequest, deadline) =>
+      prisma.$transaction(
+        async (tx) => {
+          const dispatchDeadline = Math.min(deadline - DISPATCH_DEADLINE_MARGIN_MS, performance.now() + DISPATCH_MAX_MS);
+          await boundDispatchWaits(tx, dispatchDeadline);
+          // Endpoint writers take their lock before touching deliveries. Hold both rows until the request starts.
+          const [current] = await tx.$queryRaw<WebhookEndpoint[]>`SELECT * FROM "WebhookEndpoint" WHERE id = ${endpoint.id} FOR SHARE`;
+          if (!current || !sameDispatchSettings(current, endpoint)) return;
+          await boundDispatchWaits(tx, dispatchDeadline);
+          const [live] = await tx.$queryRaw<Pick<WebhookDelivery, 'attemptNumber' | 'leaseUntil' | 'retryUntil'>[]>`
           SELECT "attemptNumber", "leaseUntil", "retryUntil" FROM "WebhookDelivery"
           WHERE id = ${delivery.id} AND status = 'pending' FOR SHARE`;
-        if (
-          !live?.leaseUntil ||
-          !live.retryUntil ||
-          live.attemptNumber !== delivery.attemptNumber ||
-          +live.leaseUntil !== delivery.leaseUntil?.getTime() ||
-          +live.retryUntil !== delivery.retryUntil?.getTime()
-        )
-          return;
-        await options.beforeRequest?.(tx);
-        const clockStarted = performance.now();
-        const signingTime = await webhookDatabaseTime(tx);
-        const timeRemaining = Math.min(+live.leaseUntil, +live.retryUntil) - +signingTime;
-        if (timeRemaining <= 0) return;
-        const secrets = await tx.webhookSecret.findMany({
-          where: { endpointId: endpoint.id, ...activeWebhookSecrets(signingTime) },
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-          take: MAX_WEBHOOK_SIGNATURES + 1,
-          select: { ciphertext: true },
-        });
-        if (secrets.length > MAX_WEBHOOK_SIGNATURES && !current.secretOverlapWarnedAt) overlapAt = signingTime;
-        const timestamp = Math.floor(+signingTime / 1000);
-        let signature: string;
-        try {
-          const keys = secrets.slice(0, MAX_WEBHOOK_SIGNATURES).map(({ ciphertext }) => decryptWebhookSecret(ciphertext, options.secretKey));
-          signature = await signWebhook({ id: webhookId, timestamp, payload: body, secrets: keys });
-        } catch {
-          return { error: 'signing_failed' } as const;
-        }
-        // Account for time spent preparing the signature without relying on the worker's wall clock.
-        if (performance.now() - clockStarted >= timeRemaining) return;
-        // The response promise is boxed so Prisma commits without waiting for the receiver.
-        return startRequest(timestamp, signature);
-      }, dispatchTransactionOptions(options.transport)),
+          if (
+            !live?.leaseUntil ||
+            !live.retryUntil ||
+            live.attemptNumber !== delivery.attemptNumber ||
+            +live.leaseUntil !== delivery.leaseUntil?.getTime() ||
+            +live.retryUntil !== delivery.retryUntil?.getTime()
+          )
+            return;
+          if (options.beforeRequest) {
+            await boundDispatchWaits(tx, dispatchDeadline);
+            await options.beforeRequest(tx, delivery);
+          }
+          await boundDispatchWaits(tx, dispatchDeadline);
+          const clockStarted = performance.now();
+          const signingTime = await webhookDatabaseTime(tx);
+          const timeRemaining =
+            Math.min(+live.leaseUntil - SETTLE_RESERVE_MS - (options.transport?.totalTimeoutMs ?? TOTAL_TIMEOUT_MS), +live.retryUntil) - +signingTime;
+          if (timeRemaining <= 0) return;
+          await boundDispatchWaits(tx, dispatchDeadline);
+          const secrets = await tx.webhookSecret.findMany({
+            where: { endpointId: endpoint.id, ...activeWebhookSecrets(signingTime) },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: MAX_WEBHOOK_SIGNATURES + 1,
+            select: { ciphertext: true },
+          });
+          if (secrets.length > MAX_WEBHOOK_SIGNATURES && !current.secretOverlapWarnedAt) warnOverlap(signingTime);
+          const timestamp = Math.floor(+signingTime / 1000);
+          let signature: string;
+          try {
+            const keys = secrets.slice(0, MAX_WEBHOOK_SIGNATURES).map(({ ciphertext }) => decryptWebhookSecret(ciphertext, options.secretKey));
+            signature = await signWebhook({ id: webhookId, timestamp, payload: body, secrets: keys });
+          } catch {
+            return { error: 'signing_failed' } as const;
+          }
+          // Account for time spent preparing the signature without relying on the worker's wall clock.
+          if (performance.now() - clockStarted >= timeRemaining) return;
+          if (performance.now() >= dispatchDeadline) return { error: 'lookup_failed' } as const;
+          // The response promise is boxed so Prisma commits without waiting for the receiver.
+          return startRequest(timestamp, signature);
+        },
+        { timeout: DISPATCH_MAX_MS + 1000 },
+      ),
     options.transport,
   );
-  if (overlapAt) {
-    try {
-      const warned = await prisma.webhookEndpoint.updateMany({
-        where: { id: endpoint.id, updatedAt: endpoint.updatedAt, secretOverlapWarnedAt: null },
-        data: { secretOverlapWarnedAt: overlapAt, updatedAt: endpoint.updatedAt },
-      });
-      if (warned.count)
-        console.warn(
-          JSON.stringify({ level: 'warn', event: 'webhook.secret_overlap_limit', endpointId: endpoint.id, maxSignatures: MAX_WEBHOOK_SIGNATURES }),
-        );
-    } catch {
-      console.error(JSON.stringify({ event: 'webhook.secret_overlap_warning_failed', endpointId: endpoint.id }));
-    }
-  }
-  return result;
 }
 
-/**
- * The dispatch transaction only locks and reads; it ends once the request has started. The attempt's own deadlines
- * (connect budget, total timeout) decide a slow final check, so the transaction outlives the total timeout by a margin
- * instead of Prisma's default 5 seconds, then closes even if PostgreSQL never answers.
- */
-const DISPATCH_TRANSACTION_MARGIN_MS = 2000;
-const dispatchTransactionOptions = (transport?: WebhookTransportOptions) => ({
-  timeout: (transport?.totalTimeoutMs ?? TOTAL_TIMEOUT_MS) + DISPATCH_TRANSACTION_MARGIN_MS,
-});
+async function boundDispatchWaits(tx: Prisma.TransactionClient, deadline: number) {
+  const remaining = Math.floor(deadline - performance.now());
+  if (remaining <= 0) throw new Error('Webhook dispatch budget expired');
+  // set_config(..., true) is the parameterized form of SET LOCAL. Prisma's timeout cannot cancel an active SQL statement.
+  const timeout = `${remaining}ms`;
+  await tx.$queryRaw`SELECT set_config('lock_timeout', ${timeout}, true), set_config('statement_timeout', ${timeout}, true)`;
+}
+
+async function warnSecretOverlap(endpoint: WebhookEndpoint, overlapAt: Date) {
+  try {
+    const warned = await prisma.webhookEndpoint.updateMany({
+      where: { id: endpoint.id, updatedAt: endpoint.updatedAt, secretOverlapWarnedAt: null },
+      data: { secretOverlapWarnedAt: overlapAt, updatedAt: endpoint.updatedAt },
+    });
+    if (warned.count)
+      console.warn(
+        JSON.stringify({ level: 'warn', event: 'webhook.secret_overlap_limit', endpointId: endpoint.id, maxSignatures: MAX_WEBHOOK_SIGNATURES }),
+      );
+  } catch {
+    console.error(JSON.stringify({ event: 'webhook.secret_overlap_warning_failed', endpointId: endpoint.id }));
+  }
+}
 
 async function sendClaim(ch: ClickHouseClient, { delivery, expired }: Claim, options: DeliveryOptions) {
   const start = performance.now();
   let endpoint: WebhookEndpoint | null | undefined;
   let result: DeliveryResult | undefined;
+  let overlapAt: Date | undefined;
   try {
     endpoint = await prisma.webhookEndpoint.findUnique({ where: { id: delivery.endpointId } });
-    if (endpoint?.enabled) {
+    if (endpoint?.enabled && !endpoint.filterReviewRequired) {
       const scope = storedWebhookScope(endpoint);
       if (scope !== undefined) {
         if (expired) return settle(delivery, endpoint, undefined, 0, options.failureLimit);
-        result = await attemptDelivery(ch, delivery, endpoint, scope, options);
+        result = await attemptDelivery(ch, delivery, endpoint, scope, options, (time) => {
+          overlapAt = time;
+        });
       }
     }
   } catch (error) {
@@ -374,7 +400,29 @@ async function sendClaim(ch: ClickHouseClient, { delivery, expired }: Claim, opt
     const reason = expired ? 'expired' : 'unstarted';
     return prisma.$transaction((tx) => interruptClaim(tx, delivery, reason));
   }
-  await settle(delivery, endpoint, result, Math.round(performance.now() - start), options.failureLimit);
+  const latencyMs = Math.round(performance.now() - start);
+  for (const backoff of [0, ...SETTLE_RETRIES_MS]) {
+    if (backoff) await delay(backoff);
+    try {
+      await settle(delivery, endpoint, result, latencyMs, options.failureLimit);
+      if (endpoint && overlapAt) await warnSecretOverlap(endpoint, overlapAt);
+      return;
+    } catch {
+      // Retry this result under the same delivery lease and sequence.
+    }
+  }
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      event: 'webhook.settlement_failed',
+      endpointId: delivery.endpointId,
+      deliveryId: delivery.id,
+      attemptNumber: delivery.attemptNumber,
+      responseCode: result.responseCode,
+      error: result.error,
+      leaseUntil: delivery.leaseUntil,
+    }),
+  );
 }
 
 export async function deliverWebhooks(ch: ClickHouseClient, options: DeliveryOptions, projectId?: string) {
