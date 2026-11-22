@@ -1,4 +1,4 @@
-import type { AuditEvent } from '@logbird/contracts';
+import { type AuditEvent, supportsExactJson } from '@logbird/contracts';
 import { formatRetention } from './format';
 
 const VERB_PAST: Record<string, string> = {
@@ -221,4 +221,17 @@ export function parentActor(parents: readonly Pick<AuditEvent, 'actor'>[]): NonN
     if (actor && (actor.id || actor.name)) return actor;
   }
   return null;
+}
+
+/**
+ * True when this browser parsed `payload` without exact-number support and it holds a number at or beyond 2^53,
+ * whose digits may have been rounded on the way in. The stored evidence and the export keep the exact digits.
+ */
+export function payloadMayBeRounded(payload: unknown, exact = supportsExactJson): boolean {
+  if (exact) return false;
+  const walk = (value: unknown): boolean =>
+    typeof value === 'number'
+      ? Math.abs(value) >= 2 ** 53 || !Number.isFinite(value)
+      : value !== null && typeof value === 'object' && Object.values(value).some(walk);
+  return walk(payload);
 }

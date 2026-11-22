@@ -9,7 +9,6 @@ import {
   normalizeEvent,
   resolveTimestamp,
   retryFingerprint,
-  roundedFingerprint,
 } from '@logbird/clickhouse';
 import { ingestPendingDetailsSchema } from '@logbird/contracts';
 import {
@@ -228,8 +227,7 @@ function classifyCandidates(
       fingerprint.startsWith('v1:') && sameTimestamp
         ? fingerprintFor(candidate.row)
         : retryFingerprint(candidate.input, projectId, receipt.receivedAt, id, fingerprint, receipt.eventAt);
-    // Evidence from before exact numbers holds the rounded-double fingerprint of the same wire input.
-    if (candidateFingerprint !== fingerprint && roundedFingerprint(candidate.input, receipt.eventAt.toISOString()) !== fingerprint) {
+    if (candidateFingerprint !== fingerprint) {
       const value = candidate.input && typeof candidate.input === 'object' ? (candidate.input as Record<string, unknown>).occurredAt : undefined;
       const difference =
         resolveTimestamp(value, receipt.receivedAt).timestamp.getTime() === receipt.eventAt.getTime()

@@ -63,7 +63,7 @@ it('gives one canonical spelling per value, with exact exponents', () => {
     expect(canonicalDecimal(s)).toBe('9007199254740993e0');
   expect(canonicalDecimal('-0.00123')).toBe('-123e-5');
   expect(canonicalDecimal('0.000')).toBe('0');
-  expect(canonicalDecimal('1e99999999999999999999')).toBe('1e99999999999999999999');
+  expect(canonicalDecimal('1e99999999999999999999')).toBeNull();
   expect(canonicalDecimal('Infinity')).toBeNull();
 });
 
@@ -94,4 +94,21 @@ it('refuses plain decimals that would be huge, and non-numbers', () => {
   expect(plainDecimal((parseJsonExact('[1e400]') as unknown[])[0])).toHaveLength(401);
   expect(plainDecimal('42')).toBeNull();
   expect(plainDecimal(true)).toBeNull();
+});
+
+it('skips arithmetic for exponents over 15 digits, in linear time', () => {
+  const token = `1e-${'0'.repeat(1_000_000)}5`;
+  const start = Date.now();
+  expect(canonicalDecimal(token)).toBeNull();
+  const parsed = (parseJsonExact(`[${token}]`) as unknown[])[0];
+  expect(isRawJson(parsed)).toBe(true);
+  expect(Date.now() - start).toBeLessThan(1000);
+  expect(canonicalDecimal('1e123456789012345')).toBe('1e123456789012345');
+});
+
+it('measures plain decimal length exactly', () => {
+  expect(plainDecimal(1.23, 4)).toBe('1.23');
+  expect(plainDecimal(1.23, 3)).toBeNull();
+  expect(plainDecimal(0.001, 5)).toBe('0.001');
+  expect(plainDecimal(-1200, 5)).toBe('-1200');
 });

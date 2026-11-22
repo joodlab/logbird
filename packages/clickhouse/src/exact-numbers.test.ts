@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { parseJsonExact } from '@logbird/contracts';
 import { expect, it } from 'vitest';
-import { canonicalFingerprint, eventFingerprint, retryFingerprint, roundedFingerprint } from './identity';
+import { canonicalFingerprint, eventFingerprint, retryFingerprint } from './identity';
 import { normalizeEvent } from './normalize';
 
 const ctx = { projectId: 'fictional-exact', receivedAt: new Date('2026-11-22T12:00:00Z') };
@@ -101,18 +101,19 @@ it('hashes equivalent spellings of an exact number the same, and keeps the sent 
   expect(normalize(wire('{"action":"x","n":9007199254740993.0}')).row.payload).toBe('{"action":"x","n":9007199254740993.0}');
 });
 
-it('matches evidence from before exact numbers (rounded fingerprints) for the same wire input', () => {
-  const text = '{"id":"old","action":"x","occurredAt":"2026-11-22T11:59:00.000Z","metadata":{"snowflake":1234567890123456789}}';
-  const at = new Date('2026-11-22T11:59:00.000Z');
-  const old = canonicalFingerprint(JSON.parse(text), at.toISOString());
-  expect(roundedFingerprint(wire(text), at.toISOString())).toBe(old);
-  expect(retryFingerprint(wire(text), ctx.projectId, ctx.receivedAt, 'old', old, at)).toBe(old);
-  // Without a raw number there is no rounded variant, and a different event never matches.
-  expect(roundedFingerprint(wire('{"action":"x","n":1}'), at.toISOString())).toBeNull();
-  const other = '{"id":"old","action":"x","occurredAt":"2026-11-22T11:59:00.000Z","metadata":{"snowflake":1234567890123456000}}';
-  expect(retryFingerprint(wire(other), ctx.projectId, ctx.receivedAt, 'old', canonicalFingerprint(wire(text), at.toISOString()), at)).not.toBe(
-    canonicalFingerprint(wire(text), at.toISOString()),
-  );
+it('never matches a different number at double precision, in either order', () => {
+  const at = '2026-11-22T12:00:00.000Z';
+  const plain = canonicalFingerprint(wire('{"id":"e","action":"x","n":9007199254740992}'), at);
+  const exact = canonicalFingerprint(wire('{"id":"e","action":"x","n":9007199254740993}'), at);
+  expect(plain).not.toBe(exact);
+  expect(retryFingerprint(wire('{"id":"e","action":"x","n":9007199254740993}'), ctx.projectId, ctx.receivedAt, 'e', plain, new Date(at))).toBe(exact);
+  expect(retryFingerprint(wire('{"id":"e","action":"x","n":9007199254740992}'), ctx.projectId, ctx.receivedAt, 'e', exact, new Date(at))).toBe(plain);
+});
+
+it('keeps a number with a huge exponent as sent, without big arithmetic', () => {
+  const token = `1e-${'0'.repeat(20)}5`;
+  const { row } = normalize(wire(`{"action":"x","metadata":{"tiny":${token}}}`));
+  expect(row.payload).toContain(`"tiny":${token}`);
 });
 
 it('indexes numbers only in identifier columns and counts numeric ids in conformance', () => {

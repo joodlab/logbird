@@ -16,26 +16,28 @@ export const outcomeSchema = z.enum(OUTCOMES);
 export const severitySchema = z.enum(SEVERITIES);
 
 const id = z.string().min(1).max(256);
+/** Entity ids may also be numbers (integer keys); a number is stored as the plain decimal of its exact value. */
+const entityId = z.union([id, z.number()]);
 const shortText = z.string().max(512);
 
 export const actorInputSchema = z.looseObject({
   type: z.string().max(64).optional(), // recommended: one of ACTOR_TYPES
-  id: id.optional(),
+  id: entityId.optional(),
   name: shortText.optional(),
   email: shortText.optional(),
 });
 
 export const executorInputSchema = z.looseObject({
   type: z.string().max(64).optional(), // recommended: one of EXECUTOR_TYPES
-  id: id.optional(),
+  id: entityId.optional(),
   name: shortText.optional(),
-  jobId: id.optional(),
+  jobId: entityId.optional(),
   attempt: z.number().int().min(0).max(65_535).optional(),
 });
 
 export const targetInputSchema = z.looseObject({
   type: z.string().min(1).max(64),
-  id,
+  id: entityId,
   name: shortText.optional(),
 });
 
@@ -74,7 +76,7 @@ export const eventInputSchema = z.looseObject({
   actor: actorInputSchema.optional(),
   impersonator: actorInputSchema.optional(),
   executor: executorInputSchema.optional(),
-  tenant: z.looseObject({ id, name: shortText.optional() }).optional(),
+  tenant: z.looseObject({ id: entityId, name: shortText.optional() }).optional(),
   source: z.string().max(128).optional(), // external system that supplied the change, e.g. "channel-manager"
   targets: z.array(targetInputSchema).max(64).optional(),
   changes: z.array(changeInputSchema).max(256).optional(),

@@ -35,10 +35,10 @@ export interface EventInput {
   targets?: { type: string; id: EntityId; name?: string; [key: string]: unknown }[];
   changes?: { field: string; before?: unknown; after?: unknown }[];
   context?: {
-    operationId?: EntityId;
-    parentEventId?: EntityId;
-    requestId?: EntityId;
-    traceId?: EntityId;
+    operationId?: string;
+    parentEventId?: string;
+    requestId?: string;
+    traceId?: string;
     ip?: string;
     userAgent?: string;
     [key: string]: unknown;
@@ -347,6 +347,20 @@ export class Logbird {
   }
 }
 
+/**
+ * Deep copy that keeps JSON.rawJSON values as they are (structuredClone would turn them into plain objects) and
+ * clones everything else like structuredClone, so a bigint or Date under a redacted key is still copied, then replaced.
+ */
+function exactClone(value: unknown): unknown {
+  if (isRawJson(value)) return value;
+  if (Array.isArray(value)) return value.map(exactClone);
+  if (value !== null && typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype === Object.prototype || prototype === null)
+      return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, exactClone(child)]));
+  }
+  return typeof value === 'object' && value !== null ? structuredClone(value) : value;
+}
 export const DEFAULT_SECRET_KEYS = /passw(or)?d|secret|token|otp|api[-_]?key|authorization|cookie|credential|private[-_]?key/i;
 /** Redact a deep copy; combine this hook with application-specific filtering as needed. */
 export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacement?: string } = {}): (event: EventInput) => EventInput {
@@ -358,8 +372,7 @@ export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacem
     return pattern.test(key);
   };
   return (event) => {
-    // A JSON copy that keeps exact numbers (structuredClone would turn JSON.rawJSON values into plain objects).
-    const copy = parseJsonExact(JSON.stringify(event)) as EventInput;
+    const copy = exactClone(event) as EventInput;
     function walk(value: unknown, top = false): void {
       if (!value || typeof value !== 'object' || isRawJson(value)) return;
       for (const [key, child] of Object.entries(value)) {

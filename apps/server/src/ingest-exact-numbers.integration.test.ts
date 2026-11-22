@@ -1,4 +1,4 @@
-import { canonicalFingerprint, exportEvents, insertEvents, read, searchEvents } from '@logbird/clickhouse';
+import { exportEvents, insertEvents, searchEvents } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { clickhouse } from './clickhouse';
@@ -80,26 +80,31 @@ it('treats an identical raw retry as the same event and the rounded number as di
   expect(await f.count()).toBe(1);
 });
 
-it('accepts an exact retry of an event stored before exact numbers (rounded payload), without a second row', async () => {
+it('answers duplicate_id_conflict for a retry of an event stored before exact numbers (rounded payload)', async () => {
   await insertEvents(clickhouse, [f.row(JSON.parse(body))]);
   const retry = await rawPost(body);
   expect(retry.status).toBe(202);
-  expect(await retry.json()).toMatchObject({ accepted: 1, ids: ['exact-1'], rejected: [] });
+  const retryBody = await retry.json();
+  expect(retryBody.accepted).toBe(0);
+  expect(retryBody.rejected[0].code).toBe('duplicate_id_conflict');
   expect(await f.count()).toBe(1);
 });
 
-it('takes over an abandoned receipt claimed before exact numbers and stores the exact digits', async () => {
-  const old = JSON.parse(body);
-  const normalized = f.row(old);
-  await f.pending(old, { expired: true, legacy: canonicalFingerprint(old, normalized.timestamp) });
-  let retry = await rawPost(body);
-  for (let attempt = 0; retry.status === 503 && attempt < 5; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    retry = await rawPost(body);
+it('never accepts a different number that rounds to the stored one, in either order', async () => {
+  const at = new Date(Date.now() - 30_000).toISOString();
+  const event = (n: string, id: string) => `{"id":"${id}","action":"qa.round","occurredAt":"${at}","metadata":{"n":${n}}}`;
+  for (const [first, second, id] of [
+    ['9007199254740992', '9007199254740993', 'round-up'],
+    ['9007199254740993', '9007199254740992', 'round-down'],
+  ] as const) {
+    expect((await rawPost(event(first, id))).status).toBe(202);
+    const conflict = await (await rawPost(event(second, id))).json();
+    expect(conflict.accepted).toBe(0);
+    expect(conflict.rejected[0].code).toBe('duplicate_id_conflict');
   }
-  expect(retry.status).toBe(202);
-  expect(await retry.json()).toMatchObject({ accepted: 1, ids: ['exact-1'], rejected: [] });
-  const [stored] = await read<{ payload: string }>(clickhouse, 'SELECT payload FROM events WHERE project_id={p:String}', { p: f.project });
-  expect(stored?.payload).toContain('"snowflake":1234567890123456789');
-  expect(await f.count()).toBe(1);
+  // Two events in one batch with the same id and nearby 64-bit numbers are also a conflict.
+  const batch = await (await rawPost(`[${event('9007199254740994', 'same-batch')},${event('9007199254740995', 'same-batch')}]`)).json();
+  expect(batch.accepted).toBe(1);
+  expect(batch.rejected[0].code).toBe('duplicate_id_conflict');
+  expect(await f.count()).toBe(3);
 });

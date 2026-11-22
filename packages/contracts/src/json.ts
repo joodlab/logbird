@@ -14,13 +14,17 @@ type ExactJson = JSON & { rawJSON?: (text: string) => RawJson; isRawJSON?: (valu
 const json = JSON as ExactJson;
 const NUMBER = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/;
 
+/** Exponents with more digits than this are never canonicalized: arithmetic stays in safe integers. */
+const MAX_EXPONENT_DIGITS = 15;
 /**
- * One spelling per decimal value: `-123e-5` for `-0.00123`, `0` for any zero; null when `text` is not a finite JSON/JS
- * number spelling (e.g. Infinity). Linear in the input: digit scans, no backtracking patterns.
+ * One spelling per decimal value: `-123e-5` for `-0.00123`, `0` for any zero. Null when `text` is not a JSON/JS
+ * number spelling (e.g. Infinity) or its exponent has more than 15 digits (such a number overflows or underflows a
+ * double and keeps its sent spelling). Linear in the input: digit scans and safe-integer arithmetic only.
  */
 export function canonicalDecimal(text: string): string | null {
   const m = NUMBER.exec(text);
   if (!m) return null;
+  if ((m[4]?.replace(/^[+-]/, '').length ?? 0) > MAX_EXPONENT_DIGITS) return null;
   const fraction = m[3] ?? '';
   const all = `${m[2]}${fraction}`;
   let start = 0;
@@ -28,7 +32,7 @@ export function canonicalDecimal(text: string): string | null {
   if (start === all.length) return '0';
   let end = all.length;
   while (all.charCodeAt(end - 1) === 48) end--;
-  const exponent = BigInt(m[4] ?? 0) - BigInt(fraction.length) + BigInt(all.length - end);
+  const exponent = Number(m[4] ?? 0) - fraction.length + (all.length - end);
   return `${m[1]}${all.slice(start, end)}e${exponent}`;
 }
 
@@ -49,12 +53,12 @@ export function plainDecimal(value: unknown, maxLength = 1024): string | null {
   const e = canonical.indexOf('e');
   const sign = canonical.startsWith('-') ? '-' : '';
   const digits = canonical.slice(sign.length, e);
-  const exponent = BigInt(canonical.slice(e + 1));
-  const length = BigInt(sign.length + digits.length) + (exponent >= 0n ? exponent : -exponent + 1n);
-  if (length > BigInt(maxLength)) return null;
-  const exp = Number(exponent);
-  if (exp >= 0) return `${sign}${digits}${'0'.repeat(exp)}`;
+  const exp = Number(canonical.slice(e + 1));
   const point = digits.length + exp;
+  // Exact output length, checked before any padding is allocated.
+  const length = sign.length + (exp >= 0 ? digits.length + exp : point > 0 ? digits.length + 1 : 2 - point + digits.length);
+  if (length > maxLength) return null;
+  if (exp >= 0) return `${sign}${digits}${'0'.repeat(exp)}`;
   return point > 0 ? `${sign}${digits.slice(0, point)}.${digits.slice(point)}` : `${sign}0.${'0'.repeat(-point)}${digits}`;
 }
 
@@ -75,8 +79,15 @@ export function rawJsonNumber(text: string): RawJson {
   return json.rawJSON(text);
 }
 
+/**
+ * A double holds every decimal with at most 15 significant digits exactly, so an inexact number needs 16+ digits
+ * (one dot allowed in the run) or a 3+ digit exponent. Texts without such a run skip the reviver (plain JSON.parse
+ * speed); digits inside strings only cause a harmless slow path.
+ */
+const MAYBE_INEXACT = /\d[\d.]{15}|[eE][+-]?\d{3}/;
+
 export function parseJsonExact(text: string): unknown {
-  if (!supportsExactJson) return JSON.parse(text);
+  if (!supportsExactJson || !MAYBE_INEXACT.test(text)) return JSON.parse(text);
   const raw = json.rawJSON as (text: string) => RawJson;
   return JSON.parse(text, function reviver(this: unknown, _key: string, value: unknown, context?: { source?: string }) {
     if (typeof value !== 'number' || typeof context?.source !== 'string' || isExactNumber(context.source, value)) return value;

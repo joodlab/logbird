@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { isRawJson, plainDecimal, rawJsonText } from '@logbird/contracts';
+import { isRawJson, plainDecimal } from '@logbird/contracts';
 import { resolveTimestamp } from './timestamp';
 
 function uuidv7() {
@@ -134,7 +134,10 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     executor_id: idText(executor.id),
     executor_name: text(executor.name),
     job_id: idText(executor.jobId),
-    job_attempt: isNumber(executor.attempt) ? Math.min(65_535, Math.max(0, Math.trunc(Number(rawJsonText(executor.attempt) ?? 0)) || 0)) : 0,
+    // Same clamp as JSON.parse gave: 1e400 is Infinity → 65535, NaN → 0.
+    job_attempt: isNumber(executor.attempt)
+      ? Math.min(65_535, Math.max(0, Math.trunc(Number(isRawJson(executor.attempt) ? executor.attempt.rawJSON : executor.attempt)) || 0))
+      : 0,
     tenant_id: idText(tenant.id),
     tenant_name: text(tenant.name),
     source: text(e.source, 128),

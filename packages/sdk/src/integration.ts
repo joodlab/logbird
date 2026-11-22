@@ -1,3 +1,4 @@
+import { parseJsonExact } from './exact-json';
 import { type EventInput, type Logbird, uuidv7 } from './index';
 export interface AuditCarrier {
   operationId: string;
@@ -127,8 +128,10 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
         },
         true,
       ).then(
+        // Exact copy: a JSON.rawJSON id keeps its digits in process. A queue that JSON-parses job data rounds it
+        // again, so 64-bit ids that cross a queue should be strings.
         (event) =>
-          JSON.parse(
+          parseJsonExact(
             JSON.stringify({
               operationId: event.context?.operationId ?? envelope.context?.operationId,
               requestId: event.context?.requestId,

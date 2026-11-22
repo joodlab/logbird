@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { Logbird, redact } from './index';
+import { createAudit, jobAudit } from './integration';
 import { generateWebhookSecret, signWebhook, verifyWebhook } from './webhooks';
 
 afterEach(() => {
@@ -38,4 +39,25 @@ it('verifies a webhook and keeps exact digits in the parsed payload', async () =
     payload,
   });
   expect(JSON.stringify(parsed)).toBe(payload);
+});
+
+it('redacts a bigint under a secret key instead of dropping the event', () => {
+  const event = redact()({ action: 'x', metadata: { password: 10n, kept: rawJSON('1234567890123456789') } });
+  expect(event.metadata).toMatchObject({ password: '[redacted]' });
+  expect(JSON.stringify(event.metadata)).toContain('"kept":1234567890123456789');
+});
+
+it('keeps an exact actor id in an in-process carrier', async () => {
+  const client = new Logbird({ enabled: false });
+  const track = vi.spyOn(client, 'track');
+  const audit = await createAudit(
+    { client, actor: async () => ({ type: 'user', id: rawJSON('9007199254740993') as never }) },
+    {},
+    new Request('http://host'),
+  );
+  const carrier = await audit.carrier();
+  const job = jobAudit({ client, job: { id: 1, queueName: 'q' }, carrier });
+  job('done');
+  await job.pending();
+  expect(JSON.stringify(track.mock.calls.at(-1)?.[0].actor)).toContain('"id":9007199254740993');
 });
