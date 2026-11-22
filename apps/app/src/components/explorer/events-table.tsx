@@ -23,10 +23,12 @@ import {
 } from 'react';
 import { ActionName } from '@/components/action-name';
 import { JobHint, SupportMarker } from '@/components/impersonation';
+import { TimeColumnHeader } from '@/components/time-zone-control';
 import { Timestamp } from '@/components/timestamp';
 import { eventSentence } from '@/lib/events';
-import { formatNumber } from '@/lib/format';
+import { formatNumber, localDayKey, timestampNeedsYear } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
+import { useConsoleZone } from '@/lib/time-zone';
 import { EVENT_COLUMNS } from './columns';
 import { anchorShift, eventRowLabel, isReplaced, nextRowIndex, prependedCount, resolveCursor } from './row-navigation';
 
@@ -36,13 +38,15 @@ const helper = createColumnHelper<typeof features, AuditEvent>();
 const columnDefs = EVENT_COLUMNS.map((c) =>
   helper.display({
     id: c.id,
-    header: c.label,
+    header: c.id === 'time' ? () => <TimeColumnHeader /> : c.label,
     cell: (ctx) => c.render(ctx.row.original),
     enableHiding: !c.required,
   }),
 ) as ColumnDef<typeof features, AuditEvent, unknown>[];
 
 const WIDTH = new Map(EVENT_COLUMNS.map((c) => [c.id, c.width]));
+/** The time column with a year in its rows (12 px mono, 22 characters, plus the cell padding). */
+const TIME_WIDTH_WITH_YEAR = 180;
 /** Height of the sticky column header (h-8). The virtualizer offsets rows by it, so scrolling never parks a row under it. */
 const HEADER_HEIGHT = 32;
 
@@ -142,6 +146,8 @@ export function EventsTable({
   resultKey,
   ref,
 }: EventsTableProps) {
+  // Range labels and times read the console zone: re-render when the reader switches it.
+  const zone = useConsoleZone();
   const isMobile = useIsMobile();
   const scrollRef = useRef<HTMLDivElement>(null);
   const columnVisibility = useMemo(() => Object.fromEntries(EVENT_COLUMNS.map((c) => [c.id, columns.includes(c.id)])), [columns]);
@@ -155,8 +161,14 @@ export function EventsTable({
   });
 
   const visible = table.getVisibleLeafColumns();
-  const template = visible.map((c) => (WIDTH.get(c.id) === 'flex' ? 'minmax(200px,1fr)' : `${WIDTH.get(c.id)}px`)).join(' ');
-  const minWidth = visible.reduce((sum, c) => sum + (WIDTH.get(c.id) === 'flex' ? 200 : Number(WIDTH.get(c.id))), 0) + 16;
+  // "Dec 31, 2025, 23:59:59" is wider than this year's "Nov 22, 10:17:20": widen the time column only when a row needs it.
+  // Whether a row needs its year depends on the console zone and on the current year there.
+  const thisYear = localDayKey(Date.now()).slice(0, 4);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: zone and thisYear are what timestampNeedsYear reads.
+  const withYear = useMemo(() => rows.some((e) => timestampNeedsYear(e.timestamp)), [rows, zone, thisYear]);
+  const width = (id: string) => (id === 'time' && withYear ? TIME_WIDTH_WITH_YEAR : WIDTH.get(id));
+  const template = visible.map((c) => (width(c.id) === 'flex' ? 'minmax(200px,1fr)' : `${width(c.id)}px`)).join(' ');
+  const minWidth = visible.reduce((sum, c) => sum + (width(c.id) === 'flex' ? 200 : Number(width(c.id))), 0) + 16;
   const tableRows = table.getRowModel().rows;
   const rowHeight = isMobile ? 64 : 36;
   const headerHeight = isMobile ? 0 : HEADER_HEIGHT;

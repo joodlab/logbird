@@ -18,6 +18,7 @@ import { keys, viewsQuery } from '@/lib/api/queries';
 import { creatorLabel } from '@/lib/events';
 import { placeholderKeys } from '@/lib/placeholders';
 import { rangeLabel } from '@/lib/range';
+import { useConsoleZone } from '@/lib/time-zone';
 import { useCopyViewLink, viewSearch } from '@/lib/views';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/views')({
@@ -28,6 +29,7 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/views')({
 });
 
 function ViewsPage() {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const { projectId } = Route.useParams();
   const views = useQuery(viewsQuery(projectId));
   const queryClient = useQueryClient();

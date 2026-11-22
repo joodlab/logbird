@@ -4,6 +4,7 @@ import { cn } from '@logbird/ui/lib/utils';
 import { useMemo, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ReferenceArea, XAxis, YAxis } from 'recharts';
 import { formatAxis } from '@/lib/format';
+import { useConsoleZone } from '@/lib/time-zone';
 import { OutcomeTooltip } from './chart-tooltip';
 import { bucketTicks, outcomeChartConfig, SERIES, toSeries } from './outcome-series';
 
@@ -31,7 +32,9 @@ export function EventHistogram({ data, height = 120, onZoom: onZoomProp, classNa
   const onZoom = stale ? undefined : onZoomProp;
   const rows = useMemo(() => toSeries(data), [data]);
   const interval = data?.interval ?? 60;
-  const axis = useMemo(() => bucketTicks(rows, interval), [rows, interval]);
+  const zone = useConsoleZone();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the formatters read the console zone; recompute when it changes.
+  const axis = useMemo(() => bucketTicks(rows, interval), [rows, interval, zone]);
   const [drag, setDrag] = useState<{ start: number; end: number } | null>(null);
   // The bar the keyboard (arrow keys) last moved to, read from the tooltip: Enter or Space zooms to it.
   const active = useRef<number | null>(null);
