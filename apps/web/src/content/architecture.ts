@@ -5,7 +5,7 @@
 export const architecture = {
   flow: [
     { name: 'Your product', role: 'SDK or HTTP, ingest key' },
-    { name: 'Logbird API', role: 'Validates, answers 202 after the write' },
+    { name: 'Logbird API', role: 'Validates each event; its 202 lists the ones stored' },
     { name: 'ClickHouse', role: 'Events, rollups, entity pages' },
     { name: 'Console and read API', role: 'Your team, and your own backend' },
   ],

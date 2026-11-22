@@ -171,7 +171,7 @@ export function SiteFooter() {
           <p className="max-w-xs text-muted-foreground text-sm leading-relaxed">
             Retrace every step.
             <br />
-            The open-source audit log for your product.
+            {shared.footerTagline}
           </p>
         </div>
         <div className="grid grid-cols-2 gap-8 sm:grid-cols-3 lg:grid-cols-5">

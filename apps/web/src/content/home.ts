@@ -17,7 +17,10 @@ export function homeMetaFor(site: SiteState) {
         open: 'Open source: self-host it, or ask for early access to Logbird Cloud.',
         closed: 'Open source: self-host it, or join the Logbird Cloud waitlist.',
       }),
-      private: 'Open source and MIT-licensed. Join the waitlist to hear when it opens.',
+      private: byCloud(site, {
+        open: 'The source opens soon; request early access to Logbird Cloud.',
+        closed: 'The source opens soon; join the waitlist to hear when.',
+      }),
     })}`,
   };
 }
@@ -78,7 +81,7 @@ export function homeContent(site: SiteState) {
       /** The brand line, kept near the wordmark and in the closing band. */
       eyebrow: 'Retrace every step.',
       title: 'The audit log your customers ask for, and the evidence your auditors ask for.',
-      lead: `Send one event per action over HTTP or the TypeScript SDK. Show each customer account its own history in your product, search everything in the console, and export it complete when an auditor asks. MIT-licensed: ${hosting}`,
+      lead: `Send one event per action over HTTP or the TypeScript SDK. Show each customer account its own history in your product, search your events in the console, and export them complete when an auditor asks. MIT-licensed: ${hosting}`,
       primaryCta: { label: shared.accessCta, to: '/contact' } satisfies Cta,
       status: byRepo(site, {
         public: shared.cloudStatusLine,
@@ -136,6 +139,10 @@ export function homeContent(site: SiteState) {
         limit:
           "One customer account per scope, matched on the id Logbird stored. ClickHouse enforces the customer account as well only when the restricted query user is configured; otherwise Logbird's query builders are the single layer.",
       },
+      /** What the page shows: scoped access only once its production proof is confirmed. */
+      get access() {
+        return site.scopedReadLive ? this.scoped : this.now;
+      },
       limitLabel: 'The limit',
       screenshot: {
         label: 'Customer account',
@@ -158,17 +165,17 @@ export function homeContent(site: SiteState) {
         {
           promise: 'Retention per project, from 7 days to 10 years. Expired events are permanently deleted every hour.',
           limit:
-            'An owner or admin can shorten retention, and the deletion then starts immediately and is final. There is no retention lock or legal hold yet; it is on the roadmap.',
+            'An owner or admin can shorten retention, and the deletion then starts immediately and is final. There is no retention lock or legal hold yet.',
         },
         {
           promise:
-            'The evidence export (`jsonl-evidence`) carries every matching event with its original payload. Its record keeps the filter, the fixed query clock, the SHA-256, the size and the row count, so a file can be matched to its record.',
+            'The evidence export (`jsonl-evidence`) carries every matching event with its original payload. When the export completes, its record keeps the filter, the fixed query clock, the SHA-256, the size and the row count, so a file can be matched to its record.',
           limit:
             "Matching the SHA-256 and size establishes that the file matches Logbird's output; it does not establish who saved it or when it reached a client's disk.",
         },
         {
           promise:
-            'Workspace activity records what your team does in Logbird: project and retention changes, keys, members and roles, saved views, invite links, exports, sign-ins and ended sessions.',
+            'Workspace activity records what your team does in Logbird: project and retention changes, keys, members and roles, saved views, invite links, exports, sign-ins, sign-outs and revoked sessions.',
           limit: "It doesn't record who searched or opened events.",
         },
       ] satisfies Limit[],
@@ -231,11 +238,11 @@ export function homeContent(site: SiteState) {
       title: byRepo(site, {
         public: byCloud(site, {
           open: 'Run it on your servers, or on ours in early access.',
-          closed: 'Run it on your servers today, or join the waitlist for ours.',
+          closed: 'Run it on your servers today, or join the Logbird Cloud waitlist.',
         }),
         private: byCloud(site, {
           open: 'Run it on ours in early access, or on yours once the source opens.',
-          closed: 'Run it on your servers once the source opens, or on ours when Logbird Cloud opens.',
+          closed: 'Run it on your servers once the source opens, or join the Logbird Cloud waitlist.',
         }),
       }),
       selfHost: {
@@ -250,11 +257,14 @@ export function homeContent(site: SiteState) {
       },
       cloud: {
         title: 'Logbird Cloud',
-        body: byCloud(site, {
-          open: 'The same open-source codebase, and we run the servers, the upgrades and the backups. It is in early access: sign-ups are limited to invited teams for now.',
-          closed:
-            "The same open-source codebase, and we run the servers, the upgrades and the backups. It isn't open yet: join the waitlist to hear when it opens.",
-        }),
+        /** Present tense only once it is open; "open-source" only while the repository is public. */
+        body: `${byRepo(site, { public: 'The same open-source codebase', private: 'The same codebase you will be able to self-host' })}, ${byCloud(
+          site,
+          {
+            open: 'and we run the servers, the upgrades and the backups. It is in early access: sign-ups are limited to invited teams for now.',
+            closed: "and we will run the servers, the upgrades and the backups. It isn't open yet: join the waitlist to hear when it opens.",
+          },
+        )}`,
         primaryCta: { label: shared.accessCta, to: '/contact' } satisfies Cta,
         moreCta: { label: 'About Logbird Cloud', to: '/cloud' } satisfies Cta,
       },
@@ -271,7 +281,8 @@ export function homeContent(site: SiteState) {
         },
         {
           promise: 'The SDK batches and retries for you.',
-          limit: 'Its queue is in memory: a crash before the server acknowledges can lose pending events.',
+          limit:
+            'Its queue is in memory and bounded: a crash before the server acknowledges, or an outage long enough to fill the queue, can lose pending events.',
         },
         {
           promise: 'Only an `action` string is required, and each event must fit the ingest limits.',

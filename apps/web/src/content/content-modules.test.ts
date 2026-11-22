@@ -232,6 +232,48 @@ describe('content modules', () => {
       expect(html).toContain(text);
     }
     expect(html).not.toContain('Viewer tokens');
-    expect(proven.customers.scoped.points.map((point) => point.title)).toContain('Viewer tokens');
+    // The route renders `customers.access`: the backend state now, the scoped state once proven.
+    expect(current.customers.access).toBe(current.customers.now);
+    expect(proven.customers.access).toBe(proven.customers.scoped);
+    expect(proven.customers.access.points.map((point) => point.title)).toContain('Viewer tokens');
   }, 60_000);
+
+  it('every repository and Cloud state renders a page that matches that state', async () => {
+    const github = { WEB_GITHUB_URL: 'https://github.com/example-org/logbird' };
+    const states = [
+      { name: 'public, Cloud closed', env: { ...github, WEB_GITHUB_PUBLIC: 'true' }, repoPublic: true, cloudOpen: false },
+      {
+        name: 'public, Cloud open',
+        env: { ...github, WEB_GITHUB_PUBLIC: 'true', WEB_APP_URL: 'https://app.example.test' },
+        repoPublic: true,
+        cloudOpen: true,
+      },
+      { name: 'private, Cloud closed', env: github, repoPublic: false, cloudOpen: false },
+      { name: 'private, Cloud open', env: { ...github, WEB_APP_URL: 'https://app.example.test' }, repoPublic: false, cloudOpen: true },
+    ];
+    for (const state of states) {
+      const [page] = await renderPages(['/'], state.env);
+      const text = (page?.html ?? '')
+        .replace(/<script[\s\S]*?<\/script>/g, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replaceAll('&#x27;', "'")
+        .replaceAll('&quot;', '"')
+        .replace(/\s+/g, ' ');
+      const where = `/ (${state.name})`;
+      if (state.cloudOpen) {
+        // Open: access requests, never a waitlist or a future service.
+        expect(text, where).not.toMatch(/waitlist|we will run|when it opens|isn't open yet/i);
+        expect(text, where).toContain('Request access');
+      } else {
+        // Closed: never a service that runs today, and never "…or ours" as if it did.
+        expect(text, where).not.toMatch(/early access|we run the servers|or on ours/i);
+        expect(text, where).toContain('Join the waitlist');
+      }
+      if (!state.repoPublic) {
+        expect(text, where).not.toMatch(/open-source codebase|Open source and|self-host it\b/i);
+      }
+      // No legal-hold roadmap claim, no unmeasured time, no assurance words.
+      expect(text, where).not.toMatch(/on the roadmap|within seconds|tamper|immutable|certified|verify integrity/i);
+    }
+  }, 120_000);
 });

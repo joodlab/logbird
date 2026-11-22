@@ -10,7 +10,7 @@ import { Rich } from '../components/marketing/rich';
 import { Eyebrow, Feature, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { home } from '../content/home';
-import { type Cta, type Item, SITE } from '../content/site';
+import type { Cta, Item } from '../content/site';
 import { pageHead } from '../lib/seo';
 import { isReady } from '../lib/site-map';
 
@@ -51,7 +51,7 @@ function Points({ items }: { items: Item[] }) {
 
 function HomePage() {
   const { explorer, customers, evidence, operators, developers, hosting, guarantees, closing } = home;
-  const access = SITE.scopedReadLive ? customers.scoped : customers.now;
+  const { access } = customers;
   return (
     <>
       <Hero />
