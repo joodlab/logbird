@@ -8,7 +8,9 @@ in [Logbird](https://github.com/joodlab/logbird). The client is built to sit ins
 - **It never breaks your application.** Nothing Logbird does throws into your code. Problems go to a callback, your
   `ILogger` and the `Logbird` meter.
 - **It does not lose events silently.** Every event that will not be stored (queue full, rejected by the server,
-  unsent at shutdown) is counted and passed to `OnDrop` together with its JSON, so you can save it and send it again.
+  unsent at shutdown) is counted, and passed to `OnDrop` together with its JSON so you can save it and send it again.
+  The callbacks run on a bounded background queue: if they fall more than `MaxQueueSize` notifications behind,
+  further ones are skipped and counted, while the counters keep every event.
 - **Retries never duplicate.** Each event gets a stable id (UUIDv7) when you track it. A retry resends identical
   bytes, and Logbird stores one event per id.
 
@@ -85,7 +87,8 @@ one, and `AuditChange.Secret("password")` records that a secret changed without 
 
 Actor, impersonator, executor and tenant ids and each target's type and id are **sent exactly as you give them**:
 never trimmed, truncated or converted. The text is the identity, so `"user_42"` and `" user_42 "` are different
-actors. Before sending, the client applies the server's rule:
+actors. Before sending, the client applies the server's identifier rule (servers before that rule ships may still trim
+identifiers when they store them; the client never does):
 
 - An identifier that cannot be stored as sent drops the event with `DropReason.InvalidEntityId` (reason
   `invalid_entity_id`): longer than 256 UTF-16 code units (64 for a target type), containing a lone surrogate, or more
@@ -93,8 +96,9 @@ actors. Before sending, the client applies the server's rule:
 - Surrounding whitespace is kept and reported as a `LogbirdEventWarning` through `OnError` and the logger.
 - An empty string means the field is absent.
 
-Identifiers are strings in this SDK. For a numeric id, pass `id.ToString(CultureInfo.InvariantCulture)` (for example
-`"42"`, never `"42.0"`); the server stores a numeric identifier as the plain decimal text of its value, so the string
+Identifiers are strings in this SDK. For a numeric id, pass an integer's invariant text, for example
+`userId.ToString(CultureInfo.InvariantCulture)` for a `long` gives `"42"`. Avoid formatting a `decimal` (`42.0m` keeps its
+scale and becomes `"42.0"`). The server stores a numeric identifier as the plain decimal text of its value, so the string
 `"42"` and the number `42` are the same identity, while `"42.0"` is a different one. For a `Guid`, pick one format
 (`guid.ToString()` gives lowercase `d0c4…`) and keep it, because a different format is a different identity.
 
@@ -132,7 +136,9 @@ var options = new LogbirdOptions
   `logbird.notifications.lost` meter; the counters below still record every event. `FlushAsync` returns after the
   callbacks for what it settled have run.
 - `client.Stats` gives counts of tracked, delivered, rejected, dropped, filtered and warned events. The `Logbird` meter
-  publishes the same counts for OpenTelemetry (`logbird.events.*`, `logbird.queue.length`).
+  publishes the same counts for OpenTelemetry (`logbird.events.*`, `logbird.batches.failed`, `logbird.queue.length`,
+  `logbird.notifications.lost`). The instruments are observable: a listener reads the counters when it collects, on its
+  own thread, so a slow or failing exporter never runs on your request path.
 - `await client.FlushAsync()` waits until everything queued so far is settled and returns `false` if delivery failed.
   It never throws. Without a generic host (console apps, .NET Framework services), call
   `client.Flush(TimeSpan.FromSeconds(10))` or `Dispose()` before the process exits. Both run on the thread pool and
@@ -178,7 +184,7 @@ using var reader = new LogbirdReadClient(new LogbirdReadOptions
 });
 
 var page = await reader.SearchAsync(new EventSearch { Query = "action:invoice.* actor:user_42", Limit = 50 });
-await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: invoice.Id, targetType: "invoice")))
+await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: invoice.Id)))
 {
     Console.WriteLine($"{e.Timestamp:u} {e.Actor?.Name} {e.Action}");
 }
@@ -220,7 +226,9 @@ signatures in constant time. It passes the same test vectors as the TypeScript S
 | .NET 8, 9, 10 and later | `net8.0` (trimming and Native AOT compatible) |
 | .NET Framework 4.6.2+ (tested on 4.8) | `netstandard2.0` |
 
-The wire format follows the TypeScript SDK byte for byte: field names and order, `JSON.stringify` string escaping
+The wire format follows the TypeScript SDK byte for byte for the same input: field names, the envelope's field order
+(an event built in TypeScript with its properties in a different order serializes them in that order, which the server
+treats as the same content), `JSON.stringify` string escaping
 (emoji and other non-ASCII text stay raw, lone surrogates are escaped, never replaced), JavaScript key order (integer-like
 keys first) and JavaScript number layout (`1.0` as `1`, `1e21` as `1e+21`). An event sent from either SDK and replayed
 from the other is therefore recognised as the same event. Tests serialize the same events in both SDKs and compare the

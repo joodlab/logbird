@@ -93,11 +93,13 @@ public class LogbirdReadClientTests
     }
 
     [Fact]
-    public void Trail_queries_quote_selectors_like_the_typescript_sdk()
+    public void Trail_queries_quote_selectors_for_the_query_language()
     {
-        var search = EventSearch.ForTrail(targetId: "a\" OR actor:other", query: "action:record.* OR action:other");
-        Assert.Equal("(action:record.* OR action:other) AND target:\"a\\\" OR actor:other\"", search.Query);
-        Assert.Equal("target:\"inv\" AND target.type:\"invoice\" AND actor:\"u\" AND tenant:\"t\"", EventSearch.ForTrail("inv", "invoice", "u", "t").Query);
-        Assert.Equal("\"\\n\\u0001\\ud800\"", EventSearch.Quote("\n\u0001\ud800"));
+        var search = EventSearch.ForTrail(targetId: "a" + '"' + " OR actor:other", query: "action:record.* OR action:other");
+        Assert.Equal("(action:record.* OR action:other) AND target:" + '"' + "a" + '\\' + '"' + " OR actor:other" + '"', search.Query);
+        Assert.Equal("target:" + '"' + "inv" + '"' + " AND actor:" + '"' + "u" + '"' + " AND tenant:" + '"' + "t" + '"', EventSearch.ForTrail("inv", "u", "t").Query);
+
+        // Inside quotes the query language takes a backslashed character literally, so a tab is sent as a tab.
+        Assert.Equal('"' + "a" + (char)9 + "b" + '\\' + '\\' + '"', EventSearch.Quote("a" + (char)9 + "b" + '\\'));
     }
 }

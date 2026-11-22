@@ -72,7 +72,23 @@ client.track({
   action: 'numbers.checked',
   occurredAt: '2026-11-22T08:00:03.000Z',
   context: {},
-  metadata: { '10': 'a', b: 'x', '2': 'y', '01': 'z', ratio: 1.5, one: 1.0, big: 1e21, tiny: 1e-7, neg0: -0, tenth: 0.1, max: 9_007_199_254_740_991 },
+  metadata: {
+    '10': 'a',
+    b: 'x',
+    '2': 'y',
+    '01': 'z',
+    ratio: 1.5,
+    one: 1.0,
+    big: 1e21,
+    tiny: 1e-7,
+    neg0: -0,
+    tenth: 0.1,
+    max: 9_007_199_254_740_991,
+    nan: Number.NaN,
+    inf: Number.POSITIVE_INFINITY,
+    ninf: Number.NEGATIVE_INFINITY,
+    eps: Number.MIN_VALUE,
+  },
 });
 await client.shutdown();
 globalThis.fetch = realFetch;

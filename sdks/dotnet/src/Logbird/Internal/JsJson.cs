@@ -110,12 +110,11 @@ internal static class JsJson
         }
         else if (value.TryGetValue<double>(out var number))
         {
-            // Round-trip text on every target (older System.Text.Json writes 17 significant digits).
-            json = number.ToString("R", CultureInfo.InvariantCulture);
+            json = Shortest(number);
         }
         else if (value.TryGetValue<float>(out var single))
         {
-            json = single.ToString("R", CultureInfo.InvariantCulture);
+            json = Shortest(single);
         }
         else
         {
@@ -131,10 +130,62 @@ internal static class JsJson
         {
             builder.Append(json);
         }
+        else if (json is "NaN" or "Infinity" or "-Infinity")
+        {
+            builder.Append("null");
+        }
         else
         {
             builder.Append(FormatNumber(json));
         }
+    }
+
+    /// <summary>
+    /// The shortest decimal text that reads back as the same double, as JavaScript writes it. NaN and infinities have
+    /// no JSON form: JavaScript writes <c>null</c>, and so does this SDK.
+    /// </summary>
+    internal static string Shortest(double value)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+        {
+            return "null";
+        }
+
+#if NET8_0_OR_GREATER
+        // .NET Core 3.0 and later format "R" as the shortest round-trip text.
+        return value.ToString("R", CultureInfo.InvariantCulture);
+#else
+        // .NET Framework's "R" is not always the shortest (double.Epsilon gives 4.94065645841247E-324); search instead.
+        for (var precision = 1; precision <= 17; precision++)
+        {
+            var text = value.ToString("E" + (precision - 1).ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+            if (double.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture) == value)
+            {
+                return text;
+            }
+        }
+
+        return value.ToString("R", CultureInfo.InvariantCulture);
+#endif
+    }
+
+    internal static string Shortest(float value)
+    {
+        if (float.IsNaN(value) || float.IsInfinity(value))
+        {
+            return "null";
+        }
+
+        for (var precision = 1; precision <= 9; precision++)
+        {
+            var text = value.ToString("E" + (precision - 1).ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+            if (float.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture) == value)
+            {
+                return text;
+            }
+        }
+
+        return value.ToString("R", CultureInfo.InvariantCulture);
     }
 
     /// <summary>

@@ -6,13 +6,23 @@
  * `create` writes LOGBIRD_IT_* variables (the endpoint, default http://127.0.0.1:4741, and fresh keys) to a NEW
  * <env-file> with owner-only permissions; keep it outside the repository and load it before `dotnet test`. If any
  * step fails, everything it created is removed again.
- * `delete` purges the recorded project's ClickHouse rows, ingest receipts and the project itself under one project
- * lock, then deletes the fictional workspace only if nothing else (project, member, invitation, link, receipt) is in it.
+ * `delete` removes the recorded project with the server's own deletion sequence under one exclusive project lock (fence,
+ * stop maintenance, settle in-flight inserts, purge ClickHouse rows and ingest receipts, reconcile, delete), then
+ * deletes the fictional workspace only if nothing else (project, member, invitation, link, receipt) is in it. If a
+ * recent insert is still settling it fails with ingest_pending and keeps <env-file>: run it again a minute later.
  */
 import { randomUUID } from 'node:crypto';
 import { closeSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
-import { createClickHouseClient, purgeProject } from '@logbird/clickhouse';
 import { prisma, withProjectLock } from '@logbird/database';
+import {
+  clickhouse,
+  maintenanceClickhouse,
+  purgeProjectEvents,
+  queryClickhouse,
+  settleProjectInserts,
+  stopMaintenance,
+} from '../../../../apps/server/src/clickhouse';
+import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from '../../../../apps/server/src/destructive-maintenance';
 import { generateApiKey } from '../../../../apps/server/src/keys';
 
 const [command, envFile, endpointArgument] = process.argv.slice(2);
@@ -72,17 +82,15 @@ async function remove() {
   const project = await prisma.project.findFirstOrThrow({ where: { id: projectId, organizationId: orgId }, include: { organization: true } });
   const slug = project.organization.slug;
   if (!slug.startsWith(SLUG_PREFIX)) throw new Error(`refusing to touch workspace ${slug}`);
-  const ch = createClickHouseClient();
-  try {
-    // One exclusive project lock for the purge and the SQL deletes: no ingest can land in between.
-    await withProjectLock(projectId, async (db) => {
-      await purgeProject(ch, projectId);
-      await db.ingestReceipt.deleteMany({ where: { projectId } });
-      await db.project.delete({ where: { id: projectId, organizationId: orgId } });
-    });
-  } finally {
-    await ch.close();
-  }
+  // The same sequence the DELETE /api/projects/:projectId route uses, under one exclusive project lock.
+  await withProjectLock(projectId, async () => {
+    await beginDestructiveMaintenance(projectId);
+    await stopMaintenance(projectId);
+    await settleProjectInserts(projectId);
+    await purgeProjectEvents(projectId, { settled: true });
+    await reconcileDestructiveMaintenance(projectId);
+    await prisma.project.delete({ where: { id: projectId, organizationId: orgId } });
+  });
   // A single conditional statement: if anything else was added to the workspace, it stays with its data.
   const { count } = await prisma.organization.deleteMany({
     where: {
@@ -119,5 +127,6 @@ try {
     await remove();
   }
 } finally {
+  await Promise.allSettled([clickhouse.close(), maintenanceClickhouse.close(), queryClickhouse.close()]);
   await prisma.$disconnect();
 }

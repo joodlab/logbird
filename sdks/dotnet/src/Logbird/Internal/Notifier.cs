@@ -9,69 +9,76 @@ namespace Logbird.Internal;
 /// <summary>
 /// Runs host callbacks (<c>OnDrop</c>, <c>OnError</c>, logging) in order on the thread pool, never on the thread that
 /// called <c>Track</c> or on the shutdown path, so a slow or blocking callback cannot hold either. The backlog is
-/// bounded: past <see cref="_capacity"/> pending notifications, new ones are skipped and counted (the client's
-/// counters still record every drop). No thread is held while idle.
+/// bounded: past the capacity, new notifications are skipped and counted (the client's counters still record every
+/// drop). No thread is held while idle.
 /// </summary>
 internal sealed class Notifier(int capacity, Action<int> lost)
 {
-    private readonly int _capacity = capacity;
-    private readonly ConcurrentQueue<Action> _pending = new();
-    private readonly object _waitersGate = new();
+    private readonly object _gate = new();
+    private readonly Queue<Action> _pending = new();
     private readonly List<(long Target, TaskCompletionSource<bool> Completion)> _waiters = [];
-    private int _count;
-    private int _running;
-    private long _posted;
+    private bool _running;
+    private long _accepted;
     private long _completed;
-
-    /// <summary>The number of notifications posted so far (accepted or skipped).</summary>
-    public long Posted => Interlocked.Read(ref _posted);
 
     public void Post(Action notification)
     {
-        if (Interlocked.Increment(ref _count) > _capacity)
+        bool accepted;
+        var start = false;
+        lock (_gate)
         {
-            Interlocked.Decrement(ref _count);
-            Interlocked.Increment(ref _posted);
-            Interlocked.Increment(ref _completed);
-            lost(1);
-            return;
+            accepted = _pending.Count < capacity;
+            if (accepted)
+            {
+                _pending.Enqueue(notification);
+                _accepted++;
+                start = !_running;
+                _running = true;
+            }
         }
 
-        Interlocked.Increment(ref _posted);
-        _pending.Enqueue(notification);
-        if (Interlocked.CompareExchange(ref _running, 1, 0) == 0)
+        if (!accepted)
         {
-            // The caller's ambient state (AsyncLocals, culture) must not leak into host callbacks.
-            using (ExecutionContext.SuppressFlow())
-            {
-                _ = Task.Run(Drain);
-            }
+            lost(1);
+        }
+        else if (start)
+        {
+            Start();
         }
     }
 
-    /// <summary>Waits until every notification posted before the call has run, or the token is cancelled.</summary>
+    /// <summary>
+    /// Waits until every notification accepted before the call has run (skipped ones never count), or the token is
+    /// cancelled. A cancelled wait is forgotten at once.
+    /// </summary>
     public Task WaitAsync(CancellationToken cancellationToken)
     {
-        var target = Interlocked.Read(ref _posted);
-        if (Interlocked.Read(ref _completed) >= target)
+        TaskCompletionSource<bool> completion;
+        lock (_gate)
         {
-            return Task.CompletedTask;
+            if (_completed >= _accepted)
+            {
+                return Task.CompletedTask;
+            }
+
+            completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _waiters.Add((_accepted, completion));
         }
 
-        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        lock (_waitersGate)
-        {
-            _waiters.Add((target, completion));
-        }
-
-        // The drain may have finished between the check and the registration.
-        Release();
         if (!cancellationToken.CanBeCanceled)
         {
             return completion.Task;
         }
 
-        var registration = cancellationToken.Register(() => completion.TrySetResult(false));
+        var registration = cancellationToken.Register(() =>
+        {
+            lock (_gate)
+            {
+                _waiters.RemoveAll(waiter => waiter.Completion == completion);
+            }
+
+            completion.TrySetResult(false);
+        });
         return completion.Task.ContinueWith(
             _ => registration.Dispose(),
             CancellationToken.None,
@@ -79,55 +86,68 @@ internal sealed class Notifier(int capacity, Action<int> lost)
             TaskScheduler.Default);
     }
 
-    private void Drain()
+    private void Start()
     {
-        while (true)
+        try
         {
-            while (_pending.TryDequeue(out var notification))
+            // Unsafe: the caller's execution context (AsyncLocals, culture, a suppressed flow) never reaches host
+            // callbacks, and there is nothing to suppress or restore.
+            ThreadPool.UnsafeQueueUserWorkItem(_ => Drain(), null);
+        }
+        catch
+        {
+            lock (_gate)
             {
-                try
-                {
-                    notification();
-                }
-                catch
-                {
-                    // A diagnostic hook must never break capture.
-                }
-
-                Interlocked.Decrement(ref _count);
-                Interlocked.Increment(ref _completed);
-                Release();
-            }
-
-            Volatile.Write(ref _running, 0);
-            if (_pending.IsEmpty || Interlocked.CompareExchange(ref _running, 1, 0) != 0)
-            {
-                return;
+                _running = false;
             }
         }
     }
 
-    private void Release()
+    private void Drain()
     {
-        var completed = Interlocked.Read(ref _completed);
-        List<TaskCompletionSource<bool>>? done = null;
-        lock (_waitersGate)
+        while (true)
         {
-            for (var i = _waiters.Count - 1; i >= 0; i--)
+            Action notification;
+            lock (_gate)
             {
-                if (_waiters[i].Target <= completed)
+                if (_pending.Count == 0)
                 {
-                    (done ??= []).Add(_waiters[i].Completion);
-                    _waiters.RemoveAt(i);
+                    _running = false;
+                    return;
+                }
+
+                notification = _pending.Dequeue();
+            }
+
+            try
+            {
+                notification();
+            }
+            catch
+            {
+                // A diagnostic hook must never break capture.
+            }
+
+            List<TaskCompletionSource<bool>>? done = null;
+            lock (_gate)
+            {
+                _completed++;
+                for (var i = _waiters.Count - 1; i >= 0; i--)
+                {
+                    if (_waiters[i].Target <= _completed)
+                    {
+                        (done ??= []).Add(_waiters[i].Completion);
+                        _waiters.RemoveAt(i);
+                    }
                 }
             }
-        }
 
-        if (done is not null)
-        {
-            foreach (var completion in done)
+            if (done is not null)
             {
-                completion.TrySetResult(true);
+                foreach (var completion in done)
+                {
+                    completion.TrySetResult(true);
+                }
             }
         }
     }

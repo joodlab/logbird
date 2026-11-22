@@ -87,9 +87,15 @@ public sealed class Redactor
 
     /// <summary>Returns a redacted deep copy of an event JSON object. The input is not changed.</summary>
     /// <param name="eventJson">The event as JSON.</param>
+    /// <exception cref="ArgumentException">The JSON nests deeper than 64 levels.</exception>
     public JsonObject Redact(JsonObject eventJson)
     {
-        var copy = (JsonObject)Guard.NotNull(eventJson, nameof(eventJson)).DeepClone();
+        if (JsonDepth.Exceeds(Guard.NotNull(eventJson, nameof(eventJson)), 64))
+        {
+            throw new ArgumentException("The event JSON nests deeper than 64 levels.", nameof(eventJson));
+        }
+
+        var copy = (JsonObject)eventJson.DeepClone();
         RedactInPlace(copy);
         return copy;
     }

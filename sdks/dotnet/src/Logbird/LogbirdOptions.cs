@@ -79,8 +79,11 @@ public sealed class LogbirdOptions
 
     /// <summary>
     /// Called once for every event that will not be stored: queue overflow, a server rejection, a permanent HTTP error,
-    /// an oversized event, or shutdown. The <see cref="DroppedEvent.Json"/> lets you save it for replay; do not log it if
-    /// it may contain personal data. Exceptions thrown by the callback are ignored. It can run on a background thread.
+    /// an oversized or invalid event, or shutdown. The <see cref="DroppedEvent.Json"/> lets you save it for replay; do not
+    /// log it if it may contain personal data. Callbacks run in order on a background thread, never on the thread that
+    /// called <c>Track</c>; if they fall more than <see cref="MaxQueueSize"/> (at least 1,000) notifications behind,
+    /// further notifications are skipped and counted on the <c>logbird.notifications.lost</c> meter, while
+    /// <see cref="LogbirdClient.Stats"/> still counts every event. Exceptions thrown by the callback are ignored.
     /// </summary>
     public Action<DroppedEvent>? OnDrop { get; set; }
 

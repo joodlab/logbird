@@ -92,6 +92,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private long _filtered;
     private long _failedSends;
     private long _warnings;
+    private long _notificationsLost;
+    private readonly long[] _droppedByReason = new long[DropReasonCount];
 
     [ThreadStatic]
     private static List<string>? _whitespaceFields;
@@ -124,7 +126,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         _onError = options.OnError;
         _onDrop = options.OnDrop;
         _logger = logger ?? NullLogger.Instance;
-        _notifier = new Notifier(Math.Max(1_000, options.MaxQueueSize), lost => LogbirdMetrics.Record(LogbirdMetrics.NotificationsLost, lost));
+        _notifier = new Notifier(Math.Max(1_000, options.MaxQueueSize), lost => Interlocked.Add(ref _notificationsLost, lost));
         if (!_enabled)
         {
             return;
@@ -134,7 +136,10 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         _queue = new EventQueue(options.MaxQueueSize, options.QueueFullBehavior);
         _sender = new BatchSender(http, options.Endpoint!, options.IngestKey!, options.MaxRetries, options.RequestTimeout, OnSenderDrop, OnSenderWarning, () => _queue!.CompleteSatisfiedWaiters(), Report, delay);
         _loop = Task.Run(RunAsync);
+        LogbirdMetrics.Register(this);
     }
+
+    internal const int DropReasonCount = (int)DropReason.InvalidEntityId + 1;
 
     /// <summary>The SDK version sent in the <c>X-Logbird-SDK</c> header.</summary>
     public static string Version { get; } = ReadVersion();
@@ -203,7 +208,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 if (result is null)
                 {
                     Interlocked.Increment(ref _filtered);
-                    LogbirdMetrics.Record(LogbirdMetrics.Filtered, 1);
                     return;
                 }
 
@@ -213,7 +217,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 occurredAt = source.OccurredAt ?? occurredAt;
             }
 
-            if (!ReferenceEquals(source, auditEvent) && JsonDepth.Exceeds(source))
+            if (_beforeSend is not null && JsonDepth.Exceeds(source))
             {
                 throw new LogbirdDeliveryException($"An audit event nests JSON deeper than {JsonDepth.Max} levels and was dropped.");
             }
@@ -260,12 +264,10 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             {
                 foreach (var field in whitespace)
                 {
-                    Warn(eventId, eventAction, $"surrounding whitespace in {field} is kept as sent");
+                    Warn(eventId, eventAction, $"surrounding whitespace in {field} is kept as sent", $"surrounding whitespace in {field}");
                 }
 
                 Interlocked.Increment(ref _tracked);
-                LogbirdMetrics.Record(LogbirdMetrics.Tracked, 1);
-                LogbirdMetrics.RecordQueueLength(1);
                 if (count == 1)
                 {
                     Interlocked.Exchange(ref _firstQueuedAtTicks, _clock.Elapsed.Ticks);
@@ -281,7 +283,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             {
                 if (added is not null)
                 {
-                    LogbirdMetrics.RecordQueueLength(-1);
                 }
 
                 overflow.TrySettle();
@@ -422,6 +423,10 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         {
             // Best effort.
         }
+        finally
+        {
+            LogbirdMetrics.Unregister(this);
+        }
     }
 
     /// <summary>
@@ -435,7 +440,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             var (queued, inFlight, waiters) = _queue!.Abandon();
 
             // In-flight events already left the queue-length gauge when they were dequeued.
-            LogbirdMetrics.RecordQueueLength(-queued.Count);
             foreach (var item in inFlight)
             {
                 Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before the event was sent.");
@@ -606,7 +610,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 break;
             }
 
-            LogbirdMetrics.RecordQueueLength(-batch.Length);
             SendResult result;
             try
             {
@@ -621,7 +624,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             if (result.Delivered > 0)
             {
                 Interlocked.Add(ref _delivered, result.Delivered);
-                LogbirdMetrics.Record(LogbirdMetrics.Delivered, result.Delivered);
             }
 
             var overflow = _queue.FinishBatch(result.Failure is null ? [] : result.Unsettled);
@@ -633,7 +635,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
             if (result.Failure is { } failure)
             {
-                LogbirdMetrics.RecordQueueLength(result.Unsettled.Count - overflow.Count);
                 foreach (var item in overflow)
                 {
                     if (item.TrySettle())
@@ -643,7 +644,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 }
 
                 Interlocked.Increment(ref _failedSends);
-                LogbirdMetrics.Record(LogbirdMetrics.FailedSends, 1);
                 _consecutiveFailures++;
                 var backoff = TimeSpan.FromSeconds(Math.Min(60, Math.Pow(2, Math.Min(_consecutiveFailures - 1, 6))));
                 if (backoff < _flushInterval)
@@ -655,13 +655,14 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 Interlocked.Exchange(ref _retryAtTicks, now + backoff.Ticks);
                 Interlocked.Exchange(ref _firstQueuedAtTicks, now);
 
-                // Settle the flush waiters before any diagnostics, so a throwing logger or callback cannot hold them.
-                // Their flush requests are answered: retry after the backoff, unless a new flush asks again.
-                _flushRequested = false;
-                _queue.CompleteWaitersAfterFailure();
+                // Post the diagnostics first (they run on the notifier, so nothing here can block), then answer the
+                // flush requests: a flush returns after the callbacks for its failure have run. Retry after the backoff,
+                // unless a new flush asks again.
                 var unsettledCount = result.Unsettled.Count;
                 Notify(() => LogDeliveryFailed(_logger, unsettledCount, backoff.TotalSeconds, failure));
                 Report(failure, log: false);
+                _flushRequested = false;
+                _queue.CompleteWaitersAfterFailure();
                 return false;
             }
 
@@ -690,26 +691,51 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private void OnSenderDrop(QueuedEvent item, DropReason reason, string? detail)
         => Drop(reason, item.Id, item.Action, item.Json, detail);
 
-    private void OnSenderWarning(QueuedEvent item, string reason) => Warn(item.Id, item.Action, reason);
+    // A server reason can quote the event's values; the message and log line keep only its leading field or code.
+    private void OnSenderWarning(QueuedEvent item, string reason)
+        => Warn(item.Id, item.Action, reason, "server warning (" + SafePrefix(reason) + ")");
 
-    private void Warn(string id, string action, string reason)
+    private static string SafePrefix(string reason)
+    {
+        var end = 0;
+        while (end < reason.Length && end < 40 && (char.IsLetterOrDigit(reason[end]) || reason[end] is '_' or '.' or '-'))
+        {
+            end++;
+        }
+
+        return end == 0 ? "unspecified" : reason.Substring(0, end);
+    }
+
+    private void Warn(string id, string action, string reason, string summary)
     {
         Interlocked.Increment(ref _warnings);
-        LogbirdMetrics.Record(LogbirdMetrics.Warned, 1);
-        Report(new LogbirdEventWarning(id, action, reason));
+        Report(new LogbirdEventWarning(id, action, reason, summary));
+    }
+
+    internal long NotificationsLost => Interlocked.Read(ref _notificationsLost);
+
+    internal void AddDroppedByReason(long[] totals)
+    {
+        for (var i = 0; i < totals.Length && i < _droppedByReason.Length; i++)
+        {
+            totals[i] += Interlocked.Read(ref _droppedByReason[i]);
+        }
     }
 
     private void Drop(DropReason reason, string? id, string action, byte[]? json, string? detail)
     {
+        if ((int)reason >= 0 && (int)reason < _droppedByReason.Length)
+        {
+            Interlocked.Increment(ref _droppedByReason[(int)reason]);
+        }
+
         if (reason == DropReason.Rejected)
         {
             Interlocked.Increment(ref _rejected);
-            LogbirdMetrics.Record(LogbirdMetrics.Rejected, 1);
         }
         else
         {
             Interlocked.Increment(ref _dropped);
-            LogbirdMetrics.RecordDropped(reason);
         }
 
         if (_onDrop is { } onDrop)

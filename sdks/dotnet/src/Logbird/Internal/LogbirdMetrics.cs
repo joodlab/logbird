@@ -5,114 +5,115 @@ using System.Diagnostics.Metrics;
 namespace Logbird.Internal;
 
 /// <summary>
-/// OpenTelemetry-compatible counters on the <c>Logbird</c> meter. Creating or recording an instrument runs listener
-/// code synchronously, so every step is guarded: a broken listener disables the instrument, never delivery.
+/// OpenTelemetry-compatible instruments on the <c>Logbird</c> meter. They are all observable: a listener reads the
+/// clients' counters when it collects, on its own thread. Nothing on the <c>Track</c>, delivery or shutdown paths ever
+/// calls into listener code, so a listener that throws, blocks or records audit events cannot affect capture.
+/// Creating an instrument does run listener code, so that is guarded too: a failure disables the instrument.
 /// </summary>
 internal static class LogbirdMetrics
 {
     public const string MeterName = "Logbird";
 
+    private static readonly object Gate = new();
+    private static readonly List<WeakReference<LogbirdClient>> Clients = [];
     private static readonly Meter? Meter = Create(() => new Meter(MeterName, LogbirdClient.Version));
 
-    public static readonly Counter<long>? Tracked = Counter("logbird.events.tracked", "{event}", "Events accepted into the in-memory queue.");
+    // Kept alive by these fields; each callback sums over the live clients.
+    private static readonly object?[] Instruments =
+    [
+        Counter("logbird.events.tracked", "{event}", "Events accepted into the in-memory queue.", s => s.Tracked),
+        Counter("logbird.events.delivered", "{event}", "Events the server stored.", s => s.Delivered),
+        Counter("logbird.events.rejected", "{event}", "Events the server rejected individually.", s => s.Rejected),
+        Counter("logbird.events.filtered", "{event}", "Events skipped by BeforeSend.", s => s.Filtered),
+        Counter("logbird.events.warned", "{warning}", "Warnings about stored events (identifier whitespace, server warnings).", s => s.Warnings),
+        Counter("logbird.batches.failed", "{batch}", "Batches that failed after all retries and were queued again.", s => s.FailedSends),
+        Create(() => Meter?.CreateObservableCounter("logbird.events.dropped", DroppedByReason, "{event}", "Events that will not be stored, by reason.")),
+        Create(() => Meter?.CreateObservableCounter(
+            "logbird.notifications.lost", () => Sum(client => client.NotificationsLost), "{notification}", "OnDrop/OnError notifications skipped because the callbacks fell too far behind.")),
+        Create(() => Meter?.CreateObservableUpDownCounter("logbird.queue.length", () => Sum(client => client.Stats.QueueLength), "{event}", "Events waiting to be sent.")),
+    ];
 
-    public static readonly Counter<long>? Delivered = Counter("logbird.events.delivered", "{event}", "Events the server stored.");
-
-    public static readonly Counter<long>? Rejected = Counter("logbird.events.rejected", "{event}", "Events the server rejected individually.");
-
-    public static readonly Counter<long>? Dropped = Counter("logbird.events.dropped", "{event}", "Events that will not be stored, by reason.");
-
-    public static readonly Counter<long>? FailedSends = Counter("logbird.batches.failed", "{batch}", "Batches that failed after all retries and were queued again.");
-
-    public static readonly Counter<long>? Filtered = Counter("logbird.events.filtered", "{event}", "Events skipped by BeforeSend.");
-
-    public static readonly Counter<long>? Warned = Counter("logbird.events.warned", "{warning}", "Warnings about stored events (identifier whitespace, server warnings).");
-
-    public static readonly Counter<long>? NotificationsLost = Counter(
-        "logbird.notifications.lost", "{notification}", "OnDrop/OnError notifications skipped because the callbacks fell too far behind.");
-
-    public static readonly UpDownCounter<long>? QueueLength = Create(() => Meter?.CreateUpDownCounter<long>("logbird.queue.length", "{event}", "Events waiting to be sent."));
-
-    /// <summary>
-    /// True while a measurement is being recorded on this thread. A listener that records an audit event from its
-    /// measurement callback re-enters Logbird; nested measurements are skipped so that cannot recurse.
-    /// </summary>
-    [ThreadStatic]
-    private static bool _recording;
-
-    /// <summary>Records a measurement. A throwing <c>MeterListener</c> must never break delivery or reach the host.</summary>
-    public static void Record(Counter<long>? counter, long value)
+    public static void Register(LogbirdClient client)
     {
-        if (counter is null || _recording)
+        lock (Gate)
         {
-            return;
-        }
-
-        _recording = true;
-        try
-        {
-            counter.Add(value);
-        }
-        catch
-        {
-            // Telemetry is best effort.
-        }
-        finally
-        {
-            _recording = false;
+            Clients.Add(new WeakReference<LogbirdClient>(client));
         }
     }
 
-    /// <summary>Records a dropped event with its reason tag.</summary>
-    public static void RecordDropped(DropReason reason)
+    public static void Unregister(LogbirdClient client)
     {
-        if (Dropped is null || _recording)
+        lock (Gate)
         {
-            return;
-        }
-
-        _recording = true;
-        try
-        {
-            Dropped.Add(1, Reason(reason));
-        }
-        catch
-        {
-            // Telemetry is best effort.
-        }
-        finally
-        {
-            _recording = false;
+            Clients.RemoveAll(reference => !reference.TryGetTarget(out var target) || ReferenceEquals(target, client));
         }
     }
 
-    /// <summary>Changes the queue length gauge.</summary>
-    public static void RecordQueueLength(long delta)
+    internal static string ReasonName(DropReason reason) => reason switch
     {
-        if (delta == 0 || QueueLength is null || _recording)
+        DropReason.QueueFull => "queue_full",
+        DropReason.Rejected => "rejected",
+        DropReason.HttpError => "http_error",
+        DropReason.TooLarge => "too_large",
+        DropReason.Shutdown => "shutdown",
+        DropReason.InvalidEntityId => "invalid_entity_id",
+        _ => "invalid",
+    };
+
+    private static ObservableCounter<long>? Counter(string name, string unit, string description, Func<LogbirdStats, long> read)
+        => Create(() => Meter?.CreateObservableCounter(name, () => Sum(client => read(client.Stats)), unit, description));
+
+    private static long Sum(Func<LogbirdClient, long> read)
+    {
+        long total = 0;
+        foreach (var client in LiveClients())
         {
-            return;
+            total += read(client);
         }
 
-        _recording = true;
-        try
-        {
-            QueueLength.Add(delta);
-        }
-        catch
-        {
-            // Telemetry is best effort.
-        }
-        finally
-        {
-            _recording = false;
-        }
+        return total;
     }
 
-    public static KeyValuePair<string, object?> Reason(DropReason reason) => new("reason", ReasonName(reason));
+    private static IEnumerable<Measurement<long>> DroppedByReason()
+    {
+        var totals = new long[LogbirdClient.DropReasonCount];
+        foreach (var client in LiveClients())
+        {
+            client.AddDroppedByReason(totals);
+        }
 
-    private static Counter<long>? Counter(string name, string unit, string description)
-        => Create(() => Meter?.CreateCounter<long>(name, unit, description));
+        var measurements = new List<Measurement<long>>();
+        for (var i = 0; i < totals.Length; i++)
+        {
+            // Server rejections have their own instrument.
+            if (totals[i] != 0 && (DropReason)i != DropReason.Rejected)
+            {
+                measurements.Add(new Measurement<long>(totals[i], new KeyValuePair<string, object?>("reason", ReasonName((DropReason)i))));
+            }
+        }
+
+        return measurements;
+    }
+
+    private static List<LogbirdClient> LiveClients()
+    {
+        var live = new List<LogbirdClient>();
+        lock (Gate)
+        {
+            Clients.RemoveAll(reference =>
+            {
+                if (!reference.TryGetTarget(out var client))
+                {
+                    return true;
+                }
+
+                live.Add(client);
+                return false;
+            });
+        }
+
+        return live;
+    }
 
     private static T? Create<T>(Func<T?> create)
         where T : class
@@ -127,15 +128,4 @@ internal static class LogbirdMetrics
             return null;
         }
     }
-
-    private static string ReasonName(DropReason reason) => reason switch
-    {
-        DropReason.QueueFull => "queue_full",
-        DropReason.Rejected => "rejected",
-        DropReason.HttpError => "http_error",
-        DropReason.TooLarge => "too_large",
-        DropReason.Shutdown => "shutdown",
-        DropReason.InvalidEntityId => "invalid_entity_id",
-        _ => "invalid",
-    };
 }

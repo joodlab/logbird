@@ -35,7 +35,7 @@ internal static class JsonDepth
         return false;
     }
 
-    private static bool Exceeds(JsonNode? root)
+    public static bool Exceeds(JsonNode? root, int max = Max)
     {
         if (root is null)
         {
@@ -47,7 +47,7 @@ internal static class JsonDepth
         while (pending.Count > 0)
         {
             var (node, depth) = pending.Pop();
-            if (depth > Max)
+            if (depth > max)
             {
                 return true;
             }

@@ -282,13 +282,11 @@ public class HardeningTests
     }
 
     [Theory]
-    [InlineData("", null, null, null)]
-    [InlineData(null, "", null, null)]
-    [InlineData(null, null, "", null)]
-    [InlineData(null, null, null, "")]
-    [InlineData(null, "invoice", null, null)]
-    public void Empty_or_dangling_trail_selectors_are_rejected_instead_of_widening_the_search(string? targetId, string? targetType, string? actorId, string? tenantId)
-        => Assert.Throws<ArgumentException>(() => EventSearch.ForTrail(targetId, targetType, actorId, tenantId));
+    [InlineData("", null, null)]
+    [InlineData(null, "", null)]
+    [InlineData(null, null, "")]
+    public void Empty_trail_selectors_are_rejected_instead_of_widening_the_search(string? targetId, string? actorId, string? tenantId)
+        => Assert.Throws<ArgumentException>(() => EventSearch.ForTrail(targetId, actorId, tenantId));
 
     [Fact]
     public async Task A_cursor_that_does_not_advance_is_an_error_not_the_end()

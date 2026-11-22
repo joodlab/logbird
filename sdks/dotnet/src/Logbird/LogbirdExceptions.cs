@@ -45,15 +45,15 @@ public class LogbirdDeliveryException : Exception
 /// </summary>
 public sealed class LogbirdEventWarning : LogbirdDeliveryException
 {
-    internal LogbirdEventWarning(string eventId, string action, string reason)
-        : base($"Logbird warning for event {eventId} ({action}): {reason}")
+    internal LogbirdEventWarning(string eventId, string action, string reason, string summary)
+        : base("Logbird warning about a stored event: " + summary)
     {
         EventId = eventId;
         Action = action;
         Reason = reason;
     }
 
-    /// <summary>The event id.</summary>
+    /// <summary>The event id. Not part of <see cref="Exception.Message"/>, which never contains event data.</summary>
     public string EventId { get; }
 
     /// <summary>The event action.</summary>

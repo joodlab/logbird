@@ -92,6 +92,10 @@ public class CrossSdkTests
                 ["neg0"] = -0.0,
                 ["tenth"] = 0.10m,
                 ["max"] = 9_007_199_254_740_991L,
+                ["nan"] = double.NaN,
+                ["inf"] = double.PositiveInfinity,
+                ["ninf"] = double.NegativeInfinity,
+                ["eps"] = double.Epsilon,
             },
         });
         Assert.True(await client.FlushAsync());
