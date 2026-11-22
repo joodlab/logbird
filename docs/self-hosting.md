@@ -3,13 +3,13 @@
 ## Five-minute quickstart
 
 Install Docker Engine and Compose >=2.24.4 (Linux containers). The default stack
-pulls the four published GHCR images for `LOGBIRD_VERSION=0.1.1`; it does not
+pulls the four published GHCR images for `LOGBIRD_VERSION=0.1.2`; it does not
 compile source. Images are available only after the corresponding tagged release
 finishes publishing. Check the [release page](https://github.com/joodlab/logbird/releases)
 before installing; release preparation in Git is not proof of registry availability.
 
 ```sh
-git clone --branch v0.1.1 https://github.com/joodlab/logbird.git
+git clone --branch v0.1.2 https://github.com/joodlab/logbird.git
 cd logbird
 sh scripts/selfhost-init.sh
 # Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
@@ -96,7 +96,7 @@ One .env.example serves source development and containers. Empty URL overrides l
 | INGEST_RATE_LIMIT_PER_MINUTE / READ_RATE_LIMIT_PER_MINUTE | 3000 / 1200 per project key (shared Redis limits) |
 | VIEWER_READ_RATE_LIMIT_PER_MINUTE / VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE | 300 per minting key and tenant (viewer-token reads, on top of the project read limit) / 600 viewer tokens minted per key. See [scoped read access](scoped-read-access.md) |
 | LOGBIRD_BIND / LOGBIRD_HTTP_PORT | 127.0.0.1 / 4600; only app is published |
-| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / 0.1.1; pulls `<registry>/logbird-<role>:<version>` |
+| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / 0.1.2; pulls `<registry>/logbird-<role>:<version>` |
 | LOGBIRD_SOURCE_VERSION | local; only the source-build override uses this tag |
 | LOGBIRD_DOMAIN / ACME_EMAIL | TLS hostname / optional ACME email |
 | NODE_ENV / PORT | Source development / 4601; containers force production and service ports |
@@ -315,7 +315,7 @@ socket-idle timeout grows to the budget plus five minutes. Progress headers are
 spaced so a statement emits at most about 20 (every 30 seconds at the default),
 well under Node's 16 KiB response-header limit. A proxy between the worker and
 ClickHouse must therefore allow at least that long without bytes (raise its idle timeout above
-30 seconds, or above budget/20 for larger budgets), or it cuts long statements. The final 007/008 coverage pass
+30 seconds, or above the budget divided by 20 and rounded up to a whole second for larger budgets), or it cuts long statements. The final 007/008 coverage pass
 runs in id-hash buckets, each capped at one fifth of the budget (120 seconds by
 default). Each bucket rescans both raw and index tables, so per-bucket time grows
 linearly with history and the whole pass roughly with its square.
