@@ -25,7 +25,7 @@ describe('placeholder data is never current', () => {
   it('a project query switching range shows nothing from the previous range until its own answer arrives', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const answers = new Map<string, (v: string) => void>();
-    let switchRange: (r: string) => void = () => {};
+    let switchRange: ((r: string) => void) | undefined;
     function Widget() {
       const [range, setRange] = useState('24h');
       switchRange = setRange;
@@ -53,7 +53,7 @@ describe('placeholder data is never current', () => {
     });
     expect(host.textContent).toBe('1,204 events · 24h');
     await act(async () => {
-      switchRange('7d');
+      switchRange?.('7d');
       await settle();
     });
     // The 24h answer is still in the query (placeholder), but it must not render under "7d".
@@ -86,30 +86,66 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-describe('every consumer of a placeholder-enabled query reads it through current()/awaiting()', () => {
+/**
+ * Reads of a placeholder-enabled query's `.data` that do not go through `current()`: each `const x = useQuery(...)` (or
+ * `useInfiniteQuery`) built from such a query, directly or through an options variable, may read `x.data` only on a
+ * line that branches on `x.isPlaceholderData` (or right after one), which is how a component shows an old answer dimmed.
+ */
+export function unguardedReads(src: string, queries: readonly string[]): string[] {
+  const names = queries.join('|');
+  const optionVars = [...src.matchAll(new RegExp(String.raw`(?:const|let)\s+(\w+)\s*=\s*(?:\{\s*\.\.\.)?(?:${names})\(`, 'g'))].map((m) => m[1]);
+  const sources = [names, ...optionVars].join('|');
+  const results = [
+    ...src.matchAll(new RegExp(String.raw`(?:const|let)\s+(\w+)\s*=\s*use(?:Infinite)?Query\(\s*(?:\{\s*\.\.\.)?(?:${sources})\b`, 'g')),
+  ].map((m) => m[1]);
+  const lines = src.split('\n');
+  const problems: string[] = [];
+  for (const r of results) {
+    const reads = new RegExp(String.raw`\b${r}\.data\b`);
+    const branch = new RegExp(String.raw`\b${r}\.isPlaceholderData\b`);
+    lines.forEach((line, i) => {
+      if (reads.test(line) && !branch.test(line) && !branch.test(lines[i - 1] ?? '')) problems.push(`${r}.data on line ${i + 1}: ${line.trim()}`);
+    });
+  }
+  return problems;
+}
+
+describe('the guard catches unguarded reads', () => {
+  it('flags a second, unguarded query in a file that already uses current()', () => {
+    const src = [
+      "import { current } from '@/lib/api/current';",
+      'const self = useQuery(facetQuery(projectId, "actor", range, q, 1));',
+      'const series = useQuery({ ...histogramQuery(projectId, range, q), retry });',
+      'const name = current(self)?.values[0]?.label;',
+      'const chart = series.data;',
+    ].join('\n');
+    expect(unguardedReads(src, ['facetQuery', 'histogramQuery'])).toEqual(['series.data on line 5: const chart = series.data;']);
+  });
+  it('follows options built into a variable first', () => {
+    const src = ['const options = fieldsQuery(projectId, range);', 'const fields = useQuery(options);', 'const rows = fields.data?.data ?? [];'].join(
+      '\n',
+    );
+    expect(unguardedReads(src, ['fieldsQuery'])).toHaveLength(1);
+  });
+  it('accepts an explicit placeholder branch', () => {
+    const src = [
+      'const facet = useQuery(facetQuery(p, f, r, q, 20));',
+      'const values = facet.isPlaceholderData ? [] : (facet.data?.values ?? []);',
+    ].join('\n');
+    expect(unguardedReads(src, ['facetQuery'])).toEqual([]);
+  });
+});
+
+describe('every consumer of a placeholder-enabled query reads it through current() or an explicit placeholder branch', () => {
   const queries = placeholderQueries();
   it('finds the placeholder-enabled queries', () => {
     expect(queries).toEqual(
       expect.arrayContaining(['overviewQuery', 'eventsInfiniteQuery', 'histogramQuery', 'facetQuery', 'entityListQuery', 'fieldsQuery']),
     );
   });
-
   const root = join(import.meta.dirname, '..', '..');
-  const consumers = sourceFiles(root).filter((file) => {
-    const src = readFileSync(file, 'utf8');
-    return queries.some((q) => new RegExp(`use(?:Infinite)?Query\\(\\s*(?:\\{\\s*\\.\\.\\.)?${q}\\(`).test(src));
-  });
-
-  /** Consumers that may keep the previous answer as it is, and why. */
-  const allowed: Record<string, string> = {
-    // Field names from the previous range are still valid autocomplete suggestions; nothing is counted or labelled.
-    'components/query-input/use-completions.ts': 'autocomplete field names',
-  };
-
-  it.each(consumers.map((f) => [relative(root, f).replaceAll('\\', '/'), f]))('%s', (name, file) => {
-    if (allowed[name]) return;
-    const src = readFileSync(file, 'utf8');
-    // Either the shared helpers, or an explicit `isPlaceholderData` branch that shows the old answer dimmed and busy.
-    expect(/from '@\/lib\/api\/current'/.test(src) || /isPlaceholderData/.test(src)).toBe(true);
+  const files = sourceFiles(root).filter((file) => queries.some((q) => readFileSync(file, 'utf8').includes(`${q}(`)));
+  it.each(files.map((f) => [relative(root, f).replaceAll('\\', '/'), f]))('%s', (_name, file) => {
+    expect(unguardedReads(readFileSync(file, 'utf8'), queries)).toEqual([]);
   });
 });

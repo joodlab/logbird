@@ -102,11 +102,19 @@ describe('isValidRange rejects ranges that name no window (#203)', () => {
       '2026-11-22T04:00:00.000Z..2026-11-22T04:00:00.000Z',
       '1969-12-31T00:00:00.000Z..2026-11-22T00:00:00.000Z',
       '2026-11-22T00:00:00.000Z..+275760-09-13T00:00:00.000Z',
+      // Dates that do not exist, and years past what storage (DateTime64) supports.
+      '2026-02-30T00:00:00.000Z..2026-03-04T00:00:00.000Z',
+      '2026-11-22T24:00:00.000Z..2026-11-23T01:00:00.000Z',
+      '2026-11-22T00:00:00.000Z..2500-01-01T00:00:00.000Z',
       '2026-11-22T00:00:00.000Z..2026-11-23T00:00:00.000Z..2026-11-24T00:00:00.000Z',
       'yesterday',
       '',
     ])
       expect(isValidRange(r, now), r).toBe(false);
+  });
+  it('labels a stored or shared invalid range as the default it opens', () => {
+    expect(rangeLabel('0d')).toBe('Last 24 hours');
+    expect(rangeLabel('99999999999d')).toBe('Last 24 hours');
   });
   it('resolves an invalid range to the default window instead of throwing', () => {
     const fallback = resolveRange('24h', now);

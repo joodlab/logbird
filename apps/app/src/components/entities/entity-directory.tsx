@@ -103,8 +103,8 @@ export function EntityDirectory({ projectId, section, q, type, sort = 'events', 
   const types = useQuery({ ...facetQuery(projectId, typeField ?? 'action', '90d', '', 12), enabled: Boolean(typeField) });
   // While a new search loads, the previous search's rows stay, dimmed and marked busy (the spinner in the search box says
   // why); the empty state and the type chips only ever describe the current answer.
-  const rows = list.data?.pages.flatMap((p) => p.data) ?? [];
   const updating = list.isPlaceholderData;
+  const rows = list.data?.pages.flatMap((p) => p.data) ?? [];
   // Events without a type cannot be filtered by type: only offer real values.
   const typeValues = (current(types)?.values ?? []).filter((t) => t.value);
 

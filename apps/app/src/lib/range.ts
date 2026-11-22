@@ -38,10 +38,21 @@ export const ALL_RANGE = 'all';
 /** 2000-01-01T00:00:00Z: earlier than any event ingest can admit (3650 days before receipt) until 2035. */
 const ALL_FROM_MS = Date.UTC(2000, 0, 1);
 
-/** Latest instant a range may name: 9999-12-31T23:59:59.999Z, the last one `toISOString` writes in four-digit form. */
-const MAX_MS = Date.UTC(9999, 11, 31, 23, 59, 59, 999);
-/** An endpoint the API accepts: a finite instant from 1970 (before any admissible event) to the year 9999. */
+/** Latest instant a range may name: 2299-12-31T23:59:59.999Z, the end of ClickHouse's DateTime64 calendar. */
+const MAX_MS = Date.UTC(2299, 11, 31, 23, 59, 59, 999);
+/** An endpoint the API and storage accept: a finite instant from 1970 (before any admissible event) to 2299. */
 const representable = (ms: number) => Number.isFinite(ms) && ms >= 0 && ms <= MAX_MS;
+
+const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+/** An absolute endpoint as written: an ISO instant whose date and time exist (no Feb 30, no 24:00), else NaN. */
+function parseInstant(text: string): number {
+  const m = ISO_INSTANT.exec(text);
+  if (!m) return Number.NaN;
+  const [y, mo, d, h, mi, s] = [m[1], m[2], m[3], m[4], m[5], m[6] ?? '0'].map(Number) as [number, number, number, number, number, number];
+  const day = new Date(Date.UTC(y, mo - 1, d));
+  if (day.getUTCFullYear() !== y || day.getUTCMonth() !== mo - 1 || day.getUTCDate() !== d || h > 23 || mi > 59 || s > 59) return Number.NaN;
+  return Date.parse(text);
+}
 
 /** Bounds of a relative or absolute range, or null when it names no window (zero, reversed or unrepresentable). */
 function windowOf(range: string, now: number): { fromMs: number; toMs: number; relative: boolean } | null {
@@ -53,8 +64,8 @@ function windowOf(range: string, now: number): { fromMs: number; toMs: number; r
   }
   const [a, b, extra] = range.split('..');
   if (!a || !b || extra !== undefined) return null;
-  const fromMs = Date.parse(a);
-  const toMs = Date.parse(b);
+  const fromMs = parseInstant(a);
+  const toMs = parseInstant(b);
   return representable(fromMs) && representable(toMs) && fromMs < toMs ? { fromMs, toMs, relative: false } : null;
 }
 
@@ -100,6 +111,8 @@ export function rangePhrase(range: string): string {
 }
 
 export function rangeLabel(range: string): string {
+  // A stored or shared range that names no window opens as the default: label it as what opens.
+  if (!isValidRange(range)) return rangeLabel(DEFAULT_RANGE);
   if (range === ALL_RANGE) return 'All time';
   const preset = RANGE_PRESETS.find((p) => p.value === range);
   if (preset) return preset.label;

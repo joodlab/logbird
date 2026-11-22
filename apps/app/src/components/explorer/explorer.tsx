@@ -201,6 +201,7 @@ function ProjectExplorer({
 
   // The tail follows *arrival* (`receivedAt`), so late or back-dated events still stream in.
   const firstPage = problem ? undefined : current(events)?.pages[0]?.data;
+  const firstPageTook = current(events)?.pages[0]?.tookMs;
   useEffect(() => {
     if (!sinceRef.current && firstPage) sinceRef.current = newestArrival(firstPage) ?? new Date().toISOString();
   }, [firstPage]);
@@ -507,7 +508,7 @@ function ProjectExplorer({
                   {totalLowerBound ? formatSearchTotal({ count: total, exact: false }) : formatNumber(total)}
                 </span>{' '}
                 {!totalLowerBound && total === 1 ? 'event' : 'events'} · {rangeName}
-                {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
+                {firstPageTook !== undefined ? ` · ${Math.round(firstPageTook)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>
             )}
@@ -539,7 +540,7 @@ function ProjectExplorer({
                 : (from, to) => {
                     // Keep the selection inside the search that produced the visible bars (its end can lie ahead of
                     // now, and a relative range has moved on since).
-                    const shown = histogram.data ?? resolveRange(range);
+                    const shown = current(histogram) ?? resolveRange(range);
                     const start = Math.max(from, shown.fromMs);
                     const end = Math.min(to, shown.toMs);
                     if (start < end) onChange({ range: absoluteRange(start, end), live: undefined });
