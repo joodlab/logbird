@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+## 0.2.1
+
+### Highlights
+
+- Jump to (Ctrl K) finds an entity by its id: the exact id leads the list, a record is found by its bare id (`article_27_2` for `article:article_27_2`), and "Search events for" runs the id query instead of free text.
+- When free text in the explorer is exactly an entity's id, the empty state says so and offers the id query; a wider range is offered only when older events match.
+- The console forwards `/pricing` and `/use-cases` to the marketing site when one is configured.
+
+### Changes
+
+**Entity search.** With `q`, the console's entity list
+(`GET /api/projects/:projectId/entities`, for actors, tenants, executors and records) ranks
+by match first, then by the chosen sort: the id exactly as typed, the same id in
+another case, id prefix, name prefix, substring, then fuzzy. A record's bare id counts as
+its id. One or two characters match only ids, a record's bare id and names that start with
+them. `q` accepts up to 1,024 characters (was 200). Without `q` nothing changes. On a
+project with 1.14 million records, the four lookups behind Jump to took 12 to 300 ms in our
+measurement, down from 0.85 to 1.35 s. The order is described in
+[docs/SPEC.md](docs/SPEC.md).
+
+**Console.** Jump to opens an entity whose id is exactly the typed text, across actors,
+tenants, executors and records. Free text is the fallback only after a complete lookup
+found no exact id; a failed lookup shows an error with a "Search as text" action. The
+query bar keeps the previous suggestions, dimmed, while the next ones load. Record pages
+say "Every event for this record since ...".
+
+**Marketing site.** The console's forwarding list gains `/pricing` and `/use-cases`.
+`docker-compose.site.yml` and the site image accept an optional `WEB_CHECKOUT_URL`; leaving
+it unset changes nothing.
+
+**.NET.** `Stats` and the `Logbird` meter count every event a completed `FlushAsync()`
+covers by the time it returns. An ASP.NET Core example (`examples/aspnetcore`) and a
+[.NET guide](docs/sdk-dotnet.md) are added. The packages are not on nuget.org yet; the
+release workflow has a NuGet job that stays off until a maintainer enables it.
+
+### Upgrade and known limits
+
+- No settings change and no migration. Set `LOGBIRD_VERSION=0.2.1` and redeploy.
+- The entity list is the console's own API; `/v1` callers see no change. Its cursor is now
+  bound to whether the list was a search, so a console tab that was paging a search during
+  the upgrade may need a reload.
+- Two record pairs that join to the same text, such as type `catalog` with id `item:27` and
+  type `catalog:item` with id `27`, share one row in the record directory, so their counts
+  are merged there (#223). Their events are stored and searched separately.
+
 ## 0.2.0
 
 ### Highlights
