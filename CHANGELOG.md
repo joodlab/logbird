@@ -22,7 +22,9 @@ is the [query language](docs/query-language.md) and
   for a custom attribute named `record` changes meaning, and a value that is neither a
   type and id nor `*` (for example `record:pending`) is rejected with 422. To keep
   searching that attribute, write `attr.record:pending`. This applies to `q` on
-  `/v1/events`, `/v1/export` and `/v1/facets`, and to saved views.
+  `/v1/events`, `/v1/export` and `/v1/facets`, to saved views, and to the filter stored on a
+  webhook endpoint (nothing is delivered in this release; review any endpoint filter that
+  uses `record:`).
 - **`\*` is a literal asterisk**, in quoted and unquoted values. `tenant:team\*` used to be
   a prefix search for ids starting with `team\`; it now matches the exact id `team*`.
 - **`\r` in a quoted value is a carriage return**; `\\r` is a backslash followed by `r`.
