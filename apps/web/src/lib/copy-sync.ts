@@ -26,6 +26,7 @@ export const NOT_CHECKED: Record<string, string> = {
     'a placeholder brief: the legal pages are their own wording source (owner-approved TSX); legal-pages.test.ts checks selected facts',
   'arabic-notes.md': 'reference strings for a future localization, not a page',
   'home.md': 'a brief: the page renders apps/web/src/content/home.ts, and content-modules.test.ts guards the route file',
+  'pricing.md': 'a brief: the page renders apps/web/src/content/pricing.ts; pricing.test.ts and content-modules.test.ts guard it',
 };
 
 const releaseDate = (iso: string) => {

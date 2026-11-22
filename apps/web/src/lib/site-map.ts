@@ -1,4 +1,5 @@
 import { homeMeta } from '../content/home';
+import { pricing } from '../content/pricing';
 import { GITHUB_PUBLIC } from '../env';
 import { CLOUD_OPEN } from './cloud';
 import { buildLog, postPath, posts, releases } from './publications';
@@ -86,6 +87,17 @@ export const siteMap: SitePage[] = [
     changefreq: 'weekly',
     ready: true,
     ogSlug: 'cloud',
+    inNav: true,
+    inFooter: true,
+  },
+  {
+    path: '/pricing',
+    ...pricing.meta,
+    section: 'product',
+    priority: 0.8,
+    changefreq: 'weekly',
+    ready: true,
+    ogSlug: 'pricing',
     inNav: true,
     inFooter: true,
   },

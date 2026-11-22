@@ -1,4 +1,4 @@
-import { APP_URL, GITHUB_PUBLIC, GITHUB_URL } from '../env';
+import { APP_URL, CHECKOUT_URL, GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import { SELF_HOST_VERSION } from '../lib/selfhost';
 
 /**
@@ -25,6 +25,8 @@ export interface SiteState {
    * production proof; until then pages describe reading through your own backend. Flip SCOPED_READ_LIVE, in one change.
    */
   scopedReadLive: boolean;
+  /** Cloud checkout (WEB_CHECKOUT_URL). content/pricing.ts uses it only once the owner approves pricing. */
+  checkoutUrl?: string;
 }
 
 /** See SiteState.scopedReadLive. Stays false until the maintainer confirms the production proof (#138). */
@@ -37,6 +39,7 @@ export const SITE: SiteState = {
   selfHostVersion: SELF_HOST_VERSION,
   githubUrl: GITHUB_PUBLIC ? GITHUB_URL : undefined,
   scopedReadLive: SCOPED_READ_LIVE,
+  checkoutUrl: CHECKOUT_URL,
 };
 
 /** Words that differ with the repository's visibility. Both variants are required, so a missing one fails tsc. */
