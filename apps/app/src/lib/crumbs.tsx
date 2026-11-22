@@ -1,26 +1,32 @@
+import { useLocation } from '@tanstack/react-router';
 import { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
 
 /**
  * Pages with dynamic titles (an actor's name, an operation id) publish their last breadcrumb
  * here; static sections come from route `staticData.crumb`.
  */
-const CrumbContext = createContext<{ crumb: string | null; setCrumb: (c: string | null) => void }>({ crumb: null, setCrumb: () => undefined });
+type Crumb = { label: string; path: string } | null;
+const CrumbContext = createContext<{ crumb: Crumb; setCrumb: (c: Crumb) => void }>({ crumb: null, setCrumb: () => undefined });
 
 export function CrumbProvider({ children }: { children: ReactNode }) {
-  const [crumb, setCrumb] = useState<string | null>(null);
+  const [crumb, setCrumb] = useState<Crumb>(null);
   return <CrumbContext value={{ crumb, setCrumb }}>{children}</CrumbContext>;
 }
 
+/** The current page's dynamic crumb. One set by the previous page (still in state for a render) never shows here. */
 export function useCrumb(): string | null {
-  return useContext(CrumbContext).crumb;
+  const { crumb } = useContext(CrumbContext);
+  const { pathname } = useLocation();
+  return crumb && crumb.path === pathname ? crumb.label : null;
 }
 
 export function useSetCrumb(label: string | null | undefined): void {
   const { setCrumb } = useContext(CrumbContext);
+  const { pathname } = useLocation();
   useEffect(() => {
-    setCrumb(label ?? null);
+    setCrumb(label ? { label, path: pathname } : null);
     return () => setCrumb(null);
-  }, [label, setCrumb]);
+  }, [label, pathname, setCrumb]);
 }
 
 declare module '@tanstack/react-router' {

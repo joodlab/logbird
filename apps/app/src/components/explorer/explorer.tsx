@@ -55,6 +55,7 @@ interface ExplorerProps {
 }
 
 const FACETS_KEY = 'logbird.explorer.facets';
+const EMPTY_ROWS: AuditEvent[] = [];
 
 /**
  * The `EventsTable` result-set key: every input of the events query. That is the project, the range and the effective
@@ -107,6 +108,7 @@ function ProjectExplorer({
   // The base filter (an entity or support agent) must constrain all of `q`, even one with a top-level OR.
   const effectiveQ = andQuery(baseQuery ?? '', q);
   const queryBar = useRef<QueryInputHandle>(null);
+  const results = useRef<HTMLDivElement>(null);
   const eventsTable = useRef<EventsTableHandle>(null);
   const [facetsOpen, setFacetsOpen] = useState(() => {
     if (embedded || typeof window === 'undefined') return false;
@@ -152,6 +154,7 @@ function ProjectExplorer({
   // Rows from a previous search (a placeholder while the new range or query loads) are never shown or selectable as
   // this one's; a rejected query keeps the last good rows, labelled as such.
   const pages = problem ? lastGood.current.pages : events.isPlaceholderData ? undefined : events.data?.pages;
+  const resultsLoading = (events.isPending || events.isPlaceholderData) && !problem;
   // A rejected query shows the last good bars, labelled as such; otherwise bars from a previous search (a placeholder
   // while the new range or query loads) are never drawn as if they were this one's.
   const histogramData = problem ? lastGood.current.histogram : histogram.isPlaceholderData ? undefined : histogram.data;
@@ -159,14 +162,17 @@ function ProjectExplorer({
   /* ---------------- live tail ---------------- */
   const relative = isValidRange(range) && !range.includes('..');
   const liveActive = live && relative;
-  const [liveRows, setLiveRows] = useState<AuditEvent[]>([]);
+  // Streamed rows belong to one search (project, range, query, language): they are only ever shown with that search.
+  const liveKey = `${explorerResultKey(projectId, range, effectiveQ, lang)}|${live}`;
+  const [liveBuffer, setLiveBuffer] = useState<{ key: string; rows: AuditEvent[] }>({ key: liveKey, rows: [] });
+  const liveRows = liveBuffer.key === liveKey ? liveBuffer.rows : EMPTY_ROWS;
   const [fresh, setFresh] = useState<Set<string>>(new Set());
   const sinceRef = useRef<string | null>(null);
   const liveRowsRef = useRef<AuditEvent[]>([]);
   liveRowsRef.current = liveRows;
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset the tail whenever the result set identity changes
   useEffect(() => {
-    setLiveRows([]);
+    setLiveBuffer({ key: liveKey, rows: [] });
     sinceRef.current = null;
   }, [effectiveQ, lang, range, live]);
 
@@ -194,7 +200,7 @@ function ProjectExplorer({
       const incoming = data.filter((e) => !known.has(e.id));
       sinceRef.current = newestArrival(data) ?? since;
       if (incoming.length) {
-        setLiveRows((prev) => [...incoming, ...prev].slice(0, 2000));
+        setLiveBuffer((prev) => ({ key: liveKey, rows: [...incoming, ...(prev.key === liveKey ? prev.rows : [])].slice(0, 2000) }));
         setFresh(new Set(incoming.map((e) => e.id)));
       }
       return incoming.length;
@@ -530,7 +536,11 @@ function ProjectExplorer({
             {facetsPanel}
           </div>
         ) : null}
-        <div className={cn('relative flex min-h-0 min-w-0 flex-1 flex-col transition-opacity', problem && rows.length > 0 && 'opacity-45')}>
+        <div
+          className={cn('relative flex min-h-0 min-w-0 flex-1 flex-col outline-none transition-opacity', problem && rows.length > 0 && 'opacity-45')}
+          ref={results}
+          tabIndex={-1}
+        >
           {liveActive && liveRows.length > 0 ? (
             <div className="pointer-events-none absolute inset-x-0 top-10 z-20 flex justify-center">
               <span className="pointer-events-auto flex items-center gap-1.5 rounded-full border bg-popover px-3 py-1 text-xs shadow-md">
@@ -550,7 +560,7 @@ function ProjectExplorer({
               freshIds={fresh}
               hasMore={!problem && events.hasNextPage}
               loadMore={() => events.fetchNextPage()}
-              loading={(events.isPending || events.isPlaceholderData) && !problem}
+              loading={resultsLoading}
               onCursorChange={setCursorId}
               resultKey={resultKey}
               onSelect={(e) => {
@@ -570,7 +580,8 @@ function ProjectExplorer({
         event={selected}
         // Back to the row the sheet showed last (it may differ from the one opened, after j/k): never to <body>.
         // With no rows left (a refetch emptied the list meanwhile), to the query bar.
-        finalFocus={() => eventsTable.current?.cursorElement() ?? queryBar.current?.element() ?? true}
+        // Back to the row; while the new result loads (no rows yet), to the results region, never away to the query bar.
+        finalFocus={() => eventsTable.current?.cursorElement() ?? (resultsLoading ? results.current : null) ?? queryBar.current?.element() ?? true}
         onFilter={(term) => {
           addFilter(term);
         }}
