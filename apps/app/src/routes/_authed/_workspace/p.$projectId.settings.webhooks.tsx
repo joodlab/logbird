@@ -164,7 +164,15 @@ function WebhooksSettings() {
 function useEndpointMutations(projectId: string) {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks'] });
-  return { refresh };
+  /**
+   * The endpoint the server returned replaces the listed one at once, before the list is read again: an Edit opened
+   * in between sees the saved values (never the previous filter or its rejection).
+   */
+  const apply = (updated: WebhookEndpoint) => {
+    queryClient.setQueryData(webhooksQuery(projectId).queryKey, (list) => list?.map((e) => (e.id === updated.id ? updated : e)));
+    refresh();
+  };
+  return { refresh, apply };
 }
 
 function EndpointCard({
@@ -179,7 +187,7 @@ function EndpointCard({
   onEdit: (filterError?: string) => void;
   onRotate: () => void;
 }) {
-  const { refresh } = useEndpointMutations(projectId);
+  const { refresh, apply } = useEndpointMutations(projectId);
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const { org } = useOrganization();
@@ -188,9 +196,9 @@ function EndpointCard({
   const toggle = useMutation({
     mutationFn: (enabled: boolean) => api.webhooks.update(projectId, endpoint.id, { enabled }),
     ...webhookRetry,
-    onSuccess: (_, enabled) => {
+    onSuccess: (updated, enabled) => {
       toast.success(enabled ? 'Endpoint turned on' : 'Endpoint turned off');
-      refresh();
+      apply(updated);
     },
     onError: (error) => toast.error('Could not change the endpoint', { description: webhookErrorCopy(error) }),
   });
@@ -213,7 +221,7 @@ function EndpointCard({
     ...webhookRetry,
     onSuccess: (updated) => {
       setRejected(null);
-      refresh();
+      apply(updated);
       // Say what the returned endpoint says: another hold (a scope, an operator review) can still keep it paused.
       const still = endpointStates(updated).filter((s) => s.kind === 'hold');
       if (still.length)
@@ -371,7 +379,7 @@ function EndpointDialog({
   /** A created endpoint's secret, handed straight to the one-time dialog (never kept in mutation state). */
   onSecret: (issued: Issued) => void;
 }) {
-  const { refresh } = useEndpointMutations(projectId);
+  const { refresh, apply } = useEndpointMutations(projectId);
   const ids = useId();
   const [form, setForm] = useState<Form>(() => formFrom(endpoint));
   const [wasOpen, setWasOpen] = useState(false);
@@ -426,7 +434,8 @@ function EndpointDialog({
     },
     ...webhookRetry,
     onSuccess: (result, { at }) => {
-      refresh();
+      if (result && !('created' in result)) apply(result);
+      else refresh();
       if (at !== session.current) return;
       if (!(result && 'created' in result)) toast.success(result ? 'Endpoint saved' : 'Nothing to save');
       onClose();
