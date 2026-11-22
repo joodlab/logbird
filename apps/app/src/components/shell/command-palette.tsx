@@ -32,7 +32,7 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api/client';
 import { entitySearchQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
-import { ENTITY_SECTIONS, entityMatchRank, entityQuery, isExactId, resolveJump, sectionForKind } from '@/lib/entities';
+import { ENTITY_SECTIONS, entityMatchRank, entityQuery, exactPerKind, isExactId, resolveJump, sectionForKind } from '@/lib/entities';
 import { formatTerm } from '@/lib/query-language';
 import { PROJECT_NAV } from './nav';
 
@@ -50,7 +50,9 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   // Best match first across kinds; an exact id always leads (the server ranks it first whatever the per-kind cap).
   // One character is enough: ingest accepts an id like `7`.
   const lookup = useQuery({ ...entitySearchQuery(projectId ?? '', debounced), enabled: open && Boolean(projectId) && debounced.length >= 1 });
-  const found = lookup.data?.entities;
+  // Only an answer for exactly the current text counts: during the debounce the last answer is for older text (its
+  // `BIZ_27` must not stand in for a newly typed `biz_27`).
+  const found = debounced === search.trim() ? lookup.data?.entities : undefined;
   // Support agents only appear as `impersonator`, never in the actor directory: look them up by name or id.
   const agents = useQuery({
     queryKey: ['palette-support-agents', projectId, debounced],
@@ -68,7 +70,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   const firstAgentValue = firstAgent ? `support ${firstAgent.value} ${firstAgent.label}` : '';
   const trimmed = search.trim();
   // Entities whose id is exactly what was typed (`biz_27`, or a record's bare id): opened directly from Jump to.
-  const exact = (found ?? []).filter((e) => isExactId(entityMatchRank(e, trimmed))).slice(0, 4);
+  const exact = exactPerKind(found, trimmed);
   const openValue = (e: { kind: string; id: string }) => `${trimmed} open ${e.kind} ${e.id}`;
   const firstExact = exact[0];
   const firstExactValue = firstExact ? openValue(firstExact) : '';
@@ -138,13 +140,11 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
     const pid = projectId;
     const text = trimmed;
     const token = ++selection.current;
-    let entities = debounced === text ? found : undefined;
-    if (!entities) {
-      const answer = await queryClient.fetchQuery(entitySearchQuery(pid, text)).catch(() => null);
-      if (token !== selection.current) return;
-      entities = answer?.entities;
-    }
-    const target = resolveJump(text, shape, entities);
+    // fetchQuery answers from the cache only when that answer is fresh and complete (a partial one is never fresh),
+    // and otherwise waits for the lookup, including one already in flight.
+    const answer = await queryClient.fetchQuery(entitySearchQuery(pid, text)).catch(() => null);
+    if (token !== selection.current) return;
+    const target = resolveJump(text, shape, answer?.entities);
     if (target.kind === 'entity') openEntity(pid, target.entity);
     else if (target.kind === 'operation')
       go(() => navigate({ to: '/p/$projectId/operations/$operationId', params: { projectId: pid, operationId: text } }));

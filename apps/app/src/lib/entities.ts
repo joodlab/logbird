@@ -122,6 +122,19 @@ export function resolveJump<E extends { kind?: EntityKind; id: string; name: str
   return shape ? { kind: shape } : { kind: 'search' };
 }
 
+/** The entities whose id is exactly the text, one per kind (the literal id before a case variant), best first. */
+export function exactPerKind<E extends { kind: EntityKind; id: string; name: string; type?: string }>(
+  entities: readonly E[] | undefined,
+  text: string,
+): E[] {
+  return (entities ?? [])
+    .map((entity, i) => ({ entity, i, rank: entityMatchRank(entity, text) }))
+    .filter((x) => isExactId(x.rank))
+    .sort((a, b) => a.rank - b.rank || a.i - b.i)
+    .filter((x, i, all) => all.findIndex((y) => y.entity.kind === x.entity.kind) === i)
+    .map((x) => x.entity);
+}
+
 export function targetEntityId(type: string, id: string): string {
   return `${type}:${id}`;
 }

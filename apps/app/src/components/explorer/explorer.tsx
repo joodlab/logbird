@@ -17,7 +17,7 @@ import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
 import { entitySearchQuery, eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
-import { ENTITY_SECTIONS, entityMatchRank, entityQuery, idFromFreeText, isExactId, sectionForKind } from '@/lib/entities';
+import { ENTITY_SECTIONS, entityQuery, exactPerKind, idFromFreeText, sectionForKind } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
 import { andQuery, scopedQuery } from '@/lib/query-language';
@@ -331,7 +331,8 @@ function ProjectExplorer({
   const word = lang === 'query' ? idFromFreeText(q) : '';
   const idLookup = useQuery({ ...entitySearchQuery(projectId, word), enabled: showsEmpty && Boolean(word) });
   // Every kind with exactly this id (an actor and a tenant can share one): offer each.
-  const idMatches = word ? (idLookup.data?.entities ?? []).filter((e) => isExactId(entityMatchRank(e, word))).slice(0, 4) : [];
+  // One per kind (the literal id first within a kind), so case variants of one kind never crowd out another kind.
+  const idMatches = word ? exactPerKind(idLookup.data?.entities, word) : [];
   const idMatch = idMatches[0];
   // "a tenant id", or "the id of a tenant and an actor".
   const idPhrase =

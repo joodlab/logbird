@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { entityMatchRank, entityQuery, idFromFreeText, resolveJump } from './entities';
+import { entityMatchRank, entityQuery, exactPerKind, idFromFreeText, resolveJump } from './entities';
 
 describe('entity match rank (the order Jump to lists entities in)', () => {
   const tenant = (id: string, name = '') => ({ kind: 'tenant' as const, id, name, type: '' });
@@ -61,5 +61,21 @@ describe('where Jump to goes for pasted text', () => {
     expect(resolveJump('evt_9', 'event', entities)).toEqual({ kind: 'event' });
     expect(resolveJump('op_123', 'operation', undefined)).toEqual({ kind: 'operation' });
     expect(resolveJump('something', null, entities)).toEqual({ kind: 'search' });
+  });
+});
+
+describe('exact ids, one per kind', () => {
+  it('keeps the literal id per kind, so case variants of one kind never crowd out another kind', () => {
+    const e = (kind: 'actor' | 'tenant' | 'executor' | 'target', id: string, type = '') => ({ kind, id, name: '', type });
+    const found = [
+      e('actor', 'ACME'),
+      e('actor', 'Acme'),
+      e('actor', 'acme'),
+      e('actor', 'aCme'),
+      e('tenant', 'acme'),
+      e('executor', 'ACME'),
+      e('target', 'doc:ACME', 'doc'),
+    ];
+    expect(exactPerKind(found, 'acme').map((x) => `${x.kind}:${x.id}`)).toEqual(['actor:acme', 'tenant:acme', 'executor:ACME', 'target:doc:ACME']);
   });
 });
