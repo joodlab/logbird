@@ -31,10 +31,20 @@ describe('setup computation', () => {
   });
   it('reports samples, stopped ingestion and low conformance as attention', () => {
     expect(computeSetup(project, { ...events, sampleEvents: 2000 }, team).steps[1]?.status).toBe('attention');
-    const s = computeSetup(project, { ...events, firstEventAt: new Date(0).toISOString(), sampledEvents: 1, avgConformance: 11 }, team);
+    const s = computeSetup(
+      project,
+      { ...events, firstEventAt: new Date(0).toISOString(), lastEventAt: new Date(0).toISOString(), sampledEvents: 1, avgConformance: 11 },
+      team,
+    );
     expect(s.steps[2]?.status).toBe('attention');
     expect(s.steps[3]?.status).toBe('attention');
     expect(s.steps[4]?.status).toBe('todo');
+  });
+  it('keeps "events flowing" to do when only a console test event ever arrived', () => {
+    // firstEventAt counts the console test; lastEventAt counts only the integration's own events.
+    const s = computeSetup(project, { ...events, firstEventAt: new Date(0).toISOString(), lastEventAt: null }, team);
+    expect(s.steps[1]?.status).toBe('done');
+    expect(s.steps[2]?.status).toBe('todo');
   });
   it('sorts fields by missing coverage and completes with pending teammate', () => {
     const date = new Date(0);

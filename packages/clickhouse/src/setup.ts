@@ -7,11 +7,6 @@ export async function setupEventFacts(ch: ClickHouseClient, project: string) {
   // Sample data never counts. A console test event counts only as the first event (it proves the pipeline works); the
   // integration facts (recent arrivals, envelope, operation ids) leave out every Logbird-generated source (`logbird-*`).
   const params = { project, source: SAMPLE_DATA_SOURCES, reserved: LOGBIRD_SOURCE_PREFIX, limit: SETUP_ENVELOPE_SAMPLE };
-    project,
-    source: SAMPLE_DATA_SOURCES,
-    integration: [...SAMPLE_DATA_SOURCES, CONSOLE_TEST_EVENT_SOURCE],
-    limit: SETUP_ENVELOPE_SAMPLE,
-  };
   const read = async <T>(query: string) =>
     (await ch.query({ query, query_params: params, format: 'JSONEachRow', clickhouse_settings: { max_execution_time: 10 } })).json<T>();
   // Lifetime facts necessarily span all retained partitions. PREWHERE prunes by project;
