@@ -72,8 +72,10 @@ export type SearchQuery = z.infer<typeof searchQuerySchema>;
 export const searchResponseSchema = z.object({
   data: z.array(eventSchema),
   nextCursor: z.string().nullable(),
-  /** Approximate number of matches in range (may be capped / estimated for huge ranges). */
+  /** Number of matches in range. When `totalExact` is false it is a lower bound (capped at 10,001, or the count did not finish). */
   total: z.number().int(),
+  /** False when `total` is a lower bound. Absent from older servers: treat as exact below 10,001. */
+  totalExact: z.boolean().optional(),
   tookMs: z.number(),
 });
 export type SearchResponse = z.infer<typeof searchResponseSchema>;
