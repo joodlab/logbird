@@ -10,7 +10,7 @@ export {
 } from './webhooks';
 
 // Keep in sync with packages/sdk/package.json (verified by index.test.ts).
-const SDK_VERSION = '0.1.2';
+const SDK_VERSION = '0.1.3';
 const MAX_SEND_MS = 5 * 60_000;
 
 /** Copied structural envelope: no runtime or workspace dependency in the published SDK. */

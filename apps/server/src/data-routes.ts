@@ -207,7 +207,8 @@ export const dataRoutes = new Hono<AppEnv>()
     c.json(
       await ingest(c.get('project').id, {
         action: 'sample.record.updated',
-        actor: { ...c.get('user'), type: 'user' },
+        // Only the envelope fields: a large profile field (image) could exceed 256 KB and leak into the stream.
+        actor: { type: 'user', id: c.get('user').id, name: c.get('user').name, email: c.get('user').email },
         executor: { type: 'api', id: 'api-server' },
         targets: [{ type: 'record', id: 'sample', name: 'Sample record' }],
         changes: [{ field: 'status', before: 'pending', after: 'approved' }],
