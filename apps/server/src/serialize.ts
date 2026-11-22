@@ -18,6 +18,10 @@ export const serializeKey = (key: ApiKey & Creator) =>
     lastUsedUserAgent: key.lastUsedUserAgent ?? null,
     replacesKeyId: key.replacesKeyId ?? null,
     revokedAt: key.revokedAt?.toISOString() ?? null,
+    kind: key.scope ? 'scoped-read' : key.kind,
+    scope: key.scope ?? null,
+    embedOrigins: key.embedOrigins,
+    expiresAt: key.expiresAt?.toISOString() ?? null,
   });
 export const serializeView = (view: SavedView & Creator) =>
   savedViewSchema.parse({
