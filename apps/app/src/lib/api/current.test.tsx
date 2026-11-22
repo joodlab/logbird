@@ -353,6 +353,23 @@ describe('the guard catches direct reads', () => {
     // The file filter selects it too: placeholderData before the query call.
     expect(usesPlaceholders(extracted, [], false)).toBe(true);
   });
+  it('reads a regex after an arrow and a quoted placeholderData key', () => {
+    const arrow = [
+      'const opts = {',
+      '  select: (data) => /[\'"]/.test(JSON.stringify(data)),',
+      '  ...fieldsQuery(p, r),',
+      '};',
+      'const result = useQuery(opts);',
+      'return result.data;',
+    ].join('\n');
+    expect(unguardedReads(arrow, ['fieldsQuery'])).toHaveLength(1);
+    const quoted = [
+      "const result = useQuery({ queryKey: ['preview'], queryFn: loadPreview, 'placeholderData': keepPreviousData });",
+      'return result.data;',
+    ].join('\n');
+    expect(unguardedReads(quoted, [])).toHaveLength(1);
+    expect(usesPlaceholders(quoted, [], false)).toBe(true);
+  });
   it('flags data destructured from a result later', () => {
     const src = ['const fields = useQuery(fieldsQuery(p, r));', 'const { data, isFetching } = fields;'].join('\n');
     expect(unguardedReads(src, ['fieldsQuery'])).toEqual(['destructured data on line 2: const { data, isFetching } = fields;']);
