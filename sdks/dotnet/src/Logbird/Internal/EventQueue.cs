@@ -323,7 +323,8 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior, Actio
 
     private void Complete(bool failOutstanding, bool outstandingResult)
     {
-        List<(FlushWaiter Waiter, bool Result)>? done = null;
+        // Decided and published under the lock (continuations run asynchronously, so no caller code runs here): no
+        // completion can land after Abandon has started reporting.
         lock (_gate)
         {
             // While shutdown is reporting abandoned events, nothing completes: those flushes wait for the report.
@@ -338,17 +339,9 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior, Actio
                 var settled = _waiters[i].Target < min;
                 if (settled || failOutstanding)
                 {
-                    (done ??= []).Add((_waiters[i], settled || outstandingResult));
+                    _waiters[i].Completion.TrySetResult(settled || outstandingResult);
                     _waiters.RemoveAt(i);
                 }
-            }
-        }
-
-        if (done is not null)
-        {
-            foreach (var (waiter, result) in done)
-            {
-                waiter.Completion.TrySetResult(result);
             }
         }
     }

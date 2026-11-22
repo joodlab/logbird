@@ -284,4 +284,122 @@ public class FinalCycleTests
         Assert.Equal("page_limit", error.Code);
         Assert.Equal(5, page);
     }
+
+    [Fact]
+    public async Task No_flush_completion_can_land_after_abandonment_has_started()
+    {
+        for (var round = 0; round < 200; round++)
+        {
+            var queue = new Internal.EventQueue(100, QueueFullBehavior.DropOldest, _ => { });
+            var waiters = new System.Collections.Generic.List<Internal.FlushWaiter>();
+            for (var i = 0; i < 20; i++)
+            {
+                queue.Enqueue(sequence => new Internal.QueuedEvent([1], "e" + i, "a", sequence), out _, out _, out _);
+                waiters.Add(queue.AddWaiter()!);
+            }
+
+            var batch = queue.TakeBatch(10, int.MaxValue);
+            foreach (var item in batch)
+            {
+                item.TrySettle();
+            }
+
+            queue.FinishBatch([], out _);
+            var completer = Task.Run(() =>
+            {
+                for (var i = 0; i < 50; i++)
+                {
+                    queue.CompleteSatisfiedWaiters();
+                }
+            });
+            var (_, _, decided) = queue.Abandon();
+            var notDecided = waiters.Where(w => decided.All(d => d.Waiter != w)).ToList();
+
+            // Every waiter Abandon did not decide must already have been completed before Abandon took the lock.
+            Assert.All(notDecided, w => Assert.True(w.Completion.Task.IsCompleted));
+            await completer;
+        }
+    }
+
+    [Fact]
+    public async Task A_503_acknowledging_a_duplicated_id_once_keeps_the_previous_body()
+    {
+        var server = new FakeServer().Then(request =>
+        {
+            var ids = request.Ids;
+            var details = new
+            {
+                accepted = 1,
+                ids = new[] { ids[0] },
+                rejected = Array.Empty<object>(),
+                warnings = Array.Empty<object>(),
+                indices = new[] { 2 },
+                eventIds = new[] { ids[2] },
+            };
+            return FakeServer.Json(HttpStatusCode.ServiceUnavailable, JsonSerializer.Serialize(new { error = new { code = "ingest_pending", details } }));
+        });
+        await using var client = Client(Options(), server);
+        client.Track(new AuditEvent("first") { Id = "dup" });
+        client.Track(new AuditEvent("second") { Id = "dup" });
+        client.Track(new AuditEvent("third"));
+        Assert.True(await client.FlushAsync());
+        var requests = server.Requests.ToArray();
+        Assert.Equal(requests[0].Body, requests[1].Body);
+    }
+
+    [Fact]
+    public async Task Missing_and_non_protocol_rejection_codes_become_other()
+    {
+        var errors = new ConcurrentQueue<Exception>();
+        var server = new FakeServer().Then(request => FakeServer.Json(
+            HttpStatusCode.Accepted,
+            "{\"accepted\":0,\"ids\":[],\"rejected\":[{\"index\":0,\"reason\":\"x\"},{\"index\":1,\"reason\":\"y\",\"code\":\"invalid_entity_id\"},{\"index\":2,\"reason\":\"z\",\"code\":7}]}"));
+        await using var client = Client(Options(o => o.OnError = errors.Enqueue), server);
+        client.Track(new AuditEvent("a"));
+        client.Track(new AuditEvent("b"));
+        client.Track(new AuditEvent("c"));
+        Assert.True(await client.FlushAsync());
+        Assert.Equal(["other", "other", "other"], errors.OfType<LogbirdRejectedException>().Single().Codes);
+    }
+
+    [Fact]
+    public async Task A_huge_array_of_nulls_is_caught_before_any_copy()
+    {
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        var copies = 0;
+        await using var client = Client(Options(o =>
+        {
+            o.OnDrop = drops.Enqueue;
+            o.BeforeSend = e =>
+            {
+                Interlocked.Increment(ref copies);
+                return e;
+            };
+        }), new FakeServer());
+        var nulls = new JsonArray();
+        for (var i = 0; i < 300_000; i++)
+        {
+            nulls.Add((JsonNode?)null);
+        }
+
+        client.Track(new AuditEvent("nulls") { Metadata = { ["n"] = nulls } });
+        Assert.True(await client.FlushAsync());
+        Assert.Equal(0, copies);
+        Assert.Equal(DropReason.TooLarge, Assert.Single(drops).Reason);
+    }
+
+    [Fact]
+    public async Task The_earlier_SearchAll_signature_still_compiles_and_works()
+    {
+        var server = new FakeServer().ThenStatus(HttpStatusCode.OK, """{"data":[],"nextCursor":null,"total":0,"tookMs":1}""");
+        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "k" }, new HttpClient(server));
+        var count = 0;
+        await foreach (var _ in reader.SearchAllAsync(new EventSearch { Limit = 10 }, CancellationToken.None))
+        {
+            count++;
+        }
+
+        Assert.Equal(0, count);
+        Assert.Single(server.Requests);
+    }
 }

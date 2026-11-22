@@ -87,6 +87,13 @@ public sealed class LogbirdReadClient : IDisposable
 
     /// <summary>Iterates every matching event, requesting further pages as you go.</summary>
     /// <param name="search">The search. Its <see cref="EventSearch.Cursor"/> is the starting point.</param>
+    /// <param name="cancellationToken">Cancels the iteration.</param>
+    /// <exception cref="LogbirdApiException">The server answered an error, or could not be reached.</exception>
+    public IAsyncEnumerable<StoredEvent> SearchAllAsync(EventSearch? search, CancellationToken cancellationToken)
+        => SearchAllAsync(search, maxPages: null, cancellationToken);
+
+    /// <summary>Iterates every matching event, requesting further pages as you go, optionally bounded by a page limit.</summary>
+    /// <param name="search">The search. Its <see cref="EventSearch.Cursor"/> is the starting point.</param>
     /// <param name="maxPages">
     /// Stops with <see cref="LogbirdApiException"/> (code <c>page_limit</c>) after this many pages if more remain. Logbird's
     /// cursors are keyset-ordered and do not repeat; the client also detects a cursor repeated within its last 1,000
@@ -155,7 +162,7 @@ public sealed class LogbirdReadClient : IDisposable
         }
     }
 
-    /// <summary>How many recent cursors <see cref="SearchAllAsync"/> remembers to detect a stalled pagination.</summary>
+    /// <summary>How many recent cursors <c>SearchAllAsync</c> remembers to detect a stalled pagination.</summary>
     internal const int CursorHistory = 1_000;
 
     /// <summary>Gets one event with its raw payload and causation chain, or <see langword="null"/> when it does not exist.</summary>

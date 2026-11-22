@@ -230,11 +230,16 @@ internal sealed class BatchSender
                             if (hasDetails && CompleteDetails(batch, attempt, details, out var acceptedIds, out var unresolved))
                             {
                                 Warn(state, attempt, details.GetProperty("warnings"), unresolved);
+
+                                // Each accepted id settles one entry; a second entry with the same id stays unaccounted,
+                                // which makes the details incomplete and keeps the previous body.
                                 for (var wire = 0; wire < attempt.Length; wire++)
                                 {
                                     var index = attempt[wire];
-                                    if (!unresolved.Contains(wire) && acceptedIds.Contains(EventJson.JsTrim(batch[index].Id)))
+                                    var key = EventJson.JsTrim(batch[index].Id);
+                                    if (!unresolved.Contains(wire) && !state.IsSettled(index) && acceptedIds.TryGetValue(key, out var times) && times > 0)
                                     {
+                                        acceptedIds[key] = times - 1;
                                         state.Deliver(index);
                                     }
                                 }
@@ -518,7 +523,7 @@ internal sealed class BatchSender
 
             // Read everything that can throw before settling, so a malformed reason never settles an unreported event.
             var reason = Text(reasonElement);
-            var code = rejection.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String ? SafeCode(Text(codeElement)) : "rejected";
+            var code = rejection.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String ? SafeCode(Text(codeElement)) : "other";
             var index = attempt[(int)wire];
             if (!state.TryReject(index))
             {
@@ -564,9 +569,9 @@ internal sealed class BatchSender
     }
 
     /// <summary>Validates 503 details exactly like the TypeScript SDK; anything incomplete keeps the previous body.</summary>
-    private static bool CompleteDetails(QueuedEvent[] batch, int[] attempt, JsonElement details, out HashSet<string> acceptedIds, out HashSet<long> unresolved)
+    private static bool CompleteDetails(QueuedEvent[] batch, int[] attempt, JsonElement details, out Dictionary<string, int> acceptedIds, out HashSet<long> unresolved)
     {
-        acceptedIds = [];
+        acceptedIds = new Dictionary<string, int>(StringComparer.Ordinal);
         unresolved = [];
         if (!details.TryGetProperty("ids", out var ids) || ids.ValueKind != JsonValueKind.Array
             || !details.TryGetProperty("accepted", out var accepted) || !TryGetNumber(accepted, out var acceptedCount)
@@ -652,7 +657,11 @@ internal sealed class BatchSender
             }
         }
 
-        acceptedIds = [.. idList];
+        foreach (var id in idList)
+        {
+            acceptedIds[id] = acceptedIds.TryGetValue(id, out var times) ? times + 1 : 1;
+        }
+
         unresolved = [.. indexList];
         return true;
     }
@@ -714,7 +723,6 @@ internal sealed class BatchSender
         "duplicate_id_conflict",
         "stored_event_unreadable",
         "unverified_after_parse_failure",
-        "invalid_entity_id",
     };
 
     /// <summary>A rejection code from the response, kept only if it is a known protocol code (it reaches messages and logs).</summary>
