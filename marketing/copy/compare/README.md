@@ -20,31 +20,12 @@ path: /compare
 ## list
 
 - **id:** `list`
-- **cards (one per comparison, no logos):**
-  1. **Retraced.** An open-source (Apache-2.0) audit log service with an embeddable React viewer. Self-hosted.
-     → `/compare/retraced`
-  2. **WorkOS Audit Logs.** A hosted audit log API with an Admin Portal viewer for your customers' IT admins, and
-     streaming to SIEM tools. → `/compare/workos-audit-logs`
-  3. **Pangea Secure Audit Log.** A hosted, tamperproof audit log with cryptographic proofs. Pangea is now part of
-     CrowdStrike. → `/compare/pangea`
-  4. **Bemi.** A different category: automatic change capture for Postgres. Records every row change without
-     instrumenting your code. → `/compare/bemi`
-- **visual:** none
-
-## fit
-
-- **id:** `fit`
 - **eyebrow:** Which tool fits
 - **heading:** Each tool answers a different question.
-- **items (one line each, drawn from the "When to choose" sections of each page):**
-  - **Retraced** fits when you want to embed an audit log viewer in your own React app, in a self-hosted
-    Apache-2.0 service.
-  - **WorkOS Audit Logs** fits when your enterprise customers' IT admins need a ready-made portal and SIEM streams
-    today, and you'd rather not run any infrastructure.
-  - **Pangea Secure Audit Log** fits when you need cryptographic proof that audit events haven't been changed.
-  - **Bemi** fits when you want every Postgres row change captured automatically, without instrumenting your code.
-  - **Logbird** fits when your events must stay on your own servers, you want to send any event shape, and your
-    team needs an operator console to answer "what happened?".
+- **data:** one card per comparison (name, one-line description, "Fits when: …" and a "Logbird and … compared" link) is
+  rendered from `apps/web/src/lib/comparisons.ts` (`card`, `fit`), its only source.
+- **body:** **Logbird.** Fits when: your events must stay on your own servers, you want to send any event shape, and
+  your team needs an operator console to answer "what happened?".
 - **visual:** none
 
 ## method

@@ -18,6 +18,7 @@ path: /
 - **body:** Logbird is the audit log for your product. Send who-did-what events over HTTP or the SDK. Search them,
   follow any user, customer account or record, and run it on your own servers.
 - **cta (primary):** Join the waitlist → `/contact`
+- **cta (primary) (when Cloud is open):** Request access → `/contact`
 - **cta (secondary):** Self-host it → `/self-hosting` (only once the repository is public; until then "Self-host when
   the source opens" → `/contact?interest=self-host`, see `README.md` § Self-host CTA rule)
 - **code sample (copy button):**
@@ -31,7 +32,9 @@ path: /
 
   Caption under the snippet: "That's a valid event. Only `action` is required."
   <!-- source: README.md Quickstart; docs/SPEC.md §1.1 -->
-- **small print under the CTAs:** Source on GitHub — coming soon. Logbird Cloud is not open yet.
+- **small print under the CTAs:** Logbird Cloud is not open yet. <!-- private build: prefixed with "Source on GitHub — coming soon." -->
+- **small print under the CTAs (when Cloud is open):** Logbird Cloud is in early access: sign-ups are limited to invited teams for
+  now. Already invited? [Sign in](https://app.example.test/login).
 - **visual:** `marketing/media/staydesk/explorer-light.webp` (dark-mode pair:
   `marketing/media/staydesk/explorer-dark.webp`).
 
@@ -148,13 +151,14 @@ path: /
 
   <!-- source: docs/concepts.md worked example, event 1 (condensed) -->
 - **annotations (one line each, placed beside the JSON):**
-  - `actor`: who asked.
-  - `executor`: what did the work, and on which attempt.
-  - `tenant`: whose account.
-  - `targets`: which records.
-  - `changes`: before and after. Never secrets.
-  - `operationId`: ties a request to the jobs it started.
-- **cta:** The envelope guide → `/developers#envelope`
+  - `action`: What happened. The only required field. required
+  - `actor`: Who asked.
+  - `executor`: What did the work, and on which attempt.
+  - `tenant`: Whose account.
+  - `targets`: Which records.
+  - `changes`: Before and after. Never secrets.
+  - `operationId`: Ties a request to the jobs it started.
+- **cta:** Read the envelope guide → `/developers`
 - **visual:** code sample
 
 ## open-source
@@ -169,7 +173,7 @@ path: /
 - **bullets:**
   - Bundled Docker Compose, Coolify, or your own Postgres, ClickHouse and Redis.
   - Automatic HTTPS with Caddy, or any reverse proxy you already run.
-  - Source on GitHub, under the MIT licence. <!-- copy-sync: skip (private build: "Source on GitHub — coming soon. The repository opens publicly soon.") -->
+  - Source on GitHub, under the MIT licence. <!-- private build: "Source on GitHub — coming soon." -->
 - **cta:** Self-host it → `/self-hosting` (public repo only; see the CTA rule) · What's in the repository → `/open-source`
 - **while the repository is private:** replace the quickstart code block with "Available when the repository opens.
   On one VM: clone, generate secrets, configure SMTP, pull the images, then `docker compose up -d --no-build`. We'll
@@ -196,7 +200,7 @@ path: /
   - Import history by sending events with their original `occurredAt`, up to 3650 days back. / An older `occurredAt`
     is stored at receive time with a warning, and project retention still applies to imports. Logbird doesn't rebuild
     history from your database. <!-- source: docs/SPEC.md §3 -->
-- **cta:** Read how we handle data → `/security`
+- **cta:** Read how Logbird handles data → `/security`
 - **visual:** none (text block)
 
 ## final-cta

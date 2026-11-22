@@ -74,7 +74,7 @@ path: /developers
   - Call `shutdown()` from your host's own exit hook. The SDK installs no process handlers.
   - Keep ingest keys on the server. Never ship one in a browser bundle.
   <!-- source: packages/sdk/README.md; docs/integrations.md §Design -->
-- **side note ("Redaction"):** `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys,
+- **side note ("Redaction"):** **Redaction:** `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys,
   cookies and similar keys with `[redacted]` before sending. Add your own patterns for email or phone numbers; the
   default list covers secrets, not all personal data.
   <!-- source: packages/sdk/README.md §Host context options -->
@@ -129,8 +129,8 @@ path: /developers
   - **When support acts for a customer,** the customer stays the actor and the staff member goes in `impersonator`.
   - **Never send secrets in `changes`.** Send `"[redacted]"` to record that a secret changed.
   - **Everything else is kept.** Custom top-level keys and anything under `metadata` stay in the event's JSON and are
-    indexed as searchable attributes, for example `metadata.channel:whatsapp`: up to 256 per event, 6 levels deep, and
-    text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON).
+    indexed as searchable attributes, for example `metadata.channel:whatsapp`: up to 256 custom attributes per event, 6
+    levels deep, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON).
 - **worked example (condensed):** "Lina cancels booking #1042. The API records the cancellation and queues a refund.
   The refund worker fails once, then succeeds on attempt 2."
 
@@ -159,7 +159,7 @@ path: /developers
 
   Caption: "Both events land on Lina's page, Azure Hotels' page and booking bk_1042's page. The operation page shows
   the refund nested under the cancellation." <!-- source: docs/concepts.md §Worked example -->
-- **cta:** Full concepts guide → `docs/concepts.md` (repo doc; link target pending, see `README.md`)
+<!-- planned call to action, not on the page yet: Full concepts guide → docs/concepts.md -->
 - **visual:** diagram: a two-node tree. Top node "booking.cancelled · API server · Lina Haddad"; child node
   "payment.refunded · Refunds worker · attempt 2". Both sit inside a box labelled `op_cancel_bk_1042`. To the right, three
   chips show where the events appear: "Actors: Lina Haddad", "Tenants: Azure Hotels", "Records: booking:bk_1042".
@@ -280,8 +280,6 @@ path: /developers
 - **heading:** The numbers to design around.
 - **table:**
 
-  | Limit | Value |
-  | --- | --- |
   | Events per request | 1 to 1000 |
   | Request size | 5 MB |
   | Event size | 256 KB |

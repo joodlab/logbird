@@ -33,8 +33,8 @@ path: /changelog
 
 - **id:** `build-log`
 - **heading:** Build log
-- **body:** <!-- copy-sync: skip (engineering note: how entries are published) --> Day by day, in public. Drafts in `marketing/devlog/` are published here only after the owner approves
-  them; each one becomes an entry in `apps/web/src/lib/publications.ts`.
+- **body:** Day by day, in public. <!-- Drafts in `marketing/devlog/` are published here only after the owner approves
+  them; each one becomes an entry in `apps/web/src/lib/publications.ts`. -->
 - **empty state:** No entries yet. Each day's post appears here once it's published.
 - **site:** the page is `ready` (indexed, in the footer and sitemap) from the first release or approved entry.
   <!-- source: marketing/README.md -->
@@ -44,7 +44,7 @@ path: /changelog
 
 - **id:** `how-we-write`
 - **heading:** How entries are written (internal guidance, not shown on the page) <!-- copy-sync: skip (internal) -->
-- **rules:**
+- **rules:** <!-- copy-sync: skip (internal writing guidance, not on the page) -->
   - **One change per entry, in the user's words.** "You can now search your audit log with SQL, safely." Not
     "Refactored query pipeline."
   - **Say the limit with the change.** "Live tail polls over HTTP; there's no WebSocket."
