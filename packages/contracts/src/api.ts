@@ -72,8 +72,10 @@ export type SearchQuery = z.infer<typeof searchQuerySchema>;
 export const searchResponseSchema = z.object({
   data: z.array(eventSchema),
   nextCursor: z.string().nullable(),
-  /** Approximate number of matches in range (may be capped / estimated for huge ranges). */
+  /** Number of matches in range. When `totalExact` is false it is a lower bound (capped at 10,001, or the count did not finish). */
   total: z.number().int(),
+  /** False when `total` is a lower bound. Absent from older servers: treat as exact below 10,001. */
+  totalExact: z.boolean().optional(),
   tookMs: z.number(),
 });
 export type SearchResponse = z.infer<typeof searchResponseSchema>;
@@ -135,7 +137,8 @@ export const facetFieldSchema = z.union([
   z
     .string()
     .regex(/^(?:attr|attributes)\..+/)
-    .refine((field) => field.replace(/^(?:attr|attributes)\./, '').length <= 4096, 'Attribute path exceeds 4096 characters.'),
+    .refine((field) => field.replace(/^(?:attr|attributes)\./, '').length <= 4096, 'Attribute path exceeds 4096 characters.')
+    .meta({ description: '`attr.<path>` or `attributes.<path>`; the path after the prefix is at most 4096 characters.' }),
 ]);
 export const facetQuerySchema = rangeQuerySchema.extend({
   field: facetFieldSchema.meta({ example: 'attr.metadata.missing' }),

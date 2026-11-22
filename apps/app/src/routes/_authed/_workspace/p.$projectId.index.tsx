@@ -22,7 +22,7 @@ import { eventSentence } from '@/lib/events';
 import { delta, formatNumber, formatPercent } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { formatTerm } from '@/lib/query-language';
-import { DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
+import { ALL_RANGE, DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/')({
@@ -39,6 +39,8 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/')({
 function OverviewPage() {
   const { projectId } = Route.useParams();
   const { range } = useRange();
+  // "All time" has no earlier window of the same length to compare against: no trend badges.
+  const compare = range !== ALL_RANGE;
   const navigate = useNavigate();
   const project = useQuery(projectQuery(projectId));
   const overview = useQuery(overviewQuery(projectId, range));
@@ -83,14 +85,14 @@ function OverviewPage() {
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <StatCard
-          delta={k ? delta(k.events, k.eventsPrev) : undefined}
+          delta={k && compare ? delta(k.events, k.eventsPrev) : undefined}
           label="Events"
           loading={loading}
           onClick={() => explore('')}
           value={k ? formatNumber(k.events) : '—'}
         />
         <StatCard
-          delta={k ? delta(k.actors, k.actorsPrev) : undefined}
+          delta={k && compare ? delta(k.actors, k.actorsPrev) : undefined}
           label="Active actors"
           loading={loading}
           onClick={() => navigate({ to: '/p/$projectId/actors', params: { projectId } })}
@@ -103,7 +105,7 @@ function OverviewPage() {
           value={k ? formatNumber(k.tenants) : '—'}
         />
         <StatCard
-          delta={k ? k.failureRate - k.failureRatePrev : undefined}
+          delta={k && compare ? k.failureRate - k.failureRatePrev : undefined}
           deltaKind="points"
           goodWhen="down"
           hint="failure + denied"

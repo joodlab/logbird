@@ -77,6 +77,12 @@ function queryClient(q: { lang?: string }) {
   if (!queryClickhouse) throw new ApiError(503, 'sql_mode_unavailable', 'Configure the restricted ClickHouse query user to enable SQL mode.');
   return queryClickhouse;
 }
+/**
+ * Scoped reads (#138) go through the restricted query user when it is configured, whose row policy binds the project
+ * and the tenant (phase 2: a second, database-enforced layer under the query builders' scope predicate). Unscoped
+ * reads, and installations without the query user, use the main client as before.
+ */
+const readerClient = (scope: s.ReadScope | null) => (scope && queryClickhouse ? ch.withTenant(queryClickhouse, scope.tenantId) : clickhouse);
 const query = <T extends z.ZodType>(schema: T) =>
   validator('query', schema, (r, c) => {
     const text = c.req.query('q') ?? '';
@@ -161,7 +167,7 @@ export const publicRoutes = new Hono<AppEnv>()
       const input = c.req.valid('query');
       const { scope } = c.get('reader');
       assertNotMasked(scope, input);
-      const page = await ch.searchEvents(clickhouse, c.get('project').id, input, undefined, scope);
+      const page = await ch.searchEvents(readerClient(scope), c.get('project').id, input, undefined, scope);
       return c.json(s.searchResponseSchema.parse({ ...page, data: page.data.map((e) => maskEvent(e, scope?.mask)) }));
     },
   )
@@ -174,7 +180,7 @@ export const publicRoutes = new Hono<AppEnv>()
     doc('Event detail', s.eventDetailSchema, 200, 'readKeyOrViewerToken'),
     async (c) => {
       const { scope } = c.get('reader');
-      const detail = found(await ch.getEvent(clickhouse, c.get('project').id, c.req.param('eventId'), scope));
+      const detail = found(await ch.getEvent(readerClient(scope), c.get('project').id, c.req.param('eventId'), scope, clickhouse));
       const mask = scope?.mask;
       return c.json(
         s.eventDetailSchema.parse(
@@ -198,7 +204,7 @@ export const publicRoutes = new Hono<AppEnv>()
       const input = c.req.valid('query');
       const { scope } = c.get('reader');
       assertNotMasked(scope, input);
-      return c.json(s.facetResponseSchema.parse(await ch.facets(clickhouse, c.get('project').id, input, scope)));
+      return c.json(s.facetResponseSchema.parse(await ch.facets(readerClient(scope), c.get('project').id, input, scope)));
     },
   )
   .get(
@@ -219,6 +225,7 @@ export const publicRoutes = new Hono<AppEnv>()
       return runExport(c, input, {
         actor: { type: 'api_key', id: reader.keyId, name: reader.keyName },
         leaseUser: `api_key:${reader.keyId}`,
+        client: readerClient(reader.scope),
         scope: reader.scope,
         map: reader.scope?.mask?.length ? (e) => maskEvent(e, reader.scope?.mask) : undefined,
         access: {
@@ -279,6 +286,8 @@ export const publicRoutes = new Hono<AppEnv>()
   );
 /** Who runs an export: a console user, or a read key / viewer token (#138), and the scope applied to every row. */
 type ExportCaller = {
+  /** The ClickHouse client for the rows (scoped exports use the restricted query user when configured). */
+  client?: ch.ClickHouseClient;
   actor: { type: string; id: string; name: string };
   /** Admission identity: one running export per user, or per API key. */
   leaseUser: string;
@@ -314,14 +323,14 @@ async function runExport(c: Context<AppEnv>, input: s.ExportQuery, caller: Expor
   c.header(s.EXPORT_SCHEMA_HEADER, `${input.format}/${s.EXPORT_SCHEMA_VERSION}`);
   const body = await auditedExport(
     async (signal) => {
-      const client = queryClient(input);
+      const client = caller.client ?? queryClient(input);
       resolved = await ch.prepareExport(client, input, clock);
       return ch.exportEvents(
         client,
         project.id,
         input,
         resolved,
-        { signal, cancelQuery: cancelExportQuery },
+        { signal, cancelQuery: cancelExportQuery, tag: exportId },
         { scope: caller.scope, map: caller.map },
       );
     },
@@ -414,7 +423,8 @@ async function runExport(c: Context<AppEnv>, input: s.ExportQuery, caller: Expor
           stream,
           requested: event,
           unknown,
-          sql: input.lang === 'sql',
+          // The restricted profile allows 1 GiB per query: SQL mode and scoped (restricted) exports take both slots.
+          sql: input.lang === 'sql' || Boolean(caller.client && ch.isQueryClient(caller.client)),
           receivedBefore: new Date(clock),
           signal: c.req.raw.signal,
         });
@@ -550,6 +560,7 @@ export const dataRoutes = new Hono<AppEnv>()
         context: { requestId: c.get('requestId'), operationId: c.get('requestId') },
         description: 'Updated a sample record',
         occurredAt: new Date().toISOString(),
+        source: s.CONSOLE_TEST_EVENT_SOURCE,
       }),
       202,
     ),

@@ -13,7 +13,7 @@ import { placeholderKeys } from '@/lib/placeholders';
 import { altClickLabel, useIsMac } from '@/lib/platform';
 import { hasPresenceTerm, togglePresenceTerm, withPresence } from '@/lib/presence-filter';
 import { coreField } from '@/lib/query-catalog';
-import { fieldTerms, hasTerm, queryFieldForFacet, removeTerm, toggleTerm } from '@/lib/query-language';
+import { andQuery, fieldTerms, hasTerm, queryFieldForFacet, removeTerm, toggleTerm } from '@/lib/query-language';
 import { hasSqlPredicate, isColumnPredicate, removeSqlConjuncts, sqlConjuncts, sqlString, toggleSqlPredicate } from '@/lib/sql-language';
 
 interface FacetSpec {
@@ -68,6 +68,11 @@ interface FacetSidebarProps {
   counts?: { q: string; lang: QueryLang };
   /** Why every count is out of date (the current query was rejected or failed). Dims all groups and says so. */
   staleReason?: string | null;
+  /**
+   * A locked filter (an entity page's `tenant:biz_7`), in the query language: ANDed into every count after this field's
+   * own terms are removed, so even the tenant facet of a tenant's history counts only that tenant's events.
+   */
+  scope?: string;
   onChange: (q: string) => void;
   className?: string;
 }
@@ -120,7 +125,7 @@ function presenceOps(field: string, lang: QueryLang): FacetOps {
 }
 
 /** Facet groups with counts. Click includes a value, ⌥/Alt-click (or −) excludes it. */
-export function FacetSidebar({ projectId, range, q, lang = 'query', counts, staleReason, onChange, className }: FacetSidebarProps) {
+export function FacetSidebar({ projectId, range, q, lang = 'query', counts, staleReason, scope, onChange, className }: FacetSidebarProps) {
   const isMac = useIsMac();
   return (
     // Stable gutter: opening a group past the bottom must not narrow every row and move the counts.
@@ -151,6 +156,7 @@ export function FacetSidebar({ projectId, range, q, lang = 'query', counts, stal
           projectId={projectId}
           q={q}
           range={range}
+          scope={scope}
           spec={f}
           stale={Boolean(staleReason)}
         />
@@ -166,11 +172,13 @@ function FacetGroup({
   q,
   lang,
   counts,
+  scope,
   stale,
   isMac,
   onChange,
 }: {
   spec: FacetSpec;
+  scope?: string;
   projectId: string;
   range: string;
   q: string;
@@ -191,11 +199,15 @@ function FacetGroup({
   const without = opsFor(base.lang).without(base.q);
   // A presence facet counts only events that have the field (`field:*`), so the empty bucket never hides in
   // otherCount: its "any value" row is then exactly the listed values plus the overflow.
-  const scopedQ = spec.presence ? withPresence(without, queryField, base.lang) : without;
+  const own = spec.presence ? withPresence(without, queryField, base.lang) : without;
+  // The locked scope is query language; SQL mode is never offered together with one.
+  const scopedQ = scope && base.lang !== 'sql' ? andQuery(scope, own) : own;
   const facet = useQuery({ ...facetQuery(projectId, spec.field, range, scopedQ, 20, base.lang), enabled: open });
-  const allValues = facet.data?.values ?? [];
+  // Values from a previous search (a placeholder while this one loads) are never shown as this search's.
+  const loadingValues = (facet.isPending || facet.isPlaceholderData) && !facet.isError;
+  const allValues = facet.isPlaceholderData ? [] : (facet.data?.values ?? []);
   const values = spec.presence ? allValues.filter((v) => v.value !== '') : allValues;
-  const presentCount = spec.presence ? values.reduce((n, v) => n + v.count, 0) + (facet.data?.otherCount ?? 0) : 0;
+  const presentCount = spec.presence ? values.reduce((n, v) => n + v.count, 0) + (facet.isPlaceholderData ? 0 : (facet.data?.otherCount ?? 0)) : 0;
   const max = Math.max(...values.map((v) => v.count), presentCount, 1);
   // Counts still belong to the previous query (keepPreviousData) until this group's own response arrives.
   const updating = facet.isPlaceholderData || (facet.isFetching && !facet.isPending);
@@ -317,7 +329,7 @@ function FacetGroup({
           className={cn('flex flex-col gap-px pb-2 ps-2 transition-opacity', dimmed && values.length > 0 && 'opacity-50')}
           data-stale={dimmed || undefined}
         >
-          {facet.isPending && !facet.isError ? (
+          {loadingValues ? (
             placeholderKeys(3).map((k) => <Skeleton className="h-(--control-size-compact) w-full" key={k} />)
           ) : failed && values.length === 0 ? (
             <button

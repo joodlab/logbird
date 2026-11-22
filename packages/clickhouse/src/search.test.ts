@@ -13,27 +13,32 @@ function row(id: string, timestamp: string, receivedAt = timestamp) {
   if (!n.ok) throw new Error(n.reason);
   return n.row;
 }
-function client(rows: ReturnType<typeof row>[], total = rows.length) {
-  const query = vi
-    .fn()
-    .mockResolvedValueOnce({ json: async () => rows })
-    .mockResolvedValueOnce({ json: async () => [{ n: total }] });
-  return { ch: { query } as unknown as ClickHouseClient, query };
+const isCount = (sql: string) => sql.startsWith('SELECT count() n FROM (SELECT DISTINCT event_id');
+// The row and count statements run concurrently: answer and inspect each by purpose, never by call order.
+function client(rows: ReturnType<typeof row>[], total: number | Error = rows.length) {
+  const query = vi.fn(async (args: { query: string }) => {
+    if (!isCount(args.query)) return { json: async () => rows, close: vi.fn() };
+    if (total instanceof Error) throw total;
+    return { json: async () => [{ n: total }], close: vi.fn() };
+  });
+  const call = (count: boolean) =>
+    query.mock.calls.find(([args]) => isCount(args.query) === count)?.[0] as { query: string; query_params: Record<string, unknown> };
+  return { ch: { query } as unknown as ClickHouseClient, query, rowCall: () => call(false), countCall: () => call(true) };
 }
 it.each(['asc', 'desc'] as const)('keeps the %s selector in sort-key order and resolves receipts only in its bounded page', async (order) => {
   const a = row('first', '2026-11-07T10:01:00.000Z'),
     b = row('second', '2026-11-07T10:02:00.000Z');
   const rows = order === 'asc' ? [a, b] : [b, a];
-  const { ch, query } = client(rows, 5);
+  const { ch, rowCall } = client(rows, 5);
   const page = await searchEvents(ch, 'qa-narrow-search', { from, to, order, limit: 1, q: 'target:record tenant:tenant' });
-  const sql = query.mock.calls[0]?.[0].query as string;
+  const sql = rowCall().query;
   const inner = sql.slice(sql.indexOf(' IN (') + 5, sql.lastIndexOf(') ORDER BY'));
   expect(inner).toMatch(/^SELECT timestamp,event_id FROM events WHERE project_id=/);
   expect(inner).not.toMatch(/received_at|SELECT \*|payload|search_text/);
   expect(inner).toContain(`ORDER BY timestamp ${order.toUpperCase()},event_id ${order.toUpperCase()} LIMIT 1 BY event_id LIMIT {limit:UInt32}`);
   expect(sql).toContain('(timestamp,event_id) IN (');
   expect(sql).toMatch(/ORDER BY timestamp (?:ASC|DESC),event_id (?:ASC|DESC),received_at ASC LIMIT 1 BY event_id LIMIT \{limit:UInt32\}$/);
-  expect(query.mock.calls[0]?.[0].query_params).toMatchObject({ project: 'qa-narrow-search', limit: 2 });
+  expect(rowCall().query_params).toMatchObject({ project: 'qa-narrow-search', limit: 2 });
   expect(page.data.map((e) => e.id)).toEqual([rows[0]?.event_id]);
   expect(page.total).toBe(5);
   expect(JSON.parse(Buffer.from(page.nextCursor as string, 'base64url').toString()).slice(0, 2)).toEqual([rows[0]?.timestamp, rows[0]?.event_id]);
@@ -41,17 +46,17 @@ it.each(['asc', 'desc'] as const)('keeps the %s selector in sort-key order and r
 it.each(['asc', 'desc'] as const)('applies the %s cursor inside the narrow selector and does not advance past the sentinel', async (order) => {
   const at = '2026-11-07T10:01:00.000Z';
   const next = row('b', at);
-  const { ch, query } = client([next], 3);
+  const { ch, rowCall, countCall } = client([next], 3);
   const cursorId = order === 'asc' ? 'a' : 'z';
   const cursor = Buffer.from(JSON.stringify([at, cursorId])).toString('base64url');
   const page = await searchEvents(ch, 'qa-narrow-search', { from, to, order, limit: 1, cursor });
   expect(page.nextCursor).toBeNull();
   expect(page.data.map((e) => e.id)).toEqual(['b']);
-  const sql = query.mock.calls[0]?.[0].query as string;
+  const sql = rowCall().query;
   expect(sql).toContain(`AND (timestamp,event_id) ${order === 'asc' ? '>' : '<'} ({cursorTs:DateTime64(3)},{cursorId:String}) ORDER BY`);
   expect(sql.indexOf('{cursorTs:')).toBeGreaterThan(sql.indexOf(' IN (SELECT timestamp'));
-  expect(query.mock.calls[0]?.[0].query_params).toMatchObject({ cursorTs: '2026-11-07 10:01:00.000', cursorId });
-  const countSql = query.mock.calls[1]?.[0].query as string;
+  expect(rowCall().query_params).toMatchObject({ cursorTs: '2026-11-07 10:01:00.000', cursorId });
+  const countSql = countCall().query;
   expect(countSql).not.toContain('cursorTs');
   expect(countSql).toContain('SELECT DISTINCT event_id');
 });
@@ -61,15 +66,86 @@ it.each(['asc', 'desc'] as const)('rechecks %s filters before deduping legacy ro
     ['tenant:wanted', 'tenant_id = {q0:String}'],
     ['target:wanted', 'arrayExists(x -> x = {q0:String}, target_ids)'],
   ] as const) {
-    const { ch, query } = client([]);
+    const { ch, rowCall } = client([]);
     await searchEvents(ch, 'qa-narrow-search', { from, to, order, limit: 1, q });
-    const sql = query.mock.calls[0]?.[0].query as string;
+    const sql = rowCall().query;
     const outer = sql.slice(0, sql.indexOf(' IN (SELECT'));
     expect(outer).toContain(predicate);
     expect(sql.split(predicate)).toHaveLength(3);
     expect(sql).toContain('(timestamp,event_id) IN (SELECT timestamp,event_id');
-    expect(query.mock.calls[0]?.[0].query_params).toMatchObject({ q0: 'wanted', limit: 2 });
+    expect(rowCall().query_params).toMatchObject({ q0: 'wanted', limit: 2 });
   }
+});
+it('never reports a total below the rows a page proves, and marks a failed count as a lower bound', async () => {
+  const a = row('a', '2026-11-07T10:01:00.000Z'),
+    b = row('b', '2026-11-07T10:02:00.000Z'),
+    c = row('c', '2026-11-07T10:03:00.000Z');
+  // The count ran against an earlier snapshot and saw nothing; the page proves at least three.
+  const stale = await searchEvents(client([c, b, a], 0).ch, 'qa-narrow-search', { from, to, order: 'desc', limit: 2 });
+  expect(stale).toMatchObject({ total: 3, totalExact: false });
+  const failed = await searchEvents(client([c, b, a], new Error('fictional count failure')).ch, 'qa-narrow-search', {
+    from,
+    to,
+    order: 'desc',
+    limit: 2,
+  });
+  expect(failed.data.map((e) => e.id)).toEqual(['c', 'b']);
+  expect(failed).toMatchObject({ total: 3, totalExact: false });
+  expect(await searchEvents(client([b, a], 2).ch, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 })).toMatchObject({
+    total: 2,
+    totalExact: true,
+  });
+  expect(await searchEvents(client([b], 10_001).ch, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 })).toMatchObject({
+    total: 10_001,
+    totalExact: false,
+  });
+});
+it('settles a stalled count body by its deadline and closes the stream', async () => {
+  const b = row('b', '2026-11-07T10:02:00.000Z');
+  const close = vi.fn();
+  const query = vi.fn(async (args: { query: string }) =>
+    isCount(args.query) ? { json: () => new Promise(() => undefined), close } : { json: async () => [b], close: vi.fn() },
+  );
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const started = Date.now();
+  const page = await searchEvents({ query } as unknown as ClickHouseClient, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 });
+  expect(Date.now() - started).toBeLessThan(1500);
+  expect(page).toMatchObject({ total: 1, totalExact: false });
+  expect(close).toHaveBeenCalled();
+  expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)).reason)).toEqual(['budget']);
+  warn.mockRestore();
+});
+it('runs the count only after the rows, and never when the rows fail', async () => {
+  const b = row('b', '2026-11-07T10:02:00.000Z');
+  const order: string[] = [];
+  let rowsDone = false;
+  const query = vi.fn(async (args: { query: string }) => {
+    order.push(isCount(args.query) ? `count(rowsDone=${rowsDone})` : 'rows');
+    if (isCount(args.query)) return { json: async () => [{ n: 1 }], close: vi.fn() };
+    return {
+      json: async () => {
+        rowsDone = true;
+        return [b];
+      },
+      close: vi.fn(),
+    };
+  });
+  expect(await searchEvents({ query } as unknown as ClickHouseClient, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 })).toMatchObject({
+    total: 1,
+    totalExact: true,
+  });
+  expect(order).toEqual(['rows', 'count(rowsDone=true)']);
+  const failing = vi.fn(async (args: { query: string }) => {
+    if (isCount(args.query)) throw new Error('count must not run');
+    throw Object.assign(new Error('Too many simultaneous queries.'), { code: '202', type: 'TOO_MANY_SIMULTANEOUS_QUERIES' });
+  });
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  await expect(
+    searchEvents({ query: failing } as unknown as ClickHouseClient, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 }),
+  ).rejects.toThrow('Too many simultaneous queries.');
+  expect(failing).toHaveBeenCalledTimes(1);
+  expect(warn).not.toHaveBeenCalled();
+  warn.mockRestore();
 });
 it('returns no cursor for an empty page', async () => {
   const { ch } = client([], 0);
@@ -82,7 +158,7 @@ it('detail keeps oldest receipt first, with timestamp as its deterministic tie b
     .mockResolvedValueOnce({ json: async () => [original] })
     .mockResolvedValueOnce({ json: async () => [{ children: 0, size: 0 }] });
   const result = await getEvent({ query } as unknown as ClickHouseClient, 'qa-narrow-search', 'same');
-  expect(query.mock.calls[0]?.[0].query).toMatch(/ORDER BY received_at,timestamp LIMIT 1$/);
+  expect(query.mock.calls[0]?.[0].query).toMatch(/ORDER BY received_at,timestamp,sipHash64\(payload\) LIMIT 1$/);
   expect(result?.event.receivedAt).toBe('2026-11-07T10:03:00.000Z');
 });
 it('expiration probes stay narrow and bounded in both raw rows and the identity index', async () => {

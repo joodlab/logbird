@@ -31,6 +31,14 @@ No token table is kept. To cut off all tokens of a key, revoke the key.
 
 See [scoped read access](scoped-read-access.md) for what a scope enforces.
 
+## Two enforcement layers
+
+Scoped reads are filtered twice. The query builders AND the scope outside the caller's filter on every read path. When
+the restricted ClickHouse query user is configured, scoped reads also run as that user, and its row policy binds the
+project and the tenant (`SQL_logbird_tenant`), so a missing predicate in a future query still cannot return another
+tenant's events. Self-hosters re-run `pnpm --filter @logbird/clickhouse create-query-user` once after upgrading to
+install the tenant-aware policy; until they do, the query builders remain the only layer.
+
 ## Scopes name stored ids
 
 A scope (on a scoped read key or a viewer token) is enforced on the stored, indexed ids. It never reads the original

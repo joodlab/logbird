@@ -1,7 +1,9 @@
 import { readScopeSchema } from '@logbird/contracts';
 import { expect, it } from 'vitest';
 import { normalizeEvent } from './normalize';
+import { recordTargetPredicate } from './query';
 import { scopeFingerprint, scopePredicate } from './scope';
+import { pairedTargetSql } from './target-pair';
 
 it('#180 decision: only surrounding whitespace can make two sent ids share a stored id that a scope can name', () => {
   const stored = (sent: string) => {
@@ -40,10 +42,13 @@ it('builds a parameterized column predicate with a same-position target match', 
   expect(p.sql).toBe(
     [
       'tenant_id = {scope_tenant:String}',
-      'arrayExists((t, i) -> t = {scope_target_type:String} AND i = {scope_target_id:String}, target_types, target_ids)',
+      '(has(target_ids, {scope_target_id:String}) AND arrayExists((t, i) -> t = {scope_target_type:String} AND i = {scope_target_id:String}, target_types, target_ids))',
       '(startsWith(action, {scope_action_0:String}) OR startsWith(action, {scope_action_1:String}))',
     ].join(' AND '),
   );
+  // The same paired-target definition as the `record:` query field (#182), so the two cannot drift.
+  expect(p.sql).toContain(`(${pairedTargetSql('scope_target_type', 'scope_target_id')})`);
+  expect(recordTargetPredicate('website', 's1', 0).sql).toBe(pairedTargetSql('recordType0', 'recordId0'));
   // The predicate never reads the payload (cost: an indexed column check only, #180 benchmark).
   expect(p.sql).not.toContain('payload');
   // Values never reach the SQL text.

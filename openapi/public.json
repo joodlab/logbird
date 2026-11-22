@@ -383,6 +383,9 @@
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
+                    },
+                    "totalExact": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -1763,6 +1766,7 @@
                   "type": "string"
                 },
                 {
+                  "description": "`attr.<path>` or `attributes.<path>`; the path after the prefix is at most 4096 characters.",
                   "pattern": "^(?:attr|attributes)\\..+",
                   "type": "string"
                 }
@@ -1826,6 +1830,7 @@
                   "type": "string"
                 },
                 {
+                  "description": "`attr.<path>` or `attributes.<path>`; the path after the prefix is at most 4096 characters.",
                   "pattern": "^(?:attr|attributes)\\..+",
                   "type": "string"
                 }

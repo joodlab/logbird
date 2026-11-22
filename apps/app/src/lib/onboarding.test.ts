@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
+import { firstEventCopy } from './onboarding';
 
 const list = vi.fn();
 vi.mock('@/lib/api/client', () => ({ api: { projects: { list: () => list() } } }));
@@ -26,5 +27,22 @@ describe('first-project wizard after creating or switching a workspace', () => {
   it('keeps the wizard reachable when the list cannot be read', async () => {
     list.mockRejectedValueOnce(new Error('offline'));
     expect(await activeWorkspaceHasProjects(new QueryClient({ defaultOptions: { queries: { retry: false } } }))).toBe(false);
+  });
+});
+
+describe('firstEventCopy', () => {
+  it('never claims the integration works for a console test event, in the toast or the card', () => {
+    const copy = firstEventCopy('logbird-test');
+    expect(copy).toEqual({
+      toastTitle: 'Console test received',
+      toastDescription: 'Logbird is receiving events. Send one from your backend to check your integration.',
+      cardTitle: 'Console test received — now send one from your backend',
+    });
+    expect(Object.values(copy).join(' ')).not.toMatch(/works/i);
+  });
+
+  it('celebrates an integration event', () => {
+    expect(firstEventCopy('booking-service').cardTitle).toBe('It works — your first event just arrived');
+    expect(firstEventCopy(null, false).cardTitle).toBe('First event received');
   });
 });

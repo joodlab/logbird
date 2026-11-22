@@ -21,6 +21,7 @@ import { Timestamp } from '@/components/timestamp';
 import { projectSetupQuery } from '@/lib/api/queries';
 import { eventSentence, personLabel } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
+import { firstEventCopy } from '@/lib/onboarding';
 import { useCan } from '@/lib/permissions';
 import { formatTerm } from '@/lib/query-language';
 import { curlSnippet, fetchSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
@@ -73,7 +74,9 @@ export function FirstEventPanel({ projectId, showSnippets = true }: { projectId:
       sawEmpty.current = false;
       setCelebrate(true);
       invalidate();
-      toast.success('First event received', { description: 'Your integration works. Everything else builds on this.' });
+      // A console test proves the pipeline, not the integration: say so instead of "your integration works".
+      const copy = firstEventCopy(data.ingest.firstEvent?.source);
+      toast.success(copy.toastTitle, { description: copy.toastDescription });
     }
   }, [data, invalidate]);
 
@@ -120,7 +123,7 @@ function Listening({ projectId, setup }: { projectId: string; setup: ProjectSetu
           </Button>
         </AdminOnly>
         <span className="text-[11px] text-muted-foreground">
-          {canSend ? 'Sent from the console as you · counts as a real event' : 'Ask an admin to send one, or run a snippet'}
+          {canSend ? 'Sent from the console as you · completes the first-event step only' : 'Ask an admin to send one, or run a snippet'}
         </span>
       </div>
     </div>
@@ -145,7 +148,7 @@ function ReceivedEvent({ projectId, event, celebrate }: { projectId: string; eve
           </span>
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p className="font-medium text-sm">{celebrate ? 'It works — your first event just arrived' : 'First event received'}</p>
+          <p className="font-medium text-sm">{firstEventCopy(event.source, celebrate).cardTitle}</p>
           <p className="text-muted-foreground text-xs">
             <Timestamp format="full" iso={event.receivedAt} /> · via {event.sdk || 'HTTP'}
           </p>

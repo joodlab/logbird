@@ -111,6 +111,8 @@ Omitted values use receive time.
 }
 ```
 
+Sources beginning with `logbird-` are reserved for events Logbird itself generates: `logbird-sample` (sample data) and `logbird-test` (the console's "Send a test event"). An integration that sends one is stored and searchable like any other event, but it does not count toward the integration setup steps (events flowing, envelope, operation ids; `isLogbirdGeneratedSource` in `packages/contracts`). `logbird-sample` is also left out of the first-event step, and replacing or removing sample data deletes every row tagged `logbird-sample`, including rows a client sent with that tag.
+
 Semantics worth documenting to users:
 - **id is immutable within a project**, regardless of `occurredAt`. Exact retries
   appear in `ids` as accepted, without another raw insert or rollup increment.
@@ -316,8 +318,16 @@ project instead of failing the workspace; its progress is a placeholder (0, next
 firstEventAt null), not measured emptiness.
 
 Hot-path rules: always filter `project_id` + time range first; never `FINAL` on search; dedupe in the result
-set by `event_id` when needed; cursor = `(timestamp, event_id)` keyset; `total` via `count()` with
-`max_execution_time` guard (fall back to "10k+").
+set by `event_id` when needed; cursor = `(timestamp, event_id)` keyset; `total` via a distinct
+count capped at 10,001 with a one-second budget that runs after the row query (a page can take up to one second
+longer than its rows). Rows never fail
+because of the count: when the count is capped, times out or fails, `totalExact: false` marks `total` as a lower
+bound (at least the rows returned, plus one when there is a next page) and the console shows "≥ N" or "10,000+".
+A page waits at most one second for its count, whatever the HTTP request is doing. Server-side cleanup differs: the
+writable client's count stops at its one-second `max_execution_time`; a restricted SQL count is cancelled when
+ClickHouse notices the closed connection, which is cooperative, and is otherwise bounded by the restricted profile's
+10 seconds (measured locally: a deliberately sleeping restricted count finished after 3 s while the page had returned at
+1.0 s).
 
 ## 5. Server API
 
@@ -466,7 +476,19 @@ Full guide: [scoped read access](scoped-read-access.md); token format and secret
 - **Facets:** `field` is an envelope field or `attr.<path>`; JSON-array attribute values count each element. Optional
   `by` + `byLimit` (1–20, default 5) add the top second-level values per returned value with `groupsOtherCount`; the
   console `/facets` accepts the same parameters. The response always has `by` (null without it).
-- **Not yet:** the restricted query user's row policy does not yet enforce the tenant (phase 2).
+- **Row policy (phase 2):** with the restricted query user configured, scoped reads (search, detail, facets, export)
+  run as `logbird_query` through a tenant-bound handle (`withTenant`) that sends `SQL_logbird_tenant` = the scope's tenant
+  itself and refuses a query whose `scope_tenant` names another tenant. The `events` policy is `project_id = getSetting('SQL_logbird_project') AND (getSetting('SQL_logbird_tenant')
+  = '' OR tenant_id = getSetting('SQL_logbird_tenant'))`; rollup tables (no tenant column) add
+  `getSetting('SQL_logbird_tenant') = ''`, so a tenant-bound session sees none of their rows. The settings profile
+  defaults `SQL_logbird_tenant` to '' (not CONST), so unscoped and SQL-mode queries are unchanged. Target and
+  action-prefix limits stay in the query builders. Scoped reads then run under the query user's CONST limits (10 s,
+  5M rows read, 1 GiB) instead of the export budget; the `total` count keeps its 1 s application deadline (an inexact lower bound past
+  it), and a scoped export takes both export admission slots, like SQL mode. The handle is a frozen object
+  exposing only `query` (always with the tenant; a different tenant is refused): no command, exec, insert, ping, close or
+  disposal reaches the shared client. The restricted client ignores credentials embedded in `CLICKHOUSE_URL`. Detail picks the canonical version of an id project-wide on
+  the main client (oldest receipt, then timestamp, then a payload hash) and tests the scope in that same lookup, so an
+  out-of-scope id and an unknown id take the same path; only an in-scope version is fetched through the bound handle.
 
 ### Webhook endpoint management
 
@@ -559,7 +581,7 @@ instance-admin feature).
 Isolation is layered: (1) query-language values compile to parameterized SQL; (2) SQL expressions pass the lexical
 scan, EXPLAIN AST baseline comparison and allowlists; (3) the readonly query account has SELECT-only grants and
 CONST safety/resource limits; (4) row policies on events, events_by_minute, entities and attribute_keys enforce
-`project_id = getSetting('SQL_logbird_project')` for `logbird_query`. Each restricted query sends its authorized
+`project_id = getSetting('SQL_logbird_project')` for `logbird_query`, plus the tenant binding for scoped reads (§5.2). Each restricted query sends its authorized
 project in `clickhouse_settings`; validation-only EXPLAIN uses a sentinel project. Missing bindings fail closed.
 Companion `USING 1 TO ALL EXCEPT logbird_query` policies preserve the main user's access. The binding is trusted
 server input, not a substitute for HTTP authorization; holders of database credentials can choose the binding.
@@ -649,7 +671,7 @@ User journeys (each must work end-to-end against the real server):
    `onboarding.next`, so leaving and coming back resumes at the missing step; the wizard's progress reflects real
    state. The first-event step reuses the Setup page's component: ingest key shown once (copy), curl / SDK / fetch
    snippets pre-filled, a **live waiting indicator** that polls setup every 2.5 s and flips to the received event,
-   "Send a test event", "Load sample data" (never counts) and "Skip for now" → Overview. The workspace step pre-fills
+   "Send a test event" (stored with `source: logbird-test`; completes only the first-event step), "Load sample data" (never counts) and "Skip for now" → Overview. The workspace step pre-fills
    the name from `GET /api/onboarding/workspace-name` (selected, so typing replaces it). The full-screen wizard is only
    for a workspace's first project: later projects are created from a dialog inside the app shell (Projects page and
    switcher → New project) that lands on the new project's Setup page.

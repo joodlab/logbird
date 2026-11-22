@@ -10,6 +10,8 @@ import {
   RECORD_HINT,
 } from '@logbird/contracts';
 
+import { pairedTargetSql } from './target-pair';
+
 export { QueryError } from '@logbird/contracts';
 export const columns: Record<string, string> = Object.fromEntries(
   QUERY_FIELDS.flatMap(({ aliases, column, key }) => (column ? [key, ...(aliases ?? [])].map((field) => [field, column]) : [])),
@@ -20,7 +22,7 @@ export function recordTargetPredicate(type: string, id: string, index?: number) 
   const typeParam = `recordType${index ?? ''}`;
   const idParam = `recordId${index ?? ''}`;
   return {
-    sql: `has(target_ids, {${idParam}:String}) AND arrayExists((t, i) -> t = {${typeParam}:String} AND i = {${idParam}:String}, target_types, target_ids)`,
+    sql: pairedTargetSql(typeParam, idParam),
     params: { [typeParam]: type, [idParam]: id },
   };
 }
