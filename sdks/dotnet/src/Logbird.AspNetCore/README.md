@@ -63,16 +63,15 @@ app.MapPut("/invoices/{id}", (string id, IAuditLog audit) =>
   `AddLogbird` once; later calls do not change the registered client.
 - **Direct tracking**: events sent with `ILogbirdClient.Track` are not filled in; use `IAuditLog` for request context.
   `IAuditLog` records through the registered `ILogbirdClient`, so a fake registered before `AddLogbird` receives its
-  events in tests. `IAuditLog` itself drops an event it cannot build or copy, and reports it through `OnDrop` (counted
-  by Logbird's own client even when another client records): a throwing configure callback, a prepared event whose
-  pre-copy check (depth, and a lower bound of the size) already finds it over Logbird's limits, or a prepared event that
-  cannot be copied (for example JSON with duplicate property names). Two exceptions: with `Enabled = false`, Logbird's
-  own client neither reports nor counts these drops (a host-provided client still receives the events it is given); and
-  wherever Logbird's own client counts a tracked event as `Filtered` instead of recording it (in any of your code that
-  Logbird runs: `BeforeSend`, redaction patterns, `OnDrop`, `OnError`, the logger and HTTP handlers), such a drop is
-  likewise only counted as `Filtered`, so that code cannot feed itself. Every other event goes to the registered client,
-  which applies its own limits. The container hands out `ILogbirdClient` only; Logbird disposes its client itself at
-  shutdown.
+  events in tests. `IAuditLog` itself drops an event it cannot build or copy: a `null` event, a throwing configure
+  callback, a prepared event whose pre-copy check (depth, and a lower bound of the size) already finds it over Logbird's
+  limits, or a prepared event that cannot be copied (for example JSON with duplicate property names). Every other event
+  goes to the registered client, which applies its own limits. Its own drops are reported by Logbird's own client even
+  when another client records, under the same rules as any drop that client reports: nothing is reported or counted with
+  `Enabled = false`; on Logbird's own flow, where `Track` counts events as `Filtered` (for example inside `BeforeSend`,
+  `OnDrop` or `OnError`), they are only counted as `Filtered`; and an `OnDrop` notification skipped because the callback
+  backlog is full is counted as lost (see the core README). The container hands out `ILogbirdClient` only; Logbird
+  disposes its client itself at shutdown.
 
 See the [`Logbird` package README](https://github.com/joodlab/logbird/tree/master/sdks/dotnet) for options, failure
 handling, redaction, reading the trail and verifying webhooks.
