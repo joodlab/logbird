@@ -872,7 +872,8 @@ try {
         const n = nav.getBoundingClientRect();
         const a = active?.getBoundingClientRect();
         return {
-          active: active?.textContent ?? null,
+          // The visible label only: each tab also holds an invisible bold copy that reserves its width.
+          active: active?.querySelector('span > span')?.textContent ?? null,
           visible: Boolean(a && a.left >= n.left - 1 && a.right <= n.right + 1),
           span: a ? `${Math.round(a.left)}–${Math.round(a.right)} in ${Math.round(n.left)}–${Math.round(n.right)}` : null,
           scrollLeft: Math.round(nav.scrollLeft),
@@ -895,8 +896,10 @@ try {
     await page.goto(`${BASE}/p/${projectId}/settings`);
     await settle(page);
     await page.locator('nav[aria-label="Settings sections"] a').first().focus();
+    // As many presses as there are tabs after the first (project settings has four sections), then one that leaves.
+    const tabCount = await page.locator('nav[aria-label="Settings sections"] a').count();
     const seen = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < tabCount - 1; i++) {
       await page.keyboard.press('Tab');
       await page.waitForTimeout(250);
       seen.push(
@@ -908,18 +911,22 @@ try {
           const atStart = nav.scrollLeft <= 0;
           const atEnd = nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 1;
           return {
-            tab: a.textContent,
+            tab: a.querySelector('span > span')?.textContent ?? a.textContent,
             clear: r.left >= n.left + (atStart ? 0 : 28) - 1 && r.right <= n.right - (atEnd ? 0 : 28) + 1,
             span: `${Math.round(r.left)}–${Math.round(r.right)} in ${Math.round(n.left)}–${Math.round(n.right)}`,
           };
         }),
       );
     }
+    check('settings 390px: each Tab-focused tab clears the fade', seen.length === tabCount - 1 && seen.every((s) => s.tab && s.clear), seen);
+    await page.keyboard.press('Tab');
     check(
-      'settings 390px: each Tab-focused tab clears the fade',
-      seen.every((s) => s.tab && s.clear),
-      seen,
+      'settings 390px: the next Tab leaves the strip',
+      await page.$eval('nav[aria-label="Settings sections"]', (nav) => !nav.contains(document.activeElement)),
+      null,
     );
+    // Back to the last tab, so the forced-colors check below sees a focused tab.
+    await page.keyboard.press('Shift+Tab');
     await page.emulateMedia({ forcedColors: 'active' });
     await page.waitForTimeout(200);
     const settingsFc = await outlines(page);

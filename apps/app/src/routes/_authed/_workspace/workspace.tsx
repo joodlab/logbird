@@ -1,6 +1,6 @@
 import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute, Outlet, useRouterState } from '@tanstack/react-router';
+import { createFileRoute, Outlet, retainSearchParams, useRouterState } from '@tanstack/react-router';
 import { z } from 'zod';
 import { SettingsTabs } from '@/components/settings-tabs';
 import { AppShell } from '@/components/shell/app-shell';
@@ -10,6 +10,8 @@ import { lastProject } from '@/lib/session';
 export const Route = createFileRoute('/_authed/_workspace/workspace')({
   // Workspace activity reads the shared `range` param: a malformed one (`range=0`, decoded as a number) falls back to the default.
   validateSearch: z.object({ range: z.string().optional().catch(undefined) }),
+  // Moving between Members and Workspace activity keeps a chosen range (as project pages do).
+  search: { middlewares: [retainSearchParams(['range'])] },
   staticData: { crumb: 'Workspace settings', crumbTo: '/workspace' },
   head: () => ({ meta: [{ title: 'Workspace settings · Logbird' }] }),
   component: WorkspaceSettingsLayout,
@@ -31,7 +33,7 @@ function WorkspaceSettingsLayout() {
   // workspace is not listed here, so the sidebar shows workspace navigation only).
   const projects = useQuery(projectsQuery());
   const remembered = typeof window === 'undefined' ? null : lastProject();
-  const projectId = remembered && projects.data?.some((p) => p.id === remembered) ? remembered : undefined;
+  const projectId = remembered && projects.data?.some((p) => p.id === remembered && p.organizationId === workspace.id) ? remembered : undefined;
   const fills = pathname === '/workspace/activity';
   return (
     <AppShell projectId={projectId}>

@@ -135,7 +135,7 @@ export function AppSidebar({ projectId }: { projectId?: string }) {
           <SidebarGroup>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive render={<Link to="/projects" />} tooltip="Projects">
+                <SidebarMenuButton isActive={pathname.startsWith('/projects')} render={<Link to="/projects" />} tooltip="Projects">
                   <FolderPlusIcon />
                   <span>Projects</span>
                 </SidebarMenuButton>

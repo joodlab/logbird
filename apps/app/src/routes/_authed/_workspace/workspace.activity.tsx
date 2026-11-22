@@ -3,7 +3,7 @@ import { FilterChip } from '@logbird/ui/components/filter-chip';
 import { EmptyState, ErrorState } from '@logbird/ui/components/states';
 import { Input } from '@logbird/ui/components/ui/input';
 import { useDebouncedValue } from '@tanstack/react-pacer';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { ActivityIcon, SearchIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -11,10 +11,11 @@ import { z } from 'zod';
 import { EventSheet } from '@/components/explorer/event-sheet';
 import { EventsTable, type EventsTableHandle } from '@/components/explorer/events-table';
 import { TimeZoneInline } from '@/components/time-zone-control';
+import { api } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
 import { workspaceActivityQuery } from '@/lib/api/queries';
-import { includeTerm, removeTerm } from '@/lib/query-language';
-import { rangeLabel } from '@/lib/range';
+import { formatExactTerm, includeTerm, removeTerm } from '@/lib/query-language';
+import { rangeLabel, resolveRange } from '@/lib/range';
 import { formatSearchTotal, searchTotal } from '@/lib/search-total';
 import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
@@ -55,6 +56,17 @@ function WorkspaceActivity() {
   const resultKey = useRef<string | undefined>(undefined);
   if (activity.isSuccess && !activity.isPlaceholderData) resultKey.current = `${range}|${q}|${category ?? ''}`;
   const selectedIndex = search.ev ? rows.findIndex((e) => e.id === search.ev) : -1;
+  // A bookmarked or shared event beyond the loaded pages (page two, or any later one) is looked up by its id in the same
+  // workspace stream and range, so the link opens it without loading every page before it.
+  const loneEvent = useQuery({
+    queryKey: ['workspace-activity-event', range, search.ev],
+    queryFn: ({ signal }) => {
+      const r = resolveRange(range);
+      return api.workspaceActivity({ from: r.from, to: r.to, q: formatExactTerm('id', search.ev ?? ''), limit: 1 }, signal);
+    },
+    enabled: Boolean(search.ev) && selectedIndex < 0 && Boolean(pages),
+  });
+  const lone = selectedIndex < 0 ? current(loneEvent)?.data.find((e) => e.id === search.ev) : undefined;
   const select = (e: AuditEvent | null | undefined) => navigate({ search: (prev) => ({ ...prev, ev: e?.id }), replace: true });
   // The table tracks its own keyboard cursor (by event id, following the open event); closing the sheet returns to it.
   const table = useRef<EventsTableHandle>(null);
@@ -143,7 +155,7 @@ function WorkspaceActivity() {
         )}
       </div>
       <EventSheet
-        event={selectedIndex >= 0 ? (rows[selectedIndex] ?? null) : null}
+        event={selectedIndex >= 0 ? (rows[selectedIndex] ?? null) : (lone ?? null)}
         fetchDetail={false}
         // Back to the row the sheet showed last (it may differ from the one opened, after prev/next): never to <body>.
         // With no rows left (a refetch emptied the list meanwhile), to the search field.
@@ -153,7 +165,7 @@ function WorkspaceActivity() {
           if (!open) select(null);
         }}
         onPrev={selectedIndex > 0 ? () => select(rows[selectedIndex - 1]) : undefined}
-        open={selectedIndex >= 0}
+        open={selectedIndex >= 0 || Boolean(lone)}
       />
     </div>
   );
