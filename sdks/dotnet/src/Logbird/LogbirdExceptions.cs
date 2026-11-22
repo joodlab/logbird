@@ -40,13 +40,14 @@ public class LogbirdDeliveryException : Exception
 }
 
 /// <summary>
-/// A stored event needs attention, reported through <see cref="LogbirdOptions.OnError"/> and the logger. The event was
-/// sent (and, for a server warning, stored); nothing was dropped.
+/// An event needs attention, reported through <see cref="LogbirdOptions.OnError"/> and the logger; nothing was dropped.
+/// The SDK's own warning (surrounding whitespace in an identifier) is raised when the event is queued, before it is sent;
+/// a server warning (such as an adjusted <c>occurredAt</c>) is raised after the server stored the event.
 /// </summary>
 public sealed class LogbirdEventWarning : LogbirdDeliveryException
 {
-    internal LogbirdEventWarning(string eventId, string action, string reason, string summary)
-        : base("Logbird warning about a stored event: " + summary)
+    internal LogbirdEventWarning(string eventId, string action, string reason, string message)
+        : base(message)
     {
         EventId = eventId;
         Action = action;
@@ -60,8 +61,8 @@ public sealed class LogbirdEventWarning : LogbirdDeliveryException
     public string Action { get; }
 
     /// <summary>
-    /// What to look at, for example <c>surrounding whitespace in actor.id: sent exactly as given; …</c> or the server's reason for
-    /// an adjusted <c>occurredAt</c>.
+    /// What to look at: for example the SDK's <c>surrounding whitespace in actor.id: sent exactly as given; …</c>, or the
+    /// server's reason for an adjusted <c>occurredAt</c>.
     /// </summary>
     public string Reason { get; }
 }

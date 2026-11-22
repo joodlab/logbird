@@ -276,14 +276,14 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 id = UuidV7.NewId();
             }
 
-            // Identifiers are sent exactly as given. One Logbird cannot store exactly as given is refused here and the event is
-            // not sent; surrounding whitespace is sent as given and reported once the event is queued.
+            // Identifiers are sent exactly as given. One Logbird would not index as given is refused here by the SDK and the
+            // event is not sent; surrounding whitespace is sent as given and reported once the event is queued.
             var whitespace = _whitespaceFields ??= [];
             whitespace.Clear();
             if (EntityIds.Validate(source, whitespace) is { } invalidEntity)
             {
                 Drop(DropReason.InvalidEntityId, id, action, null, invalidEntity);
-                Report(new LogbirdDeliveryException("An audit event was not sent: " + invalidEntity));
+                Report(new LogbirdDeliveryException("An audit event was dropped: " + invalidEntity));
                 return id ?? auditEvent?.Id;
             }
 
@@ -313,7 +313,9 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             {
                 foreach (var field in whitespace)
                 {
-                    Warn(eventId, eventAction, $"surrounding whitespace in {field}: sent exactly as given; Logbird servers up to 0.2.x index it trimmed, so a search for the padded id does not find it", $"surrounding whitespace in {field}");
+                    // Field names and fixed text only: the message never carries event data.
+                    var reason = EntityIds.WhitespaceReason(field);
+                    Warn(eventId, eventAction, reason, "Logbird warning about an event it is sending: " + reason);
                 }
 
                 Interlocked.Increment(ref _tracked);
@@ -877,7 +879,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     // A server reason can quote the event's values; the message and log line keep only its leading field or code.
     private void OnSenderWarning(QueuedEvent item, string reason)
-        => Warn(item.Id, item.Action, reason, "server warning (" + SafePrefix(reason) + ")");
+        => Warn(item.Id, item.Action, reason, "Logbird warning about a stored event: server warning (" + SafePrefix(reason) + ")");
 
     // A server reason is free text that can quote the event's values; the summary names only a fixed topic.
     private static string SafePrefix(string reason)
@@ -886,10 +888,10 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             : reason.Contains("id") ? "id"
             : "other";
 
-    private void Warn(string id, string action, string reason, string summary)
+    private void Warn(string id, string action, string reason, string message)
     {
         Interlocked.Increment(ref _warnings);
-        Report(new LogbirdEventWarning(id, action, reason, summary));
+        Report(new LogbirdEventWarning(id, action, reason, message));
     }
 
     internal long NotificationsLost => Interlocked.Read(ref _notificationsLost);
