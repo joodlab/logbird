@@ -13,6 +13,9 @@ import { createClickHouseClient, exportEvents, facets, getEvent, purgeProject, s
 
 const total = Number(process.argv[2] ?? 1_000_000);
 const runs = Number(process.argv[3] ?? 30);
+// The cohorts below need at least 100k events (tiny tenant: one event per 20k; detail ids bench-2/-7/-16/-20007).
+if (!Number.isInteger(total) || total < 100_000) throw new Error('events must be an integer >= 100000');
+if (!Number.isInteger(runs) || runs < 1) throw new Error('runs must be a positive integer');
 const ch = createClickHouseClient();
 const p = `qa-bench-scoped-${randomUUID()}`;
 const span = 7 * 86_400_000;
@@ -38,7 +41,9 @@ async function measure(name: string, run: () => Promise<unknown>) {
 
 try {
   const started = performance.now();
-  // ~60% one big tenant, 200 medium tenants, one tiny tenant with total/20000 events; 50 websites as targets.
+  // Cohorts: 60% one big tenant ("big"), 80 medium tenants ("m6", "m7", … "m199": 40% shared by tenant ids whose last
+  // digit is 6-9), and a tiny tenant with total/20000 events spread over 5 of the 50 websites (so "tiny + website" is a
+  // real subset). Counts are printed before timing.
   // 100k-row batches keep ClickHouse memory (rollup materialized views included) well under 1 GiB per statement.
   for (let offset = 0; offset < total; offset += 100_000)
     await ch.command({
@@ -59,13 +64,22 @@ try {
               arrayElement(['booking.created','booking.cancelled','auth.login','page.updated'], number % 4 + 1) act,
               concat('u', toString(number % 5000)) actor,
               multiIf(number % 20000 = 7, 'tiny', number % 10 < 6, 'big', concat('m', toString(number % 200))) tenant,
-              concat('site_', toString(number % 50)) site,
+              if(number % 20000 = 7, concat('site_', toString(intDiv(number, 20000) % 5)), concat('site_', toString(number % 50))) site,
               if(number % 3 = 0, '["roles:create"]', '["staff:invite","roles:create"]') missing
             FROM numbers({offset:UInt64}, {batch:UInt64}))`,
       query_params: { p, step, offset, batch: Math.min(100_000, total - offset) },
       clickhouse_settings: { max_insert_threads: '2', max_memory_usage: '1073741824' },
     });
   console.log(JSON.stringify({ project: p, inserted: total, seconds: Math.round((performance.now() - started) / 100) / 10 }));
+  const cohorts = await (
+    await ch.query({
+      query: `SELECT countIf(tenant_id = 'big') big, uniqExactIf(tenant_id, startsWith(tenant_id, 'm')) mediumTenants, countIf(tenant_id = 'm16') m16,
+        countIf(tenant_id = 'tiny') tiny, countIf(tenant_id = 'tiny' AND has(target_ids, 'site_0')) tinySite0 FROM events WHERE project_id = {p:String}`,
+      query_params: { p },
+      format: 'JSONEachRow',
+    })
+  ).json();
+  console.log(JSON.stringify({ cohorts: cohorts[0] }));
   const now = Date.now();
   const day = { from: new Date(now - 86_400_000).toISOString(), to: new Date(now + 60_000).toISOString() };
   const week = { from: new Date(now - span - 60_000).toISOString(), to: day.to };
@@ -74,7 +88,7 @@ try {
     ['big tenant', { tenantId: 'big' }],
     ['medium tenant', { tenantId: 'm16' }],
     ['tiny tenant', { tenantId: 'tiny' }],
-    ['tiny tenant + website', { tenantId: 'tiny', target: { type: 'website', id: 'site_7' } }],
+    ['tiny tenant + website', { tenantId: 'tiny', target: { type: 'website', id: 'site_0' } }],
   ];
   const results: { name: string; p50: number; p95: number }[] = [];
   for (const [label, scope] of scopes) {
@@ -90,7 +104,7 @@ try {
         facets(ch, p, { ...week, field: 'attr.metadata.missing', by: 'tenant', limit: 10, byLimit: 5 }, scope),
       ),
     );
-    // Detail of an event inside the scope (bench-7: tiny tenant on site_7; bench-2: big; bench-16: m16).
+    // Detail of an event inside the scope (bench-7: tiny tenant on site_0; bench-2: big; bench-16: m16).
     const id = scope?.tenantId === 'tiny' ? 'bench-7' : scope?.tenantId === 'm16' ? 'bench-16' : 'bench-2';
     results.push(
       await measure(`detail ${label}`, async () => {
@@ -111,10 +125,15 @@ try {
   }
   console.log(JSON.stringify({ summary: results }));
 } finally {
-  await purgeProject(ch, p);
-  const left = await (
-    await ch.query({ query: 'SELECT count() n FROM events WHERE project_id={p:String}', query_params: { p }, format: 'JSONEachRow' })
-  ).json<{ n: number }>();
-  console.log(JSON.stringify({ cleanup: p, remaining: Number(left[0]?.n ?? -1) }));
-  await ch.close();
+  try {
+    await purgeProject(ch, p);
+    const left = await (
+      await ch.query({ query: 'SELECT count() n FROM events WHERE project_id={p:String}', query_params: { p }, format: 'JSONEachRow' })
+    ).json<{ n: number }>();
+    console.log(JSON.stringify({ cleanup: p, remaining: Number(left[0]?.n ?? -1) }));
+  } catch (error) {
+    console.error(JSON.stringify({ cleanup: p, failed: String(error) }));
+  } finally {
+    await ch.close();
+  }
 }

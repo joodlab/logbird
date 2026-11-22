@@ -129,7 +129,8 @@ export function createPublicRateLimits({
     authenticated: (kind: 'ingest' | 'read') =>
       createMiddleware<AppEnv>(async (c, next) => {
         const limit = kind === 'ingest' ? ingestLimit : readLimit;
-        const projectKey = `${prefix}:rate:project:${c.get('project').id}:${kind}:${window()}`;
+        const minute = window(); // one window for both buckets, even across a minute boundary
+        const projectKey = `${prefix}:rate:project:${c.get('project').id}:${kind}:${minute}`;
         const reader = kind === 'read' ? c.get('reader') : undefined;
         try {
           if (reader?.via === 'token') {
@@ -142,7 +143,7 @@ export function createPublicRateLimits({
             const [tenantCount, projectCount] = (await store.eval(
               viewerScript,
               2,
-              `${prefix}:rate:viewer:${reader.keyId}:${tenant}:${window()}`,
+              `${prefix}:rate:viewer:${reader.keyId}:${tenant}:${minute}`,
               projectKey,
               120_000,
               viewerReadLimit,

@@ -2,6 +2,7 @@
 import { compileQuery, projectStats, retentionStats, validateSql } from '@logbird/clickhouse';
 import {
   API_KEY_SCOPES,
+  apiErrorSchema,
   apiKeySchema,
   createApiKeyResponseSchema,
   createApiKeySchema,
@@ -349,6 +350,11 @@ export const managementRoutes = new Hono<AppEnv>()
         201: {
           description: 'Replacement key; the secret is shown once',
           content: { 'application/json': { schema: resolver(createApiKeyResponseSchema) } },
+        },
+        409: {
+          description:
+            'key_revoked: the key is revoked. key_expired: the key has expired; retry with a future expiresAt. key_restricted: the replacement would drop the scope or expiry (database backstop).',
+          content: { 'application/json': { schema: resolver(apiErrorSchema) } },
         },
       },
     }),

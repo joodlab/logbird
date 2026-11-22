@@ -4573,6 +4573,37 @@
             },
             "description": "Replacement key; the secret is shown once"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "key_revoked: the key is revoked. key_expired: the key has expired; retry with a future expiresAt. key_restricted: the replacement would drop the scope or expiry (database backstop)."
+          },
           "default": {
             "content": {
               "application/json": {
@@ -10815,7 +10846,7 @@
             "description": "Search events",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }
@@ -10863,10 +10894,10 @@
                 }
               }
             },
-            "description": "Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.",
+            "description": "a request budget is exhausted (the project bucket; for viewer tokens the minting key + tenant bucket; for minting the per-key bucket) or the peer authentication-failure budget is. Public limits fail open if Redis is unavailable.",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }
@@ -11076,7 +11107,7 @@
             "description": "Ingest events",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }
@@ -11124,10 +11155,10 @@
                 }
               }
             },
-            "description": "Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.",
+            "description": "a request budget is exhausted (the project bucket; for viewer tokens the minting key + tenant bucket; for minting the per-key bucket) or the peer authentication-failure budget is. Public limits fail open if Redis is unavailable.",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }
@@ -11775,7 +11806,7 @@
             "description": "Event detail",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }
@@ -11823,10 +11854,10 @@
                 }
               }
             },
-            "description": "Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.",
+            "description": "a request budget is exhausted (the project bucket; for viewer tokens the minting key + tenant bucket; for minting the per-key bucket) or the peer authentication-failure budget is. Public limits fail open if Redis is unavailable.",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }
@@ -11960,10 +11991,10 @@
                 }
               }
             },
-            "description": "Versioned CSV/JSONL or complete original-payload JSONL (jsonl-evidence; 422 masked_export for masked scopes), limited to the caller scope. CSV columns: id, timestamp, action, outcome, description, project_id, received_at, environment, category, severity, actor_type, actor_id, actor_name, actor_email, impersonator_id, impersonator_name, executor_type, executor_id, executor_name, job_id, job_attempt, tenant_id, tenant_name, source, targets, changes, context, attributes, conformance, schema_version, sdk, schemaVersion. There is no trailer: a complete file ends with a newline and a normal end of the chunked body; a failure after the headers aborts the connection, so treat any transport error as an incomplete file and discard it. Audited in workspace activity as export.requested, then export.completed or export.failed (actor = the API key; metadata.access names the key, tenant and viewer token). See docs/exports.md.",
+            "description": "Versioned CSV/JSONL or complete original-payload JSONL (jsonl-evidence; 422 masked_export for masked scopes), limited to the caller scope. CSV columns: id, timestamp, action, outcome, description, project_id, received_at, environment, category, severity, actor_type, actor_id, actor_name, actor_email, impersonator_id, impersonator_name, executor_type, executor_id, executor_name, job_id, job_attempt, tenant_id, tenant_name, source, targets, changes, context, attributes, conformance, schema_version, sdk, schemaVersion. There is no trailer: a complete download is one that ends normally (a non-empty file ends with a newline; an export with no matching events is an empty JSONL body or a CSV header only); a failure after the headers aborts the connection, so treat any transport error as an incomplete file and discard it. Audited in workspace activity as export.requested, then export.completed or export.failed (actor = the API key; metadata.access names the key, tenant and viewer token). See docs/exports.md.",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }
@@ -12024,10 +12055,10 @@
                 }
               }
             },
-            "description": "Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.",
+            "description": "Export capacity is in use. Finish or cancel an export, then retry. Otherwise: a request budget is exhausted (the project bucket; for viewer tokens the minting key + tenant bucket; for minting the per-key bucket) or the peer authentication-failure budget is. Public limits fail open if Redis is unavailable.",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }
@@ -12350,7 +12381,7 @@
             "description": "Facets",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }
@@ -12398,10 +12429,10 @@
                 }
               }
             },
-            "description": "Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.",
+            "description": "a request budget is exhausted (the project bucket; for viewer tokens the minting key + tenant bucket; for minting the per-key bucket) or the peer authentication-failure budget is. Public limits fail open if Redis is unavailable.",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }
@@ -12663,7 +12694,7 @@
             "description": "Viewer token",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }
@@ -12714,7 +12745,7 @@
             "description": "scope_exceeded: the requested scope is wider than the key scope.",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }
@@ -12762,10 +12793,10 @@
                 }
               }
             },
-            "description": "Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.",
+            "description": "a request budget is exhausted (the project bucket; for viewer tokens the minting key + tenant bucket; for minting the per-key bucket) or the peer authentication-failure budget is. Public limits fail open if Redis is unavailable.",
             "headers": {
               "RateLimit-Limit": {
-                "description": "Requests per project and key kind per minute",
+                "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",
                 "schema": {
                   "type": "integer"
                 }

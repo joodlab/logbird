@@ -36,7 +36,7 @@ it.each(['asc', 'desc'] as const)('keeps the %s selector in sort-key order and r
   expect(query.mock.calls[0]?.[0].query_params).toMatchObject({ project: 'qa-narrow-search', limit: 2 });
   expect(page.data.map((e) => e.id)).toEqual([rows[0]?.event_id]);
   expect(page.total).toBe(5);
-  expect(JSON.parse(Buffer.from(page.nextCursor as string, 'base64url').toString())).toEqual([rows[0]?.timestamp, rows[0]?.event_id]);
+  expect(JSON.parse(Buffer.from(page.nextCursor as string, 'base64url').toString()).slice(0, 2)).toEqual([rows[0]?.timestamp, rows[0]?.event_id]);
 });
 it.each(['asc', 'desc'] as const)('applies the %s cursor inside the narrow selector and does not advance past the sentinel', async (order) => {
   const at = '2026-11-07T10:01:00.000Z';

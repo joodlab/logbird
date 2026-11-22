@@ -61,7 +61,7 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
 | --- | --- |
 | `GET /v1/events` | Only in-scope events; `total` counts in-scope events only. Cursors are bound to the scope that minted them: a cursor from another scope (or from an unscoped key) is refused with 422 `validation_error`. |
 | `GET /v1/events/:id` | An out-of-scope id answers 404 exactly like an id that was never stored. The parent chain stops at the first out-of-scope parent; `childCount` and `operationSize` count in-scope events only. The event's own `context.parentEventId` is kept as recorded (it is the event's content), and following it answers that same 404. |
-| `GET /v1/facets` | Counts over in-scope events only (any envelope field or `attr.<path>`, optional second level `by`). |
+| `GET /v1/facets` | Counts over in-scope events only (any query field, or `attr.<path>` / `attributes.<path>`, optional second level `by`). Attribute values are stored as text: a value that is JSON array text (a sent array, or a string that looks like one) counts each element; an array whose stored text was cut at 2048 bytes counts as one value. |
 | `GET /v1/export` | Only in-scope rows, through the same engine, admission limits and audit trail as console exports. |
 
 ## Masks
@@ -98,7 +98,8 @@ POST /api/projects/:projectId/keys
 - Scope, origins and expiry are fixed at creation. **Rolling** (`POST …/keys/:keyId/roll`) copies the scope and
   origins and keeps the old key's absolute expiry; pass `{ "expiresAt": "…" }` to give the replacement a different
   one. Rolling an expired key requires a new `expiresAt` (409 `key_expired` otherwise). A database trigger refuses any
-  replacement that drops the scope or the expiry (409 `key_restricted`), also when an older release does the roll.
+  replacement that drops the scope or the expiry: this release answers 409 `key_restricted`; an older release (after a
+  rollback) fails that roll with a server error and creates nothing.
 - `api_key.created` and `api_key.revoked` in workspace activity record the scope, origins and expiry.
 
 ## Viewer tokens
@@ -142,8 +143,9 @@ Authorization: Bearer lb_read_…
 
 `GET /v1/export?format=csv|jsonl|jsonl-evidence&q=&from=&to=` streams like the console export
 ([exports](exports.md)): `X-Logbird-Export-Id` and `X-Logbird-Export-Schema` headers, the same CSV columns, and the
-same admission limits (one running export per API key, two per workspace). There is no trailer: a complete file ends
-with a newline and a normal end of the response; a failure after the headers aborts the connection, so discard any
+same admission limits (one running export per API key, two per workspace; a busy key answers 429 `export_busy`). There
+is no trailer: a complete download is one that ends normally (a non-empty file ends with a newline; no matching events
+gives an empty JSONL body or a CSV header only). A failure after the headers aborts the connection, so discard any
 download that ends with a transport error.
 
 Each export is recorded in workspace activity as `export.requested`, then `export.completed` or `export.failed`, with

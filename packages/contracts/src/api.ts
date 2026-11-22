@@ -303,8 +303,9 @@ export const scopeMaskSchema = z.enum(SCOPE_MASKS);
  * v1 allows one tenant per scope; the shape stays list-ready (a future `tenantIds` would be additive).
  */
 /**
- * Scope identifiers must be exactly what ingest stores for them: no surrounding whitespace, no U+FFFD or lone
- * surrogates, and shorter than the stored caps. The server additionally checks the original stored payload.
+ * Scope identifiers name STORED ids (maintainer decision, #180): they must already be in stored form, with no
+ * surrounding whitespace, no U+FFFD, no lone surrogates and no U+0000 (Postgres jsonb cannot store it), and shorter than
+ * the stored caps. Then a capped or Unicode-repaired stored value can never equal a valid scope id.
  */
 const scopeIdentifier = (max: number) =>
   z
@@ -312,8 +313,11 @@ const scopeIdentifier = (max: number) =>
     .min(1)
     .max(max)
     .refine(
-      (v) => v === v.trim() && !/�|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(v),
-      'Use the identifier exactly as sent: no surrounding whitespace or invalid Unicode.',
+      (v) =>
+        v === v.trim() &&
+        !v.includes(String.fromCharCode(0)) &&
+        !/\uFFFD|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(v),
+      'Use the identifier exactly as stored: no surrounding whitespace, NUL or invalid Unicode.',
     );
 export const readScopeSchema = z
   .object({

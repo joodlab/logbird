@@ -60,6 +60,17 @@ export function scopeFingerprint(scope: ReadScope | null | undefined, projectId:
   return createHash('sha256').update(canonical).digest('base64url').slice(0, 16);
 }
 
+/** The binding stored in search cursors: the scope fingerprint, or for unscoped readers a project-only fingerprint. */
+export function cursorBinding(projectId: string, scope?: ReadScope | null) {
+  return (
+    scopeFingerprint(scope, projectId) ??
+    `u.${createHash('sha256')
+      .update(JSON.stringify([projectId]))
+      .digest('base64url')
+      .slice(0, 16)}`
+  );
+}
+
 /** A malformed cursor, or one minted under a different project or scope (HTTP 422 `validation_error`). */
 export class CursorError extends Error {
   constructor() {

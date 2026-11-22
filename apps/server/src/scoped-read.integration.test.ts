@@ -505,6 +505,34 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
       expect(row.event.id).toBe(`qa-bulk-${String(row.payload.metadata.n).padStart(3, '0')}`);
     }
 
+    // Attribute facets count JSON-array text per element. Attributes are stored as text, so a real array and a string
+    // that looks like one are counted the same way, and an array whose stored text is cut at 2048 bytes is no longer
+    // valid JSON and counts as one value (documented guarantee).
+    const tagEvents = [
+      { id: 'qa-tags-array', tags: ['red', 'blue'] },
+      { id: 'qa-tags-string', tags: '["red","blue"]' },
+      { id: 'qa-tags-plain', tags: 'red' },
+      { id: 'qa-tags-long', tags: Array.from({ length: 300 }, (_, n) => `long-${n}`) },
+    ].map((e) => ({ id: e.id, occurredAt: ts(14), action: 'booking.created', tenant: { id: 'tfacet' }, metadata: { tags: e.tags } }));
+    expect(
+      (
+        await (
+          await app.request('/v1/events', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${result.ingestKey.secret}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ events: tagEvents }),
+          })
+        ).json()
+      ).accepted,
+    ).toBe(4);
+    const facetKey = await createKey({ name: 'Facet tenant', kind: 'scoped-read', scope: { tenantId: 'tfacet' } });
+    const tags = await facets(facetKey.secret, { field: 'attr.metadata.tags', limit: '100' });
+    const tagCount = new Map(tags.values.map((v) => [v.value, v.count]));
+    expect(tagCount.get('red')).toBe(3);
+    expect(tagCount.get('blue')).toBe(2);
+    expect([...tagCount.keys()].some((v) => v.startsWith('long-'))).toBe(false); // the cut array is one opaque value
+    expect([...tagCount.entries()].filter(([v]) => v.startsWith('["long-0"')).map(([, n]) => n)).toEqual([1]);
+
     // Rolling copies scope, origins and the absolute expiry (a replacement never outlives the key it replaces unless the
     // roll passes a new expiry); revoking or expiring the key kills it and its tokens.
     const rolled = await console_(ownerCookie, `${keysPath}/${site.key.id}/roll`, 'POST');
@@ -565,6 +593,12 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect(preScopeAuthenticator.test(read.secret)).toBe(true); // unrestricted keys keep the old format
     const expiringIngest = await createKey({ name: 'Expiring ingest', kind: 'ingest', expiresAt: later });
     expect(preScopeAuthenticator.test(expiringIngest.secret)).toBe(false);
+    // The fence is installed as migrated: an enabled BEFORE INSERT row trigger on "ApiKey" calling the fence function.
+    const installed = await prisma.$queryRaw<{ enabled: string; insert: boolean; before: boolean; row: boolean; fn: string }[]>`
+      SELECT t.tgenabled::text AS enabled, (t.tgtype & 4) <> 0 AS insert, (t.tgtype & 2) <> 0 AS before, (t.tgtype & 1) <> 0 AS row, p.proname AS fn
+      FROM pg_trigger t JOIN pg_proc p ON p.oid = t.tgfoid
+      WHERE t.tgrelid = '"ApiKey"'::regclass AND t.tgname = 'ApiKey_roll_fence' AND NOT t.tgisinternal`;
+    expect(installed).toEqual([{ enabled: 'O', insert: true, before: true, row: true, fn: 'logbird_api_key_roll_fence' }]);
     // escape: rollback — the database fence refuses a roll (as an older release would do it) that drops the scope or
     // the expiry; legitimate rolls and plain inserts are untouched.
     const oldReleaseRoll = (replaced: { id: string; kind: string }, extra: Record<string, unknown> = {}) =>
@@ -612,13 +646,30 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect((await v1(result.ingestKey.secret, '/events')).status).toBe(401);
   } finally {
     clearTokenKeyCache();
-    if (project) expect((await console_(ownerCookie, `/api/projects/${project.id}?confirm=${project.slug}`, 'DELETE')).status).toBe(204);
-    if (organizationId) {
-      await prisma.exportLease.deleteMany({ where: { workspaceId: organizationId } });
-      await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${organizationId}` } });
-      await purgeProject(clickhouse, `ws:${organizationId}`);
-      await prisma.organization.delete({ where: { id: organizationId } });
+    // Every cleanup step runs even if an earlier one fails; failures are reported after all of them ran.
+    const failures: unknown[] = [];
+    const step = async (run: () => Promise<unknown>) => {
+      try {
+        await run();
+      } catch (error) {
+        failures.push(error);
+      }
+    };
+    if (project) {
+      const { id, slug } = project;
+      await step(async () => {
+        const deleted = await console_(ownerCookie, `/api/projects/${id}?confirm=${slug}`, 'DELETE');
+        if (deleted.status !== 204) throw new Error(`project delete answered ${deleted.status}`);
+      });
     }
-    await prisma.user.deleteMany({ where: { id: { in: users } } });
+    if (organizationId) {
+      await step(() => prisma.exportLease.deleteMany({ where: { workspaceId: organizationId } }));
+      await step(() => prisma.auditOutbox.deleteMany({ where: { stream: `ws:${organizationId}` } }));
+      await step(() => purgeProject(clickhouse, `ws:${organizationId}`));
+      await step(() => prisma.organization.delete({ where: { id: organizationId } }));
+    }
+    await step(() => prisma.user.deleteMany({ where: { id: { in: users } } }));
+    if (failures.length) console.error(JSON.stringify({ event: 'qa.scoped_read.cleanup_failed', failures: failures.map(String) }));
+    expect(failures).toEqual([]);
   }
 }, 360_000);

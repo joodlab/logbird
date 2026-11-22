@@ -26,6 +26,7 @@ import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keysQuery, keys as queryKeys } from '@/lib/api/queries';
+import { isKeyExpired, isKeyUsable } from '@/lib/api-keys';
 import { creatorLabel } from '@/lib/events';
 import { fieldErrorMessage } from '@/lib/forms';
 import { useCan } from '@/lib/permissions';
@@ -82,8 +83,8 @@ function KeysSettings() {
   const active = list.data?.filter((k) => !k.revokedAt) ?? [];
   const revoked = list.data?.filter((k) => k.revokedAt) ?? [];
   const byId = new Map((list.data ?? []).map((k) => [k.id, k]));
-  /** The active key that replaced `key` through a roll, if any. */
-  const replacementOf = (key: ApiKey) => active.find((k) => k.replacesKeyId === key.id);
+  /** The usable key that replaced `key` through a roll, if any (an expired replacement does not count). */
+  const replacementOf = (key: ApiKey) => active.find((k) => k.replacesKeyId === key.id && isKeyUsable(k));
 
   return (
     <div className="flex flex-col gap-5">
@@ -144,7 +145,7 @@ function KeysSettings() {
                         <TypePill tone="warning">
                           revoked <Timestamp format="relative" iso={k.revokedAt} />
                         </TypePill>
-                      ) : k.expiresAt && Date.parse(k.expiresAt) <= Date.now() ? (
+                      ) : isKeyExpired(k) ? (
                         <TypePill tone="warning">
                           expired <Timestamp format="relative" iso={k.expiresAt} />
                         </TypePill>
@@ -189,7 +190,8 @@ function KeysSettings() {
                     </span>
                     {k.revokedAt || !manage ? null : (
                       <span className="ms-auto flex items-center gap-1">
-                        {replacement ? null : (
+                        {/* Rolling an expired key needs a new expiry, which this dialog does not ask for yet. */}
+                        {replacement || isKeyExpired(k) ? null : (
                           <Button
                             data-testid="roll-key"
                             disabled={roll.isPending}

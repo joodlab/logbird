@@ -10,7 +10,11 @@ export function routeDoc(summary: string, options: DescribeRouteOptions = {}, se
   const requirements: Record<string, string[]>[] =
     security === 'none' ? [] : security === 'readKeyOrViewerToken' ? [{ readKey: [] }, { viewerToken: [] }] : [{ [security]: [] }];
   const headers = {
-    'RateLimit-Limit': { description: 'Requests per project and key kind per minute', schema: { type: 'integer' as const } },
+    'RateLimit-Limit': {
+      description:
+        'Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket',
+      schema: { type: 'integer' as const },
+    },
     'RateLimit-Remaining': { description: 'Requests remaining in this window', schema: { type: 'integer' as const } },
     'RateLimit-Reset': { description: 'Seconds until the fixed window resets', schema: { type: 'integer' as const } },
   };
@@ -32,7 +36,11 @@ export function routeDoc(summary: string, options: DescribeRouteOptions = {}, se
       ...(publicApi
         ? {
             429: {
-              description: 'Project request budget or peer authentication-failure budget exhausted. Public limits fail open if Redis is unavailable.',
+              description: `${
+                options.responses && 429 in options.responses && 'description' in options.responses[429]
+                  ? `${options.responses[429].description} Otherwise: `
+                  : ''
+              }a request budget is exhausted (the project bucket; for viewer tokens the minting key + tenant bucket; for minting the per-key bucket) or the peer authentication-failure budget is. Public limits fail open if Redis is unavailable.`,
               headers: {
                 ...headers,
                 'Retry-After': {

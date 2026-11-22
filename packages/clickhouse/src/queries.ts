@@ -28,7 +28,7 @@ import { projectMaintenance } from './maintenance-tag';
 import type { EventRow } from './normalize';
 import { columns, compileQuery, QueryError } from './query';
 import { rollupSql } from './rollup-sql';
-import { CursorError, scopeFingerprint, scopePredicate } from './scope';
+import { CursorError, cursorBinding, scopePredicate } from './scope';
 import { freezeSqlClock, sqlSyntaxError, validateSql } from './sql-guard';
 
 const sqlExpression = Symbol('sqlExpression');
@@ -170,16 +170,29 @@ export function toEvent(r: EventRow & { category?: string }): AuditEvent {
   };
 }
 const encode = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
-/** Search cursors are `[timestamp, eventId]`, plus the scope fingerprint when minted by a scoped caller. */
+/**
+ * Search cursors are `[timestamp, eventId, binding]`: the binding ties them to the project, and to the scope when
+ * minted by a scoped caller. Two-element cursors (issued before bindings existed) stay valid for unscoped readers only.
+ */
 function cursor(s: string, projectId: string, scope?: ReadScope | null): [string, string] {
-  const bound = scopeFingerprint(scope, projectId);
+  const bound = cursorBinding(projectId, scope);
   try {
     const a: unknown = JSON.parse(Buffer.from(s, 'base64url').toString());
-    // A cursor only pages within the project and scope that minted it: unscoped ↔ scoped and scope A ↔ scope B are
-    // rejected, and so is a malformed position (a non-ISO timestamp would otherwise fail later as a 500).
-    if (Array.isArray(a) && a.length === (bound ? 3 : 2) && a.every((v) => typeof v === 'string') && (!bound || a[2] === bound)) {
+    // A cursor only pages within the project and scope that minted it: another project, unscoped ↔ scoped and
+    // scope A ↔ scope B are rejected, and so is a malformed position (it would otherwise fail later as a 500 or be
+    // silently normalized, e.g. February 30).
+    const binds = Array.isArray(a) && (a.length === 3 ? a[2] === bound : a.length === 2 && !scope);
+    if (binds && a.every((v) => typeof v === 'string')) {
       const [ts, id] = a as [string, string];
-      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(ts) && Number.isFinite(Date.parse(ts)) && id.length <= 1024) return [ts, id];
+      const date = new Date(ts);
+      if (
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(ts) &&
+        Number.isFinite(date.getTime()) &&
+        date.toISOString() === ts &&
+        id &&
+        id.length <= 1024
+      )
+        return [ts, id];
     }
   } catch {
     /* Report malformed cursors with a stable public error below. */
@@ -236,7 +249,7 @@ async function searchPage(
     page: {
       data,
       total,
-      nextCursor: hasMore && last ? encode([last.timestamp, last.id, ...(scope ? [scopeFingerprint(scope, projectId)] : [])]) : null,
+      nextCursor: hasMore && last ? encode([last.timestamp, last.id, cursorBinding(projectId, scope)]) : null,
       tookMs: performance.now() - start,
     },
     payloads: includePayload ? rows.slice(0, q.limit).map((row) => row.payload) : [],
