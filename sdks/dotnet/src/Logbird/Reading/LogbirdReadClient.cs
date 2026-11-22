@@ -1,0 +1,227 @@
+using System;
+using System.Collections.Generic;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
+using System.Threading;
+using System.Threading.Tasks;
+using Logbird.Internal;
+
+namespace Logbird;
+
+/// <summary>Settings for <see cref="LogbirdReadClient"/>.</summary>
+public sealed class LogbirdReadOptions
+{
+    /// <summary>Your Logbird public origin, for example <c>https://audit.example.com</c>.</summary>
+    public Uri? Endpoint { get; set; }
+
+    /// <summary>A project read key (<c>lb_read_…</c>). Server-side only: never send it to a browser.</summary>
+    public string? ReadKey { get; set; }
+
+    /// <summary>The time limit for one request. Defaults to 30 seconds.</summary>
+    public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
+}
+
+/// <summary>
+/// Reads stored events through the public API (<c>GET /v1/events</c> and <c>GET /v1/events/{id}</c>). Unlike
+/// recording, reading reports failures by throwing <see cref="LogbirdApiException"/>, because the caller needs the data.
+/// </summary>
+/// <remarks>
+/// A read key can read the whole project. When you show history to your own customers, check that the signed-in user
+/// may see the tenant or record before you search, on every request including next-page requests.
+/// </remarks>
+public sealed class LogbirdReadClient : IDisposable
+{
+    private readonly HttpClient _http;
+    private readonly bool _ownsHttp;
+    private readonly string _baseUrl;
+    private readonly AuthenticationHeaderValue _authorization;
+    private readonly TimeSpan _timeout;
+
+    /// <summary>Creates a read client.</summary>
+    /// <param name="options">The endpoint and read key.</param>
+    /// <param name="httpClient">An <see cref="HttpClient"/> to use, for example from <c>IHttpClientFactory</c>. Not disposed by this client.</param>
+    /// <exception cref="ArgumentException">The endpoint or key is missing.</exception>
+    public LogbirdReadClient(LogbirdReadOptions options, HttpClient? httpClient = null)
+    {
+        Guard.NotNull(options, nameof(options));
+        if (options.Endpoint is not { IsAbsoluteUri: true } endpoint || (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp))
+        {
+            throw new ArgumentException("Endpoint must be an absolute http or https URL.", nameof(options));
+        }
+
+        if (string.IsNullOrWhiteSpace(options.ReadKey))
+        {
+            throw new ArgumentException("ReadKey is required.", nameof(options));
+        }
+
+        if (options.Timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentException("Timeout must be positive.", nameof(options));
+        }
+
+        _baseUrl = endpoint.AbsoluteUri.TrimEnd('/');
+        _authorization = new AuthenticationHeaderValue("Bearer", options.ReadKey);
+        _timeout = options.Timeout;
+        _ownsHttp = httpClient is null;
+        _http = httpClient ?? new HttpClient { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+    }
+
+    /// <summary>Searches stored events and returns one page.</summary>
+    /// <param name="search">The search; <see langword="null"/> returns the newest events in the default range.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <exception cref="LogbirdApiException">The server answered an error, or could not be reached.</exception>
+    public Task<EventPage> SearchAsync(EventSearch? search = null, CancellationToken cancellationToken = default)
+        => GetAsync(_baseUrl + "/v1/events" + (search ?? new EventSearch()).ToQueryString(), ReadJsonContext.Default.EventPage, cancellationToken)!;
+
+    /// <summary>Iterates every matching event, requesting further pages as you go.</summary>
+    /// <param name="search">The search. Its <see cref="EventSearch.Cursor"/> is the starting point.</param>
+    /// <param name="cancellationToken">Cancels the iteration.</param>
+    /// <exception cref="LogbirdApiException">The server answered an error, or could not be reached.</exception>
+    public async IAsyncEnumerable<StoredEvent> SearchAllAsync(EventSearch? search = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var current = search ?? new EventSearch();
+        while (true)
+        {
+            var page = await SearchAsync(current, cancellationToken).ConfigureAwait(false);
+            foreach (var item in page.Events)
+            {
+                yield return item;
+            }
+
+            if (string.IsNullOrEmpty(page.NextCursor) || page.NextCursor == current.Cursor)
+            {
+                yield break;
+            }
+
+            current = current with { Cursor = page.NextCursor };
+        }
+    }
+
+    /// <summary>Gets one event with its raw payload and causation chain, or <see langword="null"/> when it does not exist.</summary>
+    /// <param name="eventId">The event id.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <exception cref="LogbirdApiException">The server answered an error other than 404, or could not be reached.</exception>
+    public Task<EventDetail?> GetAsync(string eventId, CancellationToken cancellationToken = default)
+    {
+        Guard.NotBlank(eventId, nameof(eventId));
+        return GetAsync(_baseUrl + "/v1/events/" + Uri.EscapeDataString(eventId), ReadJsonContext.Default.EventDetail, cancellationToken, notFoundIsNull: true);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (_ownsHttp)
+        {
+            _http.Dispose();
+        }
+    }
+
+    private async Task<T?> GetAsync<T>(string url, JsonTypeInfo<T> type, CancellationToken cancellationToken, bool notFoundIsNull = false)
+        where T : class
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_timeout);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = _authorization;
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Logbird.NET", LogbirdClient.Version));
+        HttpResponseMessage response;
+        byte[] body;
+        try
+        {
+            response = await _http.SendAsync(request, timeout.Token).ConfigureAwait(false);
+#if NET8_0_OR_GREATER
+            body = await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
+#else
+            body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+#endif
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException)
+        {
+            throw new LogbirdApiException(null, "unreachable", "Logbird could not be reached.", e);
+        }
+
+        using (response)
+        {
+            if (notFoundIsNull && response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw LogbirdApiException.FromResponse(response.StatusCode, body);
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize(body, type)
+                    ?? throw new LogbirdApiException(response.StatusCode, "invalid_response", "Logbird returned an empty response.");
+            }
+            catch (JsonException e)
+            {
+                throw new LogbirdApiException(response.StatusCode, "invalid_response", "Logbird returned a response this SDK cannot read.", e);
+            }
+        }
+    }
+}
+
+/// <summary>A read request failed.</summary>
+public sealed class LogbirdApiException : Exception
+{
+    /// <summary>Creates the exception.</summary>
+    /// <param name="statusCode">The HTTP status, when the server answered.</param>
+    /// <param name="code">The Logbird error code, for example <c>unauthorized</c> or <c>rate_limited</c>.</param>
+    /// <param name="message">The error message.</param>
+    /// <param name="innerException">The underlying error.</param>
+    public LogbirdApiException(HttpStatusCode? statusCode, string code, string message, Exception? innerException = null)
+        : base(message, innerException)
+    {
+        StatusCode = statusCode;
+        Code = code;
+    }
+
+    /// <summary>The HTTP status, or <see langword="null"/> when the server could not be reached.</summary>
+    public HttpStatusCode? StatusCode { get; }
+
+    /// <summary>The Logbird error code.</summary>
+    public string Code { get; }
+
+    internal static LogbirdApiException FromResponse(HttpStatusCode status, byte[] body)
+    {
+        var code = "http_" + ((int)status).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var message = $"Logbird read failed with HTTP {(int)status}.";
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("error", out var error)
+                && error.ValueKind == JsonValueKind.Object)
+            {
+                if (error.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String)
+                {
+                    code = codeElement.GetString()!;
+                }
+
+                if (error.TryGetProperty("message", out var messageElement) && messageElement.ValueKind == JsonValueKind.String)
+                {
+                    message = messageElement.GetString()!;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Not a Logbird error body (for example a proxy page): keep the generic message.
+        }
+
+        return new LogbirdApiException(status, code, message);
+    }
+}
