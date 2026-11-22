@@ -108,6 +108,9 @@ export function previousWindow(range: string): { from: string; to: string } {
  * timestamp admission), with a day of slack on each side for clocks and the time since arrival. Used where a search
  * must find every stored match, such as all children of an event.
  */
-export function admittedRange(now = Date.now()): string {
-  return absoluteRange(now - 3651 * UNIT_MS.d, now + 2 * UNIT_MS.d);
+export function admittedRange(now = Date.now(), oldestStoredIso?: string | null): string {
+  const admitted = now - 3651 * UNIT_MS.d;
+  // A purge that has not run yet can leave older rows: reach back to the oldest one the project still holds.
+  const oldest = oldestStoredIso ? Date.parse(oldestStoredIso) - UNIT_MS.d : Number.NaN;
+  return absoluteRange(Number.isNaN(oldest) ? admitted : Math.min(admitted, oldest), now + 2 * UNIT_MS.d);
 }

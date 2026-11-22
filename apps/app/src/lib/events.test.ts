@@ -238,3 +238,13 @@ describe('causedCount', () => {
     expect(causedCount({ childCount: 4 }, { id: 'self', context: ctx('self') })).toBe(3);
   });
 });
+
+describe('directChildren de-duplication', () => {
+  it('counts an id stored at two timestamps once, at its earliest time', () => {
+    const child = (ts: string) =>
+      event({ id: 'c1', timestamp: ts, context: { operationId: 'op', parentEventId: 'root', requestId: '', traceId: '', ip: '', userAgent: '' } });
+    expect(directChildren([child('2026-11-05T10:00:02.000Z'), child('2026-11-05T10:00:01.000Z')], 'root').map((e) => e.timestamp)).toEqual([
+      '2026-11-05T10:00:01.000Z',
+    ]);
+  });
+});

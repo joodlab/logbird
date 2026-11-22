@@ -37,7 +37,7 @@ import { EntityLink, EntityProfileLink } from '@/components/entity-link';
 import { SupportAgentLink } from '@/components/impersonation';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
-import { eventQuery, operationQuery } from '@/lib/api/queries';
+import { eventQuery, operationQuery, retentionQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
 import { actorAttributeHint, causedCount, directChildren, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
@@ -91,6 +91,7 @@ export function EventSheet({
             detail={detail.data}
             detailError={detail.isError ? detail.error : null}
             detailLoading={fetchDetail && detail.isPending}
+            detailUpdatedAt={detail.dataUpdatedAt}
             event={e}
             onFilter={onFilter}
             onNext={onNext}
@@ -227,12 +228,13 @@ interface Children {
 }
 
 /**
- * Direct children of an event (events whose `context.parentEventId` is this event). The list is read from the event's
- * operation, which the operation page shares through the cache. The count comes from the event detail (all stored
- * history, any operation); when a successful, settled operation read shows more, the larger number wins and the
- * detail is refreshed.
+ * Direct children of an event (events whose `context.parentEventId` is this event). The count comes from the event
+ * detail (all stored history, any operation); the list is read from the event's operation, which the operation page
+ * shares through the cache. Both are cached, so they can disagree: the operation read is accepted only when it is not
+ * older than the detail, or when both agree. A disagreeing snapshot refreshes whichever side is older, and the heading
+ * and rows always come from the same accepted snapshot.
  */
-function useChildren(detail: EventDetail | undefined, e: AuditEvent, projectId: string | undefined): Children {
+function useChildren(detail: EventDetail | undefined, detailUpdatedAt: number, e: AuditEvent, projectId: string | undefined): Children {
   const operationId = e.context.operationId;
   const lookup = Boolean(projectId && detail && operationId) && (detail?.operationSize ?? Number.POSITIVE_INFINITY) <= CHILD_LOOKUP_MAX_OPERATION;
   const op = useQuery({ ...operationQuery(projectId ?? '', operationId ?? ''), enabled: lookup });
@@ -240,21 +242,25 @@ function useChildren(detail: EventDetail | undefined, e: AuditEvent, projectId: 
   const counted = detail ? causedCount(detail, e) : 0;
   // A disabled or failed query may still hold older cached data: only a successful lookup counts.
   const children = lookup && op.isSuccess ? directChildren(op.data, e.id) : [];
-  // While the operation revalidates, do not draw conclusions from it.
-  const settled = lookup && op.isSuccess && !op.isFetching;
-  const stale = settled && children.length > counted;
+  const agree = children.length === counted;
+  const accepted = lookup && op.isSuccess && (agree || op.dataUpdatedAt >= detailUpdatedAt);
+  const refresh = !lookup || !op.isSuccess || op.isFetching || agree ? null : accepted ? 'detail' : 'operation';
   useEffect(() => {
-    if (stale && projectId) queryClient.invalidateQueries({ queryKey: eventQuery(projectId, e.id).queryKey });
-  }, [stale, queryClient, projectId, e.id]);
+    if (!(refresh && projectId)) return;
+    const queryKey = refresh === 'detail' ? eventQuery(projectId, e.id).queryKey : operationQuery(projectId, operationId ?? '').queryKey;
+    queryClient.invalidateQueries({ queryKey });
+  }, [refresh, queryClient, projectId, e.id, operationId]);
   return {
-    total: settled ? Math.max(counted, children.length) : counted,
-    shown: children.slice(0, CHILD_PREVIEW),
-    loading: lookup && op.isPending,
+    total: accepted ? Math.max(counted, children.length) : counted,
+    shown: accepted ? children.slice(0, CHILD_PREVIEW) : [],
+    loading: lookup && (op.isPending || (!accepted && op.isFetching)),
   };
 }
 
 function ChildEvents({ caused: c, event: e, projectId, indent }: { caused: Children; event: AuditEvent; projectId: string; indent: number }) {
   const { total, shown, loading } = c;
+  // Only needed for the "View all" search: how far back the project still holds rows.
+  const retention = useQuery({ ...retentionQuery(projectId), enabled: total > shown.length });
   return (
     <>
       {loading ? (
@@ -292,7 +298,7 @@ function ChildEvents({ caused: c, event: e, projectId, indent }: { caused: Child
             // Every child, whatever its operation or timestamp: an exact parent search over every timestamp ingest
             // admits. A self-parented event matches its own search, so it is left out.
             search={{
-              range: admittedRange(),
+              range: admittedRange(Date.now(), retention.data?.oldestEventAt),
               q: andQuery(formatExactTerm('parent', e.id), e.context.parentEventId === e.id ? formatExactTerm('id', e.id, true) : ''),
             }}
             to="/p/$projectId/events"
@@ -448,6 +454,7 @@ function EventDetailBody({
   event: e,
   detail,
   detailLoading,
+  detailUpdatedAt,
   detailError,
   projectId,
   onPrev,
@@ -458,6 +465,8 @@ function EventDetailBody({
   event: AuditEvent;
   detail: EventDetail | undefined;
   detailLoading: boolean;
+  /** When the detail was fetched: the child list is reconciled against it. */
+  detailUpdatedAt: number;
   detailError: unknown;
   projectId?: string;
   onPrev?: () => void;
@@ -477,7 +486,7 @@ function EventDetailBody({
         }`;
   const attributes = Object.entries(e.attributes).sort(([a], [b]) => a.localeCompare(b));
   const ctx = e.context;
-  const caused = useChildren(detail, e, projectId);
+  const caused = useChildren(detail, detailUpdatedAt, e, projectId);
   const depth = detail?.parents.length ?? 0;
 
   return (

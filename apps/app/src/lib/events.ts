@@ -225,9 +225,12 @@ export function parentActor(parents: readonly Pick<AuditEvent, 'actor'>[]): NonN
 
 /** Events directly caused by `eventId` (their `context.parentEventId`), oldest first. */
 export function directChildren(events: readonly AuditEvent[], eventId: string): AuditEvent[] {
+  // The operation endpoint returns one row per (timestamp, id): an id stored at two timestamps is still one child.
+  const seen = new Set<string>();
   return events
     .filter((c) => c.context.parentEventId === eventId && c.id !== eventId)
-    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) || a.id.localeCompare(b.id));
+    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) || a.id.localeCompare(b.id))
+    .filter((c) => !seen.has(c.id) && Boolean(seen.add(c.id)));
 }
 
 /**

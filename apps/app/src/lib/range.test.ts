@@ -32,3 +32,12 @@ describe('rangeLabel', () => {
     expect(label).toContain('2026');
   });
 });
+
+describe('admittedRange with stored rows older than the admission window', () => {
+  it('reaches back to the oldest stored event (minus a day)', () => {
+    const now = Date.parse('2026-11-22T12:00:00.000Z');
+    const oldest = '2016-11-01T00:00:00.000Z';
+    expect(resolveRange(admittedRange(now, oldest)).fromMs).toBe(Date.parse(oldest) - 86_400_000);
+    expect(resolveRange(admittedRange(now, null)).fromMs).toBe(now - 3651 * 86_400_000);
+  });
+});

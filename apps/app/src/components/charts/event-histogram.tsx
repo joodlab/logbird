@@ -45,7 +45,7 @@ export function EventHistogram({ data, height = 120, onZoom: onZoomProp, classNa
     if (drag && onZoom) {
       const from = Math.min(drag.start, drag.end);
       const to = Math.max(drag.start, drag.end) + interval * 1000;
-      onZoom(from, Math.min(to, Date.now()));
+      onZoom(from, to);
     }
     setDrag(null);
   };

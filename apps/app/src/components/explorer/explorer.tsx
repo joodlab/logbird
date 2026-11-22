@@ -19,7 +19,7 @@ import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import { andQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
-import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
+import { absoluteRange, isValidRange, rangeLabel, resolveRange } from '@/lib/range';
 import { appendSqlPredicate } from '@/lib/sql-language';
 import { EventSheet } from './event-sheet';
 import { EventsTable, type EventsTableHandle } from './events-table';
@@ -468,7 +468,8 @@ export function Explorer({
             data={histogramData}
             height={embedded ? 96 : 112}
             loading={histogram.isFetching && !histogram.isPending}
-            onZoom={(from, to) => onChange({ range: absoluteRange(from, to), live: undefined })}
+            // Clamp to the search's own end (which can lie ahead of now), so a bar's events stay in the zoomed range.
+            onZoom={(from, to) => onChange({ range: absoluteRange(from, Math.min(to, resolveRange(range).toMs)), live: undefined })}
             stale={Boolean(problem)}
           />
         ) : null}

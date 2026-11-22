@@ -29,3 +29,13 @@ describe('chart ticks', () => {
     }
   });
 });
+
+describe('multi-year ticks', () => {
+  it('labels about seven of ~118 month-wide buckets, with years', () => {
+    const series = rows('2016-11-01T00:00:00.000Z', 31 * 86_400, 118);
+    const { ticks, format } = timeTicks(series, 31 * 86_400);
+    expect(ticks?.length).toBeGreaterThanOrEqual(6);
+    expect(ticks?.length).toBeLessThanOrEqual(8);
+    expect(format(series[0]?.ts ?? 0)).toMatch(/20\d\d/);
+  });
+});

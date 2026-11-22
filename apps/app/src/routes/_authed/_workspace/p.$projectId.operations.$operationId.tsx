@@ -153,22 +153,29 @@ function OperationPage() {
           </h1>
           <CopyValue className="text-muted-foreground" value={operationId} />
         </div>
-        <Button
-          nativeButton={false}
-          render={
-            <Link
-              params={{ projectId }}
-              // Exactly the operation's own span (the search's upper bound is exclusive), not whatever range was open.
-              search={(prev) => ({ range: spanRange ?? prev.range, q: formatExactTerm('operation', operationId) })}
-              to="/p/$projectId/events"
-            />
-          }
-          size="sm"
-          variant="outline"
-        >
-          <Rows3Icon />
-          Open in explorer
-        </Button>
+        {spanRange ? (
+          <Button
+            nativeButton={false}
+            render={
+              <Link
+                params={{ projectId }}
+                // The span of every event in the operation, not whatever range was open.
+                search={{ range: spanRange, q: formatExactTerm('operation', operationId) }}
+                to="/p/$projectId/events"
+              />
+            }
+            size="sm"
+            variant="outline"
+          >
+            <Rows3Icon />
+            Open in explorer
+          </Button>
+        ) : (
+          <Button disabled size="sm" variant="outline">
+            <Rows3Icon />
+            Open in explorer
+          </Button>
+        )}
       </div>
 
       <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border md:grid-cols-5 [&>div:last-child]:col-span-2 md:[&>div:last-child]:col-span-1">

@@ -1,6 +1,6 @@
 import type { HistogramResponse } from '@logbird/contracts';
 import type { ChartConfig } from '@logbird/ui/components/ui/chart';
-import { formatClock, formatDayTime, formatMonthDay, zoneOffsetMs } from '@/lib/format';
+import { formatClock, formatDate, formatDayTime, formatMonthDay, formatMonthYear, zoneOffsetMs } from '@/lib/format';
 
 export const SERIES = ['success', 'partial', 'denied', 'failure', 'unknown'] as const;
 export type SeriesKey = (typeof SERIES)[number];
@@ -74,7 +74,14 @@ export function timeTicks(rows: SeriesRow[], intervalSeconds: number, target = 7
   const last = rows.at(-1)?.ts;
   if (first === undefined || last === undefined || last <= first) return { ticks: undefined, format: (ts: number) => formatClock(ts) };
   const span = last + step - first;
-  const nice = NICE_STEPS.find((n) => n >= step && n % step === 0 && span / n <= target) ?? Math.max(step, NICE_STEPS.at(-1) ?? DAY);
+  const fitted = NICE_STEPS.find((n) => n >= step && n % step === 0 && span / n <= target);
+  // Buckets wider than the ladder (multi-year searches): label every n-th bucket to stay near the target, with years.
+  if (fitted === undefined && step > (NICE_STEPS.at(-1) ?? DAY)) {
+    const stride = Math.max(1, Math.ceil(rows.length / target));
+    const ticks = rows.filter((_, i) => i % stride === 0).map((r) => r.ts);
+    return { ticks, format: (ts: number) => (span > 365 * DAY ? formatMonthYear(ts) : formatMonthDay(ts)) };
+  }
+  const nice = fitted ?? Math.max(step, NICE_STEPS.at(-1) ?? DAY);
   // Labels are centered on their tick: keep them clear of the plot edges so none is clipped.
   const edge = span * 0.035;
   const inside = (r: SeriesRow) => r.ts >= first + edge && r.ts <= last + step - edge;
@@ -93,6 +100,8 @@ export const bucketTicks = (rows: SeriesRow[], intervalSeconds: number) => timeT
 
 export function bucketLabel(ts: number, intervalSeconds: number): string {
   const end = ts + intervalSeconds * 1000;
+  // A multi-day bucket names the days it covers (its end is exclusive).
+  if (intervalSeconds > 86_400) return `${formatDate(new Date(ts).toISOString())} – ${formatDate(new Date(end - 1).toISOString())}`;
   if (intervalSeconds >= 86_400) return formatMonthDay(ts);
   return `${formatDayTime(ts)} – ${formatClock(end)}`;
 }
