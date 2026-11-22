@@ -612,12 +612,13 @@ const ENTITY_ORDER: Record<EntitySort, { keys: string; types: [string, string] }
   name: { keys: "lowerUTF8(if(name='',id,name)),''", types: ['String', 'String'] },
 };
 /**
- * How well an entity matches a search, best first: 0 exact id, 1 id prefix, 2 name prefix, 3 substring of id or name,
- * 4 fuzzy (ngram) only. A record is stored as `type:id`; its bare id (the part after its own, known type, which may
+ * How well an entity matches a search, best first: 0 the exact id as typed, 1 the id in another case, 2 id prefix,
+ * 3 name prefix, 4 substring of id or name, 5 fuzzy (ngram) only. A record is stored as `type:id`; its bare id (the part after its own, known type, which may
  * itself contain colons) counts as the id too (`article_27_2`). Other kinds keep their ids whole: `a:biz_27` is not
  * `biz_27`.
  */
-const ENTITY_BARE_ID = "lowerUTF8(if(kind='target' AND type!='' AND startsWith(id,concat(type,':')),substring(id,length(type)+2),id))";
+const ENTITY_BARE_ID_EXACT = "if(kind='target' AND startsWith(id,concat(type,':')),substring(id,length(type)+2),id)";
+const ENTITY_BARE_ID = `lowerUTF8(${ENTITY_BARE_ID_EXACT})`;
 /**
  * Whether an entity's id or name matches a search, over the given columns. Three or more characters: the id or name
  * contains the text, or resembles it (ngram). One or two characters say too little for that (on a project with a
@@ -625,7 +626,7 @@ const ENTITY_BARE_ID = "lowerUTF8(if(kind='target' AND type!='' AND startsWith(i
  * text: an id like `7` is still found exactly.
  */
 const entitySearchMatch = (id: string, name: string, type: string, kind: string) =>
-  `{q:String}='' OR (lengthUTF8({q:String})>=3 AND (positionCaseInsensitiveUTF8(concat(${id},' ',${name}),{q:String})>0 OR ngramSearchCaseInsensitiveUTF8(concat(${id},' ',${name}),{q:String})>0.3)) OR (lengthUTF8({q:String})<3 AND (startsWith(lowerUTF8(${id}),lowerUTF8({q:String})) OR startsWith(lowerUTF8(if(${kind}='target' AND ${type}!='' AND startsWith(${id},concat(${type},':')),substring(${id},length(${type})+2),${id})),lowerUTF8({q:String})) OR startsWith(lowerUTF8(${name}),lowerUTF8({q:String}))))`;
+  `{q:String}='' OR (lengthUTF8({q:String})>=3 AND (positionCaseInsensitiveUTF8(concat(${id},' ',${name}),{q:String})>0 OR ngramSearchCaseInsensitiveUTF8(concat(${id},' ',${name}),{q:String})>0.3)) OR (lengthUTF8({q:String})<3 AND (startsWith(lowerUTF8(${id}),lowerUTF8({q:String})) OR startsWith(lowerUTF8(if(${kind}='target' AND startsWith(${id},concat(${type},':')),substring(${id},length(${type})+2),${id})),lowerUTF8({q:String})) OR startsWith(lowerUTF8(${name}),lowerUTF8({q:String}))))`;
 /**
  * A search in two steps. The stored rows pick candidate ids cheaply (a kind can hold a million records; matching only
  * after a GROUP BY over all of them cost ~0.85 s on a 5M-event project). Every row of a candidate is then aggregated, so
@@ -635,11 +636,12 @@ const entitySearchMatch = (id: string, name: string, type: string, kind: string)
 const ENTITY_SEARCH_CANDIDATES = `({q:String}='' OR entity_id IN (SELECT entity_id FROM entities WHERE project_id={p:String} AND kind={kind:String} AND (${entitySearchMatch('entity_id', 'name', 'type', 'kind')})))`;
 const ENTITY_SEARCH_HAVING = `(${entitySearchMatch('id', 'name', 'type', 'kind')})`;
 const ENTITY_MATCH_RANK = `multiIf(
-  lowerUTF8(id)=lowerUTF8({q:String}) OR ${ENTITY_BARE_ID}=lowerUTF8({q:String}),0,
-  startsWith(lowerUTF8(id),lowerUTF8({q:String})) OR startsWith(${ENTITY_BARE_ID},lowerUTF8({q:String})),1,
-  startsWith(lowerUTF8(name),lowerUTF8({q:String})),2,
-  positionCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0,3,
-  4)`;
+  id={q:String} OR ${ENTITY_BARE_ID_EXACT}={q:String},0,
+  lowerUTF8(id)=lowerUTF8({q:String}) OR ${ENTITY_BARE_ID}=lowerUTF8({q:String}),1,
+  startsWith(lowerUTF8(id),lowerUTF8({q:String})) OR startsWith(${ENTITY_BARE_ID},lowerUTF8({q:String})),2,
+  startsWith(lowerUTF8(name),lowerUTF8({q:String})),3,
+  positionCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0,4,
+  5)`;
 export async function listEntities(ch: ClickHouseClient, p: string, q: EntityListQuery) {
   const sort = q.sort ?? 'events',
     order = ENTITY_ORDER[sort];
@@ -683,7 +685,7 @@ function entityCursor(s: string, sort: EntitySort, search: boolean): [string, st
     const a: unknown = JSON.parse(Buffer.from(s, 'base64url').toString());
     if (Array.isArray(a) && a.length === (search ? 5 : 4) && a.every((v) => typeof v === 'string') && a[0] === sort) {
       const [, k1, k2, id, rank = '0'] = a as string[];
-      if (/^[0-4]$/.test(rank)) return [k1 as string, k2 as string, id as string, rank];
+      if (/^[0-5]$/.test(rank)) return [k1 as string, k2 as string, id as string, rank];
     }
   } catch {
     /* Report malformed or cross-sort cursors with a stable public error below. */

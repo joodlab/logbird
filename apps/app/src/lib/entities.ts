@@ -66,24 +66,32 @@ export function entityQuery(kind: EntityKind, id: string, targetType?: string): 
 }
 
 /**
- * How well an entity matches what was typed, best first, the same order the server ranks a search by: 0 exact id,
- * 1 id prefix, 2 name prefix, 3 id or name contains it, 4 a fuzzy match only. A record's bare id (`article_27_2` for
+ * How well an entity matches what was typed, best first, the same order the server ranks a search by: 0 the exact id
+ * as typed, 1 the id in another case, 2 id prefix, 3 name prefix, 4 id or name contains it, 5 a fuzzy match only. A record's bare id (`article_27_2` for
  * `article:article_27_2`) counts as its id.
  */
-export function entityMatchRank(entity: { kind?: EntityKind; id: string; name: string; type?: string }, text: string): 0 | 1 | 2 | 3 | 4 {
-  const t = text.trim().toLowerCase();
+export function entityMatchRank(entity: { kind?: EntityKind; id: string; name: string; type?: string }, text: string): EntityMatchRank {
+  const typed = text.trim();
+  const t = typed.toLowerCase();
+  // Only a record loses a prefix, and only its own known type (which may contain colons, or be empty for `:7`):
+  // `a:biz_27` is not `biz_27`.
+  const record = entity.kind === 'target' && entity.id.startsWith(`${entity.type ?? ''}:`);
+  const bareExact = record ? entity.id.slice((entity.type ?? '').length + 1) : entity.id;
   const id = entity.id.toLowerCase();
-  // Only a record loses a prefix, and only its own known type (which may contain colons): `a:biz_27` is not `biz_27`.
-  const type = entity.kind === 'target' ? (entity.type ?? '').toLowerCase() : '';
-  const bare = type && id.startsWith(`${type}:`) ? id.slice(type.length + 1) : id;
+  const bare = bareExact.toLowerCase();
   const name = entity.name.toLowerCase();
-  if (!t) return 4;
-  if (id === t || bare === t) return 0;
-  if (id.startsWith(t) || bare.startsWith(t)) return 1;
-  if (name.startsWith(t)) return 2;
-  if (`${id} ${name}`.includes(t)) return 3;
-  return 4;
+  if (!t) return 5;
+  if (entity.id === typed || bareExact === typed) return 0;
+  if (id === t || bare === t) return 1;
+  if (id.startsWith(t) || bare.startsWith(t)) return 2;
+  if (name.startsWith(t)) return 3;
+  if (`${id} ${name}`.includes(t)) return 4;
+  return 5;
 }
+
+/** The id as typed (0) or in another case (1): both are exact ids; the literal one comes first. */
+export type EntityMatchRank = 0 | 1 | 2 | 3 | 4 | 5;
+export const isExactId = (rank: EntityMatchRank) => rank <= 1;
 
 /**
  * The id that free text could be, or '' when it cannot be one: a single bare word (no field, operator, group or
@@ -94,6 +102,24 @@ export function idFromFreeText(text: string): string {
   const quoted = /^"([^"\\]+)"$/.exec(t);
   if (quoted) return quoted[1]?.trim() ?? '';
   return /^[^\s:()"'*-][^\s:()"'*]*$/.test(t) && !/^(AND|OR|NOT)$/.test(t) ? t : '';
+}
+
+/**
+ * Where Jump to goes for pasted text. An entity whose id is exactly the text wins: a tenant `op_customer` is that
+ * tenant, not an operation, whatever its prefix. Otherwise the id's shape decides (`op_…` an operation, `evt_…` or a
+ * ULID an event), and anything else is searched.
+ */
+export function resolveJump<E extends { kind?: EntityKind; id: string; name: string; type?: string }>(
+  text: string,
+  shape: 'operation' | 'event' | null,
+  entities: readonly E[] | undefined,
+): { kind: 'entity'; entity: E } | { kind: 'operation' } | { kind: 'event' } | { kind: 'search' } {
+  const exact = (entities ?? [])
+    .map((entity, i) => ({ entity, i, rank: entityMatchRank(entity, text) }))
+    .filter((x) => isExactId(x.rank))
+    .sort((a, b) => a.rank - b.rank || a.i - b.i)[0];
+  if (exact) return { kind: 'entity', entity: exact.entity };
+  return shape ? { kind: shape } : { kind: 'search' };
 }
 
 export function targetEntityId(type: string, id: string): string {
