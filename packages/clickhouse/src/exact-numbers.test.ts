@@ -186,3 +186,23 @@ it('indexes an exact numeric attribute whole or not at all, never as a prefix', 
   expect(row.attributes['metadata.small']).toBe('12345678901234567891');
   expect(row.payload).toContain(`"huge":${huge}`);
 });
+
+it('indexes ordinary numeric attributes as plain decimals, legacy columns unchanged', () => {
+  const input = wire('{"action":"x","metadata":{"rate":0.0000001,"big":1e21,"n":42,"f":19.9}}');
+  expect(normalize(input).row.attributes).toMatchObject({
+    'metadata.rate': '0.0000001',
+    'metadata.big': '1000000000000000000000',
+    'metadata.n': '42',
+    'metadata.f': '19.9',
+  });
+  const legacy = normalizeEvent(input, { ...ctx, legacyColumns: true });
+  expect(legacy.ok && legacy.row.attributes).toMatchObject({ 'metadata.rate': '1e-7', 'metadata.big': '1e+21' });
+});
+
+it('indexes a rejected numeric timestamp whole, so two long values never match each other', () => {
+  const a = normalize(wire(`{"action":"x","occurredAt":${'1'.repeat(256)}1}`)).row.attributes['logbird.occurredAt.rejected'];
+  const b = normalize(wire(`{"action":"x","occurredAt":${'1'.repeat(256)}2}`)).row.attributes['logbird.occurredAt.rejected'];
+  expect(a).toBe(`${'1'.repeat(256)}1`);
+  expect(b).toBe(`${'1'.repeat(256)}2`);
+  expect(normalize(wire('{"action":"x","occurredAt":"yesterday"}')).row.attributes['logbird.occurredAt.rejected']).toBe('yesterday');
+});

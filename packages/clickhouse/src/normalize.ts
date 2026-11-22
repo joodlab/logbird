@@ -77,9 +77,10 @@ export function normalizeEvent(
     }
     const entries = Object.entries(object(v));
     if (entries.length && depth < 6) for (const [key, child] of entries) flatten(child, path ? `${path}.${key}` : key, depth + 1);
-    else if (isRawJson(v)) {
-      // An exact number is indexed whole (plain or unique scientific spelling) or not at all: a 2 KB prefix of its
-      // digits would match a different number.
+    else if (isRawJson(v) || (typeof v === 'number' && Number.isFinite(v) && !ctx.legacyColumns)) {
+      // A number is indexed whole, as the plain decimal of its value (0.0000001, not 1e-7) or else its unique scientific
+      // spelling, or not at all: a 2 KB prefix of its digits would match a different number. Legacy (pre-v1) columns
+      // keep JSON.stringify spelling.
       const exact = numericId(v, 2048);
       if (exact !== null) attributes[path] = exact;
     } else
@@ -129,7 +130,11 @@ export function normalizeEvent(
   // Only `action` is required: a bad occurredAt never drops the event. It is stored at receive time, the original value
   // is kept in attributes['logbird.occurredAt.rejected'] (and in payload), and the caller gets a warning.
   const { timestamp: date, problem: occurredAtProblem, valid: occurredAtValid } = resolveTimestamp(e.occurredAt, ctx.receivedAt);
-  if (occurredAtProblem) attributes['logbird.occurredAt.rejected'] = capText(wellFormed(value(e.occurredAt)), 256);
+  if (occurredAtProblem) {
+    // A rejected numeric timestamp is indexed whole like any number (two long values never share a prefix match).
+    const rejected = isNumber(e.occurredAt) && !ctx.legacyColumns ? numericId(e.occurredAt, 2048) : capText(wellFormed(value(e.occurredAt)), 256);
+    if (rejected !== null) attributes['logbird.occurredAt.rejected'] = rejected;
+  }
   const warning =
     [
       occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,

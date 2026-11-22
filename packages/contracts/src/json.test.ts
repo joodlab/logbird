@@ -167,3 +167,12 @@ it('carries and borrows through million-digit exponent runs in linear time', () 
   expect(borrow).toBe(`5e${'9'.repeat(1_000_016)}`);
   expect(Date.now() - start).toBeLessThan(1000);
 });
+
+it('stays linear when a long run of nines or zeros ends just before the counted suffix', () => {
+  const start = Date.now();
+  // Carry into a prefix that ends in 8 after a million nines (the old /9*$/ scan retried from every nine).
+  expect(canonicalDecimal(`50e1${'9'.repeat(1_000_000)}8${'9'.repeat(16)}`)).toBe(`5e1${'9'.repeat(1_000_000)}9${'0'.repeat(16)}`);
+  // Borrow from a prefix that ends in 1 after a million zeros.
+  expect(canonicalDecimal(`0.5e1${'0'.repeat(1_000_000)}1${'0'.repeat(16)}`)).toBe(`5e1${'0'.repeat(1_000_000)}0${'9'.repeat(16)}`);
+  expect(Date.now() - start).toBeLessThan(1000);
+});

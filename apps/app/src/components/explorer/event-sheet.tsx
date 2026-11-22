@@ -847,7 +847,7 @@ function EventDetailBody({
           </div>
           {detail && roundsLargeNumbers ? (
             <p className="mt-1 text-muted-foreground text-xs">
-              This browser may round long numbers here and in Copy JSON. The stored event and the Complete export keep the exact digits.
+              This browser may round long numbers here and in Copy JSON. The stored event and the Complete export keep the digits Logbird received.
             </p>
           ) : null}
           <CollapsibleContent className="pt-3">
