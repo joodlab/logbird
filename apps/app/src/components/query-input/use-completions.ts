@@ -241,8 +241,9 @@ export function useCompletions({
   const narrowing = Boolean(valueField) && Boolean(rawPrefix) && !complete;
   const valuesLoading = Boolean(valueField) && (base.isFetching || (narrowing && (narrowed.isFetching || debouncing)));
   // The rows shown are not this prefix's own answer yet (debouncing, the previous prefix's kept list, or the unfiltered
-  // list standing in while the request is pending): dimmed and busy. A failed request shows the fallback as it is.
-  const valuesStale = narrowing && !narrowed.isError && (debouncing || current(narrowed) === undefined);
+  // list standing in while the request is pending): dimmed and busy. A settled failure for this prefix shows the fallback
+  // as it is; while a new prefix debounces, an earlier prefix's failure does not count.
+  const valuesStale = narrowing && (debouncing || (!narrowed.isError && current(narrowed) === undefined));
 
   /* ---------------- free text that names an entity (`rawd` → tenant:biz_2 Rawda Suites) ---------------- */
   const word =
