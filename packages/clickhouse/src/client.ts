@@ -215,16 +215,24 @@ export async function insertEvents(
 }
 
 const restricted = new WeakSet<ClickHouseClient>();
-export function createQueryClickHouseClient(env = process.env): ClickHouseClient | null {
-  if (!env.CLICKHOUSE_QUERY_USER || !env.CLICKHOUSE_QUERY_PASSWORD) return null;
-  // Credentials embedded in CLICKHOUSE_URL would take precedence over the username/password options and silently
-  // authenticate as the main account: the restricted client always connects with the URL's credentials removed.
-  const url = new URL(env.CLICKHOUSE_URL ?? '');
+/**
+ * Credentials embedded in CLICKHOUSE_URL take precedence over the username/password options in the driver and would
+ * silently authenticate as the main account: restricted clients connect with the URL's userinfo removed. An unset URL
+ * stays unset (the driver's default applies); everything else in the URL is kept as written.
+ */
+export function withoutUrlCredentials(value: string | undefined) {
+  if (!value) return value;
+  const url = new URL(value);
+  if (!url.username && !url.password) return value;
   url.username = '';
   url.password = '';
+  return url.toString();
+}
+export function createQueryClickHouseClient(env = process.env): ClickHouseClient | null {
+  if (!env.CLICKHOUSE_QUERY_USER || !env.CLICKHOUSE_QUERY_PASSWORD) return null;
   const client = createClickHouseClient({
     ...env,
-    CLICKHOUSE_URL: url.toString().replace(/\/$/, ''),
+    CLICKHOUSE_URL: withoutUrlCredentials(env.CLICKHOUSE_URL),
     CLICKHOUSE_USER: env.CLICKHOUSE_QUERY_USER,
     CLICKHOUSE_PASSWORD: env.CLICKHOUSE_QUERY_PASSWORD,
   });

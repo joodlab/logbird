@@ -472,16 +472,16 @@ Full guide: [scoped read access](scoped-read-access.md); token format and secret
   `by` + `byLimit` (1–20, default 5) add the top second-level values per returned value with `groupsOtherCount`; the
   console `/facets` accepts the same parameters. The response always has `by` (null without it).
 - **Row policy (phase 2):** with the restricted query user configured, scoped reads (search, detail, facets, export)
-  run as `logbird_query` and `read()` sends `SQL_logbird_tenant` = the scope's tenant (from the bound `scope_tenant`
-  parameter). The `events` policy is `project_id = getSetting('SQL_logbird_project') AND (getSetting('SQL_logbird_tenant')
+  run as `logbird_query` through a tenant-bound handle (`withTenant`) that sends `SQL_logbird_tenant` = the scope's tenant
+  itself and refuses a query whose `scope_tenant` names another tenant. The `events` policy is `project_id = getSetting('SQL_logbird_project') AND (getSetting('SQL_logbird_tenant')
   = '' OR tenant_id = getSetting('SQL_logbird_tenant'))`; rollup tables (no tenant column) add
   `getSetting('SQL_logbird_tenant') = ''`, so a tenant-bound session sees none of their rows. The settings profile
   defaults `SQL_logbird_tenant` to '' (not CONST), so unscoped and SQL-mode queries are unchanged. Target and
   action-prefix limits stay in the query builders. Scoped reads then run under the query user's CONST limits (10 s,
   5M rows read, 1 GiB) instead of the export budget; the `total` count keeps its 1 s application deadline (an inexact lower bound past
-  it), and a scoped export takes both export admission slots, like SQL mode. The server binds the tenant to a
-  read-only handle (`withTenant`): every query, command or exec through it carries the tenant, a different tenant is
-  refused, and it cannot insert or close the shared pool. Detail picks the canonical version of an id project-wide on
+  it), and a scoped export takes both export admission slots, like SQL mode. The handle is a frozen object
+  exposing only `query` (always with the tenant; a different tenant is refused): no command, exec, insert, ping, close or
+  disposal reaches the shared client. The restricted client ignores credentials embedded in `CLICKHOUSE_URL`. Detail picks the canonical version of an id project-wide on
   the main client (oldest receipt, then timestamp, then a payload hash) and tests the scope in that same lookup, so an
   out-of-scope id and an unknown id take the same path; only an in-scope version is fetched through the bound handle.
 

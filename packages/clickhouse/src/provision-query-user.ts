@@ -1,4 +1,4 @@
-import { type ClickHouseClient, createClickHouseClient } from './client';
+import { type ClickHouseClient, createQueryClickHouseClient } from './client';
 
 /**
  * Row policy of the restricted query user (defence in depth, #138 phase 2). Every table is bound to one project.
@@ -54,13 +54,17 @@ export async function provisionQueryUser(ch: ClickHouseClient, password: string)
       .some((line) => !/^GRANT SELECT ON logbird\.(events|events_by_minute|entities|attribute_keys) TO logbird_query$/.test(line))
   )
     throw new Error('Query user has unexpected grants; operator review required');
-  const probe = createClickHouseClient({
+  // Probe as the query user itself (URL credentials ignored), and prove it before trusting the settings it reports.
+  const probe = createQueryClickHouseClient({
     ...process.env,
     CLICKHOUSE_DATABASE: 'logbird',
-    CLICKHOUSE_USER: 'logbird_query',
-    CLICKHOUSE_PASSWORD: password,
+    CLICKHOUSE_QUERY_USER: 'logbird_query',
+    CLICKHOUSE_QUERY_PASSWORD: password,
   });
+  if (!probe) throw new Error('Query user probe could not be configured');
   try {
+    const who = await (await probe.query({ query: 'SELECT currentUser()', format: 'TabSeparatedRaw' })).text();
+    if (who.trim() !== 'logbird_query') throw new Error('The probe did not authenticate as logbird_query; operator review required');
     const settings = await (
       await probe.query({
         query:
