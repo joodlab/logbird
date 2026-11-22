@@ -91,6 +91,22 @@ describe('search committer', () => {
     expect(commits).toEqual([]);
   });
 
+  it('drops an edit when a new entry is pushed while it is pending (a range picked in the header)', () => {
+    const { committer, commits, moveTo } = setup();
+    committer.edit('revoked');
+    moveTo(2); // pushed during the edit
+    vi.advanceTimersByTime(300);
+    expect(commits).toEqual([]);
+  });
+
+  it('keeps an edit through a replace on the same entry (opening an event)', () => {
+    const { committer, commits } = setup();
+    committer.edit('revoked');
+    // `ev` replaces the current entry: same index
+    vi.advanceTimersByTime(300);
+    expect(commits).toEqual(['revoked']);
+  });
+
   it('keeps typing across its own write: an edit begun before the previous write lands still commits', () => {
     const { committer, commits } = setup();
     committer.edit('rev');

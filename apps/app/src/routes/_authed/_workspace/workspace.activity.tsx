@@ -73,16 +73,26 @@ function WorkspaceActivity() {
   );
   useEffect(() => () => committer.cancel(), [committer]);
 
-  // Every location change: our own write settles the box (a typed `category:auth` becomes the chip, unless the reader kept
-  // typing); any other change (Back/Forward, a range, a link) cancels a pending edit and shows the new query.
+  // Every location change. Our own write settles the box (a typed `category:auth` becomes the chip, unless the reader kept
+  // typing). A navigation (another history entry: Back/Forward, a range picked in the header, a link) or a query changed
+  // from outside cancels a pending edit and shows the new query, exactly as the committer drops it. A replace that only
+  // opens or closes an event (`ev`) is not a navigation: the edit carries on, whichever of the two happens first.
+  const entryRef = useRef(`${router.history.location.state.__TSR_index ?? 0}`);
+  const syncedQ = useRef(locationQ);
   // biome-ignore lint/correctness/useExhaustiveDependencies: react to the location only
   useEffect(() => {
+    const entry = `${router.history.location.state.__TSR_index ?? 0}`;
+    const moved = entry !== entryRef.current;
+    entryRef.current = entry;
     const own = ownWrite.current;
     ownWrite.current = null;
-    if (own && own.q === locationQ) {
+    if (own && own.q === locationQ && !moved) {
+      syncedQ.current = locationQ;
       if (committer.pending === undefined && draftRef.current === own.text) setDraft(activityFreeText(locationQ));
       return;
     }
+    if (!moved && locationQ === syncedQ.current) return;
+    syncedQ.current = locationQ;
     committer.cancel();
     setDraft(activityFreeText(locationQ));
   }, [href]);
