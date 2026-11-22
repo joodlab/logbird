@@ -256,10 +256,14 @@ export function applyMailmap(commits, check = (contacts) => run('git', ['check-m
 const run = (command, args, input) => execFileSync(command, args, { encoding: 'utf8', input, maxBuffer: 32 * 1024 * 1024 });
 const git = (...args) => run('git', args).trim();
 
-export function previousTag(to, gitCommand = git) {
+// Tags whose release never completed: the images were not all published and no GitHub Release exists. The notes of
+// the next release start from the last release people could actually install, so these are never a baseline.
+export const unpublishedTags = new Set(['v0.1.2']);
+
+export function previousTag(to, gitCommand = git, unpublished = unpublishedTags) {
   const tags = gitCommand('tag', '--merged', to, '--list', 'v*', '--sort=-version:refname')
     .split('\n')
-    .filter((tag) => /^v\d+\.\d+\.\d+$/.test(tag));
+    .filter((tag) => /^v\d+\.\d+\.\d+$/.test(tag) && !unpublished.has(tag));
   const previous = tags.filter((tag) => gitCommand('rev-parse', `${tag}^{commit}`) !== to);
   return previous.length ? gitCommand('describe', '--tags', '--abbrev=0', ...previous.flatMap((tag) => ['--match', tag]), to) : undefined;
 }

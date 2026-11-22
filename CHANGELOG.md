@@ -2,7 +2,38 @@
 
 ## Unreleased
 
+## 0.1.3
+
+### Highlights
+
+- The first published release that carries the 0.1.2 changes. 0.1.2 was tagged, but its server, worker and migrate images were never published and it has no GitHub Release; upgrade from 0.1.1 straight to 0.1.3.
+- Release images for arm64 are now built on native runners, and a published version is checked to contain both linux/amd64 and linux/arm64 before the `latest` and `0.1` tags move to it.
+
+### Changes
+
+The application is the same as 0.1.2; see that section for what changed since
+0.1.1. The release workflow builds each platform on its own native runner instead
+of emulating arm64, where client generation failed on the Node 26 base image.
+Pull requests that touch Dockerfiles, Compose files or the image workflows now
+build the four release images for arm64 as well, so a break on one platform is
+caught before a tag.
+
+### Upgrade and known limits
+
+- Follow the 0.1.2 upgrade notes below, with `LOGBIRD_VERSION` set to `0.1.3`. The
+  four additive migrations listed there are applied by the `0.1.3` migrate image.
+- Don't use `0.1.2`: `ghcr.io/joodlab/logbird-app:0.1.2` exists, but the server,
+  worker and migrate images for that version do not, so a 0.1.2 stack can't start.
+  If you pulled `logbird-app:latest` or `logbird-app:0.1` on 22 November 2026, pull
+  again.
+- The runtime images use Node 26. Installing an optional native accelerator for
+  the queue's message encoding logs an error on arm64 during the image build and
+  then succeeds; both published worker images pass an encoding round trip.
+
 ## 0.1.2
+
+Tagged on 22 November 2026 but never published: only the console image was built.
+Use 0.1.3, which contains the same application changes.
 
 ### Highlights
 

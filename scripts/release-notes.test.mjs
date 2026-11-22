@@ -17,6 +17,7 @@ import {
   previousTag,
   resolveLogins,
   summarize,
+  unpublishedTags,
   withoutOmitted,
 } from './release-notes.mjs';
 
@@ -793,4 +794,28 @@ test('commits reverted inside the range are left out only by full hash and only 
   // A hash prefix is not a match, so the set is incomplete and everything is listed.
   const prefixed = omitted.map((sha, index) => record(index === 0 ? sha.slice(0, 39) : sha, 'chore: add ci helper'));
   assert.equal(descriptions(prefixed.join('')).length, omitted.length);
+});
+
+test('a tag whose release never completed is not a baseline for the next release', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'logbird-notes-test-'));
+  const git = (...args) => execFileSync('git', args, { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const addCommit = (message) =>
+    git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@users.noreply.github.com', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', message);
+  try {
+    git('init');
+    addCommit('feat: first');
+    git('tag', 'v0.1.1');
+    addCommit('feat: second');
+    git('tag', 'v0.1.2');
+    addCommit('ci: third');
+    const head = git('rev-parse', 'HEAD');
+    assert.ok(unpublishedTags.has('v0.1.2'));
+    assert.equal(previousTag(head, git), 'v0.1.1');
+    assert.equal(previousTag(head, git, new Set()), 'v0.1.2');
+    assert.equal(previousTag(head, git, new Set(['v0.1.1', 'v0.1.2'])), undefined);
+    git('tag', 'v0.1.3');
+    assert.equal(previousTag(head, git), 'v0.1.1');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
