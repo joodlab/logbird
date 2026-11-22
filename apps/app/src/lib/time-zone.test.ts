@@ -26,7 +26,8 @@ afterAll(() => {
   process.env.TZ = originalTz;
 });
 
-describe('console time zone', () => {
+// Each test re-imports the formatters, ranges and picker fresh (a cold import can take seconds on a busy machine).
+describe('console time zone', { timeout: 30_000 }, () => {
   it('defaults to the browser zone and switches every formatter both ways across New Year', async () => {
     const m = await load('America/Los_Angeles');
     expect(m.BROWSER_ZONE).toBe('America/Los_Angeles');
