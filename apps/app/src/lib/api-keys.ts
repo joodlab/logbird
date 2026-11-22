@@ -81,7 +81,8 @@ const INVALID_UNICODE = /�|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDB
 export function checkScopeId(value: string, max: number): string | undefined {
   if (value.length > max) return `At most ${max} characters (this has ${value.length}).`;
   if (value !== value.trim()) return 'Remove the spaces at the start or end: use the id exactly as stored.';
-  if (value.includes(String.fromCharCode(0)) || INVALID_UNICODE.test(value)) return 'Contains characters Logbird never stores (NUL or invalid Unicode).';
+  if (value.includes(String.fromCharCode(0)) || INVALID_UNICODE.test(value))
+    return 'Contains characters Logbird never stores (NUL or invalid Unicode).';
   return undefined;
 }
 
@@ -93,11 +94,13 @@ export function validateKeyForm(v: KeyFormValues): Partial<Record<KeyFormField, 
   if (v.kind === 'scoped-read') {
     errors.tenantId = v.tenantId === '' ? 'Enter the tenant id this key may read.' : checkScopeId(v.tenantId, SCOPE_LIMITS.tenantId);
     if (v.targetType !== '' || v.targetId !== '') {
-      errors.targetType = v.targetType === '' ? 'Enter the target type too, or clear the target id.' : checkScopeId(v.targetType, SCOPE_LIMITS.targetType);
+      errors.targetType =
+        v.targetType === '' ? 'Enter the target type too, or clear the target id.' : checkScopeId(v.targetType, SCOPE_LIMITS.targetType);
       errors.targetId = v.targetId === '' ? 'Enter the target id too, or clear the target type.' : checkScopeId(v.targetId, SCOPE_LIMITS.targetId);
     }
     const prefixes = listLines(v.actionPrefixes);
-    if (prefixes.length > SCOPE_LIMITS.actionPrefixes) errors.actionPrefixes = `At most ${SCOPE_LIMITS.actionPrefixes} prefixes (this has ${prefixes.length}).`;
+    if (prefixes.length > SCOPE_LIMITS.actionPrefixes)
+      errors.actionPrefixes = `At most ${SCOPE_LIMITS.actionPrefixes} prefixes (this has ${prefixes.length}).`;
     else {
       const bad = prefixes.map((p, i) => [i, checkScopeId(p, SCOPE_LIMITS.actionPrefix)] as const).find(([, m]) => m);
       if (bad) errors.actionPrefixes = `Line ${bad[0] + 1}: ${bad[1]}`;
@@ -105,7 +108,8 @@ export function validateKeyForm(v: KeyFormValues): Partial<Record<KeyFormField, 
   }
   if (isReadKind(v.kind)) {
     const origins = listLines(v.embedOrigins);
-    if (origins.length > SCOPE_LIMITS.embedOrigins) errors.embedOrigins = `At most ${SCOPE_LIMITS.embedOrigins} origins (this has ${origins.length}).`;
+    if (origins.length > SCOPE_LIMITS.embedOrigins)
+      errors.embedOrigins = `At most ${SCOPE_LIMITS.embedOrigins} origins (this has ${origins.length}).`;
     else {
       const bad = origins.findIndex((o) => !embedOriginSchema.safeParse(o).success);
       if (bad >= 0) errors.embedOrigins = `Line ${bad + 1}: use a lowercase origin such as https://app.example.com (no path or trailing slash).`;
