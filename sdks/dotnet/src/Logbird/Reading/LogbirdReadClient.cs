@@ -121,7 +121,8 @@ public sealed class LogbirdReadClient : IDisposable
     /// <summary>
     /// A trail that needs Logbird 0.2.0 (see <see cref="EventSearch.ForTrail(string, string, string, string, DateTimeOffset?, DateTimeOffset?, int?, string, string)"/>)
     /// is only sent to a server that reports 0.2.0 or later; an older server would run a different search. The version is
-    /// read once from the server's public OpenAPI document (without the read key) and kept; a failed read is not kept.
+    /// read from the server's public OpenAPI document (without the read key) and kept once it is 0.2.0 or later; a failed
+    /// read, an unreadable version or an older version is not kept, so a server upgraded meanwhile is seen on the next call.
     /// </summary>
     private Task EnsureServerSupportsAsync(EventSearch search, CancellationToken cancellationToken)
         => search.NeedsServer020
@@ -132,8 +133,9 @@ public sealed class LogbirdReadClient : IDisposable
     private async Task RequireServer020Async(string what, CancellationToken cancellationToken)
     {
         // One probe for all callers: created once, started once, and not tied to any caller's token (each caller waits under
-        // its own, so cancelling one search never fails another). A probe that fails or finds no readable version forgets
-        // itself when it completes, even if no caller is still waiting, so the next search asks again.
+        // its own, so cancelling one search never fails another). A probe that fails, finds no readable version, or finds a
+        // version older than 0.2.0 forgets itself when it completes, even if no caller is still waiting, so the next call
+        // asks again (a long-lived client sees a server upgraded after its first call).
         var probe = Volatile.Read(ref _serverVersion);
         if (probe is null)
         {
@@ -148,19 +150,25 @@ public sealed class LogbirdReadClient : IDisposable
             throw new LogbirdApiException(null, "server_version_unknown", what + " needs Logbird 0.2.0 or later, and the server's version could not be read; nothing was sent.");
         }
 
-        if (!version.Value.AtLeast(new Version(0, 2, 0)))
+        if (!version.Value.AtLeast(MinimumServer))
         {
             throw new LogbirdApiException(null, "server_too_old", what + " needs Logbird 0.2.0 or later; the server reports " + version.Value + ", so nothing was sent.");
         }
     }
 
-    /// <summary>Runs one version read; a failed or unreadable read removes this probe (and only this one) from the cache.</summary>
+    /// <summary>The oldest Logbird the version-gated calls are sent to.</summary>
+    private static readonly Version MinimumServer = new(0, 2, 0);
+
+    /// <summary>
+    /// Runs one version read; a failed or unreadable read, or a version older than <see cref="MinimumServer"/>, removes this
+    /// probe (and only this one) from the cache. Only a version that allows the calls is kept.
+    /// </summary>
     private async Task<ServerVersion?> ProbeAsync(Lazy<Task<ServerVersion?>> self)
     {
         try
         {
             var version = await ReadServerVersionAsync().ConfigureAwait(false);
-            if (version is null)
+            if (version is null || !version.Value.AtLeast(MinimumServer))
             {
                 _ = Interlocked.CompareExchange(ref _serverVersion, null, self);
             }

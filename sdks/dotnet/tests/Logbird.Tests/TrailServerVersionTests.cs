@@ -182,6 +182,38 @@ public class TrailServerVersionTests
     }
 
     [Fact]
+    public async Task A_server_upgraded_after_the_first_call_is_seen_on_the_next_one()
+    {
+        // A long-lived client first meets an older server; once it reports 0.2.0, the next trail is sent.
+        var current = "0.1.3";
+        var server = new FakeServer
+        {
+            Fallback = request => Task.FromResult(request.Request.RequestUri!.AbsolutePath == "/openapi.json"
+                ? FakeServer.Json(HttpStatusCode.OK, "{" + (char)34 + "info" + (char)34 + ":{" + (char)34 + "version" + (char)34 + ":" + (char)34 + Volatile.Read(ref current) + (char)34 + "}}")
+                : FakeServer.Json(HttpStatusCode.OK, """{"data":[],"nextCursor":null,"total":0,"tookMs":1}""")),
+        };
+        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "lb_read_fictional" }, new HttpClient(server));
+        var search = EventSearch.ForTrail(targetId: "inv_1", targetType: "invoice");
+        Assert.Equal("server_too_old", (await Assert.ThrowsAsync<LogbirdApiException>(() => reader.SearchAsync(search))).Code);
+
+        // The refused version is not kept: the probe forgets itself when it completes.
+        var cache = typeof(LogbirdReadClient).GetField("_serverVersion", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
+        {
+            while (cache.GetValue(reader) is not null)
+            {
+                await Task.Delay(10);
+            }
+        });
+
+        Volatile.Write(ref current, "0.2.0");
+        await reader.SearchAsync(search);
+        await reader.SearchAsync(search);
+        Assert.Equal(2, Calls(server, "/openapi.json"));
+        Assert.Equal(2, Calls(server, "/v1/events"));
+    }
+
+    [Fact]
     public async Task Other_searches_never_ask_for_the_version()
     {
         var server = Server("0.1.3");
