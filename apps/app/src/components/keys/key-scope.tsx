@@ -8,7 +8,7 @@ import { viewerTokenSnippet } from '@/lib/snippets';
 
 export const SCOPED_READ_DOCS = 'https://github.com/joodlab/logbird/blob/master/docs/scoped-read-access.md';
 
-const Mono = ({ children }: { children: ReactNode }) => <span className="break-all font-mono text-foreground">{children}</span>;
+const Mono = ({ children }: { children: ReactNode }) => <span className="font-mono text-foreground [overflow-wrap:anywhere]">{children}</span>;
 
 /** "booking. or auth." */
 function prefixList(prefixes: readonly string[]): ReactNode {
@@ -42,19 +42,20 @@ export function KeyGrantSummary({
   title?: string;
   className?: string;
 }) {
-  const rows: [string, ReactNode][] = [];
-  if (kind === 'ingest') rows.push(['Can', 'Send events to this project. It cannot read them.']);
+  const rows: { label: string; value: ReactNode }[] = [];
+  const add = (label: string, value: ReactNode) => rows.push({ label, value });
+  if (kind === 'ingest') add('Can', 'Send events to this project. It cannot read them.');
   else if (kind === 'read') {
-    rows.push(['Reads', 'Every event in this project']);
-    rows.push(['Viewer tokens', 'It can mint them for any tenant']);
+    add('Reads', 'Every event in this project');
+    add('Viewer tokens', 'It can mint them for any tenant');
   } else if (scope) {
-    rows.push([
+    add(
       'Reads',
       <>
         Only events of tenant <Mono>{scope.tenantId}</Mono>
       </>,
-    ]);
-    rows.push([
+    );
+    add(
       'Target',
       scope.target ? (
         <>
@@ -63,13 +64,13 @@ export function KeyGrantSummary({
       ) : (
         'Any target'
       ),
-    ]);
-    rows.push(['Actions', scope.actionPrefixes?.length ? <>Only actions starting with {prefixList(scope.actionPrefixes)}</> : 'All actions']);
-    rows.push(['Hidden', scope.mask?.length ? `${maskList(scope)}, and the raw payload` : 'Nothing']);
-    rows.push(['Viewer tokens', 'Only for this scope or a narrower one']);
+    );
+    add('Actions', scope.actionPrefixes?.length ? <>Only actions starting with {prefixList(scope.actionPrefixes)}</> : 'All actions');
+    add('Hidden', scope.mask?.length ? `${maskList(scope)}, and the raw payload` : 'Nothing');
+    add('Viewer tokens', 'Only for this scope or a narrower one');
   }
   if (kind !== 'ingest')
-    rows.push([
+    add(
       'Browser origins',
       embedOrigins.length ? (
         <span className="flex flex-col">
@@ -80,8 +81,8 @@ export function KeyGrantSummary({
       ) : (
         'None: its viewer tokens work server to server only'
       ),
-    ]);
-  rows.push([
+    );
+  add(
     'Expires',
     expiresAt ? (
       <>
@@ -90,14 +91,15 @@ export function KeyGrantSummary({
     ) : (
       'Never. Roll or revoke it yourself.'
     ),
-  ]);
+  );
   return (
     <section aria-label={title} className={cn('flex flex-col gap-2 rounded-lg border bg-muted/30 p-3', className)} data-testid="key-grant-summary">
       <h3 className="font-medium text-xs">{title}</h3>
-      <dl className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)] gap-x-3 gap-y-1 text-muted-foreground text-xs">
-        {rows.map(([label, value]) => (
+      <dl className="grid grid-cols-1 gap-x-3 gap-y-1 text-muted-foreground text-xs sm:grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)]">
+        {rows.map(({ label, value }) => (
           <div className="contents" key={label}>
-            <dt>{label}</dt>
+            {/* Phones stack each label above its value, so long ids keep whole words. */}
+            <dt className="max-sm:mt-1 max-sm:font-medium max-sm:text-foreground/70">{label}</dt>
             <dd className="min-w-0">{value}</dd>
           </div>
         ))}

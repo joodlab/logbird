@@ -746,10 +746,10 @@ function CreateKeyDialog({
                     </form.Field>
                     <form.Field name="masks">
                       {(field) => (
-                        <div className="flex flex-col gap-1.5" role="group" aria-labelledby={`${ids}-masks`}>
-                          <span className="font-medium text-sm" id={`${ids}-masks`}>
+                        <fieldset className="flex min-w-0 flex-col gap-1.5">
+                          <legend className="font-medium text-sm">
                             Hide <span className="font-normal text-muted-foreground">· optional</span>
-                          </span>
+                          </legend>
                           {SCOPE_MASKS.map((mask) => (
                             // biome-ignore lint/a11y/noLabelWithoutControl: the Base UI checkbox inside is the control.
                             <label className="flex items-start gap-2 text-sm" key={mask}>
@@ -766,7 +766,7 @@ function CreateKeyDialog({
                             </label>
                           ))}
                           <p className="text-muted-foreground text-xs">Hiding any field also hides each event’s raw payload.</p>
-                        </div>
+                        </fieldset>
                       )}
                     </form.Field>
                   </fieldset>
