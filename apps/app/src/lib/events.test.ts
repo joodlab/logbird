@@ -1,6 +1,6 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { actorLabel, eventSentence, humanizeNoun } from './events';
+import { actorLabel, causedCount, directChildren, eventSentence, humanizeNoun } from './events';
 
 function event(patch: Partial<AuditEvent>): AuditEvent {
   return {
@@ -199,4 +199,52 @@ it.each([
   ['export.failed', 'CSV export of QA Store stopped after 20 events (download canceled) (export 12345678)'],
 ])('renders the explicit %s export sentence', (action, description) => {
   expect(eventSentence(event({ action, description, actor: vera, targets: [{ type: 'project', id: 'p', name: 'QA Store' }] }))).toBe(description);
+});
+
+describe('directChildren', () => {
+  const at = (id: string, ts: string, parent?: string) =>
+    event({ id, timestamp: ts, context: { operationId: 'op_1', parentEventId: parent ?? '', requestId: '', traceId: '', ip: '', userAgent: '' } });
+
+  it('keeps only events whose parent is the given event, oldest first', () => {
+    const events = [
+      at('root', '2026-11-05T10:00:00.000Z'),
+      at('b', '2026-11-05T10:00:02.000Z', 'root'),
+      at('grandchild', '2026-11-05T10:00:03.000Z', 'b'),
+      at('a', '2026-11-05T10:00:01.000Z', 'root'),
+      at('sibling', '2026-11-05T10:00:01.500Z'),
+    ];
+    expect(directChildren(events, 'root').map((e) => e.id)).toEqual(['a', 'b']);
+  });
+
+  it('orders same-millisecond children by id and ignores a self-reference', () => {
+    const events = [
+      at('y', '2026-11-05T10:00:01.000Z', 'root'),
+      at('x', '2026-11-05T10:00:01.000Z', 'root'),
+      at('root', '2026-11-05T10:00:00.000Z', 'root'),
+    ];
+    expect(directChildren(events, 'root').map((e) => e.id)).toEqual(['x', 'y']);
+  });
+});
+
+describe('causedCount', () => {
+  const ctx = (parentEventId: string) => ({ operationId: '', parentEventId, requestId: '', traceId: '', ip: '', userAgent: '' });
+
+  it('is the stored child count for a normal event', () => {
+    expect(causedCount({ childCount: 3 }, { id: 'root', context: ctx('') })).toBe(3);
+  });
+
+  it('does not count an event that names itself as its parent', () => {
+    expect(causedCount({ childCount: 1 }, { id: 'self', context: ctx('self') })).toBe(0);
+    expect(causedCount({ childCount: 4 }, { id: 'self', context: ctx('self') })).toBe(3);
+  });
+});
+
+describe('directChildren de-duplication', () => {
+  it('counts an id stored at two timestamps once, at its earliest time', () => {
+    const child = (ts: string) =>
+      event({ id: 'c1', timestamp: ts, context: { operationId: 'op', parentEventId: 'root', requestId: '', traceId: '', ip: '', userAgent: '' } });
+    expect(directChildren([child('2026-11-05T10:00:02.000Z'), child('2026-11-05T10:00:01.000Z')], 'root').map((e) => e.timestamp)).toEqual([
+      '2026-11-05T10:00:01.000Z',
+    ]);
+  });
 });

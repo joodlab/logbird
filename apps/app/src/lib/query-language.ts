@@ -190,6 +190,23 @@ export function formatTerm(field: string, value: string, negated = false): strin
   return `${negated ? '-' : ''}${field}:${quoteIfNeeded(value)}`;
 }
 
+/** Values the server reads as one plain token: no operators, reserved words, quotes, wildcards or leading `-`. */
+const PLAIN_EXACT = /^[A-Za-z0-9_.@][A-Za-z0-9_.@-]*$/;
+const RESERVED = new Set(['AND', 'OR', 'NOT', 'TO']);
+
+/**
+ * A term that matches exactly `value`, for ids the console links to. Anything but a plain token is quoted (reserved
+ * words, `&&`, spaces, `:`…). A value ending in `*` would be a prefix search even quoted, so it becomes an anchored
+ * regex with every metacharacter escaped; a backslash is written `\x5c`, so a literal `\1` can never read as a
+ * backreference.
+ */
+export function formatExactTerm(field: string, value: string, negated = false): string {
+  const sign = negated ? '-' : '';
+  if (value.endsWith('*')) return `${sign}${field}:/${value.replace(/\\/g, '\\x5c').replace(/[\^$.*+?()[\]{}|/]/g, '\\$&')}/`;
+  if (PLAIN_EXACT.test(value) && !RESERVED.has(value)) return `${sign}${field}:${value}`;
+  return `${sign}${field}:"${value.replace(/["\\]/g, '\\$&')}"`;
+}
+
 /**
  * Drop operators and groups that removing a term left dangling — `(a OR b)` minus `a` and `b` must
  * not become `( OR )`, which the server rightly rejects.
