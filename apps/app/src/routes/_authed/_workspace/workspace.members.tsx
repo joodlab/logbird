@@ -190,6 +190,9 @@ function MembersSettings() {
       >
         {org.isPending ? (
           <Skeleton className="h-14 w-full" />
+        ) : org.isError && (!org.data || pending.length === 0) ? (
+          // The list could not be loaded: never claim there are none.
+          <ErrorState error={org.error} onRetry={() => org.refetch()} size="sm" title="Could not load pending invitations" />
         ) : pending.length === 0 ? (
           <EmptyState
             description="Invite someone above — they show up here until they accept."
