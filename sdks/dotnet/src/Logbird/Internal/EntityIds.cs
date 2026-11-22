@@ -3,10 +3,11 @@ using System.Collections.Generic;
 namespace Logbird.Internal;
 
 /// <summary>
-/// The server's entity-identifier rule, checked before sending so a caller learns about a problem at once. Identifiers
-/// (actor, impersonator, executor and tenant ids, and each target's type and id) are sent exactly as given: never
-/// trimmed, truncated or repaired. One that cannot be stored as sent drops the event with <c>invalid_entity_id</c>;
-/// surrounding whitespace is kept and reported as a warning.
+/// The SDK's identifier check, run before sending so a caller learns about a problem at once. Identifiers (actor,
+/// impersonator, executor and tenant ids, and each target's type and id) are sent exactly as given: never trimmed,
+/// truncated or repaired. One that Logbird cannot store exactly as given (too long, a lone surrogate, too many targets)
+/// is refused with <c>invalid_entity_id</c> and the event is not sent; surrounding whitespace is sent as given and
+/// reported as a warning (Logbird up to 0.2.x indexes such an id trimmed; see issue #269).
 /// </summary>
 internal static class EntityIds
 {
@@ -19,7 +20,7 @@ internal static class EntityIds
     {
         if (e.EmitTargets && e.Targets.Count > MaxTargets)
         {
-            return $"invalid_entity_id: an event can have at most {MaxTargets} targets";
+            return $"invalid_entity_id: the event has more than {MaxTargets} targets; this SDK sends events only exactly as given and Logbird cannot store this one, so the event was not sent";
         }
 
         return Check("actor.id", e.Actor?.Id, MaxIdLength, whitespaceFields)
@@ -65,12 +66,12 @@ internal static class EntityIds
 
         if (value!.Length > maxLength)
         {
-            return $"invalid_entity_id: {field} is longer than {maxLength} UTF-16 code units";
+            return $"invalid_entity_id: {field} is longer than {maxLength} UTF-16 code units; this SDK sends identifiers only exactly as given and Logbird cannot store this one, so the event was not sent";
         }
 
         if (HasLoneSurrogate(value))
         {
-            return $"invalid_entity_id: {field} contains a lone surrogate";
+            return $"invalid_entity_id: {field} contains a lone surrogate; this SDK sends identifiers only exactly as given and Logbird cannot store this one, so the event was not sent";
         }
 
         if (EventJson.JsTrim(value).Length != value.Length)

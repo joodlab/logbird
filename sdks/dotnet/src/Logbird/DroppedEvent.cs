@@ -27,7 +27,8 @@ public enum DropReason
     /// <summary>
     /// An entity identifier cannot be stored exactly as sent (<c>invalid_entity_id</c>): an actor, impersonator,
     /// executor or tenant id or a target id longer than 256 UTF-16 code units, a target type longer than 64, a lone
-    /// surrogate, or more than 256 targets. Checked before sending, with the same rule as the server.
+    /// surrogate, or more than 256 targets. The SDK refuses it before sending, because Logbird cannot store such an
+    /// identifier exactly as given, and the event is not sent.
     /// </summary>
     InvalidEntityId = 6,
 

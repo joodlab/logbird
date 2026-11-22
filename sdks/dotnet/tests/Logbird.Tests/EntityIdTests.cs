@@ -58,7 +58,7 @@ public class EntityIdTests
             many.Target("record", $"r{i}");
         }
 
-        yield return [many, "at most 256 targets"];
+        yield return [many, "more than 256 targets"];
     }
 
     [Theory]
@@ -73,6 +73,8 @@ public class EntityIdTests
         Assert.Equal(DropReason.InvalidEntityId, drop.Reason);
         Assert.StartsWith("invalid_entity_id: ", drop.Detail);
         Assert.Contains(expected, drop.Detail);
+        Assert.EndsWith("so the event was not sent", drop.Detail);
+        Assert.DoesNotContain("same rule", drop.Detail);
         Assert.Equal(["sibling"], h.Server.Requests.SelectMany(r => r.Events).Select(e => e.GetProperty("action").GetString()));
         Assert.Equal(1, h.Client.Stats.Dropped);
     }
@@ -106,7 +108,7 @@ public class EntityIdTests
         Assert.Equal("invoice ", sent.GetProperty("targets")[0].GetProperty("type").GetString());
         var warnings = h.Errors.OfType<LogbirdEventWarning>().Select(w => w.Reason).ToArray();
         Assert.Equal(
-            ["surrounding whitespace in actor.id is kept as sent", "surrounding whitespace in tenant.id is kept as sent", "surrounding whitespace in targets[0].type is kept as sent"],
+            new[] { "actor.id", "tenant.id", "targets[0].type" }.Select(field => "surrounding whitespace in " + field + ": sent exactly as given; Logbird servers up to 0.2.x index it trimmed, so a search for the padded id does not find it"),
             warnings);
         Assert.Equal(3, h.Client.Stats.Warnings);
         Assert.Empty(h.Drops);

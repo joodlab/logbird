@@ -60,7 +60,7 @@ public sealed class LogbirdEventWarning : LogbirdDeliveryException
     public string Action { get; }
 
     /// <summary>
-    /// What to look at, for example <c>surrounding whitespace in actor.id is kept as sent</c> or the server's reason for
+    /// What to look at, for example <c>surrounding whitespace in actor.id: sent exactly as given; …</c> or the server's reason for
     /// an adjusted <c>occurredAt</c>.
     /// </summary>
     public string Reason { get; }

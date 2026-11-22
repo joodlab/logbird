@@ -92,13 +92,14 @@ one, and `AuditChange.Secret("password")` records that a secret changed without 
 
 Actor, impersonator, executor and tenant ids and each target's type and id are **sent exactly as you give them**:
 never trimmed, truncated or converted. The text is the identity, so `"user_42"` and `" user_42 "` are different
-actors. Before sending, the client applies the server's identifier rule (servers before that rule ships may still trim
-identifiers when they store them; the client never does):
+actors. Logbird servers up to 0.2.x keep such an id as sent in the stored payload but index it trimmed, so a search for
+`" user_42 "` does not find the event ([#269](https://github.com/joodlab/logbird/issues/269)). Before sending, the
+client checks every identifier:
 
-- An identifier that cannot be stored as sent drops the event with `DropReason.InvalidEntityId` (reason
-  `invalid_entity_id`): longer than 256 UTF-16 code units (64 for a target type), containing a lone surrogate, or more
-  than 256 targets on one event.
-- Surrounding whitespace is kept and reported as a `LogbirdEventWarning` through `OnError` and the logger.
+- One that Logbird cannot store exactly as given is refused, and the event is not sent: it is dropped with
+  `DropReason.InvalidEntityId` (reason `invalid_entity_id`). That is an identifier longer than 256 UTF-16 code units (64
+  for a target type), one containing a lone surrogate, or more than 256 targets on one event.
+- Surrounding whitespace is sent as given and reported as a `LogbirdEventWarning` through `OnError` and the logger.
 - An empty string means the field is absent.
 
 Identifiers are strings in this SDK. For a numeric id, pass an integer's invariant text, for example

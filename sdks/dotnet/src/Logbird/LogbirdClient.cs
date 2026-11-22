@@ -276,14 +276,14 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 id = UuidV7.NewId();
             }
 
-            // Identifiers are sent exactly as given. One the server could not store as sent drops the event here, with the
-            // server's reason; surrounding whitespace is kept and reported once the event is queued.
+            // Identifiers are sent exactly as given. One Logbird cannot store exactly as given is refused here and the event is
+            // not sent; surrounding whitespace is sent as given and reported once the event is queued.
             var whitespace = _whitespaceFields ??= [];
             whitespace.Clear();
             if (EntityIds.Validate(source, whitespace) is { } invalidEntity)
             {
                 Drop(DropReason.InvalidEntityId, id, action, null, invalidEntity);
-                Report(new LogbirdDeliveryException("An audit event was dropped: " + invalidEntity));
+                Report(new LogbirdDeliveryException("An audit event was not sent: " + invalidEntity));
                 return id ?? auditEvent?.Id;
             }
 
@@ -313,7 +313,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             {
                 foreach (var field in whitespace)
                 {
-                    Warn(eventId, eventAction, $"surrounding whitespace in {field} is kept as sent", $"surrounding whitespace in {field}");
+                    Warn(eventId, eventAction, $"surrounding whitespace in {field}: sent exactly as given; Logbird servers up to 0.2.x index it trimmed, so a search for the padded id does not find it", $"surrounding whitespace in {field}");
                 }
 
                 Interlocked.Increment(ref _tracked);
