@@ -27,7 +27,7 @@ export const snapshotReleases: Release[] = [
     version: '0.1.0',
     date: '2026-11-09',
     highlights: [
-      'Capture activity with the event ingest API and TypeScript SDK, including batching and retries with stable event IDs.',
+      'Capture activity with the event ingest API and TypeScript SDK, including batching, retries and immutable event IDs.',
       'Search and follow live events in the console, inspect actors and targets, export results, and enforce project retention.',
       'Self-host with Compose or Coolify using versioned images, SMTP sign-in and restricted signups for your team.',
     ],
