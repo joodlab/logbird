@@ -43,7 +43,7 @@ the next release is a minor bump.
    The wrapper uses changelogithub's output APIs and read-only GitHub identity
    lookups. It never creates/edits a release, including without `--dry`. The first
    release includes all non-merge history, including the root commit; later releases
-   use the nearest preceding reachable stable `vX.Y.Z` tag, ignoring prereleases.
+   use the nearest preceding reachable stable `vX.Y.Z` tag, ignoring prereleases and tags listed as unpublished in `scripts/release-notes.mjs` (a tag whose release never completed, such as `v0.1.2`).
    `--from vX.Y.Z` overrides the baseline and must be an ancestor. Compare links
    use the baseline and new version; first releases link the full commit history.
    Highlights must exist in the exact version section; missing/empty/comment-only
@@ -85,7 +85,8 @@ exact commit in successful master push CI (`.github/workflows/ci.yml`). A tag pu
 before Quality finishes fails; rerun the failed workflow after CI passes.
 
 The workflow tests the release tooling and generates notes before building. It
-then builds/pushes these four images for `linux/amd64` and `linux/arm64`:
+then builds these four images on native `linux/amd64` (`ubuntu-latest`) and
+`linux/arm64` (`ubuntu-24.04-arm`) runners:
 
 | Role | Image | Dockerfile target |
 | --- | --- | --- |
@@ -94,14 +95,16 @@ then builds/pushes these four images for `linux/amd64` and `linux/arm64`:
 | Console | ghcr.io/joodlab/logbird-app | apps/app/Dockerfile:runtime |
 | Migrations | ghcr.io/joodlab/logbird-migrate | apps/server/Dockerfile:migrate |
 
-Each receives X.Y.Z, X.Y and latest tags, OCI source/version/revision/MIT license
-labels, an SBOM and maximum-mode BuildKit provenance. X.Y and latest are moving
+Each platform build pushes by digest with OCI source/version/revision/MIT license
+labels, an SBOM and maximum-mode BuildKit provenance. After the builds pass, a job
+per role reads the two digest artifacts and uses `docker buildx imagetools create`
+to publish the X.Y.Z image index, inspects the published index and fails unless it holds both linux/amd64 and linux/arm64, and only then moves the X.Y and latest tags to that verified digest. X.Y and latest are moving
 aliases; pin exact versions or digests for controlled upgrades. Only publish
 releases in increasing version order, since older tags would move these aliases
 backwards. Never rebuild a completed published release under the same version.
 
 Preflight also rejects a tag that already has a GitHub Release, preserving a
-completed publication on full-workflow retries. Only after all four pushes succeed
+completed publication on full-workflow retries. Only after all four indexes publish
 does the workflow create the GitHub Release and attach `images.txt` with all four
 index digests. Notes contain the reviewed
 Highlights, conventional-type groups in a collapsible changelog with PR/commit
@@ -174,16 +177,24 @@ responses or an excluded identity reaching rendering abort notes generation befo
 any notes are emitted. Invalid Highlights or failed preflight likewise prevent
 image publishing and release creation. Fix the cause and rerun; do not bypass it.
 
-Release concurrency serializes publications. Partial image-job failure may leave
-some version tags pushed without a release: inspect the run/digests, fix the cause,
-and rerun against the same accepted source before announcing availability. An
-existing GitHub Release blocks a full rerun in preflight; retrying only release
+Release concurrency serializes publications. If an index publication fails, other
+roles may receive their version tags before the GitHub Release is available.
+Inspect the run and digests, fix the cause, and rerun against the same accepted
+source before announcing availability. The publish job is safe to re-run with
+"Re-run failed jobs": it rebuilds the X.Y.Z index from the same platform digests,
+verifies it, and then moves the aliases. The registry accepts one tag at a time, so
+a job that fails partway can leave `X.Y` on the new release while `latest` is still
+on the previous one. Re-run the failed job to finish, then confirm that X.Y.Z, X.Y
+and latest resolve to the same digest with `docker buildx imagetools inspect`. An existing GitHub Release blocks a full
+rerun in preflight; retrying only release
 creation fails rather than replacing its reviewed notes. No Coolify deployment
 runs automatically.
 
-`.github/workflows/docker.yml` separately builds all four amd64 targets, plus the
-marketing site image (`apps/web/Dockerfile`, fictional build arguments), on PRs
-changing Dockerfiles, Compose, Docker context exclusions or the image workflows.
+`.github/workflows/docker.yml` separately builds all four targets on native amd64
+and arm64 runners on PRs changing Dockerfiles, Compose, Docker context exclusions
+or the image workflows. It checks BullMQ's MessagePack serialization in both
+worker images and builds the marketing site image on amd64 (`apps/web/Dockerfile`,
+fictional build arguments).
 The site image is not a release artifact: tags publish only the four roles above,
 and the hosted instance builds the site from `docker-compose.site.yml` (see
 [Coolify](coolify.md#hosted-marketing-site-logbirdjoodlabcom-only)).
