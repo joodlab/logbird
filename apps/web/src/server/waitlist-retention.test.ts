@@ -650,6 +650,12 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
     Server.prototype.listen = listen;
     renameGate.hold = undefined;
     const unreaped = await stopWriters(writers, deadline);
+    // A writer can exit unexpectedly after its last `done`, or a signal can fail to reach it: that fails the test too.
+    const failed = writers.filter((writer) => writer.failure !== undefined);
+    if (failed.length && !outcome) {
+      // biome-ignore lint/correctness/noUnsafeFinally: a writer that failed must fail the test
+      throw new Error(`Writers failed: ${failed.map((writer) => `${writer.index}: ${writer.failure}`).join('; ')}`);
+    }
     if (unreaped.length) {
       const message = `Writers not reaped: ${unreaped.map((writer) => `${writer.index} (pid ${writer.process.pid})`).join(', ')}`;
       if (outcome) {
