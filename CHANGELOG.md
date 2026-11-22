@@ -2,6 +2,95 @@
 
 ## Unreleased
 
+## 0.1.4
+
+### Highlights
+
+- Show each customer only its own audit trail: tenant-scoped read keys and 15-minute viewer tokens read one tenant's (or one record's) events through search, event detail, count-by-any-field and export. The server enforces the scope, and ClickHouse enforces the tenant as well when the restricted query user is configured.
+- Stored events are exact: 64-bit ids and long decimals keep every digit, a record's history matches its type and id on the same target, a slow total count never fails a search or hides its rows, and one oversized event no longer rejects its batch.
+- The console opens entity pages on their full history, names its time zone everywhere with a switch to UTC, lists what an event caused, and has a Workspace settings area and a form for scoped keys.
+
+### Changes
+
+**Scoped read access.** A `scoped-read` key carries a scope (`tenantId`, optionally one
+target, action prefixes and a field mask). `POST /v1/viewer-tokens` mints a short-lived
+token for a browser. `/v1/events`, `/v1/events/:id`, `/v1/facets` and `/v1/export` apply
+the scope outside the caller's query. Keys can expire; rolling a key keeps its scope and
+expiry. See [scoped read access](docs/scoped-read-access.md) and [security](docs/security.md).
+
+**Exact numbers.** Numbers a double cannot hold are stored, returned, exported and
+searched with their exact digits, and numeric entity ids are indexed. Equality on a
+number is exact; `>` and `<` compare at double precision. Send `occurredAt` as ISO-8601
+or integer epoch milliseconds.
+
+**Record histories.** `record:<type>:<id>` is a query field that matches one target with
+that type and id. Record pages, the Record facet and the read helper in the TypeScript SDK
+use it. A saved view that filters `target:` and `target.type:` separately opens as saved,
+with a note and an "Open exact version" button.
+
+**Search totals.** Rows are returned first; the count has its own one-second budget. When
+it runs out the response sets `totalExact: false`, `total` is a lower bound and the console
+shows "≥ N".
+
+**Ingest.** An event over 256 KB is rejected on its own (`invalid_event`) and the rest of
+its batch is stored. A console test event completes only the "first event" setup step;
+sources beginning with `logbird-` are reserved for events Logbird generates.
+
+**Arrival-time index.** Migration 010 adds a min/max index on `received_at`, which reads
+by arrival time (webhook delivery, alerts, live view) use to skip most of a project's
+history.
+
+**Console.** Record, actor, tenant and executor pages lead with the complete history,
+newest first. Every time names its zone, with one switch between local time and UTC. The
+event drawer lists the events an event caused; unknown events and operations say so.
+Members, invite links and workspace activity move to Workspace settings. Overview
+drill-downs open exactly what their widgets show, and data from a previous project or
+entity is never shown as current.
+
+**.NET.** The `Logbird` and `Logbird.AspNetCore` packages are in the repository
+(`sdks/dotnet`). They are not published to NuGet yet.
+
+### Upgrade and known limits
+
+This is a patch release: the default Compose installation upgrades without any change to
+its settings.
+
+- **Upgrade order.** Follow [Upgrades and backups](docs/self-hosting.md#upgrades-and-backups)
+  with `LOGBIRD_VERSION` set to `0.1.4` before pulling. The `0.1.4` migrate image applies
+  two additive PostgreSQL migrations (new columns on `ApiKey`, and a trigger,
+  `ApiKey_roll_fence`, that refuses a replacement key that drops its predecessor's scope or
+  expiry; no data changes) and ClickHouse migration 010. The index materializes in the
+  background; reads stay correct meanwhile and no downtime is needed. Check
+  `system.mutations` in the Logbird database for progress.
+- **Restricted query user.** The Compose and Coolify stacks re-provision it automatically
+  (the migrate image runs `create-query-user`). Source installations run
+  `pnpm --filter @logbird/clickhouse create-query-user` once after upgrading; it is
+  idempotent and keeps credentials. Until then the query builders remain the only layer
+  that enforces a scope's tenant.
+- **Rollback.** Keys with a scope or an expiry have a longer secret that releases before
+  0.1.4 reject, so after a rollback they stop working instead of reading the whole project.
+  Compare the returned kind, scope and expiry after creating or rolling a key.
+- **Retries across the upgrade.** A retry, after the upgrade, of an event first stored
+  before it that contains a number a double cannot hold answers `duplicate_id_conflict`,
+  because its stored digits were rounded. Events stored before this release keep their
+  rounded values.
+- **New per-event rejections.** An event over 256 KB, and an event nested more than 1,000
+  levels deep that holds a number a double cannot keep, are each rejected as
+  `invalid_event`; the other events in the batch are stored.
+- **`record:` in saved queries.** A query `record:site:12` used to search a custom
+  attribute named `record` and now means a record. To keep searching that attribute, write
+  `attr.record:"site:12"`.
+- **Scoped reads.** One tenant per scope. A scope names stored ids: ids are still trimmed
+  at ingest, so an id sent with surrounding whitespace is its trimmed id. With the
+  restricted query user, a scoped read runs under that user's limits (10 seconds,
+  5,000,000 rows read and 1 GiB per query); a very large tenant over a wide range can hit
+  them. Revoking a key reaches its viewer tokens within 30 seconds. Rotating
+  `BETTER_AUTH_SECRET` invalidates viewer tokens.
+- **Webhooks.** Endpoints can still be created and rotated, but nothing is delivered in
+  this release.
+- **New optional settings.** `VIEWER_READ_RATE_LIMIT_PER_MINUTE` (300) and
+  `VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE` (600).
+
 ## 0.1.3
 
 ### Highlights
