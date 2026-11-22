@@ -130,6 +130,8 @@ describe('isValidRange rejects ranges that name no window (#203)', () => {
     const fallback = resolveRange('24h', now);
     expect(resolveRange('99999999999d', now)).toEqual(fallback);
     expect(resolveRange('0d', now)).toEqual(fallback);
+    // An injected clock at the epoch: the fallback clamps instead of recursing.
+    expect(resolveRange('0d', 0)).toMatchObject({ fromMs: 0, toMs: 0 });
   });
 });
 
