@@ -273,6 +273,40 @@ below for older Trailmark installations.
 See the [maintainer migration-cancellation check](releases.md#migration-cancellation-check)
 for signal handling; its live acceptance is pending in #77.
 
+### Upgrading to the arrival-time index (010)
+
+Migration 010 adds a minmax skip index on `events.received_at` and materializes it. Arrival-time reads (webhook
+discovery, alert windows, the live view) then skip granules whose arrival range misses the requested range instead of
+reading every granule of the project that the partition and primary-key steps keep, which do not know arrival time
+(how much that is, and how it grows with retained history, depends on the data; it was not measured). Event values are preserved, but the physical work is
+not free: `MATERIALIZE INDEX` writes the new index files for every part, and ClickHouse rewrites the full column data
+of compact parts while doing so, competing with merges and retention mutations. It runs as a background mutation
+(the statement pins `mutations_sync = 0`, so a migration user whose profile waits for mutations does not block):
+the migration returns at once, reads stay correct while it runs (parts without the index are read as before), and new
+parts get the index on insert. Measured locally on a shared 2 GiB ClickHouse: 23.8 million rows (4.05 GiB)
+materialized in about 35 seconds, roughly 2.5 minutes per 100 million rows. That is an extrapolation from one machine,
+not a bound: many compact parts, busy or slower storage take longer.
+
+Check completion in the Logbird database:
+
+```sql
+SELECT mutation_id, is_done, parts_to_do, latest_fail_reason FROM system.mutations
+WHERE database = currentDatabase() AND table = 'events' AND command LIKE '%idx_received_at%';
+```
+
+The migration is recorded as applied once both statements were submitted, so a later `ch:migrate` does not run it
+again. If `is_done` stays 0, first check whether the original mutation is still running (`parts_to_do` falling): a
+part failure can leave it active and retrying, and reissuing then queues duplicate work. Fix any cause shown in
+`latest_fail_reason` (a mutation cancelled with `KILL MUTATION` may show none). Once no materialization of
+`idx_received_at` is active, reissue `ALTER TABLE events MATERIALIZE INDEX idx_received_at SETTINGS mutations_sync = 0`;
+repeating it is safe for event data, though it repeats the physical work.
+
+Known limit: during a large historical import (old event times arriving now), a slice that overlaps the import's
+arrival window can still read granules the import touched whose arrival range overlaps the slice. In the measured
+import (one batch stream over about five minutes) every such granule overlapped it, so the index gave no gain. Draining such
+a slice in small pages repeats that read per page (see #209 for measurements), so larger pages mean fewer repeated
+reads during catch-up.
+
 ### Upgrading to immutable ids
 
 Back up Postgres and ClickHouse, preserve the private environment file and stop
