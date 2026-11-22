@@ -1,9 +1,22 @@
-import { type ClickHouseClient, compileQuery, type EventRow, read, toEvent } from '@logbird/clickhouse';
+import {
+  type ClickHouseClient,
+  compileQuery,
+  type EventRow,
+  INGEST_CLAIM_LEASE_MS,
+  OCCURRED_AT_FUTURE_DAYS,
+  OCCURRED_AT_PAST_DAYS,
+  read,
+  toEvent,
+} from '@logbird/clickhouse';
 import { ProjectBusyError, prisma, type WebhookEndpoint, withProjectLock } from '@logbird/database';
 import { WEBHOOK_LOG_RETENTION_MS } from '@logbird/database/webhooks';
 import { webhookWatermark } from './webhook-policy';
 
 const DISCOVERY_PAGE_SIZE = 100;
+const DISCOVERY_SLICE_MS = 5 * 60_000;
+// A self-hosted ClickHouse profile may normally return partial reads on overflow. Never commit those to the cursor.
+const COMPLETE_READ = `SETTINGS read_overflow_mode = 'throw', read_overflow_mode_leaf = 'throw', result_overflow_mode = 'throw',
+  timeout_overflow_mode = 'throw', timeout_overflow_mode_leaf = 'throw', group_by_overflow_mode = 'throw', sort_overflow_mode = 'throw'`;
 type EndpointScope = Pick<WebhookEndpoint, 'projectId' | 'filterQuery' | 'scopeTenantId' | 'scopeTargetType' | 'scopeTargetId'>;
 
 function scopePredicate(endpoint: EndpointScope, clock?: number) {
@@ -30,7 +43,7 @@ export async function webhookEvent(ch: ClickHouseClient, endpoint: EndpointScope
   const [row] = await read<EventRow>(
     ch,
     `SELECT * FROM events WHERE ${match.sql} AND event_id = {id:String} AND received_at = {from:DateTime64(3)}
-      ORDER BY timestamp LIMIT 1`,
+      ORDER BY timestamp LIMIT 1 ${COMPLETE_READ}`,
     { ...match.params, id: eventId, from: receivedAt.toISOString() },
   );
   // The public projection keeps stored attribute text exact, including integers beyond JavaScript's safe range.
@@ -49,7 +62,8 @@ async function captureWatermark(projectId: string) {
         ) AS pending`;
       return row ? webhookWatermark(row.now, row.pending) : null;
     },
-    { waitMs: 200 },
+    // Queue at the existing writer-preference gate and give admitted writes a full receipt lease to drain.
+    { mode: 'queued-exclusive', waitMs: INGEST_CLAIM_LEASE_MS },
   );
 }
 
@@ -65,18 +79,22 @@ export async function discoverWebhookDeliveries(ch: ClickHouseClient, endpoint: 
   let scanRecorded = false;
   try {
     const watermark = await captureWatermark(endpoint.projectId);
-    if (!watermark || watermark < endpoint.cursorReceivedAt || (+watermark === +endpoint.cursorReceivedAt && !endpoint.cursorEventId)) return;
+    if (!watermark || watermark < endpoint.cursorReceivedAt) return;
+    // A null ID denotes the first unexamined millisecond, including at endpoint creation. The end is exclusive.
+    const sliceEnd = new Date(Math.min(+endpoint.cursorReceivedAt + DISCOVERY_SLICE_MS, +watermark + 1));
     const match = scopePredicate(endpoint, +now);
     const rows = await read<{ event_id: string; delivery_received_at: string }>(
       ch,
       `SELECT event_id, min(received_at) AS delivery_received_at FROM events
-        WHERE ${match.sql} AND received_at <= {to:DateTime64(3)}
-          AND (received_at > {from:DateTime64(3)}
-            ${endpoint.cursorEventId === null ? '' : 'OR (received_at = {from:DateTime64(3)} AND event_id > {cursorId:String})'})
-        GROUP BY event_id ORDER BY delivery_received_at, event_id LIMIT ${DISCOVERY_PAGE_SIZE}`,
+        WHERE ${match.sql}
+          AND timestamp >= subtractDays({from:DateTime64(3,'UTC')}, ${OCCURRED_AT_PAST_DAYS})
+          AND timestamp < addDays({to:DateTime64(3,'UTC')}, ${OCCURRED_AT_FUTURE_DAYS})
+          AND received_at >= {from:DateTime64(3,'UTC')} AND received_at < {to:DateTime64(3,'UTC')}
+          ${endpoint.cursorEventId === null ? '' : "AND (received_at > {from:DateTime64(3,'UTC')} OR event_id > {cursorId:String})"}
+        GROUP BY event_id ORDER BY delivery_received_at, event_id LIMIT ${DISCOVERY_PAGE_SIZE} ${COMPLETE_READ}`,
       {
         ...match.params,
-        to: watermark.toISOString(),
+        to: sliceEnd.toISOString(),
         from: endpoint.cursorReceivedAt.toISOString(),
         cursorId: endpoint.cursorEventId,
       },
@@ -94,7 +112,7 @@ export async function discoverWebhookDeliveries(ch: ClickHouseClient, endpoint: 
       const updated = await tx.webhookEndpoint.updateMany({
         where: snapshot,
         data: {
-          cursorReceivedAt: full ? full.receivedAt : watermark,
+          cursorReceivedAt: full ? full.receivedAt : sliceEnd,
           cursorEventId: full ? full.eventId : null,
           lastScannedAt: now,
           updatedAt: endpoint.updatedAt,

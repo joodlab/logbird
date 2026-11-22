@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { createClickHouseClient, insertEvents, normalizeEvent, purgeProject } from '@logbird/clickhouse';
+import { createClickHouseClient, insertEvents, normalizeEvent, purgeProject, read } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma } from '@logbird/database';
 import { encryptWebhookSecret, webhookSecretKey } from '@logbird/database/webhooks';
 import { generateWebhookSecret, verifyWebhook } from '@logbird/sdk';
@@ -13,7 +13,9 @@ import { claimWebhookDeliveries, deliverWebhooks } from './webhook-delivery';
 import { discoverWebhookDeliveries } from './webhook-discovery';
 import { sendWebhookDisableNotices } from './webhook-notices';
 
-it('delivers late audit events once, retries across workers, signs tests and disables through the real services', { timeout: 60_000 }, async () => {
+it('delivers a late insert once, signs exact stored text, retries across workers and emails a composite-role admin', {
+  timeout: 60_000,
+}, async () => {
   const id = `qa-webhooks-${randomUUID()}`;
   const email = `${id}@example.invalid`;
   expect(['127.0.0.1', 'localhost', '::1']).toContain(process.env.SMTP_HOST);
@@ -69,6 +71,32 @@ it('delivers late audit events once, retries across workers, signs tests and dis
     return (await response.json()) as { messages: { ID: string; Subject: string }[] };
   };
   let organizationCreated = false;
+  const cleanFixtures = async () => {
+    const cleanMail = async () => {
+      const found = await mailSearch();
+      if (found.messages.length) {
+        const cleaned = await fetch(new URL('/api/v1/messages', mailpit), {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ IDs: found.messages.map(({ ID }) => ID) }),
+        });
+        expect(cleaned.ok).toBe(true);
+      }
+    };
+    const cleanups: Promise<unknown>[] = [queue.obliterate({ force: true })];
+    if (organizationCreated)
+      cleanups.push(
+        purgeProject(ch, id),
+        prisma.$transaction([
+          prisma.auditOutbox.deleteMany({ where: { stream: `ws:${id}` } }),
+          prisma.organization.deleteMany({ where: { id } }),
+          prisma.user.deleteMany({ where: { id } }),
+        ]),
+        cleanMail(),
+      );
+    const failures = (await Promise.allSettled(cleanups)).flatMap((result) => (result.status === 'rejected' ? [result.reason] : []));
+    if (failures.length) throw new AggregateError(failures, 'Webhook fixture cleanup failed');
+  };
   try {
     await events.waitUntilReady();
     receiver.listen(0, '127.0.0.1');
@@ -79,7 +107,7 @@ it('delivers late audit events once, retries across workers, signs tests and dis
     organizationCreated = true;
     await prisma.project.create({ data: { id, organizationId: id, name: id, slug: id } });
     await prisma.user.create({ data: { id, name: 'QA webhook admin', email } });
-    await prisma.member.create({ data: { id, userId: id, organizationId: id, role: 'admin', createdAt: time(0) } });
+    await prisma.member.create({ data: { id, userId: id, organizationId: id, role: 'owner, admin', createdAt: time(0) } });
     const endpoint = await prisma.webhookEndpoint.create({
       data: {
         projectId: id,
@@ -109,11 +137,8 @@ it('delivers late audit events once, retries across workers, signs tests and dis
       if (!normalized.ok) throw new Error(normalized.reason);
       return normalized.row;
     };
-    const first = row('newer-visible', time(-50_000));
-    // Store both the raw numeric token and its exact public attribute projection.
     const numericId = '9876543210987654321';
-    first.payload = `${first.payload.slice(0, -1)},"numericId":${numericId}}`;
-    first.attributes = { ...first.attributes, numericId };
+    const first = row('newer-visible', time(-50_000), { numericId });
     const delayed = row('late-insert', lateTime);
     await prisma.ingestReceipt.create({
       data: { projectId: id, organizationId: id, eventId: delayed.event_id, eventAt: lateTime, receivedAt: lateTime, fingerprint: 'qa-receipt' },
@@ -142,7 +167,15 @@ it('delivers late audit events once, retries across workers, signs tests and dis
     await tick();
     await tick();
     expect(requests.map(({ headers }) => headers['webhook-id']).sort()).toEqual(['late-insert', 'newer-visible']);
-    expect(requests.find(({ headers }) => headers['webhook-id'] === first.event_id)?.payload).toContain(`"numericId":"${numericId}"`);
+    const [stored] = await read<{ payloadText: string; attributeText: string }>(
+      ch,
+      `SELECT JSONExtractString(payload, 'numericId') AS payloadText, attributes['numericId'] AS attributeText
+       FROM events WHERE project_id = {project:String} AND event_id = {event:String}`,
+      { project: id, event: first.event_id },
+    );
+    expect(stored).toEqual({ payloadText: numericId, attributeText: numericId });
+    const wire = requests.find(({ headers }) => headers['webhook-id'] === first.event_id)?.payload ?? '';
+    expect(Buffer.from(wire).includes(Buffer.from(`"numericId":"${stored?.attributeText}"`))).toBe(true);
     for (const request of requests) {
       expect((request.headers['webhook-signature'] as string).split(' ')).toHaveLength(2);
       for (const secret of [primary, rotated])
@@ -223,10 +256,12 @@ it('delivers late audit events once, retries across workers, signs tests and dis
     });
     for (const failure of [1, 2]) {
       const terminal = await ping();
-      await dueNow(terminal.id, true);
       responses.push(500);
       await tick();
-      expect(await log(terminal.id)).toMatchObject({ status: 'failed' });
+      expect(await log(terminal.id)).toMatchObject({ status: 'pending', attempts: [{ responseCode: 500 }] });
+      await dueNow(terminal.id, true);
+      await tick();
+      expect(await log(terminal.id)).toMatchObject({ status: 'failed', attempts: [{ responseCode: 500 }] });
       expect(await prisma.webhookEndpoint.findUnique({ where: { id: endpoint.id } })).toMatchObject({
         enabled: failure === 1,
         disabledReason: failure === 1 ? null : 'consecutive_failures',
@@ -245,22 +280,7 @@ it('delivers late audit events once, retries across workers, signs tests and dis
     receiver.closeAllConnections();
     await new Promise<void>((resolve) => receiver.close(() => resolve()));
     try {
-      await queue.obliterate({ force: true });
-      if (organizationCreated) {
-        await purgeProject(ch, id);
-        await prisma.auditOutbox.deleteMany({ where: { stream: `ws:${id}` } });
-        await prisma.organization.deleteMany({ where: { id } });
-        await prisma.user.deleteMany({ where: { id } });
-        const found = await mailSearch();
-        if (found.messages.length) {
-          const cleaned = await fetch(new URL('/api/v1/messages', mailpit), {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ IDs: found.messages.map(({ ID }) => ID) }),
-          });
-          expect(cleaned.ok).toBe(true);
-        }
-      }
+      await cleanFixtures();
     } finally {
       await Promise.all([queue.close(), events.close(), closeProjectLocks(), prisma.$disconnect(), ch.close()]);
       await connection.quit();

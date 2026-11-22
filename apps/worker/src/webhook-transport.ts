@@ -1,4 +1,4 @@
-import { request as requestHttp, validateHeaderValue } from 'node:http';
+import { request as requestHttp } from 'node:http';
 import { request as requestHttps } from 'node:https';
 import { resolveWebhookDestination, WebhookLookupBusyError } from '@logbird/database/webhooks';
 import { signWebhook } from '@logbird/sdk';
@@ -11,20 +11,18 @@ const LOG_BYTES = 2048;
 export type AttemptResult = {
   responseCode?: number;
   responseBody?: string;
-  error?: 'destination_rejected' | 'timeout' | 'network_error' | 'event_unavailable' | 'invalid_event_id' | 'signing_failed';
+  error?: 'destination_rejected' | 'timeout' | 'network_error' | 'event_unavailable' | 'lookup_failed' | 'signing_failed';
 };
 
 export type WebhookTransportOptions = NonNullable<Parameters<typeof resolveWebhookDestination>[1]> & {
   totalTimeoutMs?: number;
 };
+type AttemptContext = { started: number; signal: AbortSignal; responseCode?: number };
 
-export function usableWebhookId(id: string) {
-  try {
-    validateHeaderValue('webhook-id', id);
-    return !!id && !id.includes('.');
-  } catch {
-    return false;
-  }
+function webhookHeaderId(id: string) {
+  // Reserve the prefix in both branches so a literal ID can never collide with an encoded ID.
+  const prefix = 'lb1_';
+  return /^[\x21-\x7e]+$/.test(id) && !id.includes('.') && !id.startsWith(prefix) ? id : `${prefix}${Buffer.from(id, 'utf8').toString('base64url')}`;
 }
 
 export async function postWebhook(
@@ -35,9 +33,32 @@ export async function postWebhook(
   options: WebhookTransportOptions = {},
   stillCurrent?: () => Promise<boolean>,
 ): Promise<AttemptResult | undefined> {
-  if (!usableWebhookId(id)) return { error: 'invalid_event_id' };
-  const started = Date.now();
-  const signal = AbortSignal.timeout(options.totalTimeoutMs ?? TOTAL_TIMEOUT_MS);
+  const controller = new AbortController();
+  const attempt: AttemptContext = { started: Date.now(), signal: controller.signal };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<AttemptResult>((resolve) => {
+    timer = setTimeout(() => {
+      resolve({ error: 'timeout', responseCode: attempt.responseCode });
+      controller.abort();
+    }, options.totalTimeoutMs ?? TOTAL_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([deadline, sendWebhook(rawUrl, webhookHeaderId(id), payload, secrets, options, stillCurrent, attempt)]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function sendWebhook(
+  rawUrl: string,
+  id: string,
+  payload: string,
+  secrets: readonly string[],
+  options: WebhookTransportOptions,
+  stillCurrent: (() => Promise<boolean>) | undefined,
+  attempt: AttemptContext,
+): Promise<AttemptResult | undefined> {
+  const { started, signal } = attempt;
   const timestamp = Math.floor(started / 1000);
   let signature: string;
   try {
@@ -51,13 +72,17 @@ export async function postWebhook(
   } catch (error) {
     return { error: error instanceof WebhookLookupBusyError ? 'timeout' : 'destination_rejected' };
   }
+  if (signal.aborted) return { error: 'timeout' };
   if (stillCurrent && !(await stillCurrent())) return;
   if (signal.aborted || Date.now() - started >= CONNECT_TIMEOUT_MS) return { error: 'timeout' };
   const { url, address, family } = destination;
   const https = url.protocol === 'https:';
   return new Promise((resolve) => {
-    let timedOut = false;
-    let responseCode: number | undefined;
+    const finish = (result: AttemptResult) => {
+      clearTimeout(connectTimer);
+      resolve(result);
+    };
+    const networkFailure = () => finish({ error: signal.aborted ? 'timeout' : 'network_error', responseCode: attempt.responseCode });
     const request = (https ? requestHttps : requestHttp)(
       url,
       {
@@ -77,36 +102,39 @@ export async function postWebhook(
           'webhook-signature': signature,
         },
       },
-      async (response) => {
+      (response) => {
         clearTimeout(connectTimer);
-        responseCode = response.statusCode;
+        const responseCode = response.statusCode;
+        attempt.responseCode = responseCode;
         const preview = Buffer.alloc(LOG_BYTES);
         let received = 0;
-        try {
-          for await (const chunk of response) {
-            const bytes: Buffer = chunk;
-            if (received < preview.length) bytes.copy(preview, received, 0, preview.length - received);
-            received += Math.min(bytes.length, MAX_RESPONSE_BYTES - received);
-            if (received >= MAX_RESPONSE_BYTES) break;
+        const complete = () => finish({ responseCode, responseBody: preview.subarray(0, received).toString('utf8').replaceAll('\0', '') });
+        response.on('data', (bytes: Buffer) => {
+          if (received < preview.length) bytes.copy(preview, received, 0, preview.length - received);
+          received += bytes.length;
+          if (received >= MAX_RESPONSE_BYTES) {
+            complete();
+            response.destroy();
           }
-          resolve({ responseCode: response.statusCode, responseBody: preview.subarray(0, received).toString('utf8').replaceAll('\0', '') });
-        } catch {
-          resolve({ error: signal.aborted ? 'timeout' : 'network_error', responseCode: response.statusCode });
-        }
+        });
+        response.once('end', complete);
+        response.once('error', networkFailure);
       },
     );
     const connectTimer = setTimeout(
       () => {
-        timedOut = true;
-        request.destroy(new Error('Webhook connect timeout'));
+        finish({ error: 'timeout' });
+        request.destroy();
       },
       CONNECT_TIMEOUT_MS - (Date.now() - started),
     );
     request.once('socket', (socket) => socket.once(https ? 'secureConnect' : 'connect', () => clearTimeout(connectTimer)));
-    request.once('error', () => {
-      clearTimeout(connectTimer);
-      resolve({ error: timedOut || signal.aborted ? 'timeout' : 'network_error', responseCode });
+    request.once('upgrade', (response, socket) => {
+      finish({ error: 'network_error', responseCode: response.statusCode });
+      socket.destroy();
     });
+    request.once('error', networkFailure);
+    request.once('close', networkFailure);
     request.end(payload);
   });
 }

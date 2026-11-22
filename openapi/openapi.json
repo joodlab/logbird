@@ -8147,7 +8147,14 @@
                     "data": {
                       "items": {
                         "properties": {
+                          "attemptCount": {
+                            "description": "Total attempts, including attempts outside the retention window.",
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
                           "attempts": {
+                            "description": "The five most recent retained attempts, in attempt number order.",
                             "items": {
                               "properties": {
                                 "error": {
@@ -8159,6 +8166,7 @@
                                         "network_error",
                                         "event_unavailable",
                                         "invalid_event_id",
+                                        "lookup_failed",
                                         "signing_failed"
                                       ],
                                       "type": "string"
@@ -8277,6 +8285,7 @@
                           "status",
                           "createdAt",
                           "nextAttemptAt",
+                          "attemptCount",
                           "attempts"
                         ],
                         "type": "object"
@@ -8509,6 +8518,37 @@
               }
             },
             "description": "Rotate webhook secret (shown once; default 24-hour overlap, maximum 7 days)"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "const": "webhook_secret_overlap_limit",
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rotation would exceed the limit of 10 active secrets. Wait for an expiry or rotate with zero overlap."
           },
           "default": {
             "content": {

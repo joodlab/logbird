@@ -12,8 +12,9 @@ import {
   rotateWebhookSecretSchema,
   updateWebhookSchema,
   webhookEndpointSchema,
+  webhookSecretOverlapLimitSchema,
 } from '@logbird/contracts';
-import { type Prisma, prisma, type WebhookEndpoint } from '@logbird/database';
+import { Prisma, prisma, type WebhookAttempt, type WebhookEndpoint } from '@logbird/database';
 import {
   encryptWebhookSecret,
   validateWebhookUrl,
@@ -22,9 +23,9 @@ import {
   WebhookUrlError,
   webhookSecretKey,
 } from '@logbird/database/webhooks';
-import { generateWebhookSecret } from '@logbird/sdk';
+import { generateWebhookSecret, MAX_WEBHOOK_SIGNATURES } from '@logbird/sdk';
 import { type Context, Hono } from 'hono';
-import { validator } from 'hono-openapi';
+import { resolver, validator } from 'hono-openapi';
 import { env } from './env';
 import { ApiError } from './errors';
 import { audit } from './ingest';
@@ -35,6 +36,7 @@ import type { AppEnv } from './types';
 
 const base = '/projects/:projectId/webhooks';
 const secretKey = webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY);
+const rotationSummary = 'Rotate webhook secret (shown once; default 24-hour overlap, maximum 7 days)';
 function serialize(endpoint: WebhookEndpoint) {
   return webhookEndpointSchema.parse({
     ...endpoint,
@@ -227,13 +229,22 @@ export const webhookRoutes = new Hono<AppEnv>()
       await requireRole(c);
       const endpoint = await findEndpoint(c);
       const { status, cursor } = c.req.valid('query');
+      const now = new Date();
       const rows = await prisma.webhookDelivery.findMany({
-        where: { endpointId: endpoint.id, status, id: cursor ? { lt: cursor } : undefined, expiresAt: { gt: new Date() } },
+        where: { endpointId: endpoint.id, status, id: cursor ? { lt: cursor } : undefined, OR: [{ status: 'pending' }, { expiresAt: { gt: now } }] },
         orderBy: { id: 'desc' },
         take: 21,
-        include: { attempts: { orderBy: { number: 'asc' }, where: { startedAt: { gt: new Date(Date.now() - WEBHOOK_LOG_RETENTION_MS) } } } },
       });
       const page = rows.slice(0, 20);
+      const attempts = page.length
+        ? await prisma.$queryRaw<WebhookAttempt[]>(Prisma.sql`
+            SELECT a.* FROM (VALUES ${Prisma.join(page.map(({ id, attemptNumber }) => Prisma.sql`(${id}::text, ${attemptNumber}::int)`))}) d(id, last)
+            CROSS JOIN LATERAL (
+              SELECT * FROM "WebhookAttempt" WHERE "deliveryId" = d.id AND number <= d.last
+                AND "startedAt" > ${new Date(+now - WEBHOOK_LOG_RETENTION_MS)}
+              ORDER BY number DESC LIMIT 5
+            ) a ORDER BY a."deliveryId", a.number`)
+        : [];
       c.header('Cache-Control', 'no-store');
       return c.json(
         listWebhookDeliveriesResponseSchema.parse({
@@ -242,7 +253,10 @@ export const webhookRoutes = new Hono<AppEnv>()
             kind: row.receivedAt ? 'event' : 'test',
             createdAt: row.createdAt.toISOString(),
             nextAttemptAt: row.nextAttemptAt?.toISOString() ?? null,
-            attempts: row.attempts.map((attempt) => ({ ...attempt, startedAt: attempt.startedAt.toISOString() })),
+            attemptCount: row.attemptNumber,
+            attempts: attempts
+              .filter(({ deliveryId }) => deliveryId === row.id)
+              .map((attempt) => ({ ...attempt, startedAt: attempt.startedAt.toISOString() })),
           })),
           nextCursor: rows.length > 20 ? (page.at(-1)?.id ?? null) : null,
         }),
@@ -255,12 +269,12 @@ export const webhookRoutes = new Hono<AppEnv>()
       requireEnabled(endpoint);
       const now = new Date();
       const delivery = await tx.webhookDelivery.findFirst({
-        where: { id: c.req.param('deliveryId'), endpointId: endpoint.id, expiresAt: { gt: now } },
+        where: { id: c.req.param('deliveryId'), endpointId: endpoint.id, OR: [{ status: 'pending' }, { expiresAt: { gt: now } }] },
       });
       if (!delivery) throw new ApiError(404, 'not_found', 'Webhook delivery not found.');
       const updated = await tx.webhookDelivery.updateMany({
         where: { id: delivery.id, status: { not: 'pending' } },
-        data: { status: 'pending', nextAttemptAt: now, retryUntil: null, windowAttempts: 0, expiresAt: new Date(+now + WEBHOOK_LOG_RETENTION_MS) },
+        data: { status: 'pending', nextAttemptAt: now, retryUntil: null, windowAttempts: 0 },
       });
       if (!updated.count) throw new ApiError(409, 'webhook_delivery_pending', 'This delivery is already pending.');
       await record(c, tx, 'webhook.resend_queued', endpoint);
@@ -270,7 +284,15 @@ export const webhookRoutes = new Hono<AppEnv>()
   })
   .post(
     `${base}/:id/rotate-secret`,
-    doc('Rotate webhook secret (shown once; default 24-hour overlap, maximum 7 days)', rotateWebhookSecretResponseSchema),
+    routeDoc(rotationSummary, {
+      responses: {
+        200: { description: rotationSummary, content: { 'application/json': { schema: resolver(rotateWebhookSecretResponseSchema) } } },
+        409: {
+          description: `Rotation would exceed the limit of ${MAX_WEBHOOK_SIGNATURES} active secrets. Wait for an expiry or rotate with zero overlap.`,
+          content: { 'application/json': { schema: resolver(webhookSecretOverlapLimitSchema) } },
+        },
+      },
+    }),
     validator('json', rotateWebhookSecretSchema, invalidBody),
     async (c) => {
       const { overlapSeconds } = c.req.valid('json');
@@ -284,6 +306,12 @@ export const webhookRoutes = new Hono<AppEnv>()
         const until = new Date(now.getTime() + overlapSeconds * 1000);
         // Secrets past their window can never sign again: drop them so rotations don't accumulate rows.
         await tx.webhookSecret.deleteMany({ where: { endpointId: endpoint.id, expiresAt: { lte: now } } });
+        if (overlapSeconds > 0 && (await tx.webhookSecret.count({ where: { endpointId: endpoint.id } })) >= MAX_WEBHOOK_SIGNATURES)
+          throw new ApiError(
+            409,
+            'webhook_secret_overlap_limit',
+            `At most ${MAX_WEBHOOK_SIGNATURES} active secrets are supported. Wait for an expiry or rotate with zero overlap.`,
+          );
         await tx.webhookSecret.updateMany({
           where: { endpointId: endpoint.id, OR: [{ expiresAt: null }, { expiresAt: { gt: until } }] },
           data: { expiresAt: until },

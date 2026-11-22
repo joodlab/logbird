@@ -5,6 +5,7 @@ import { keys } from './keys';
 
 export * from './generated/client';
 export * from './ingest-receipts';
+export * from './membership-roles';
 export * from './receipt-index-maintenance';
 
 const databaseUrl = keys().DATABASE_URL;
@@ -37,8 +38,9 @@ export interface ProjectLockOptions {
   /**
    * shared    – ingestion: many writers of new events may hold it at once.
    * exclusive – maintenance (retention purge, sample data, deletion, policy changes): excludes everyone.
+   * queued-exclusive – exclusive, with a queued acquisition of the admission gate.
    */
-  mode?: 'shared' | 'exclusive';
+  mode?: 'shared' | 'exclusive' | 'queued-exclusive';
   /** How long to keep trying before ProjectBusyError. Never blocks a Prisma connection or a transaction. */
   waitMs?: number;
 }
@@ -49,8 +51,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  *  - gate (key 1): writer preference — maintenance holds it while waiting for in-flight ingests to drain, and
  *    ingest must pass it (momentary shared try-lock) before taking the data lock, so a steady ingest stream
  *    cannot starve maintenance.
- * Every acquisition is a non-blocking try with a bounded retry loop: a long purge makes callers fail fast with
- * ProjectBusyError (503 + Retry-After) instead of queueing pooled connections.
+ * The queued-exclusive mode joins PostgreSQL's lock queue for the gate, in waits bounded by the lock pool's
+ * lock_timeout. Other callers use non-blocking tries. The data lock always uses bounded retries.
  */
 export async function withProjectLock<T>(
   projectId: string,
@@ -78,7 +80,16 @@ export async function withProjectLock<T>(
           await client.query('SELECT pg_advisory_unlock_shared(hashtextextended($1, 1))', [projectId]);
         }
       } else {
-        gate ||= await tryLock('SELECT pg_try_advisory_lock(hashtextextended($1, 1)) locked');
+        if (!gate && mode === 'queued-exclusive') {
+          try {
+            await client.query('SELECT pg_advisory_lock(hashtextextended($1, 1))', [projectId]);
+            gate = true;
+          } catch (error) {
+            if (!(error && typeof error === 'object' && 'code' in error && error.code === '55P03')) throw error;
+          }
+        } else {
+          gate ||= await tryLock('SELECT pg_try_advisory_lock(hashtextextended($1, 1)) locked');
+        }
         if (gate) data = await tryLock('SELECT pg_try_advisory_lock(hashtextextended($1, 0)) locked');
       }
       if (data) break;

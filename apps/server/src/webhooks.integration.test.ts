@@ -2,15 +2,19 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
+import { insertEvents } from '@logbird/clickhouse';
 import { createWebhookResponseSchema, listWebhooksResponseSchema, MAX_WEBHOOK_ENDPOINTS, webhookEndpointSchema } from '@logbird/contracts';
 import { prisma } from '@logbird/database';
 import { decryptWebhookSecret, type WebhookLookup, webhookSecretKey } from '@logbird/database/webhooks';
-import { verifyWebhook } from '@logbird/sdk';
+import { MAX_WEBHOOK_SIGNATURES, verifyWebhook } from '@logbird/sdk';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { deliverWebhooks } from '../../worker/src/webhook-delivery';
+import { discoverWebhookDeliveries } from '../../worker/src/webhook-discovery';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
 import { env } from './env';
+import { immutableFixture } from './immutable-fixture';
 
 const control = vi.hoisted(() => ({ failAudit: false, lookup: undefined as WebhookLookup | undefined }));
 vi.mock('@logbird/database/webhooks', async (original) => {
@@ -52,6 +56,40 @@ async function create(role = 'owner', input: unknown = { url: receiver }) {
   expect(response.headers.get('cache-control')).toBe('no-store');
   return createWebhookResponseSchema.parse(await response.json());
 }
+
+async function withLocalReceiver(endpointId: string, work: (received: { headers: IncomingHttpHeaders; payload: string }[]) => Promise<void>) {
+  const received: { headers: IncomingHttpHeaders; payload: string }[] = [];
+  const receiver = createServer(async (req, res) => {
+    req.setEncoding('utf8');
+    let payload = '';
+    for await (const chunk of req) payload += chunk;
+    received.push({ headers: req.headers, payload });
+    res.writeHead(204).end();
+  });
+  try {
+    receiver.listen(0, '127.0.0.1');
+    await once(receiver, 'listening');
+    const { port } = receiver.address() as AddressInfo;
+    await prisma.webhookEndpoint.update({ where: { id: endpointId }, data: { url: `http://127.0.0.1:${port}/test` } });
+    await work(received);
+  } finally {
+    receiver.closeAllConnections();
+    await new Promise<void>((resolve) => receiver.close(() => resolve()));
+  }
+}
+
+const send = () =>
+  deliverWebhooks(
+    clickhouse,
+    {
+      secretKey: webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY),
+      concurrency: 1,
+      perEndpoint: 1,
+      failureLimit: 50,
+      transport: { allowHttp: true, allowAddress: (address) => address === '127.0.0.1' },
+    },
+    projectId,
+  );
 beforeAll(async () => {
   for (const id of [org, otherOrg]) await prisma.organization.create({ data: { id, name: 'QA Webhooks', slug: id, createdAt: new Date() } });
   for (const role of ['owner', 'admin', 'member', 'viewer', 'unknown', 'outsider', 'foreign-owner']) {
@@ -149,40 +187,11 @@ it('sends an API test ping and resend with the same signed ID and protects the d
   const log = await request(`${path}/deliveries?status=pending`);
   expect(log.status).toBe(200);
   expect(log.headers.get('cache-control')).toBe('no-store');
-  expect(await log.json()).toMatchObject({ data: [{ ...ping, attempts: [] }], nextCursor: null });
+  expect(await log.json()).toMatchObject({ data: [{ ...ping, attemptCount: 0, attempts: [] }], nextCursor: null });
   const resend = `${path}/deliveries/${ping.id}/resend`;
   expect((await request(resend, 'POST')).status).toBe(409);
   expect((await request(resend, 'POST', undefined, 'member')).status).toBe(403);
-  const received: { headers: IncomingHttpHeaders; payload: string }[] = [];
-  const receiver = createServer((req, res) => {
-    req.setEncoding('utf8');
-    let payload = '';
-    req.on('data', (chunk) => {
-      payload += chunk;
-    });
-    req.on('end', () => {
-      received.push({ headers: req.headers, payload });
-      res.writeHead(204).end();
-    });
-  });
-  try {
-    receiver.listen(0, '127.0.0.1');
-    await once(receiver, 'listening');
-    const { port } = receiver.address() as AddressInfo;
-    // Pin only the local receiver in this fixture. Production saves and sends retain their address policies.
-    await prisma.webhookEndpoint.update({ where: { id: endpoint.id }, data: { url: `http://127.0.0.1:${port}/test` } });
-    const send = () =>
-      deliverWebhooks(
-        clickhouse,
-        {
-          secretKey: webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY),
-          concurrency: 1,
-          perEndpoint: 1,
-          failureLimit: 50,
-          transport: { allowHttp: true, allowAddress: (address) => address === '127.0.0.1' },
-        },
-        projectId,
-      );
+  await withLocalReceiver(endpoint.id, async (received) => {
     await send();
     const requeued = await request(resend, 'POST');
     expect(requeued.status).toBe(202);
@@ -198,6 +207,7 @@ it('sends an API test ping and resend with the same signed ID and protects the d
       data: [
         {
           id: ping.id,
+          attemptCount: 2,
           attempts: [
             { number: 1, responseCode: 204 },
             { number: 2, responseCode: 204 },
@@ -205,10 +215,7 @@ it('sends an API test ping and resend with the same signed ID and protects the d
         },
       ],
     });
-  } finally {
-    receiver.closeAllConnections();
-    await new Promise<void>((resolve) => receiver.close(() => resolve()));
-  }
+  });
   expect((await request(`/api/projects/${siblingId}/webhooks/${endpoint.id}/deliveries`)).status).toBe(404);
   expect(
     await prisma.auditOutbox.count({
@@ -218,6 +225,82 @@ it('sends an API test ping and resend with the same signed ID and protects the d
       },
     }),
   ).toBe(2);
+});
+
+it('lists only the latest five retained attempts per delivery and includes the cumulative count', async () => {
+  const { endpoint } = await create();
+  const now = Date.now();
+  for (const count of [8, 53]) {
+    await prisma.webhookDelivery.create({
+      data: {
+        endpointId: endpoint.id,
+        eventId: `qa-history-${count}`,
+        status: 'pending',
+        expiresAt: new Date(now - 1000),
+        attemptNumber: count,
+        attempts: {
+          create: Array.from({ length: count }, (_, index) => ({
+            number: index + 1,
+            status: 'failed',
+            startedAt: new Date(now - (count - index) * 1000),
+          })),
+        },
+      },
+    });
+  }
+  const response = await request(`${base()}/${endpoint.id}/deliveries?status=pending`);
+  expect(response.status).toBe(200);
+  const { data } = await response.json();
+  expect(data).toHaveLength(2);
+  for (const row of data) {
+    const count = row.eventId === 'qa-history-8' ? 8 : 53;
+    expect(row.attemptCount).toBe(count);
+    expect(row.attempts.map(({ number }: { number: number }) => number)).toEqual(Array.from({ length: 5 }, (_, offset) => count - 4 + offset));
+  }
+});
+
+it('advances discovery while HTTP ingest keeps arriving behind a slow admitted write', async () => {
+  const fixture = await immutableFixture('qa-webhook-ingest');
+  const exec = clickhouse.exec.bind(clickhouse);
+  let holdNextWrite = false;
+  let held = false;
+  const wrapped = vi.spyOn(clickhouse, 'exec').mockImplementation(async (params) => {
+    const result = await exec(params);
+    if (holdNextWrite && !held && params.query.startsWith('INSERT INTO events ')) {
+      held = true;
+      await delay(650);
+    }
+    return result;
+  });
+  let ongoing: Promise<unknown>[] = [];
+  try {
+    const from = new Date(Date.now() - 60_000);
+    await insertEvents(clickhouse, [fixture.row({ id: 'qa-already-stored', action: 'qa.webhook' }, from)]);
+    holdNextWrite = true;
+    const hook = await prisma.webhookEndpoint.create({
+      data: { projectId: fixture.project, url: receiver, cursorReceivedAt: from },
+    });
+    const admitted = Promise.resolve(fixture.post({ id: 'qa-slow', action: 'qa.webhook' }));
+    ongoing = [admitted];
+    await expect.poll(() => held, { interval: 20 }).toBe(true);
+    const scan = discoverWebhookDeliveries(clickhouse, hook);
+    const arrivals = [0, 100, 250, 400].map(async (ms) => {
+      await delay(ms);
+      return fixture.post({ id: `qa-arrival-${ms}`, action: 'qa.webhook' });
+    });
+    ongoing.push(scan, ...arrivals);
+    await scan;
+    expect((await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } })).cursorReceivedAt.getTime()).toBeGreaterThan(+from);
+    expect(await prisma.webhookDelivery.findMany({ where: { endpointId: hook.id }, select: { eventId: true } })).toEqual([
+      { eventId: 'qa-already-stored' },
+    ]);
+    for (const response of await Promise.all([admitted, ...arrivals])) expect(response.status).toBe(202);
+    expect(await fixture.count()).toBe(6);
+  } finally {
+    await Promise.allSettled(ongoing);
+    wrapped.mockRestore();
+    await fixture.cleanup();
+  }
 });
 
 it('returns a retryable lookup error for a busy workspace and lets another workspace save', async () => {
@@ -310,6 +393,31 @@ it('a zero-overlap rotation retires every earlier secret, including one still in
   }
   expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id, expiresAt: null } })).toBe(1);
 });
+
+it('verifies with the oldest of ten active secrets and rejects the next overlapping rotation', async () => {
+  const { endpoint, secret } = await create();
+  const path = `${base()}/${endpoint.id}`;
+  for (let count = 1; count < MAX_WEBHOOK_SIGNATURES; count++) {
+    expect((await request(`${path}/rotate-secret`, 'POST', {})).status).toBe(200);
+  }
+  const overflow = await request(`${path}/rotate-secret`, 'POST', {});
+  expect(overflow.status).toBe(409);
+  expect(await overflow.json()).toMatchObject({ error: { code: 'webhook_secret_overlap_limit' } });
+  expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id } })).toBe(10);
+
+  expect((await request(`${path}/test`, 'POST')).status).toBe(202);
+  await withLocalReceiver(endpoint.id, async (received) => {
+    await send();
+    expect(received).toHaveLength(1);
+    const [message] = received;
+    if (!message) throw new Error('Missing fixture delivery');
+    expect((message.headers['webhook-signature'] as string).split(' ')).toHaveLength(10);
+    expect(await verifyWebhook({ ...message, secret })).toMatchObject({ action: 'logbird.webhook.test' });
+  });
+  expect((await request(`${path}/rotate-secret`, 'POST', { overlapSeconds: 0 })).status).toBe(200);
+  expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id, expiresAt: null } })).toBe(1);
+});
+
 it.each(['owner', 'admin'])('%s can manage endpoints', async (role) => {
   const { endpoint } = await create(role);
   expect((await request(`${base()}/${endpoint.id}`, 'PATCH', { enabled: false }, role)).status).toBe(200);

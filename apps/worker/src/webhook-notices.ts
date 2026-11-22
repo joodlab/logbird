@@ -1,4 +1,4 @@
-import { prisma } from '@logbird/database';
+import { hasAdminRole, prisma } from '@logbird/database';
 import { sendWebhookDisabled } from '@logbird/email/send';
 
 export async function sendWebhookDisableNotices(projectId?: string) {
@@ -18,10 +18,10 @@ export async function sendWebhookDisableNotices(projectId?: string) {
       if (!claimed.count) return;
       try {
         const member = await prisma.member.findFirst({
-          where: { organizationId: project.organizationId, userId: notice.recipientId, role: { in: ['owner', 'admin'] } },
-          select: { user: { select: { email: true } } },
+          where: { organizationId: project.organizationId, userId: notice.recipientId },
+          select: { role: true, user: { select: { email: true } } },
         });
-        if (member)
+        if (member && hasAdminRole(member.role))
           await sendWebhookDisabled({
             email: member.user.email,
             project: project.name,

@@ -7,9 +7,11 @@ const blockedV4 = [
   '10.0.0.1',
   '10.255.255.255',
   '100.64.0.0',
+  '100.100.100.200',
   '100.127.255.255',
   '127.0.0.1',
   '127.255.255.255',
+  '168.63.129.16',
   '169.254.0.1',
   '169.254.169.254',
   '172.16.0.0',
@@ -30,6 +32,7 @@ const blockedV4 = [
 it.each(blockedV4)('rejects special-use IPv4 %s and its mapped/NAT64 forms', (address) => {
   expect(isAllowedWebhookAddress(address)).toBe(false);
   expect(isAllowedWebhookAddress(`::ffff:${address}`)).toBe(false);
+  expect(isAllowedWebhookAddress(`::${address}`)).toBe(false);
   expect(isAllowedWebhookAddress(`64:ff9b::${address}`)).toBe(false);
 });
 it.each([

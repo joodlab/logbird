@@ -1,5 +1,6 @@
 export {
   generateWebhookSecret,
+  MAX_WEBHOOK_SIGNATURES,
   type SignWebhookOptions,
   signWebhook,
   type VerifyWebhookOptions,

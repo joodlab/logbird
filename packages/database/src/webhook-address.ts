@@ -20,7 +20,8 @@ export function isAllowedWebhookAddress(address: string): boolean {
       a === 10 ||
       a === 127 ||
       a >= 224 ||
-      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 100 && b >= 64 && b <= 127) || // Includes Alibaba ECS metadata.
+      host === '168.63.129.16' || // Azure WireServer (platform-only address outside special-use ranges).
       (a === 169 && b === 254) ||
       (a === 172 && b >= 16 && b <= 31) ||
       (a === 192 && (b === 168 || (b === 0 && (c === 0 || c === 2)) || (b === 88 && c === 99))) ||

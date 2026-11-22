@@ -57,3 +57,24 @@ it('pins the validated address, signs a real POST and never follows its redirect
     await new Promise<void>((resolve) => receiver.close(() => resolve()));
   }
 });
+
+it('settles a stalled response at the total deadline and preserves its status code', async () => {
+  const receiver = createServer((_request, response) => {
+    response.writeHead(410).flushHeaders();
+  });
+  try {
+    receiver.listen(0, '127.0.0.1');
+    await once(receiver, 'listening');
+    const { port } = receiver.address() as AddressInfo;
+    expect(
+      await postWebhook(`http://127.0.0.1:${port}/event`, 'signed-id', '{}', [secret], {
+        allowHttp: true,
+        allowAddress: (address) => address === '127.0.0.1',
+        totalTimeoutMs: 400,
+      }),
+    ).toEqual({ error: 'timeout', responseCode: 410 });
+  } finally {
+    receiver.closeAllConnections();
+    await new Promise<void>((resolve) => receiver.close(() => resolve()));
+  }
+});

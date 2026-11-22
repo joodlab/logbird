@@ -445,7 +445,7 @@ return 400 `webhook_url_not_allowed`. A lookup timeout or exhausted capacity
 returns 503 `webhook_lookup_busy` with `Retry-After: 3`. A scope needs a `tenantId`
 or a `target`. Use `null` to clear it.
 
-Each endpoint starts at creation time, or at rollout for existing endpoints.
+Each endpoint starts at the creation millisecond, inclusive, or at rollout for existing endpoints.
 There is no historical backfill. The worker reads ClickHouse in
 `(received_at, event_id)` order through the Logbird query compiler. The scope
 applies as an AND. A target must match both the type and ID on the same event
@@ -454,28 +454,38 @@ target. The scan window ends at the earlier of:
 - The current database time minus the async-insert flush bound and a safety margin (15 seconds total).
 - The millisecond before the project's oldest unconfirmed ingest receipt.
 
-The worker captures that limit under the existing project ingest lock so an
-in-flight receipt cannot register behind the cursor. It inserts deliveries and
-advances the endpoint cursor in one Postgres transaction. Deliveries are unique
+The worker queues for the existing project admission gate and holds it while already admitted writes
+drain. It releases the gate before querying ClickHouse. Each query examines up to five minutes of
+receive time and pages up to 100 matching IDs, ordered by receive time and ID. Empty slices advance
+the cursor too. The event-time predicate covers the full ingest window of 3650 days before receipt
+through 24 hours after receipt. Physical reads can still span historical partitions because ClickHouse
+sorts by event time. If a ClickHouse read exceeds its budget, discovery leaves the cursor in place.
+The worker inserts deliveries and advances the cursor in one Postgres transaction. Deliveries are unique
 by endpoint and event ID. Disabled endpoints pause scanning and sending. On
 re-enable, scanning resumes from the saved cursor. The worker rechecks the
 current scope and filter before sending an event. Events removed from storage or
 excluded by a new scope finish with `event_unavailable`.
+Relative filter times use the start of the discovery scan as `now`. Send-time
+rechecks use the same clock for that delivery.
 
 Each POST body is the public event shape returned in `/v1/events/:id`'s
 `event`. It is built from stored event columns, which preserve exact attribute
-text such as large numeric identifiers. The worker signs the exact bytes with the Standard Webhooks headers
+text such as large numeric identifiers supplied as strings. The worker signs the exact bytes with the Standard Webhooks headers
 `webhook-id`, `webhook-timestamp` (Unix seconds), and `webhook-signature`.
-Rotation overlap defaults to 86400 seconds, with integer bounds 0–604800.
-Every non-expired secret contributes a space-separated `v1,<base64>`
-signature. The ID stays stable on retry and resend. Use it to deduplicate
+IDs made of visible ASCII characters (`!` through `~`) without a dot or the `lb1_` prefix are used directly. Other IDs are encoded as
+`lb1_` followed by the unpadded base64url of the UTF-8 ID. The original ID stays in the JSON body.
+The SDK verifies the signature using the exact header value.
+
+Rotation overlap defaults to 86400 seconds, with integer bounds 0–604800. Up to ten active secrets
+can contribute space-separated `v1,<base64>` signatures. A rotation above the limit returns 409
+`webhook_secret_overlap_limit`. Wait for an overlap to expire or rotate with zero overlap.
+The header ID stays stable on retry and resend. Use it to deduplicate
 requests if a worker restarts after the receiver accepted a POST but before
-Logbird recorded the outcome. Event IDs that cannot be sent as Standard
-Webhooks headers are logged as `invalid_event_id`.
+Logbird recorded the outcome.
 
 Each send resolves the destination again, checks all addresses against the
 save-time policy, and pins one validated address for the socket while preserving
-the original TLS hostname. Redirects count as failures. Connect and total
+the original TLS hostname. Redirects and HTTP upgrades count as failures. Connect and total
 deadlines are 5 and 10 seconds. The sender reads up to 64 KiB of the response
 and keeps the first 2 KiB of body in the attempt log. It sends
 `User-Agent: Logbird-Webhooks/<version>` and no console headers or cookies.
@@ -484,6 +494,8 @@ Each endpoint has four concurrent sends by default and a limit of 50 attempts
 per second. A separate worker-wide cap defaults to 16 concurrent sends.
 2xx succeeds. Network failures and other responses retry with jitter at roughly
 5 s, 30 s, 2 min, 10 min, 30 min, 1 h, then every 2–4 h for up to 24 hours.
+Internal lookup failures are recorded as `lookup_failed` and retry within the same window.
+Once the window expires, the delivery is marked failed before another attempt can start.
 HTTP 410 disables immediately with `gone_410`. An endpoint also disables with
 `consecutive_failures` after 50 consecutive failed deliveries by default or
 24 hours of failures without a success. Auto-disable records `webhook.disabled`
@@ -492,11 +504,13 @@ in workspace activity and queues email to owners and admins.
 Owners and admins can use `POST .../webhooks/:id/test` to queue a
 `logbird.webhook.test` event with its own ID. Use
 `GET .../webhooks/:id/deliveries?status=&cursor=` to page delivery statuses
-and attempts, and `POST .../webhooks/:id/deliveries/:deliveryId/resend` to give
+and the five most recent retained attempts per delivery. `attemptCount` counts all attempts,
+including those outside the retention window. Use `POST .../webhooks/:id/deliveries/:deliveryId/resend` to give
 a completed delivery a new retry window. Both POSTs return 202 and require
 an enabled endpoint. Attempt logs include status, attempt number, latency,
 response code, and a body preview, with no response headers. The worker
-keeps attempt history for 30 days and removes expired delivery records.
+keeps completed attempt history for 30 days from the attempt. Delivery records expire 30 days
+after terminal settlement. Pending deliveries remain available while an endpoint is disabled.
 
 ### 5.1 Query language (`q`)
 

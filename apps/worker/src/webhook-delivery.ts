@@ -1,12 +1,14 @@
 import { type ClickHouseClient, normalizeEvent, toEvent } from '@logbird/clickhouse';
-import { Prisma, prisma, storeAuditEvent, type WebhookDelivery } from '@logbird/database';
+import { hasAdminRole, Prisma, prisma, storeAuditEvent, type WebhookDelivery, type WebhookEndpoint, workspaceAdminRoles } from '@logbird/database';
 import { decryptWebhookSecret, WEBHOOK_LOG_RETENTION_MS } from '@logbird/database/webhooks';
+import { MAX_WEBHOOK_SIGNATURES } from '@logbird/sdk';
 import { webhookEvent } from './webhook-discovery';
 import { RETRY_WINDOW_MS, webhookRetryDelay } from './webhook-policy';
 import { type AttemptResult, postWebhook, type WebhookTransportOptions } from './webhook-transport';
 
 const LEASE_MS = 120_000;
 const MAX_ENDPOINT_ATTEMPTS_PER_SECOND = 50;
+type Claim = { delivery: WebhookDelivery; expired: boolean };
 type DeliveryOptions = {
   secretKey: Buffer;
   concurrency: number;
@@ -28,7 +30,7 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
       SELECT d.* FROM "WebhookEndpoint" e
       CROSS JOIN LATERAL (
         SELECT id FROM "WebhookDelivery"
-        WHERE "endpointId" = e.id AND status = 'pending' AND "expiresAt" > ${now}
+        WHERE "endpointId" = e.id AND status = 'pending'
           AND "nextAttemptAt" <= ${now} AND ("leaseUntil" IS NULL OR "leaseUntil" <= ${now})
         ORDER BY "nextAttemptAt", id
         LIMIT greatest(0, least(
@@ -45,62 +47,90 @@ export async function claimWebhookDeliveries(options: Pick<DeliveryOptions, 'con
       JOIN "WebhookDelivery" d ON d.id = candidate.id
       WHERE e.enabled ${projectId ? Prisma.sql`AND e."projectId" = ${projectId}` : Prisma.empty}
       ORDER BY d."nextAttemptAt", d.id LIMIT ${capacity} FOR UPDATE OF d SKIP LOCKED`);
-    const claims: WebhookDelivery[] = [];
+    const claims: Claim[] = [];
     for (const row of due) {
       if (row.leaseUntil)
         await tx.webhookAttempt.updateMany({
           where: { deliveryId: row.id, number: row.attemptNumber, status: 'sending' },
           data: { status: 'interrupted' },
         });
-      const claim = await tx.webhookDelivery.update({
+      const expired = row.retryUntil !== null && row.retryUntil <= now;
+      const delivery = await tx.webhookDelivery.update({
         where: { id: row.id },
         data: {
-          attemptNumber: { increment: 1 },
-          windowAttempts: { increment: 1 },
           leaseUntil: new Date(+now + LEASE_MS),
-          retryUntil: row.retryUntil ?? new Date(+now + RETRY_WINDOW_MS),
-          expiresAt: new Date(+now + WEBHOOK_LOG_RETENTION_MS),
+          ...(!expired && {
+            attemptNumber: { increment: 1 },
+            windowAttempts: { increment: 1 },
+            retryUntil: row.retryUntil ?? new Date(+now + RETRY_WINDOW_MS),
+          }),
         },
       });
-      await tx.webhookAttempt.create({ data: { deliveryId: row.id, number: claim.attemptNumber, startedAt: now, status: 'sending' } });
-      claims.push(claim);
+      if (!expired)
+        await tx.webhookAttempt.create({ data: { deliveryId: row.id, number: delivery.attemptNumber, startedAt: now, status: 'sending' } });
+      claims.push({ delivery, expired });
     }
     return claims;
   });
 }
 
-function isSuccess(result: AttemptResult) {
-  return !result.error && result.responseCode !== undefined && result.responseCode >= 200 && result.responseCode < 300;
+function isSuccess(result?: AttemptResult) {
+  return result && !result.error && result.responseCode !== undefined && result.responseCode >= 200 && result.responseCode < 300;
 }
 
-async function settle(delivery: WebhookDelivery, configAt: Date, result: AttemptResult, latencyMs: number, failureLimit: number, now = new Date()) {
+async function settle(
+  delivery: WebhookDelivery,
+  configAt: Date | undefined,
+  result: AttemptResult | undefined,
+  latencyMs: number,
+  failureLimit: number,
+  now = new Date(),
+) {
   const success = isSuccess(result);
-  const gone = result.responseCode === 410;
-  const localFailure = result.error === 'event_unavailable' || result.error === 'invalid_event_id';
+  const gone = result?.responseCode === 410;
+  const localFailure = result?.error === 'event_unavailable';
   const retryUntil = delivery.retryUntil ?? now;
-  const finished = success || gone || localFailure || now >= retryUntil;
+  const finished = !result || success || gone || localFailure || now >= retryUntil;
   const status = success ? 'succeeded' : finished ? 'failed' : 'pending';
   // Keep one lock order for endpoint mutations and settlement. The lease's sequence fences stale results.
   await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "WebhookEndpoint" WHERE id = ${delivery.endpointId} FOR UPDATE`;
     const updated = await tx.webhookDelivery.updateMany({
-      where: { id: delivery.id, status: 'pending', attemptNumber: delivery.attemptNumber },
+      where: { id: delivery.id, status: 'pending', attemptNumber: delivery.attemptNumber, leaseUntil: delivery.leaseUntil },
       data: {
         status,
         leaseUntil: null,
         nextAttemptAt: finished ? null : new Date(Math.min(+retryUntil, +now + webhookRetryDelay(delivery.windowAttempts))),
+        ...(finished && { expiresAt: new Date(+now + WEBHOOK_LOG_RETENTION_MS) }),
       },
     });
     if (!updated.count) return;
-    await tx.webhookAttempt.update({
-      where: { deliveryId_number: { deliveryId: delivery.id, number: delivery.attemptNumber } },
-      data: { status: success ? 'succeeded' : 'failed', latencyMs, ...result },
-    });
+    if (result)
+      await tx.webhookAttempt.update({
+        where: { deliveryId_number: { deliveryId: delivery.id, number: delivery.attemptNumber } },
+        data: { status: success ? 'succeeded' : 'failed', latencyMs, ...result },
+      });
+    if (localFailure || result?.error === 'signing_failed' || result?.error === 'lookup_failed') return;
     const endpoint = await tx.webhookEndpoint.findUniqueOrThrow({
       where: { id: delivery.endpointId },
       include: { project: { select: { id: true, organizationId: true, name: true } } },
     });
-    if (!endpoint.enabled || +endpoint.updatedAt !== +configAt || localFailure || result.error === 'signing_failed') return;
+    if (!endpoint.enabled || (configAt && +endpoint.updatedAt !== +configAt)) return;
+    // At the deadline, count an endpoint failure only when this retry window actually saw a receiver failure
+    // under the current configuration. Expiring an internal lookup failure must not disable an endpoint.
+    if (!result) {
+      if (!endpoint.failingSince) return;
+      const priorFailure = await tx.webhookAttempt.findFirst({
+        where: {
+          deliveryId: delivery.id,
+          status: 'failed',
+          startedAt: { gte: new Date(Math.max(+endpoint.updatedAt, +retryUntil - RETRY_WINDOW_MS)) },
+          OR: [{ error: null }, { error: { in: ['destination_rejected', 'timeout', 'network_error'] } }],
+        },
+        select: { number: true },
+      });
+      if (!priorFailure) return;
+    }
 
     const failures = success ? 0 : endpoint.consecutiveFailures + (finished ? 1 : 0);
     const startedAt = delivery.leaseUntil ? new Date(+delivery.leaseUntil - LEASE_MS) : now;
@@ -132,13 +162,13 @@ async function settle(delivery: WebhookDelivery, configAt: Date, result: Attempt
       },
       tx,
     );
-    const recipients = await tx.member.findMany({
-      where: { organizationId: endpoint.project.organizationId, role: { in: ['owner', 'admin'] } },
-      select: { userId: true },
-      distinct: ['userId'],
+    const members = await tx.member.findMany({
+      where: { organizationId: endpoint.project.organizationId, OR: workspaceAdminRoles.map((role) => ({ role: { contains: role } })) },
+      select: { userId: true, role: true },
     });
+    const recipients = new Set(members.filter(({ role }) => hasAdminRole(role)).map(({ userId }) => userId));
     await tx.webhookDisableNotice.createMany({
-      data: recipients.map(({ userId }) => ({ endpointId: endpoint.id, recipientId: userId, reason })),
+      data: [...recipients].map((userId) => ({ endpointId: endpoint.id, recipientId: userId, reason })),
     });
   });
 }
@@ -166,49 +196,59 @@ async function interruptClaim(delivery: WebhookDelivery) {
   });
 }
 
-async function sendClaim(ch: ClickHouseClient, delivery: WebhookDelivery, options: DeliveryOptions) {
-  const start = Date.now();
-  const endpoint = await prisma.webhookEndpoint.findUnique({ where: { id: delivery.endpointId } });
-  if (!endpoint?.enabled) return interruptClaim(delivery);
-
+async function attemptDelivery(ch: ClickHouseClient, delivery: WebhookDelivery, endpoint: WebhookEndpoint, options: DeliveryOptions) {
   const event = delivery.receivedAt
     ? await webhookEvent(ch, endpoint, delivery.eventId, delivery.receivedAt, delivery.createdAt)
     : testEvent(delivery, endpoint.projectId);
-  let result: AttemptResult = { error: 'event_unavailable' };
-  if (event) {
-    const secrets = await prisma.webhookSecret.findMany({
-      where: { endpointId: endpoint.id, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      select: { ciphertext: true },
-    });
-    let keys: string[];
-    try {
-      keys = secrets.map(({ ciphertext }) => decryptWebhookSecret(ciphertext, options.secretKey));
-    } catch {
-      keys = [];
-    }
-    // Check the snapshot after DNS so an edit during resolution cannot send to a superseded URL or scope.
-    const posted = await postWebhook(endpoint.url, delivery.eventId, JSON.stringify(event), keys, options.transport, async () => {
-      const unchanged = await prisma.webhookEndpoint.count({
-        where: {
-          id: endpoint.id,
-          updatedAt: endpoint.updatedAt,
-          enabled: true,
-          deliveries: { some: { id: delivery.id, attemptNumber: delivery.attemptNumber, leaseUntil: { gt: new Date() }, status: 'pending' } },
-        },
-      });
-      return unchanged > 0;
-    });
-    if (!posted) return interruptClaim(delivery);
-    result = posted;
+  if (!event) return { error: 'event_unavailable' } as const;
+  const secrets = await prisma.webhookSecret.findMany({
+    where: { endpointId: endpoint.id, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: MAX_WEBHOOK_SIGNATURES,
+    select: { ciphertext: true },
+  });
+  let keys: string[];
+  try {
+    keys = secrets.map(({ ciphertext }) => decryptWebhookSecret(ciphertext, options.secretKey));
+  } catch {
+    return { error: 'signing_failed' } as const;
   }
-  await settle(delivery, endpoint.updatedAt, result, Date.now() - start, options.failureLimit);
+  // Check the snapshot after DNS so an edit during resolution cannot send to a superseded URL or scope.
+  return postWebhook(endpoint.url, delivery.eventId, JSON.stringify(event), keys, options.transport, async () => {
+    const now = new Date();
+    const unchanged = await prisma.webhookEndpoint.count({
+      where: {
+        id: endpoint.id,
+        updatedAt: endpoint.updatedAt,
+        enabled: true,
+        deliveries: {
+          some: { id: delivery.id, attemptNumber: delivery.attemptNumber, leaseUntil: { gt: now }, retryUntil: { gt: now }, status: 'pending' },
+        },
+      },
+    });
+    return unchanged > 0 && !!delivery.retryUntil && delivery.retryUntil > new Date();
+  });
+}
+
+async function sendClaim(ch: ClickHouseClient, { delivery, expired }: Claim, options: DeliveryOptions) {
+  if (expired) return settle(delivery, undefined, undefined, 0, options.failureLimit);
+  const start = Date.now();
+  let endpoint: WebhookEndpoint | null | undefined;
+  let result: AttemptResult | undefined;
+  try {
+    endpoint = await prisma.webhookEndpoint.findUnique({ where: { id: delivery.endpointId } });
+    if (endpoint?.enabled) result = await attemptDelivery(ch, delivery, endpoint, options);
+  } catch {
+    result = { error: 'lookup_failed' };
+  }
+  if (!result) return interruptClaim(delivery);
+  await settle(delivery, endpoint?.updatedAt, result, Date.now() - start, options.failureLimit);
 }
 
 export async function deliverWebhooks(ch: ClickHouseClient, options: DeliveryOptions, projectId?: string, now = new Date()) {
   const claims = await claimWebhookDeliveries(options, projectId, now);
-  const results = await Promise.allSettled(claims.map((delivery) => sendClaim(ch, delivery, options)));
+  const results = await Promise.allSettled(claims.map((claim) => sendClaim(ch, claim, options)));
   for (const [index, result] of results.entries()) {
-    if (result.status === 'rejected') console.error(JSON.stringify({ event: 'webhook.delivery_failed', deliveryId: claims[index]?.id }));
+    if (result.status === 'rejected') console.error(JSON.stringify({ event: 'webhook.delivery_failed', deliveryId: claims[index]?.delivery.id }));
   }
 }

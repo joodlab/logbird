@@ -1,3 +1,6 @@
+export const OCCURRED_AT_PAST_DAYS = 3650;
+export const OCCURRED_AT_FUTURE_DAYS = 1;
+
 /** Receipt-relative resolution is identity policy; keep it independent of input admission and search caps. */
 export function resolveTimestamp(value: unknown, receivedAt: Date) {
   const supplied = value !== undefined && value !== null && value !== '';
@@ -8,7 +11,7 @@ export function resolveTimestamp(value: unknown, receivedAt: Date) {
     else {
       const time = new Date(value).getTime();
       if (!Number.isFinite(time)) problem = 'occurredAt is not a valid date';
-      else if (time < receivedAt.getTime() - 3650 * 86_400_000 || time > receivedAt.getTime() + 86_400_000)
+      else if (time < receivedAt.getTime() - OCCURRED_AT_PAST_DAYS * 86_400_000 || time > receivedAt.getTime() + OCCURRED_AT_FUTURE_DAYS * 86_400_000)
         problem = 'occurredAt must be within the last 3650 days and the next 24 hours';
     }
   }

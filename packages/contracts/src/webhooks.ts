@@ -40,6 +40,9 @@ export const listWebhooksResponseSchema = z.object({ data: z.array(webhookEndpoi
 /** The plaintext secret is returned only by create and rotate. Never persist this response. */
 export const createWebhookResponseSchema = z.object({ endpoint: webhookEndpointSchema, secret: z.string() });
 export const rotateWebhookSecretResponseSchema = z.object({ secret: z.string() });
+export const webhookSecretOverlapLimitSchema = z.object({
+  error: z.object({ code: z.literal('webhook_secret_overlap_limit'), message: z.string() }),
+});
 export type WebhookEndpoint = z.infer<typeof webhookEndpointSchema>;
 
 export const webhookDeliveryStatusSchema = z.enum(['pending', 'succeeded', 'failed']);
@@ -50,7 +53,9 @@ export const webhookAttemptSchema = z.object({
   latencyMs: z.number().int().nonnegative().nullable(),
   responseCode: z.number().int().nullable(),
   responseBody: z.string().nullable(),
-  error: z.enum(['destination_rejected', 'timeout', 'network_error', 'event_unavailable', 'invalid_event_id', 'signing_failed']).nullable(),
+  error: z
+    .enum(['destination_rejected', 'timeout', 'network_error', 'event_unavailable', 'invalid_event_id', 'lookup_failed', 'signing_failed'])
+    .nullable(),
 });
 export const webhookDeliverySchema = z.object({
   id: z.string(),
@@ -59,7 +64,8 @@ export const webhookDeliverySchema = z.object({
   status: webhookDeliveryStatusSchema,
   createdAt: z.iso.datetime(),
   nextAttemptAt: z.iso.datetime().nullable(),
-  attempts: z.array(webhookAttemptSchema),
+  attemptCount: z.number().int().nonnegative().describe('Total attempts, including attempts outside the retention window.'),
+  attempts: z.array(webhookAttemptSchema).describe('The five most recent retained attempts, in attempt number order.'),
 });
 export const listWebhookDeliveriesQuerySchema = z.object({
   status: webhookDeliveryStatusSchema.optional(),

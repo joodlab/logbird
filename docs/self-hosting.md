@@ -1043,6 +1043,6 @@ notifications, give the worker the existing `SMTP_*`, `MAIL_FROM` and
 | `WEBHOOKS_FAILURE_LIMIT` | `50` | Consecutive failed deliveries before auto-disable (1–1000). |
 
 Set these optional variables in the worker's runtime environment, such as a
-Compose override or a Kubernetes deployment overlay. Logs expire after
-30 days. New endpoints start at the current time. A receiver should
+Compose override or a Kubernetes deployment overlay. Attempt logs expire
+after 30 days. Delivery records expire 30 days after they finish. New endpoints start at their creation millisecond. A receiver should
 deduplicate by `webhook-id` and verify its signature against the raw request body.
