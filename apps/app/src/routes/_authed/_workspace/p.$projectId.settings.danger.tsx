@@ -29,7 +29,7 @@ import { useCan } from '@/lib/permissions';
 import { type DeleteBlock, deleteBlock, deleteBlockedMessage, secondsUntil } from '@/lib/project-delete';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/danger')({
-  head: () => ({ meta: [{ title: 'Danger zone · Settings · Logbird' }] }),
+  head: () => ({ meta: [{ title: 'Danger zone · Project settings · Logbird' }] }),
   staticData: { crumb: 'Danger zone' },
   component: DangerZone,
 });
@@ -66,7 +66,11 @@ function DangerZone() {
       // Leave first, then drop the deleted project's cache: mounted project pages would otherwise refetch it into 404s.
       if (stillHere) await navigate({ to: '/' });
       queryClient.removeQueries({ queryKey: keys.project(projectId) });
-      await queryClient.invalidateQueries({ queryKey: keys.projects, exact: true });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.projects, exact: true }),
+        // Each workspace's own list too (`workspaceProjectsQuery`): the workspace pages read it to offer a first project.
+        queryClient.invalidateQueries({ queryKey: [...keys.projects, 'workspace'] }),
+      ]);
     },
     onError: (error, slug) => {
       const refused = deleteBlock(error);
