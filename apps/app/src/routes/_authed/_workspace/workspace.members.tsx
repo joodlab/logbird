@@ -9,13 +9,11 @@ import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
 import { createFileRoute } from '@tanstack/react-router';
 import { Loader2Icon, MailIcon, MoreHorizontalIcon, RotateCwIcon, ShieldIcon, UserMinusIcon, XIcon } from 'lucide-react';
-import { toast } from 'sonner';
 import { UserAvatar } from '@/components/account/user-avatar';
 import { InviteForm } from '@/components/members/invite-form';
 import { InviteLinkPanel, PanelHeading } from '@/components/members/invite-link-panel';
 import { SettingsSection } from '@/components/settings-section';
 import { Timestamp } from '@/components/timestamp';
-import { errorMessage } from '@/lib/api/errors';
 import {
   invitationUrl,
   type OrgMember,
@@ -192,7 +190,7 @@ function MembersSettings() {
       >
         {org.isPending ? (
           <Skeleton className="h-14 w-full" />
-        ) : org.isError && !org.data ? (
+        ) : org.isError && (!org.data || pending.length === 0) ? (
           // The list could not be loaded: never claim there are none.
           <ErrorState error={org.error} onRetry={() => org.refetch()} size="sm" title="Could not load pending invitations" />
         ) : pending.length === 0 ? (
@@ -223,13 +221,7 @@ function MembersSettings() {
                     <CopyButton label="Copy link" showLabel size="sm" value={invitationUrl(i.id)} variant="outline" />
                     <Button
                       disabled={resend.isPending}
-                      onClick={() =>
-                        resend.mutate(
-                          { email: i.email, role: (i.role ?? 'member') as Role, resend: true },
-                          // The row has no form to show it in: a failed resend must not pass silently.
-                          { onError: (error) => toast.error(`Could not re-send the invitation to ${i.email}`, { description: errorMessage(error) }) },
-                        )
-                      }
+                      onClick={() => resend.mutate({ email: i.email, role: (i.role ?? 'member') as Role, resend: true })}
                       size="sm"
                       variant="ghost"
                     >

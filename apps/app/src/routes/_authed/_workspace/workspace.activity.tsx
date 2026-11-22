@@ -3,9 +3,8 @@ import { FilterChip } from '@logbird/ui/components/filter-chip';
 import { EmptyState, ErrorState } from '@logbird/ui/components/states';
 import { Button } from '@logbird/ui/components/ui/button';
 import { Input } from '@logbird/ui/components/ui/input';
-import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, Link, useRouter, useRouterState } from '@tanstack/react-router';
 import { ActivityIcon, FolderPlusIcon, SearchIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
@@ -19,6 +18,7 @@ import { workspaceActivityQuery, workspaceProjectsQuery } from '@/lib/api/querie
 import { useCan } from '@/lib/permissions';
 import { formatExactTerm } from '@/lib/query-language';
 import { rangeLabel, resolveRange } from '@/lib/range';
+import { createSearchCommitter } from '@/lib/search-committer';
 import { formatSearchTotal, searchTotal } from '@/lib/search-total';
 import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
@@ -40,39 +40,51 @@ function WorkspaceActivity() {
   // Management actions are rare: this page defaults to a 90-day window (staticData.defaultRange).
   const { range } = useRange();
   const q = search.q ?? '';
-  // The area chip is the query's positive `category:` term; the box holds the rest (negated categories included), so a
-  // bookmark such as `-category:auth` opens exactly as written (lib/activity-search.ts).
+  // The area chip stands for one positive top-level `category:` term; the box holds everything else as written, so a
+  // bookmark such as `-category:auth` or `category:auth OR category:member` opens exactly as saved (lib/activity-search.ts).
   const category = activityChip(q);
   const [draft, setDraft] = useState(() => activityFreeText(q));
-  const [debounced] = useDebouncedValue(draft, { wait: 250 });
-  // The `q` the reader's current edit started from; null when no edit is pending. The URL is written only for an edit,
-  // never on mount, and never over a `q` that changed meanwhile (Back/Forward, a chip, a link).
-  const editedFrom = useRef<string | null>(null);
-  const written = useRef<string | null>(null);
+  // The location and its query from one router snapshot: the route's validated search can lag the location by a render
+  // during a transition, and the box must never compare a fresh location with a stale query.
+  const href = useRouterState({ select: (s) => s.location.href });
+  const locationQ = useRouterState({ select: (s) => ((s.location.search as { q?: unknown }).q as string | undefined) ?? '' });
+  const router = useRouter();
+  const qRef = useRef(locationQ);
+  qRef.current = locationQ;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  // The query this page last wrote, and the box text it came from: the URL change that follows is ours, not a navigation.
+  const ownWrite = useRef<{ q: string; text: string } | null>(null);
+  const write = (next: string, text: string) => {
+    ownWrite.current = { q: next, text };
+    navigate({ search: (prev) => ({ ...prev, q: next || undefined }), replace: true });
+  };
+  // Typed text reaches the URL after a 250 ms pause, only if the page is still where the edit started (lib/search-committer.ts).
+  const [committer] = useState(() =>
+    createSearchCommitter({
+      wait: 250,
+      location: () => router.state.location.href,
+      commit: (text) => {
+        const next = activityQuery(activityChip(qRef.current), text);
+        if (next !== qRef.current) write(next, text);
+      },
+    }),
+  );
+  useEffect(() => () => committer.cancel(), [committer]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: write the debounced edit to the URL
+  // Every location change: our own write settles the box (a typed `category:auth` becomes the chip, unless the reader kept
+  // typing); any other change (Back/Forward, a range, a link) cancels a pending edit and shows the new query.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: react to the location only
   useEffect(() => {
-    const base = editedFrom.current;
-    if (base === null) return;
-    editedFrom.current = null;
-    if (base !== q) return; // the query changed while the edit was pending: that navigation wins
-    const next = activityQuery(category, debounced);
-    if (next !== q) {
-      written.current = next;
-      navigate({ search: (prev) => ({ ...prev, q: next || undefined }), replace: true });
-    }
-  }, [debounced]);
-
-  // A query that changed from outside the box (Back/Forward, a chip, a link) brings the box in line with it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: react to the URL's query only
-  useEffect(() => {
-    if (written.current === q) {
-      written.current = null;
+    const own = ownWrite.current;
+    ownWrite.current = null;
+    if (own && own.q === locationQ) {
+      if (committer.pending === undefined && draftRef.current === own.text) setDraft(activityFreeText(locationQ));
       return;
     }
-    if (editedFrom.current !== null && editedFrom.current !== q) editedFrom.current = null;
-    setDraft(activityFreeText(q));
-  }, [q]);
+    committer.cancel();
+    setDraft(activityFreeText(locationQ));
+  }, [href]);
 
   const activity = useInfiniteQuery(workspaceActivityQuery(workspace.id, range, q));
   // Another range's or search's actions never show (or count) under this one's label.
@@ -150,8 +162,8 @@ function WorkspaceActivity() {
               aria-label="Search workspace activity"
               className="ps-9"
               onChange={(e) => {
-                if (editedFrom.current === null) editedFrom.current = q;
                 setDraft(e.target.value);
+                committer.edit(e.target.value);
               }}
               placeholder="Search activity…"
               ref={searchInput}
@@ -165,15 +177,13 @@ function WorkspaceActivity() {
               <FilterChip
                 active={category === value}
                 key={value}
-                onClick={() =>
-                  navigate({
-                    search: (prev) => ({
-                      ...prev,
-                      q: toggleActivityChip(q, value) || undefined,
-                    }),
-                    replace: true,
-                  })
-                }
+                onClick={() => {
+                  // Text still being typed is part of the query the chip changes: fold it in, never drop it.
+                  const text = committer.takePending() ?? draftRef.current;
+                  const next = toggleActivityChip(activityQuery(activityChip(qRef.current), text), value);
+                  setDraft(activityFreeText(next));
+                  write(next, activityFreeText(next));
+                }}
               >
                 {label}
               </FilterChip>
