@@ -122,6 +122,11 @@ export function rawJsonNumber(text: string): RawJson {
  * speed); digits inside strings only cause a harmless slow path.
  */
 const MAYBE_INEXACT = /\d[\d.]{15}|[eE][+-]?\d{3}/;
+/**
+ * False when `text` (JSON) cannot hold a number a double misrepresents: every such number has a run of 16+ digits or a
+ * 3+ digit exponent. True means "look closer" (digits inside strings match too).
+ */
+export const mayHoldInexactNumbers = (text: string) => MAYBE_INEXACT.test(text);
 
 export function parseJsonExact(text: string): unknown {
   if (!supportsExactJson || !MAYBE_INEXACT.test(text)) return JSON.parse(text);

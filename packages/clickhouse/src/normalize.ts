@@ -1,5 +1,13 @@
 import { randomBytes } from 'node:crypto';
-import { canonicalDecimal, EXACT_NUMBER_MAX_DEPTH, hasDeepRawNumbers, isRawJson, plainDecimal, rawJsonText } from '@logbird/contracts';
+import {
+  canonicalDecimal,
+  EXACT_NUMBER_MAX_DEPTH,
+  hasDeepRawNumbers,
+  isRawJson,
+  mayHoldInexactNumbers,
+  plainDecimal,
+  rawJsonText,
+} from '@logbird/contracts';
 import { resolveTimestamp } from './timestamp';
 
 function uuidv7() {
@@ -91,13 +99,16 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   // Exactness is bounded by depth (stringifying raw values deeper would overflow the stack). An event that holds a
   // number a double cannot keep that deep is rejected on its own, never rounded: a rounded payload would let a changed
   // digit match as an exact retry.
-  if (hasDeepRawNumbers(input)) return { ok: false as const, reason: DEEP_NUMBERS_REASON };
+  // The tree walk only runs when the serialized event could hold such a number (or serializing it overflowed), so
+  // ordinary events pay one regex scan of their payload, not a second traversal.
   let payload: string;
   try {
     payload = JSON.stringify(input);
   } catch {
+    if (hasDeepRawNumbers(input)) return { ok: false as const, reason: DEEP_NUMBERS_REASON };
     return { ok: false as const, reason: 'event must be JSON serializable' };
   }
+  if (mayHoldInexactNumbers(payload) && hasDeepRawNumbers(input)) return { ok: false as const, reason: DEEP_NUMBERS_REASON };
   if (Buffer.byteLength(payload) > 256 * 1024) return { ok: false as const, reason: 'event exceeds 256 KB' };
   const attributes: Record<string, string> = Object.create(null);
   let invalidAttributeKey = false;
