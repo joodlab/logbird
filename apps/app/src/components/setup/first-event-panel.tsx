@@ -21,11 +21,11 @@ import { Timestamp } from '@/components/timestamp';
 import { projectSetupQuery } from '@/lib/api/queries';
 import { eventSentence, personLabel } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
+import { firstEventCopy } from '@/lib/onboarding';
 import { useCan } from '@/lib/permissions';
 import { curlSnippet, fetchSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
 import { useSessionKey } from './api-key-step';
 import { useInvalidateSetup, useSampleData, useTestEvent } from './use-setup';
-import { isLogbirdGeneratedSource } from '@logbird/contracts';
 
 /** How often the first-event step polls setup while nothing has arrived. */
 export const FIRST_EVENT_POLL_MS = 2500;
@@ -74,12 +74,8 @@ export function FirstEventPanel({ projectId, showSnippets = true }: { projectId:
       setCelebrate(true);
       invalidate();
       // A console test proves the pipeline, not the integration: say so instead of "your integration works".
-      const fromConsole = isLogbirdGeneratedSource(data.ingest.firstEvent?.source);
-      toast.success(fromConsole ? 'Console test received' : 'First event received', {
-        description: fromConsole
-          ? 'Logbird is receiving events. Send one from your backend to check your integration.'
-          : 'Your integration works. Everything else builds on this.',
-      });
+      const copy = firstEventCopy(data.ingest.firstEvent?.source);
+      toast.success(copy.toastTitle, { description: copy.toastDescription });
     }
   }, [data, invalidate]);
 
@@ -151,7 +147,7 @@ function ReceivedEvent({ projectId, event, celebrate }: { projectId: string; eve
           </span>
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p className="font-medium text-sm">{celebrate ? 'It works — your first event just arrived' : 'First event received'}</p>
+          <p className="font-medium text-sm">{firstEventCopy(event.source, celebrate).cardTitle}</p>
           <p className="text-muted-foreground text-xs">
             <Timestamp format="full" iso={event.receivedAt} /> · via {event.sdk || 'HTTP'}
           </p>

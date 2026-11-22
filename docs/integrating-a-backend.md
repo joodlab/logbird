@@ -67,7 +67,7 @@ SDK error objects that may contain sensitive details.
 | `targets` | Affected records | Document ID and safe display name |
 | `context.operationId` | Correlation across a request and its jobs | A UUID carried through job data |
 | `context.parentEventId` | The event that caused this event | The request event ID |
-| `source` | Upstream system supplying the change. Values beginning with `logbird-` are reserved for events Logbird generates (sample data, console tests): they are stored, but do not count toward setup progress. | `catalog-service` |
+| `source` | Upstream system supplying the change. Values beginning with `logbird-` are reserved for events Logbird generates (sample data, console tests): they are stored, but do not count toward the Setup integration steps, and removing sample data deletes rows tagged `logbird-sample`. | `catalog-service` |
 | `changes` | Allowed before/after values | Draft changing to published |
 
 Copy only allowlisted fields. Avoid request bodies, session objects, customer

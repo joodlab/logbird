@@ -67,8 +67,10 @@ export const ENVELOPE_MISSING_QUERIES: Record<EnvelopeField, string | null> = {
 
 /**
  * Sources beginning with `logbird-` are reserved for events Logbird itself generates (sample data, console test
- * events). An integration that sends one is stored and searchable like any other event, but its events do not count
- * toward setup progress. Use `isLogbirdGeneratedSource` (or `LOGBIRD_SOURCE_PREFIX` in SQL) everywhere setup decides.
+ * events). An integration that sends one is stored and searchable like any other event, but it does not count toward
+ * the integration setup steps (events flowing, envelope, operation ids). Only `logbird-sample` is also left out of the
+ * first-event step, and replacing or removing sample data deletes every row tagged `logbird-sample`, including rows a
+ * client sent with that tag. Use `isLogbirdGeneratedSource` (or `LOGBIRD_SOURCE_PREFIX` in SQL) for the integration steps.
  */
 export const LOGBIRD_SOURCE_PREFIX = 'logbird-';
 export function isLogbirdGeneratedSource(source: string | null | undefined): boolean {
