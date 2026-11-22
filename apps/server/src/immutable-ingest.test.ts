@@ -26,6 +26,8 @@ vi.mock('@logbird/database', () => ({
   confirmIngestReceipts: vi.fn(),
   expireIngestReceipts: vi.fn(),
   takeOverIngestReceipts: vi.fn(async () => []),
+  ingestReceiptClock: async () => new Date(),
+  withIngestReceiptGate: async (_id: string, _mode: string, work: (db: object) => Promise<unknown>) => work({}),
   prisma: { ingestReceipt: { deleteMany: vi.fn() } },
 }));
 vi.mock('@logbird/worker/ingest-recovery', () => ({ ingestRecoveryRetryAfter: vi.fn(async () => 0) }));

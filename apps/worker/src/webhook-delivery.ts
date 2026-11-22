@@ -1,6 +1,6 @@
 import { type ClickHouseClient, normalizeEvent, toEvent } from '@logbird/clickhouse';
 import { hasAdminRole, Prisma, prisma, storeAuditEvent, type WebhookDelivery, type WebhookEndpoint, workspaceAdminRoles } from '@logbird/database';
-import { decryptWebhookSecret, WEBHOOK_LOG_RETENTION_MS } from '@logbird/database/webhooks';
+import { activeWebhookSecrets, decryptWebhookSecret, WEBHOOK_LOG_RETENTION_MS } from '@logbird/database/webhooks';
 import { MAX_WEBHOOK_SIGNATURES } from '@logbird/sdk';
 import { webhookEvent } from './webhook-discovery';
 import { RETRY_WINDOW_MS, webhookRetryDelay } from './webhook-policy';
@@ -201,15 +201,26 @@ async function attemptDelivery(ch: ClickHouseClient, delivery: WebhookDelivery, 
     ? await webhookEvent(ch, endpoint, delivery.eventId, delivery.receivedAt, delivery.createdAt)
     : testEvent(delivery, endpoint.projectId);
   if (!event) return { error: 'event_unavailable' } as const;
+  const now = new Date();
   const secrets = await prisma.webhookSecret.findMany({
-    where: { endpointId: endpoint.id, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+    where: { endpointId: endpoint.id, ...activeWebhookSecrets(now) },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    take: MAX_WEBHOOK_SIGNATURES,
+    take: MAX_WEBHOOK_SIGNATURES + 1,
     select: { ciphertext: true },
   });
+  if (secrets.length > MAX_WEBHOOK_SIGNATURES && !endpoint.secretOverlapWarnedAt) {
+    const warned = await prisma.webhookEndpoint.updateMany({
+      where: { id: endpoint.id, updatedAt: endpoint.updatedAt, secretOverlapWarnedAt: null },
+      data: { secretOverlapWarnedAt: now, updatedAt: endpoint.updatedAt },
+    });
+    if (warned.count)
+      console.warn(
+        JSON.stringify({ level: 'warn', event: 'webhook.secret_overlap_limit', endpointId: endpoint.id, maxSignatures: MAX_WEBHOOK_SIGNATURES }),
+      );
+  }
   let keys: string[];
   try {
-    keys = secrets.map(({ ciphertext }) => decryptWebhookSecret(ciphertext, options.secretKey));
+    keys = secrets.slice(0, MAX_WEBHOOK_SIGNATURES).map(({ ciphertext }) => decryptWebhookSecret(ciphertext, options.secretKey));
   } catch {
     return { error: 'signing_failed' } as const;
   }

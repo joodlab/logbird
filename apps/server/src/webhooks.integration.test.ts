@@ -6,8 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { insertEvents } from '@logbird/clickhouse';
 import { createWebhookResponseSchema, listWebhooksResponseSchema, MAX_WEBHOOK_ENDPOINTS, webhookEndpointSchema } from '@logbird/contracts';
 import { prisma } from '@logbird/database';
-import { decryptWebhookSecret, type WebhookLookup, webhookSecretKey } from '@logbird/database/webhooks';
-import { MAX_WEBHOOK_SIGNATURES, verifyWebhook } from '@logbird/sdk';
+import { decryptWebhookSecret, encryptWebhookSecret, type WebhookLookup, webhookSecretKey } from '@logbird/database/webhooks';
+import { generateWebhookSecret, MAX_WEBHOOK_SIGNATURES, verifyWebhook } from '@logbird/sdk';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { deliverWebhooks } from '../../worker/src/webhook-delivery';
 import { discoverWebhookDeliveries } from '../../worker/src/webhook-discovery';
@@ -141,6 +141,8 @@ it('creates, lists, reads, patches and deletes configuration; exposes the encryp
     scope: { tenantId: 'qa-t1', target: { type: 'invoice', id: 'qa-1' } },
   });
   expect(secret).toMatch(/^whsec_/);
+  const saved = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } });
+  expect(saved.cursorReceivedAt.toISOString()).toBe(endpoint.createdAt);
   expect(endpoint).toMatchObject({
     enabled: true,
     disabledAt: null,
@@ -268,7 +270,9 @@ it('advances discovery while HTTP ingest keeps arriving behind a slow admitted w
     const result = await exec(params);
     if (holdNextWrite && !held && params.query.startsWith('INSERT INTO events ')) {
       held = true;
-      await delay(650);
+      await delay(3800);
+      held = false;
+      holdNextWrite = false;
     }
     return result;
   });
@@ -289,12 +293,15 @@ it('advances discovery while HTTP ingest keeps arriving behind a slow admitted w
       return fixture.post({ id: `qa-arrival-${ms}`, action: 'qa.webhook' });
     });
     ongoing.push(scan, ...arrivals);
-    await scan;
+    const [, ...responses] = await Promise.all([scan, ...arrivals]);
+    expect(held).toBe(true);
+    for (const response of responses) expect(response.status, await response.clone().text()).toBe(202);
+    expect(await prisma.ingestReceipt.count({ where: { projectId: fixture.project, eventId: 'qa-slow', confirmedAt: null } })).toBe(1);
     expect((await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } })).cursorReceivedAt.getTime()).toBeGreaterThan(+from);
     expect(await prisma.webhookDelivery.findMany({ where: { endpointId: hook.id }, select: { eventId: true } })).toEqual([
       { eventId: 'qa-already-stored' },
     ]);
-    for (const response of await Promise.all([admitted, ...arrivals])) expect(response.status).toBe(202);
+    expect((await admitted).status).toBe(202);
     expect(await fixture.count()).toBe(6);
   } finally {
     await Promise.allSettled(ongoing);
@@ -416,6 +423,56 @@ it('verifies with the oldest of ten active secrets and rejects the next overlapp
   });
   expect((await request(`${path}/rotate-secret`, 'POST', { overlapSeconds: 0 })).status).toBe(200);
   expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id, expiresAt: null } })).toBe(1);
+});
+
+it('reports a seeded legacy overlap above ten, warns once when sending, and clears the warning after zero-overlap rotation', async () => {
+  const { endpoint, secret: currentSecret } = await create();
+  const path = `${base()}/${endpoint.id}`;
+  const key = webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY);
+  const oldSecrets = Array.from({ length: MAX_WEBHOOK_SIGNATURES }, () => generateWebhookSecret());
+  const createdAt = Date.now() - 60_000;
+  await prisma.webhookSecret.createMany({
+    data: oldSecrets.map((secret, order) => ({
+      endpointId: endpoint.id,
+      ciphertext: encryptWebhookSecret(secret, key),
+      createdAt: new Date(createdAt + order),
+      expiresAt: new Date(createdAt + 600_000),
+    })),
+  });
+  const warning = { secretOverlapWarning: 'webhook_secret_overlap_limit' };
+  expect(await (await request(path)).json()).toMatchObject(warning);
+  expect(await (await request(base())).json()).toMatchObject({ data: [warning] });
+  expect(await (await request(path, 'PATCH', { description: 'QA legacy overlap' })).json()).toMatchObject(warning);
+  const log = vi.spyOn(console, 'warn');
+  try {
+    await withLocalReceiver(endpoint.id, async (received) => {
+      for (let index = 0; index < 2; index++) {
+        expect((await request(`${path}/test`, 'POST')).status).toBe(202);
+        await send();
+      }
+      expect(received).toHaveLength(2);
+      for (const message of received) {
+        expect((message.headers['webhook-signature'] as string).split(' ')).toHaveLength(MAX_WEBHOOK_SIGNATURES);
+        for (const secret of [...oldSecrets.slice(1), currentSecret])
+          await expect(verifyWebhook({ ...message, secret })).resolves.toMatchObject({ action: 'logbird.webhook.test' });
+        await expect(verifyWebhook({ ...message, secret: oldSecrets[0] ?? '' })).rejects.toMatchObject({ reason: 'no_matching_signature' });
+      }
+      expect(log.mock.calls.filter(([message]) => String(message).includes('webhook.secret_overlap_limit'))).toHaveLength(1);
+      const rotated = await request(`${path}/rotate-secret`, 'POST', { overlapSeconds: 0 });
+      expect(rotated.status).toBe(200);
+      const { secret } = await rotated.json();
+      expect(await (await request(path)).json()).not.toHaveProperty('secretOverlapWarning');
+      expect((await request(`${path}/test`, 'POST')).status).toBe(202);
+      await send();
+      expect(received).toHaveLength(3);
+      const message = received[2];
+      if (!message) throw new Error('Missing fixture delivery');
+      expect((message.headers['webhook-signature'] as string).split(' ')).toHaveLength(1);
+      await expect(verifyWebhook({ ...message, secret })).resolves.toMatchObject({ action: 'logbird.webhook.test' });
+    });
+  } finally {
+    log.mockRestore();
+  }
 });
 
 it.each(['owner', 'admin'])('%s can manage endpoints', async (role) => {

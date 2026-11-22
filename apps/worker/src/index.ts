@@ -6,10 +6,13 @@ import { closeRetentionQueue, connection, retentionQueue, retentionQueueName } f
 import { runReceiptIndexCompaction } from './receipt-index-compaction';
 import { clickhouse, enforceProjectRetention } from './retention';
 import { enforceRetention } from './retention-sweep';
+import { webhookSigningConfig } from './webhook-config';
 import { startWebhookQueues } from './webhook-queues';
 
+const signing = webhookSigningConfig(env);
+if (!signing.key) console.error(JSON.stringify({ level: 'error', event: signing.event, message: signing.message }));
 await probeIngestRecovery(clickhouse);
-const closeWebhookQueues = await startWebhookQueues(clickhouse);
+const closeWebhookQueues = await startWebhookQueues(clickhouse, signing.key);
 const worker = new Worker(
   retentionQueueName,
   async (job) => {
@@ -111,7 +114,7 @@ await compactionQueue.upsertJobScheduler(
 // Startup sweep uses the same locked recovery path as hourly and on-demand jobs.
 for (const run of await prisma.retentionRun.findMany({ where: { status: 'running' }, distinct: ['projectId'], select: { projectId: true } }))
   await retentionQueue.add('retention.project', { projectId: run.projectId });
-console.log(JSON.stringify({ level: 'info', event: 'worker.ready' }));
+console.log(JSON.stringify({ level: 'info', event: 'worker.ready', webhookDelivery: signing.key ? 'ready' : 'unavailable' }));
 let stopping = false;
 async function shutdown() {
   if (stopping) return;

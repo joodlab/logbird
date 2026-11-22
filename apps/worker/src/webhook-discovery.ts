@@ -2,13 +2,12 @@ import {
   type ClickHouseClient,
   compileQuery,
   type EventRow,
-  INGEST_CLAIM_LEASE_MS,
   OCCURRED_AT_FUTURE_DAYS,
   OCCURRED_AT_PAST_DAYS,
   read,
   toEvent,
 } from '@logbird/clickhouse';
-import { ProjectBusyError, prisma, type WebhookEndpoint, withProjectLock } from '@logbird/database';
+import { prisma, type WebhookEndpoint, withIngestReceiptGate } from '@logbird/database';
 import { WEBHOOK_LOG_RETENTION_MS } from '@logbird/database/webhooks';
 import { webhookWatermark } from './webhook-policy';
 
@@ -42,7 +41,7 @@ export async function webhookEvent(ch: ClickHouseClient, endpoint: EndpointScope
   const match = scopePredicate(endpoint, +filterClock);
   const [row] = await read<EventRow>(
     ch,
-    `SELECT * FROM events WHERE ${match.sql} AND event_id = {id:String} AND received_at = {from:DateTime64(3)}
+    `SELECT * FROM events WHERE ${match.sql} AND event_id = {id:String} AND received_at = {from:DateTime64(3,'UTC')}
       ORDER BY timestamp LIMIT 1 ${COMPLETE_READ}`,
     { ...match.params, id: eventId, from: receivedAt.toISOString() },
   );
@@ -51,19 +50,34 @@ export async function webhookEvent(ch: ClickHouseClient, endpoint: EndpointScope
 }
 
 async function captureWatermark(projectId: string) {
-  // Acceptance's clock is assigned before the receipt write. Drain current admissions under the existing
-  // project lock, then release it before scanning ClickHouse. Later admissions receive a newer clock.
-  return withProjectLock(
-    projectId,
-    async (db) => {
-      const [row] = await db.$queryRaw<{ now: Date; pending: Date | null }[]>`
+  // Capture after current admissions commit their receipts. Their ClickHouse writes can still be in flight.
+  return withIngestReceiptGate(projectId, 'exclusive', async (db) => {
+    const [row] = await db.$queryRaw<{ now: Date; pending: Date | null }[]>`
         SELECT clock_timestamp() AS now, (
           SELECT min("receivedAt") FROM "IngestReceipt" WHERE "projectId"=${projectId} AND "confirmedAt" IS NULL
         ) AS pending`;
-      return row ? webhookWatermark(row.now, row.pending) : null;
+    return row ? webhookWatermark(row.now, row.pending) : null;
+  });
+}
+
+// Keep the arrival-time predicate on the stored column so ClickHouse can use an arrival-time index when present.
+function readWebhookCandidates(ch: ClickHouseClient, endpoint: WebhookEndpoint, sliceEnd: Date, now: Date) {
+  const match = scopePredicate(endpoint, +now);
+  return read<{ event_id: string; delivery_received_at: string }>(
+    ch,
+    `SELECT event_id, min(received_at) AS delivery_received_at FROM events
+        WHERE ${match.sql}
+          AND timestamp >= subtractDays({from:DateTime64(3,'UTC')}, ${OCCURRED_AT_PAST_DAYS})
+          AND timestamp < addDays({to:DateTime64(3,'UTC')}, ${OCCURRED_AT_FUTURE_DAYS})
+          AND received_at >= {from:DateTime64(3,'UTC')} AND received_at < {to:DateTime64(3,'UTC')}
+          ${endpoint.cursorEventId === null ? '' : "AND (received_at > {from:DateTime64(3,'UTC')} OR event_id > {cursorId:String})"}
+        GROUP BY event_id ORDER BY delivery_received_at, event_id LIMIT ${DISCOVERY_PAGE_SIZE} ${COMPLETE_READ}`,
+    {
+      ...match.params,
+      to: sliceEnd.toISOString(),
+      from: endpoint.cursorReceivedAt.toISOString(),
+      cursorId: endpoint.cursorEventId,
     },
-    // Queue at the existing writer-preference gate and give admitted writes a full receipt lease to drain.
-    { mode: 'queued-exclusive', waitMs: INGEST_CLAIM_LEASE_MS },
   );
 }
 
@@ -82,23 +96,7 @@ export async function discoverWebhookDeliveries(ch: ClickHouseClient, endpoint: 
     if (!watermark || watermark < endpoint.cursorReceivedAt) return;
     // A null ID denotes the first unexamined millisecond, including at endpoint creation. The end is exclusive.
     const sliceEnd = new Date(Math.min(+endpoint.cursorReceivedAt + DISCOVERY_SLICE_MS, +watermark + 1));
-    const match = scopePredicate(endpoint, +now);
-    const rows = await read<{ event_id: string; delivery_received_at: string }>(
-      ch,
-      `SELECT event_id, min(received_at) AS delivery_received_at FROM events
-        WHERE ${match.sql}
-          AND timestamp >= subtractDays({from:DateTime64(3,'UTC')}, ${OCCURRED_AT_PAST_DAYS})
-          AND timestamp < addDays({to:DateTime64(3,'UTC')}, ${OCCURRED_AT_FUTURE_DAYS})
-          AND received_at >= {from:DateTime64(3,'UTC')} AND received_at < {to:DateTime64(3,'UTC')}
-          ${endpoint.cursorEventId === null ? '' : "AND (received_at > {from:DateTime64(3,'UTC')} OR event_id > {cursorId:String})"}
-        GROUP BY event_id ORDER BY delivery_received_at, event_id LIMIT ${DISCOVERY_PAGE_SIZE} ${COMPLETE_READ}`,
-      {
-        ...match.params,
-        to: sliceEnd.toISOString(),
-        from: endpoint.cursorReceivedAt.toISOString(),
-        cursorId: endpoint.cursorEventId,
-      },
-    );
+    const rows = await readWebhookCandidates(ch, endpoint, sliceEnd, now);
     const deliveries = rows.map((row) => ({
       endpointId: endpoint.id,
       eventId: row.event_id,
@@ -138,8 +136,8 @@ export async function scanWebhooks(ch: ClickHouseClient) {
       endpoints.slice(index, index + 4).map(async (endpoint) => {
         try {
           await discoverWebhookDeliveries(ch, endpoint);
-        } catch (error) {
-          if (!(error instanceof ProjectBusyError)) console.error(JSON.stringify({ event: 'webhook.discovery_failed', endpointId: endpoint.id }));
+        } catch {
+          console.error(JSON.stringify({ event: 'webhook.discovery_failed', endpointId: endpoint.id }));
         }
       }),
     );

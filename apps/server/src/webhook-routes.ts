@@ -16,6 +16,7 @@ import {
 } from '@logbird/contracts';
 import { Prisma, prisma, type WebhookAttempt, type WebhookEndpoint } from '@logbird/database';
 import {
+  activeWebhookSecrets,
   encryptWebhookSecret,
   validateWebhookUrl,
   WEBHOOK_LOG_RETENTION_MS,
@@ -37,9 +38,10 @@ import type { AppEnv } from './types';
 const base = '/projects/:projectId/webhooks';
 const secretKey = webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY);
 const rotationSummary = 'Rotate webhook secret (shown once; default 24-hour overlap, maximum 7 days)';
-function serialize(endpoint: WebhookEndpoint) {
+function serialize(endpoint: WebhookEndpoint, activeSecretCount = 0) {
   return webhookEndpointSchema.parse({
     ...endpoint,
+    ...(activeSecretCount > MAX_WEBHOOK_SIGNATURES && { secretOverlapWarning: 'webhook_secret_overlap_limit' }),
     scope:
       endpoint.scopeTenantId || endpoint.scopeTargetType
         ? {
@@ -52,6 +54,7 @@ function serialize(endpoint: WebhookEndpoint) {
     disabledAt: endpoint.disabledAt?.toISOString() ?? null,
   });
 }
+const activeSecretCount = () => ({ _count: { select: { secrets: { where: activeWebhookSecrets(new Date()) } } } });
 const scopeColumns = (scope: { tenantId?: string; target?: { type: string; id: string } } | null) => ({
   scopeTenantId: scope?.tenantId ?? null,
   scopeTargetType: scope?.target?.type ?? null,
@@ -129,8 +132,9 @@ export const webhookRoutes = new Hono<AppEnv>()
     const endpoints = await prisma.webhookEndpoint.findMany({
       where: { projectId: c.get('project').id },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      include: activeSecretCount(),
     });
-    return c.json({ data: endpoints.map(serialize) });
+    return c.json({ data: endpoints.map((endpoint) => serialize(endpoint, endpoint._count.secrets)) });
   })
   .post(
     base,
@@ -144,9 +148,14 @@ export const webhookRoutes = new Hono<AppEnv>()
       const endpoint = await lockedProject(c, async (tx) => {
         if ((await tx.webhookEndpoint.count({ where: { projectId: c.get('project').id } })) >= MAX_WEBHOOK_ENDPOINTS)
           throw new ApiError(400, 'webhook_limit_reached', `A project may have at most ${MAX_WEBHOOK_ENDPOINTS} webhook endpoints.`);
+        const [clock] = await tx.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`;
+        if (!clock) throw new Error('Webhook creation clock unavailable');
+        const createdAt = clock.now;
         const endpoint = await tx.webhookEndpoint.create({
           data: {
             projectId: c.get('project').id,
+            createdAt,
+            cursorReceivedAt: createdAt,
             url,
             description: input.description,
             enabled: input.enabled ?? true,
@@ -167,7 +176,12 @@ export const webhookRoutes = new Hono<AppEnv>()
   )
   .get(`${base}/:id`, doc('Get webhook endpoint (no secrets)', webhookEndpointSchema), async (c) => {
     await requireRole(c);
-    return c.json(serialize(await findEndpoint(c)));
+    const endpoint = await prisma.webhookEndpoint.findFirst({
+      where: { id: c.req.param('id'), projectId: c.get('project').id },
+      include: activeSecretCount(),
+    });
+    if (!endpoint) throw new ApiError(404, 'not_found', 'Webhook endpoint not found.');
+    return c.json(serialize(endpoint, endpoint._count.secrets));
   })
   .patch(`${base}/:id`, doc('Update webhook endpoint', webhookEndpointSchema), validator('json', updateWebhookSchema, webhookBody), async (c) => {
     const input = c.req.valid('json');
@@ -180,6 +194,7 @@ export const webhookRoutes = new Hono<AppEnv>()
       const enabledChanged = input.enabled !== undefined && input.enabled !== before.enabled;
       const after = await tx.webhookEndpoint.update({
         where: { id: before.id },
+        include: activeSecretCount(),
         data: {
           url,
           description: input.description,
@@ -199,7 +214,7 @@ export const webhookRoutes = new Hono<AppEnv>()
       if (enabledChanged) await record(c, tx, input.enabled ? 'webhook.enabled' : 'webhook.disabled', after, ['enabled'], 'manual');
       return after;
     });
-    return c.json(serialize(endpoint));
+    return c.json(serialize(endpoint, endpoint._count.secrets));
   })
   .delete(`${base}/:id`, routeDoc('Delete webhook endpoint', { responses: { 204: { description: 'Deleted' } } }), async (c) => {
     await lockedProject(c, async (tx) => {

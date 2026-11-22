@@ -369,9 +369,10 @@ model WebhookEndpoint {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   secrets WebhookSecret[]
-  cursorReceivedAt DateTime @default(now())
+  cursorReceivedAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
   cursorEventId String?
   lastScannedAt DateTime?
+  secretOverlapWarnedAt DateTime?
   consecutiveFailures Int @default(0)
   failingSince DateTime?
   deliveries WebhookDelivery[]
@@ -399,9 +400,9 @@ model WebhookDelivery {
   eventId String
   // Null identifies a synthetic test. The receive clock pins the original event identity on resend.
   receivedAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
   status String @default("pending")
-  nextAttemptAt DateTime? @default(now())
+  nextAttemptAt DateTime? @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
   leaseUntil DateTime?
   attemptNumber Int @default(0)
   windowAttempts Int @default(0)
@@ -436,8 +437,8 @@ model WebhookDisableNotice {
   endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
   recipientId String
   reason String
-  createdAt DateTime @default(now())
-  nextAttemptAt DateTime @default(now())
+  createdAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
+  nextAttemptAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
 
   @@index([endpointId])
   @@index([nextAttemptAt])

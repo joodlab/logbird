@@ -454,12 +454,13 @@ target. The scan window ends at the earlier of:
 - The current database time minus the async-insert flush bound and a safety margin (15 seconds total).
 - The millisecond before the project's oldest unconfirmed ingest receipt.
 
-The worker queues for the existing project admission gate and holds it while already admitted writes
-drain. It releases the gate before querying ClickHouse. Each query examines up to five minutes of
+The worker queues for the receipt gate while writers assign their arrival clocks and register receipts.
+Unconfirmed receipts then fence the scan during ClickHouse writes. Each query examines up to five minutes of
 receive time and pages up to 100 matching IDs, ordered by receive time and ID. Empty slices advance
 the cursor too. The event-time predicate covers the full ingest window of 3650 days before receipt
 through 24 hours after receipt. Physical reads can still span historical partitions because ClickHouse
-sorts by event time. If a ClickHouse read exceeds its budget, discovery leaves the cursor in place.
+sorts by event time. On very large projects delivery can stall until the arrival-time index is present.
+The cursor never skips events when a scan exceeds its read budget.
 The worker inserts deliveries and advances the cursor in one Postgres transaction. Deliveries are unique
 by endpoint and event ID. Disabled endpoints pause scanning and sending. On
 re-enable, scanning resumes from the saved cursor. The worker rechecks the
@@ -479,6 +480,9 @@ The SDK verifies the signature using the exact header value.
 Rotation overlap defaults to 86400 seconds, with integer bounds 0–604800. Up to ten active secrets
 can contribute space-separated `v1,<base64>` signatures. A rotation above the limit returns 409
 `webhook_secret_overlap_limit`. Wait for an overlap to expire or rotate with zero overlap.
+An endpoint with more than ten active secrets from an earlier version returns
+`secretOverlapWarning: webhook_secret_overlap_limit` and signs with the ten newest active secrets.
+The worker logs the condition once per endpoint.
 The header ID stays stable on retry and resend. Use it to deduplicate
 requests if a worker restarts after the receiver accepted a POST but before
 Logbird recorded the outcome.

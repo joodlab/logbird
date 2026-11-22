@@ -1,5 +1,4 @@
 import type { ClickHouseClient } from '@logbird/clickhouse';
-import { webhookSecretKey } from '@logbird/database/webhooks';
 import { Queue, Worker } from 'bullmq';
 import { env } from './env';
 import { connection } from './queue';
@@ -8,9 +7,7 @@ import { scanWebhooks } from './webhook-discovery';
 import { sendWebhookDisableNotices } from './webhook-notices';
 import { pruneWebhookLogs } from './webhook-retention';
 
-export async function startWebhookQueues(ch: ClickHouseClient) {
-  const key = env.BETTER_AUTH_SECRET || env.WEBHOOK_SECRET_KEY ? webhookSecretKey(env.BETTER_AUTH_SECRET ?? '', env.WEBHOOK_SECRET_KEY) : null;
-  if (!key) console.warn(JSON.stringify({ event: 'webhook.delivery_key_missing' }));
+export async function startWebhookQueues(ch: ClickHouseClient, key: Buffer | null) {
   const options = { connection, prefix: env.BULLMQ_PREFIX };
   const jobs = [
     { name: 'webhook-discovery', interval: 2000, run: () => scanWebhooks(ch) },

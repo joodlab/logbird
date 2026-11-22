@@ -1028,11 +1028,11 @@ Logbird query language (empty matches everything). Secret rotation accepts an
 `overlapSeconds` integer from 0 to 604800 (default 86400); omitted fields in PATCH
 remain unchanged.
 
-Run the additive Postgres migration before upgrading the API and worker.
+Run the additive Postgres migrations before upgrading the API and worker.
 Compose runs it through the existing migrate service. If the worker uses a
 separate runtime environment, provide the same `WEBHOOK_SECRET_KEY` as the
 server, or the same `BETTER_AUTH_SECRET` if using a derived key. The worker
-logs `webhook.delivery_key_missing` when neither is supplied. For disable
+logs `webhook.delivery_key_missing` and reports itself unready when neither is supplied. For disable
 notifications, give the worker the existing `SMTP_*`, `MAIL_FROM` and
 `APP_URL` settings. Keep both roles' `WEBHOOKS_ALLOW_HTTP` settings aligned.
 
@@ -1046,3 +1046,11 @@ Set these optional variables in the worker's runtime environment, such as a
 Compose override or a Kubernetes deployment overlay. Attempt logs expire
 after 30 days. Delivery records expire 30 days after they finish. New endpoints start at their creation millisecond. A receiver should
 deduplicate by `webhook-id` and verify its signature against the raw request body.
+
+On very large projects delivery can stall until the arrival-time index is present.
+The cursor never skips events when a scan exceeds its read budget.
+
+If an endpoint carries more than ten active secrets from an earlier version,
+the API reports `secretOverlapWarning: webhook_secret_overlap_limit` and the
+worker signs with the ten newest active secrets. Wait for an overlap to expire,
+or rotate with `overlapSeconds` set to `0` and update the receiver with the new secret.

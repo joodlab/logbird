@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { createClickHouseClient, insertEvents, normalizeEvent, purgeProject, read } from '@logbird/clickhouse';
+import { createClient } from '@clickhouse/client';
+import { insertEvents, normalizeEvent, purgeProject, read } from '@logbird/clickhouse';
 import { closeProjectLocks, prisma } from '@logbird/database';
 import { encryptWebhookSecret, webhookSecretKey } from '@logbird/database/webhooks';
 import { generateWebhookSecret, verifyWebhook } from '@logbird/sdk';
@@ -13,13 +14,20 @@ import { claimWebhookDeliveries, deliverWebhooks } from './webhook-delivery';
 import { discoverWebhookDeliveries } from './webhook-discovery';
 import { sendWebhookDisableNotices } from './webhook-notices';
 
-it('delivers a late insert once, signs exact stored text, retries across workers and emails a composite-role admin', {
+it('delivers a late insert once with a non-UTC ClickHouse session, signs stored text and emails a composite-role admin', {
   timeout: 60_000,
 }, async () => {
   const id = `qa-webhooks-${randomUUID()}`;
   const email = `${id}@example.invalid`;
   expect(['127.0.0.1', 'localhost', '::1']).toContain(process.env.SMTP_HOST);
-  const ch = createClickHouseClient();
+  const sessionTimezone = 'Asia/Riyadh';
+  const ch = createClient({
+    url: process.env.CLICKHOUSE_URL,
+    database: process.env.CLICKHOUSE_DATABASE,
+    username: process.env.CLICKHOUSE_USER,
+    password: process.env.CLICKHOUSE_PASSWORD,
+    clickhouse_settings: { session_timezone: sessionTimezone, date_time_input_format: 'best_effort' },
+  });
   const connection = new Redis(process.env.REDIS_URL ?? '', { maxRetriesPerRequest: null });
   const prefix = process.env.BULLMQ_PREFIX ?? '{logbird-t2w}';
   const queue = new Queue(id, { prefix, connection });
@@ -98,6 +106,7 @@ it('delivers a late insert once, signs exact stored text, retries across workers
     if (failures.length) throw new AggregateError(failures, 'Webhook fixture cleanup failed');
   };
   try {
+    expect(await read(ch, 'SELECT timeZone() AS timezone')).toEqual([{ timezone: sessionTimezone }]);
     await events.waitUntilReady();
     receiver.listen(0, '127.0.0.1');
     await once(receiver, 'listening');
@@ -179,7 +188,11 @@ it('delivers a late insert once, signs exact stored text, retries across workers
     for (const request of requests) {
       expect((request.headers['webhook-signature'] as string).split(' ')).toHaveLength(2);
       for (const secret of [primary, rotated])
-        expect(await verifyWebhook({ ...request, secret })).toMatchObject({ id: request.headers['webhook-id'], tenant: { id: 't1' } });
+        expect(await verifyWebhook({ ...request, secret })).toMatchObject({
+          id: request.headers['webhook-id'],
+          receivedAt: request.headers['webhook-id'] === delayed.event_id ? delayed.received_at : first.received_at,
+          tenant: { id: 't1' },
+        });
     }
     expect(await prisma.webhookDelivery.count({ where: { endpointId: endpoint.id, status: 'succeeded' } })).toBe(2);
 

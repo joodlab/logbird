@@ -18,8 +18,10 @@ import {
   findIngestReceipts,
   INGEST_RECEIPT_WINDOW_MS,
   type IngestReceipt,
+  ingestReceiptClock,
   prisma,
   takeOverIngestReceipts,
+  withIngestReceiptGate,
 } from '@logbird/database';
 import { ingestRecoveryRetryAfter } from '@logbird/worker/ingest-recovery';
 import { clickhouse } from './clickhouse';
@@ -28,6 +30,7 @@ import { isolateIngestRows, STORAGE_PARSE_REJECTION } from './ingest-parse-isola
 import { ingestReceiptFailureResponse, isDatabaseFailure, receiptErrorDetails } from './ingest-receipt-errors';
 
 export type IngestCandidate = { index: number; input: unknown; row: EventRow };
+type AcceptanceWarning = (index: number, warning?: string) => void;
 export const DUPLICATE_ID_CONFLICT =
   'duplicate_id_conflict: id conflicts with different content in this request or stored history. Send corrections with a new id and context.parentEventId.';
 
@@ -117,9 +120,15 @@ async function recheckAfterPause(projectId: string, owned: Map<string, IngestRec
 }
 
 /** Before insert, release owned claims on failure; a failed release leaves abandoned claims for recovery. */
-async function claimEvents(projectId: string, organizationId: string, candidates: IngestCandidate[], fingerprint: (row: EventRow) => string) {
+async function claimEvents(
+  projectId: string,
+  organizationId: string,
+  candidates: IngestCandidate[],
+  fingerprint: (row: EventRow) => string,
+  onWarningChange?: AcceptanceWarning,
+) {
   try {
-    return await claimPhase(projectId, organizationId, candidates, fingerprint);
+    return await claimPhase(projectId, organizationId, candidates, fingerprint, onWarningChange);
   } catch (error) {
     if (!(error instanceof ApiError)) logReceiptPhaseFailure('claim', error);
     if (!(error instanceof ApiError) && isDatabaseFailure(error))
@@ -128,10 +137,33 @@ async function claimEvents(projectId: string, organizationId: string, candidates
   }
 }
 
+function acceptCandidates(projectId: string, candidates: IngestCandidate[], acceptedAt: Date, onWarningChange?: AcceptanceWarning) {
+  for (const candidate of candidates) {
+    const { occurredAt } = candidate.input as { occurredAt?: unknown };
+    const previous = resolveTimestamp(occurredAt, new Date(candidate.row.received_at));
+    const next = resolveTimestamp(occurredAt, acceptedAt);
+    if (previous.problem !== next.problem || previous.valid !== next.valid) {
+      // Renormalize only when an occurredAt crosses a validity boundary, so warnings and conformance agree.
+      const normalized = normalizeEvent(candidate.input, { projectId, receivedAt: acceptedAt, sdk: candidate.row.sdk });
+      if (!normalized.ok) throw new Error('Validated event changed during acceptance');
+      candidate.row = { ...normalized.row, event_id: candidate.row.event_id };
+      onWarningChange?.(candidate.index, normalized.warning ?? undefined);
+    } else {
+      candidate.row = { ...candidate.row, received_at: acceptedAt.toISOString(), timestamp: next.timestamp.toISOString() };
+    }
+  }
+}
+
 /** Claim/recheck owns release until it hands the claims to the insert phase. */
-async function claimPhase(projectId: string, organizationId: string, candidates: IngestCandidate[], fingerprint: (row: EventRow) => string) {
-  const unique = new Map<string, EventRow>();
-  for (const { row } of candidates) if (!unique.has(row.event_id)) unique.set(row.event_id, row);
+async function claimPhase(
+  projectId: string,
+  organizationId: string,
+  candidates: IngestCandidate[],
+  fingerprint: (row: EventRow) => string,
+  onWarningChange?: AcceptanceWarning,
+) {
+  const unique = new Map<string, IngestCandidate>();
+  for (const candidate of candidates) if (!unique.has(candidate.row.event_id)) unique.set(candidate.row.event_id, candidate);
   const eventIds = [...unique.keys()].sort();
   const prior = await findIngestReceipts(projectId, eventIds);
   const cacheCutoff = new Date(Date.now() - INGEST_RECEIPT_WINDOW_MS);
@@ -150,23 +182,30 @@ async function claimPhase(projectId: string, organizationId: string, candidates:
     eventIds.filter((id) => !cached.get(id)?.confirmedAt || !cached.get(id)?.fingerprint.startsWith('v1:')),
   );
   await upgradeLegacyReceipts(projectId, cached, stored);
-  const values = eventIds
-    .filter((id) => !cached.has(id))
-    .map((id) => {
-      const row = unique.get(id) as EventRow;
-      const legacy = stored.get(id);
-      return {
-        eventId: id,
-        fingerprint: legacy?.fingerprint ?? fingerprint(row),
-        receivedAt: legacy?.receivedAt ?? new Date(row.received_at),
-        eventAt: legacy?.eventAt ?? new Date(row.timestamp),
-        confirmedAt: legacy ? new Date() : null,
-        claimedAt: new Date(),
-      };
-    });
   const owned = new Map<string, IngestReceipt>();
   try {
-    const inserted = await claimIngestReceipts(projectId, organizationId, values);
+    // The receipt must commit before discovery can capture its watermark. Ready replays already have a receipt.
+    const inserted = await withIngestReceiptGate(projectId, 'shared', async (tx) => {
+      const acceptedAt = await ingestReceiptClock(tx, projectId);
+      acceptCandidates(projectId, candidates, acceptedAt, onWarningChange);
+      const values = eventIds.flatMap((id) => {
+        const candidate = unique.get(id);
+        if (!candidate || cached.has(id)) return [];
+        const { row } = candidate;
+        const legacy = stored.get(id);
+        return [
+          {
+            eventId: id,
+            fingerprint: legacy?.fingerprint ?? fingerprint(row),
+            receivedAt: legacy?.receivedAt ?? acceptedAt,
+            eventAt: legacy?.eventAt ?? new Date(row.timestamp),
+            confirmedAt: legacy ? new Date() : null,
+            claimedAt: new Date(),
+          },
+        ];
+      });
+      return claimIngestReceipts(projectId, organizationId, values, tx);
+    });
     for (const receipt of inserted) owned.set(receipt.eventId, receipt);
     await takeOverReadyClaims(projectId, prior, candidates, owned);
     const rechecked = await recheckAfterPause(projectId, owned, stored, lookupAt);
@@ -341,7 +380,13 @@ async function persistRows(projectId: string, rows: EventRow[], owned: Map<strin
 }
 
 /** Caller holds a project lock: exclusive during recovery, shared otherwise. Receipts fence every API process. */
-export async function insertImmutableEvents(projectId: string, organizationId: string, candidates: IngestCandidate[], supportsSubsetRetry = false) {
+export async function insertImmutableEvents(
+  projectId: string,
+  organizationId: string,
+  candidates: IngestCandidate[],
+  supportsSubsetRetry = false,
+  onWarningChange?: AcceptanceWarning,
+) {
   if (!candidates.length) return { ids: [] as string[], rejected: [] as { index: number; reason: string; code: string }[] };
   // The wire payload and normalized rows are immutable within this attempt; hash each row once.
   const fingerprints = new Map<EventRow, string>();
@@ -353,7 +398,7 @@ export async function insertImmutableEvents(projectId: string, organizationId: s
     }
     return value;
   };
-  const { owned, receipts } = await claimEvents(projectId, organizationId, candidates, fingerprint);
+  const { owned, receipts } = await claimEvents(projectId, organizationId, candidates, fingerprint, onWarningChange);
   let result: ReturnType<typeof classifyCandidates>;
   try {
     result = classifyCandidates(projectId, candidates, receipts, owned, fingerprint);

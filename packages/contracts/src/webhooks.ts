@@ -29,6 +29,10 @@ export const webhookEndpointSchema = z.object({
   description: z.string().nullable(),
   enabled: z.boolean(),
   disabledReason: z.enum(['manual', 'gone_410', 'consecutive_failures']).nullable(),
+  secretOverlapWarning: z
+    .literal('webhook_secret_overlap_limit')
+    .optional()
+    .describe('Only the newest ten active secrets sign deliveries. Wait for an overlap to expire or rotate with overlapSeconds set to 0.'),
   disabledAt: z.iso.datetime().nullable(),
   filterQuery: z.string(),
   scope: webhookScopeSchema.nullable(),

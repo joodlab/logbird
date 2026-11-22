@@ -38,9 +38,8 @@ export interface ProjectLockOptions {
   /**
    * shared    – ingestion: many writers of new events may hold it at once.
    * exclusive – maintenance (retention purge, sample data, deletion, policy changes): excludes everyone.
-   * queued-exclusive – exclusive, with a queued acquisition of the admission gate.
    */
-  mode?: 'shared' | 'exclusive' | 'queued-exclusive';
+  mode?: 'shared' | 'exclusive';
   /** How long to keep trying before ProjectBusyError. Never blocks a Prisma connection or a transaction. */
   waitMs?: number;
 }
@@ -51,8 +50,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  *  - gate (key 1): writer preference — maintenance holds it while waiting for in-flight ingests to drain, and
  *    ingest must pass it (momentary shared try-lock) before taking the data lock, so a steady ingest stream
  *    cannot starve maintenance.
- * The queued-exclusive mode joins PostgreSQL's lock queue for the gate, in waits bounded by the lock pool's
- * lock_timeout. Other callers use non-blocking tries. The data lock always uses bounded retries.
+ * Both locks use bounded retries.
  */
 export async function withProjectLock<T>(
   projectId: string,
@@ -80,16 +78,7 @@ export async function withProjectLock<T>(
           await client.query('SELECT pg_advisory_unlock_shared(hashtextextended($1, 1))', [projectId]);
         }
       } else {
-        if (!gate && mode === 'queued-exclusive') {
-          try {
-            await client.query('SELECT pg_advisory_lock(hashtextextended($1, 1))', [projectId]);
-            gate = true;
-          } catch (error) {
-            if (!(error && typeof error === 'object' && 'code' in error && error.code === '55P03')) throw error;
-          }
-        } else {
-          gate ||= await tryLock('SELECT pg_try_advisory_lock(hashtextextended($1, 1)) locked');
-        }
+        gate ||= await tryLock('SELECT pg_try_advisory_lock(hashtextextended($1, 1)) locked');
         if (gate) data = await tryLock('SELECT pg_try_advisory_lock(hashtextextended($1, 0)) locked');
       }
       if (data) break;
@@ -117,16 +106,34 @@ export async function withProjectLock<T>(
 }
 export const closeProjectLocks = () => projectLocks.end();
 
-/** Replaces the existing project lookup: acceptance follows every active fence, with no extra round trip.
- * The caller holds the shared project lock, so an export cannot register a new fence until INSERT settles.
- */
-export async function findIngestProject(db: import('./generated/client').Prisma.TransactionClient, projectId: string) {
-  const rows = await db.$queryRaw<{ id: string; organizationId: string; acceptedAt: Date }[]>`
-    SELECT p.id,p."organizationId",greatest(clock_timestamp(),
+/** Only receipt assignment and registration contend with discovery. Keep ClickHouse I/O outside this transaction. */
+export function withIngestReceiptGate<T>(
+  projectId: string,
+  mode: 'shared' | 'exclusive',
+  work: (tx: import('./generated/client').Prisma.TransactionClient) => Promise<T>,
+) {
+  return prisma.$transaction(
+    async (tx) => {
+      if (mode === 'shared') await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtextextended(${projectId}, 2))`;
+      else {
+        // Bound both the wait for receipt registration and the watermark query while writers queue behind it.
+        await tx.$executeRaw`SET LOCAL statement_timeout = '1s'`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${projectId}, 2))`;
+      }
+      return work(tx);
+    },
+    { isolationLevel: 'ReadCommitted', ...(mode === 'shared' ? { maxWait: 60_000, timeout: 60_000 } : {}) },
+  );
+}
+
+/** The separate project data lock prevents a new export fence until the insert settles. */
+export async function ingestReceiptClock(db: import('./generated/client').Prisma.TransactionClient, projectId: string) {
+  const [row] = await db.$queryRaw<{ acceptedAt: Date }[]>`
+    SELECT greatest(clock_timestamp(),
       (SELECT (max("receivedBefore") AT TIME ZONE 'UTC') + interval '1 millisecond' FROM "ExportLease"
-       WHERE "projectId"=p.id AND "expiresAt">(clock_timestamp() AT TIME ZONE 'UTC'))) AS "acceptedAt"
-    FROM "Project" p WHERE p.id=${projectId}`;
-  return rows[0] ?? null;
+       WHERE "projectId"=${projectId} AND "expiresAt">(clock_timestamp() AT TIME ZONE 'UTC'))) AS "acceptedAt"`;
+  if (!row) throw new Error('Ingest receipt clock unavailable');
+  return row.acceptedAt;
 }
 
 /** Call only while holding the project lock. Old clients/runs fall back to startedAt. */
