@@ -208,7 +208,11 @@ curl --fail-with-body "$LOGBIRD_ENDPOINT/v1/events" \
 
 Use a current timestamp when creating an event. Send a single event, an array or
 `{ "events": [...] }` with at most 1000 entries. Limits are 256 KB per event and
-5 MB per request (256 * 1024 and 5 * 1024 * 1024 bytes). Inspect even a 202 response:
+5 MB per request (256 * 1024 and 5 * 1024 * 1024 bytes). An event over 256 KB is
+rejected on its own and the rest of the batch is stored; an otherwise valid event gets
+`invalid_event: event exceeds 256 KB` (a missing `action` or an unsafe `id` is reported
+first); more than 1000 events or more than 5 MB refuses the whole request with
+`413 payload_too_large`. Inspect even a 202 response:
 `rejected` lists individual failures and `warnings` reports normalization.
 Definite native storage parse failures are isolated into `invalid_event` rejections
 with zero-based indices and code-first reasons. Healthy siblings remain accepted;
