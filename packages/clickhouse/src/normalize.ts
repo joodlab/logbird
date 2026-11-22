@@ -106,7 +106,10 @@ export function normalizeEvent(
       if (exact !== null) attributes[path] = exact;
     } else {
       const bytes = Buffer.from(value(v));
-      let cut = bytes.subarray(0, 2048).toString('utf8').replace(/\uFFFD$/, '');
+      let cut = bytes
+        .subarray(0, 2048)
+        .toString('utf8')
+        .replace(/\uFFFD$/, '');
       // A composite value cut inside a number drops that number's partial digits: a prefix of its digits would match a
       // different number. One backward scan; legacy columns keep the plain cut.
       if (!ctx.legacyColumns && bytes.length > 2048 && numberChar(String.fromCharCode(bytes[2048] ?? 0))) {

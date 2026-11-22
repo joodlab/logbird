@@ -214,9 +214,7 @@ it('indexes a rejected numeric timestamp whole, so two long values never match e
   expect(b).toBe(`${'1'.repeat(200)}2`);
   // Same cap as a rejected string: a 256-digit number is not indexed, so it never equals a truncated long string.
   expect(normalize(wire(`{"action":"x","occurredAt":${'1'.repeat(256)}}`)).row.attributes['logbird.occurredAt.rejected']).toBeUndefined();
-  expect(normalize(wire(`{"action":"x","occurredAt":"${'1'.repeat(300)}"}`)).row.attributes['logbird.occurredAt.rejected']).toBe(
-    '1'.repeat(256),
-  );
+  expect(normalize(wire(`{"action":"x","occurredAt":"${'1'.repeat(300)}"}`)).row.attributes['logbird.occurredAt.rejected']).toBe('1'.repeat(256));
   expect(normalize(wire('{"action":"x","occurredAt":"yesterday"}')).row.attributes['logbird.occurredAt.rejected']).toBe('yesterday');
 });
 
@@ -263,9 +261,7 @@ it('never keeps the partial digits of a number cut by the composite-value cap', 
   expect(a.endsWith(',')).toBe(true);
   expect(a).toBe(cut('12399999999999999999'));
   // A value that fits is kept whole.
-  expect(normalize(wire('{"action":"x","metadata":{"list":[12345678901234567891]}}')).row.attributes['metadata.list']).toBe(
-    '[12345678901234567891]',
-  );
+  expect(normalize(wire('{"action":"x","metadata":{"list":[12345678901234567891]}}')).row.attributes['metadata.list']).toBe('[12345678901234567891]');
 });
 
 it('truncates executor.attempt from its exact decimal value, clamped like before', () => {
