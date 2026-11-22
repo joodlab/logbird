@@ -257,7 +257,10 @@ public sealed class LogbirdReadClient : IDisposable
     public async Task<ViewerToken> MintViewerTokenAsync(ViewerScope scope, TimeSpan? lifetime = null, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(scope, nameof(scope));
-        scope.Validate();
+
+        // One snapshot is validated, sent and compared with the grant, so a caller changing its list meanwhile changes nothing.
+        var requested = scope.Snapshot();
+        requested.Validate();
         int? ttlSeconds = null;
         if (lifetime is { } span)
         {
@@ -270,7 +273,7 @@ public sealed class LogbirdReadClient : IDisposable
         }
 
         await RequireServer020Async("Minting a viewer token", cancellationToken).ConfigureAwait(false);
-        var body = JsonSerializer.SerializeToUtf8Bytes(new MintViewerTokenRequest { Scope = scope.ToWire(), TtlSeconds = ttlSeconds }, ScopedJsonContext.Default.MintViewerTokenRequest);
+        var body = JsonSerializer.SerializeToUtf8Bytes(new MintViewerTokenRequest { Scope = requested.ToWire(), TtlSeconds = ttlSeconds }, ScopedJsonContext.Default.MintViewerTokenRequest);
         using var content = new ByteArrayContent(body);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         var response = await SendAsync(HttpMethod.Post, _viewerTokensUrl, content, ScopedJsonContext.Default.MintViewerTokenResponse, cancellationToken).ConfigureAwait(false);
@@ -281,7 +284,7 @@ public sealed class LogbirdReadClient : IDisposable
         }
 
         var granted = ViewerScope.FromWire(response.Scope);
-        if (!granted.SameAccessAs(scope))
+        if (!granted.SameAccessAs(requested))
         {
             throw new LogbirdApiException(null, "scope_mismatch", "Logbird granted a different scope than requested; the token was not returned.");
         }

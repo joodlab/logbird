@@ -70,6 +70,37 @@ public class ScopedReadTests
     }
 
     [Fact]
+    public async Task Changing_the_prefix_list_after_calling_changes_nothing_that_is_sent_or_compared()
+    {
+        var prefixes = new System.Collections.Generic.List<string> { "booking." };
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = new FakeServer
+        {
+            Fallback = async request =>
+            {
+                if (request.Request.RequestUri!.AbsolutePath == "/openapi.json")
+                {
+                    await gate.Task;
+                    return FakeServer.Json(HttpStatusCode.OK, "{\"info\":{\"version\":\"0.2.0\"}}");
+                }
+
+                return Minted(request);
+            },
+        };
+        using var reader = Reader(server);
+        var minting = reader.MintViewerTokenAsync(new ViewerScope("biz_5") { ActionPrefixes = prefixes });
+
+        // The caller changes its list while the version check is pending.
+        prefixes.Add(" not validated ");
+        gate.SetResult(true);
+        var token = await minting;
+
+        var sent = server.Requests.Single(r => r.Request.RequestUri!.AbsolutePath == "/v1/viewer-tokens").Text;
+        Assert.Equal("{\"scope\":{\"tenantId\":\"biz_5\",\"actionPrefixes\":[\"booking.\"]}}", sent);
+        Assert.Equal(["booking."], token.Scope.ActionPrefixes);
+    }
+
+    [Fact]
     public async Task A_granted_scope_that_differs_from_the_request_is_refused_and_the_token_withheld()
     {
         var server = Server(_ => FakeServer.Json((HttpStatusCode)201, "{\"token\":\"lbv1.fictional.mac\",\"expiresAt\":\"2026-11-23T10:15:00.000Z\",\"scope\":{\"tenantId\":\"biz_6\"}}"));

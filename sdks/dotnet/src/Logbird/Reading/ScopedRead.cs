@@ -77,6 +77,14 @@ public sealed class ViewerScope
     /// <summary>Lists no values (tenant and target ids), so logging this object cannot leak them.</summary>
     public override string ToString() => nameof(ViewerScope);
 
+    /// <summary>A copy that the caller can no longer change (the prefix list is copied).</summary>
+    internal ViewerScope Snapshot() => new(TenantId)
+    {
+        Target = Target is null ? null : new ViewerScopeTarget(Target.Type, Target.Id),
+        ActionPrefixes = ActionPrefixes?.ToArray(),
+        Mask = Mask,
+    };
+
     internal void Validate()
     {
         CheckStored(TenantId, 250, nameof(TenantId));
