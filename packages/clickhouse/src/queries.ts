@@ -15,6 +15,7 @@ import type {
   histogramQuerySchema,
   OverviewResponse,
   RangeQuery,
+  ReadScope,
   SearchQuery,
   SearchResponse,
 } from '@logbird/contracts';
@@ -27,6 +28,7 @@ import { projectMaintenance } from './maintenance-tag';
 import type { EventRow } from './normalize';
 import { columns, compileQuery, QueryError } from './query';
 import { rollupSql } from './rollup-sql';
+import { CursorError, cursorBinding, scopePredicate } from './scope';
 import { freezeSqlClock, sqlSyntaxError, validateSql } from './sql-guard';
 
 const sqlExpression = Symbol('sqlExpression');
@@ -127,11 +129,19 @@ export function timeRange(q: RangeQuery, now = Date.now()) {
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
   return { from: from.toISOString(), to: to.toISOString() };
 }
-export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery, compiled?: Awaited<ReturnType<typeof filter>>) {
+export async function where(
+  ch: ClickHouseClient,
+  projectId: string,
+  q: RangeQuery,
+  compiled?: Awaited<ReturnType<typeof filter>>,
+  scope?: ReadScope | null,
+) {
   const c = compiled ?? (await filter(ch, q));
+  const s = scopePredicate(scope);
+  // The scope is ANDed outside the user's filter: nothing inside `(c.sql)` can widen it.
   return {
-    sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${c.sql})`,
-    params: { project: projectId, ...timeRange(q), ...c.params },
+    sql: `project_id={project:String} AND timestamp >= {from:DateTime64(3)} AND timestamp < {to:DateTime64(3)} AND (${c.sql}) AND (${s.sql})`,
+    params: { project: projectId, ...timeRange(q), ...c.params, ...s.params },
   };
 }
 const iso = (s: string) => new Date(s.endsWith('Z') ? s : `${s.replace(' ', 'T')}Z`).toISOString();
@@ -172,14 +182,34 @@ export function toEvent(r: EventRow & { category?: string }): AuditEvent {
   };
 }
 const encode = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
-function cursor(s: string): [string, string] {
+/**
+ * Search cursors are `[timestamp, eventId, binding]`: the binding ties them to the project, and to the scope when
+ * minted by a scoped caller. Two-element cursors (issued before bindings existed) stay valid for unscoped readers only.
+ */
+function cursor(s: string, projectId: string, scope?: ReadScope | null): [string, string] {
+  const bound = cursorBinding(projectId, scope);
   try {
     const a: unknown = JSON.parse(Buffer.from(s, 'base64url').toString());
-    if (Array.isArray(a) && a.length === 2 && a.every((v) => typeof v === 'string')) return a as [string, string];
+    // A cursor only pages within the project and scope that minted it: another project, unscoped ↔ scoped and
+    // scope A ↔ scope B are rejected, and so is a malformed position (it would otherwise fail later as a 500 or be
+    // silently normalized, e.g. February 30).
+    const binds = Array.isArray(a) && (a.length === 3 ? a[2] === bound : a.length === 2 && !scope);
+    if (binds && a.every((v) => typeof v === 'string')) {
+      const [ts, id] = a as [string, string];
+      const date = new Date(ts);
+      if (
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(ts) &&
+        Number.isFinite(date.getTime()) &&
+        date.toISOString() === ts &&
+        id &&
+        id.length <= 1024
+      )
+        return [ts, id];
+    }
   } catch {
     /* Report malformed cursors with a stable public error below. */
   }
-  throw new Error('Invalid cursor');
+  throw new CursorError();
 }
 /** Distinct matches up to the 10,001 cap. `exact` is false when capped, past its budget, cancelled or failed. */
 export const COUNT_CAP = 10_001;
@@ -235,9 +265,10 @@ async function searchPage(
   includePayload = false,
   exportClock?: string,
   execution?: ExportExecution,
+  scope?: ReadScope | null,
 ): Promise<{ page: SearchResponse; payloads: string[] }> {
   const start = performance.now(),
-    w = await where(ch, projectId, q, compiled),
+    w = await where(ch, projectId, q, compiled, scope),
     asc = q.order === 'asc',
     op = asc ? '>' : '<',
     order = asc ? 'ASC' : 'DESC';
@@ -248,7 +279,7 @@ async function searchPage(
     params.exportReceivedBefore = exportClock;
   }
   if (q.cursor) {
-    const [ts, id] = cursor(q.cursor);
+    const [ts, id] = cursor(q.cursor, projectId, scope);
     params.cursorTs = ts;
     params.cursorId = id;
     tail = ` AND (timestamp,event_id) ${op} ({cursorTs:DateTime64(3)},{cursorId:String})`;
@@ -277,7 +308,13 @@ async function searchPage(
   const total = count === undefined ? 0 : Math.max(count.n, seen);
   const totalExact = count === undefined ? true : count.exact && count.n >= seen;
   return {
-    page: { data, total, totalExact, nextCursor: hasMore && last ? encode([last.timestamp, last.id]) : null, tookMs: performance.now() - start },
+    page: {
+      data,
+      total,
+      totalExact,
+      nextCursor: hasMore && last ? encode([last.timestamp, last.id, cursorBinding(projectId, scope)]) : null,
+      tookMs: performance.now() - start,
+    },
     payloads: includePayload ? rows.slice(0, q.limit).map((row) => row.payload) : [],
   };
 }
@@ -286,35 +323,39 @@ export async function searchEvents(
   projectId: string,
   q: SearchQuery,
   compiled?: Awaited<ReturnType<typeof filter>>,
+  scope?: ReadScope | null,
 ): Promise<SearchResponse> {
-  return (await searchPage(ch, projectId, q, compiled)).page;
+  return (await searchPage(ch, projectId, q, compiled, false, undefined, undefined, scope)).page;
 }
-async function eventRow(ch: ClickHouseClient, p: string, id: string) {
-  return (
-    await read<EventRow>(ch, 'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp LIMIT 1', {
-      p,
-      id,
-    })
-  )[0];
+async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: ReadScope | null) {
+  const canonical = 'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp LIMIT 1';
+  if (!scope) return (await read<EventRow>(ch, canonical, { p, id }))[0];
+  const s = scopePredicate(scope);
+  // Pick the canonical stored row first, then test the scope on it: a scoped caller sees exactly the row an unscoped
+  // reader sees, or nothing (never a different stored version that happens to match).
+  return (await read<EventRow>(ch, `SELECT * FROM (${canonical}) WHERE ${s.sql}`, { p, id, ...s.params }))[0];
 }
-export async function getEvent(ch: ClickHouseClient, projectId: string, eventId: string): Promise<EventDetail | null> {
-  const row = await eventRow(ch, projectId, eventId);
+/** With a scope, an out-of-scope id is indistinguishable from an unknown one (null → 404). */
+export async function getEvent(ch: ClickHouseClient, projectId: string, eventId: string, scope?: ReadScope | null): Promise<EventDetail | null> {
+  const row = await eventRow(ch, projectId, eventId, scope);
   if (!row) return null;
   const parents: AuditEvent[] = [],
     seen = new Set([eventId]);
   let parent = row.parent_event_id;
   while (parent && !seen.has(parent) && parents.length < 100) {
     seen.add(parent);
-    const r = await eventRow(ch, projectId, parent);
+    // The chain stops at the first parent outside the scope.
+    const r = await eventRow(ch, projectId, parent, scope);
     if (!r) break;
     parents.unshift(toEvent(r));
     parent = r.parent_event_id;
   }
+  const s = scopePredicate(scope);
   const counts = (
     await read<{ children: number; size: number }>(
       ch,
-      `SELECT uniqExactIf(event_id,parent_event_id={id:String}) children,uniqExactIf(event_id,operation_id={op:String} AND operation_id!='') size FROM events WHERE project_id={p:String} AND (parent_event_id={id:String} OR operation_id={op:String})`,
-      { p: projectId, id: eventId, op: row.operation_id },
+      `SELECT uniqExactIf(event_id,parent_event_id={id:String}) children,uniqExactIf(event_id,operation_id={op:String} AND operation_id!='') size FROM events WHERE project_id={p:String} AND (parent_event_id={id:String} OR operation_id={op:String}) AND (${s.sql})`,
+      { p: projectId, id: eventId, op: row.operation_id, ...s.params },
     )
   )[0];
   return {
@@ -362,36 +403,80 @@ export async function histogram(ch: ClickHouseClient, p: string, q: z.infer<type
   }
   return { interval, buckets: [...buckets.values()] };
 }
-export async function facets(ch: ClickHouseClient, p: string, q: z.infer<typeof facetQuerySchema>): Promise<FacetResponse> {
-  const w = await where(ch, p, q),
-    col = Object.hasOwn(columns, q.field) ? columns[q.field] : undefined;
-  let expr = col;
-  if (!expr) {
-    expr = 'attributes[{attr:String}]';
-  }
+const TARGET_COLUMNS = ['target_ids', 'target_types', 'target_names'];
+/** Two target-level facets expand ONE (id, type, name) tuple, so an id is never paired with another target's type. */
+const SHARED_TARGETS = 'ARRAY JOIN arrayZip(target_ids,target_types,target_names) AS facet_targets';
+/** SQL for one facet level: the grouped value, its display label and an optional ARRAY JOIN. */
+function facetLevel(field: string, n: number, sharedTargets = false) {
+  const col = Object.hasOwn(columns, field) ? columns[field] : undefined;
+  let expr = col ?? `attributes[{attr${n}:String}]`;
   let join = '';
   let label = expr;
-  if (expr === 'target_ids') {
-    join = 'ARRAY JOIN arrayZip(target_ids,target_names) AS target';
-    expr = 'target.1';
-    label = 'target.2';
+  if (sharedTargets && col && TARGET_COLUMNS.includes(col)) {
+    // The caller adds SHARED_TARGETS once for both levels.
+    expr = `facet_targets.${TARGET_COLUMNS.indexOf(col) + 1}`;
+    label = col === 'target_ids' ? 'facet_targets.3' : expr;
+  } else if (expr === 'target_ids') {
+    join = `ARRAY JOIN arrayZip(target_ids,target_names) AS facet_target${n}`;
+    expr = `facet_target${n}.1`;
+    label = `facet_target${n}.2`;
   } else if (['target_types', 'target_names', 'changes_fields'].includes(expr)) {
     expr = `arrayJoin(${expr})`;
     label = expr;
-  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(q.field)) label = `${q.field}_name`;
+  } else if (['actor', 'impersonator', 'tenant', 'executor'].includes(field)) label = `${field}_name`;
+  else if (!col) {
+    // Array-valued attributes are stored as JSON text ("[\"a\",\"b\"]"): count each element (#140). Strings unwrap;
+    // other element types keep their JSON text. An empty array contributes no group.
+    const a = `attributes[{attr${n}:String}]`;
+    // JSON whitespace (space, tab, LF, CR) may precede the array; the scalar fallback keeps the original text.
+    const lead = `trimLeft(replaceAll(replaceAll(replaceAll(${a},char(9),' '),char(10),' '),char(13),' '))`;
+    expr = `arrayJoin(if(startsWith(${lead},'[') AND isValidJSON(${a}),arrayMap(x -> if(JSONType(x)='String',JSONExtractString(x),x),JSONExtractArrayRaw(${a})),[${a}]))`;
+    label = expr;
+  }
   if (QUERY_FIELDS.some((f) => f.column === col && ['number', 'date'].includes(f.type))) {
     expr = `toString(${expr})`;
     label = expr;
   }
+  return { expr, label, join, column: col, params: col ? {} : { [`attr${n}`]: field.replace(/^(attr|attributes)\./, '') } };
+}
+/** The stored column a facet field reads (undefined for attributes). */
+export const facetColumn = (field: string) => (Object.hasOwn(columns, field) ? columns[field] : undefined);
+export async function facets(
+  ch: ClickHouseClient,
+  p: string,
+  q: Omit<z.infer<typeof facetQuerySchema>, 'byLimit'> & { byLimit?: number },
+  scope?: ReadScope | null,
+): Promise<FacetResponse> {
+  const w = await where(ch, p, q, undefined, scope);
+  const one = facetLevel(q.field, 1);
   // Only the top `limit` groups leave ClickHouse; the window sum (computed before LIMIT) keeps otherCount exact.
   const rows = await read<{ value: string; label: string; count: number; total: number }>(
     ch,
-    `SELECT ${expr} value,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),value) label,count() count,sum(count()) OVER () total FROM events ${join} WHERE ${w.sql} GROUP BY value ORDER BY count DESC,value LIMIT {facetLimit:UInt32}`,
-    { ...w.params, attr: q.field.replace(/^(attr|attributes)\./, ''), facetLimit: q.limit },
+    `SELECT ${one.expr} value,coalesce(nullIf(argMaxIf(${one.label},received_at,${one.label}!=''),''),value) label,count() count,sum(count()) OVER () total FROM events ${one.join} WHERE ${w.sql} GROUP BY value ORDER BY count DESC,value LIMIT {facetLimit:UInt32}`,
+    { ...w.params, ...one.params, facetLimit: q.limit },
   );
-  const values = rows.map((r) => ({ value: r.value, label: r.label, count: Number(r.count) }));
+  const values: FacetResponse['values'] = rows.map((r) => ({ value: r.value, label: r.label, count: Number(r.count) }));
   const total = Number(rows[0]?.total ?? 0);
-  return { field: q.field, values, otherCount: Math.max(total - values.reduce((n, v) => n + v.count, 0), 0) };
+  const otherCount = Math.max(total - values.reduce((n, v) => n + v.count, 0), 0);
+  if (!q.by || !values.length) return { field: q.field, by: q.by ?? null, values, otherCount };
+  // Second level (#140): the top `byLimit` values of `by` within each returned value, and the count of the rest.
+  // One bounded query: the outer filter keeps only the returned first-level values.
+  const isTarget = (field: string) => TARGET_COLUMNS.includes(facetColumn(field) ?? '');
+  const shared = isTarget(q.field) && isTarget(q.by);
+  const both = shared ? { one: facetLevel(q.field, 1, true), two: facetLevel(q.by, 2, true) } : { one, two: facetLevel(q.by, 2) };
+  const two = both.two;
+  const joins = shared ? SHARED_TARGETS : `${one.join} ${two.join}`;
+  const groups = await read<{ value: string; grp: string; label: string; count: number; total: number }>(
+    ch,
+    `SELECT value,grp,coalesce(nullIf(argMaxIf(glabel,received_at,glabel!=''),''),grp) label,count() count,sum(count()) OVER (PARTITION BY value) total FROM (SELECT ${both.one.expr} value,${two.expr} grp,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE value IN {facetValues:Array(String)} GROUP BY value,grp ORDER BY value,count DESC,grp LIMIT {byLimit:UInt32} BY value`,
+    { ...w.params, ...one.params, ...two.params, facetValues: values.map((v) => v.value), byLimit: q.byLimit ?? 5 },
+  );
+  for (const v of values) {
+    const mine = groups.filter((g) => g.value === v.value);
+    v.groups = mine.map((g) => ({ value: g.grp, label: g.label, count: Number(g.count) }));
+    v.groupsOtherCount = Math.max(Number(mine[0]?.total ?? 0) - v.groups.reduce((n, g) => n + g.count, 0), 0);
+  }
+  return { field: q.field, by: q.by, values, otherCount };
 }
 async function metrics(ch: ClickHouseClient, p: string, q: RangeQuery) {
   const w = await where(ch, p, q);
@@ -614,7 +699,16 @@ export async function prepareExport(ch: ClickHouseClient, q: ExportQuery, clock 
   return { range, compiled, clock: new Date(clock).toISOString() };
 }
 export type ExportPlan = Awaited<ReturnType<typeof prepareExport>>;
-export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQuery, plan?: ExportPlan, execution?: ExportExecution) {
+/** Scoped exports (#138): the scope predicate is ANDed into every page; `map` applies field masks before encoding. */
+export type ExportScope = { scope?: ReadScope | null; map?: (event: AuditEvent) => AuditEvent };
+export async function* exportEvents(
+  ch: ClickHouseClient,
+  p: string,
+  q: ExportQuery,
+  plan?: ExportPlan,
+  execution?: ExportExecution,
+  scoped: ExportScope = {},
+) {
   const frozen = plan ?? (await prepareExport(ch, q));
   const query = { ...q, ...frozen.range };
   let nextCursor: string | undefined;
@@ -628,7 +722,9 @@ export async function* exportEvents(ch: ClickHouseClient, p: string, q: ExportQu
       q.format === 'jsonl-evidence',
       frozen.clock,
       execution,
+      scoped.scope,
     );
+    if (scoped.map) page.data = page.data.map(scoped.map);
     if (first && q.format === 'csv') yield `${CSV_COLUMNS.join(',')}\n`;
     first = false;
     for (const [index, e] of page.data.entries()) {

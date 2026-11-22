@@ -1,10 +1,10 @@
 import { auth, authAuditContext, clearSessionCookies, setAuthAuditHandler } from '@logbird/auth';
-import { QueryError } from '@logbird/clickhouse';
+import { CursorError, QueryError } from '@logbird/clickhouse';
 import { queryErrorDetailsSchema } from '@logbird/contracts';
 import { Prisma, ProjectBusyError, prisma } from '@logbird/database';
 import { failedRepairStatus } from '@logbird/worker/project-repair';
 import { connection } from '@logbird/worker/queue';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
@@ -44,22 +44,51 @@ app.use(
 app.use('/api/auth/*', rateLimit);
 app.use('/api/session/*', rateLimit);
 app.use('/api/sessions/*', rateLimit);
-app.use(
-  '*',
-  cors({
-    origin: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)],
-    credentials: true,
-    exposeHeaders: [
-      'X-Logbird-Export-Id',
-      'X-Logbird-Export-Schema',
-      'X-Request-Id',
-      'RateLimit-Limit',
-      'RateLimit-Remaining',
-      'RateLimit-Reset',
-      'Retry-After',
-    ],
-  }),
-);
+const EXPOSED_HEADERS = [
+  'X-Logbird-Export-Id',
+  'X-Logbird-Export-Schema',
+  'X-Request-Id',
+  'RateLimit-Limit',
+  'RateLimit-Remaining',
+  'RateLimit-Reset',
+  'Retry-After',
+];
+/**
+ * Browser access with viewer tokens (#138) to GET /v1/events[/:id], /v1/facets and /v1/export. No cookies are ever
+ * used (no Allow-Credentials). The preflight carries no Authorization header, so it is answered for any origin; the
+ * actual response is readable only by an origin on the minting key's `embedOrigins` (other origins get 403
+ * origin_not_allowed from requireReader). A 401 is readable by any origin so an embed can tell it must refresh its
+ * token. Read keys never get CORS: they belong on servers.
+ */
+const viewerReadPath = (c: Context) =>
+  /^\/v1\/(?:events(?:\/[^/]+)?|facets|export)$/.test(c.req.path) &&
+  (c.req.method === 'GET' || (c.req.method === 'OPTIONS' && c.req.header('access-control-request-method') === 'GET'));
+app.use('/v1/*', async (c, next) => {
+  const origin = c.req.header('origin');
+  if (!viewerReadPath(c) || !origin) return next();
+  if (c.req.method === 'OPTIONS') {
+    c.header('Access-Control-Allow-Origin', origin);
+    c.header('Access-Control-Allow-Methods', 'GET');
+    c.header('Access-Control-Allow-Headers', 'authorization');
+    c.header('Access-Control-Max-Age', '600');
+    c.header('Vary', 'Origin');
+    return c.body(null, 204);
+  }
+  await next();
+  const reader = c.get('reader');
+  if (c.res.status === 401 || (reader?.via === 'token' && reader.embedOrigins.includes(origin))) {
+    c.res.headers.set('Access-Control-Allow-Origin', origin);
+    c.res.headers.set('Access-Control-Expose-Headers', EXPOSED_HEADERS.join(','));
+  }
+  c.res.headers.append('Vary', 'Origin');
+});
+const consoleCors = cors({
+  origin: [env.APP_URL, ...env.TRUSTED_ORIGINS.split(',').filter(Boolean)],
+  credentials: true,
+  exposeHeaders: EXPOSED_HEADERS,
+});
+// Viewer-token read paths use only the CORS above (no credentials, origins from the key).
+app.use('*', (c, next) => (viewerReadPath(c) && c.req.header('origin') ? next() : consoleCors(c, next)));
 app.use('*', async (c, next) => {
   const start = Date.now();
   await next();
@@ -81,6 +110,8 @@ app.onError((error, c) => {
     return c.json({ error: { code: 'project_busy', message: error.message } }, 503);
   }
 
+  // A malformed cursor, or one minted under another scope (#138).
+  if (error instanceof CursorError) return c.json({ error: { code: 'validation_error', message: error.message } }, 422);
   if (error instanceof QueryError)
     return c.json({ error: { code: 'invalid_query', message: error.message, details: queryErrorDetailsSchema.parse(error.details) } }, 422);
   const receiptFailure = ingestReceiptFailureResponse(error);
@@ -99,6 +130,12 @@ app.onError((error, c) => {
       c.header('Retry-After', String(Math.max(1, Math.ceil(error.retryAfter ?? 1))));
     return c.json({ error: { code: error.code, message: error.message, details: error.details } }, error.status);
   }
+  // The ApiKey roll fence (database backstop, #138). The API checks the same rule first, so this is a safety net.
+  if (/logbird_api_key_roll_fence/.test(`${error.message} ${String((error as { cause?: unknown }).cause ?? '')}`))
+    return c.json(
+      { error: { code: 'key_restricted', message: 'A replacement key must keep the scope and the expiry of the key it replaces.' } },
+      409,
+    );
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
     return c.json({ error: { code: 'conflict', message: 'This record already exists.' } }, 409);
   if (error instanceof HTTPException) return c.json({ error: { code: 'invalid_request', message: error.message } }, error.status);
@@ -248,7 +285,13 @@ app.get(
         securitySchemes: {
           session: { type: 'apiKey', in: 'cookie', name: 'better-auth.session_token' },
           ingestKey: { type: 'http', scheme: 'bearer' },
-          readKey: { type: 'http', scheme: 'bearer' },
+          readKey: { type: 'http', scheme: 'bearer', description: 'A read (`lb_read_…`) or scoped-read key. Scoped keys see only their scope.' },
+          viewerToken: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'lbv1',
+            description: 'Short-lived viewer token from POST /v1/viewer-tokens (≤ 1 h). Read routes only; sees only its scope.',
+          },
         },
       },
     },
