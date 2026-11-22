@@ -158,9 +158,9 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
           { type: 'page', id: 'site_a' },
         ],
       },
-      // Collisions: ingest trims ids, so these are STORED as tenant "t1", target "site_a" and action "booking.leak",
-      // but their original ids differ. The exact check on the stored payload keeps them out of those scopes.
-      { id: 'qa-collide-tenant', occurredAt: ts(8), action: 'booking.created', tenant: { id: 't1 ', name: 'Lookalike' }, targets: [site_a] },
+      // Whitespace-padded ids: ingest trims them, so these are STORED as tenant "t1", target "site_a" and action
+      // "booking.leak". Maintainer decision (#180): a scope names stored ids, so they belong to those scopes.
+      { id: 'qa-collide-tenant', occurredAt: ts(8), action: 'booking.created', tenant: { id: 't1 ', name: 'Tenant one' }, targets: [site_a] },
       {
         id: 'qa-collide-target',
         occurredAt: ts(9),
@@ -193,17 +193,35 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
       'qa-t2-child',
       'qa-t2-x',
     ];
-    const tenant1 = ['qa-collide-action', 'qa-collide-target', 'qa-dotted-ip', 'qa-t1-a1', 'qa-t1-b1', 'qa-t1-child', 'qa-t1-page'];
+    const tenant1 = [
+      'qa-collide-action',
+      'qa-collide-target',
+      'qa-collide-tenant',
+      'qa-dotted-ip',
+      'qa-t1-a1',
+      'qa-t1-b1',
+      'qa-t1-child',
+      'qa-t1-page',
+    ];
+    const siteIds = ['qa-collide-target', 'qa-collide-tenant', 'qa-t1-a1', 'qa-t1-child'];
     expect(await ids(read.secret)).toEqual(all);
-    // escape: collision — tenant id that differs only by whitespace (stored identically) stays out of the t1 scope.
     expect(await ids(t1.secret)).toEqual(tenant1);
-    // escape: collision — target id that differs only by whitespace stays out of the website scope.
-    expect(await ids(site.secret)).toEqual(['qa-t1-a1', 'qa-t1-child']);
-    // escape: collision — an action whose original does not start with the prefix stays out of the prefix scope.
-    expect(await ids(bookings.secret)).toEqual(['qa-collide-target', 'qa-t1-a1', 'qa-t1-b1']);
-    expect((await v1(t1.secret, '/events/qa-collide-tenant')).status).toBe(404);
-    expect((await v1(site.secret, '/events/qa-collide-target')).status).toBe(404);
-    expect((await v1(bookings.secret, '/events/qa-collide-action')).status).toBe(404);
+    expect(await ids(site.secret)).toEqual(siteIds);
+    expect(await ids(bookings.secret)).toEqual(['qa-collide-action', 'qa-collide-target', 'qa-collide-tenant', 'qa-t1-a1', 'qa-t1-b1']);
+    // decision (#180): whitespace-padded ids are their trimmed stored id — a scope shows exactly what the console shows
+    // for that stored id (tenant page, tenant:t1 filter), never more. Recorded here so it is a decision, not an accident.
+    const consoleView = await ids(read.secret, 'tenant:t1');
+    expect(consoleView).toEqual(tenant1);
+    for (const [secret, id] of [
+      [t1.secret, 'qa-collide-tenant'],
+      [site.secret, 'qa-collide-target'],
+      [bookings.secret, 'qa-collide-action'],
+    ] as const) {
+      const detail = await v1(secret, `/events/${id}`);
+      expect(detail.status, id).toBe(200);
+      // The event's original document still shows the id as it was sent.
+      expect(JSON.stringify((await detail.json()).payload)).toMatch(/"t1 "|"site_a "|" booking.leak"/);
+    }
     // Totals count in-scope events only.
     const totals = await (await v1(t1.secret, `/events?${new URLSearchParams({ from: '2026-01-01T00:00:00Z', limit: '1' })}`)).json();
     expect(totals.total).toBe(tenant1.length);
@@ -226,7 +244,7 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
         q,
       ).toBe(true);
       expect(
-        (await ids(site.secret, q)).every((id) => ['qa-t1-a1', 'qa-t1-child'].includes(id)),
+        (await ids(site.secret, q)).every((id) => siteIds.includes(id)),
         q,
       ).toBe(true);
     }
@@ -312,10 +330,10 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect(scopedGroups.values).toHaveLength(1);
     expect(scopedGroups.values[0]).toMatchObject({ value: 't1', label: 'Tenant one', count: tenant1.length });
     expect(scopedGroups.values[0]?.groups).toEqual([
+      { value: 'booking.created', label: 'booking.created', count: 3 },
       { value: 'auth.login', label: 'auth.login', count: 2 },
-      { value: 'booking.created', label: 'booking.created', count: 2 },
     ]);
-    expect(scopedGroups.values[0]?.groupsOtherCount).toBe(tenant1.length - 4);
+    expect(scopedGroups.values[0]?.groupsOtherCount).toBe(tenant1.length - 5);
     // Two target levels expand ONE target tuple: qa-t1-page has website:site_x and page:site_a, never website:site_a.
     const targetPairs = await facets(read.secret, { field: 'target', by: 'target.type', q: 'id:qa-t1-page', limit: '10' });
     expect(targetPairs.values.map((v) => [v.value, v.groups?.map((g) => g.value)]).sort()).toEqual([
@@ -383,7 +401,7 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect((await mint(token.token, { scope: { tenantId: 't1' } })).status).toBe(403);
     expect((await mint(result.ingestKey.secret, { scope: { tenantId: 't1' } })).status).toBe(401);
 
-    expect(await ids(token.token)).toEqual(['qa-t1-a1', 'qa-t1-child']);
+    expect(await ids(token.token)).toEqual(siteIds);
     expect(await ids(token.token, 'tenant:t2 OR target:site_b')).toEqual([]);
     expect((await v1(token.token, '/events/qa-t2-x')).status).toBe(404);
     // A token is a read credential only: never for ingest.
@@ -431,7 +449,7 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line) as { id: string });
-    expect(lines.map((e) => e.id).sort()).toEqual(['qa-t1-a1', 'qa-t1-child']);
+    expect(lines.map((e) => e.id).sort()).toEqual(siteIds);
     const csv = await (await v1(masked.secret, `/export?${new URLSearchParams({ format: 'csv', from: '2026-01-01T00:00:00Z' })}`)).text();
     // Row ids only (qa-t1-child's own parentEventId legitimately names its out-of-scope parent).
     expect(
@@ -454,7 +472,7 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     const completed = JSON.parse(receipts[0]?.payload ?? '{}');
     expect(completed.actor).toMatchObject({ type: 'api_key', id: read.key.id, name: 'CMS server' });
     expect(completed.metadata.access).toMatchObject({ via: 'viewer_token', apiKeyId: read.key.id, viaToken: true, tenantId: 't1' });
-    expect(completed.metadata.export.rows).toBe(2);
+    expect(completed.metadata.export.rows).toBe(siteIds.length);
 
     // Evidence export with a scoped (unmasked) key across export page boundaries (200 rows per page): every in-scope
     // row exactly once, original payload text unchanged (19-digit number kept), nothing from other tenants.
@@ -502,7 +520,7 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect(createApiKeyResponseSchema.parse(await extended.json()).key.expiresAt).toBe(later);
     expect((await console_(ownerCookie, `${keysPath}/${site.key.id}/roll`, 'POST', { expiresAt: '2020-01-01T00:00:00Z' })).status).toBe(422);
     expect((await console_(ownerCookie, `${keysPath}/${site.key.id}/roll`, 'POST', { scope: { tenantId: 't2' } })).status).toBe(422);
-    expect(await ids(replacement.secret)).toEqual(['qa-t1-a1', 'qa-t1-child']);
+    expect(await ids(replacement.secret)).toEqual(siteIds);
     const listed = (await (await console_(ownerCookie, keysPath)).json()).data.map((k: unknown) => apiKeySchema.parse(k));
     expect(listed.find((k: { id: string }) => k.id === t1.key.id)).toMatchObject({ kind: 'scoped-read', scope: { tenantId: 't1' } });
     await prisma.apiKey.update({ where: { id: t1.key.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
@@ -511,6 +529,31 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect(expiredRoll.status).toBe(409);
     expect((await expiredRoll.json()).error.code).toBe('key_expired');
     expect((await console_(ownerCookie, `${keysPath}/${t1.key.id}/roll`, 'POST', { expiresAt: later })).status).toBe(201);
+
+    // Numeric tenant ids (rule from #174/#184): a numeric identifier is stored as the plain decimal text of its exact
+    // value (42, 42.0 and 4.2e1 are stored as "42"); a string identifier is stored exactly as sent. A scope written as
+    // "42" therefore matches the number 42 in any spelling and the string "42", not the string "42.0". Before that
+    // ingest change numbers are not stored as ids at all, so no scope sees them; the assertions follow what is stored.
+    const numericBody = `{"events":[${[
+      ['qa-num-42', '42'],
+      ['qa-num-42-0', '42.0'],
+      ['qa-num-exp', '4.2e1'],
+      ['qa-num-string', '"42"'],
+      ['qa-num-string-dot', '"42.0"'],
+    ]
+      .map(([id, tenant]) => `{"id":"${id}","occurredAt":"${ts(13)}","action":"booking.created","tenant":{"id":${tenant}}}`)
+      .join(',')}]}`;
+    const numeric = await app.request('/v1/events', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${result.ingestKey.secret}`, 'Content-Type': 'application/json' },
+      body: numericBody,
+    });
+    expect((await numeric.json()).accepted).toBe(5);
+    const storedTenant = async (id: string) => (await (await v1(read.secret, `/events/${id}`)).json()).event.tenant?.id ?? '';
+    const numbersStored = (await storedTenant('qa-num-42')) === '42';
+    for (const id of ['qa-num-42-0', 'qa-num-exp']) expect(await storedTenant(id)).toBe(numbersStored ? '42' : '');
+    const t42 = await createKey({ name: 'Numeric tenant', kind: 'scoped-read', scope: { tenantId: '42' } });
+    expect(await ids(t42.secret)).toEqual(numbersStored ? ['qa-num-42', 'qa-num-42-0', 'qa-num-exp', 'qa-num-string'] : ['qa-num-string']);
 
     // escape: rollback — restricted keys (scope or expiry) carry 48 random characters, which releases before scoped
     // keys reject (their authenticator accepts exactly 32), so a rollback fails closed instead of widening them.

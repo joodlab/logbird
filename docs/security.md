@@ -30,3 +30,16 @@ The server accepts a token only when:
 No token table is kept. To cut off all tokens of a key, revoke the key.
 
 See [scoped read access](scoped-read-access.md) for what a scope enforces.
+
+## Scopes name stored ids
+
+A scope (on a scoped read key or a viewer token) is enforced on the stored, indexed ids. It never reads the original
+payload: that would cost a JSON parse per candidate event (measured at 5-10x slower for large tenants). Stored ids are
+what the console uses for tenant pages, filters, facets and exports, so a scope shows exactly what the console shows
+for that id, never more.
+
+The one case where two different sent ids share a stored id is surrounding whitespace, which ingest has trimmed so
+far: `" biz_5"` is stored, and scoped, as `biz_5`. Capped or Unicode-repaired ids can't match, because scope ids must
+already be in stored form. This is a maintainer decision (#180); ingest is being changed to store ids exactly as
+sent, after which it applies only to events stored before that change. A read-only operator query that counts
+stored ids differing from the sent ones ships with that change.

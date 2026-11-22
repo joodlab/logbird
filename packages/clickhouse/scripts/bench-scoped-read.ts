@@ -9,7 +9,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { ReadScope } from '@logbird/contracts';
-import { createClickHouseClient, facets, getEvent, purgeProject, searchEvents } from '../src/index';
+import { createClickHouseClient, exportEvents, facets, getEvent, purgeProject, searchEvents } from '../src/index';
 
 const total = Number(process.argv[2] ?? 1_000_000);
 const runs = Number(process.argv[3] ?? 30);
@@ -97,6 +97,16 @@ try {
         if (!(await getEvent(ch, p, id, scope))) throw new Error(`detail ${id} missing for ${label}`);
       }),
     );
+    // Full CSV export of the last hour (every page, every row), as GET /v1/export streams it.
+    const hour = { from: new Date(now - 3_600_000).toISOString(), to: day.to };
+    let rows = 0;
+    results.push(
+      await measure(`export 1h csv ${label}`, async () => {
+        rows = 0;
+        for await (const chunk of exportEvents(ch, p, { ...hour, q: '', format: 'csv' }, undefined, undefined, { scope })) rows += chunk.split('\n').length - 1;
+      }),
+    );
+    console.log(JSON.stringify({ exportRows: label, rows }));
   }
   console.log(JSON.stringify({ summary: results }));
 } finally {

@@ -14,7 +14,7 @@ The recommended pattern is **one unscoped `read` key on your server**. For every
 viewer token for that business or website and gives only the token to the browser.
 
 > **Status.** In this release the scope is enforced in Logbird's query builders on every read path (below). A second,
-> independent layer (ClickHouse row policies on the tenant) follows in the next release. Until then, treat the query
+> independent layer (ClickHouse row policies on the tenant) follows in a later release. Until then, treat the query
 > builders as the single enforcement layer.
 
 ## The scope
@@ -34,10 +34,26 @@ viewer token for that business or website and gives only the token to the browse
 - Events without a tenant are never visible to a scoped caller.
 - One tenant per scope in this version.
 
-The scope is a predicate the server ANDs **outside** your `q` filter. It is checked on the indexed search columns and,
-exactly, on the original stored event, so two ids that look the same after storage normalization (whitespace, length
-caps) never see each other's events. Nothing in `q` can widen it: `tenant:other`,
-`OR`, negation, `tenant:*` and free text all stay inside the scope. SQL mode (`lang=sql`) is console-only.
+The scope is a predicate the server ANDs **outside** your `q` filter, on the indexed search columns. Nothing in `q`
+can widen it: `tenant:other`, `OR`, negation, `tenant:*` and free text all stay inside the scope. SQL mode
+(`lang=sql`) is console-only.
+
+### A scope names stored ids
+
+A scope matches the ids Logbird **stored**, the same ids the console shows on a tenant's page and matches with
+`tenant:<id>`. A scoped key never sees more than the console shows for that same stored id.
+
+- Today ingest trims surrounding whitespace from ids. Events sent with `" biz_5"` or `"biz_5 "` are stored as
+  `biz_5` and belong to the `biz_5` scope, as they already do on every other Logbird surface. Ids are being changed
+  to be stored exactly as sent; once that ships, this applies only to events stored before it.
+- Ingest also caps ids (256 characters) and replaces invalid Unicode. Scope ids are refused unless they are already
+  in stored form (at most 250 characters, no surrounding whitespace, no U+FFFD), so a capped or repaired stored id can
+  never match a scope.
+- An id sent as a JSON number is not stored as an id today, so no scope sees it. With the change above, a numeric
+  identifier is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are stored as `"42"`); a
+  string identifier is stored exactly as sent. A scope written as `"42"` then matches the number 42 in any spelling
+  and the string `"42"`, not the string `"42.0"`.
+- A read-only operator query that counts stored ids differing from the sent ones ships with the ingest change.
 
 ## Where the scope applies
 
@@ -72,9 +88,8 @@ POST /api/projects/:projectId/keys
 ```
 
 - `scope` is required for `scoped-read` and refused on other kinds. All read kinds use `lb_read_…` secrets.
-- Scope identifiers must be exactly what your events send: at most 250 characters (60 for a target type, 190 for an
-  action prefix), with no leading or trailing whitespace and no invalid Unicode. Tenant and target ids must be JSON
-  strings in your events; an id sent as a number is not stored as an id and is never visible to a scoped reader.
+- Scope identifiers must be in stored form: at most 250 characters (60 for a target type, 190 for an action prefix),
+  with no leading or trailing whitespace and no invalid Unicode (see [A scope names stored ids](#a-scope-names-stored-ids)).
 - Keys with a scope or an expiry have 48 random characters after the prefix (other keys have 32). Releases before
   scoped keys reject that format, so if you roll back, these keys stop working instead of becoming project-wide.
 - `embedOrigins` (read kinds only): browser origins allowed to use this key's viewer tokens, for example
@@ -137,3 +152,11 @@ the API key as the actor and `metadata.access = { via, apiKeyId, viaToken, tenan
 ## Security notes
 
 See [security](security.md#viewer-tokens) for the token format and secret derivation.
+
+## Limits
+
+- One tenant per scope.
+- A target scope matches any indexed target of an event. Events stored by releases that indexed only the first 64
+  targets are matched on those 64 only.
+- Field masks are presets (`ip`, `user_agent`, `actor_email`), not arbitrary paths.
+- Revoking a key reaches its viewer tokens within 30 seconds.

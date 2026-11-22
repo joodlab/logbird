@@ -433,12 +433,16 @@ Full guide: [scoped read access](scoped-read-access.md); token format and secret
   `{tenantId, target?: {type, id}, actionPrefixes?, mask?}`; `embedOrigins` and `expiresAt` are optional. All are
   fixed at creation. Rolling copies scope and origins and keeps the absolute expiry unless the roll body passes a new
   `expiresAt`; rolling an expired key without one answers 409 `key_expired`. Expired keys authenticate like revoked
-  ones (401).
+  ones (401). Keys with a scope or expiry have 48-character secrets (earlier releases accept only 32, so they fail closed
+  after a rollback), and the Postgres trigger `ApiKey_roll_fence` refuses a replacement that drops the replaced key's
+  scope or expiry (409 `key_restricted`).
 - **Enforcement:** `scopePredicate` (`packages/clickhouse/src/scope.ts`) is ANDed outside the compiled `q` in
   `where()`, so search, totals, facets and export pages share it; detail tests it on the canonical stored row, stops
   the parent chain at the first out-of-scope parent and scopes child/operation counts. The target matches type and id
-  on the same array position. Scoped reads never use rollups. Search cursors carry a scope fingerprint and are refused
-  (422 `validation_error`) under any other scope, including unscoped.
+  on the same array position. Scoped reads never use rollups. Search cursors carry a project+scope fingerprint and are
+  refused (422 `validation_error`) under any other scope, including unscoped. A scope names **stored** ids (checked on
+  columns, never the payload); scope ids must be in stored form (≤ 250 code units, no surrounding whitespace, no
+  U+FFFD), so only whitespace-trimmed ids share a scope, as they share every other surface (maintainer decision, #180).
 - **Viewer tokens:** `POST /v1/viewer-tokens` (read or scoped-read key; 60–3600 s, default 900) → `lbv1.<payload>.<mac>`,
   HMAC-SHA256 with an HKDF key (`logbird-viewer-token-v1`) from `BETTER_AUTH_SECRET`. A token's scope must be within
   the key's (403 `scope_exceeded`). Verification: MAC, `exp`/`iat` with 30 s skew, and the minting key unrevoked,
