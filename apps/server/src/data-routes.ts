@@ -82,7 +82,7 @@ function queryClient(q: { lang?: string }) {
  * and the tenant (phase 2: a second, database-enforced layer under the query builders' scope predicate). Unscoped
  * reads, and installations without the query user, use the main client as before.
  */
-const readerClient = (scope: s.ReadScope | null) => (scope && queryClickhouse ? queryClickhouse : clickhouse);
+const readerClient = (scope: s.ReadScope | null) => (scope && queryClickhouse ? ch.withTenant(queryClickhouse, scope.tenantId) : clickhouse);
 const query = <T extends z.ZodType>(schema: T) =>
   validator('query', schema, (r, c) => {
     const text = c.req.query('q') ?? '';
@@ -175,7 +175,7 @@ export const publicRoutes = new Hono<AppEnv>()
     doc('Event detail', s.eventDetailSchema, 200, 'readKeyOrViewerToken'),
     async (c) => {
       const { scope } = c.get('reader');
-      const detail = found(await ch.getEvent(readerClient(scope), c.get('project').id, c.req.param('eventId'), scope));
+      const detail = found(await ch.getEvent(readerClient(scope), c.get('project').id, c.req.param('eventId'), scope, clickhouse));
       const mask = scope?.mask;
       return c.json(
         s.eventDetailSchema.parse(
@@ -418,7 +418,8 @@ async function runExport(c: Context<AppEnv>, input: s.ExportQuery, caller: Expor
           stream,
           requested: event,
           unknown,
-          sql: input.lang === 'sql',
+          // The restricted profile allows 1 GiB per query: SQL mode and scoped (restricted) exports take both slots.
+          sql: input.lang === 'sql' || Boolean(caller.client && ch.isQueryClient(caller.client)),
           receivedBefore: new Date(clock),
           signal: c.req.raw.signal,
         });

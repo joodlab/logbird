@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createClickHouseClient, createQueryClickHouseClient, insertEvents } from './client';
+import { createClickHouseClient, createQueryClickHouseClient, insertEvents, withTenant } from './client';
 import { normalizeEvent } from './normalize';
-import { entityProfile, listFields, liveEvents, overview, projectStats, purgeProject, searchEvents } from './queries';
+import { entityProfile, getEvent, listFields, liveEvents, overview, projectStats, purgeProject, read, searchEvents } from './queries';
 
 /**
  * This suite probes the row policies the migrations install on the `logbird` database (and writes a probe table and
@@ -200,7 +200,13 @@ describe.runIf(enabled)('#138 phase 2: database-enforced tenant binding for scop
   beforeAll(async () => {
     const rows = ['t1', 't2', ''].map((tenant, n) => {
       const row = normalizeEvent(
-        { id: `tenant-${n}`, action: 'row.policy.tenant', tenant: tenant ? { id: tenant } : undefined, occurredAt: now.toISOString() },
+        {
+          id: `tenant-${n}`,
+          action: 'row.policy.tenant',
+          tenant: tenant ? { id: tenant } : undefined,
+          metadata: { policy: 'tenant' },
+          occurredAt: now.toISOString(),
+        },
         { projectId: tenantProject, receivedAt: now },
       );
       if (!row.ok) throw new Error('Fixture normalization failed');
@@ -257,7 +263,60 @@ describe.runIf(enabled)('#138 phase 2: database-enforced tenant binding for scop
         )[0]?.n,
       );
     expect(await count({ SQL_logbird_tenant: 't1' })).toBe(0);
-    expect(await count({})).toBeGreaterThanOrEqual(0);
+    expect(await count({})).toBeGreaterThan(0); // the rollup really has rows for this project
+  });
+
+  it('a tenant-bound client stays bound even when the query carries no scope at all', async () => {
+    const bound = withTenant(restricted!, 't1');
+    // No scope predicate, no scope parameter: only the row policy stands between this query and other tenants.
+    const rows = await read<{ tenant_id: string }>(bound, 'SELECT tenant_id FROM events WHERE project_id={p:String} ORDER BY tenant_id', {
+      p: tenantProject,
+    });
+    expect(rows.map((r) => r.tenant_id)).toEqual(['t1']);
+    // A scope parameter naming another tenant is refused before the query runs.
+    await expect(read(bound, 'SELECT 1 FROM events WHERE project_id={p:String}', { p: tenantProject, scope_tenant: 't2' })).rejects.toThrow(
+      'Scope tenant does not match the bound tenant',
+    );
+    expect(() => withTenant(main!, 't1')).toThrow();
+  });
+
+  it('detail keeps the project-wide canonical version: a later version of another tenant is not revealed', async () => {
+    // Two stored versions of one id (legacy duplicates): the canonical (oldest receipt) belongs to tA, a later one to tB.
+    const dupe = `dup-${randomUUID()}`;
+    const version = (tenant: string, receivedAt: Date, extra: Record<string, unknown> = {}) => {
+      const row = normalizeEvent(
+        { id: dupe, action: 'row.policy.dup', tenant: { id: tenant }, occurredAt: receivedAt.toISOString(), ...extra },
+        {
+          projectId: tenantProject,
+          receivedAt,
+        },
+      );
+      if (!row.ok) throw new Error('Fixture normalization failed');
+      return row.row;
+    };
+    const child = normalizeEvent(
+      {
+        id: `child-${randomUUID()}`,
+        action: 'row.policy.child',
+        tenant: { id: 'tB' },
+        context: { parentEventId: dupe },
+        occurredAt: now.toISOString(),
+      },
+      { projectId: tenantProject, receivedAt: new Date(now.getTime() + 2000) },
+    );
+    if (!child.ok) throw new Error('Fixture normalization failed');
+    // Distinct occurrence times and separate inserts keep both versions (same-key rows are replaced by ReplacingMergeTree).
+    await insertEvents(main!, [version('tA', new Date(now.getTime() - 1000))]);
+    await insertEvents(main!, [version('tB', new Date(now.getTime() + 1000))]);
+    await insertEvents(main!, [child.row]);
+    const tB = withTenant(restricted!, 'tB');
+    expect(await getEvent(tB, tenantProject, dupe, { tenantId: 'tB' }, main!)).toBeNull();
+    const tA = await getEvent(withTenant(restricted!, 'tA'), tenantProject, dupe, { tenantId: 'tA' }, main!);
+    expect(tA?.event.tenant?.id).toBe('tA');
+    // Parent traversal stops at the out-of-scope canonical parent instead of following tB's later copy.
+    const ofChild = await getEvent(tB, tenantProject, child.row.event_id, { tenantId: 'tB' }, main!);
+    expect(ofChild?.event.id).toBe(child.row.event_id);
+    expect(ofChild?.parents).toEqual([]);
   });
 
   it('the application read path binds the scope tenant automatically', async () => {

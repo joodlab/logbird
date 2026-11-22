@@ -224,3 +224,23 @@ export function createQueryClickHouseClient(env = process.env): ClickHouseClient
 export function isQueryClient(ch: ClickHouseClient) {
   return restricted.has(ch);
 }
+const boundTenants = new WeakMap<ClickHouseClient, string>();
+/**
+ * The restricted query client bound to one tenant (#138 phase 2). Every query through it sends that tenant to the row
+ * policy, whatever the SQL or its parameters say, so a query that forgot the scope predicate still sees only the tenant.
+ */
+export function withTenant(ch: ClickHouseClient, tenantId: string): ClickHouseClient {
+  if (!restricted.has(ch)) throw new Error('Only the restricted query client can be bound to a tenant');
+  if (!tenantId) throw new Error('A tenant binding needs a tenant');
+  const bound = new Proxy(ch, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  restricted.add(bound);
+  boundTenants.set(bound, tenantId);
+  return bound;
+}
+/** The tenant a restricted client is bound to, if any. */
+export const boundTenant = (ch: ClickHouseClient) => boundTenants.get(ch);

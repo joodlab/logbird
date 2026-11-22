@@ -22,7 +22,7 @@ import type {
 import { EXPORT_SCHEMA_VERSION, pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
-import { isQueryClient } from './client';
+import { boundTenant, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
 import { projectMaintenance } from './maintenance-tag';
 import type { EventRow } from './normalize';
@@ -59,6 +59,13 @@ export async function read<T>(
   // expression. Bind per HTTP query, not on the shared client's session.
   const project = query_params.project ?? query_params.p;
   if (isQueryClient(ch) && (typeof project !== 'string' || !project)) throw new Error('Restricted query requires one project');
+  // A tenant-bound client always sends its tenant; a scope predicate in the query must name the same tenant.
+  const bound = boundTenant(ch);
+  if (bound !== undefined && typeof query_params.scope_tenant === 'string' && query_params.scope_tenant !== bound)
+    throw new Error('Scope tenant does not match the bound tenant');
+  const tenant = bound ?? (typeof query_params.scope_tenant === 'string' ? query_params.scope_tenant : '');
+  // Only SQL-mode filters carry the expression symbol: error reports name the language the caller actually used.
+  const lang = sqlExpression in query_params ? 'sql' : 'query';
   execution?.signal.throwIfAborted();
   const queryId = execution ? randomUUID() : undefined;
   let cancellation: Promise<void> | undefined;
@@ -83,12 +90,7 @@ export async function read<T>(
             ? { max_memory_usage: '134217728', max_bytes_to_read: '268435456', read_overflow_mode: 'throw' as const, max_threads: 2 }
             : {}),
           // Scoped reads bind their tenant (the scope predicate's parameter) so the row policy enforces it too (#138).
-          ...(isQueryClient(ch)
-            ? {
-                SQL_logbird_project: project as string,
-                SQL_logbird_tenant: typeof query_params.scope_tenant === 'string' ? query_params.scope_tenant : '',
-              }
-            : {}),
+          ...(isQueryClient(ch) ? { SQL_logbird_project: project as string, SQL_logbird_tenant: tenant } : {}),
         },
       })
     ).json<T>();
@@ -101,13 +103,13 @@ export async function read<T>(
       )
     )
       throw new QueryError('Query exceeded its resource budget', {
-        lang: isQueryClient(ch) ? 'sql' : 'query',
+        lang,
         reason: 'limit',
         start: null,
         end: null,
         hint: 'Narrow the time range or filter',
       });
-    if (isQueryClient(ch) && /SYNTAX_ERROR|Syntax error/.test(error instanceof Error ? error.message : ''))
+    if (lang === 'sql' && /SYNTAX_ERROR|Syntax error/.test(error instanceof Error ? error.message : ''))
       throw sqlSyntaxError(error, query, (query_params as Record<symbol, string>)[sqlExpression] ?? '');
     throw error;
   } finally {
@@ -270,17 +272,42 @@ export async function searchEvents(
 ): Promise<SearchResponse> {
   return (await searchPage(ch, projectId, q, compiled, false, undefined, undefined, scope)).page;
 }
-async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: ReadScope | null) {
+async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: ReadScope | null, canonicalClient?: ClickHouseClient) {
   const canonical = 'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp LIMIT 1';
   if (!scope) return (await read<EventRow>(ch, canonical, { p, id }))[0];
   const s = scopePredicate(scope);
+  if (canonicalClient && canonicalClient !== ch) {
+    // A row-policy-bound client only sees its tenant's rows, so it would pick the oldest version *of its tenant* as
+    // canonical. Choose the canonical version project-wide (pointer only, nothing returned to the caller), then fetch
+    // exactly that version through the bound client: if it belongs to another tenant, the caller gets nothing.
+    const [pointer] = await read<{ received_at: string; timestamp: string }>(
+      canonicalClient,
+      'SELECT received_at, timestamp FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp LIMIT 1',
+      { p, id },
+    );
+    if (!pointer) return;
+    return (
+      await read<EventRow>(
+        ch,
+        `SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} AND received_at={pointerReceived:DateTime64(3, 'UTC')} AND timestamp={pointerTimestamp:DateTime64(3, 'UTC')} AND ${s.sql} ORDER BY received_at,timestamp LIMIT 1`,
+        { p, id, pointerReceived: pointer.received_at, pointerTimestamp: pointer.timestamp, ...s.params },
+      )
+    )[0];
+  }
   // Pick the canonical stored row first, then test the scope on it: a scoped caller sees exactly the row an unscoped
   // reader sees, or nothing (never a different stored version that happens to match).
   return (await read<EventRow>(ch, `SELECT * FROM (${canonical}) WHERE ${s.sql}`, { p, id, ...s.params }))[0];
 }
 /** With a scope, an out-of-scope id is indistinguishable from an unknown one (null → 404). */
-export async function getEvent(ch: ClickHouseClient, projectId: string, eventId: string, scope?: ReadScope | null): Promise<EventDetail | null> {
-  const row = await eventRow(ch, projectId, eventId, scope);
+export async function getEvent(
+  ch: ClickHouseClient,
+  projectId: string,
+  eventId: string,
+  scope?: ReadScope | null,
+  /** With a row-policy-bound `ch`: the unrestricted client that picks the canonical version of each id. */
+  canonicalClient?: ClickHouseClient,
+): Promise<EventDetail | null> {
+  const row = await eventRow(ch, projectId, eventId, scope, canonicalClient);
   if (!row) return null;
   const parents: AuditEvent[] = [],
     seen = new Set([eventId]);
@@ -288,7 +315,7 @@ export async function getEvent(ch: ClickHouseClient, projectId: string, eventId:
   while (parent && !seen.has(parent) && parents.length < 100) {
     seen.add(parent);
     // The chain stops at the first parent outside the scope.
-    const r = await eventRow(ch, projectId, parent, scope);
+    const r = await eventRow(ch, projectId, parent, scope, canonicalClient);
     if (!r) break;
     parents.unshift(toEvent(r));
     parent = r.parent_event_id;

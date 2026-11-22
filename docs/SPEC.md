@@ -468,7 +468,10 @@ Full guide: [scoped read access](scoped-read-access.md); token format and secret
   `getSetting('SQL_logbird_tenant') = ''`, so a tenant-bound session sees none of their rows. The settings profile
   defaults `SQL_logbird_tenant` to '' (not CONST), so unscoped and SQL-mode queries are unchanged. Target and
   action-prefix limits stay in the query builders. Scoped reads then run under the query user's CONST limits (10 s,
-  5M rows read, 1 GiB) instead of the export budget.
+  5M rows read, 1 GiB) instead of the export budget; the scoped `total` count gets the same 10 s deadline (1 s on the main
+  client), and a scoped export takes both export admission slots, like SQL mode. The server binds the tenant to the
+  client itself (`withTenant`), so a query without the scope predicate still sends it. Detail picks the canonical version
+  of an id project-wide on the main client (pointer only) and fetches that version through the tenant-bound client.
 
 ### Webhook endpoint management
 
