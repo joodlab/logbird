@@ -108,3 +108,13 @@ it('never accepts a different number that rounds to the stored one, in either or
   expect(batch.rejected[0].code).toBe('duplicate_id_conflict');
   expect(await f.count()).toBe(3);
 });
+
+it('keeps a shallow event exact beside a deeply nested wrapper property, so a standalone retry matches', async () => {
+  const event = `{"id":"wrapped","action":"qa.wrapped","occurredAt":"${occurredAt}","metadata":{"snowflake":9007199254740993}}`;
+  const wrapped = await rawPost(`{"events":[${event}],"ignored":${'['.repeat(20_000)}1${']'.repeat(20_000)}}`);
+  expect(wrapped.status).toBe(202);
+  expect(await wrapped.json()).toMatchObject({ accepted: 1, ids: ['wrapped'], rejected: [] });
+  const retry = await rawPost(event);
+  expect(await retry.json()).toMatchObject({ accepted: 1, ids: ['wrapped'], rejected: [] });
+  expect(await f.count()).toBe(1);
+});

@@ -82,13 +82,16 @@ See [SDK redaction options](../packages/sdk/README.md#host-context-options-02).
 
 ### Numbers and ids
 
-Logbird stores every number with the exact digits it was sent with, including 64-bit
-integers and long decimals, and returns them as JSON numbers with those digits. Search
-matches them exactly: `metadata.orderId:9007199254740993`. Entity ids may be numbers, so
-integer primary keys work as sent. A numeric id is stored as the plain decimal text of its
-exact value (`42`, `42.0` and `4.2e1` are all stored as `"42"`); a string id is indexed
-as sent, with surrounding whitespace trimmed and a 256-character cap (the original
-payload always keeps it exactly). An event's own `id` must be a string (a numeric event id gets a fresh id
+Logbird stores every number with its exact value, including 64-bit integers and long
+decimals, and returns them as JSON numbers with those digits (the spelling may change:
+`19.90` comes back as `19.9`, `1e3` as `1000`). Search matches them exactly:
+`metadata.orderId:9007199254740993`. Entity ids may be numbers, so integer primary keys
+work as sent. A numeric id is stored as the plain decimal text of its exact value (`42`,
+`42.0` and `4.2e1` are all stored as `"42"`); if that is longer than 256 characters, as
+its scientific spelling (`1e300`); a number with more than 256 significant digits is not
+indexed (never truncated). A string id is indexed as sent, with surrounding whitespace
+trimmed and a 256-character cap (the original payload always keeps it exactly). An event
+nested more than 1,000 levels deep stores its long numbers as doubles and gets a warning. An event's own `id` must be a string (a numeric event id gets a fresh id
 and a warning).
 
 JavaScript numbers cannot hold integers above 2^53 − 1 (`Number.MAX_SAFE_INTEGER`):

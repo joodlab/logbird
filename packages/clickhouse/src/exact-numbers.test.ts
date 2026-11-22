@@ -138,13 +138,21 @@ it('stores a numeric id as the plain decimal of its exact value, one spelling pe
   expect(normalize(wire('{"action":"x","tenant":{"id":"42.0"}}')).row.tenant_id).toBe('42.0');
 });
 
-it('never truncates a long numeric id: one longer than the column is not indexed', () => {
-  const ids = (n: string) => normalize(wire(`{"action":"x","actor":{"id":${n}},"targets":[{"type":"t","id":${n}}]}`)).row;
+it('never truncates a long numeric id: plain if it fits, else unique scientific, else not indexed', () => {
+  const ids = (n: string) => normalize(wire(`{"action":"x","actor":{"id":${n}},"targets":[{"type":"order","id":${n}}]}`)).row;
   expect(ids('1e255')).toMatchObject({ actor_id: `1${'0'.repeat(255)}`, target_ids: [`1${'0'.repeat(255)}`] });
-  expect(ids('1e256')).toMatchObject({ actor_id: '', target_ids: [''] });
-  // Two 257-digit ids that share their first 256 digits must not merge.
-  const a = ids(`${'1'.repeat(256)}1`).actor_id;
-  const b = ids(`${'1'.repeat(256)}2`).actor_id;
-  expect([a, b]).toEqual(['', '']);
-  expect(ids(`1e${'9'.repeat(20)}`).actor_id).toBe('');
+  expect(ids('1e256')).toMatchObject({ actor_id: '1e256', target_ids: ['1e256'] });
+  expect(ids('2e256').target_ids).toEqual(['2e256']);
+  // Two 257-significant-digit ids that share their first 256 digits must not merge: neither is indexed.
+  expect([ids(`${'1'.repeat(256)}1`).actor_id, ids(`${'1'.repeat(256)}2`).actor_id]).toEqual(['', '']);
+});
+
+it('stores long numbers as doubles with a warning only for events nested deeper than the exactness bound', () => {
+  const deep = `{"action":"x","metadata":{"n":12345678901234567891,"deep":${'['.repeat(1100)}1${']'.repeat(1100)}}}`;
+  const result = normalize(wire(deep));
+  expect(result.warning).toContain('Nested deeper than 1000 levels');
+  expect(result.row.attributes['metadata.n']).toBe('12345678901234567000');
+  const shallow = normalize(wire('{"action":"x","metadata":{"n":12345678901234567891,"deep":[[[1]]]}}'));
+  expect(shallow.warning).toBeNull();
+  expect(shallow.row.attributes['metadata.n']).toBe('12345678901234567891');
 });

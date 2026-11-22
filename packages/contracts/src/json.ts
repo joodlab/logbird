@@ -100,9 +100,144 @@ export function parseJsonExact(text: string): unknown {
       return raw(context.source);
     } as (this: unknown, key: string, value: unknown) => unknown);
   } catch (error) {
-    // The reviver recurses; a document nested past its stack depth (thousands of levels) is parsed like before
-    // rather than refused. Its inexact numbers then round as plain JSON.parse does.
-    if (error instanceof RangeError) return JSON.parse(text);
+    // The reviver recurses; a document nested past its stack depth (thousands of levels) is parsed iteratively, with
+    // the same values and exact numbers, instead of being refused or rounded.
+    if (error instanceof RangeError) return parseJsonExactIterative(text);
     throw error;
   }
+}
+
+// Control characters are exactly what JSON forbids unescaped inside strings.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: JSON string grammar excludes U+0000–U+001F
+const STRING_TOKEN = /"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/y;
+const NUMBER_TOKEN = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+type Frame = { container: unknown[] | Record<string, unknown>; key: string };
+
+/**
+ * JSON.parse semantics without recursion (explicit stack), keeping numbers a double cannot hold as raw JSON values.
+ * Duplicate keys keep the first position with the last value, and `__proto__` is an own data property, as in
+ * JSON.parse. Only used when the reviver overflows, and where exact JSON is supported.
+ */
+export function parseJsonExactIterative(text: string): unknown {
+  const raw = json.rawJSON as (text: string) => RawJson;
+  const n = text.length;
+  let i = 0;
+  const fail = (): never => {
+    throw new SyntaxError(`Unexpected token in JSON at position ${i}`);
+  };
+  const ws = () => {
+    for (let c = text.charCodeAt(i); c === 32 || c === 9 || c === 10 || c === 13; c = text.charCodeAt(++i));
+  };
+  const readString = (): string => {
+    STRING_TOKEN.lastIndex = i;
+    const m = STRING_TOKEN.exec(text);
+    if (!m) return fail();
+    i = STRING_TOKEN.lastIndex;
+    return JSON.parse(m[0]) as string;
+  };
+  const stack: Frame[] = [];
+  let root: unknown;
+  const put = (value: unknown) => {
+    const top = stack.at(-1);
+    if (!top) root = value;
+    else if (Array.isArray(top.container)) top.container.push(value);
+    else Object.defineProperty(top.container, top.key, { value, writable: true, enumerable: true, configurable: true });
+  };
+  const readKey = (frame: Frame) => {
+    ws();
+    if (text[i] !== '"') fail();
+    frame.key = readString();
+    ws();
+    if (text[i] !== ':') fail();
+    i++;
+  };
+  let expectValue = true;
+  for (;;) {
+    ws();
+    if (expectValue) {
+      const c = text[i];
+      if (c === '{' || c === '[') {
+        i++;
+        const container: unknown[] | Record<string, unknown> = c === '[' ? [] : {};
+        put(container);
+        const frame: Frame = { container, key: '' };
+        stack.push(frame);
+        ws();
+        if (text[i] === (c === '[' ? ']' : '}')) {
+          i++;
+          stack.pop();
+          expectValue = false;
+        } else if (c === '{') readKey(frame);
+        continue;
+      }
+      expectValue = false;
+      if (c === '"') put(readString());
+      else if (text.startsWith('true', i)) {
+        put(true);
+        i += 4;
+      } else if (text.startsWith('false', i)) {
+        put(false);
+        i += 5;
+      } else if (text.startsWith('null', i)) {
+        put(null);
+        i += 4;
+      } else {
+        NUMBER_TOKEN.lastIndex = i;
+        const m = NUMBER_TOKEN.exec(text);
+        if (!m) fail();
+        const token = (m as RegExpExecArray)[0];
+        i = NUMBER_TOKEN.lastIndex;
+        const value = Number(token);
+        put(isExactNumber(token, value) ? value : raw(token));
+      }
+      continue;
+    }
+    const top = stack.at(-1);
+    if (!top) {
+      if (i !== n) fail();
+      return root;
+    }
+    const c = text[i];
+    if (c === ',') {
+      i++;
+      if (!Array.isArray(top.container)) readKey(top);
+      expectValue = true;
+    } else if (c === (Array.isArray(top.container) ? ']' : '}')) {
+      i++;
+      stack.pop();
+    } else fail();
+  }
+}
+
+/** Nesting depth up to which raw numbers are kept: deeper, JSON.stringify with raw values overflows the stack. */
+export const EXACT_NUMBER_MAX_DEPTH = 1000;
+/**
+ * When `value` nests deeper than EXACT_NUMBER_MAX_DEPTH and holds raw JSON numbers, replace them in place with plain
+ * doubles (what JSON.parse gives) and return true. Iterative, so depth itself never overflows.
+ */
+export function roundDeepRawNumbers(value: unknown, maxDepth = EXACT_NUMBER_MAX_DEPTH): boolean {
+  let deep = false;
+  let raw = false;
+  const stack: [unknown, number][] = [[value, 1]];
+  while (stack.length && !(deep && raw)) {
+    const [node, depth] = stack.pop() as [unknown, number];
+    if (isRawJson(node)) raw = true;
+    else if (node !== null && typeof node === 'object') {
+      if (depth > maxDepth) deep = true;
+      for (const child of Object.values(node)) stack.push([child, depth + 1]);
+    }
+  }
+  if (!(deep && raw)) return false;
+  const nodes: unknown[] = [value];
+  while (nodes.length) {
+    const node = nodes.pop();
+    if (node === null || typeof node !== 'object' || isRawJson(node)) continue;
+    const record = node as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      const child = record[key];
+      if (isRawJson(child)) record[key] = Number(child.rawJSON);
+      else nodes.push(child);
+    }
+  }
+  return true;
 }

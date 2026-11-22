@@ -18,12 +18,9 @@ export const severitySchema = z.enum(SEVERITIES);
 
 const id = z.string().min(1).max(256);
 /** Entity ids may also be numbers (integer keys); a number is stored as the plain decimal of its exact value. */
-const entityId = z.union([
-  id,
-  z.number(),
-  // parseJsonExact keeps a number a double cannot hold as a raw JSON value with its exact digits.
-  z.custom<RawJson>((value) => isRawJson(value) && /^-?\d/.test(value.rawJSON), 'expected a number').meta({ type: 'number' }),
-]);
+// parseJsonExact keeps a number a double cannot hold as a raw JSON value with its exact digits.
+const rawNumber = z.custom<RawJson>((value) => isRawJson(value) && /^-?\d/.test(value.rawJSON), 'expected a number').meta({ type: 'number' });
+const entityId = z.union([id, z.number(), rawNumber]);
 const shortText = z.string().max(512);
 
 export const actorInputSchema = z.looseObject({
@@ -74,7 +71,7 @@ export const eventInputSchema = z.looseObject({
     .describe('Stable string id. The trimmed key is limited to 256 UTF-16 code units. Retries resend identical parsed content.')
     .optional(), // stable event id; retries resend identical content
   action: z.string().min(1).max(200),
-  occurredAt: z.union([z.string(), z.number()]).optional(), // ISO-8601 or epoch ms; defaults to receive time
+  occurredAt: z.union([z.string(), z.number(), rawNumber]).optional(), // ISO-8601 or epoch ms; defaults to receive time
   environment: z.string().max(64).optional(), // default "production"
   outcome: z.string().max(32).optional(), // recommended: one of OUTCOMES; default "success"
   severity: z.string().max(32).optional(), // recommended: one of SEVERITIES; default "info"

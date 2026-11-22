@@ -133,7 +133,13 @@ it('hashes huge equal exponents the same way and parses deep documents without f
   const { canonicalDecimal: c } = await import('./json');
   expect(c('1e1000000000000000')).toBe('1e1000000000000000');
   const deep = `${'['.repeat(5000)}12345678901234567891${']'.repeat(5000)}`;
-  expect(() => parseJsonExact(deep)).not.toThrow();
+  let leaf: unknown = parseJsonExact(deep);
+  while (Array.isArray(leaf)) leaf = leaf[0];
+  expect(rawJsonText(leaf)).toBe('12345678901234567891');
+  // A deep wrapper property never rounds a shallow event next to it.
+  const body = `{"events":[{"action":"x","metadata":{"snowflake":9007199254740993}}],"ignored":${'['.repeat(20_000)}1${']'.repeat(20_000)}}`;
+  const parsed = parseJsonExact(body) as { events: { metadata: unknown }[] };
+  expect(JSON.stringify(parsed.events[0]?.metadata)).toBe('{"snowflake":9007199254740993}');
 });
 
 it('rejects a raw JSON value that is not a number in the entity id contract', async () => {

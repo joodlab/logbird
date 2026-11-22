@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { isRawJson, plainDecimal } from '@logbird/contracts';
+import { canonicalDecimal, EXACT_NUMBER_MAX_DEPTH, isRawJson, plainDecimal, rawJsonText, roundDeepRawNumbers } from '@logbird/contracts';
 import { resolveTimestamp } from './timestamp';
 
 function uuidv7() {
@@ -24,11 +24,19 @@ const wellFormed = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|
 // Numbers (ids from integer keys, numeric names) are indexed by their exact decimal text, like a string would be.
 // Legacy (pre-v1) receipt fingerprints froze the old columns, where a number indexed as ''.
 const textOf = (v: unknown, cap: number, numbers: boolean): string => {
-  // A numeric id is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are all "42"). One whose
-  // plain decimal is longer than the column is not indexed: truncating could merge two distinct ids.
-  if (typeof v !== 'string') return (numbers ? plainDecimal(v, cap) : null) ?? '';
+  // A numeric id is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are all "42"); when that is
+  // longer than the column, as its canonical scientific spelling (1e256), which is unique per value. Only a number
+  // with more significant digits than the column holds is not indexed: truncating could merge distinct ids.
+  if (typeof v !== 'string') return (numbers ? numericId(v, cap) : null) ?? '';
   return capText(wellFormed(v.trim()), cap);
 };
+function numericId(v: unknown, cap: number): string | null {
+  const plain = plainDecimal(v, cap);
+  if (plain !== null) return plain;
+  const text = rawJsonText(v);
+  const scientific = text === null ? null : canonicalDecimal(text);
+  return scientific !== null && scientific.length <= cap ? scientific : null;
+}
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
 const isNumber = (v: unknown) => typeof v === 'number' || isRawJson(v);
 export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string; legacyColumns?: boolean }) {
@@ -43,6 +51,9 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   if (typeof e.action !== 'string') return { ok: false as const, reason: 'action must be a string' };
   if (typeof e.id === 'string' && (e.id.includes('\u0000') || /[\uD800-\uDFFF]/u.test(e.id) || e.id.trim().length > 256))
     return { ok: false as const, reason: 'invalid_event_id: id must be valid Unicode, at most 256 UTF-16 code units, and contain no NUL' };
+  // Exactness is bounded by depth: deeper than this, long numbers are stored as doubles (as JSON.parse gives) and the
+  // caller is warned; stringifying raw values that deep would overflow the stack.
+  const roundedDeep = roundDeepRawNumbers(input);
   let payload: string;
   try {
     payload = JSON.stringify(input);
@@ -109,6 +120,7 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   const warning =
     [
       occurredAtProblem ? `${occurredAtProblem}; stored at receive time` : null,
+      roundedDeep ? `Nested deeper than ${EXACT_NUMBER_MAX_DEPTH} levels: long numbers were stored as doubles.` : null,
       isNumber(e.id) ? 'Numeric id is not a stable event id; send a string id for safe retries.' : null,
     ]
       .filter(Boolean)
