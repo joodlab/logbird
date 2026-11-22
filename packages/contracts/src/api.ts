@@ -126,11 +126,10 @@ export const FACET_FIELDS = [
   'target.type',
   'source',
 ] as const;
-/** Every query-language field key and alias (`QUERY_FIELDS`), all of which can be faceted (#140). */
-export const FACETABLE_FIELDS = [...new Set([...FACET_FIELDS, ...QUERY_FIELDS.flatMap((f) => [f.key, ...(f.aliases ?? [])])])] as [
-  string,
-  ...string[],
-];
+/** Facets group stored fields. Virtual selectors such as record: are available in q. */
+export const FACETABLE_FIELDS = [
+  ...new Set([...FACET_FIELDS, ...QUERY_FIELDS.filter(({ column }) => column).flatMap(({ key, aliases }) => [key, ...(aliases ?? [])])]),
+] as [string, ...string[]];
 /** Any envelope field, or any attribute key as `attr.<path>` or `attributes.<path>` (array-valued attributes count each element). */
 export const facetFieldSchema = z.union([
   z.enum(FACETABLE_FIELDS),
@@ -138,7 +137,8 @@ export const facetFieldSchema = z.union([
   z
     .string()
     .regex(/^(?:attr|attributes)\..+/)
-    .refine((field) => field.replace(/^(?:attr|attributes)\./, '').length <= 4096, 'Attribute path exceeds 4096 characters.'),
+    .refine((field) => field.replace(/^(?:attr|attributes)\./, '').length <= 4096, 'Attribute path exceeds 4096 characters.')
+    .meta({ description: '`attr.<path>` or `attributes.<path>`; the path after the prefix is at most 4096 characters.' }),
 ]);
 export const facetQuerySchema = rangeQuerySchema.extend({
   field: facetFieldSchema.meta({ example: 'attr.metadata.missing' }),
@@ -163,6 +163,13 @@ export const facetResponseSchema = z.object({
 });
 export type FacetResponse = z.infer<typeof facetResponseSchema>;
 /** `GET /v1/facets`: the console schema without SQL mode (`lang=sql` is console-only). */
+/**
+ * The overview's "Recent problems": events whose outcome is one of these OR whose severity is this. The server lists
+ * them and the console's "View all" opens exactly the same group, both from these constants.
+ */
+export const RECENT_PROBLEM_OUTCOMES = ['failure', 'denied'] as const;
+export const RECENT_PROBLEM_SEVERITY = 'critical';
+
 export const publicFacetQuerySchema = facetQuerySchema.extend({ lang: z.literal('query').optional() });
 
 /* ------------------------------------------------------------------ */
@@ -187,7 +194,7 @@ export const overviewResponseSchema = z.object({
   topActors: z.array(topItem.extend({ type: z.string() })),
   topTenants: z.array(topItem),
   topExecutors: z.array(topItem.extend({ type: z.string() })),
-  recentProblems: z.array(eventSchema), // latest failure/denied/critical
+  recentProblems: z.array(eventSchema), // latest RECENT_PROBLEM_OUTCOMES or RECENT_PROBLEM_SEVERITY events
   ingest: z.object({
     lastEventAt: z.string().nullable(),
     eventsLastHour: z.number().int(),
@@ -221,7 +228,12 @@ export type EntitySort = z.infer<typeof entitySortSchema>;
 
 export const entityListQuerySchema = z.object({
   kind: entityKindSchema,
-  q: z.string().max(200).optional(), // fuzzy match on id + name
+  /**
+   * Search by id and name. Results rank by match first (exact id, id prefix, name prefix, substring, fuzzy; a record's
+   * bare id counts as its id), then by `sort`, so an exact id always leads whatever the limit. One or two characters
+   * match only ids and names that start with them.
+   */
+  q: z.string().max(1024).optional(),
   type: z.string().optional(),
   /** events: most active first (then most recently seen); lastSeen: most recent first; name: A→Z. */
   sort: entitySortSchema.default('events'),
@@ -229,6 +241,16 @@ export const entityListQuerySchema = z.object({
   cursor: z.string().optional(),
 });
 export const entityListResponseSchema = z.object({ data: z.array(entitySchema), nextCursor: z.string().nullable() });
+
+export const entityMetadataQuerySchema = z.object({
+  /** For targets, selects the original type when more than one pair can share the composite entity id. */
+  targetType: z.string().max(64).optional(),
+});
+export const entityMetadataSchema = entitySchema.pick({ kind: true, id: true, type: true, name: true });
+export type EntityMetadata = z.infer<typeof entityMetadataSchema>;
+
+export const entityProfileQuerySchema = rangeQuerySchema.extend(entityMetadataQuerySchema.shape);
+export type EntityProfileQuery = z.infer<typeof entityProfileQuerySchema>;
 
 export const entityProfileSchema = z.object({
   entity: entitySchema,
@@ -446,7 +468,7 @@ export const savedViewSchema = z.object({
     labels: z
       .array(
         z.object({
-          field: z.enum(['actor', 'tenant', 'executor', 'target', 'impersonator']),
+          field: z.enum(['actor', 'tenant', 'executor', 'target', 'record', 'impersonator']),
           value: z.string().max(512),
           label: z.string().max(200),
         }),

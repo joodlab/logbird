@@ -12,9 +12,9 @@ path: /about
 - **eyebrow:** About
 - **heading (H1):** We built the audit log we needed.
 - **body:** Logbird started as the audit log a product team needed, where every support question begins the same
-  way: who changed this, and when? We wanted the answer to take one search, on servers we run ourselves. It's
-  MIT-licensed, and the source opens publicly soon, so any product team can do the same.
-  <!-- once WEB_GITHUB_PUBLIC=true: "We released it under the MIT licence so any product team can do the same." -->
+  way: who changed this, and when? We wanted the answer to take one search, on servers we run ourselves. We released
+  it under the MIT licence so any product team can do the same.
+  <!-- private build: "It's MIT-licensed, and the source opens publicly soon, so any product team can do the same." -->
   <!-- source: docs/SPEC.md intro (audience) and docs/roadmap.md intro -->
   <!-- owner-gated: org-name, origin-story. Only once the owner approves WEB_ORG_NAME and the origin story:
        "Logbird is built by {WEB_ORG_NAME}. It started as the audit log for a hotel-booking SaaS, where every support
@@ -41,11 +41,14 @@ path: /about
 - **eyebrow:** What we hold to
 - **heading:** Five decisions that don't change.
 - **bullets:**
-  1. **Accept anything.** Any JSON object with an `action` is a valid event. We recommend a shape; we never reject
+  1. **Require only an action.** An `action` string is the only required field, and each event must fit the ingest
+     limits. We recommend a shape; we never reject
      an event for missing it.
   2. **Capture is your code's job.** We give you the SDK, the integrations and the patterns. Our guarantee starts at
      the `202`.
-  3. **History starts when capture starts.** There's no backfill.
+  3. **Your code sends the history.** Logbird doesn't rebuild history from your database. Import past events by sending
+     them with their original `occurredAt`, up to 3650 days back; an older value is stored at receive time with a
+     warning, and project retention still applies.
   4. **Retention means deletion.** Expired events are deleted for good.
   5. **We audit ourselves.** Logbird records its own management actions in your workspace's activity stream.
   <!-- source: docs/SPEC.md §1; docs/roadmap.md ("Product decisions stay fixed") -->

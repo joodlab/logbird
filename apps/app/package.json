@@ -1,7 +1,7 @@
 {
   "name": "@logbird/app",
   "license": "MIT",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -35,6 +35,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.13",
     "@playwright/test": "^1.63.0",
     "@logbird/tsconfig": "workspace:*",
     "@types/node": "^22.20.1",

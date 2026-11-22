@@ -30,7 +30,7 @@ export const SUPPORT_TERM = 'impersonator:*';
 export function whoFilter(q: string, lang: QueryLang = 'query'): WhoFilter {
   const terms = presenceTerms(q, 'impersonator', lang);
   if (terms.some((t) => !t.negated)) return 'support';
-  if (terms.some((t) => t.negated && t.value === '*')) return 'self';
+  if (terms.some((t) => t.negated && t.value === null)) return 'self';
   return 'all';
 }
 
@@ -40,8 +40,8 @@ export function whoFilter(q: string, lang: QueryLang = 'query'): WhoFilter {
  * (`impersonator:* -impersonator:support_2` is still meaningful).
  */
 export function withWhoFilter(q: string, who: WhoFilter, lang: QueryLang = 'query'): string {
-  if (who === 'support') return setPresence(q, 'impersonator', { value: '*', negated: false }, lang, (t) => t.negated && t.value !== '*');
-  if (who === 'self') return setPresence(q, 'impersonator', { value: '*', negated: true }, lang);
+  if (who === 'support') return setPresence(q, 'impersonator', { value: null, negated: false }, lang, (t) => t.negated && t.value !== null);
+  if (who === 'self') return setPresence(q, 'impersonator', { value: null, negated: true }, lang);
   return setPresence(q, 'impersonator', null, lang);
 }
 

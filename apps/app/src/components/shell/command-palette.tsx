@@ -1,4 +1,3 @@
-import type { EntityKind } from '@logbird/contracts';
 import { EntityAvatar } from '@logbird/ui/components/entity-chip';
 import {
   CommandDialog,
@@ -12,7 +11,7 @@ import {
 } from '@logbird/ui/components/ui/command';
 import { useTheme } from '@logbird/ui/theme';
 import { useDebouncedValue } from '@tanstack/react-pacer';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ActivityIcon,
@@ -29,11 +28,12 @@ import {
   UsersIcon,
   VenetianMaskIcon,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { api } from '@/lib/api/client';
-import { projectsQuery, viewsQuery } from '@/lib/api/queries';
-import { ENTITY_SECTIONS, sectionForKind } from '@/lib/entities';
-import { formatExactTerm } from '@/lib/query-language';
+import { entitySearchQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
+import { ENTITY_SECTIONS, entityMatchRank, entityQuery, exactPerKind, isExactId, resolveJump, sectionForKind } from '@/lib/entities';
+import { formatTerm } from '@/lib/query-language';
 import { PROJECT_NAV } from './nav';
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
@@ -46,18 +46,13 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   const projects = useQuery({ ...projectsQuery(), enabled: open });
   const views = useQuery({ ...viewsQuery(projectId ?? ''), enabled: open && Boolean(projectId) });
 
-  const entities = useQuery({
-    queryKey: ['palette-entities', projectId, debounced],
-    enabled: open && Boolean(projectId) && debounced.length >= 2,
-    queryFn: async ({ signal }) => {
-      const kinds: EntityKind[] = ['actor', 'tenant', 'executor', 'target'];
-      const results = await Promise.all(
-        kinds.map((kind) => api.entities.list(projectId ?? '', { kind, q: debounced, limit: 4 }, signal).catch(() => ({ data: [] }))),
-      );
-      return results.flatMap((r) => r.data);
-    },
-    staleTime: 30_000,
-  });
+  const queryClient = useQueryClient();
+  // Best match first across kinds; an exact id always leads (the server ranks it first whatever the per-kind cap).
+  // One character is enough: ingest accepts an id like `7`.
+  const lookup = useQuery({ ...entitySearchQuery(projectId ?? '', debounced), enabled: open && Boolean(projectId) && debounced.length >= 1 });
+  // Only an answer for exactly the current text counts: during the debounce the last answer is for older text (its
+  // `BIZ_27` must not stand in for a newly typed `biz_27`).
+  const found = debounced === search.trim() ? lookup.data?.entities : undefined;
   // Support agents only appear as `impersonator`, never in the actor directory: look them up by name or id.
   const agents = useQuery({
     queryKey: ['palette-support-agents', projectId, debounced],
@@ -73,19 +68,99 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   const [highlighted, setHighlighted] = useState('');
   const firstAgent = agents.data?.[0];
   const firstAgentValue = firstAgent ? `support ${firstAgent.value} ${firstAgent.label}` : '';
+  const trimmed = search.trim();
+  // Entities whose id is exactly what was typed (`biz_27`, or a record's bare id): opened directly from Jump to.
+  const exact = exactPerKind(found, trimmed);
+  const openValue = (e: { kind: string; id: string }) => `${trimmed} open ${e.kind} ${e.id}`;
+  const firstExact = exact[0];
+  const firstExactValue = firstExact ? openValue(firstExact) : '';
+  // Highlight an exact id once its lookup lands, else a matching support agent, so Enter opens what was meant rather
+  // than a free-text search that cannot find an id.
   useEffect(() => {
-    if (firstAgentValue) setHighlighted(firstAgentValue);
-  }, [firstAgentValue]);
+    if (firstExactValue || firstAgentValue) setHighlighted(firstExactValue || firstAgentValue);
+  }, [firstExactValue, firstAgentValue]);
+  const others = (found ?? []).filter((e) => !exact.includes(e));
+  // "Search events for": an id searches its own events, never free text (which matches names, not ids). Enter can land
+  // before the lookup for this exact text (debounce, a slow kind): then finish the lookup first and decide.
+  // Each selection, keystroke, close or project change bumps the token: a lookup that lands after the palette closed or
+  // moved on does nothing.
+  const selection = useRef(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: bump on every change of either, whatever the value
+  useEffect(() => {
+    selection.current += 1;
+  }, [open, projectId]);
+  const searchEvents = async () => {
+    if (!projectId || !trimmed) return;
+    const pid = projectId;
+    const text = trimmed;
+    const token = ++selection.current;
+    // The row shows the id query once the exact id is known: submit exactly that. Otherwise finish the lookup first.
+    const run = (q: string) => go(() => navigate({ to: '/p/$projectId/events', params: { projectId: pid }, search: { q } }));
+    let id = firstExact;
+    if (!id) {
+      // Free text is the fallback only when a complete lookup found no exact id. A failed or partial lookup cannot
+      // tell, so say so and let the reader choose.
+      const answer = await queryClient.fetchQuery(entitySearchQuery(pid, text)).catch(() => null);
+      if (token !== selection.current) return;
+      id = answer?.entities.find((e) => isExactId(entityMatchRank(e, text)));
+      if (!id && (!answer || answer.partial)) {
+        toast.error('Could not check whether this is an id', {
+          description: 'Some entities could not be searched. Try again, or search it as text.',
+          action: { label: 'Search as text', onClick: () => token === selection.current && run(text) },
+        });
+        return;
+      }
+    }
+    run(id ? entityQuery(id.kind, id.id, id.type) : text);
+  };
 
   const go = (fn: () => void) => {
+    selection.current += 1;
     onOpenChange(false);
     setSearch('');
     fn();
   };
 
-  const trimmed = search.trim();
   const looksLikeEvent = ULID_RE.test(trimmed) || /^evt_/.test(trimmed);
   const looksLikeOperation = /^op_/.test(trimmed);
+  const openEntity = (pid: string, e: NonNullable<typeof found>[number]) => {
+    const section = sectionForKind(e.kind);
+    go(() =>
+      navigate({
+        to: `/p/$projectId/${section}/$entityId` as '/p/$projectId/records/$entityId',
+        params: { projectId: pid, entityId: e.id },
+        search: e.kind === 'target' ? { targetType: e.type } : {},
+      }),
+    );
+  };
+  // "Open operation / event" for an id shaped like one: an entity with exactly that id still wins (a tenant can be
+  // called `op_customer`). Enter can land before the lookup does, so finish it first, then decide.
+  const openByShape = async (shape: 'operation' | 'event') => {
+    if (!projectId || !trimmed) return;
+    const pid = projectId;
+    const text = trimmed;
+    const token = ++selection.current;
+    // fetchQuery answers from the cache only when that answer is fresh and complete (a partial one is never fresh),
+    // and otherwise waits for the lookup, including one already in flight.
+    const answer = await queryClient.fetchQuery(entitySearchQuery(pid, text)).catch(() => null);
+    if (token !== selection.current) return;
+    const target = resolveJump(text, shape, answer?.entities);
+    const openShape = () =>
+      shape === 'operation'
+        ? go(() => navigate({ to: '/p/$projectId/operations/$operationId', params: { projectId: pid, operationId: text } }))
+        : go(() => navigate({ to: '/p/$projectId/events', params: { projectId: pid }, search: { q: formatTerm('id', text), ev: text } }));
+    if (target.kind === 'entity') return openEntity(pid, target.entity);
+    // The shape is the fallback only after a complete lookup found no entity with this id: a failed or partial one
+    // cannot tell whether a tenant (or actor, or record) is called this, so say so and let the reader choose.
+    if (!answer || answer.partial) {
+      toast.error('Could not check whether this is an entity id', {
+        description: 'Some entities could not be searched. Try again, or open it anyway.',
+        action: { label: `Open ${shape} anyway`, onClick: () => token === selection.current && openShape() },
+      });
+      return;
+    }
+    openShape();
+  };
 
   return (
     <CommandDialog
@@ -99,7 +174,14 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
       open={open}
       title="Command palette"
     >
-      <CommandInput onValueChange={setSearch} placeholder="Search pages, actors, tenants, records, or paste an event id…" value={search} />
+      <CommandInput
+        onValueChange={(value) => {
+          selection.current += 1;
+          setSearch(value);
+        }}
+        placeholder="Search pages, actors, tenants, records, or paste an event id…"
+        value={search}
+      />
       <CommandList className="max-h-[min(60vh,28rem)]">
         <CommandEmpty>No matches. Try an id like usr_42 or op_…</CommandEmpty>
         {projectId && agents.data && agents.data.length > 0 ? (
@@ -123,40 +205,49 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
         ) : null}
         {projectId && trimmed ? (
           <CommandGroup heading="Jump to">
+            {exact.map((e) => {
+              const section = sectionForKind(e.kind);
+              const Icon = ENTITY_SECTIONS[section].icon;
+              return (
+                <CommandItem key={`open ${e.kind}:${e.id}`} onSelect={() => openEntity(projectId, e)} value={openValue(e)}>
+                  <Icon />
+                  <span className="shrink-0 whitespace-nowrap">Open {ENTITY_SECTIONS[section].singular.toLowerCase()}</span>
+                  <span className="min-w-0 truncate">{e.name || e.id}</span>
+                  {e.name ? <span className="min-w-0 shrink-[2] truncate font-mono text-muted-foreground text-xs">{e.id}</span> : null}
+                </CommandItem>
+              );
+            })}
             {looksLikeEvent ? (
-              <CommandItem
-                onSelect={() =>
-                  go(() =>
-                    navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: formatExactTerm('id', trimmed), ev: trimmed } }),
-                  )
-                }
-                value={`event ${trimmed}`}
-              >
+              <CommandItem onSelect={() => openByShape('event')} value={`event ${trimmed}`}>
                 <FileSearchIcon />
                 Open event <span className="font-mono text-xs">{trimmed}</span>
               </CommandItem>
             ) : null}
             {looksLikeOperation ? (
-              <CommandItem
-                onSelect={() => go(() => navigate({ to: '/p/$projectId/operations/$operationId', params: { projectId, operationId: trimmed } }))}
-                value={`operation ${trimmed}`}
-              >
+              <CommandItem onSelect={() => openByShape('operation')} value={`operation ${trimmed}`}>
                 <GitBranchIcon />
                 Open operation <span className="font-mono text-xs">{trimmed}</span>
               </CommandItem>
             ) : null}
-            <CommandItem
-              onSelect={() => go(() => navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: trimmed } }))}
-              value={`search ${trimmed}`}
-            >
-              <SearchIcon />
-              Search events for <span className="font-mono text-xs">{trimmed}</span>
-            </CommandItem>
+            {/* Free text searches names and descriptions, never ids: an exact id searches its own events instead. */}
+            {firstExact ? (
+              <CommandItem onSelect={searchEvents} value={`search ${trimmed}`}>
+                <SearchIcon />
+                <span className="shrink-0 whitespace-nowrap">Search events for</span>
+                <span className="min-w-0 truncate font-mono text-xs">{entityQuery(firstExact.kind, firstExact.id, firstExact.type)}</span>
+              </CommandItem>
+            ) : (
+              <CommandItem onSelect={searchEvents} value={`search ${trimmed}`}>
+                <SearchIcon />
+                <span className="shrink-0 whitespace-nowrap">Search events for</span>
+                <span className="min-w-0 truncate font-mono text-xs">{trimmed}</span>
+              </CommandItem>
+            )}
           </CommandGroup>
         ) : null}
-        {entities.data && entities.data.length > 0 ? (
+        {others.length > 0 ? (
           <CommandGroup heading="Entities">
-            {entities.data.map((e) => {
+            {others.map((e) => {
               const section = sectionForKind(e.kind);
               const Icon = ENTITY_SECTIONS[section].icon;
               return (
@@ -165,8 +256,9 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                   onSelect={() =>
                     go(() =>
                       navigate({
-                        to: `/p/$projectId/${section}/$entityId` as '/p/$projectId/actors/$entityId',
+                        to: `/p/$projectId/${section}/$entityId` as '/p/$projectId/records/$entityId',
                         params: { projectId: projectId ?? '', entityId: e.id },
+                        search: e.kind === 'target' ? { targetType: e.type } : {},
                       }),
                     )
                   }
@@ -224,22 +316,6 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
               Retention
             </CommandItem>
             <CommandItem
-              keywords={['activity', 'audit', 'management', 'history', 'log', 'who']}
-              onSelect={() => go(() => navigate({ to: '/p/$projectId/settings/activity', params: { projectId } }))}
-              value="Workspace activity"
-            >
-              <ActivityIcon />
-              Workspace activity
-            </CommandItem>
-            <CommandItem
-              keywords={['invite', 'team', 'teammates', 'link', 'join', 'people']}
-              onSelect={() => go(() => navigate({ to: '/p/$projectId/settings/members', params: { projectId } }))}
-              value="Members"
-            >
-              <UsersIcon />
-              Members &amp; invites
-            </CommandItem>
-            <CommandItem
               keywords={['setup', 'quickstart', 'docs', 'sdk', 'onboarding', 'checklist', 'query', 'language', 'help', 'integration', 'guide']}
               onSelect={() => go(() => navigate({ to: '/p/$projectId/setup', params: { projectId } }))}
               value="Setup integration guide"
@@ -249,6 +325,25 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
             </CommandItem>
           </CommandGroup>
         ) : null}
+        {/* Workspace settings belong to the workspace: reachable from any page, with or without a project. */}
+        <CommandGroup heading="Workspace">
+          <CommandItem
+            keywords={['activity', 'audit', 'management', 'history', 'log', 'who']}
+            onSelect={() => go(() => navigate({ to: '/workspace/activity' }))}
+            value="Workspace activity"
+          >
+            <ActivityIcon />
+            Workspace activity
+          </CommandItem>
+          <CommandItem
+            keywords={['invite', 'team', 'teammates', 'link', 'join', 'people']}
+            onSelect={() => go(() => navigate({ to: '/workspace/members' }))}
+            value="Members"
+          >
+            <UsersIcon />
+            Members &amp; invites
+          </CommandItem>
+        </CommandGroup>
         {views.data && views.data.length > 0 ? (
           <CommandGroup heading="Saved views">
             {views.data.map((view) => (

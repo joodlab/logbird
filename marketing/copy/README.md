@@ -16,7 +16,7 @@ sourced web research dated 2026-11-07 (see `compare/`). The voice follows `docs/
 
 | File | Page | Path |
 | --- | --- | --- |
-| [`home.md`](home.md) | Home | `/` |
+| [`home.md`](home.md) | Home (brief; the words are in `apps/web/src/content/home.ts`) | `/` |
 | [`product.md`](product.md) | Product tour | `/product` |
 | [`developers.md`](developers.md) | Developers | `/developers` |
 | [`self-hosting.md`](self-hosting.md) | Self-hosting | `/self-hosting` |
@@ -49,6 +49,60 @@ Then one `##` block per section, in page order:
 - `cta`: label → target.
 - `visual`: an exact path under `marketing/media/`, or "code sample", or "diagram: …".
 
+### Content modules and briefs (#250)
+
+Pages are moving to typed content modules under `apps/web/src/content/`, one per page, plus `shared.ts` for the calls to
+action and the closing band. A module is a function of the site's state (`content/site.ts`: repository public or
+private, Cloud open or closed, the latest release), and both variants of a state are required, so a missing one fails
+`tsc`. Once a page has moved, its file here becomes a **brief**: the section jobs, the proof for every claim with its
+source, the visuals and the owner notes, but not the page text. Change wording in the module, and check the claim
+against the brief's sources in the same pull request. `apps/web/src/content/content-modules.test.ts` fails if prose
+comes back into a moved route file or component.
+
+Moved so far: home (`home.md` is its brief).
+
+### Interim drift check
+
+**Interim.** The planned fix is typed content modules (#250): the pages render them, so each claim has one source. This
+check catches common drift between these files and the pages until then, and is deleted when the modules land. It
+doesn't make each claim single-source; its known gaps are listed in the pull request that added it (#249).
+
+`apps/web/src/lib/copy-sync.test.ts` renders every mapped page except the exempt ones listed below, as the public build does, once with Logbird
+Cloud closed and once open (`WEB_APP_URL` set). It looks for the claims the copy file states for that page, bound to
+elements rather than loose text. Change a claim in the copy and on the page in the same pull request.
+
+- **Headings.** A `heading` must be a heading on the page. In the other direction, every `h1`/`h2` section heading in
+  the page's `<main>` must be a heading in the copy. The shared closing band is the exception: its words render from
+  `apps/web/src/content/shared.ts`.
+- **Texts.** A `body`, `eyebrow`, `limit line`, `small print`, note or message must be one element's whole text, or a
+  run of up to three adjacent sibling elements (a title and its body). A prefix or an extended sentence fails.
+- **Lists.** `bullets`, `steps`, `items`, `cards` and the like must be one list on the page: the same items, in the same
+  order and number.
+- **Tables.** Tables are compared row by row and cell by cell.
+- **Calls to action.** A `cta` (`Label → target · …`) must be a link with that label and target.
+- **What counts as a difference.** Case, digits, signs, operators, units and words all count. Only spacing, typographic
+  quotes, and `.` `:` `;` at a sentence or title boundary are ignored. Unicode is compared after NFC.
+- **Citations.** `[S1–S4]` is written out as `[S1, S2, S3, S4]`, the way the page renders it.
+- **Placeholders.** Values from configuration or the release list are written as named placeholders, resolved from the
+  test's configuration and `releases.ts`: `<latest release>`, `<latest release date>`, `<first release>`,
+  `<first release date>`, `<supported line>`, `<security contact>`, `<contact email>`, `<sign-in URL>`. Any other
+  `<…>` is literal text.
+- **Variants.**
+  - Wording shown only while Logbird Cloud is open goes in a field named `… (when Cloud is open)`, which is checked
+    against that render.
+  - Private-repository wording goes in a comment.
+  - A field the public page doesn't show at all, or an engineering note, carries
+    `<!-- copy-sync: skip (reason) -->` on its first line. The reason is required.
+- **Field names.** Every field name is classified in `apps/web/src/lib/copy-claims.ts`. An unknown or misspelt name
+  fails the test.
+- **Data modules.** Where a page renders a part from a data module (the comparison tables, sources, "what we couldn't
+  verify", and the /compare cards come from `apps/web/src/lib/comparisons.ts`), the copy file doesn't restate it. It
+  has a `data` field pointing at the module, its only source.
+- **Inventory.** Every file in this folder is either in the map above or listed in the test with the reason it has no
+  page: this guide, the two legal briefs (the legal pages are their own owner-approved wording source;
+  `legal-pages.test.ts` checks selected facts), `arabic-notes.md`, and the briefs of pages that render a content module
+  (`home.md`).
+
 ## Messaging hierarchy
 
 ### Tagline
@@ -62,15 +116,16 @@ run it on your own servers. <!-- source: docs/brand.md §2 (cloud clause "or our
 
 ### Three pillars
 
-1. **Send any shape.** Any JSON object with an `action` is a valid event. Logbird recommends an envelope (actor,
-   tenant, executor, targets, changes, operation) and scores how much of it each event fills. It never drops an event
-   for being off-standard.
+1. **Only `action` is required.** An `action` string is the only required field, and each event must fit the ingest
+   limits. Logbird recommends an envelope (actor,
+   tenant, executor, targets, changes, operation) and scores how much of it each event fills. It never rejects an event
+   for missing recommended fields.
    <!-- source: docs/SPEC.md §1.1, §3 -->
 2. **Answer "who did what" fast.** Search with a query language or a guarded SQL `WHERE` expression. Follow any
    actor, tenant, worker or record on its own page. Open one request and every job it spawned as a single tree.
    <!-- source: docs/SPEC.md §5.1, §8; docs/concepts.md -->
 3. **Own it, and know its limits.** MIT-licensed, self-hosted with Docker Compose, stored in ClickHouse. The
-   guarantees are written down: a `202` means the event is in ClickHouse, delivery is at least once, and retention
+   guarantees are written down: on `202`, `ids` lists the events written to ClickHouse, delivery is at least once when clients retry, and retention
    deletes are permanent.
    <!-- source: LICENSE; docs/self-hosting.md; docs/SPEC.md §1, §2; README.md -->
 
@@ -87,8 +142,9 @@ run it on your own servers. <!-- source: docs/brand.md §2 (cloud clause "or our
 | --- | --- |
 | MIT licence | `LICENSE` |
 | Only `action` is required; nothing is rejected for missing recommended fields | `docs/SPEC.md` §1, `README.md` |
-| The server answers `202` only after ClickHouse has the rows (`async_insert=1, wait_for_async_insert=1`) | `docs/SPEC.md` §2 |
-| Delivery is at least once; counts may include duplicates | `README.md` |
+| On `202`, `ids` lists the events written to ClickHouse by this request or an earlier identical one (a batch with no valid event can still answer `202` with empty `ids`; removing sample data has a documented interruption window, `docs/ingest-identity.md`); the response lists stored event IDs in `ids` and rejected events in `rejected` (`async_insert=1, wait_for_async_insert=1`) | `docs/SPEC.md` §2 |
+| Delivery is at least once when the client retries unsettled events (the SDK does); an exact retry with the same valid, non-blank string `id` reuses the stored event while the project retains it, changed content under that id is rejected with `duplicate_id_conflict`, and an id can be reused once retention deletes the original (the SDK sets ids; an event without an id gets a new one per retry) | `docs/SPEC.md` §3, `docs/concepts.md` (Event ids and retries) |
+| Historical events can be sent with their original `occurredAt`, up to 3650 days back; an older value is stored at receive time with a warning, and project retention still applies | `docs/SPEC.md` §3, `packages/clickhouse/src/timestamp.ts` |
 | Retention permanently deletes expired events; lowering it requires typing the project slug and purges immediately | `docs/SPEC.md` §1, §7.1 |
 | Retention options run from 7 days to 10 years (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days); new projects default to 90 days | `packages/contracts/src/api.ts` (`RETENTION_OPTIONS`), `docs/SPEC.md` §6 |
 | One ingest request carries up to 1000 events or 5 MB; one event up to 256 KB | `docs/SPEC.md` §5, `packages/sdk/README.md` |
@@ -97,7 +153,7 @@ run it on your own servers. <!-- source: docs/brand.md §2 (cloud clause "or our
 | SQL mode runs as a separate read-only ClickHouse user with row policies bound to one project | `docs/SPEC.md` §5.1.2, `docs/query-language.md` |
 | Logbird records its own management actions in a workspace activity stream | `docs/SPEC.md` §1.5 |
 | First-party integrations: Hono, TanStack Start, Vue, Nuxt; worker helper `jobAudit` | `docs/integrations.md`, `packages/sdk/README.md` |
-| Self-host: sequential `docker compose build`, then `docker compose up -d --no-build`, Compose ≥ 2.24.4; Coolify; external Postgres/ClickHouse/Redis or Dragonfly; Caddy TLS | `docs/self-hosting.md`, `docs/coolify.md` |
+| Self-host: pull the four published role images (default; source builds are optional), then `docker compose up -d --no-build`, Compose ≥ 2.24.4; Coolify; external Postgres/ClickHouse/Redis or Dragonfly; Caddy TLS | `docs/self-hosting.md`, `docs/coolify.md` |
 | Suggested starting VM: 4 vCPU, 8 GB RAM, SSD — an initial allocation, not measured capacity | `docs/self-hosting.md` §Sizing |
 
 **Not used on purpose:** performance numbers of any kind (query latency, events per second, "300,000 events in
@@ -106,7 +162,7 @@ can be added when it lands, each with its source.
 
 ## Self-host CTA rule
 
-Nobody outside the team can self-host until the repository is public (no published images, no npm packages). While
+The repository is public and release images are on GHCR; the npm packages aren't published yet. While
 `WEB_GITHUB_PUBLIC` is false the site must not offer a clone/compose quickstart or say "Self-host … today":
 
 - Secondary CTA: **"Self-host when the source opens"** → `/contact?interest=self-host` (the waitlist, self-host preselected).
@@ -140,6 +196,11 @@ These variants are **not** used anywhere on the site. The owner may approve them
   <!-- Name design partners only after they approve publication. -->
 - **Cloud clause in the positioning:** used only once Logbird Cloud accepts sign-ups.
   <!-- owner-gated: cloud-clause. "…and run it on your own servers or ours." (docs/brand.md) -->
+- **Scoped read access:** home's customer-facing section describes reading through your own backend until the
+  maintainer confirms the production proof of scoped read keys and viewer tokens (#138). Then `SCOPED_READ_LIVE` in
+  `apps/web/src/content/site.ts` flips, in one change.
+- **.NET:** one sentence on home (in the repository, not yet on NuGet). No C# code or install command until the packages
+  are on NuGet.
 - **Repository link:** comes from `WEB_GITHUB_URL`. Until the repository is public, every mention reads
   "Source on GitHub — coming soon".
   <!-- owner-gated: org-name. Repository: https://github.com/joodlab/logbird ; publisher: Joodlab -->
@@ -149,13 +210,16 @@ These variants are **not** used anywhere on the site. The owner may approve them
 - **Domain (decided).** The public origin is `logbird.joodlab.com`; copy writes it wherever a domain is needed and
   never invents another one. No mailbox is derived from it: contact addresses come only from `WEB_SECURITY_EMAIL` and
   `WEB_CONTACT_EMAIL`, with no default. The engineer keeps the domain in one config value (`apps/web/src/env.ts`).
-- **Public repository timing.** All copy says "the repository opens publicly soon".
+- **Public repository (decided).** The repository is public; copy that depends on it follows `WEB_GITHUB_PUBLIC` (see the
+  self-host CTA rule above).
 - **npm packages.** `@logbird/sdk` and the integrations are not on npm yet (registry returned 404 on 2026-11-07;
-  `docs/roadmap.md` P0-3). Install lines are labelled "after the first npm release".
+  `docs/roadmap.md` P0-3). The public build shows the source install, labelled "From source (not on npm yet)".
 - **Docs links.** Pages link to repository docs (for example `docs/concepts.md`). Those links resolve once the
   repository is public or a docs site exists. Until then, the engineer can hide them or point them at `/developers`.
-- **Security contact.** `SECURITY.md` still lists `SECURITY_CONTACT_EMAIL (not configured)`. The security page needs
-  that address before launch.
+- **Security contact.** `SECURITY.md` sends reports through GitHub private vulnerability reporting, with a fallback
+  route. On the website, `WEB_SECURITY_EMAIL` sets the security mailbox; without it, pages ask researchers to request a
+  private channel through the contact form, and the site stays a release blocker (noindex; the Cloudflare package
+  refuses to build) until it is set (`apps/web/src/lib/release.ts`).
 
 ## Captures
 
@@ -201,8 +265,8 @@ Use these words the same way on every page. They match `docs/concepts.md`.
 | audit log, activity history, who did what | "observability platform", "SIEM" (Logbird is neither) |
 | send, search, follow, keep, delete | leverage, unlock, supercharge, empower |
 | "permanently deleted", "no archive, no undo" | "smart data lifecycle", "auto-archiving" |
-| "at least once; counts may include duplicates" | "never lose an event", "exactly once", "100% reliable" |
-| "a `202` means the event is in ClickHouse" | "real-time", "instant", any latency figure |
+| "at least once when the client retries unsettled events; an exact retry with the same non-blank string id reuses the stored event while it is retained" | "never lose an event", "exactly once", "100% reliable", "tamper-proof", "immutable storage" |
+| "on `202`, `ids` lists the accepted events" | "real-time", "instant", any latency figure |
 | self-host, self-hosted (adjective), on your own servers | on-prem (unless quoting someone) |
 | open source, MIT-licensed | "free forever", "community edition" (there is one edition) |
 | "Source on GitHub — coming soon" | any wording that implies the repository is public |

@@ -3,13 +3,13 @@
 ## Five-minute quickstart
 
 Install Docker Engine and Compose >=2.24.4 (Linux containers). The default stack
-pulls the four published GHCR images for `LOGBIRD_VERSION=0.1.3`; it does not
+pulls the four published GHCR images for `LOGBIRD_VERSION=0.2.0`; it does not
 compile source. Images are available only after the corresponding tagged release
 finishes publishing. Check the [release page](https://github.com/joodlab/logbird/releases)
 before installing; release preparation in Git is not proof of registry availability.
 
 ```sh
-git clone --branch v0.1.3 https://github.com/joodlab/logbird.git
+git clone --branch v0.2.0 https://github.com/joodlab/logbird.git
 cd logbird
 sh scripts/selfhost-init.sh
 # Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
@@ -96,7 +96,7 @@ One .env.example serves source development and containers. Empty URL overrides l
 | INGEST_RATE_LIMIT_PER_MINUTE / READ_RATE_LIMIT_PER_MINUTE | 3000 / 1200 per project key (shared Redis limits) |
 | VIEWER_READ_RATE_LIMIT_PER_MINUTE / VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE | 300 per minting key and tenant (viewer-token reads, on top of the project read limit) / 600 viewer tokens minted per key. See [scoped read access](scoped-read-access.md) |
 | LOGBIRD_BIND / LOGBIRD_HTTP_PORT | 127.0.0.1 / 4600; only app is published |
-| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / 0.1.3; pulls `<registry>/logbird-<role>:<version>` |
+| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / 0.2.0; pulls `<registry>/logbird-<role>:<version>` |
 | LOGBIRD_SOURCE_VERSION | local; only the source-build override uses this tag |
 | LOGBIRD_DOMAIN / ACME_EMAIL | TLS hostname / optional ACME email |
 | NODE_ENV / PORT | Source development / 4601; containers force production and service ports |
@@ -248,6 +248,12 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
 
 ## Upgrades and backups
 
+Run every `docker compose` command below with the active installation's invocation: its project (`-p`), env file
+(`--env-file`), Compose files (`-f`, including any override) and TLS profile. After a restore cutover that is the
+restored project's invocation (see the wrapper in Cut over below). A source-build installation keeps
+`docker-compose.build.yml` in that invocation: in step 5 it builds the four roles from the new revision one at a time
+instead of pulling, and the image-tag check doesn't apply.
+
 1. Block browser/SDK ingress and run `docker compose stop app server worker`.
    The worker has a five-minute grace period to finish its current job; wait for
    stop to complete and inspect logs if it needed a forced kill.
@@ -255,10 +261,19 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
 3. Record `git rev-parse HEAD` and `docker compose images` with the backup receipt.
 4. Fetch/select the tested revision: `git fetch origin`, then
    `git switch --detach <tested-sha>`. Preserve local changes first.
-5. Re-run `sh scripts/selfhost-init.sh` (it preserves existing values and warns if
-   `.env` still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird` namespace; remove that
-   line so the default `ghcr.io/joodlab` applies). Set LOGBIRD_VERSION to the tested
-   release, run `docker compose pull`, then `docker compose up -d --no-build`.
+5. Re-run `sh scripts/selfhost-init.sh <active env file>` (default `.env`; after a
+   restore cutover, the env file the installation now runs with). It preserves existing
+   values and warns if the file still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird`
+   namespace; remove that line so the default `ghcr.io/joodlab` applies. It keeps the
+   existing `LOGBIRD_VERSION`, and that value overrides the new revision's Compose
+   default, so set it to the tested release without the `v` (tag `v0.2.0` means
+   `LOGBIRD_VERSION=0.2.0`). A `LOGBIRD_VERSION` or `LOGBIRD_IMAGE_REGISTRY` exported in
+   your shell overrides the env file: unset it, or set it to the same values. Run
+   `docker compose config --images` with the installation's project, env-file and `-f`
+   flags and check the full names: all four must be
+   `<registry>/logbird-<role>:<version>`, with `ghcr.io/joodlab` as the default
+   registry, before you run
+   `docker compose pull` and `docker compose up -d --no-build`.
    One-shot migrate gates new API/worker startup; failure blocks startup.
 6. Verify readiness, SMTP login, retained events/settings/keys and retention
    receipts before reopening ingress. After a failed receipt the next successful
@@ -272,6 +287,40 @@ below for older Trailmark installations.
 
 See the [maintainer migration-cancellation check](releases.md#migration-cancellation-check)
 for signal handling; its live acceptance is pending in #77.
+
+### Upgrading to the arrival-time index (010)
+
+Migration 010 adds a minmax skip index on `events.received_at` and materializes it. Arrival-time reads (webhook
+discovery, alert windows, the live view) then skip granules whose arrival range misses the requested range instead of
+reading every granule of the project that the partition and primary-key steps keep, which do not know arrival time
+(how much that is, and how it grows with retained history, depends on the data; it was not measured). Event values are preserved, but the physical work is
+not free: `MATERIALIZE INDEX` writes the new index files for every part, and ClickHouse rewrites the full column data
+of compact parts while doing so, competing with merges and retention mutations. It runs as a background mutation
+(the statement pins `mutations_sync = 0`, so a migration user whose profile waits for mutations does not block):
+the migration returns at once, reads stay correct while it runs (parts without the index are read as before), and new
+parts get the index on insert. Measured locally on a shared 2 GiB ClickHouse: 23.8 million rows (4.05 GiB)
+materialized in about 35 seconds, roughly 2.5 minutes per 100 million rows. That is an extrapolation from one machine,
+not a bound: many compact parts, busy or slower storage take longer.
+
+Check completion in the Logbird database:
+
+```sql
+SELECT mutation_id, is_done, parts_to_do, latest_fail_reason FROM system.mutations
+WHERE database = currentDatabase() AND table = 'events' AND command LIKE '%idx_received_at%';
+```
+
+The migration is recorded as applied once both statements were submitted, so a later `ch:migrate` does not run it
+again. If `is_done` stays 0, first check whether the original mutation is still running (`parts_to_do` falling): a
+part failure can leave it active and retrying, and reissuing then queues duplicate work. Fix any cause shown in
+`latest_fail_reason` (a mutation cancelled with `KILL MUTATION` may show none). Once no materialization of
+`idx_received_at` is active, reissue `ALTER TABLE events MATERIALIZE INDEX idx_received_at SETTINGS mutations_sync = 0`;
+repeating it is safe for event data, though it repeats the physical work.
+
+Known limit: during a large historical import (old event times arriving now), a slice that overlaps the import's
+arrival window can still read granules the import touched whose arrival range overlaps the slice. In the measured
+import (one batch stream over about five minutes) every such granule overlapped it, so the index gave no gain. Draining such
+a slice in small pages repeats that read per page (see #209 for measurements), so larger pages mean fewer repeated
+reads during catch-up.
 
 ### Upgrading to immutable ids
 

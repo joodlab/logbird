@@ -111,6 +111,8 @@ Omitted values use receive time.
 }
 ```
 
+Sources beginning with `logbird-` are reserved for events Logbird itself generates: `logbird-sample` (sample data) and `logbird-test` (the console's "Send a test event"). An integration that sends one is stored and searchable like any other event, but it does not count toward the integration setup steps (events flowing, envelope, operation ids; `isLogbirdGeneratedSource` in `packages/contracts`). `logbird-sample` is also left out of the first-event step, and replacing or removing sample data deletes every row tagged `logbird-sample`, including rows a client sent with that tag.
+
 Semantics worth documenting to users:
 - **id is immutable within a project**, regardless of `occurredAt`. Exact retries
   appear in `ids` as accepted, without another raw insert or rollup increment.
@@ -188,7 +190,13 @@ Normalization rules (server):
   targets/context) is flattened to `attributes` with dot paths (`metadata.plan.tier`), max depth 6, max 256 keys,
   values stringified and capped at 2 KB. Arrays become JSON strings.
 - Every stored attribute key must be valid Unicode. Keys beyond the 256-attribute cap are not stored or checked. A lone surrogate in a stored key rejects the event before INSERT as `invalid_event: Attribute keys must be valid Unicode`; valid surrogate pairs remain verbatim. Keys are never repaired, avoiding replacement collisions. Changes values, target arrays and rejected occurredAt search copies also use `toWellFormed()`; raw input and v1 identity are unchanged.
-- Raw document (as received, ≤ 256 KB) is stored in `payload` (ZSTD).
+- The original document (≤ 256 KB) is stored in `payload` (ZSTD) with the same values it was sent with, including
+  numbers a double cannot hold (64-bit ids, long decimals), which keep their exact digits. An event nested more than
+  1,000 levels deep that holds such a number anywhere is rejected on its own (`invalid_event: numbers nested deeper than 1,000
+  levels cannot be stored exactly`), never rounded. Formatting is not
+  preserved: whitespace, key spacing and number spelling such as `1e3` or `19.90` come back as `1000` and `19.9`.
+  Numbers are indexed by their exact decimal text, so `actor.id: 42` is searchable as `actor:42`; a numeric event
+  `id` still gets a fresh id and a warning.
 - `conformance` = % of {occurredAt, actor.id, actor.type, outcome, targets[≥1], tenant.id, executor.type,
   context.operationId|requestId, description} present.
 - Unknown `outcome`/`severity` strings are kept verbatim (accept anything) — UI shows them neutrally.
@@ -241,6 +249,7 @@ CREATE TABLE events
   sdk               LowCardinality(String),
 
   INDEX idx_event_id   event_id        TYPE bloom_filter(0.001) GRANULARITY 1,
+  INDEX idx_received_at received_at    TYPE minmax GRANULARITY 1,          -- 010: arrival-time slices (webhooks, alerts, live)
   INDEX idx_actor      actor_id        TYPE bloom_filter(0.01)  GRANULARITY 1,
   INDEX idx_tenant     tenant_id       TYPE bloom_filter(0.01)  GRANULARITY 1,
   INDEX idx_executor   executor_id     TYPE bloom_filter(0.01)  GRANULARITY 1,
@@ -376,8 +385,17 @@ UTC multiples of their size, so ≥ 1h buckets start on whole hours (24h → 15m
 
 `GET /api/projects/:projectId/entities?kind=…&sort=events|lastSeen|name` lists a directory.
 `events` (default) is most active first, ties broken by most recently seen; `lastSeen` is most
-recent first; `name` is A→Z (unnamed entities by id). `nextCursor` is an opaque keyset cursor
-bound to its sort.
+recent first; `name` is A→Z (unnamed entities by id). With `q`, entities whose id or name contains
+it or resembles it are listed best match first: exact id, id prefix, name prefix, substring, then
+fuzzy (a record's bare id, `article_27_2` for `article:article_27_2`, counts as its id), and the
+sort orders each group, so an exact id always leads whatever the limit. One or two characters
+match only ids and names that start with them. `nextCursor` is an opaque
+keyset cursor bound to its sort (and, for a search, to the match rank).
+
+`GET /api/projects/:projectId/entities/:kind/:entityId/metadata` returns `kind`, `id`, `type` and `name` for an
+exact entity under the same session and project access rules as the profile. For targets, pass the composite
+entity ID and the original `targetType` to disambiguate pairs that share a key. An unknown entity returns 404.
+The console uses this lookup to name saved-view labels without running profile summaries.
 
 Session-authenticated `GET /api/projects/:projectId/setup` reports the computed integration checklist;
 `GET /api/workspace/setup` summarizes active-workspace projects and resumable onboarding.
@@ -469,7 +487,19 @@ Full guide: [scoped read access](scoped-read-access.md); token format and secret
 - **Facets:** `field` is an envelope field or `attr.<path>`; JSON-array attribute values count each element. Optional
   `by` + `byLimit` (1–20, default 5) add the top second-level values per returned value with `groupsOtherCount`; the
   console `/facets` accepts the same parameters. The response always has `by` (null without it).
-- **Not yet:** the restricted query user's row policy does not yet enforce the tenant (phase 2).
+- **Row policy (phase 2):** with the restricted query user configured, scoped reads (search, detail, facets, export)
+  run as `logbird_query` through a tenant-bound handle (`withTenant`) that sends `SQL_logbird_tenant` = the scope's tenant
+  itself and refuses a query whose `scope_tenant` names another tenant. The `events` policy is `project_id = getSetting('SQL_logbird_project') AND (getSetting('SQL_logbird_tenant')
+  = '' OR tenant_id = getSetting('SQL_logbird_tenant'))`; rollup tables (no tenant column) add
+  `getSetting('SQL_logbird_tenant') = ''`, so a tenant-bound session sees none of their rows. The settings profile
+  defaults `SQL_logbird_tenant` to '' (not CONST), so unscoped and SQL-mode queries are unchanged. Target and
+  action-prefix limits stay in the query builders. Scoped reads then run under the query user's CONST limits (10 s,
+  5M rows read, 1 GiB) instead of the export budget; the `total` count keeps its 1 s application deadline (an inexact lower bound past
+  it), and a scoped export takes both export admission slots, like SQL mode. The handle is a frozen object
+  exposing only `query` (always with the tenant; a different tenant is refused): no command, exec, insert, ping, close or
+  disposal reaches the shared client. The restricted client ignores credentials embedded in `CLICKHOUSE_URL`. Detail picks the canonical version of an id project-wide on
+  the main client (oldest receipt, then timestamp, then a payload hash) and tests the scope in that same lookup, so an
+  out-of-scope id and an unknown id take the same path; only an in-scope version is fetched through the bound handle.
 
 ### Webhook endpoint management
 
@@ -504,6 +534,7 @@ tenant:biz_7  tenant.name:"Azure Hotels"  executor:crm-worker  executor.type:wor
 executor.name:"CRM worker"  actor.email:lina@example.com  impersonator:usr_1
 parent:evt_123  job:456
 target:hotel_123  target.type:hotel  operation:op_101  request:req_abc  trace:…  source:channel-manager
+record:hotel:hotel_123             exact type and id on the same target; record:* means any target
 attr.metadata.plan:pro             attribute map lookup (wildcard * allowed at end)
 impersonator:*  -tenant:*          field:* = field present (non-empty value); -field:* = missing.
                                   Works for every core column and attribute key; x* stays a prefix match
@@ -533,6 +564,7 @@ a AND b,  NOT a                   explicit AND / NOT keywords (upper-case), same
 Attribute values are strings; with comparisons/ranges they are read as numbers
 (`toFloat64OrNull(attributes[k])`), or as dates when the bound is a date. Rows whose value does not convert never
 match. Array fields (`target`, `target.type`, `target.name`, `changes.field`) match when any element matches.
+`record:<type>:<id>` checks a single target for both fields, splitting the value on its first unescaped colon. See [record selector escaping](query-language.md#query-language-langquery-default).
 
 Errors: HTTP 422 `invalid_query`, `details` = `QueryErrorDetails` (`lang`, `reason`, `start`/`end` UTF-16 offsets,
 `hint`), e.g. `attempt:>abc` → reason `type`, span of `abc`, hint `attempt is a number`.
@@ -560,7 +592,7 @@ instance-admin feature).
 Isolation is layered: (1) query-language values compile to parameterized SQL; (2) SQL expressions pass the lexical
 scan, EXPLAIN AST baseline comparison and allowlists; (3) the readonly query account has SELECT-only grants and
 CONST safety/resource limits; (4) row policies on events, events_by_minute, entities and attribute_keys enforce
-`project_id = getSetting('SQL_logbird_project')` for `logbird_query`. Each restricted query sends its authorized
+`project_id = getSetting('SQL_logbird_project')` for `logbird_query`, plus the tenant binding for scoped reads (§5.2). Each restricted query sends its authorized
 project in `clickhouse_settings`; validation-only EXPLAIN uses a sentinel project. Missing bindings fail closed.
 Companion `USING 1 TO ALL EXCEPT logbird_query` policies preserve the main user's access. The binding is trusted
 server input, not a substitute for HTTP authorization; holders of database credentials can choose the binding.
@@ -650,7 +682,7 @@ User journeys (each must work end-to-end against the real server):
    `onboarding.next`, so leaving and coming back resumes at the missing step; the wizard's progress reflects real
    state. The first-event step reuses the Setup page's component: ingest key shown once (copy), curl / SDK / fetch
    snippets pre-filled, a **live waiting indicator** that polls setup every 2.5 s and flips to the received event,
-   "Send a test event", "Load sample data" (never counts) and "Skip for now" → Overview. The workspace step pre-fills
+   "Send a test event" (stored with `source: logbird-test`; completes only the first-event step), "Load sample data" (never counts) and "Skip for now" → Overview. The workspace step pre-fills
    the name from `GET /api/onboarding/workspace-name` (selected, so typing replaces it). The full-screen wizard is only
    for a workspace's first project: later projects are created from a dialog inside the app shell (Projects page and
    switcher → New project) that lands on the new project's Setup page.

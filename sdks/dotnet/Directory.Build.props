@@ -20,7 +20,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageTags>audit;audit-log;audit-trail;logbird</PackageTags>
     <!-- The release version, shared with the repository; scripts/check-version-consistency.mjs enforces it. -->
-    <VersionPrefix>0.1.3</VersionPrefix>
+    <VersionPrefix>0.2.0</VersionPrefix>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <IncludeSymbols>true</IncludeSymbols>

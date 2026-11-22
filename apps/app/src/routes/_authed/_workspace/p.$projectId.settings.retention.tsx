@@ -27,13 +27,14 @@ import { RetentionPicker } from '@/components/retention-picker';
 import { SettingsSection } from '@/components/settings-section';
 import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
+import { current } from '@/lib/api/current';
 import { ApiRequestError, errorMessage } from '@/lib/api/errors';
 import { keys, projectQuery, retentionQuery } from '@/lib/api/queries';
 import { formatNumber, formatRetention, pluralize } from '@/lib/format';
 import { useCan } from '@/lib/permissions';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/retention')({
-  head: () => ({ meta: [{ title: 'Retention · Settings · Logbird' }] }),
+  head: () => ({ meta: [{ title: 'Retention · Project settings · Logbird' }] }),
   staticData: { crumb: 'Retention' },
   component: RetentionSettings,
 });
@@ -59,7 +60,7 @@ function RetentionForm({ project }: { project: Project }) {
 
   // The server counts exactly what a lower window deletes (`?preview=<days>`).
   const preview = useQuery({ ...retentionQuery(project.id, days), enabled: lowering, placeholderData: keepPreviousData });
-  const doomed = lowering && preview.data && !preview.isPlaceholderData ? (preview.data.previewDeletedEvents ?? undefined) : undefined;
+  const doomed = lowering ? (current(preview)?.previewDeletedEvents ?? undefined) : undefined;
 
   const save = useMutation({
     mutationFn: (confirm?: string) => api.projects.update(project.id, { retentionDays: days, confirm }),

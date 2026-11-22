@@ -5,11 +5,17 @@ import { CtaBand } from '../components/marketing/cta-band';
 import { FeatureRow } from '../components/marketing/feature-row';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { GITHUB_PUBLIC } from '../env';
+import { CLONE_URL, SELF_HOST_VERSION } from '../lib/selfhost';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/developers')({ head: () => pageHead('/developers'), component: DevelopersPage });
 
 // Copy: marketing/copy/developers.md. Every sample is checked against packages/sdk and packages/integrations READMEs.
+/** The working install until the packages are on npm (packages/sdk/README.md): link the SDK from a checkout of the release. */
+const sourceInstall = `git clone ${SELF_HOST_VERSION ? `--branch v${SELF_HOST_VERSION} ` : ''}${CLONE_URL} ../logbird
+pnpm -C ../logbird install
+pnpm add @logbird/sdk@link:../logbird/packages/sdk`;
+
 const quickstart = `import { Logbird } from '@logbird/sdk';
 
 const client = new Logbird({
@@ -17,8 +23,8 @@ const client = new Logbird({
   apiKey: process.env.LOGBIRD_INGEST_KEY, // lb_ingest_...
   enabled: Boolean(process.env.LOGBIRD_INGEST_KEY), // off locally when no key is set
   defaults: { environment: 'production' },
-  onError: (error) => console.error(error.message), // permanent rejections and background failures
-  onDrop: (event) => console.warn('audit event dropped', event.action), // each rejected or discarded event
+  onError: (error) => console.error(error.message), // capture errors, permanent rejections and background flush failures
+  onDrop: (event) => console.warn('audit event dropped', event.action), // events the server rejects or a full queue discards
 });
 
 client.track({
@@ -29,10 +35,11 @@ client.track({
   changes: [{ field: 'status', before: 'confirmed', after: 'cancelled' }],
 });
 
-// flush() rejects only when retryable delivery (network, 429, 5xx) runs out of retries; the batch stays
-// queued for the next flush. Permanent rejections don't reject: they arrive through onError and onDrop.
+// flush() can reject, for example when retryable delivery (network, 429, 5xx) runs out of retries or the send
+// deadline passes. Unsettled events are then queued again, as far as the queue's capacity allows.
+// Permanent rejections don't reject flush(): they arrive through onError and onDrop.
 await client.flush().catch((error) => console.error('audit delivery pending', error));
-// On exit: stop accepting events and drain the queue. Rejects under the same condition as flush().
+// On exit: stop accepting events and drain the queue. Can reject like flush().
 await client.shutdown().catch((error) => console.error('audit events left undelivered', error));`;
 
 const http = `curl https://audit.example.com/v1/events \\
@@ -136,7 +143,10 @@ const limits: [string, string][] = [
   ['Events per request', '1 to 1000'],
   ['Request size', '5 MB'],
   ['Event size', '256 KB'],
-  ['Attributes per event', 'Up to 256 indexed, 6 levels deep, the first 2 KiB of each value'],
+  [
+    'Attributes per event',
+    'Up to 256 custom attributes indexed, 6 levels deep, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON)',
+  ],
   ['occurredAt', 'ISO-8601 or epoch milliseconds, from 3650 days ago to 24 hours ahead'],
   ['Ingest rate (default, per project)', '3000 requests a minute'],
   ['Read rate (default, per project)', '1200 requests a minute'],
@@ -243,8 +253,9 @@ function DevelopersPage() {
             <code>track(event)</code> never throws and never waits for the network.
           </>,
           <>
-            <code>flush()</code> and <code>shutdown()</code> reject when retryable delivery (network, <code>429</code>, <code>5xx</code>) runs out of
-            retries, and the batch stays queued. Permanent rejections arrive through <code>onError</code> and <code>onDrop</code> instead.
+            <code>flush()</code> and <code>shutdown()</code> can reject, for example when retryable delivery (network, <code>429</code>,{' '}
+            <code>5xx</code>) runs out of retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity
+            allows. Permanent rejections arrive through <code>onError</code> and <code>onDrop</code> instead.
           </>,
           <>
             Call <code>shutdown()</code> from your host's own exit hook. The SDK installs no process handlers.
@@ -263,18 +274,18 @@ function DevelopersPage() {
         title="Install, create a client, track an event."
         visual={
           <div className="flex flex-col gap-3">
-            <SiteCode code="npm install @logbird/sdk" language="bash" title="After the first npm release" />
+            {GITHUB_PUBLIC ? <SiteCode code={sourceInstall} language="bash" title="From source (not on npm yet)" /> : null}
             <SiteCode code={quickstart} language="ts" title="server.ts" />
             <p className="text-muted-foreground text-sm">
               {GITHUB_PUBLIC
-                ? 'The packages publish to npm with the first release.'
-                : 'The packages publish to npm with the first release, when the repository opens.'}
+                ? "The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite or esbuild."
+                : "The packages aren't on npm yet."}
             </p>
           </div>
         }
       >
-        The SDK has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events, retries failures and
-        gives each event an id and a timestamp if you don't.
+        The SDK's capture entry point has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It batches events,
+        retries failures and gives each event an id and a timestamp if you don't.
       </FeatureRow>
 
       <FeatureRow
@@ -285,15 +296,15 @@ function DevelopersPage() {
         visual={<SiteCode code={http} language="bash" title="curl" />}
       >
         <code>POST /v1/events</code> accepts one event, a JSON array, or <code>{'{ "events": [...] }'}</code>. Authenticate with an ingest key. A{' '}
-        <code>202</code> means ClickHouse has the rows.
+        <code>202</code> lists the stored event IDs in <code>ids</code> and rejected events in <code>rejected</code>.
       </FeatureRow>
 
       <Section compact id="envelope" labelledBy="envelope-title" tone="sunken">
         <SectionHeader
           eyebrow="The envelope"
           id="envelope-title"
-          lead="Logbird stores anything you send. These recommended fields become indexed columns, each one fills a page in the console, and the conformance score tells you how many of them an event has."
-          title="Six fields that make an audit log useful."
+          lead="Only an action string is required, and each event must fit the ingest limits. These recommended fields are normalized into columns: actor, tenant, executor, target and operation ids are indexed for search, and actors, workers, support agents, tenants, records and operations each get their own page in the console. The conformance score is the share of nine recommended checks an event passes."
+          title="The fields that make an audit log useful."
         />
         <div className="panel mt-10 overflow-hidden">
           <table className="table-site">
@@ -345,7 +356,9 @@ function DevelopersPage() {
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Everything else is kept.</strong> Custom top-level keys and anything under{' '}
-                  <code>metadata</code> become searchable attributes, for example <code>metadata.channel:whatsapp</code>.
+                  <code>metadata</code> stay in the event's JSON and are indexed as searchable attributes, for example{' '}
+                  <code>metadata.channel:whatsapp</code>: up to 256 custom attributes per event, 6 levels deep, text values indexed up to their first
+                  2 KiB (a number too long to index stays in the event JSON).
                 </>,
               ]}
             />
@@ -365,7 +378,7 @@ function DevelopersPage() {
       <FeatureRow
         eyebrow="Integrations"
         id="integrations"
-        limit="Express, Next.js, Laravel and Django are planned. We'll add them when we use those stacks ourselves."
+        limit="There are no Express, Next.js, Laravel or Django integrations. Use the TypeScript SDK or plain HTTP from those stacks."
         title="Middleware for the stacks we run."
         visual={<SiteCodeTabs tabs={[{ id: 'hono', label: 'Hono', code: hono, language: 'ts' }]} />}
       >
@@ -436,20 +449,25 @@ function DevelopersPage() {
             <Bullets
               items={[
                 <>
-                  <strong className="font-medium text-foreground">Batched.</strong> Events go in batches of up to 100, or every second, whichever
-                  comes first.
+                  <strong className="font-medium text-foreground">Batched.</strong> By default, events go in batches of up to 100, or every second,
+                  whichever comes first.
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Retried.</strong> Rate limits (<code>429</code>), server errors and network failures
-                  are retried with exponential backoff and jitter, up to 5 times. A numeric <code>Retry-After</code> is honoured.
+                  are retried with exponential backoff and jitter. By default, five retries that make no progress end the attempt; a <code>503</code>{' '}
+                  that settles part of the batch counts as progress. A numeric <code>Retry-After</code> is honoured, capped at 60 seconds and the
+                  5-minute send deadline.
                 </>,
                 <>
-                  <strong className="font-medium text-foreground">Acknowledged after storage.</strong> The server answers <code>202</code> only once
-                  ClickHouse has the rows.
+                  <strong className="font-medium text-foreground">Acknowledged after storage.</strong> On <code>202</code>, <code>ids</code> lists the
+                  accepted events and <code>rejected</code> names the entries that failed. An accepted event was written to ClickHouse by this request
+                  or an earlier identical one.
                 </>,
                 <>
-                  <strong className="font-medium text-foreground">At least once.</strong> A retry after a lost response can store an event twice.
-                  Counts may include duplicates.
+                  <strong className="font-medium text-foreground">At least once, stored once.</strong> The SDK gives every event an id before it
+                  queues it, so a retry after a lost response reuses the stored event while the project retains it. Raw HTTP clients should send their
+                  own string <code>id</code>: a missing, blank or non-string id gets a new generated id on every retry. A string id is rejected with{' '}
+                  <code>invalid_event_id</code> if it contains NUL or an unpaired surrogate, or exceeds 256 UTF-16 code units after trimming.
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Bounded under outage.</strong> The queue holds up to 10,000 events by default. When
@@ -461,9 +479,11 @@ function DevelopersPage() {
                   Call <code>shutdown()</code> on exit.
                 </>,
                 <>
-                  <strong className="font-medium text-foreground">Partial batches.</strong> Events without an <code>action</code> are rejected one by
-                  one, and the rest are stored. Permanent errors other than <code>429</code> drop the batch and report it through <code>onError</code>{' '}
-                  and <code>onDrop</code>, without rejecting <code>flush()</code>.
+                  <strong className="font-medium text-foreground">Partial batches.</strong> Each event is checked on its own. Rejected events, such as
+                  one without an <code>action</code> or an id conflict, are listed in <code>rejected</code>. On <code>202</code> the rest are
+                  accepted. When a <code>503</code> lists the unsettled events, retry only those; otherwise retry the whole batch with the same ids.
+                  Permanent errors other than <code>429</code> drop the batch and report it through <code>onError</code> and <code>onDrop</code>,
+                  without rejecting <code>flush()</code>.
                 </>,
               ]}
             />
@@ -487,8 +507,8 @@ function DevelopersPage() {
               items={[
                 'Rate limits are shared by all keys of the same kind in a project, across replicas. Self-hosters can change them.',
                 <>
-                  Responses carry <code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code> and <code>RateLimit-Reset</code>. A <code>429</code>{' '}
-                  includes <code>Retry-After</code>.
+                  Authenticated responses carry <code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code> and <code>RateLimit-Reset</code> when
+                  the limiter can account for the request. A <code>429</code> includes <code>Retry-After</code>.
                 </>,
                 <>
                   An unusable <code>occurredAt</code> never drops the event. It is stored at receive time, the original value is kept, and the
@@ -503,7 +523,7 @@ function DevelopersPage() {
       <FeatureRow
         eyebrow="Read API"
         id="read-api"
-        limit="A read key can read the whole project. A query filter is not authorization: your backend must check the tenant and record on every request, including each next page. The read API accepts the query language, not SQL mode. Tenant-scoped read tokens are on the roadmap."
+        limit="A read key can read the whole project. A query filter is not authorization: your backend must check the tenant and record on every request, including each next page. The read API accepts the query language, not SQL mode."
         title="Read your own history back."
         visual={<SiteCode code={read} language="ts" title="Your backend" />}
       >

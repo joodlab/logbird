@@ -42,9 +42,7 @@ const faq: FaqItem[] = [
   },
   {
     q: 'Can I move between self-host and cloud?',
-    a: CLOUD_OPEN
-      ? "We'll document how to migrate before sign-ups open to everyone. There's no migration tool today."
-      : "We'll document how to migrate before the cloud opens. There's no migration tool today.",
+    a: "Not with a tool or a guide today. Both run the same codebase, but there's no migration tool and no documented migration path yet.",
   },
   {
     q: 'How much will it cost?',
@@ -55,8 +53,8 @@ const faq: FaqItem[] = [
   {
     q: 'Will there be an SLA?',
     a: CLOUD_OPEN
-      ? "Not during early access. We'll publish service levels and limits when Logbird Cloud launches."
-      : "We'll publish service levels and limits together with the cloud's launch terms.",
+      ? 'Not during early access. There are no published service levels or limits yet.'
+      : 'There are no published service levels or limits yet.',
   },
   {
     q: CLOUD_OPEN ? 'What do you do with the email I give you?' : 'What do you do with my waitlist email?',
@@ -173,8 +171,8 @@ function CloudPage() {
         eyebrow="Logbird Cloud"
         lead={
           CLOUD_OPEN
-            ? `Logbird Cloud runs the same open-source codebase you${GITHUB_PUBLIC ? ' can' : "'ll be able to"} self-host. We run the servers, the upgrades and the backups. It's in early access: sign-ups are limited to invited teams for now. Request access, or sign in if you've been invited.`
-            : `Logbird Cloud will run the same open-source codebase you${GITHUB_PUBLIC ? ' can' : "'ll be able to"} self-host. We'll run the servers, the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.`
+            ? `Logbird Cloud runs the same ${GITHUB_PUBLIC ? 'open-source codebase you can' : "codebase you'll be able to"} self-host. We run the servers, the upgrades and the backups. It's in early access: sign-ups are limited to invited teams for now. Request access, or sign in if you've been invited.`
+            : `Logbird Cloud will run the same ${GITHUB_PUBLIC ? 'open-source codebase you can' : "codebase you'll be able to"} self-host. We'll run the servers, the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.`
         }
         title="The same Logbird, run by us."
       />

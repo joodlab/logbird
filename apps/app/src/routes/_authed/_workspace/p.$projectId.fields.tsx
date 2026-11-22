@@ -11,10 +11,12 @@ import { CheckIcon, ListTreeIcon, MinusIcon, SearchIcon, XIcon } from 'lucide-re
 import { useMemo, useState } from 'react';
 import { z } from 'zod';
 import { Timestamp } from '@/components/timestamp';
+import { awaiting, current } from '@/lib/api/current';
 import { fieldsQuery } from '@/lib/api/queries';
 import { formatCompact, formatPercent } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
-import { DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
+import { DEFAULT_RANGE, isValidRange, rangeInSentence, rangeLabel } from '@/lib/range';
+import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/fields')({
@@ -80,28 +82,32 @@ function presenceQuery(key: string): string | null {
 }
 
 function FieldsPage() {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const { projectId } = Route.useParams();
   const { kind = 'all' } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { range } = useRange();
   const fields = useQuery(fieldsQuery(projectId, range));
+  // Another range's coverage never shows under this range's label.
+  const fieldsData = current(fields);
+  const fieldsLoading = awaiting(fields);
   const [filter, setFilter] = useState('');
 
   const rows = useMemo(
     () =>
-      (fields.data?.data ?? []).filter((f) => (kind === 'all' || f.kind === kind) && (!filter || f.key.toLowerCase().includes(filter.toLowerCase()))),
-    [fields.data, kind, filter],
+      (fieldsData?.data ?? []).filter((f) => (kind === 'all' || f.kind === kind) && (!filter || f.key.toLowerCase().includes(filter.toLowerCase()))),
+    [fieldsData, kind, filter],
   );
   // Coverage is computed from approximate counts and can drift a hair past 100%.
-  const coverage = new Map((fields.data?.data ?? []).map((f) => [f.key, Math.min(1, f.coverage)]));
-  const avg = fields.data?.avgConformance ?? 0;
+  const coverage = new Map((fieldsData?.data ?? []).map((f) => [f.key, Math.min(1, f.coverage)]));
+  const avg = fieldsData?.avgConformance ?? 0;
 
   return (
     <div className="flex flex-col gap-5 p-4 sm:p-6">
       <div className="flex flex-col gap-1">
         <h1 className="font-semibold text-xl tracking-tight">Fields</h1>
         <p className="text-muted-foreground text-sm">
-          Every field Logbird has seen in {rangeLabel(range).toLowerCase()}: recommended envelope fields and the attributes you send on top.
+          Every field Logbird has seen in {rangeInSentence(rangeLabel(range))}: recommended envelope fields and the attributes you send on top.
         </p>
       </div>
 
@@ -123,7 +129,7 @@ function FieldsPage() {
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="font-semibold text-2xl tabular-nums">{fields.isPending ? '—' : Math.round(avg)}%</span>
+                <span className="font-semibold text-2xl tabular-nums">{fieldsLoading ? '—' : Math.round(avg)}%</span>
                 <span className="text-[10px] text-muted-foreground uppercase tracking-wider">average</span>
               </div>
             </div>
@@ -158,7 +164,7 @@ function FieldsPage() {
                   <span className="font-mono text-[12px]">{key}</span>
                   <span className="hidden min-w-0 flex-1 truncate text-muted-foreground text-xs sm:inline">{hint}</span>
                   <span className="ms-auto shrink-0 text-muted-foreground text-xs tabular-nums">
-                    {fields.isPending || c === undefined ? '—' : formatPercent(c)}
+                    {fieldsLoading || c === undefined ? '—' : formatPercent(c)}
                   </span>
                 </li>
               );
@@ -207,7 +213,7 @@ function FieldsPage() {
           <span>Samples</span>
           <span>Last seen</span>
         </div>
-        {fields.isPending ? (
+        {fieldsLoading ? (
           <div className="flex flex-col gap-1 p-2">
             {placeholderKeys(12).map((k) => (
               <Skeleton className="h-9" key={k} />

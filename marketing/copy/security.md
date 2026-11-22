@@ -22,13 +22,14 @@ path: /security
 - **eyebrow:** Where data lives
 - **heading:** Self-hosted, your events stay on your servers.
 - **body:** When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your
-  own Postgres. The self-hosted software doesn't send usage data back to us. The server's only outbound connection is to the SMTP provider
-  you choose, which delivers sign-in codes and invitations.
+  own Postgres. The self-hosted software doesn't send usage data back to us. In the bundled deployment, the server connects out to the
+  SMTP provider you choose, and resolves a webhook endpoint's hostname when you save it.
   <!-- source: docs/self-hosting.md; README.md §Architecture; no analytics/telemetry code found in apps/ or packages/ (grep, 2026-11-07) — owner to confirm -->
 - **visual:** diagram: one box labelled "Your server" holding console, API, worker, Postgres, ClickHouse and Redis.
-  The only arrow leaving the box goes to "Your SMTP provider", labelled "sign-in codes, invitations".
-  Caption: "Self-hosted: the console, API, worker, Postgres, ClickHouse and Redis all run on your server. The only
-  connection out goes to your SMTP provider, for sign-in codes and invitations."
+  The arrow leaving the box goes to "Your SMTP provider".
+  Caption: "The bundled Compose deployment: the console, API, worker, Postgres, ClickHouse and Redis all run on your
+  server. Outbound, the server connects to your SMTP provider (sign-in codes, invitations and membership notices) and
+  looks up a webhook endpoint's hostname when you save it. With your own databases, it also connects to them."
 
 ## retention
 
@@ -139,7 +140,10 @@ path: /security
     working behind a shared network address.
   - If Redis fails, sign-in limits fail closed (requests are refused) and ingest and read limits fail open (requests
     continue).
-  - Delivery is at least once. A retry can store an event twice, so counts may include duplicates.
+  - Delivery is at least once when the client retries unsettled events, as the SDK does. An exact retry with the same valid, non-blank string `id` reuses the stored event while the project retains it, so retries
+    from the SDK, which sets ids, don't add copies; changed content under that id is rejected with
+    `duplicate_id_conflict`. An event sent without an id gets a new one on every retry. Once retention deletes an
+    event, its id can be used again.
   - Don't send secrets. The SDK's `redact()` helper replaces common secret fields before sending.
   <!-- source: docs/SPEC.md §5; docs/deployment.md; README.md; packages/sdk/README.md -->
 - **visual:** none
@@ -149,7 +153,7 @@ path: /security
 - **id:** `reporting`
 - **eyebrow:** Responsible disclosure
 - **heading:** Report a vulnerability privately.
-- **body:** Please don't post details in a public issue. Email the security contact below. Include the affected
+- **body:** Please don't post details in a public issue. Email <security contact>. Include the affected
   version, a reproduction using fictional data, and the impact. We'll coordinate the fix and the disclosure with
   you. We don't offer a response-time SLA yet.
   <!-- site rule: the site names only the security email, never a GitHub reporting flow -->

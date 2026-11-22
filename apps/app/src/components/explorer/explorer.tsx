@@ -1,4 +1,4 @@
-import type { AuditEvent, HistogramResponse, QueryLang, SearchResponse } from '@logbird/contracts';
+import type { AuditEvent, EntityKind, HistogramResponse, QueryLang, SearchResponse } from '@logbird/contracts';
 import { StableText } from '@logbird/ui/components/stable-text';
 import { EmptyState, ErrorState } from '@logbird/ui/components/states';
 import { Button } from '@logbird/ui/components/ui/button';
@@ -13,15 +13,19 @@ import { toast } from 'sonner';
 import { EventHistogram } from '@/components/charts/event-histogram';
 import { EventListContext } from '@/components/impersonation';
 import { QueryInput, type QueryInputHandle } from '@/components/query-input/query-input';
+import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
-import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
+import { awaiting, current } from '@/lib/api/current';
+import { entitySearchQuery, eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
+import { ENTITY_SECTIONS, entityQuery, exactPerKind, idFromFreeText, sectionForKind } from '@/lib/entities';
 import { formatNumber } from '@/lib/format';
-import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
-import { andQuery } from '@/lib/query-language';
+import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
+import { andQuery, scopedQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
-import { ALL_RANGE, absoluteRange, isValidRange, rangeLabel, resolveRange } from '@/lib/range';
+import { ALL_RANGE, absoluteRange, isValidRange, rangeInSentence, rangeLabel, resolveRange } from '@/lib/range';
 import { explorerTotal, formatSearchTotal, searchTotal } from '@/lib/search-total';
 import { appendSqlPredicate } from '@/lib/sql-language';
+import { useConsoleZone } from '@/lib/time-zone';
 import { EventSheet } from './event-sheet';
 import { EventsTable, type EventsTableHandle } from './events-table';
 import { ColumnPicker, ExplorerOverflowMenu, ExportMenu, SaveViewButton } from './explorer-toolbar';
@@ -70,6 +74,14 @@ function newestArrival(events: AuditEvent[]): string | undefined {
   return events.reduce<string | undefined>((max, e) => (!max || e.receivedAt > max ? e.receivedAt : max), undefined);
 }
 
+/** "tenant", "actor", "executor", "record": what the reader calls each kind. */
+function kindNoun(kind: EntityKind): string {
+  return ENTITY_SECTIONS[sectionForKind(kind)].singular.toLowerCase();
+}
+function articleFor(kind: EntityKind): string {
+  return /^[aeiou]/.test(kindNoun(kind)) ? 'an' : 'a';
+}
+
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   return Boolean(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable || el.closest('[role=dialog]')));
@@ -102,12 +114,16 @@ function ProjectExplorer({
   rangeComplete = false,
   className,
 }: ExplorerProps) {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const { q, range, columns, ev, live } = state;
   const rangeName = rangeLabelOverride ?? rangeLabel(range);
   const complete = rangeComplete || range === ALL_RANGE;
   const lang: QueryLang = allowSql && state.lang === 'sql' ? 'sql' : 'query';
-  // The base filter (an entity or support agent) must constrain all of `q`, even one with a top-level OR.
-  const effectiveQ = andQuery(baseQuery ?? '', q);
+  // The base filter (an entity or support agent) must constrain all of `q`: `scopedQuery` combines it only when `q`
+  // parses, as one group. A `q` that does not parse is never sent (`blocked`); the bar shows its parse error.
+  const scoped = scopedQuery(baseQuery ?? '', q);
+  const blocked = scoped.problem !== null;
+  const effectiveQ = scoped.q ?? '';
   const queryBar = useRef<QueryInputHandle>(null);
   const results = useRef<HTMLDivElement>(null);
   const eventsTable = useRef<EventsTableHandle>(null);
@@ -124,13 +140,13 @@ function ProjectExplorer({
   // The keyboard cursor, by event id: it stays on its event when live tail prepends rows.
   const [cursorId, setCursorId] = useState<string | null>(null);
 
-  const events = useInfiniteQuery(eventsInfiniteQuery(projectId, range, effectiveQ, lang));
+  const events = useInfiniteQuery({ ...eventsInfiniteQuery(projectId, range, effectiveQ, lang), enabled: !blocked });
   // Round bucket sizes (30 min for 24 h, 3 h for 7 d) so bars line up with the axis ticks.
-  const histogram = useQuery(histogramQuery(projectId, range, effectiveQ, lang));
+  const histogram = useQuery({ ...histogramQuery(projectId, range, effectiveQ, lang), enabled: !blocked });
 
   /* ---------------- query errors ---------------- */
   // A rejected query keeps the last good results on screen (dimmed) and explains itself in the bar.
-  const problem = queryProblem(events.error, lang) ?? queryProblem(histogram.error, lang);
+  const problem = scopedQueryProblem(scoped, queryProblem(events.error, lang) ?? queryProblem(histogram.error, lang));
   const lastGood = useRef<{
     pages?: SearchResponse[];
     histogram?: HistogramResponse;
@@ -144,12 +160,15 @@ function ProjectExplorer({
     resultKey?: string;
   }>({});
   // Only settled results become "last good" (a placeholder is another search's data).
-  const scope = `${range}|${baseQuery ?? ''}`;
-  if (events.data && !events.isError && !events.isPlaceholderData) {
-    lastGood.current.pages = events.data.pages;
+  // The project is part of it: a fallback never shows another project's rows, even if this component stays mounted.
+  const scope = JSON.stringify([projectId, range, baseQuery ?? '']);
+  // A blocked search fetched nothing: whatever is cached under its blank key is never this search's (nor last good).
+  const eventsNow = blocked ? undefined : current(events);
+  if (eventsNow && !events.isError) {
+    lastGood.current.pages = eventsNow.pages;
     lastGood.current.pagesScope = scope;
   }
-  if (events.isSuccess && !events.isPlaceholderData) {
+  if (!blocked && events.isSuccess && !events.isPlaceholderData) {
     lastGood.current.base = baseQuery ?? '';
     lastGood.current.query = { q, lang };
     lastGood.current.range = range;
@@ -159,8 +178,9 @@ function ProjectExplorer({
   // range are committed, so the table starts that set at the top even when it shares rows with the old one (e.g. moving
   // between two entity profiles, where `q` stays empty but `baseQuery` changes).
   const resultKey = lastGood.current.resultKey;
-  if (histogram.data && !histogram.isError && !histogram.isPlaceholderData) {
-    lastGood.current.histogram = histogram.data;
+  const histogramNow = blocked ? undefined : current(histogram);
+  if (histogramNow && !histogram.isError) {
+    lastGood.current.histogram = histogramNow;
     lastGood.current.histogramScope = scope;
   }
   // A rejected query falls back to the last good result only when it was searched over this same range and locked
@@ -172,11 +192,11 @@ function ProjectExplorer({
   const exportBlocked = problem ? 'Fix the query first — the export runs the same query.' : null;
   // Rows from a previous search (a placeholder while the new range or query loads) are never shown or selectable as
   // this one's; a rejected query keeps the last good rows, labelled as such.
-  const pages = problem ? fallbackPages : events.isPlaceholderData ? undefined : events.data?.pages;
-  const resultsLoading = (events.isPending || events.isPlaceholderData) && !problem;
+  const pages = problem ? fallbackPages : current(events)?.pages;
+  const resultsLoading = awaiting(events) && !problem;
   // A rejected query shows the last good bars, labelled as such; otherwise bars from a previous search (a placeholder
   // while the new range or query loads) are never drawn as if they were this one's.
-  const histogramData = problem ? fallbackHistogram : histogram.isPlaceholderData ? undefined : histogram.data;
+  const histogramData = problem ? fallbackHistogram : current(histogram);
 
   /* ---------------- live tail ---------------- */
   const relative = isValidRange(range) && !range.includes('..');
@@ -196,7 +216,8 @@ function ProjectExplorer({
   }, [effectiveQ, lang, range, live]);
 
   // The tail follows *arrival* (`receivedAt`), so late or back-dated events still stream in.
-  const firstPage = problem || events.isPlaceholderData ? undefined : events.data?.pages[0]?.data;
+  const firstPage = problem ? undefined : current(events)?.pages[0]?.data;
+  const firstPageTook = current(events)?.pages[0]?.tookMs;
   useEffect(() => {
     if (!sinceRef.current && firstPage) sinceRef.current = newestArrival(firstPage) ?? new Date().toISOString();
   }, [firstPage]);
@@ -304,6 +325,44 @@ function ProjectExplorer({
     else toast.error('This filter has no SQL equivalent', { description: `Switch to Query mode to filter by ${term}.` });
   };
 
+  /* ---------------- empty results: say why, and offer only what would find something ---------------- */
+  const showsEmpty = Boolean(pages) && !problem && !events.isError && rows.length === 0;
+  // A bare word that is exactly an entity's id: free text searches names and descriptions, never ids.
+  const word = lang === 'query' ? idFromFreeText(q) : '';
+  const idLookup = useQuery({ ...entitySearchQuery(projectId, word), enabled: showsEmpty && Boolean(word) });
+  // Every kind with exactly this id (an actor and a tenant can share one): offer each.
+  // One per kind (the literal id first within a kind), so case variants of one kind never crowd out another kind.
+  const idMatches = word ? exactPerKind(idLookup.data?.entities, word) : [];
+  const idMatch = idMatches[0];
+  // "a tenant id", or "the id of a tenant and an actor".
+  const idPhrase =
+    idMatches.length === 1 && idMatch
+      ? `${articleFor(idMatch.kind)} ${kindNoun(idMatch.kind)} id`
+      : `the id of ${idMatches.map((e) => `${articleFor(e.kind)} ${kindNoun(e.kind)}`).join(' and ')}`;
+  const idSettled = !word || idLookup.isSuccess || idLookup.isError;
+  // Whether anything older matches: only then is the range the reason, and only then is widening offered.
+  const wider = useQuery({
+    ...histogramQuery(projectId, ALL_RANGE, effectiveQ, lang),
+    enabled: showsEmpty && !complete && idSettled && !idMatch,
+  });
+  const olderMatches = current(wider)?.buckets.reduce((n, b) => n + b.total, 0);
+  const widen =
+    olderMatches && olderMatches > 0 ? (
+      <Button onClick={() => onChange({ range: ALL_RANGE })} size="sm" variant="outline">
+        Search all time
+      </Button>
+    ) : wider.isError ? (
+      <Button onClick={() => wider.refetch()} size="sm" variant="outline">
+        Retry the check
+      </Button>
+    ) : null;
+  // What the empty state can say about other dates: matches outside the range, none anywhere, or that it could not tell.
+  const outside = wider.isError
+    ? 'Could not check other dates.'
+    : olderMatches
+      ? `${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event matches' : 'events match'} outside this range.`
+      : 'Remove a filter or change the query.';
+
   const empty = problem ? (
     <EmptyState description="Fix the query above to see results." icon={SearchXIcon} title="Query not run" />
   ) : events.isError ? (
@@ -311,31 +370,39 @@ function ProjectExplorer({
   ) : (
     <EmptyState
       description={
-        q ? (
+        idMatch ? (
           <>
-            Nothing in <span className="font-medium text-foreground">{rangeName.toLowerCase()}</span> matches{' '}
-            <span className="font-mono text-foreground">{q}</span>.{' '}
-            {complete ? 'Remove a filter to see more.' : 'Try a wider range or remove a filter.'}
+            <span className="font-mono text-foreground">{word}</span> is {idPhrase}. Free text searches names and descriptions, not ids.
           </>
-        ) : complete ? (
-          `No events in ${rangeName.toLowerCase()}.`
+        ) : q ? (
+          <>
+            Nothing in <span className="font-medium text-foreground">{rangeInSentence(rangeName)}</span> matches{' '}
+            <span className="font-mono text-foreground">{q}</span>. {outside}
+          </>
+        ) : wider.isError ? (
+          `No events in ${rangeInSentence(rangeName)}. Could not check other dates.`
+        ) : olderMatches ? (
+          `No events in ${rangeInSentence(rangeName)}. ${formatNumber(olderMatches)} ${olderMatches === 1 ? 'event is' : 'events are'} stored outside it.`
+        ) : complete || olderMatches === 0 ? (
+          `No events in ${rangeInSentence(rangeName)}. Send events with your ingest key to see them here.`
         ) : (
-          `No events in ${rangeName.toLowerCase()}. Widen the range, or send events with your ingest key.`
+          `No events in ${rangeInSentence(rangeName)}.`
         )
       }
       icon={SearchXIcon}
       title={q ? 'No matching events' : 'No events in this range'}
     >
+      {idMatches.map((e) => (
+        <Button key={`${e.kind}:${e.id}`} onClick={() => onChange({ q: entityQuery(e.kind, e.id, e.type) })} size="sm">
+          Search <span className="font-mono">{entityQuery(e.kind, e.id, e.type)}</span>
+        </Button>
+      ))}
       {q ? (
         <Button onClick={() => onChange({ q: '' })} size="sm" variant="outline">
           Clear query
         </Button>
       ) : null}
-      {range !== '30d' && !complete ? (
-        <Button onClick={() => onChange({ range: '30d' })} size="sm" variant="outline">
-          Search last 30 days
-        </Button>
-      ) : null}
+      {widen}
     </EmptyState>
   );
 
@@ -495,7 +562,7 @@ function ProjectExplorer({
                   </button>
                 ) : null}
               </>
-            ) : events.isPending || events.isPlaceholderData ? (
+            ) : awaiting(events) ? (
               'Searching…'
             ) : (
               <>
@@ -503,10 +570,13 @@ function ProjectExplorer({
                   {totalLowerBound ? formatSearchTotal({ count: total, exact: false }) : formatNumber(total)}
                 </span>{' '}
                 {!totalLowerBound && total === 1 ? 'event' : 'events'} · {rangeName}
-                {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
+                {firstPageTook !== undefined ? ` · ${Math.round(firstPageTook)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>
             )}
+            {/* Below md the table has no column header (useIsMobile): name the zone here (and switch it) in every state,
+                including the last good rows shown after a rejected query. */}
+            <TimeZoneInline className="md:hidden" />
           </span>
           <button
             aria-expanded={showChart}
@@ -532,7 +602,7 @@ function ProjectExplorer({
                 : (from, to) => {
                     // Keep the selection inside the search that produced the visible bars (its end can lie ahead of
                     // now, and a relative range has moved on since).
-                    const shown = histogram.data ?? resolveRange(range);
+                    const shown = current(histogram) ?? resolveRange(range);
                     const start = Math.max(from, shown.fromMs);
                     const end = Math.min(to, shown.toMs);
                     if (start < end) onChange({ range: absoluteRange(start, end), live: undefined });

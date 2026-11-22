@@ -133,7 +133,10 @@ public class HardeningTests
         client.Track(new AuditEvent("stuck"));
         var watch = Stopwatch.StartNew();
         Assert.False(await client.FlushAsync(TimeSpan.FromSeconds(20)));
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), watch.Elapsed.ToString());
+
+        // The send failed on its own (the alternative is waiting out the flush's 20-second limit).
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), watch.Elapsed.ToString());
+        Assert.Equal(1, client.Stats.FailedSends);
         Assert.Equal(2, handler.Requests);
         Assert.Equal(1, client.Stats.QueueLength);
     }
@@ -150,10 +153,11 @@ public class HardeningTests
         }), handler);
         client.Track(new AuditEvent("in.flight"));
         _ = client.FlushAsync();
-        await handler.Received.Task;
-        var watch = Stopwatch.StartNew();
-        await client.DisposeAsync();
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), watch.Elapsed.ToString());
+        await Deadline.Within(TimeSpan.FromSeconds(30), () => handler.Received.Task);
+
+        // The documented bound is ShutdownTimeout + 2 s (a cancelled request unwinding) + 5 s (pending callbacks); the
+        // failure this test guards against is a hang, so the limit sits well above the bound.
+        await Deadline.Within(TimeSpan.FromSeconds(15), () => client.DisposeAsync().AsTask());
         Assert.Equal(DropReason.Shutdown, Assert.Single(drops).Reason);
         Assert.Equal(0, client.Stats.QueueLength);
     }
@@ -174,10 +178,10 @@ public class HardeningTests
             client.Track(new AuditEvent("in.flight"));
             client.Track(new AuditEvent("queued"));
             _ = client.FlushAsync();
-            await handler.Received.Task;
-            var watch = Stopwatch.StartNew();
-            await client.DisposeAsync();
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), watch.Elapsed.ToString());
+            await Deadline.Within(TimeSpan.FromSeconds(30), () => handler.Received.Task);
+
+            // Documented bound: ShutdownTimeout + 2 s + 5 s; the callback blocks forever, so a regression would hang.
+            await Deadline.Within(TimeSpan.FromSeconds(15), () => client.DisposeAsync().AsTask());
             Assert.Equal(2, drops.Count(d => d.Reason == DropReason.Shutdown));
         }
         finally

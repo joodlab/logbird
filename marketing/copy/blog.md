@@ -12,7 +12,7 @@ path: /blog
 - **eyebrow:** Blog
 - **heading (H1):** Notes from building Logbird.
 - **body:** Longer posts on how Logbird works and why: the decisions, the guarantees, and the limits. For day-by-day
-  progress, see the changelog. (The last sentence and the CTA appear only once `/changelog` is ready.)
+  progress, see the changelog. <!-- the last sentence and the CTA appear only once /changelog is ready -->
 - **cta:** Changelog and build log → `/changelog`
 - **empty state:** No posts yet. The first one is on its way.
 - **site:** posts live in `apps/web/src/lib/publications.ts`. The blog is `ready` from the first published post; the
@@ -59,8 +59,9 @@ the actor and the worker is the executor. When support acts on her behalf, the s
 Lina is still the actor. Getting this right is most of what makes an audit log useful, so the SDK carries the actor
 from the request into the job for you.
 
-**Write the guarantees down.** When the server answers `202`, the event is in ClickHouse. Delivery is at least once,
-so counts may include duplicates. The SDK's queue lives in memory, so a crash before that `202` can lose events.
+**Write the guarantees down.** When the server answers `202`, it lists the accepted event IDs in `ids` and the
+rejected events in `rejected`. Delivery is at least once when the client retries unsettled events, as the SDK does, and an exact retry with the same valid, non-blank `id` reuses
+the stored event while the project retains it. The SDK's queue lives in memory, so a crash before that `202` can lose events.
 Retention deletes are permanent: when you lower a project's window, you type its slug, and the expired events are
 gone. We'd rather you read those sentences now than discover them during an incident.
 
@@ -68,8 +69,8 @@ gone. We'd rather you read those sentences now than discover them during an inci
 ClickHouse and Redis. Your events never leave your servers. Logbird Cloud will run the same codebase for people who
 don't want to operate it. It isn't open yet, and we haven't set prices.
 
-What's not there yet: published images, npm packages, SSO, alerts, streaming export, and a customer-facing viewer
-with tenant-scoped tokens. They're on the roadmap, and we'll write about each one as it lands.
+What's not there yet: published SDK packages, SSO, alerts and archive exports. They're candidates on our public roadmap,
+and we'll write about each one if it lands.
 
 The repository opens publicly soon. If you'd like to hear when Logbird Cloud opens, join the waitlist.
 

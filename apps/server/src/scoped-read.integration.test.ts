@@ -4,7 +4,7 @@ import { apiKeySchema, createApiKeyResponseSchema, createProjectResponseSchema, 
 import { prisma } from '@logbird/database';
 import { expect, it } from 'vitest';
 import { app } from './app';
-import { clickhouse } from './clickhouse';
+import { clickhouse, queryClickhouse } from './clickhouse';
 import { clearTokenKeyCache, mintViewerToken, tokenKey } from './read-access';
 import { drainTestAudit } from './test-audit';
 
@@ -237,6 +237,12 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
       '(tenant:t2) OR (NOT tenant:t2)',
       'id:qa-t2-x OR id:qa-none',
       '"Tenant two"',
+      // #182: the record field inside q stays inside the scope too (site_a exists under t2 and with no tenant).
+      'record:website:site_a',
+      'record:website:site_a OR tenant:t2',
+      '-record:website:site_a',
+      'record:*',
+      'record:(website:site_a OR page:site_a)',
     ]) {
       const scoped = await ids(t1.secret, q);
       expect(
@@ -249,6 +255,20 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
       ).toBe(true);
     }
     expect(await ids(t1.secret, 'tenant:t2 OR tenant:t1')).toEqual(tenant1);
+    // A paired record under a tenant scope: exactly that tenant's events with website:site_a on one target, counted the
+    // same way (stored ids: the trimmed tenant and target collide into t1 / site_a, see above).
+    const recordQ = 'record:website:site_a';
+    expect((await ids(t1.secret, recordQ)).sort()).toEqual(['qa-collide-target', 'qa-collide-tenant', 'qa-t1-a1', 'qa-t1-child']);
+    const recordTotal = await (
+      await v1(t1.secret, `/events?${new URLSearchParams({ q: recordQ, from: '2026-01-01T00:00:00Z', limit: '1' })}`)
+    ).json();
+    expect(recordTotal.total).toBe(4);
+    // The site-scoped key: page:site_a sits on an event whose website target is site_x, so nothing is in scope.
+    expect(await ids(site.secret, 'record:page:site_a')).toEqual([]);
+    const siteTotal = await (
+      await v1(site.secret, `/events?${new URLSearchParams({ q: 'record:page:site_a', from: '2026-01-01T00:00:00Z', limit: '1' })}`)
+    ).json();
+    expect(siteTotal.total).toBe(0);
     const sql = await v1(t1.secret, `/events?${new URLSearchParams({ lang: 'sql', q: '1 OR 1' })}`);
     expect(sql.status).toBe(422);
 
@@ -500,8 +520,24 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     });
     expect((await bulkIngest.json()).accepted).toBe(230);
     const bulk = await createKey({ name: 'Bulk tenant', kind: 'scoped-read', scope: { tenantId: 'tbulk' } });
+    if (queryClickhouse) {
+      // #138 phase 2: a scoped export runs under the restricted profile (1 GiB per query), so it takes both export slots
+      // like an SQL-mode export: while one streams, another key's export is refused with 429 export_busy.
+      const streaming = await v1(bulk.secret, `/export?${new URLSearchParams({ format: 'jsonl', from: '2026-01-01T00:00:00Z' })}`);
+      expect(streaming.status).toBe(200);
+      const reader = streaming.body?.getReader();
+      await reader?.read();
+      const busy = await v1(masked.secret, `/export?${new URLSearchParams({ format: 'csv', from: '2026-01-01T00:00:00Z' })}`);
+      expect(busy.status).toBe(429);
+      expect((await busy.json()).error.code).toBe('export_busy');
+      await reader?.cancel();
+      // Admission is released once the cancelled producer settles.
+      for (let i = 0; i < 60 && (await prisma.exportLease.count({ where: { userId: `api_key:${bulk.key.id}`, expiresAt: { gt: new Date() } } })); i++)
+        await new Promise((resolve) => setTimeout(resolve, 500));
+    }
     const evidenceBulk = await v1(bulk.secret, `/export?${new URLSearchParams({ format: 'jsonl-evidence', from: '2026-01-01T00:00:00Z' })}`);
     expect(evidenceBulk.status).toBe(200);
+    const evidenceExportId = evidenceBulk.headers.get('x-logbird-export-id') ?? '';
     const evidenceLines = (await evidenceBulk.text()).trim().split('\n');
     const evidenceIds = evidenceLines.map((line) => (JSON.parse(line) as { event: { id: string } }).event.id);
     expect(evidenceIds).toHaveLength(230);
@@ -544,6 +580,38 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect(tagCount.get('blue')).toBe(2);
     expect([...tagCount.keys()].some((v) => v.startsWith('long-'))).toBe(false); // the cut array is one opaque value
     expect([...tagCount.entries()].filter(([v]) => v.startsWith('["long-0"')).map(([, n]) => n)).toEqual([1]);
+
+    // #138 phase 2: every read for the tenants only scoped callers use ("tbulk": evidence export across two pages;
+    // "tfacet": facets) ran as logbird_query with that tenant bound in the row-policy setting. Correlated by the tenant
+    // literal in the logged SQL (parameters are substituted there), not by the settings under test.
+    if (queryClickhouse) {
+      await clickhouse.command({ query: 'SYSTEM FLUSH LOGS' });
+      const logged = await (
+        await clickhouse.query({
+          query: `SELECT user, Settings['SQL_logbird_tenant'] tenant, multiIf(position(query, '''tbulk''') > 0, 'tbulk', 'tfacet') expected
+            FROM system.query_log
+            WHERE type = 'QueryFinish' AND query_kind = 'Select' AND event_time > now() - INTERVAL 30 MINUTE
+              AND position(query, {p:String}) > 0 AND (position(query, '''tbulk''') > 0 OR position(query, '''tfacet''') > 0)`,
+          query_params: { p: project.id },
+          format: 'JSONEachRow',
+        })
+      ).json<{ user: string; tenant: string; expected: string }>();
+      expect(logged.filter((r) => r.expected === 'tbulk').length).toBeGreaterThanOrEqual(2); // both export pages
+      // The evidence export's own page queries, identified by their log_comment (the export id): 230 rows = 2 pages.
+      const pages = await (
+        await clickhouse.query({
+          query: `SELECT user, Settings['SQL_logbird_tenant'] tenant FROM system.query_log
+            WHERE type = 'QueryFinish' AND event_time > now() - INTERVAL 30 MINUTE AND log_comment = {exportId:String}`,
+          query_params: { exportId: evidenceExportId },
+          format: 'JSONEachRow',
+        })
+      ).json<{ user: string; tenant: string }>();
+      expect(pages.length).toBeGreaterThanOrEqual(2);
+      for (const page of pages) expect(page).toEqual({ user: 'logbird_query', tenant: "'tbulk'" });
+      expect(logged.filter((r) => r.expected === 'tfacet').length).toBeGreaterThanOrEqual(1);
+      // query_log keeps setting values quoted ("'tbulk'").
+      for (const row of logged) expect(row, JSON.stringify(row)).toMatchObject({ user: 'logbird_query', tenant: `'${row.expected}'` });
+    }
 
     // Rolling copies scope, origins and the absolute expiry (a replacement never outlives the key it replaces unless the
     // roll passes a new expiry); revoking or expiring the key kills it and its tokens.

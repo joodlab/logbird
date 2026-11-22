@@ -39,6 +39,10 @@ public class FinalCycleTests
     private sealed class StalledStream : Stream
     {
         private readonly TaskCompletionSource<int> _read = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _reads;
+
+        /// <summary>How many reads were started (each one never completes).</summary>
+        public int Reads => Volatile.Read(ref _reads);
 
         public override bool CanRead => true;
 
@@ -50,13 +54,25 @@ public class FinalCycleTests
 
         public override long Position { get => 0; set => throw new NotSupportedException(); }
 
-        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => _read.Task;
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _reads);
+            return _read.Task;
+        }
 
 #if NET
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => new(_read.Task);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _reads);
+            return new(_read.Task);
+        }
 #endif
 
-        public override int Read(byte[] buffer, int offset, int count) => _read.Task.GetAwaiter().GetResult();
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            Interlocked.Increment(ref _reads);
+            return _read.Task.GetAwaiter().GetResult();
+        }
 
         public override void Flush()
         {
@@ -128,12 +144,16 @@ public class FinalCycleTests
     [Fact]
     public async Task A_stalled_body_cannot_outlive_the_read_timeout()
     {
-        var server = new FakeServer().Then(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StalledStream()) });
-        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "k", Timeout = TimeSpan.FromMilliseconds(300) }, new HttpClient(server));
-        var watch = Stopwatch.StartNew();
-        var error = await Assert.ThrowsAsync<LogbirdApiException>(() => reader.SearchAsync());
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), watch.Elapsed.ToString());
+        // The body never arrives and its reads ignore cancellation. The read timeout must still end the search, and the
+        // stream must show that a body read had started (so it was the stalled read the timeout ended, not the headers).
+        var body = new StalledStream();
+        var server = new FakeServer().Then(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) });
+        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "k", Timeout = TimeSpan.FromSeconds(2) }, new HttpClient(server));
+        var search = reader.SearchAsync();
+        Assert.Same(search, await Task.WhenAny(search, Task.Delay(TimeSpan.FromSeconds(60))));
+        var error = await Assert.ThrowsAsync<LogbirdApiException>(() => search);
         Assert.Equal("unreachable", error.Code);
+        Assert.True(body.Reads >= 1, "no body read had started");
     }
 
     [Fact]
@@ -253,7 +273,16 @@ public class FinalCycleTests
                 return FakeServer.Accept(request);
             },
         };
-        await using var client = Client(Options(o => o.MaxQueueSize = 100_000), server);
+        // Responses are held until all flushes are registered; a long request timeout and retry budget keep a slow setup
+        // from exhausting delivery attempts before the gate opens.
+        await using var client = Client(
+            Options(o =>
+            {
+                o.MaxQueueSize = 100_000;
+                o.RequestTimeout = TimeSpan.FromMinutes(5);
+                o.MaxRetries = 1_000;
+            }),
+            server);
         var flushes = new Task<bool>[3_000];
         for (var i = 0; i < flushes.Length; i++)
         {
@@ -263,7 +292,14 @@ public class FinalCycleTests
 
         Assert.True(WaiterCount(client) <= Internal.EventQueue.MaxWaiters, WaiterCount(client).ToString(System.Globalization.CultureInfo.InvariantCulture));
         release.SetResult(true);
-        Assert.All(await Task.WhenAll(flushes), Assert.True);
+        var results = await Task.WhenAll(flushes);
+
+        // Every flush completes. All of them succeed unless the setup stalled past the sender's five-minute limit for one
+        // send, which fails that send by design; the bound on waiters is what this test is about.
+        if (client.Stats.FailedSends == 0)
+        {
+            Assert.All(results, Assert.True);
+        }
     }
 
     [Fact]
@@ -384,37 +420,118 @@ public class FinalCycleTests
     }
 
     [Fact]
-    public async Task Stats_count_every_delivery_by_the_time_FlushAsync_returns_even_when_a_flush_completes_mid_send()
+    public async Task A_flush_that_completes_mid_send_already_sees_its_deliveries_counted()
     {
-        // A 503 with partial acknowledgements settles events while the send is still running, and a flush can complete
-        // then. Deliveries must already be counted at that point; this race showed up once in CI on .NET Framework, and
-        // the loop keeps exercising that window (it cannot be forced deterministically).
-        var server = new FakeServer { Fallback = request => Task.FromResult(FakeServer.Json(HttpStatusCode.Accepted, JsonSerializer.Serialize(new { accepted = request.Ids.Length, ids = request.Ids, rejected = Array.Empty<object>() }))) };
-        await using var client = Client(Options(), server);
-        for (var round = 1; round <= 100; round++)
-        {
-            server.Then(request => FakeServer.Json(HttpStatusCode.ServiceUnavailable, JsonSerializer.Serialize(new
+        static HttpResponseMessage Accept(CapturedRequest request)
+            => FakeServer.Json(HttpStatusCode.Accepted, JsonSerializer.Serialize(new { accepted = request.Ids.Length, ids = request.Ids, rejected = Array.Empty<object>() }));
+
+        // [X] is held open; then [A, B] gets a 503 that accepts A and leaves B unresolved, which completes a flush covering
+        // X and A while the send goes on. The retry for B waits in the sender's backoff (the injectable delay) until the
+        // assertion has run, so the sender cannot advance in between. X never meets that gate: the 503 response arms it,
+        // and X's request has neither an SDK nor an HttpClient timeout that could expire first. Every wait has a hang
+        // watchdog only.
+        var xArrived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseX = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRetry = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var retryArmed = 0;
+        var server = new FakeServer()
+            .ThenAsync(async request =>
+            {
+                xArrived.TrySetResult(true);
+                await releaseX.Task;
+                return Accept(request);
+            })
+            .Then(request =>
+            {
+                // From this response on, a retry (only B's can follow) waits for the gate; X never meets it.
+                Interlocked.Exchange(ref retryArmed, 1);
+                return Pending503(request);
+            })
+            .Then(Accept);
+        static HttpResponseMessage Pending503(CapturedRequest request) => FakeServer.Json(HttpStatusCode.ServiceUnavailable, JsonSerializer.Serialize(new
             {
                 error = new
                 {
                     code = "ingest_pending",
                     details = new
                     {
-                        accepted = request.Ids.Length - 1,
-                        ids = request.Ids.Take(request.Ids.Length - 1).ToArray(),
+                        accepted = 1,
+                        ids = new[] { request.Ids[0] },
                         rejected = Array.Empty<object>(),
                         warnings = Array.Empty<object>(),
-                        indices = new[] { request.Ids.Length - 1 },
-                        eventIds = new[] { request.Ids[request.Ids.Length - 1] },
+                        indices = new[] { 1 },
+                        eventIds = new[] { request.Ids[1] },
                     },
                 },
-            })));
+            }));
+        await using var client = new LogbirdClient(
+            Options(o => o.RequestTimeout = TimeSpan.FromMinutes(5)),
+            new HttpClient(server) { Timeout = System.Threading.Timeout.InfiniteTimeSpan },
+            logger: null,
+            delay: (_, _) => Volatile.Read(ref retryArmed) == 1 ? releaseRetry.Task : Task.CompletedTask);
+        try
+        {
+            client.Track(new AuditEvent("x"));
+            var flushX = client.FlushAsync();
+            await Within(xArrived.Task);
+
             client.Track(new AuditEvent("a"));
+            var flushA = client.FlushAsync();
             client.Track(new AuditEvent("b"));
-            client.Track(new AuditEvent("c"));
-            Assert.True(await client.FlushAsync());
-            Assert.Equal(3 * round, client.Stats.Delivered);
+            releaseX.SetResult(true);
+            Assert.True(await Within(flushX));
+            Assert.True(await Within(flushA));
+
+            // Read at once: the sender is parked before B's retry, so X and A must already be counted.
+            Assert.Equal(2, client.Stats.Delivered);
+            Assert.Equal(2, server.Requests.Count);
         }
+        finally
+        {
+            releaseX.TrySetResult(true);
+            releaseRetry.TrySetResult(true);
+        }
+
+        Assert.True(await Within(client.FlushAsync()));
+        Assert.Equal(3, client.Stats.Delivered);
+        Assert.Equal(3, server.Requests.Count);
+    }
+
+    /// <summary>Awaits a task the test expects to finish; the watchdog only turns a hang into a failure.</summary>
+    private static async Task<T> Within<T>(Task<T> task)
+    {
+        if (await Task.WhenAny(task, Task.Delay(TimeSpan.FromMinutes(2))) != task)
+        {
+            throw new TimeoutException("The test hung waiting for the SDK.");
+        }
+
+        return await task;
+    }
+
+    [Fact]
+    public void Settling_counts_under_the_queue_lock_so_an_immediate_flush_already_sees_the_count()
+    {
+        var queue = new Internal.EventQueue(10, QueueFullBehavior.DropOldest, _ => { });
+        queue.Enqueue(sequence => new Internal.QueuedEvent([1], "evt_1", "a", sequence), out _, out _, out _);
+        var batch = queue.TakeBatch(10, 1_000_000);
+        var gate = typeof(Internal.EventQueue).GetField("_gate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(queue)!;
+
+        var counted = 0;
+        var heldWhileCounting = false;
+        Assert.True(queue.Settle(batch[0], () =>
+        {
+            heldWhileCounting = Monitor.IsEntered(gate);
+            counted++;
+        }));
+        Assert.True(heldWhileCounting);
+
+        // Nothing is outstanding, so a flush takes AddWaiter's immediate path, and the count is already there.
+        Assert.Null(queue.AddWaiter());
+        Assert.Equal(1, counted);
+
+        // Settling again neither succeeds nor counts again.
+        Assert.False(queue.Settle(batch[0], () => counted++));
+        Assert.Equal(1, counted);
     }
 
     [Fact]

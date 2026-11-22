@@ -1,11 +1,12 @@
 {
   "name": "@logbird/contracts",
   "license": "MIT",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./record-selector": "./src/record-selector.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

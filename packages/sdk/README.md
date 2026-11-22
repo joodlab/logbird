@@ -239,6 +239,12 @@ when pending captures may still exist rather than calling client.shutdown direct
 
 ## Event ids and retries
 
+Large numbers: a JavaScript `number` cannot hold integers above 2^53 − 1, and the SDK copies events through JSON.
+Send 64-bit ids and long decimals as strings. Numeric entity ids within the safe range (`actor: { id: 42 }`) are fine
+and are indexed as `"42"`. See
+[numbers and ids](../../docs/integrating-a-backend.md#numbers-and-ids).
+
+
 An id names one immutable event within a project, across every timestamp. An exact
 retry is accepted without inserting or incrementing rollups again. Object keys may
 be reordered recursively; array order and string contents must stay identical.

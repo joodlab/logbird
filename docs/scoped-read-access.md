@@ -13,9 +13,11 @@ There are two ways to grant scoped access:
 The recommended pattern is **one unscoped `read` key on your server**. For every dashboard view, your server mints a
 viewer token for that business or website and gives only the token to the browser.
 
-> **Status.** In this release the scope is enforced in Logbird's query builders on every read path (below). A second,
-> independent layer (ClickHouse row policies on the tenant) follows in a later release. Until then, treat the query
-> builders as the single enforcement layer.
+> **Two layers.** The scope is enforced in Logbird's query builders on every read path (below). When the restricted
+> ClickHouse query user is configured (`CLICKHOUSE_QUERY_USER`, the same account SQL mode uses), scoped reads also
+> run as that user with the tenant bound in a row policy, so ClickHouse itself returns no other tenant's events even
+> if a query forgot the scope. Without that user, the query builders are the single layer. The row policy covers the
+> tenant; the target and action-prefix limits are enforced by the query builders.
 
 ## The scope
 
@@ -49,10 +51,13 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
 - Ingest also caps ids (256 characters) and replaces invalid Unicode. Scope ids are refused unless they are already
   in stored form (at most 250 characters, no surrounding whitespace, no U+FFFD), so a capped or repaired stored id can
   never match a scope.
-- An id sent as a JSON number is not stored as an id today, so no scope sees it. With the change above, a numeric
-  identifier is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are stored as `"42"`); a
-  string identifier is stored exactly as sent. A scope written as `"42"` then matches the number 42 in any spelling
-  and the string `"42"`, not the string `"42.0"`.
+- An id sent as a JSON number is stored as one canonical text of its exact value: its plain decimal in the usual
+  case (42, 42.0 and 4.2e1 are all stored as `"42"`), scientific notation for very large or very small values
+  (the number 1e33 is stored as `"1e33"`); see [numbers and ids](integrating-a-backend.md#numbers-and-ids). A scope
+  written as `"42"` therefore matches a tenant sent as the number 42 in any spelling and as the string `"42"`, not
+  the string `"42.0"`: a numeric id and a string id with the same stored text are one tenant and one scope. A string
+  holding the expanded digits of 1e33 is a different tenant from the number. Events stored before 0.2.0 whose
+  tenant id was a number were not indexed under a tenant, so no scope sees them. Before 0.2.0, Logbird indexed a numeric target id as an empty string, so that target cannot satisfy a scope naming its numeric id, but another target can independently satisfy the scope. A numeric actor id does not affect a tenant-only scope.
 - A read-only operator query that counts stored ids differing from the sent ones ships with the ingest change.
 
 ## Where the scope applies
@@ -77,8 +82,10 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
 
 ## Keys
 
-Create scoped keys with `POST /api/projects/:projectId/keys` (a console form follows; today the console creates ingest and
-ordinary read keys):
+Create scoped keys in the console (project **Settings → API keys → Create key → Scoped read**) or with
+`POST /api/projects/:projectId/keys`. The console form shows each limit before you submit, previews what the key can
+read, and afterwards shows the kind, scope and expiry the server actually returned, with a warning if they differ from
+the request:
 
 ```http
 POST /api/projects/:projectId/keys
@@ -95,15 +102,16 @@ POST /api/projects/:projectId/keys
 - `embedOrigins` (read kinds only): browser origins allowed to use this key's viewer tokens, for example
   `https://cms.example.com`. Exact origins, lowercase, no path.
 - `expiresAt` (optional, in the future): an expired key is rejected like a revoked one, and so are its tokens.
-- **Check the response before you hand out a secret.** A server older than this release (during a rolling upgrade, or
+- **Check the response before you hand out a secret.** A server older than 0.2.0 (during a rolling upgrade, or
   after a rollback) ignores `expiresAt` on `read` and `ingest` keys and returns a permanent key, and ignores `expiresAt` on
   a roll. Compare the returned key's `kind`, `scope` and `expiresAt` with what you asked for; if they differ, revoke it.
   Older servers refuse `kind: "scoped-read"` outright (422).
 - Scope, origins and expiry are fixed at creation. **Rolling** (`POST …/keys/:keyId/roll`) copies the scope and
   origins and keeps the old key's absolute expiry; pass `{ "expiresAt": "…" }` to give the replacement a different
-  one. Rolling an expired key requires a new `expiresAt` (409 `key_expired` otherwise). A database trigger refuses any
-  replacement that drops the scope or the expiry: this release answers 409 `key_restricted`; an older release (after a
-  rollback) fails that roll with a server error and creates nothing.
+  one. Rolling an expired key requires a new `expiresAt` (409 `key_expired` otherwise). In the console, **Roll** asks
+  whether the replacement keeps the current expiry or gets a new one, and offers only a new one for an expired key.
+  A database trigger refuses any replacement that drops the scope or the expiry: 0.2.0 and later answer
+  409 `key_restricted`; an older release (after a rollback) fails that roll with a server error and creates nothing.
 - `api_key.created` and `api_key.revoked` in workspace activity record the scope, origins and expiry.
 
 ## Viewer tokens
@@ -147,7 +155,10 @@ Authorization: Bearer lb_read_…
 
 `GET /v1/export?format=csv|jsonl|jsonl-evidence&q=&from=&to=` streams like the console export
 ([exports](exports.md)): `X-Logbird-Export-Id` and `X-Logbird-Export-Schema` headers, the same CSV columns, and the
-same admission limits (one running export per API key, two per workspace; a busy key answers 429 `export_busy`). There
+same admission limits (one running export per API key, two per workspace; a busy key answers 429 `export_busy`). When
+scoped reads run as the restricted query user (see "Two layers"), a scoped export takes both of the workspace's export
+slots by itself, like a console SQL export, so another key's export answers 429 `export_busy` while it runs, and each
+scoped query runs under that user's limits (10 s, 5,000,000 rows read and 1 GiB per query). There
 is no trailer: a complete download is one that ends normally (a non-empty file ends with a newline; no matching events
 gives an empty JSONL body or a CSV header only). A failure after the headers aborts the connection, so discard any
 download that ends with a transport error.

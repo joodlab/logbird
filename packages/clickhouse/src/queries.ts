@@ -3,7 +3,9 @@ import type {
   AuditEvent,
   Entity,
   EntityKind,
+  EntityMetadata,
   EntityProfile,
+  EntityProfileQuery,
   EntitySort,
   EventDetail,
   ExportQuery,
@@ -19,14 +21,21 @@ import type {
   SearchQuery,
   SearchResponse,
 } from '@logbird/contracts';
-import { EXPORT_SCHEMA_VERSION, pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
+import {
+  EXPORT_SCHEMA_VERSION,
+  parseJsonExact,
+  pickHistogramInterval,
+  QUERY_FIELDS,
+  RECENT_PROBLEM_OUTCOMES,
+  RECENT_PROBLEM_SEVERITY,
+} from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
-import { isQueryClient } from './client';
+import { boundTenant, isQueryClient } from './client';
 import { CSV_COLUMNS, csvEvent } from './export';
 import { projectMaintenance } from './maintenance-tag';
 import type { EventRow } from './normalize';
-import { columns, compileQuery, QueryError } from './query';
+import { columns, compileQuery, QueryError, recordTargetPredicate } from './query';
 import { rollupSql } from './rollup-sql';
 import { CursorError, cursorBinding, scopePredicate } from './scope';
 import { freezeSqlClock, sqlSyntaxError, validateSql } from './sql-guard';
@@ -40,8 +49,14 @@ async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }, no
   return { sql: frozen.sql, params: { ...frozen.params, [sqlExpression]: q.q ?? '' } };
 }
 
+type CompiledFilter = Awaited<ReturnType<typeof filter>>;
 type Params = Record<string, unknown>;
-export type ExportExecution = { signal: AbortSignal; cancelQuery: (queryId: string) => Promise<void> };
+export type ExportExecution = {
+  signal: AbortSignal;
+  cancelQuery: (queryId: string) => Promise<void>;
+  /** Recorded as ClickHouse `log_comment` on every page query (e.g. the export id), for audits and tests. */
+  tag?: string;
+};
 export async function read<T>(
   ch: ClickHouseClient,
   query: string,
@@ -61,6 +76,14 @@ export async function read<T>(
   // expression. Bind per HTTP query, not on the shared client's session.
   const project = query_params.project ?? query_params.p;
   if (isQueryClient(ch) && (typeof project !== 'string' || !project)) throw new Error('Restricted query requires one project');
+  // A tenant-bound client always sends its tenant; a scope predicate in the query must name the same tenant.
+  const bound = boundTenant(ch);
+  if (bound !== undefined && typeof query_params.scope_tenant === 'string' && query_params.scope_tenant !== bound)
+    throw new Error('Scope tenant does not match the bound tenant');
+  const tenant = bound ?? (typeof query_params.scope_tenant === 'string' ? query_params.scope_tenant : '');
+  // Error reports name the language the caller used: SQL-mode filters carry the expression symbol, and the unbound
+  // restricted client serves only the console's SQL mode (its auxiliary reads too); tenant-bound clients serve /v1.
+  const lang = sqlExpression in query_params || (isQueryClient(ch) && bound === undefined) ? 'sql' : 'query';
   execution?.signal.throwIfAborted();
   const queryId = execution ? randomUUID() : undefined;
   let cancellation: Promise<void> | undefined;
@@ -81,12 +104,14 @@ export async function read<T>(
       abort_signal: abortSignal,
       clickhouse_settings: {
         ...(abortSignal ? { cancel_http_readonly_queries_on_client_close: 1 } : {}),
+        ...(execution?.tag ? { log_comment: execution.tag } : {}),
         max_execution_time: isQueryClient(ch) ? 10 : guard,
         // Restricted SQL's CONST profile supplies 1-GiB memory/read limits and reserves both API admission slots.
         ...(exportBudget && !isQueryClient(ch)
           ? { max_memory_usage: '134217728', max_bytes_to_read: '268435456', read_overflow_mode: 'throw' as const, max_threads: 2 }
           : {}),
-        ...(isQueryClient(ch) ? { SQL_logbird_project: project as string } : {}),
+        // Scoped reads bind their tenant so the row policy enforces it too (#138 phase 2).
+        ...(isQueryClient(ch) ? { SQL_logbird_project: project as string, SQL_logbird_tenant: tenant } : {}),
       },
     });
     // The driver stops watching abort_signal once headers arrive; close the body stream ourselves so a stalled body
@@ -106,13 +131,13 @@ export async function read<T>(
       )
     )
       throw new QueryError('Query exceeded its resource budget', {
-        lang: isQueryClient(ch) ? 'sql' : 'query',
+        lang,
         reason: 'limit',
         start: null,
         end: null,
         hint: 'Narrow the time range or filter',
       });
-    if (isQueryClient(ch) && /SYNTAX_ERROR|Syntax error/.test(error instanceof Error ? error.message : ''))
+    if (lang === 'sql' && /SYNTAX_ERROR|Syntax error/.test(error instanceof Error ? error.message : ''))
       throw sqlSyntaxError(error, query, (query_params as Record<symbol, string>)[sqlExpression] ?? '');
     throw error;
   } finally {
@@ -129,13 +154,7 @@ export function timeRange(q: RangeQuery, now = Date.now()) {
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('Invalid time range');
   return { from: from.toISOString(), to: to.toISOString() };
 }
-export async function where(
-  ch: ClickHouseClient,
-  projectId: string,
-  q: RangeQuery,
-  compiled?: Awaited<ReturnType<typeof filter>>,
-  scope?: ReadScope | null,
-) {
+export async function where(ch: ClickHouseClient, projectId: string, q: RangeQuery, compiled?: CompiledFilter, scope?: ReadScope | null) {
   const c = compiled ?? (await filter(ch, q));
   const s = scopePredicate(scope);
   // The scope is ANDed outside the user's filter: nothing inside `(c.sql)` can widen it.
@@ -327,17 +346,46 @@ export async function searchEvents(
 ): Promise<SearchResponse> {
   return (await searchPage(ch, projectId, q, compiled, false, undefined, undefined, scope)).page;
 }
-async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: ReadScope | null) {
-  const canonical = 'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp LIMIT 1';
+async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: ReadScope | null, canonicalClient?: ClickHouseClient) {
+  // Oldest receipt first, then timestamp, then a hash of the stored document: a deterministic canonical version even
+  // for legacy rows that tie on both timestamps.
+  const canonical =
+    'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1';
   if (!scope) return (await read<EventRow>(ch, canonical, { p, id }))[0];
   const s = scopePredicate(scope);
+  if (canonicalClient && canonicalClient !== ch) {
+    // A row-policy-bound client only sees its tenant's rows, so it would pick the oldest version *of its tenant* as
+    // canonical. Choose the canonical version project-wide and test the scope on it in the same lookup (a pointer and
+    // a flag, nothing else). An unknown id and an out-of-scope id both end here, with one query and the same answer;
+    // only an in-scope version is then fetched, exactly, through the bound client.
+    const [pointer] = await read<{ received_at: string; timestamp: string; h: string; in_scope: number }>(
+      canonicalClient,
+      `SELECT received_at, timestamp, toString(sipHash64(payload)) h, (${s.sql}) in_scope FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1`,
+      { p, id, ...s.params },
+    );
+    if (!pointer || !Number(pointer.in_scope)) return;
+    return (
+      await read<EventRow>(
+        ch,
+        `SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} AND received_at={pointerReceived:DateTime64(3, 'UTC')} AND timestamp={pointerTimestamp:DateTime64(3, 'UTC')} AND sipHash64(payload)={pointerHash:UInt64} AND ${s.sql} LIMIT 1`,
+        { p, id, pointerReceived: pointer.received_at, pointerTimestamp: pointer.timestamp, pointerHash: pointer.h, ...s.params },
+      )
+    )[0];
+  }
   // Pick the canonical stored row first, then test the scope on it: a scoped caller sees exactly the row an unscoped
   // reader sees, or nothing (never a different stored version that happens to match).
   return (await read<EventRow>(ch, `SELECT * FROM (${canonical}) WHERE ${s.sql}`, { p, id, ...s.params }))[0];
 }
 /** With a scope, an out-of-scope id is indistinguishable from an unknown one (null → 404). */
-export async function getEvent(ch: ClickHouseClient, projectId: string, eventId: string, scope?: ReadScope | null): Promise<EventDetail | null> {
-  const row = await eventRow(ch, projectId, eventId, scope);
+export async function getEvent(
+  ch: ClickHouseClient,
+  projectId: string,
+  eventId: string,
+  scope?: ReadScope | null,
+  /** With a row-policy-bound `ch`: the unrestricted client that picks the canonical version of each id. */
+  canonicalClient?: ClickHouseClient,
+): Promise<EventDetail | null> {
+  const row = await eventRow(ch, projectId, eventId, scope, canonicalClient);
   if (!row) return null;
   const parents: AuditEvent[] = [],
     seen = new Set([eventId]);
@@ -345,7 +393,7 @@ export async function getEvent(ch: ClickHouseClient, projectId: string, eventId:
   while (parent && !seen.has(parent) && parents.length < 100) {
     seen.add(parent);
     // The chain stops at the first parent outside the scope.
-    const r = await eventRow(ch, projectId, parent, scope);
+    const r = await eventRow(ch, projectId, parent, scope, canonicalClient);
     if (!r) break;
     parents.unshift(toEvent(r));
     parent = r.parent_event_id;
@@ -360,7 +408,7 @@ export async function getEvent(ch: ClickHouseClient, projectId: string, eventId:
   )[0];
   return {
     event: toEvent(row),
-    payload: JSON.parse(row.payload),
+    payload: parseJsonExact(row.payload),
     parents,
     childCount: Number(counts?.children ?? 0),
     operationSize: Number(counts?.size ?? 0),
@@ -376,8 +424,13 @@ export async function liveEvents(ch: ClickHouseClient, p: string, q: { since: st
     )
   ).map(toEvent);
 }
-export async function histogram(ch: ClickHouseClient, p: string, q: z.infer<typeof histogramQuerySchema>): Promise<HistogramResponse> {
-  const w = await where(ch, p, q),
+export async function histogram(
+  ch: ClickHouseClient,
+  p: string,
+  q: z.infer<typeof histogramQuerySchema>,
+  compiled?: CompiledFilter,
+): Promise<HistogramResponse> {
+  const w = await where(ch, p, q, compiled),
     range = timeRange(q),
     interval = q.interval ?? pickHistogramInterval(Date.parse(range.to) - Date.parse(range.from));
   const step = interval * 1000;
@@ -446,8 +499,9 @@ export async function facets(
   p: string,
   q: Omit<z.infer<typeof facetQuerySchema>, 'byLimit'> & { byLimit?: number },
   scope?: ReadScope | null,
+  compiled?: CompiledFilter,
 ): Promise<FacetResponse> {
-  const w = await where(ch, p, q, undefined, scope);
+  const w = await where(ch, p, q, compiled, scope);
   const one = facetLevel(q.field, 1);
   // Only the top `limit` groups leave ClickHouse; the window sum (computed before LIMIT) keeps otherCount exact.
   const rows = await read<{ value: string; label: string; count: number; total: number }>(
@@ -490,8 +544,8 @@ async function metrics(ch: ClickHouseClient, p: string, q: RangeQuery) {
     )[0] ?? { events: 0, actors: 0, tenants: 0, failureRate: 0, avgConformance: 0 }
   );
 }
-async function top(ch: ClickHouseClient, p: string, q: RangeQuery, col: string, label: string, type = "''") {
-  const w = await where(ch, p, q);
+async function top(ch: ClickHouseClient, p: string, q: RangeQuery, col: string, label: string, type = "''", compiled?: CompiledFilter) {
+  const w = await where(ch, p, q, compiled);
   return read<{ id: string; label: string; type: string; count: number }>(
     ch,
     `SELECT ${col} id,coalesce(nullIf(argMaxIf(${label},received_at,${label}!=''),''),id) label,argMax(${type},timestamp) type,count() count FROM events WHERE ${w.sql} AND ${col}!='' GROUP BY id ORDER BY count DESC,id LIMIT 10`,
@@ -513,7 +567,7 @@ export async function overview(ch: ClickHouseClient, p: string, q: RangeQuery): 
     top(ch, p, q, 'executor_id', 'executor_name', 'executor_type'),
     read<EventRow>(
       ch,
-      `SELECT * FROM events WHERE ${(await where(ch, p, q)).sql} AND (outcome IN ('failure','denied') OR severity='critical') ORDER BY timestamp DESC LIMIT 10`,
+      `SELECT * FROM events WHERE ${(await where(ch, p, q)).sql} AND (outcome IN (${RECENT_PROBLEM_OUTCOMES.map((o) => `'${o}'`).join(',')}) OR severity='${RECENT_PROBLEM_SEVERITY}') ORDER BY timestamp DESC LIMIT 10`,
       (await where(ch, p, q)).params,
     ),
     projectStats(ch, [p]),
@@ -557,24 +611,61 @@ const ENTITY_ORDER: Record<EntitySort, { keys: string; types: [string, string] }
   lastSeen: { keys: '-toUnixTimestamp64Milli(lastSeen),-toInt64(events)', types: ['Int64', 'Int64'] },
   name: { keys: "lowerUTF8(if(name='',id,name)),''", types: ['String', 'String'] },
 };
+/**
+ * How well an entity matches a search, best first: 0 the exact id as typed, 1 the id in another case, 2 id prefix,
+ * 3 name prefix, 4 substring of id or name, 5 fuzzy (ngram) only. A record is stored as `type:id`; its bare id (the part after its own, known type, which may
+ * itself contain colons) counts as the id too (`article_27_2`). Other kinds keep their ids whole: `a:biz_27` is not
+ * `biz_27`.
+ */
+const ENTITY_BARE_ID_EXACT = "if(kind='target' AND startsWith(id,concat(type,':')),substring(id,length(type)+2),id)";
+const ENTITY_BARE_ID = `lowerUTF8(${ENTITY_BARE_ID_EXACT})`;
+/**
+ * Whether an entity's id or name matches a search, over the given columns. Three or more characters: the id or name
+ * contains the text, or resembles it (ngram). One or two characters say too little for that (on a project with a
+ * million records they match most of them), so they match ids, a record's bare id, and names that start with the
+ * text: an id like `7` is still found exactly.
+ */
+const entitySearchMatch = (id: string, name: string, type: string, kind: string) =>
+  `{q:String}='' OR (lengthUTF8({q:String})>=3 AND (positionCaseInsensitiveUTF8(concat(${id},' ',${name}),{q:String})>0 OR ngramSearchCaseInsensitiveUTF8(concat(${id},' ',${name}),{q:String})>0.3)) OR (lengthUTF8({q:String})<3 AND (startsWith(lowerUTF8(${id}),lowerUTF8({q:String})) OR startsWith(lowerUTF8(if(${kind}='target' AND startsWith(${id},concat(${type},':')),substring(${id},length(${type})+2),${id})),lowerUTF8({q:String})) OR startsWith(lowerUTF8(${name}),lowerUTF8({q:String}))))`;
+/**
+ * A search in two steps. The stored rows pick candidate ids cheaply (a kind can hold a million records; matching only
+ * after a GROUP BY over all of them cost ~0.85 s on a 5M-event project). Every row of a candidate is then aggregated, so
+ * counts, first and last seen and the sort stay whole, and the match is decided on the aggregated id and current name,
+ * as before: a renamed entity is found by its current name only, whatever the merge state of the rollup.
+ */
+const ENTITY_SEARCH_CANDIDATES = `({q:String}='' OR entity_id IN (SELECT entity_id FROM entities WHERE project_id={p:String} AND kind={kind:String} AND (${entitySearchMatch('entity_id', 'name', 'type', 'kind')})))`;
+const ENTITY_SEARCH_HAVING = `(${entitySearchMatch('id', 'name', 'type', 'kind')})`;
+const ENTITY_MATCH_RANK = `multiIf(
+  id={q:String} OR ${ENTITY_BARE_ID_EXACT}={q:String},0,
+  lowerUTF8(id)=lowerUTF8({q:String}) OR ${ENTITY_BARE_ID}=lowerUTF8({q:String}),1,
+  startsWith(lowerUTF8(id),lowerUTF8({q:String})) OR startsWith(${ENTITY_BARE_ID},lowerUTF8({q:String})),2,
+  startsWith(lowerUTF8(name),lowerUTF8({q:String})),3,
+  positionCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0,4,
+  5)`;
 export async function listEntities(ch: ClickHouseClient, p: string, q: EntityListQuery) {
   const sort = q.sort ?? 'events',
     order = ENTITY_ORDER[sort];
+  // A search ranks by match quality first (an exact id always leads, whatever the limit), then by the chosen sort.
+  const search = Boolean(q.q);
   let after = '';
   const params: Params = { p, kind: q.kind, q: q.q ?? '', type: q.type ?? '', limit: q.limit + 1 };
   if (q.cursor) {
-    const [c1, c2, id] = entityCursor(q.cursor, sort);
-    Object.assign(params, { c1, c2, cid: id });
-    after = `WHERE (${order.keys},id) > ({c1:${order.types[0]}},{c2:${order.types[1]}},{cid:String})`;
+    const [c1, c2, id, rank] = entityCursor(q.cursor, sort, search);
+    Object.assign(params, { c1, c2, cid: id, cr: rank });
+    after = `WHERE (r,${order.keys},id) > ({cr:UInt8},{c1:${order.types[0]}},{c2:${order.types[1]}},{cid:String})`;
   }
-  const rows = await read<Entity & { k1: string | number; k2: string | number }>(
+  const rows = await read<Entity & { k1: string | number; k2: string | number; r: number }>(
     ch,
-    `SELECT *,tupleElement(k,1) k1,tupleElement(k,2) k2 FROM (SELECT *,tuple(${order.keys}) k FROM (SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} GROUP BY kind,id HAVING ({q:String}='' OR positionCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0 OR ngramSearchCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0.3) AND ({type:String}='' OR type={type:String}))) ${after} ORDER BY k,id LIMIT {limit:UInt32}`,
+    `SELECT *,tupleElement(k,1) k1,tupleElement(k,2) k2 FROM (SELECT *,tuple(${order.keys}) k,${search ? ENTITY_MATCH_RANK : '0'} r FROM (SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} AND ${ENTITY_SEARCH_CANDIDATES} GROUP BY kind,id HAVING ${ENTITY_SEARCH_HAVING} AND ({type:String}='' OR type={type:String}))) ${after} ORDER BY r,k,id LIMIT {limit:UInt32}`,
     params,
     // Directory pages aggregate the whole kind; keep the guard roomy but bounded.
     isQueryClient(ch) ? 10 : 20,
   );
   const last = rows[q.limit - 1];
+  const cursor = (row: (typeof rows)[number]) => {
+    const keys = [sort, String(row.k1), String(row.k2), row.id];
+    return encode(search ? [...keys, String(row.r)] : keys);
+  };
   return {
     data: rows.slice(0, q.limit).map((r) => ({
       kind: r.kind,
@@ -585,60 +676,120 @@ export async function listEntities(ch: ClickHouseClient, p: string, q: EntityLis
       lastSeen: iso(r.lastSeen),
       events: Number(r.events),
     })),
-    nextCursor: rows.length > q.limit && last ? encode([sort, String(last.k1), String(last.k2), last.id]) : null,
+    nextCursor: rows.length > q.limit && last ? cursor(last) : null,
   };
 }
-function entityCursor(s: string, sort: EntitySort): [string, string, string] {
+/** A keyset cursor bound to its sort, and to whether the list was a search (a search cursor carries the match rank). */
+function entityCursor(s: string, sort: EntitySort, search: boolean): [string, string, string, string] {
   try {
     const a: unknown = JSON.parse(Buffer.from(s, 'base64url').toString());
-    if (Array.isArray(a) && a.length === 4 && a.every((v) => typeof v === 'string') && a[0] === sort) {
-      const [, k1, k2, id] = a as [string, string, string, string];
-      return [k1, k2, id];
+    if (Array.isArray(a) && a.length === (search ? 5 : 4) && a.every((v) => typeof v === 'string') && a[0] === sort) {
+      const [, k1, k2, id, rank = '0'] = a as string[];
+      if (/^[0-5]$/.test(rank)) return [k1 as string, k2 as string, id as string, rank];
     }
   } catch {
     /* Report malformed or cross-sort cursors with a stable public error below. */
   }
   throw new Error('Invalid cursor');
 }
-function sqlLiteral(s: string) {
-  return `'${s.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+
+const ENTITY_NAMES = 'kind,entity_id id,anyLast(type) type,anyLast(name) name';
+const ENTITY_BY_ID = 'FROM entities WHERE project_id={p:String} AND kind={kind:String} AND entity_id={id:String} GROUP BY kind,id';
+
+function ambiguousTarget(kind: EntityKind, id: string) {
+  return kind === 'target' && id.indexOf(':') !== id.lastIndexOf(':');
 }
-function entityFilter(kind: EntityKind, id: string) {
-  return kind === 'target'
-    ? `target.type:${JSON.stringify(id.slice(0, id.indexOf(':')))} target:${JSON.stringify(id.slice(id.indexOf(':') + 1))}`
-    : `${kind}:${JSON.stringify(id)}`;
+
+/** Read the display metadata only. The composite rollup key cannot distinguish pairs containing colons. */
+export async function entityMetadata(
+  ch: ClickHouseClient,
+  p: string,
+  kind: EntityKind,
+  id: string,
+  targetType?: string,
+): Promise<EntityMetadata | null> {
+  const ambiguous = ambiguousTarget(kind, id);
+  const rollup =
+    ambiguous && targetType !== undefined
+      ? undefined
+      : (await read<EntityMetadata>(ch, `SELECT ${ENTITY_NAMES} ${ENTITY_BY_ID}`, { p, kind, id }))[0];
+  if (kind !== 'target') return rollup ?? null;
+  const type = targetType ?? rollup?.type;
+  if (type === undefined || !id.startsWith(`${type}:`)) return null;
+  if (!ambiguous) return rollup ?? null;
+
+  const pair = recordTargetPredicate(type, id.slice(type.length + 1));
+  const [event] = await read<EntityMetadata>(
+    ch,
+    `SELECT 'target' kind, {id:String} id, {recordType:String} type,
+       arrayFirst((n, t, i) -> t = {recordType:String} AND i = {recordId:String}, target_names, target_types, target_ids) name
+     FROM events WHERE project_id={p:String} AND (${pair.sql}) ORDER BY timestamp DESC,event_id DESC LIMIT 1`,
+    { p, id, ...pair.params },
+  );
+  return event ?? null;
 }
-export async function entityProfile(ch: ClickHouseClient, p: string, kind: EntityKind, id: string, q: RangeQuery): Promise<EntityProfile | null> {
-  const raw = (
-    await read<Entity>(
-      ch,
-      'SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} AND entity_id={id:String} GROUP BY kind,id',
-      { p, kind, id },
-    )
-  )[0];
-  const entity = raw ? { ...raw, firstSeen: iso(raw.firstSeen), lastSeen: iso(raw.lastSeen), events: Number(raw.events) } : undefined;
-  if (!entity) return null;
-  const entitySql =
-    kind === 'target'
-      ? `has(target_ids,${sqlLiteral(id.slice(id.indexOf(':') + 1))}) AND has(target_types,${sqlLiteral(id.slice(0, id.indexOf(':')))})`
-      : `${kind}_id = ${sqlLiteral(id)}`;
-  const scoped = { ...q, q: q.lang === 'sql' ? `(${q.q || '1'}) AND (${entitySql})` : `${q.q ? `(${q.q})` : ''} ${entityFilter(kind, id)}` };
+
+export async function entityProfile(
+  ch: ClickHouseClient,
+  p: string,
+  kind: EntityKind,
+  id: string,
+  q: EntityProfileQuery,
+): Promise<EntityProfile | null> {
+  const ambiguous = ambiguousTarget(kind, id);
+  const rollup =
+    ambiguous && q.targetType !== undefined
+      ? undefined
+      : (
+          await read<Entity>(ch, `SELECT ${ENTITY_NAMES},min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events ${ENTITY_BY_ID}`, {
+            p,
+            kind,
+            id,
+          })
+        )[0];
+  if (!ambiguous && !rollup) return null;
+  const targetType = kind === 'target' ? (q.targetType ?? rollup?.type) : undefined;
+  if (kind === 'target' && (targetType === undefined || !id.startsWith(`${targetType}:`))) return null;
+
+  // Compose trusted predicates after SQL-mode validation. Use separate bindings
+  // from the user filter, which may itself include record terms.
+  const userFilter = await filter(ch, q);
+  const entityFilter =
+    targetType !== undefined
+      ? recordTargetPredicate(targetType, id.slice(targetType.length + 1))
+      : { sql: `${kind}_id = {entityId:String}`, params: { entityId: id } };
+  // The rollup loses the pair when several types and ids share a composite key.
+  const raw = ambiguous
+    ? (
+        await read<Entity>(
+          ch,
+          `SELECT 'target' kind, {id:String} id, {recordType:String} type,
+           argMax(arrayFirst((n, t, i) -> t = {recordType:String} AND i = {recordId:String}, target_names, target_types, target_ids), (timestamp,event_id)) name,
+           min(timestamp) firstSeen, max(timestamp) lastSeen, count() events
+         FROM events WHERE project_id={p:String} AND (${entityFilter.sql}) HAVING count() > 0`,
+          { p, id, ...entityFilter.params },
+        )
+      )[0]
+    : rollup;
+  if (!raw) return null;
+  const entity = { ...raw, firstSeen: iso(raw.firstSeen), lastSeen: iso(raw.lastSeen), events: Number(raw.events) };
+  const scoped = { sql: `(${userFilter.sql}) AND (${entityFilter.sql})`, params: { ...userFilter.params, ...entityFilter.params } };
+  const w = await where(ch, p, q, scoped);
   const [series, topActions, outcomes] = await Promise.all([
-    histogram(ch, p, scoped),
-    top(ch, p, scoped, 'action', 'action'),
-    facets(ch, p, { ...scoped, field: 'outcome', limit: 100 }),
+    histogram(ch, p, q, scoped),
+    top(ch, p, q, 'action', 'action', "''", scoped),
+    facets(ch, p, { ...q, field: 'outcome', limit: 100 }, undefined, scoped),
   ]);
   const related: EntityProfile['related'] = [];
   for (const k of ['actor', 'tenant', 'executor', 'target'] as const) {
     if (k === kind) continue;
-    const w = await where(ch, p, scoped),
-      target = k === 'target',
+    const target = k === 'target',
       idCol = target ? "concat(t.1,':',t.2)" : `${k}_id`,
       nameCol = target ? 't.3' : `${k}_name`,
       typeCol = target ? 't.1' : k === 'tenant' ? "''" : `${k}_type`;
     const rs = await read<{ id: string; name: string; type: string; count: number }>(
       ch,
-      `SELECT ${idCol} id,any(${nameCol}) name,any(${typeCol}) type,count() count FROM events ${target ? 'ARRAY JOIN arrayZip(target_types,target_ids,target_names) AS t' : ''} WHERE ${w.sql} AND ${idCol}!='' GROUP BY id ORDER BY count DESC LIMIT 10`,
+      `SELECT ${idCol} id,any(${nameCol}) name,${target ? typeCol : `any(${typeCol})`} type,count() count FROM events ${target ? 'ARRAY JOIN arrayZip(target_types,target_ids,target_names) AS t' : ''} WHERE ${w.sql} AND ${idCol}!='' GROUP BY id${target ? ',type' : ''} ORDER BY count DESC LIMIT 10`,
       w.params,
     );
     related.push(...rs.map((r) => ({ ...r, kind: k, count: Number(r.count) })));

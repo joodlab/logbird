@@ -61,7 +61,11 @@ describe('fictional hospitality fixtures', () => {
       expect(json).not.toMatch(/(?:\+966|\+971|\+974)\d{7,}/);
       for (const email of json.matchAll(/[\w.+-]+@([\w.-]+)/g)) expect(email[1]).toMatch(/(?:^|\.)example\.com$|\.test$/);
       if (event.performed_by || event.legacy || event.provider_extension) legacy++;
-      ids.set(event.id as string, { operation: event.context?.operationId, actor: event.actor?.id, time });
+      ids.set(event.id as string, {
+        operation: event.context?.operationId,
+        actor: event.actor?.id === undefined ? undefined : String(event.actor.id),
+        time,
+      });
     }
     expect(count).toBe(300_000);
     expect(actions.size).toBeGreaterThanOrEqual(80);
@@ -102,7 +106,7 @@ it('gives business-scoped scheduler and partner identities distinct names', () =
     if (e.actor?.type === 'system' || e.actor?.type === 'api_key') {
       const previous = names.get(e.actor.name ?? '');
       if (previous) expect(previous).toBe(e.actor.id);
-      names.set(e.actor.name ?? '', e.actor.id ?? '');
+      names.set(e.actor.name ?? '', String(e.actor.id ?? ''));
     }
   }
   expect(names.size).toBeGreaterThan(24);

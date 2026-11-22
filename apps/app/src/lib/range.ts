@@ -4,7 +4,8 @@
  * "<isoFrom>..<isoTo>" window (what drag-to-zoom and the custom picker produce).
  */
 
-import { formatClock, formatDate, formatMonthDay, localDayKey } from './format';
+import { formatClock, formatDate, formatMonthDay, formatOffset, isRepeatedWallTime, localDayKey, zoneOffsetMs } from './format';
+import { consoleTimeZone, shortZoneLabel } from './time-zone';
 
 export const RANGE_PRESETS = [
   { value: '15m', label: 'Last 15 minutes', short: '15m' },
@@ -37,10 +38,50 @@ export const ALL_RANGE = 'all';
 /** 2000-01-01T00:00:00Z: earlier than any event ingest can admit (3650 days before receipt) until 2035. */
 const ALL_FROM_MS = Date.UTC(2000, 0, 1);
 
-export function isValidRange(range: string): boolean {
-  if (range === ALL_RANGE || RELATIVE_RE.test(range)) return true;
-  const [a, b] = range.split('..');
-  return Boolean(a && b && !Number.isNaN(Date.parse(a)) && !Number.isNaN(Date.parse(b)) && Date.parse(a) < Date.parse(b));
+/** Latest instant a range may name: 2299-12-31T23:59:59.999Z, the end of ClickHouse's DateTime64 calendar. */
+const MAX_MS = Date.UTC(2299, 11, 31, 23, 59, 59, 999);
+/** An endpoint the API and storage accept: a finite instant from 1970 (before any admissible event) to 2299. */
+const representable = (ms: number) => Number.isFinite(ms) && ms >= 0 && ms <= MAX_MS;
+
+const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})$/;
+/** An absolute endpoint as written: an ISO instant whose date and time exist (no Feb 30, no 24:00), else NaN. */
+function parseInstant(text: string): number {
+  const m = ISO_INSTANT.exec(text);
+  if (!m) return Number.NaN;
+  const [y, mo, d, h, mi, s] = [m[1], m[2], m[3], m[4], m[5], m[6] ?? '0'].map(Number) as [number, number, number, number, number, number];
+  const day = new Date(Date.UTC(y, mo - 1, d));
+  if (day.getUTCFullYear() !== y || day.getUTCMonth() !== mo - 1 || day.getUTCDate() !== d || h > 23 || mi > 59 || s > 59) return Number.NaN;
+  return Date.parse(text);
+}
+
+/** The length of a relative preset such as "24h". */
+function rangeDurationOf(relative: string): number {
+  const rel = RELATIVE_RE.exec(relative);
+  return rel ? Number(rel[1]) * UNIT_MS[rel[2] as keyof typeof UNIT_MS] : 0;
+}
+
+/** Bounds of a relative or absolute range, or null when it names no window (zero, reversed or unrepresentable). */
+function windowOf(range: string, now: number): { fromMs: number; toMs: number; relative: boolean } | null {
+  const rel = RELATIVE_RE.exec(range);
+  if (rel) {
+    const toMs = Math.floor(now / 1000) * 1000;
+    const fromMs = toMs - Number(rel[1]) * UNIT_MS[rel[2] as keyof typeof UNIT_MS];
+    return representable(fromMs) && fromMs < toMs ? { fromMs, toMs, relative: true } : null;
+  }
+  const [a, b, extra] = range.split('..');
+  if (!a || !b || extra !== undefined) return null;
+  const fromMs = parseInstant(a);
+  const toMs = parseInstant(b);
+  return representable(fromMs) && representable(toMs) && fromMs < toMs ? { fromMs, toMs, relative: false } : null;
+}
+
+/**
+ * Whether a range (from a URL, a saved view or a link someone shared) names a real window: "all", a positive relative
+ * duration whose start is representable ("0d" and "99999999999d" are not), or two representable instants in order.
+ * Anything else falls back to the page's default range.
+ */
+export function isValidRange(range: string, now = Date.now()): boolean {
+  return range === ALL_RANGE || windowOf(range, now) !== null;
 }
 
 export function rangeDurationMs(range: string): number {
@@ -56,21 +97,13 @@ export function resolveRange(range: string, now = Date.now()): ResolvedRange {
     const toMs = Math.floor(now / 1000) * 1000 + 2 * UNIT_MS.d;
     return { from: new Date(ALL_FROM_MS).toISOString(), to: new Date(toMs).toISOString(), fromMs: ALL_FROM_MS, toMs, relative: true };
   }
-  const rel = RELATIVE_RE.exec(range);
-  if (rel) {
-    const toMs = Math.floor(now / 1000) * 1000;
-    const fromMs = toMs - Number(rel[1]) * UNIT_MS[rel[2] as keyof typeof UNIT_MS];
-    return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString(), fromMs, toMs, relative: true };
-  }
-  const [a, b] = range.split('..');
-  if (a && b) {
-    const fromMs = Date.parse(a);
-    const toMs = Date.parse(b);
-    if (!(Number.isNaN(fromMs) || Number.isNaN(toMs)) && fromMs < toMs) {
-      return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString(), fromMs, toMs, relative: false };
-    }
-  }
-  return resolveRange(DEFAULT_RANGE, now);
+  // The same rule as isValidRange: a range that names no window resolves to the default instead of throwing.
+  const w = windowOf(range, now);
+  if (w) return { from: new Date(w.fromMs).toISOString(), to: new Date(w.toMs).toISOString(), ...w };
+  // The default window, computed directly (never recursing): clamped at 1970 for a clock that early (tests inject one).
+  const toMs = Math.floor(now / 1000) * 1000;
+  const fromMs = Math.max(0, toMs - rangeDurationOf(DEFAULT_RANGE));
+  return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString(), fromMs, toMs, relative: true };
 }
 
 export function absoluteRange(fromMs: number, toMs: number): string {
@@ -87,6 +120,8 @@ export function rangePhrase(range: string): string {
 }
 
 export function rangeLabel(range: string): string {
+  // A stored or shared range that names no window opens as the default: label it as what opens.
+  if (!isValidRange(range)) return rangeLabel(DEFAULT_RANGE);
   if (range === ALL_RANGE) return 'All time';
   const preset = RANGE_PRESETS.find((p) => p.value === range);
   if (preset) return preset.label;
@@ -100,10 +135,20 @@ export function rangeLabel(range: string): string {
   const year = (ms: number) => localDayKey(ms).slice(0, 4);
   const withYear = year(r.fromMs) !== year(r.toMs) || year(r.fromMs) !== year(Date.now());
   const day = (ms: number) => (withYear ? formatDate(new Date(ms).toISOString()) : formatMonthDay(ms));
+  // An absolute window names the zone its clock times are in.
+  const zone = consoleTimeZone();
+  const inZone = zone === 'UTC' ? ' UTC' : ` ${shortZoneLabel(zone)} time`;
+  // Across a clock change (02:45 – 02:00 when the clocks go back) each end names its offset, so the window never reads backwards.
+  // Inside a repeated hour the clock alone is ambiguous too.
+  const withOffsets = zoneOffsetMs(r.fromMs) !== zoneOffsetMs(r.toMs) || isRepeatedWallTime(r.fromMs) || isRepeatedWallTime(r.toMs);
+  const clock = (ms: number) => (withOffsets ? `${formatClock(ms)} (${formatOffset(ms)})` : formatClock(ms));
   return localDayKey(r.fromMs) === localDayKey(r.toMs)
-    ? `${day(r.fromMs)}, ${formatClock(r.fromMs)} – ${formatClock(r.toMs)}`
-    : `${day(r.fromMs)} ${formatClock(r.fromMs)} – ${day(r.toMs)} ${formatClock(r.toMs)}`;
+    ? `${day(r.fromMs)}, ${clock(r.fromMs)} – ${clock(r.toMs)}${inZone}`
+    : `${day(r.fromMs)} ${clock(r.fromMs)} – ${day(r.toMs)} ${clock(r.toMs)}${inZone}`;
 }
+
+/** A range label inside a sentence: "last 7 days", "all time", but "Nov 22, 08:00 – 10:00 Berlin time" keeps its capitals. */
+export const rangeInSentence = (label: string): string => (/^(Last|All) /.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label);
 
 export function rangeShortLabel(range: string): string {
   const preset = RANGE_PRESETS.find((p) => p.value === range);

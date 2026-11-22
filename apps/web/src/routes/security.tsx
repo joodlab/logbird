@@ -107,8 +107,9 @@ function SelfHostDiagram() {
         </div>
       </div>
       <figcaption className="text-muted-foreground text-sm">
-        Self-hosted: the console, API, worker, Postgres, ClickHouse and Redis all run on your server. The server's only outbound connection is to your
-        SMTP provider, for sign-in codes and invitations.
+        The bundled Compose deployment: the console, API, worker, Postgres, ClickHouse and Redis all run on your server. Outbound, the server connects
+        to your SMTP provider (sign-in codes, invitations and membership notices) and looks up a webhook endpoint's hostname when you save it. With
+        your own databases, it also connects to them.
       </figcaption>
     </figure>
   );
@@ -139,7 +140,7 @@ function SecurityPage() {
           <SectionHeader
             eyebrow="Where data lives"
             id="self-host-title"
-            lead="When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your own Postgres. The self-hosted software doesn't send usage data back to us. The server's only outbound connection is to the SMTP provider you choose, which delivers sign-in codes and invitations."
+            lead="When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your own Postgres. The self-hosted software doesn't send usage data back to us. In the bundled deployment, the server connects out to the SMTP provider you choose, and resolves a webhook endpoint's hostname when you save it."
             title="Self-hosted, your events stay on your servers."
           />
           <SelfHostDiagram />
@@ -310,7 +311,12 @@ function SecurityPage() {
               'Each project has its own ingest and read rate limits, shared across replicas through Redis.',
               'Failed authentication attempts are limited per client, so repeated bad keys are throttled. Valid keys keep working behind a shared network address.',
               'If Redis fails, sign-in limits fail closed (requests are refused) and ingest and read limits fail open (requests continue).',
-              'Delivery is at least once. A retry can store an event twice, so counts may include duplicates.',
+              <>
+                Delivery is at least once when the client retries unsettled events, as the SDK does. An exact retry with the same valid, non-blank
+                string <code>id</code> reuses the stored event while the project retains it, so retries from the SDK, which sets ids, don't add
+                copies; changed content under that id is rejected with <code>duplicate_id_conflict</code>. An event sent without an id gets a new one
+                on every retry. Once retention deletes an event, its id can be used again.
+              </>,
               <>
                 Don't send secrets. The SDK's <code>redact()</code> helper replaces common secret fields before sending.
               </>,

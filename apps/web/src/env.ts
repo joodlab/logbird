@@ -119,7 +119,9 @@ export function siteConfigFrom(values: Record<string, string | undefined>): Site
     SITE_URL: url('WEB_SITE_URL', `https://${DOMAIN}`) as string,
     APP_URL: url('WEB_APP_URL'),
     GITHUB_PUBLIC: values.WEB_GITHUB_PUBLIC === 'true',
-    GITHUB_URL: url('WEB_GITHUB_URL'),
+    // The browser URL of the repository: a configured trailing `.git` is dropped, so release and file links work and
+    // the clone URL (lib/selfhost.ts) adds it exactly once.
+    GITHUB_URL: url('WEB_GITHUB_URL')?.replace(/\.git$/, ''),
     ORG_NAME: values.WEB_ORG_NAME?.trim() || undefined,
     SECURITY_EMAIL: values.WEB_SECURITY_EMAIL?.trim() || undefined,
     CONTACT_EMAIL: values.WEB_CONTACT_EMAIL?.trim() || undefined,

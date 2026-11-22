@@ -8,6 +8,7 @@
 
 import { GITHUB_PUBLIC } from '../env';
 import { CLOUD_OPEN } from './cloud';
+import { firstRelease, latestRelease, NO_RELEASES } from './releases';
 
 export const ACCESSED = '2026-11-07';
 
@@ -60,12 +61,21 @@ const src = (id: string, title: string, url: string, also?: string[]): Compariso
   accessed: ACCESSED,
 });
 
+/** `2026-11-22` as `22 Nov 2026`, the date style of the comparison tables, without locale data. */
+const shortDate = (iso: string) => {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const [year, month, day] = iso.split('-').map(Number);
+  return `${day} ${months[(month ?? 1) - 1]} ${year}`;
+};
+
 const range = (prefix: string, from: number, to: number) => Array.from({ length: to - from + 1 }, (_, index) => `${prefix}${from + index}`);
 
 // Nobody can self-host before the source opens, so the cell says so until WEB_GITHUB_PUBLIC=true.
 const LOGBIRD_SELF_HOST = GITHUB_PUBLIC
-  ? 'Yes: Docker Compose or Coolify, with published images'
-  : 'Planned: Docker Compose or Coolify, when the source opens';
+  ? latestRelease
+    ? 'Yes: Docker Compose or Coolify, with published images'
+    : 'Yes: Docker Compose or Coolify, built from source'
+  : 'Docker Compose or Coolify, once the source opens';
 // Licence and hosting cells follow the same availability state.
 const LOGBIRD_SOURCE = GITHUB_PUBLIC ? 'MIT; source on GitHub' : 'MIT; source opens publicly soon';
 const LOGBIRD_CLOUD = CLOUD_OPEN ? 'Logbird Cloud early access (invited teams)' : 'Logbird Cloud waitlist';
@@ -97,7 +107,7 @@ const retraced: Comparison = {
     { label: 'Hosted offering', logbird: LOGBIRD_HOSTED_OFFERING, them: 'None found', sourceIds: ['S8'] },
     {
       label: 'Required event fields',
-      logbird: '`action` only; any other shape accepted',
+      logbird: 'An `action` string only; each event must fit the ingest limits',
       them: '`action` and `crud` in the API spec; the docs also list `actor` as mandatory',
       sourceIds: ['S9', 'S10'],
     },
@@ -125,7 +135,10 @@ const retraced: Comparison = {
     { label: 'Pricing', logbird: LOGBIRD_PRICING, them: 'No pricing page found', sourceIds: ['S8'] },
     {
       label: 'Latest release',
-      logbird: 'Not released yet (0.1 line)',
+      logbird:
+        latestRelease && firstRelease
+          ? `v${latestRelease.version}, ${shortDate(latestRelease.date)}; first release v${firstRelease.version}, ${shortDate(firstRelease.date)}`
+          : NO_RELEASES,
       them: 'v1.13.1, 6 Nov 2024; latest commit on `main` 26 Aug 2025; not archived',
       sourceIds: ['S16', 'S17'],
     },
@@ -134,7 +147,7 @@ const retraced: Comparison = {
     'You want to **embed an audit log viewer in your own React app**, so customers can browse their own events.',
     "Your customers' IT teams need a **programmatic API of their own** to pull their events.",
     'You prefer **Apache-2.0**, or you already run Postgres and Elasticsearch and want the audit log there too.',
-    "You want a project with **a release history** behind it. Logbird hasn't made its first release yet.",
+    `You want a project with **a long release history** behind it. ${firstRelease ? `Logbird's first release was v${firstRelease.version}, on ${shortDate(firstRelease.date)}.` : NO_RELEASES}`,
   ],
   chooseLogbird: [
     'You want to **send any event shape** and get a recommended envelope without a fixed schema.',
@@ -225,7 +238,7 @@ const workos: Comparison = {
     { label: 'Hosting model', logbird: LOGBIRD_HOSTING, them: 'Hosted by WorkOS', sourceIds: ['W2'] },
     {
       label: 'Schema',
-      logbird: 'Any JSON with an `action`; nothing to register',
+      logbird: 'Only an `action` string is required; nothing to register',
       them: 'Event schemas must be configured per action before you emit; metadata JSON Schema validation is optional',
       sourceIds: ['W2', 'W7', 'W8'],
     },
@@ -247,7 +260,12 @@ const workos: Comparison = {
       them: 'CSV export through the Dashboard and the API, one organization and date range at a time, covering the past three months',
       sourceIds: ['W10'],
     },
-    { label: 'Streaming to SIEM', logbird: 'On the roadmap', them: 'Log Streams to seven destination types', sourceIds: ['W5'] },
+    {
+      label: 'Streaming to SIEM',
+      logbird: 'No',
+      them: 'Log Streams to seven destination types',
+      sourceIds: ['W5'],
+    },
     {
       label: 'Retention',
       logbird: 'Per project, 7 days to 10 years; can be lowered, with a preview and permanent deletion',
@@ -261,7 +279,6 @@ const workos: Comparison = {
       them: "Export API; Widgets GraphQL API to search one organization's events",
       sourceIds: ['W10', 'W12'],
     },
-    { label: 'Storage engine', logbird: LOGBIRD_STORAGE, them: 'Not stated in public docs', sourceIds: [] },
     {
       label: 'Pricing',
       logbird: LOGBIRD_PRICING,
@@ -311,7 +328,7 @@ const workos: Comparison = {
     src('W13', 'Pricing page, Audit Logs section', 'https://workos.com/pricing'),
   ],
   unverified:
-    'Whether `context.location`, `context.user_agent` and actor or target sub-fields are each required; how the per-million-events charge relates to the 30-day default; event size and rate limits; Admin Portal link expiry and filter options; whether the Widgets GraphQL API is generally available; storage engine and data-residency options.',
+    'Which storage engine holds the events; whether `context.location`, `context.user_agent` and actor or target sub-fields are each required; how the per-million-events charge relates to the 30-day default; event size and rate limits; Admin Portal link expiry and filter options; whether the Widgets GraphQL API is generally available; storage engine and data-residency options.',
 };
 
 const pangea: Comparison = {
@@ -346,7 +363,7 @@ const pangea: Comparison = {
     { label: 'Hosting model', logbird: LOGBIRD_HOSTING, them: 'Hosted by Pangea', sourceIds: ['P12'] },
     {
       label: 'Schema',
-      logbird: 'Any JSON with an `action`; recommended envelope',
+      logbird: 'Only an `action` string is required; recommended envelope',
       them: "Templates (for example Timestamp, Actor, Action, Status, Target, Source, Tenant ID, Old, New, Message) or a custom schema per configuration; the schema can't change after creation",
       sourceIds: ['P13'],
     },
@@ -374,7 +391,6 @@ const pangea: Comparison = {
       them: 'Embeddable React component, `@pangeacyber/react-mui-audit-log-viewer`, wired to your backend',
       sourceIds: ['P9'],
     },
-    { label: 'Storage engine', logbird: LOGBIRD_STORAGE, them: 'Not stated in public docs', sourceIds: [] },
     {
       label: 'Pricing',
       logbird: LOGBIRD_PRICING,
@@ -441,7 +457,7 @@ const pangea: Comparison = {
     ),
   ],
   unverified:
-    "Whether CrowdStrike still sells Secure Audit Log to new customers; the pricing model (the public billing page describes credit-based pay-as-you-go with a monthly credit, but doesn't render the figures, which exist only in the page's script source, and signup now redirects to CrowdStrike); the signing and hash algorithms; the storage engine; whether `message` is required in the default template.",
+    "Which storage engine holds the events; whether CrowdStrike still sells Secure Audit Log to new customers; the pricing model (the public billing page describes credit-based pay-as-you-go with a monthly credit, but doesn't render the figures, which exist only in the page's script source, and signup now redirects to CrowdStrike); the signing and hash algorithms; the storage engine; whether `message` is required in the default template.",
 };
 
 const bemi: Comparison = {

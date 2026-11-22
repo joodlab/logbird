@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_RANGE, admittedRange, historyRange, isValidRange, rangeLabel, rangePhrase, resolveRange } from './range';
+import { ALL_RANGE, admittedRange, historyRange, isValidRange, rangeInSentence, rangeLabel, rangePhrase, resolveRange } from './range';
 
 describe('rangePhrase', () => {
   it('reads presets as a phrase with "the"', () => {
@@ -82,5 +82,63 @@ describe('admittedRange with stored rows older than the admission window', () =>
     const oldest = '2016-11-01T00:00:00.000Z';
     expect(resolveRange(admittedRange(now, oldest)).fromMs).toBe(Date.parse(oldest) - 86_400_000);
     expect(resolveRange(admittedRange(now, null)).fromMs).toBe(now - 3651 * 86_400_000);
+  });
+});
+
+describe('isValidRange rejects ranges that name no window (#203)', () => {
+  const now = Date.parse('2026-11-22T12:00:00.000Z');
+  it('accepts real windows', () => {
+    for (const r of [
+      'all',
+      '15m',
+      '24h',
+      '7d',
+      '3650d',
+      '2026-11-22T00:00:00.000Z..2026-11-22T04:00:00.000Z',
+      // Offsets with and without a colon, as saved views and shared links may carry them.
+      '2026-11-01T09:00:00+0000..2026-11-07T09:00:00+0000',
+      '2026-11-01T09:00:00+03:00..2026-11-07T09:00:00-05:30',
+    ])
+      expect(isValidRange(r, now), r).toBe(true);
+  });
+  it('rejects zero, unrepresentable, reversed, equal and malformed ranges', () => {
+    for (const r of [
+      '0d',
+      '0h',
+      '0m',
+      '99999999999d',
+      '9999999999999999999999m',
+      '2026-11-22T04:00:00.000Z..2026-11-22T00:00:00.000Z',
+      '2026-11-22T04:00:00.000Z..2026-11-22T04:00:00.000Z',
+      '1969-12-31T00:00:00.000Z..2026-11-22T00:00:00.000Z',
+      '2026-11-22T00:00:00.000Z..+275760-09-13T00:00:00.000Z',
+      // Dates that do not exist, and years past what storage (DateTime64) supports.
+      '2026-02-30T00:00:00.000Z..2026-03-04T00:00:00.000Z',
+      '2026-11-22T24:00:00.000Z..2026-11-23T01:00:00.000Z',
+      '2026-11-22T00:00:00.000Z..2500-01-01T00:00:00.000Z',
+      '2026-11-22T00:00:00.000Z..2026-11-23T00:00:00.000Z..2026-11-24T00:00:00.000Z',
+      'yesterday',
+      '',
+    ])
+      expect(isValidRange(r, now), r).toBe(false);
+  });
+  it('labels a stored or shared invalid range as the default it opens', () => {
+    expect(rangeLabel('0d')).toBe('Last 24 hours');
+    expect(rangeLabel('99999999999d')).toBe('Last 24 hours');
+  });
+  it('resolves an invalid range to the default window instead of throwing', () => {
+    const fallback = resolveRange('24h', now);
+    expect(resolveRange('99999999999d', now)).toEqual(fallback);
+    expect(resolveRange('0d', now)).toEqual(fallback);
+    // An injected clock at the epoch: the fallback clamps instead of recursing.
+    expect(resolveRange('0d', 0)).toMatchObject({ fromMs: 0, toMs: 0 });
+  });
+});
+
+describe('rangeInSentence', () => {
+  it('lowercases relative labels but keeps month and zone names', () => {
+    expect(rangeInSentence('Last 7 days')).toBe('last 7 days');
+    expect(rangeInSentence('All time')).toBe('all time');
+    expect(rangeInSentence('Nov 22, 08:00 – 10:00 Berlin time')).toBe('Nov 22, 08:00 – 10:00 Berlin time');
   });
 });

@@ -21,15 +21,17 @@ import { Timestamp } from '@/components/timestamp';
 import { projectSetupQuery } from '@/lib/api/queries';
 import { eventSentence, personLabel } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
+import { firstEventCopy } from '@/lib/onboarding';
 import { useCan } from '@/lib/permissions';
-import { curlSnippet, fetchSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
+import { formatTerm } from '@/lib/query-language';
+import { curlSnippet, dotnetSnippet, fetchSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
 import { useSessionKey } from './api-key-step';
 import { useInvalidateSetup, useSampleData, useTestEvent } from './use-setup';
 
 /** How often the first-event step polls setup while nothing has arrived. */
 export const FIRST_EVENT_POLL_MS = 2500;
 
-/** curl / TypeScript SDK / fetch, pre-filled with this origin and the session's ingest key. */
+/** curl / TypeScript SDK / C# (.NET) / fetch, pre-filled with this origin and the session's ingest key. */
 export function SendEventSnippets({ projectId }: { projectId: string }) {
   const key = useSessionKey(projectId, 'ingest');
   return (
@@ -38,9 +40,14 @@ export function SendEventSnippets({ projectId }: { projectId: string }) {
         tabs={[
           { id: 'curl', label: 'curl', code: curlSnippet(key), language: 'bash' },
           { id: 'sdk', label: 'TypeScript SDK', code: `// ${SDK_INSTALL}\n${sdkSnippet(key)}`, language: 'ts' },
+          { id: 'dotnet', label: 'C# (.NET)', code: dotnetSnippet(key), language: 'csharp' },
           { id: 'fetch', label: 'fetch', code: fetchSnippet(key), language: 'ts' },
         ]}
       />
+      {/* Not every backend is TypeScript. No package name until the .NET package is published. */}
+      <p className="text-muted-foreground text-xs">
+        Any language that can POST JSON works: curl, C# and fetch show the plain HTTP call. A Logbird package for .NET is coming.
+      </p>
       {key ? null : (
         <p className="text-muted-foreground text-xs">
           No key in this tab, so the snippets read <span className="font-mono text-foreground">LOGBIRD_INGEST_KEY</span> from the environment. Create
@@ -72,7 +79,9 @@ export function FirstEventPanel({ projectId, showSnippets = true }: { projectId:
       sawEmpty.current = false;
       setCelebrate(true);
       invalidate();
-      toast.success('First event received', { description: 'Your integration works. Everything else builds on this.' });
+      // A console test proves the pipeline, not the integration: say so instead of "your integration works".
+      const copy = firstEventCopy(data.ingest.firstEvent?.source);
+      toast.success(copy.toastTitle, { description: copy.toastDescription });
     }
   }, [data, invalidate]);
 
@@ -83,7 +92,11 @@ export function FirstEventPanel({ projectId, showSnippets = true }: { projectId:
   return (
     <div className="flex flex-col gap-4">
       {showSnippets ? <SendEventSnippets projectId={projectId} /> : null}
-      {first ? <ReceivedEvent celebrate={celebrate} event={first} projectId={projectId} /> : <Listening projectId={projectId} setup={data} />}
+      {first ? (
+        <ReceivedEvent backendSeen={Boolean(data.ingest.lastEventAt)} celebrate={celebrate} event={first} projectId={projectId} />
+      ) : (
+        <Listening projectId={projectId} setup={data} />
+      )}
       <SampleDataControl projectId={projectId} setup={data} />
     </div>
   );
@@ -119,14 +132,25 @@ function Listening({ projectId, setup }: { projectId: string; setup: ProjectSetu
           </Button>
         </AdminOnly>
         <span className="text-[11px] text-muted-foreground">
-          {canSend ? 'Sent from the console as you · counts as a real event' : 'Ask an admin to send one, or run a snippet'}
+          {canSend ? 'Sent from the console as you · completes the first-event step only' : 'Ask an admin to send one, or run a snippet'}
         </span>
       </div>
     </div>
   );
 }
 
-function ReceivedEvent({ projectId, event, celebrate }: { projectId: string; event: AuditEvent; celebrate: boolean }) {
+function ReceivedEvent({
+  projectId,
+  event,
+  celebrate,
+  backendSeen,
+}: {
+  projectId: string;
+  event: AuditEvent;
+  celebrate: boolean;
+  /** The backend has sent an event since: stop asking for one. */
+  backendSeen: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div
@@ -144,7 +168,7 @@ function ReceivedEvent({ projectId, event, celebrate }: { projectId: string; eve
           </span>
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p className="font-medium text-sm">{celebrate ? 'It works — your first event just arrived' : 'First event received'}</p>
+          <p className="font-medium text-sm">{firstEventCopy(event.source, celebrate, backendSeen).cardTitle}</p>
           <p className="text-muted-foreground text-xs">
             <Timestamp format="full" iso={event.receivedAt} /> · via {event.sdk || 'HTTP'}
           </p>
@@ -231,7 +255,7 @@ export function SampleDataControl({ projectId, setup }: { projectId: string; set
           <>
             <Button
               nativeButton={false}
-              render={<Link params={{ projectId }} search={{ q: `source:${SAMPLE_DATA_SOURCE}`, range: '7d' }} to="/p/$projectId/events" />}
+              render={<Link params={{ projectId }} search={{ q: formatTerm('source', SAMPLE_DATA_SOURCE), range: '7d' }} to="/p/$projectId/events" />}
               size="sm"
               variant="outline"
             >
@@ -270,7 +294,7 @@ export function useConfirmRemoveSampleData(count: number) {
   return () =>
     confirm({
       title: 'Remove sample data?',
-      description: `Deletes the ${formatNumber(count)} events tagged source:${SAMPLE_DATA_SOURCE}. Your real events are not touched.`,
+      description: `Deletes every event tagged source:${SAMPLE_DATA_SOURCE}, including any your integration sent with that tag (${formatNumber(count)} when this page last checked). Events with any other source are not touched.`,
       confirmLabel: 'Remove sample data',
       destructive: true,
     });

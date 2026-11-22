@@ -1,5 +1,6 @@
 import { siteDecision } from '../../app/server/site-paths';
 import { inlineScripts, scriptHash, scriptSources } from '../src/lib/csp';
+import { OBFUSCATED_EMAIL } from '../src/lib/email-off';
 import { securityHeaders } from '../src/lib/security-headers';
 import { prerenderPaths } from '../src/lib/site-map';
 
@@ -13,6 +14,9 @@ import { prerenderPaths } from '../src/lib/site-map';
  * deploy, so a target that renders pages on demand (fresh, unhashed inline scripts) fails here, not in a browser.
  *
  * POST to a page path must be a 405 on every target.
+ *
+ * No page may carry Cloudflare's email obfuscation (`/cdn-cgi/l/email-protection`, `__cf_email__`): run this against
+ * the deploy to prove the `email_off` wrap (src/lib/email-off.ts) holds at the edge.
  *
  *   BASE_URL=http://127.0.0.1:4620 [NO_API=1] tsx scripts/check-live.ts
  *
@@ -90,6 +94,9 @@ async function checkHtml(path: string, expected: number) {
   }
   if (missing) {
     fail(`${missing} of ${scripts.length} inline scripts not covered by the policy`);
+  }
+  if (OBFUSCATED_EMAIL.test(body)) {
+    fail('email addresses rewritten by the CDN (Email Address Obfuscation); see src/lib/email-off.ts');
   }
   if (expectedStatus === 404 && !body.includes('No event at this address.')) {
     fail('not the 404 page');
