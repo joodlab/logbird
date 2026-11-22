@@ -1,6 +1,6 @@
 # Logbird for .NET
 
-Audit logging for C# backends. Record who did what to which record, then search, prove and export that history
+Audit logging for C# backends. Record who did what to which record, then search and export that history
 in [Logbird](https://github.com/joodlab/logbird). The client is built to sit inside a production application:
 
 - **It never slows your requests.** `Track` serializes the event and queues it in memory. A background loop sends
