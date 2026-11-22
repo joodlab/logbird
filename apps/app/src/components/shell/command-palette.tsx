@@ -33,6 +33,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api/client';
 import { projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { ENTITY_SECTIONS, sectionForKind } from '@/lib/entities';
+import { formatExactTerm } from '@/lib/query-language';
 import { PROJECT_NAV } from './nav';
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
@@ -125,7 +126,9 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
             {looksLikeEvent ? (
               <CommandItem
                 onSelect={() =>
-                  go(() => navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: `id:${trimmed}`, ev: trimmed } }))
+                  go(() =>
+                    navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: formatExactTerm('id', trimmed), ev: trimmed } }),
+                  )
                 }
                 value={`event ${trimmed}`}
               >

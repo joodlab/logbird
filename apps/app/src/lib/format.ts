@@ -54,6 +54,9 @@ export const localDayKey = (v: Instant): string => dayKeyFmt.format(at(v));
 export const formatClock = (v: Instant): string => shortTimeFmt.format(at(v));
 /** "Nov 4" */
 export const formatMonthDay = (v: Instant): string => dayFmt.format(at(v));
+const monthYearFmt = dateFormat('en-US', { year: 'numeric', month: 'short' });
+/** "Nov 2026" */
+export const formatMonthYear = (v: Instant): string => monthYearFmt.format(at(v));
 /** "Nov 4, 14:32" */
 export const formatDayTime = (v: Instant): string => dayTimeFmt.format(at(v));
 /** Milliseconds to add to a UTC instant to get console-zone wall-clock time (DST-aware). */
