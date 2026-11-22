@@ -55,6 +55,14 @@ export function useZonePreference(): ZonePreference {
   );
 }
 
+/**
+ * The zone every console time is shown in, for components that format times: calling it re-renders the component when
+ * the reader switches zones (nothing is remounted, so forms, scroll positions and live buffers survive the switch).
+ */
+export function useConsoleZone(): string {
+  return zoneFor(useZonePreference());
+}
+
 /** "UTC", or the city of the browser's zone ("Berlin" for Europe/Berlin), for compact labels such as column headers. */
 export function shortZoneLabel(zone: string): string {
   if (zone === 'UTC') return 'UTC';

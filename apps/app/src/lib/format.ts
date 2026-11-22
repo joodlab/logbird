@@ -24,8 +24,7 @@ export function delta(current: number, previous: number): number | null {
  */
 const formatters = new Map<string, Intl.DateTimeFormat>();
 /** A formatter in the current console zone, created once per zone. */
-function inZone(key: string, locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
-  const zone = consoleTimeZone();
+function inZone(key: string, locale: string, options: Intl.DateTimeFormatOptions, zone = consoleTimeZone()): Intl.DateTimeFormat {
   const id = `${zone}|${key}`;
   let f = formatters.get(id);
   if (!f) {
@@ -39,17 +38,13 @@ const msFmt = () => inZone('ms', 'en-GB', { hour: '2-digit', minute: '2-digit', 
 const dayFmt = () => inZone('day', 'en-US', { month: 'short', day: 'numeric' });
 const dayYearFmt = () => inZone('dayYear', 'en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const shortTimeFmt = () => inZone('shortTime', 'en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-const fullFmt = () =>
-  inZone('full', 'en-US', {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
+const fullFmt = (zone?: string) =>
+  inZone(
+    'full',
+    'en-US',
+    { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false },
+    zone,
+  );
 const dateOnlyFmt = () => inZone('dateOnly', 'en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 const dayKeyFmt = () => inZone('dayKey', 'en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' });
 const dayTimeFmt = () => inZone('dayTime', 'en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -106,20 +101,7 @@ export const formatDay = (iso: string): string => dayFmt().format(new Date(iso))
 export const formatFull = (iso: string): string => `${fullFmt().format(new Date(iso))} ${consoleTimeZone()}`;
 export const formatDate = (iso: string): string => dateOnlyFmt().format(new Date(iso));
 /** "Wed, Nov 4, 2026, 15:32:10 Europe/Berlin" in a given zone, whatever the console zone is. */
-export function formatInZone(iso: string, zone: string): string {
-  const f = new Intl.DateTimeFormat('en-US', {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    timeZone: zone,
-  });
-  return `${f.format(new Date(iso))} ${zone}`;
-}
+export const formatInZone = (iso: string, zone: string): string => `${fullFmt(zone).format(new Date(iso))} ${zone}`;
 /** "2026-11-04 14:32:10.123 UTC" — the unambiguous instant, for tooltips and copying. */
 export const formatUtc = (iso: string): string => `${new Date(iso).toISOString().replace('T', ' ').replace('Z', '')} UTC`;
 
@@ -129,9 +111,10 @@ export const formatUtc = (iso: string): string => `${new Date(iso).toISOString()
  */
 export function formatTimestamp(iso: string, now = Date.now()): string {
   const d = new Date(iso);
-  const sameYear = localDayKey(d).slice(0, 4) === localDayKey(now).slice(0, 4);
-  return `${(sameYear ? dayFmt() : dayYearFmt()).format(d)}, ${timeFmt().format(d)}`;
+  return `${(timestampNeedsYear(iso, now) ? dayYearFmt() : dayFmt()).format(d)}, ${timeFmt().format(d)}`;
 }
+/** True when `formatTimestamp` adds the year (the time is outside the current year in the console zone). */
+export const timestampNeedsYear = (iso: string, now = Date.now()): boolean => localDayKey(iso).slice(0, 4) !== localDayKey(now).slice(0, 4);
 
 const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto', style: 'short' });
 

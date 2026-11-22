@@ -29,6 +29,7 @@ import { errorMessage, toApiError } from '@/lib/api/errors';
 import { keys } from '@/lib/api/queries';
 import { fieldErrorMessage } from '@/lib/forms';
 import { rangeLabel, resolveRange } from '@/lib/range';
+import { useConsoleZone } from '@/lib/time-zone';
 import { useCopyViewLink, useResolvedViewLabels } from '@/lib/views';
 import { DEFAULT_COLUMNS, EVENT_COLUMNS } from './columns';
 import { exportFailureDescription } from './export-error';
@@ -336,6 +337,7 @@ function SaveViewDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const copyLink = useCopyViewLink();

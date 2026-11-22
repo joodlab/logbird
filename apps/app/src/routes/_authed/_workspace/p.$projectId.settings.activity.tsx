@@ -14,6 +14,7 @@ import { workspaceActivityQuery } from '@/lib/api/queries';
 import { includeTerm, removeTerm } from '@/lib/query-language';
 import { rangeLabel } from '@/lib/range';
 import { formatSearchTotal, searchTotal } from '@/lib/search-total';
+import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/activity')({
@@ -26,6 +27,7 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/
 const COLUMNS = ['time', 'outcome', 'action', 'description', 'actor'];
 
 function WorkspaceActivity() {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   // Management actions are rare: this page defaults to a 90-day window (staticData.defaultRange).

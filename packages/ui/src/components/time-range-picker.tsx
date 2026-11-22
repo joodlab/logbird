@@ -28,6 +28,11 @@ interface TimeRangePickerProps {
   className?: string;
   align?: 'start' | 'end';
   size?: 'sm' | 'default';
+  /**
+   * The zone the calendar and the From/To clocks edit in (default: the browser's). `offsetMs(utcMs)` is what to add to
+   * a UTC instant to get that zone's wall-clock time; `label` names it beside From/To.
+   */
+  zone?: { offsetMs: (utcMs: number) => number; label: string };
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -37,6 +42,22 @@ function withTime(day: Date, time: string): Date {
   const d = new Date(day);
   d.setHours(h ?? 0, m ?? 0, 0, 0);
   return d;
+}
+/**
+ * The editor works on wall-clock dates: Date objects whose local fields hold the chosen zone's fields (that is what the
+ * calendar and the time inputs show). These convert between instants and wall-clock dates.
+ */
+function toWall(instant: Date, offsetMs?: (utcMs: number) => number): Date {
+  if (!offsetMs) return instant;
+  const u = new Date(instant.getTime() + offsetMs(instant.getTime()));
+  return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate(), u.getUTCHours(), u.getUTCMinutes(), u.getUTCSeconds());
+}
+function fromWall(wall: Date, offsetMs?: (utcMs: number) => number): Date {
+  if (!offsetMs) return wall;
+  const asUtc = Date.UTC(wall.getFullYear(), wall.getMonth(), wall.getDate(), wall.getHours(), wall.getMinutes(), wall.getSeconds());
+  // The offset at the guess, then at the corrected instant (DST changes inside the gap).
+  const first = asUtc - offsetMs(asUtc);
+  return new Date(asUtc - offsetMs(first));
 }
 
 /** Presets + calendar/time editor, Datadog/Grafana-style. Values stay strings so they fit in URLs. */
@@ -50,23 +71,30 @@ export function TimeRangePicker({
   className,
   align = 'end',
   size = 'sm',
+  zone,
 }: TimeRangePickerProps) {
+  const offsetMs = zone?.offsetMs;
+  const wallFrom = toWall(resolved.from, offsetMs);
+  const wallTo = toWall(resolved.to, offsetMs);
   const [open, setOpen] = useState(false);
-  const [days, setDays] = useState<DateRange | undefined>({ from: resolved.from, to: resolved.to });
-  const [fromTime, setFromTime] = useState(toTime(resolved.from));
-  const [toTimeValue, setToTimeValue] = useState(toTime(resolved.to));
+  const [days, setDays] = useState<DateRange | undefined>({ from: wallFrom, to: wallTo });
+  const [fromTime, setFromTime] = useState(toTime(wallFrom));
+  const [toTimeValue, setToTimeValue] = useState(toTime(wallTo));
   const isPreset = presets.some((p) => p.value === value);
 
   useEffect(() => {
     if (!open) return;
-    setDays({ from: resolved.from, to: resolved.to });
-    setFromTime(toTime(resolved.from));
-    setToTimeValue(toTime(resolved.to));
-  }, [open, resolved.from, resolved.to]);
+    const f = toWall(resolved.from, offsetMs);
+    const t = toWall(resolved.to, offsetMs);
+    setDays({ from: f, to: t });
+    setFromTime(toTime(f));
+    setToTimeValue(toTime(t));
+  }, [open, resolved.from, resolved.to, offsetMs]);
 
-  const from = days?.from ? withTime(days.from, fromTime) : null;
-  const to = days?.to ? withTime(days.to, toTimeValue) : days?.from ? withTime(days.from, toTimeValue) : null;
+  const from = days?.from ? fromWall(withTime(days.from, fromTime), offsetMs) : null;
+  const to = days?.to ? fromWall(withTime(days.to, toTimeValue), offsetMs) : days?.from ? fromWall(withTime(days.from, toTimeValue), offsetMs) : null;
   const valid = Boolean(from && to && from < to && to.getTime() <= Date.now() + 60_000);
+  const zoneSuffix = zone ? ` · ${zone.label}` : '';
 
   return (
     <Popover onOpenChange={setOpen} open={open}>
@@ -107,23 +135,23 @@ export function TimeRangePicker({
           </div>
           <div className="flex flex-col gap-3 p-3">
             <Calendar
-              disabled={{ after: new Date() }}
+              disabled={{ after: toWall(new Date(), offsetMs) }}
               mode="range"
               numberOfMonths={1}
               onSelect={setDays}
               selected={days}
-              defaultMonth={resolved.to}
+              defaultMonth={wallTo}
             />
             <div className="grid grid-cols-2 gap-2">
               <div className="flex flex-col gap-1">
                 <Label className="text-muted-foreground text-xs" htmlFor="tr-from">
-                  From
+                  From{zoneSuffix}
                 </Label>
                 <Input className="tabular-nums" id="tr-from" size="sm" onChange={(e) => setFromTime(e.target.value)} type="time" value={fromTime} />
               </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-muted-foreground text-xs" htmlFor="tr-to">
-                  To
+                  To{zoneSuffix}
                 </Label>
                 <Input
                   className="tabular-nums"
