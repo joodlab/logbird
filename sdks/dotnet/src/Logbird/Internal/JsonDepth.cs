@@ -109,7 +109,9 @@ internal static class JsonDepth
                 return Shape.TooDeep;
             }
 
-            // Every value costs at least one byte on the wire, so a huge array of numbers is caught here too.
+            // A lower bound of the UTF-8 text, exact for ASCII without escapes: each value costs at least one byte (a
+            // number's digit, a bracket or brace pair counted with its separators below), and the budget is checked as each
+            // member is counted, so a huge shallow array stops early instead of being walked or queued whole.
             size++;
 
             switch (node)
@@ -117,15 +119,20 @@ internal static class JsonDepth
                 case JsonObject obj:
                     foreach (var pair in obj)
                     {
-                        size += pair.Key.Length;
+                        // "key": plus a comma (the closing brace stands in for the last comma).
+                        size += pair.Key.Length + 4;
                         if (pair.Value is null)
                         {
-                            // A JSON null is written as "null".
                             size += 4;
                         }
                         else
                         {
                             pending.Push((pair.Value, depth + 1));
+                        }
+
+                        if (size > maxBytes)
+                        {
+                            return Shape.TooLarge;
                         }
                     }
 
@@ -133,6 +140,8 @@ internal static class JsonDepth
                 case JsonArray array:
                     foreach (var item in array)
                     {
+                        // A comma (the closing bracket stands in for the last one).
+                        size += 1;
                         if (item is null)
                         {
                             size += 4;
@@ -141,11 +150,20 @@ internal static class JsonDepth
                         {
                             pending.Push((item, depth + 1));
                         }
+
+                        if (size > maxBytes)
+                        {
+                            return Shape.TooLarge;
+                        }
                     }
 
                     break;
                 case JsonValue value when value.TryGetValue<string>(out var text):
-                    size += text.Length;
+                    // The two quotes; the first byte was counted above.
+                    size += text.Length + 1;
+                    break;
+                case JsonValue value when value.TryGetValue<bool>(out var flag):
+                    size += flag ? 3 : 4;
                     break;
             }
 
