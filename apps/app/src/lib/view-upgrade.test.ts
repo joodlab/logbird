@@ -85,6 +85,8 @@ it('holds a saved-view link until no legacy query can run', () => {
   expect(holdForSavedView({ ...base, found: false, confirmedMissing: true })).toBe(false);
   // An old record-page view whose stored query is still in the link.
   expect(holdForSavedView({ ...base, legacyQ: 'target:12 target.type:site' })).toBe(true);
+  // ...even when a background refresh of the list failed (the cached list still has the view).
+  expect(holdForSavedView({ ...base, legacyQ: 'target:12 target.type:site', listError: true })).toBe(true);
   // Replaced by its exact form, or an ordinary view: run.
   expect(holdForSavedView({ ...base, q: formatRecordTerm('site', '12'), legacyQ: 'target:12 target.type:site' })).toBe(false);
   expect(holdForSavedView(base)).toBe(false);

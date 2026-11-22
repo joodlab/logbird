@@ -67,7 +67,7 @@ function ExplorerPage() {
   // the link as it is.
   // A cached list without the linked view may just be out of date (it can still count as fresh): fetch it once more
   // before treating the view as gone, and hold until that fetch settles.
-  const confirmedMissing = useConfirmedMissingView(views, search.view, Boolean(storedView));
+  const confirmedMissing = useConfirmedMissingView(views, projectId, search.view, Boolean(storedView));
   const holdForView = holdForSavedView({
     viewId: search.view,
     q: search.q ?? '',

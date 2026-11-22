@@ -84,28 +84,34 @@ export function holdForSavedView(o: {
   confirmedMissing: boolean;
   legacyQ: string | undefined;
 }): boolean {
-  if (!o.viewId || o.listError) return false;
-  return o.listPending || (!o.found && !o.confirmedMissing) || (o.legacyQ !== undefined && o.q === o.legacyQ);
+  if (!o.viewId) return false;
+  // A known old view still has its stored query in the link: hold through its replacement, even if a refresh failed.
+  if (o.legacyQ !== undefined && o.q === o.legacyQ) return true;
+  if (o.listError) return false;
+  return o.listPending || (!o.found && !o.confirmedMissing);
 }
 
 /**
- * True once a fresh fetch of the view list has confirmed that `viewId` is not in it. A cached list without the view
- * may simply be out of date while still counting as fresh, so it is fetched once more (after any fetch in flight)
- * before the view is treated as gone.
+ * True once a fresh fetch of this project's view list has confirmed that the linked view is not in it. A cached list
+ * without the view may simply be out of date while still counting as fresh, so it is fetched once more (after any fetch
+ * in flight) before the view is treated as gone. The confirmation belongs to one project and view: another project's
+ * list (the same view id elsewhere) never satisfies it.
  */
 export function useConfirmedMissingView(
   views: { isSuccess: boolean; isFetching: boolean; refetch: () => Promise<unknown> },
+  projectId: string,
   viewId: string | undefined,
   found: boolean,
 ): boolean {
+  const key = viewId === undefined ? undefined : JSON.stringify([projectId, viewId]);
   const [confirmed, setConfirmed] = useState<string | undefined>(undefined);
-  const missing = Boolean(viewId) && views.isSuccess && !found;
+  const missing = key !== undefined && views.isSuccess && !found;
   const { refetch, isFetching } = views;
   useEffect(() => {
-    if (!missing || !viewId || confirmed === viewId || isFetching) return;
-    void refetch().finally(() => setConfirmed(viewId));
-  }, [missing, viewId, confirmed, isFetching, refetch]);
-  return Boolean(viewId) && confirmed === viewId && !found;
+    if (!missing || key === undefined || confirmed === key || isFetching) return;
+    void refetch().finally(() => setConfirmed(key));
+  }, [missing, key, confirmed, isFetching, refetch]);
+  return key !== undefined && confirmed === key && !found;
 }
 
 /** Explorer search params that open a saved view (and mark it open). */
