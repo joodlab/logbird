@@ -32,7 +32,13 @@ it('flags usable keys that expire within a week', () => {
   expect(expiresSoon({ revokedAt: null, expiresAt: null }, now)).toBe(false);
 });
 
-const scoped = (patch: Partial<KeyFormValues>): KeyFormValues => ({ ...EMPTY_KEY_FORM, name: 'Site 42 dashboard', kind: 'scoped-read', tenantId: 'biz_5', ...patch });
+const scoped = (patch: Partial<KeyFormValues>): KeyFormValues => ({
+  ...EMPTY_KEY_FORM,
+  name: 'Site 42 dashboard',
+  kind: 'scoped-read',
+  tenantId: 'biz_5',
+  ...patch,
+});
 
 describe('the create form', () => {
   it('builds a contract-valid body for every kind', () => {
@@ -71,7 +77,9 @@ describe('the create form', () => {
     expect(validateKeyForm(scoped({ tenantId: 'biz�' })).tenantId).toMatch(/NUL or invalid Unicode/);
     expect(validateKeyForm(scoped({ targetType: 'website' })).targetId).toBe('Enter the target id too, or clear the target type.');
     expect(validateKeyForm(scoped({ targetType: 't'.repeat(61), targetId: 'x' })).targetType).toBe('At most 60 characters (this has 61).');
-    expect(validateKeyForm(scoped({ actionPrefixes: `booking.\n${'a'.repeat(191)}` })).actionPrefixes).toBe('Line 2: At most 190 characters (this has 191).');
+    expect(validateKeyForm(scoped({ actionPrefixes: `booking.\n${'a'.repeat(191)}` })).actionPrefixes).toBe(
+      'Line 2: At most 190 characters (this has 191).',
+    );
     expect(validateKeyForm(scoped({ actionPrefixes: Array.from({ length: 21 }, (_, i) => `a${i}.`).join('\n') })).actionPrefixes).toBe(
       'At most 20 prefixes (this has 21).',
     );
