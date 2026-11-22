@@ -798,9 +798,8 @@ async function invite() {
   const invitee = `setup-invitee-${RUN}@logbird.local`;
   const other = `setup-other-${RUN}@logbird.local`;
   const { context, page, settle, shot, step, close } = await session('invite-owner', { video: false, storageState: owner.state });
-  const P = `${BASE}/p/${owner.projectId}`;
   let link = '';
-  await step('owner invites an admin from Settings → Members', async () => {
+  await step('owner invites an admin from Workspace settings → Members', async () => {
     await page.goto(`${BASE}/workspace/members`);
     await settle(1200);
     await page.getByPlaceholder('teammate@company.com').fill(invitee);
