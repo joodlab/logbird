@@ -483,12 +483,50 @@ function RollKeyDialog({
   );
 }
 
-/** A labelled text field with its limit (and any error) under it, before submit. */
+/**
+ * The line under a field: its short purpose by default, its limits while it is focused, its error once invalid. The
+ * limits stay in the field's accessible description throughout (visually hidden when not shown), so a screen reader
+ * hears them on focus; the dialog stays short until someone is filling a field in.
+ */
+function FieldHint({
+  id,
+  purpose,
+  limits,
+  error,
+  focused,
+}: {
+  id: string;
+  purpose?: ReactNode;
+  limits: ReactNode;
+  error?: string;
+  focused: boolean;
+}) {
+  return (
+    <>
+      {error ? (
+        <p className="text-destructive text-xs" id={`${id}-hint`}>
+          {error}
+        </p>
+      ) : purpose && !focused ? (
+        <p className="text-muted-foreground text-xs" id={`${id}-hint`}>
+          {purpose}
+        </p>
+      ) : null}
+      <p className={focused && !error ? 'text-muted-foreground text-xs' : 'sr-only'} id={`${id}-limits`}>
+        {limits}
+      </p>
+    </>
+  );
+}
+const describedBy = (id: string) => `${id}-hint ${id}-limits`;
+
+/** A labelled text field with its purpose, its limits while focused, and its error (see `FieldHint`). */
 function TextField({
   id,
   label,
   optional,
-  hint,
+  purpose,
+  limits,
   error,
   multiline,
   ...props
@@ -496,22 +534,25 @@ function TextField({
   id: string;
   label: string;
   optional?: boolean;
-  hint: ReactNode;
+  purpose?: ReactNode;
+  limits: ReactNode;
   error: string | undefined;
   multiline?: boolean;
   value: string;
   placeholder?: string;
   onChange: (value: string) => void;
 }) {
-  const hintId = `${id}-hint`;
+  const [focused, setFocused] = useState(false);
   const common = {
-    'aria-describedby': hintId,
+    'aria-describedby': describedBy(id),
     'aria-invalid': Boolean(error) || undefined,
     autoCapitalize: 'off',
     autoComplete: 'off',
     className: 'font-mono',
     id,
+    onBlur: () => setFocused(false),
     onChange: (e: { target: { value: string } }) => props.onChange(e.target.value),
+    onFocus: () => setFocused(true),
     placeholder: props.placeholder,
     spellCheck: false,
     value: props.value,
@@ -523,9 +564,7 @@ function TextField({
         {optional ? <span className="font-normal text-muted-foreground"> · optional</span> : null}
       </Label>
       {multiline ? <Textarea {...common} rows={2} /> : <Input {...common} />}
-      <p className={cn('text-xs', error ? 'text-destructive' : 'text-muted-foreground')} id={hintId}>
-        {error ?? hint}
-      </p>
+      <FieldHint error={error} focused={focused} id={id} limits={limits} purpose={purpose} />
     </div>
   );
 }
@@ -549,6 +588,7 @@ function CreateKeyDialog({
 }) {
   const queryClient = useQueryClient();
   const nameInput = useRef<HTMLInputElement>(null);
+  const [nameFocused, setNameFocused] = useState(false);
   const ids = useId();
   const [createdHere, setCreated] = useState<IssuedKey | null>(null);
   const created = rolled ?? createdHere;
@@ -679,17 +719,23 @@ function CreateKeyDialog({
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="key-name">Name</Label>
                     <Input
-                      aria-describedby="key-name-hint"
+                      aria-describedby={describedBy('key-name')}
                       aria-invalid={Boolean(message) || undefined}
                       id="key-name"
+                      onBlur={() => setNameFocused(false)}
+                      onFocus={() => setNameFocused(true)}
                       onChange={(e) => field.handleChange(e.target.value)}
                       placeholder="Production API"
                       ref={nameInput}
                       value={field.state.value}
                     />
-                    <p className={cn('text-xs', message ? 'text-destructive' : 'text-muted-foreground')} id="key-name-hint">
-                      {message ?? 'Up to 64 characters. Name it after what will use it.'}
-                    </p>
+                    <FieldHint
+                      error={message}
+                      focused={nameFocused}
+                      id="key-name"
+                      limits="Up to 64 characters."
+                      purpose="Name it after what will use it."
+                    />
                   </div>
                 );
               }}
@@ -731,7 +777,8 @@ function CreateKeyDialog({
                       {(field) => (
                         <TextField
                           error={fieldErrorMessage(field.state.meta.errors)}
-                          hint={`Required. Up to ${SCOPE_LIMITS.tenantId} characters, ${SCOPE_ID_RULE}.`}
+                          limits={`Up to ${SCOPE_LIMITS.tenantId} characters, ${SCOPE_ID_RULE}.`}
+                          purpose="Required: the tenant whose events this key reads."
                           id={`${ids}-tenant`}
                           label="Tenant id"
                           onChange={field.handleChange}
@@ -745,7 +792,7 @@ function CreateKeyDialog({
                         {(field) => (
                           <TextField
                             error={fieldErrorMessage(field.state.meta.errors)}
-                            hint={`Up to ${SCOPE_LIMITS.targetType} characters, ${SCOPE_ID_RULE}.`}
+                            limits={`Up to ${SCOPE_LIMITS.targetType} characters, ${SCOPE_ID_RULE}.`}
                             id={`${ids}-target-type`}
                             label="Target type"
                             onChange={field.handleChange}
@@ -759,7 +806,8 @@ function CreateKeyDialog({
                         {(field) => (
                           <TextField
                             error={fieldErrorMessage(field.state.meta.errors)}
-                            hint={`Up to ${SCOPE_LIMITS.targetId} characters, ${SCOPE_ID_RULE}. Only events with a target of this type and id.`}
+                            limits={`Up to ${SCOPE_LIMITS.targetId} characters, ${SCOPE_ID_RULE}.`}
+                            purpose="Only events with a target of this type and id."
                             id={`${ids}-target-id`}
                             label="Target id"
                             onChange={field.handleChange}
@@ -774,7 +822,8 @@ function CreateKeyDialog({
                       {(field) => (
                         <TextField
                           error={fieldErrorMessage(field.state.meta.errors)}
-                          hint={`One per line, up to ${SCOPE_LIMITS.actionPrefixes}, each up to ${SCOPE_LIMITS.actionPrefix} characters, ${SCOPE_ID_RULE}. Only actions that start with one of them.`}
+                          limits={`One per line, up to ${SCOPE_LIMITS.actionPrefixes}, each up to ${SCOPE_LIMITS.actionPrefix} characters, ${SCOPE_ID_RULE}.`}
+                          purpose="Only actions that start with one of these."
                           id={`${ids}-actions`}
                           label="Action prefixes"
                           multiline
@@ -821,7 +870,8 @@ function CreateKeyDialog({
                     {(field) => (
                       <TextField
                         error={fieldErrorMessage(field.state.meta.errors)}
-                        hint={`Where viewer tokens minted with this key may be used. One per line, up to ${SCOPE_LIMITS.embedOrigins}: ${ORIGIN_RULE} Leave empty for server-to-server use only.`}
+                        limits={`One per line, up to ${SCOPE_LIMITS.embedOrigins}: ${ORIGIN_RULE}`}
+                        purpose="Where its viewer tokens may be used. Leave empty for servers only."
                         id={`${ids}-origins`}
                         label="Browser origins"
                         multiline
