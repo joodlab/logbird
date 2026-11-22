@@ -2,6 +2,120 @@
 
 ## Unreleased
 
+## 0.2.0
+
+### Highlights
+
+- Show each customer only its own audit trail: tenant-scoped read keys and 15-minute viewer tokens read one tenant's (or one record's) events through search, event detail, counts grouped by a field and export. The server enforces the scope, and ClickHouse enforces the tenant as well when the restricted query user is configured.
+- Stored events are exact: 64-bit ids and long decimals keep every digit, a record's history matches its type and id on the same target, a slow total count no longer fails a search, and one oversized event no longer rejects its batch.
+- Breaking for some saved queries: `record:` is now a query field for one record (it used to search a custom attribute named `record`), and two escapes inside quoted values changed. See "Breaking changes" below before upgrading.
+
+### Breaking changes
+
+This is a minor release because of the query language. The default Compose installation
+needs no settings change.
+
+- **`record:` now means a record.** `record:<type>:<id>` matches one target with that type
+  and id. A query that used `record:` for a custom attribute named `record` changes
+  meaning, and one without a type and id (for example `record:pending`) is now rejected
+  with 422. To keep searching that attribute, write `attr.record:pending`. This applies to
+  `q` on `/v1/events`, `/v1/export` and `/v1/facets`, and to saved views.
+- **Escapes in quoted values.** Inside quotes, `\r` is now a carriage return and `\*` is a
+  literal asterisk. A saved query that relied on the old reading of either matches
+  differently.
+
+### Changes
+
+**Scoped read access.** A `scoped-read` key carries a scope (`tenantId`, optionally one
+target, action prefixes and a field mask). `POST /v1/viewer-tokens` mints a short-lived
+token for a browser. `/v1/events`, `/v1/events/:id`, `/v1/facets` and `/v1/export` apply
+the scope outside the caller's query. `/v1/facets` groups by one or two fields; `record`
+and fields hidden by the scope's mask cannot be grouped. Keys can expire; rolling a key
+keeps its scope and, unless a new one is given, its expiry. See
+[scoped read access](docs/scoped-read-access.md) and [security](docs/security.md).
+
+**Exact numbers.** Numbers a double cannot hold are stored, returned and exported with
+their exact digits, and numeric entity ids are indexed, so integer primary keys work as
+sent. Search matches them exactly within the index limits: a numeric id whose text is
+longer than 254 characters and a numeric attribute value longer than 2,044 characters are
+kept in the stored event but not indexed. Equality on a number is exact; `>` and `<`
+compare at double precision. Send `occurredAt` as ISO-8601 or integer epoch milliseconds.
+
+**Record histories.** Record pages, the Record facet and the read helper in the TypeScript
+SDK use `record:<type>:<id>`. A saved view that filters `target:` and `target.type:`
+separately opens as saved, with a note that it can include other records; when it names
+exactly one type and one id, the note offers an "Open exact version" button.
+
+**Search totals.** A slow count no longer fails a search. The count has a one-second
+budget; when it runs out, the rows are returned with `totalExact: false` and `total` as a
+lower bound. The console then shows the histogram's total when it has one, and otherwise
+"≥ N" (or "10,000+" at the cap).
+
+**Ingest.** Within the request limits (1,000 events and 5 MiB, which still refuse the
+whole request with 413), an event over 256 KB is rejected on its own (`invalid_event`) and
+the rest of its batch is stored. A console test event completes only the "first event"
+setup step; sources beginning with `logbird-` are reserved for events Logbird generates.
+
+**Arrival-time index.** Migration 010 adds a min/max index on `received_at`. The live view
+uses it today to skip parts of a project's history whose arrival time misses the requested
+range; webhook delivery and alerts will use it when they ship. It gives no gain while a
+large historical import is being read.
+
+**Console.** Record, actor, tenant and executor pages lead with the complete history,
+newest first. Every time names its zone, with one switch between local time and UTC. The
+event drawer lists up to five of the events an event caused, with a link to all of them;
+unknown events and operations say so. Members, invite links and workspace activity move to
+Workspace settings. Overview drill-downs open exactly what their widgets show, and data
+from a previous project or entity is never shown as current.
+
+**.NET.** The `Logbird` and `Logbird.AspNetCore` packages are in the repository
+(`sdks/dotnet`). They are not published to NuGet yet.
+
+### Upgrade and known limits
+
+- **Upgrade order.** Follow [Upgrades and backups](docs/self-hosting.md#upgrades-and-backups),
+  which stops the console, API and worker for the matched backup, with `LOGBIRD_VERSION`
+  set to `0.2.0` before pulling. The `0.2.0` migrate image applies two additive PostgreSQL
+  migrations (new columns on `ApiKey`, and a trigger, `ApiKey_roll_fence`, that refuses a
+  replacement key that drops its predecessor's scope or expiry; no data changes) and
+  ClickHouse migration 010. Building the index needs no extra downtime: it materializes in
+  the background after the services are back, and reads stay correct meanwhile. Check
+  `system.mutations` in the Logbird database for progress.
+- **Restricted query user.** The Compose and Coolify stacks re-provision it automatically
+  (the migrate image runs `create-query-user` before the server starts). Source
+  installations run `pnpm --filter @logbird/clickhouse create-query-user` once after
+  upgrading, in a quiet moment, and restart the server; it is idempotent and keeps
+  credentials. Until then the query builders remain the only layer that enforces a scope's
+  tenant.
+- **Rollback and mixed versions.** Keys with a scope or an expiry have a longer secret
+  that releases before 0.2.0 reject, so after a rollback they stop working instead of
+  reading the whole project. An older server ignores a requested expiry and returns a
+  permanent key: after creating or rolling a key, compare the returned kind, scope and
+  expiry with what you asked for, and revoke the key if they differ. Rolling a scoped or
+  expiring key on an older server fails at the database trigger and creates nothing.
+- **Retries across the upgrade.** A retry, after the upgrade, of an event first stored
+  before it that contains a number a double cannot hold answers `duplicate_id_conflict`,
+  because its stored digits were rounded. Events stored before this release keep their
+  rounded values, and their numeric entity ids stay unindexed.
+- **New per-event rejections.** An event over 256 KB, and an event nested more than 1,000
+  levels deep that holds a number a double cannot keep, are each rejected as
+  `invalid_event`; the other events in the batch are stored.
+- **Scoped reads.** One tenant per scope. A scope names stored ids: string ids are still
+  trimmed at ingest, so an id sent with surrounding whitespace is its trimmed id; a
+  numeric id is stored as the plain decimal text of its value, so a tenant sent as the
+  number `42` and one sent as the string `"42"` are the same tenant and the same scope.
+  Events stored before this release with a numeric tenant id are not visible to any scope,
+  and older events match a target scope only for the targets indexed when they were
+  ingested. With the restricted query user, a scoped read runs under that user's limits
+  (10 seconds, 5,000,000 rows read and 1 GiB per query), so a very large tenant over a wide
+  range can hit them, and a scoped export takes both of the workspace's export slots.
+  Revoking a key reaches its viewer tokens within 30 seconds. Rotating
+  `BETTER_AUTH_SECRET` invalidates viewer tokens.
+- **Webhooks.** Endpoints can still be created and rotated, but nothing is delivered in
+  this release.
+- **New optional settings.** `VIEWER_READ_RATE_LIMIT_PER_MINUTE` (300) and
+  `VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE` (600).
+
 ## 0.1.3
 
 ### Highlights
