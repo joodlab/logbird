@@ -6,7 +6,7 @@
 
 ### Highlights
 
-- The first published release that carries the 0.1.2 changes. 0.1.2 was tagged, but its server, worker and migrate images were never published and it has no GitHub Release; upgrade from 0.1.1 straight to 0.1.3.
+- The first published release that carries the 0.1.2 changes. 0.1.2 was tagged, but its server, worker and migrate images were never published and it has no GitHub Release; upgrade from 0.1.1 straight to 0.1.3 with the [upgrade notes](https://github.com/joodlab/logbird/blob/v0.1.3/CHANGELOG.md#013).
 - Release images for arm64 are now built on native runners, and a published version is checked to contain both linux/amd64 and linux/arm64 before the `latest` and `0.1` tags move to it.
 
 ### Changes
@@ -28,7 +28,7 @@ caught before a tag.
   again.
 - The runtime images use Node 26. Installing an optional native accelerator for
   the queue's message encoding logs an error on arm64 during the image build and
-  then succeeds; both published worker images pass an encoding round trip.
+  then succeeds; the worker images built for both platforms in pull-request checks pass an encoding round trip.
 
 ## 0.1.2
 

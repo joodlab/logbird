@@ -43,7 +43,7 @@ the next release is a minor bump.
    The wrapper uses changelogithub's output APIs and read-only GitHub identity
    lookups. It never creates/edits a release, including without `--dry`. The first
    release includes all non-merge history, including the root commit; later releases
-   use the nearest preceding reachable stable `vX.Y.Z` tag, ignoring prereleases.
+   use the nearest preceding reachable stable `vX.Y.Z` tag, ignoring prereleases and tags listed as unpublished in `scripts/release-notes.mjs` (a tag whose release never completed, such as `v0.1.2`).
    `--from vX.Y.Z` overrides the baseline and must be an ancestor. Compare links
    use the baseline and new version; first releases link the full commit history.
    Highlights must exist in the exact version section; missing/empty/comment-only
