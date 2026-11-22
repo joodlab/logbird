@@ -24,7 +24,10 @@ public sealed class LogbirdReadOptions
     /// </summary>
     public bool AllowInsecureHttp { get; set; }
 
-    /// <summary>A project read key (<c>lb_read_…</c>). Server-side only: never send it to a browser.</summary>
+    /// <summary>
+    /// A project read key (<c>lb_read_…</c>, unscoped or scoped), or a viewer token (<c>lbv1.…</c>) from
+    /// <see cref="LogbirdReadClient.MintViewerTokenAsync"/>. Keep read keys on servers: never send one to a browser.
+    /// </summary>
     public string? ReadKey { get; set; }
 
     /// <summary>The time limit for one request. Defaults to 30 seconds.</summary>
@@ -51,6 +54,9 @@ public sealed class LogbirdReadClient : IDisposable
     private readonly bool _ownsHttp;
     private readonly string _eventsUrl;
     private readonly string _openApiUrl;
+    private readonly string _viewerTokensUrl;
+    private readonly string _facetsUrl;
+    private readonly string _exportUrl;
     private Lazy<Task<Version?>>? _serverVersion;
     private readonly AuthenticationHeaderValue _authorization;
     private readonly TimeSpan _timeout;
@@ -87,6 +93,9 @@ public sealed class LogbirdReadClient : IDisposable
 
         _eventsUrl = Endpoints.Append(endpoint, "/v1/events").AbsoluteUri;
         _openApiUrl = Endpoints.Append(endpoint, "/openapi.json").AbsoluteUri;
+        _viewerTokensUrl = Endpoints.Append(endpoint, "/v1/viewer-tokens").AbsoluteUri;
+        _facetsUrl = Endpoints.Append(endpoint, "/v1/facets").AbsoluteUri;
+        _exportUrl = Endpoints.Append(endpoint, "/v1/export").AbsoluteUri;
         _authorization = new AuthenticationHeaderValue("Bearer", options.ReadKey);
         _timeout = options.Timeout;
         _ownsHttp = httpClient is null;
@@ -114,13 +123,14 @@ public sealed class LogbirdReadClient : IDisposable
     /// is only sent to a server that reports 0.2.0 or later; an older server would run a different search. The version is
     /// read once from the server's public OpenAPI document (without the read key) and kept; a failed read is not kept.
     /// </summary>
-    private async Task EnsureServerSupportsAsync(EventSearch search, CancellationToken cancellationToken)
-    {
-        if (!search.NeedsServer020)
-        {
-            return;
-        }
+    private Task EnsureServerSupportsAsync(EventSearch search, CancellationToken cancellationToken)
+        => search.NeedsServer020
+            ? RequireServer020Async("This trail (record:, or a literal * or carriage return)", cancellationToken)
+            : Task.CompletedTask;
 
+    /// <summary>Fails (without sending anything) unless the server reports Logbird 0.2.0 or later.</summary>
+    private async Task RequireServer020Async(string what, CancellationToken cancellationToken)
+    {
         // One probe for all callers: created once, started once, and not tied to any caller's token (each caller waits under
         // its own, so cancelling one search never fails another). A probe that fails or finds no readable version forgets
         // itself when it completes, even if no caller is still waiting, so the next search asks again.
@@ -135,12 +145,12 @@ public sealed class LogbirdReadClient : IDisposable
         var version = await WaitAsync(probe.Value, cancellationToken).ConfigureAwait(false);
         if (version is null)
         {
-            throw new LogbirdApiException(null, "server_version_unknown", "This trail needs Logbird 0.2.0 or later, and the server's version could not be read; it was not sent.");
+            throw new LogbirdApiException(null, "server_version_unknown", what + " needs Logbird 0.2.0 or later, and the server's version could not be read; nothing was sent.");
         }
 
         if (version < new Version(0, 2, 0))
         {
-            throw new LogbirdApiException(null, "server_too_old", "This trail needs Logbird 0.2.0 or later (record: and literal * or carriage returns); the server reports " + version + ", so it was not sent.");
+            throw new LogbirdApiException(null, "server_too_old", what + " needs Logbird 0.2.0 or later; the server reports " + version + ", so nothing was sent.");
         }
     }
 
@@ -227,6 +237,172 @@ public sealed class LogbirdReadClient : IDisposable
             }
 
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Mints a short-lived viewer token for one scope, for example to give a browser read access to one customer's audit
+    /// trail. Call it with an unscoped <c>read</c> key (or a scoped read key whose scope contains <paramref name="scope"/>);
+    /// a viewer token cannot mint another. Logbird 0.2.0 and later.
+    /// </summary>
+    /// <param name="scope">What the token may read. Checked locally before sending (see <see cref="ViewerScope"/>).</param>
+    /// <param name="lifetime">How long the token works, 60 seconds to 1 hour; the server default (15 minutes) when null.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <exception cref="ArgumentException">The scope or lifetime is invalid.</exception>
+    /// <exception cref="LogbirdApiException">
+    /// The server refused (for example <c>scope_exceeded</c> when the scope is wider than the key's), could not be reached,
+    /// is older than 0.2.0, or granted a scope different from the one requested (<c>scope_mismatch</c>; the token is not
+    /// returned).
+    /// </exception>
+    public async Task<ViewerToken> MintViewerTokenAsync(ViewerScope scope, TimeSpan? lifetime = null, CancellationToken cancellationToken = default)
+    {
+        Guard.NotNull(scope, nameof(scope));
+        scope.Validate();
+        int? ttlSeconds = null;
+        if (lifetime is { } span)
+        {
+            if (span < TimeSpan.FromSeconds(60) || span > TimeSpan.FromHours(1))
+            {
+                throw new ArgumentException("A viewer token lives 60 seconds to 1 hour.", nameof(lifetime));
+            }
+
+            ttlSeconds = (int)span.TotalSeconds;
+        }
+
+        await RequireServer020Async("Minting a viewer token", cancellationToken).ConfigureAwait(false);
+        var body = JsonSerializer.SerializeToUtf8Bytes(new MintViewerTokenRequest { Scope = scope.ToWire(), TtlSeconds = ttlSeconds }, ScopedJsonContext.Default.MintViewerTokenRequest);
+        using var content = new ByteArrayContent(body);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        var response = await SendAsync(HttpMethod.Post, _viewerTokensUrl, content, ScopedJsonContext.Default.MintViewerTokenResponse, cancellationToken).ConfigureAwait(false);
+        if (response?.Token is not { Length: > 0 } token || response.Scope is null
+            || !DateTimeOffset.TryParse(response.ExpiresAt, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var expiresAt))
+        {
+            throw new LogbirdApiException(null, "invalid_response", "Logbird returned a viewer token response this SDK cannot read.");
+        }
+
+        var granted = ViewerScope.FromWire(response.Scope);
+        if (!granted.SameAccessAs(scope))
+        {
+            throw new LogbirdApiException(null, "scope_mismatch", "Logbird granted a different scope than requested; the token was not returned.");
+        }
+
+        return new ViewerToken(token, expiresAt, granted);
+    }
+
+    /// <summary>
+    /// Counts in-range events by the values of a field, optionally split by a second field. With a viewer token or scoped
+    /// key, only events in its scope are counted. Logbird 0.2.0 and later.
+    /// </summary>
+    /// <param name="query">The field, optional second field, query and range.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <exception cref="ArgumentException">The facet request is invalid.</exception>
+    /// <exception cref="LogbirdApiException">The server refused, could not be reached, or is older than 0.2.0.</exception>
+    public async Task<FacetResult> FacetsAsync(FacetQuery query, CancellationToken cancellationToken = default)
+    {
+        Guard.NotNull(query, nameof(query));
+        var url = _facetsUrl + query.ToQueryString();
+        await RequireServer020Async("A facet request", cancellationToken).ConfigureAwait(false);
+        return (await GetAsync(url, ScopedJsonContext.Default.FacetResult, cancellationToken).ConfigureAwait(false))!;
+    }
+
+    /// <summary>
+    /// Streams every matching event in the range into <paramref name="destination"/> in one format, and returns the number
+    /// of bytes written. With a viewer token or scoped key, only events in its scope are exported. The client's
+    /// <see cref="LogbirdReadOptions.Timeout"/> applies until the server starts answering; the download itself runs until
+    /// it ends or <paramref name="cancellationToken"/> is cancelled, so pass a token to bound a large export.
+    /// Logbird 0.2.0 and later.
+    /// </summary>
+    /// <param name="query">The format, query and range.</param>
+    /// <param name="destination">Where to write the file. Not disposed.</param>
+    /// <param name="cancellationToken">Cancels the export.</param>
+    /// <exception cref="LogbirdApiException">
+    /// The server refused (for example <c>masked_export</c> for an evidence export of a masked scope), could not be
+    /// reached, or is older than 0.2.0. If the download fails part way, <paramref name="destination"/> holds a partial file.
+    /// </exception>
+    public async Task<long> ExportAsync(ExportQuery query, System.IO.Stream destination, CancellationToken cancellationToken = default)
+    {
+        Guard.NotNull(query, nameof(query));
+        Guard.NotNull(destination, nameof(destination));
+        var url = _exportUrl + query.ToQueryString();
+        await RequireServer020Async("An export", cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = _authorization;
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Logbird.NET", LogbirdClient.Version));
+        HttpResponseMessage response;
+        using (var headers = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+        {
+            headers.CancelAfter(_timeout);
+            try
+            {
+                response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, headers.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException or ObjectDisposedException)
+            {
+                throw new LogbirdApiException(null, "unreachable", "Logbird could not be reached: " + e.GetType().Name);
+            }
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                byte[] error;
+                try
+                {
+                    error = await Internal.BatchSender.ReadBodyAsync(response, 64 * 1024, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception e) when (e is System.IO.InvalidDataException or System.IO.IOException or HttpRequestException)
+                {
+                    error = [];
+                }
+
+                throw LogbirdApiException.FromResponse(response.StatusCode, error);
+            }
+
+            try
+            {
+                if (response.Content is null)
+                {
+                    return 0;
+                }
+
+#if NET
+                var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+#else
+                var source = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+#endif
+                using (source)
+                {
+                    var buffer = new byte[81920];
+                    long total = 0;
+                    int read;
+#if NET
+                    while ((read = await source.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false)) > 0)
+                    {
+                        await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+#else
+                    while ((read = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
+                    {
+                        await destination.WriteAsync(buffer, 0, read, cancellationToken).ConfigureAwait(false);
+#endif
+                        total += read;
+                    }
+
+                    return total;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException)
+            {
+                throw new LogbirdApiException(response.StatusCode, "unreachable", "The export download failed part way: " + e.GetType().Name);
+            }
         }
     }
 
@@ -321,12 +497,16 @@ public sealed class LogbirdReadClient : IDisposable
         }
     }
 
-    private async Task<T?> GetAsync<T>(string url, JsonTypeInfo<T> type, CancellationToken cancellationToken, bool notFoundIsNull = false)
+    private Task<T?> GetAsync<T>(string url, JsonTypeInfo<T> type, CancellationToken cancellationToken, bool notFoundIsNull = false)
+        where T : class
+        => SendAsync(HttpMethod.Get, url, null, type, cancellationToken, notFoundIsNull);
+
+    private async Task<T?> SendAsync<T>(HttpMethod method, string url, HttpContent? content, JsonTypeInfo<T> type, CancellationToken cancellationToken, bool notFoundIsNull = false)
         where T : class
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_timeout);
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var request = new HttpRequestMessage(method, url) { Content = content };
         request.Headers.Authorization = _authorization;
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Logbird.NET", LogbirdClient.Version));

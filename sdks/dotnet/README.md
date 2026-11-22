@@ -259,6 +259,36 @@ check is retried by the next search. `ForTrail` throws `ArgumentException` when 
 to leave one out), so a bug cannot silently widen a history search to the whole project. A search filter is not authorization. When you show history to your own customers, check that the signed-in user
 may see the tenant or record first, on every request including next-page requests.
 
+## Show customers their own audit trail
+
+For a multi-tenant product, keep one unscoped read key on your server and mint a short-lived **viewer token** for each
+customer view. Logbird enforces the token's scope on every read route, so nothing in a query can widen it; see
+[scoped read access](https://github.com/joodlab/logbird/blob/master/docs/scoped-read-access.md). These routes need
+Logbird 0.2.0 or later (the client checks the server's version first).
+
+```csharp
+// On your server, after checking that the signed-in user may see this business:
+var token = await reader.MintViewerTokenAsync(
+    new ViewerScope(businessId) { Target = new ViewerScopeTarget("website", websiteId), Mask = ViewerMask.Ip },
+    lifetime: TimeSpan.FromMinutes(15));
+// Hand token.Token to the browser (never in a URL); it sends it as "Authorization: Bearer".
+
+// Or read with the token from another server:
+using var scoped = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = endpoint, ReadKey = token.Token });
+var byAction = await scoped.FacetsAsync(new FacetQuery("action") { By = "outcome" });
+await using var file = File.Create("audit.csv");
+await scoped.ExportAsync(new ExportQuery(ExportFormat.Csv), file);
+```
+
+- A scope names a tenant and, optionally, one target (type and id together), action prefixes and masks (`Ip`,
+  `UserAgent`, `ActorEmail`; any mask also hides the original payload). Ids must be as Logbird stored them; the client
+  rejects a scope that could never match before sending it.
+- Minting fails with `scope_mismatch` (and returns no token) if the server grants a different scope than requested.
+  `ViewerToken.ToString()` never prints the token.
+- `FacetsAsync` counts events by any query field (optionally split by a second); `ExportAsync` streams CSV, JSONL or
+  JSONL with payloads (`JsonlEvidence`, refused for a masked scope) into your stream. The read `Timeout` covers the
+  start of an export; pass a cancellation token to bound the download.
+
 ## Verify webhooks
 
 Logbird signs webhook deliveries with [Standard Webhooks](https://www.standardwebhooks.com/). Verify the raw body
