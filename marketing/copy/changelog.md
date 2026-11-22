@@ -12,16 +12,16 @@ path: /changelog
 - **eyebrow:** Changelog
 - **heading (H1):** What changed, and when.
 - **body:** Two lists live here. **Releases** are the versions published on GitHub, with the highlights from the
-  repository's `CHANGELOG.md`; once the repository is public, each links to its full notes and upgrade steps. The
+  repository's `CHANGELOG.md`; each links to its full notes and upgrade steps <!-- only once the repository is public -->. The
   **build log** holds short updates on what we shipped, with a capture from the product when there is one.
-  <!-- source: CHANGELOG.md (all sections "Unreleased") -->
+  <!-- source: CHANGELOG.md; the release list (apps/web/src/lib/releases.ts) -->
 - **visual:** none
 
 ## releases
 
 - **id:** `releases`
 - **heading:** Releases
-- **body:** One entry per GitHub Release (stable `vX.Y.Z`, published), newest first, with the `### Highlights`
+- **body:** <!-- copy-sync: skip (engineering note: how the list is built) --> One entry per GitHub Release (stable `vX.Y.Z`, published), newest first, with the `### Highlights`
   bullets of its `CHANGELOG.md` section and, once the repository is public, a link to its full release notes. The
   build reads the list from the GitHub API and falls back to `apps/web/src/lib/releases.snapshot.ts`; run
   `pnpm --filter @logbird/web releases:sync` after each release.
@@ -33,8 +33,8 @@ path: /changelog
 
 - **id:** `build-log`
 - **heading:** Build log
-- **body:** Day by day, in public. Drafts in `marketing/devlog/` are published here only after the owner approves
-  them; each one becomes an entry in `apps/web/src/lib/publications.ts`.
+- **body:** Day by day, in public. <!-- Drafts in `marketing/devlog/` are published here only after the owner approves
+  them; each one becomes an entry in `apps/web/src/lib/publications.ts`. -->
 - **empty state:** No entries yet. Each day's post appears here once it's published.
 - **site:** the page is `ready` (indexed, in the footer and sitemap) from the first release or approved entry.
   <!-- source: marketing/README.md -->
@@ -43,8 +43,8 @@ path: /changelog
 ## how-we-write
 
 - **id:** `how-we-write`
-- **heading:** How entries are written (internal guidance, not shown on the page)
-- **rules:**
+- **heading:** How entries are written (internal guidance, not shown on the page) <!-- copy-sync: skip (internal) -->
+- **rules:** <!-- copy-sync: skip (internal writing guidance, not on the page) -->
   - **One change per entry, in the user's words.** "You can now search your audit log with SQL, safely." Not
     "Refactored query pipeline."
   - **Say the limit with the change.** "Live tail polls over HTTP; there's no WebSocket."

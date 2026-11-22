@@ -49,6 +49,47 @@ Then one `##` block per section, in page order:
 - `cta`: label → target.
 - `visual`: an exact path under `marketing/media/`, or "code sample", or "diagram: …".
 
+### Interim drift check
+
+**Interim.** The planned fix is typed content modules (#250): the pages render them, so each claim has one source. This
+check catches common drift between these files and the pages until then, and is deleted when the modules land. It
+doesn't make each claim single-source; its known gaps are listed in the pull request that added it (#249).
+
+`apps/web/src/lib/copy-sync.test.ts` renders every mapped page except the exempt ones listed below, as the public build does, once with Logbird
+Cloud closed and once open (`WEB_APP_URL` set). It looks for the claims the copy file states for that page, bound to
+elements rather than loose text. Change a claim in the copy and on the page in the same pull request.
+
+- **Headings.** A `heading` must be a heading on the page. In the other direction, every `h1`/`h2` section heading in
+  the page's `<main>` must be a heading in the copy. The shared closing band is the exception: its words are checked on
+  home.
+- **Texts.** A `body`, `eyebrow`, `limit line`, `small print`, note or message must be one element's whole text, or a
+  run of up to three adjacent sibling elements (a title and its body). A prefix or an extended sentence fails.
+- **Lists.** `bullets`, `steps`, `items`, `cards` and the like must be one list on the page: the same items, in the same
+  order and number.
+- **Tables.** Tables are compared row by row and cell by cell.
+- **Calls to action.** A `cta` (`Label → target · …`) must be a link with that label and target.
+- **What counts as a difference.** Case, digits, signs, operators, units and words all count. Only spacing, typographic
+  quotes, and `.` `:` `;` at a sentence or title boundary are ignored. Unicode is compared after NFC.
+- **Citations.** `[S1–S4]` is written out as `[S1, S2, S3, S4]`, the way the page renders it.
+- **Placeholders.** Values from configuration or the release list are written as named placeholders, resolved from the
+  test's configuration and `releases.ts`: `<latest release>`, `<latest release date>`, `<first release>`,
+  `<first release date>`, `<supported line>`, `<security contact>`, `<contact email>`, `<sign-in URL>`. Any other
+  `<…>` is literal text.
+- **Variants.**
+  - Wording shown only while Logbird Cloud is open goes in a field named `… (when Cloud is open)`, which is checked
+    against that render.
+  - Private-repository wording goes in a comment.
+  - A field the public page doesn't show at all, or an engineering note, carries
+    `<!-- copy-sync: skip (reason) -->` on its first line. The reason is required.
+- **Field names.** Every field name is classified in `apps/web/src/lib/copy-claims.ts`. An unknown or misspelt name
+  fails the test.
+- **Data modules.** Where a page renders a part from a data module (the comparison tables, sources, "what we couldn't
+  verify", and the /compare cards come from `apps/web/src/lib/comparisons.ts`), the copy file doesn't restate it. It
+  has a `data` field pointing at the module, its only source.
+- **Inventory.** Every file in this folder is either in the map above or listed in the test with the reason it has no
+  page: this guide, the two legal briefs (the legal pages are their own owner-approved wording source;
+  `legal-pages.test.ts` checks selected facts) and `arabic-notes.md`.
+
 ## Messaging hierarchy
 
 ### Tagline

@@ -59,7 +59,12 @@ export function Envelope({ className }: { className?: string }) {
             </dt>
             <dd className="text-muted-foreground text-sm leading-relaxed">
               {note.text}
-              {note.required ? <span className="ms-2 rounded-full border px-2 py-0.5 font-medium text-[11px] text-foreground">required</span> : null}
+              {note.required ? (
+                <>
+                  {/* A real space, so the text reads "…required field. required", not "field.required". */}{' '}
+                  <span className="ms-1 rounded-full border px-2 py-0.5 font-medium text-[11px] text-foreground">required</span>
+                </>
+              ) : null}
             </dd>
           </div>
         ))}
