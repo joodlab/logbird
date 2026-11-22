@@ -513,28 +513,35 @@ function RotateDialog({
   const [overlap, setOverlap] = useState<number>(86_400);
   // Each endpoint starts at the recommended overlap, not at the last one picked for another.
   const [shownFor, setShownFor] = useState<WebhookEndpoint | null>(null);
+  // Each opening and closing starts a new session (reopening for the same endpoint too): a rotation from an earlier
+  // session neither retries nor closes the dialog showing now.
+  const session = useRef(0);
   if (endpoint !== shownFor) {
     setShownFor(endpoint);
+    session.current += 1;
     if (endpoint) setOverlap(86_400);
   }
   const onSecretRef = useRef(onSecret);
   onSecretRef.current = onSecret;
-  const showing = useRef(endpoint);
-  showing.current = endpoint;
   const rotate = useMutation({
     gcTime: 0,
-    mutationFn: async ({ e, seconds }: { e: WebhookEndpoint; seconds: number }) => {
+    mutationFn: async ({ e, seconds, at }: { e: WebhookEndpoint; seconds: number; at: number }) => {
+      // A retry after the dialog was cancelled does not rotate again (with no overlap it would retire the old secret).
+      if (at !== session.current) throw new SaveAbandoned();
       const { secret } = await api.webhooks.rotateSecret(projectId, e.id, seconds);
       // Rotated: the new secret is shown whatever happened to this dialog meanwhile, and never enters mutation state.
       onSecretRef.current({ endpoint: e, secret, overlapSeconds: seconds });
       return e.id;
     },
     ...webhookRetry,
-    // Close only the dialog that asked (not one since opened for another endpoint).
-    onSuccess: (id) => {
-      if (showing.current?.id === id) onClose();
+    // Close only the opening that asked, never one opened since (for this endpoint or another).
+    onSuccess: (_id, { at }) => {
+      if (at === session.current) onClose();
     },
-    onError: (error) => toast.error('Could not rotate the secret', { description: webhookErrorCopy(error) }),
+    onError: (error, { at }) => {
+      if (error instanceof SaveAbandoned || at !== session.current) return;
+      toast.error('Could not rotate the secret', { description: webhookErrorCopy(error) });
+    },
   });
   const retrying = rotate.isPending && rotate.failureCount > 0 && isWebhookBusy(rotate.failureReason);
   return (
@@ -564,7 +571,10 @@ function RotateDialog({
           <Button onClick={onClose} variant="ghost">
             Cancel
           </Button>
-          <Button disabled={rotate.isPending || !endpoint} onClick={() => endpoint && rotate.mutate({ e: endpoint, seconds: overlap })}>
+          <Button
+            disabled={rotate.isPending || !endpoint}
+            onClick={() => endpoint && rotate.mutate({ e: endpoint, seconds: overlap, at: session.current })}
+          >
             {rotate.isPending ? <Loader2Icon className="animate-spin" /> : null}
             {retrying ? 'Busy, retrying…' : 'Rotate secret'}
           </Button>
