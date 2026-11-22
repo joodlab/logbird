@@ -37,7 +37,10 @@ async function projectSetup(projectId: string, team: Awaited<ReturnType<typeof t
       ingest: { firstEventAt: null, lastEventAt: null },
     };
   }
-  const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, include: { keys: { where: { revokedAt: null } } } });
+  const project = await prisma.project.findUniqueOrThrow({
+    where: { id: projectId },
+    include: { keys: { where: { revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] } } },
+  });
   const result = computeSetup(project, await setupFacts(projectId), team);
   if (result.complete && !project.setupCompletedAt) {
     await prisma.project.updateMany({ where: { id: projectId, setupCompletedAt: null }, data: { setupCompletedAt: new Date() } });

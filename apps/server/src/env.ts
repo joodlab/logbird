@@ -17,6 +17,10 @@ export const env = createEnv({
     PUBLIC_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(600),
     INGEST_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(3000),
     READ_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(1200),
+    /** Viewer tokens minted per key per minute (#138). */
+    VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(600),
+    /** Reads per minute with viewer tokens, per minting key and tenant (they also count toward the project read limit). */
+    VIEWER_READ_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(300),
     PORT: z.coerce.number().int().min(1).max(65_535).default(4601),
     APP_URL: z.url(),
     BETTER_AUTH_SECRET: z.string().min(32),

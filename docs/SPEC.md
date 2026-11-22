@@ -329,7 +329,8 @@ errors (except 429) drop the batch and report; transient failures retain it for 
 The **route table and every request/response schema live in `packages/contracts`** — implement them exactly.
 - Internal API (`/api/*`, better-auth session cookie, org membership enforced, project must belong to the
   active org). Public API (`/v1/*`, project-bound API keys: `lb_ingest_<random>` may only ingest, `lb_read_<random>`
-  may only read). Keys are stored as SHA-256 hash + display prefix; full secret shown once.
+  may only read). Keys are stored as SHA-256 hash + display prefix; full secret shown once. Read keys may carry a
+  fixed scope (`scoped-read`), and read keys mint short-lived viewer tokens; see §5.2.
 - Errors: `{ error: { code, message, details? } }` with proper HTTP status.
 - `GET /openapi.json` (hono-openapi) + Scalar reference at `/docs`. Both are read-only, unauthenticated and proxied
   by the console on the public origin ([architecture decision](decisions.md)).
@@ -428,6 +429,44 @@ events in the last 24 hours, then the most recent event, then the oldest project
 `InvitationPreview` for the accept page: invited email, role, workspace, inviter name, `expiresAt` and a derived
 `state` (pending / accepted / rejected / canceled / expired). Accepting still goes through better-auth with a session
 whose email matches the invitation.
+
+### 5.2 Scoped read access (#138) and facets (#140)
+
+Full guide: [scoped read access](scoped-read-access.md); token format and secret derivation: [security](security.md).
+
+- **Kinds:** `ingest`, `read`, `scoped-read`. A `scoped-read` key is stored as a read key with a `scope`
+  `{tenantId, target?: {type, id}, actionPrefixes?, mask?}`; `embedOrigins` and `expiresAt` are optional. All are
+  fixed at creation. Rolling copies scope and origins and keeps the absolute expiry unless the roll body passes a new
+  `expiresAt`; rolling an expired key without one answers 409 `key_expired`. Expired keys authenticate like revoked
+  ones (401). Keys with a scope or expiry have 48-character secrets (earlier releases accept only 32, so they fail closed
+  after a rollback), and the Postgres trigger `ApiKey_roll_fence` refuses a replacement that drops the replaced key's
+  scope or expiry (409 `key_restricted`).
+- **Enforcement:** `scopePredicate` (`packages/clickhouse/src/scope.ts`) is ANDed outside the compiled `q` in
+  `where()`, so search, totals, facets and export pages share it; detail tests it on the canonical stored row, stops
+  the parent chain at the first out-of-scope parent and scopes child/operation counts. The target matches type and id
+  on the same array position. Scoped reads never use rollups. Search cursors carry a project+scope fingerprint and are
+  refused (422 `validation_error`) under any other scope, including unscoped. A scope names **stored** ids (checked on
+  columns, never the payload); scope ids must be in stored form (≤ 250 code units, no surrounding whitespace, no
+  U+FFFD), so only whitespace-trimmed ids share a scope, as they share every other surface (maintainer decision, #180).
+- **Viewer tokens:** `POST /v1/viewer-tokens` (read or scoped-read key; 60–3600 s, default 900) → `lbv1.<payload>.<mac>`,
+  HMAC-SHA256 with an HKDF key (`logbird-viewer-token-v1`) from `BETTER_AUTH_SECRET`. A token's scope must be within
+  the key's (403 `scope_exceeded`). Verification: MAC, `exp`/`iat` with 30 s skew, and the minting key unrevoked,
+  unexpired and still containing the scope (key lookup cached ≤ 30 s per process). Tokens work on GET `/v1/events`,
+  `/v1/events/:id`, `/v1/facets`, `/v1/export` only.
+- **CORS:** those four GET routes answer preflights for any origin without credentials; the response is readable only
+  by an origin on the minting key's `embedOrigins` (other browser origins: 403 `origin_not_allowed`); 401s are
+  readable by any origin. Keys never get CORS.
+- **Masks:** `ip`, `user_agent` (emptied), `actor_email` (`masked:<hmac>` per project, HKDF info
+  `logbird-field-mask-v1`). Any mask nulls the detail payload and refuses `jsonl-evidence` (422 `masked_export`); a
+  masked scope can't filter or facet on masked columns (422 `invalid_query`, reason `not_allowed`).
+- **Limits:** token reads also count per minting key and tenant (`VIEWER_READ_RATE_LIMIT_PER_MINUTE`, 300); minting per
+  key (`VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE`, 600).
+- **Export:** `GET /v1/export` reuses the console engine and lifecycle; admission identity `api_key:<id>`; workspace
+  records carry the key as actor and `metadata.access {via, apiKeyId, viaToken, tenantId, jti, scope}`.
+- **Facets:** `field` is an envelope field or `attr.<path>`; JSON-array attribute values count each element. Optional
+  `by` + `byLimit` (1–20, default 5) add the top second-level values per returned value with `groupsOtherCount`; the
+  console `/facets` accepts the same parameters. The response always has `by` (null without it).
+- **Not yet:** the restricted query user's row policy does not yet enforce the tenant (phase 2).
 
 ### Webhook endpoint management
 
@@ -534,7 +573,8 @@ server configuration. See the query-language security model for the verification
 better-auth tables (user, session, account, verification) + organization plugin (organization, member,
 invitation) + app tables:
 - `Project { id, organizationId, name, slug (unique per org), description?, retentionDays=90, maintenanceGeneration BigInt=0, createdAt, updatedAt }`
-- `ApiKey { id, projectId, name, kind (ingest|read), prefix, hash (unique), createdById?, createdAt, lastUsedAt?, lastUsedUserAgent?, replacesKeyId?, revokedAt? }`
+- `ApiKey { id, projectId, name, kind (ingest|read), prefix, hash (unique), createdById?, createdAt, lastUsedAt?, lastUsedUserAgent?, replacesKeyId?, revokedAt?, scope Json?, embedOrigins String[], expiresAt? }`
+  (`scope` non-null = a `scoped-read` key in the API)
   (`replacesKeyId`: set on a rolled key, pointing at the key it replaces; `lastUsedUserAgent`: sampled with `lastUsedAt`)
 - `SavedView { id, projectId, name, description?, state Json, createdById?, createdAt }` — `state` = `{ q?, lang?, range?,
   columns?, labels? }`; `labels` (≤ 20) are display names for entity terms of `q` (`tenant:biz_5` → "Bayt Al Rimal"),
