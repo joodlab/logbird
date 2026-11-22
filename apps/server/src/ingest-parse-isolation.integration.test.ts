@@ -216,7 +216,12 @@ it('keeps acknowledged child claims if Postgres confirmation fails', async () =>
     return confirm(...args);
   });
   const response = await f.post([event('healthy'), badEvent('bad')]);
-  expect(response.status).toBe(500);
+  // Since #151, ClickHouse acknowledged the healthy row, so any confirmation failure (even a bug) keeps its claim and
+  // reports it as pending (503 ingest_pending, retryable); the proven-bad row is settled as a terminal rejection.
+  expect(response.status).toBe(503);
+  const body = await response.json();
+  expect(body.error.code).toBe('ingest_pending');
+  expect(body.error.details).toMatchObject({ accepted: 0, indices: [0], eventIds: ['healthy'], rejected: [{ index: 1, code: 'invalid_event' }] });
   expect(await read(clickhouse, 'SELECT event_id FROM events WHERE project_id={p:String}', { p: f.project })).toEqual([{ event_id: 'healthy' }]);
   expect(await prisma.ingestReceipt.findMany({ where: { projectId: f.project } })).toEqual([
     expect.objectContaining({ eventId: 'healthy', confirmedAt: null, claimedAt: expect.any(Date) }),

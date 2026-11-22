@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { appendFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createClickHouseClient } from '../src/client';
+import { createClickHouseClient, createQueryClickHouseClient } from '../src/client';
 import { provisionQueryUser } from '../src/provision-query-user';
 
 const ch = createClickHouseClient();
@@ -36,13 +36,15 @@ try {
   )
     throw new Error('Existing query username differs; refusing to replace it');
   if (existing.length) {
-    const existingUser = createClickHouseClient({ ...process.env, CLICKHOUSE_USER: 'logbird_query', CLICKHOUSE_PASSWORD: password });
+    // The restricted factory ignores credentials embedded in CLICKHOUSE_URL, so this really tests the query user.
+    const existingUser = createQueryClickHouseClient({ ...process.env, CLICKHOUSE_QUERY_USER: 'logbird_query', CLICKHOUSE_QUERY_PASSWORD: password });
     try {
-      await (await existingUser.query({ query: 'SELECT 1' })).text();
+      const who = await (await existingUser!.query({ query: 'SELECT currentUser()', format: 'TabSeparatedRaw' })).text();
+      if (who.trim() !== 'logbird_query') throw new Error('wrong user');
     } catch {
       throw new Error('Existing query credentials do not authenticate; refusing to rotate');
     } finally {
-      await existingUser.close();
+      await existingUser?.close();
     }
   }
   await provisionQueryUser(ch, password);
