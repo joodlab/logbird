@@ -635,6 +635,7 @@ function CreateKeyDialog({
         onClosed();
         secretGuard.reset();
         form.reset();
+        setNarrowOpen(false);
         create.reset();
       }, 200);
     }
@@ -809,95 +810,105 @@ function CreateKeyDialog({
                         ),
                       })}
                     >
-                      {({ set, invalid }) => (
-                        <details
-                          className="group flex min-w-0 flex-col gap-3 [&[open]>summary]:mb-3"
-                          data-testid="narrow-further"
-                          onToggle={(e) => setNarrowOpen((e.target as HTMLDetailsElement).open)}
-                          open={narrowOpen || set || invalid}
-                        >
-                          <summary className="flex cursor-pointer list-none items-start gap-1.5 rounded-sm font-medium text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
-                            <ChevronDownIcon className="-rotate-90 mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-0" />
-                            <span>
-                              Narrow further <span className="font-normal text-muted-foreground">· one target, some actions, hidden fields</span>
-                            </span>
-                          </summary>
-                          <div className="flex min-w-0 flex-col gap-3">
-                            <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-                              <form.Field name="targetType">
+                      {({ set, invalid }) => {
+                        // Never hides an error: a field with an error keeps the panel open. A plain button (not a native
+                        // <summary>) so the open state is ours alone and cannot drift from what React renders.
+                        const open = narrowOpen || invalid;
+                        return (
+                          <div className="flex min-w-0 flex-col gap-3" data-testid="narrow-further">
+                            <button
+                              aria-controls={`${ids}-narrow`}
+                              aria-expanded={open}
+                              className="group flex items-start gap-1.5 rounded-sm text-start font-medium text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                              data-open={open || undefined}
+                              onClick={() => setNarrowOpen(invalid ? true : !open)}
+                              type="button"
+                            >
+                              <ChevronDownIcon className="-rotate-90 mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-data-[open]:rotate-0" />
+                              <span>
+                                Narrow further{' '}
+                                <span className="font-normal text-muted-foreground">
+                                  {set && !open ? '· set: see the summary below' : '· one target, some actions, hidden fields'}
+                                </span>
+                              </span>
+                            </button>
+                            <div className="flex min-w-0 flex-col gap-3" hidden={!open} id={`${ids}-narrow`}>
+                              <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                                <form.Field name="targetType">
+                                  {(field) => (
+                                    <TextField
+                                      error={fieldErrorMessage(field.state.meta.errors)}
+                                      limits={`Up to ${SCOPE_LIMITS.targetType} characters, ${SCOPE_ID_RULE}.`}
+                                      id={`${ids}-target-type`}
+                                      label="Target type"
+                                      onChange={field.handleChange}
+                                      optional
+                                      placeholder="website"
+                                      value={field.state.value}
+                                    />
+                                  )}
+                                </form.Field>
+                                <form.Field name="targetId">
+                                  {(field) => (
+                                    <TextField
+                                      error={fieldErrorMessage(field.state.meta.errors)}
+                                      limits={`Up to ${SCOPE_LIMITS.targetId} characters, ${SCOPE_ID_RULE}.`}
+                                      purpose="Only events with a target of this type and id."
+                                      id={`${ids}-target-id`}
+                                      label="Target id"
+                                      onChange={field.handleChange}
+                                      optional
+                                      placeholder="site_42"
+                                      value={field.state.value}
+                                    />
+                                  )}
+                                </form.Field>
+                              </div>
+                              <form.Field name="actionPrefixes">
                                 {(field) => (
                                   <TextField
                                     error={fieldErrorMessage(field.state.meta.errors)}
-                                    limits={`Up to ${SCOPE_LIMITS.targetType} characters, ${SCOPE_ID_RULE}.`}
-                                    id={`${ids}-target-type`}
-                                    label="Target type"
+                                    limits={`One per line, up to ${SCOPE_LIMITS.actionPrefixes}, each up to ${SCOPE_LIMITS.actionPrefix} characters, ${SCOPE_ID_RULE}.`}
+                                    purpose="Only actions that start with one of these."
+                                    id={`${ids}-actions`}
+                                    label="Action prefixes"
+                                    multiline
                                     onChange={field.handleChange}
                                     optional
-                                    placeholder="website"
+                                    placeholder={'booking.\nauth.'}
                                     value={field.state.value}
                                   />
                                 )}
                               </form.Field>
-                              <form.Field name="targetId">
+                              <form.Field name="masks">
                                 {(field) => (
-                                  <TextField
-                                    error={fieldErrorMessage(field.state.meta.errors)}
-                                    limits={`Up to ${SCOPE_LIMITS.targetId} characters, ${SCOPE_ID_RULE}.`}
-                                    purpose="Only events with a target of this type and id."
-                                    id={`${ids}-target-id`}
-                                    label="Target id"
-                                    onChange={field.handleChange}
-                                    optional
-                                    placeholder="site_42"
-                                    value={field.state.value}
-                                  />
+                                  <fieldset className="flex min-w-0 flex-col gap-1.5">
+                                    <legend className="font-medium text-sm">
+                                      Hide <span className="font-normal text-muted-foreground">· optional</span>
+                                    </legend>
+                                    {SCOPE_MASKS.map((mask) => (
+                                      // biome-ignore lint/a11y/noLabelWithoutControl: the Base UI checkbox inside is the control.
+                                      <label className="flex items-start gap-2 text-sm" key={mask}>
+                                        <Checkbox
+                                          checked={field.state.value.includes(mask)}
+                                          className="mt-0.5"
+                                          onCheckedChange={(checked) =>
+                                            field.handleChange(checked ? [...field.state.value, mask] : field.state.value.filter((m) => m !== mask))
+                                          }
+                                        />
+                                        <span>
+                                          {MASK_LABEL[mask]} <span className="text-muted-foreground text-xs">· {MASK_HINT[mask]}</span>
+                                        </span>
+                                      </label>
+                                    ))}
+                                    <p className="text-muted-foreground text-xs">Hiding any field also hides each event’s raw payload.</p>
+                                  </fieldset>
                                 )}
                               </form.Field>
                             </div>
-                            <form.Field name="actionPrefixes">
-                              {(field) => (
-                                <TextField
-                                  error={fieldErrorMessage(field.state.meta.errors)}
-                                  limits={`One per line, up to ${SCOPE_LIMITS.actionPrefixes}, each up to ${SCOPE_LIMITS.actionPrefix} characters, ${SCOPE_ID_RULE}.`}
-                                  purpose="Only actions that start with one of these."
-                                  id={`${ids}-actions`}
-                                  label="Action prefixes"
-                                  multiline
-                                  onChange={field.handleChange}
-                                  optional
-                                  placeholder={'booking.\nauth.'}
-                                  value={field.state.value}
-                                />
-                              )}
-                            </form.Field>
-                            <form.Field name="masks">
-                              {(field) => (
-                                <fieldset className="flex min-w-0 flex-col gap-1.5">
-                                  <legend className="font-medium text-sm">
-                                    Hide <span className="font-normal text-muted-foreground">· optional</span>
-                                  </legend>
-                                  {SCOPE_MASKS.map((mask) => (
-                                    // biome-ignore lint/a11y/noLabelWithoutControl: the Base UI checkbox inside is the control.
-                                    <label className="flex items-start gap-2 text-sm" key={mask}>
-                                      <Checkbox
-                                        checked={field.state.value.includes(mask)}
-                                        className="mt-0.5"
-                                        onCheckedChange={(checked) =>
-                                          field.handleChange(checked ? [...field.state.value, mask] : field.state.value.filter((m) => m !== mask))
-                                        }
-                                      />
-                                      <span>
-                                        {MASK_LABEL[mask]} <span className="text-muted-foreground text-xs">· {MASK_HINT[mask]}</span>
-                                      </span>
-                                    </label>
-                                  ))}
-                                  <p className="text-muted-foreground text-xs">Hiding any field also hides each event’s raw payload.</p>
-                                </fieldset>
-                              )}
-                            </form.Field>
                           </div>
-                        </details>
-                      )}
+                        );
+                      }}
                     </form.Subscribe>
                   </fieldset>
                 ) : null
