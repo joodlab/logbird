@@ -1077,6 +1077,10 @@ answer must pass validation. Credentials and fragments are forbidden. Save-time
 validation uses a cancellable DNS resolver. The sender resolves again and pins
 an allowed address on every attempt.
 
+Over HTTP the whole request travels unencrypted: the signed body and the full endpoint URL, including any token in
+its path or query string. A signature proves who sent a message; it doesn't hide it. Use HTTP only for receivers on a
+network you trust, and never put a credential in an HTTP endpoint URL.
+
 PATCH `scope` replaces the whole scope; `null` clears it. `filterQuery` uses the
 Logbird query language (empty matches everything). A scope can name a tenant, a
 target, or both. Like scoped read access, it uses [stored IDs](security.md#scopes-name-stored-ids),
@@ -1146,7 +1150,9 @@ in batches of up to 100 and resumes after the last committed position if a scan 
 If an endpoint carries more than ten active secrets from an earlier version,
 the API reports `secretOverlapWarning: webhook_secret_overlap_limit` and the
 worker signs with the ten newest active secrets. Wait for an overlap to expire,
-or rotate with `overlapSeconds` set to `0` and update the receiver with the new secret.
+or rotate with `overlapSeconds` set to `0` and update the receiver with the new secret. Waiting only clears the
+warning: a receiver that knows only a secret outside those ten cannot verify any delivery until it is given one of
+the ten (or the new secret from a zero-overlap rotation).
 
 ### Reconcile a webhook discovery cursor
 
