@@ -43,6 +43,10 @@ describe('firstEventCopy', () => {
 
   it('celebrates an integration event', () => {
     expect(firstEventCopy('booking-service').cardTitle).toBe('It works — your first event just arrived');
+    // Once the backend has sent events, the console test card stops asking for one.
+    expect(firstEventCopy('logbird-test', false, true).cardTitle).toBe('Console test received — your backend has sent events since');
+    // Another Logbird-generated source is not called a console test.
+    expect(firstEventCopy('logbird-import').cardTitle).toBe('Event from Logbird received — now send one from your backend');
     expect(firstEventCopy(null, false).cardTitle).toBe('First event received');
   });
 });
