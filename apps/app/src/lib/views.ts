@@ -6,7 +6,7 @@ import { api } from '@/lib/api/client';
 import { meQuery } from '@/lib/api/queries';
 import { splitTargetId, targetEntityId } from '@/lib/entities';
 import { canonicalField, fieldTerms, hasTopLevelOr } from '@/lib/query-language';
-import { DEFAULT_RANGE, rangeInSentence, rangeLabel } from '@/lib/range';
+import { rangeInSentence, rangeLabel } from '@/lib/range';
 
 export type ViewLabel = NonNullable<SavedView['state']['labels']>[number];
 export type ViewLabelField = ViewLabel['field'];
@@ -53,8 +53,8 @@ function recordPageName(name: string, label: string, range: string): boolean {
  * rewritten: its exact generated name (`<label> — <range>`), no description, no saved columns, and a Record label for
  * the id; the pair must lead the query, be plain and positive, and be ANDed with the rest (no top-level OR). A query
  * typed in the explorer and saved there (its own name and columns, even with a resolved Record label) is left exactly
- * as written. Known limit: nothing stored records where a view came from, so a view created elsewhere that is identical
- * in every one of these fields to a record page's save is treated as one.
+ * as written. Known limit: nothing stored records where a view came from, so a view created elsewhere whose name,
+ * description and whole state are identical to a record page's save is treated as one.
  */
 export function upgradeRecordView(view: Pick<SavedView, 'name' | 'state'> & { description?: string | null }): {
   state: SavedView['state'];
@@ -62,11 +62,14 @@ export function upgradeRecordView(view: Pick<SavedView, 'name' | 'state'> & { de
 } {
   const { state } = view;
   const q = state.q ?? '';
-  const label = state.labels?.find((l) => l.field === 'target');
-  if (state.lang === 'sql' || !label || hasTopLevelOr(q)) return { state, upgraded: false };
-  // The record page always saved `description: null` and no columns.
-  if (view.description != null || state.columns !== undefined) return { state, upgraded: false };
-  if (!recordPageName(view.name, label.label, state.range ?? DEFAULT_RANGE)) return { state, upgraded: false };
+  // The whole stored state must be exactly what the record page wrote: `{ q, lang: 'query', range, labels: [one Record
+  // label] }`, nothing more or less, with `description: null`. Any other shape (an extra label, a missing language or
+  // range, saved columns, a description) is someone else's view and stays as saved.
+  const shape = Object.keys(state).sort().join(',');
+  const label = state.labels?.length === 1 ? state.labels[0] : undefined;
+  if (shape !== 'labels,lang,q,range' || state.lang !== 'query' || typeof state.range !== 'string') return { state, upgraded: false };
+  if (!label || label.field !== 'target' || view.description != null || hasTopLevelOr(q)) return { state, upgraded: false };
+  if (!recordPageName(view.name, label.label, state.range)) return { state, upgraded: false };
   const [first, second] = fieldTerms(q);
   const simple = (t: typeof first) => t && !t.negated && !t.wildcard && (t.valueKind === 'plain' || t.valueKind === 'quoted') && t.value;
   if (!simple(first) || !simple(second) || !first || !second) return { state, upgraded: false };

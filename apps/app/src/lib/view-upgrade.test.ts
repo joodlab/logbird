@@ -45,6 +45,12 @@ it('leaves a hand-typed lookalike exactly as written, even with a resolved Recor
   same({ name: 'Home page — manual review', state });
   // The generated name, but with a description: the record page never wrote one.
   same({ name: 'Home page — last 7 days', description: 'Hand-made review view', state });
+  // The record page wrote exactly { q, lang: 'query', range, labels: [one Record label] }: any other state shape stays.
+  same({ ...legacy, state: { ...state, labels: [...state.labels, { field: 'actor', value: 'u1', label: 'Lina' }] } });
+  const { lang: _lang, ...withoutLang } = state;
+  same({ ...legacy, state: withoutLang });
+  const { range: _range, ...withoutRange } = state;
+  same({ name: 'Home page — last 24 hours', state: withoutRange });
   same({ name: 'Home page — last 30 days', state });
   // No Record label.
   same({ ...legacy, state: { ...state, labels: undefined } });
