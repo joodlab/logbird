@@ -1,8 +1,4 @@
-using System;
-using System.Buffers;
 using System.Collections.Generic;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Logbird.Internal;
@@ -103,18 +99,6 @@ internal static class JsonDepth
             return Shape.Ok;
         }
 
-        // Before enumerating a container (which, for a parsed node, would build every child), write it once into a
-        // counting buffer that stops at a budget: a parsed node is written straight from its document, so an oversized or
-        // overdeep tree is rejected with constant memory.
-        if (maxBytes != long.MaxValue && root is JsonObject or JsonArray)
-        {
-            var precheck = Precheck(root, max, maxBytes - size);
-            if (precheck != Shape.Ok)
-            {
-                return precheck;
-            }
-        }
-
         var pending = new Stack<(JsonNode Node, int Depth)>();
         pending.Push((root, 1));
         while (pending.Count > 0)
@@ -190,100 +174,5 @@ internal static class JsonDepth
         }
 
         return Shape.Ok;
-    }
-
-    /// <summary>
-    /// Writes <paramref name="root"/> through a counting buffer. The writer's relaxed escaping writes at most six bytes for
-    /// each byte Logbird's own serializer writes (a one-byte character such as DEL escaped as a six-byte sequence), so
-    /// passing six times the remaining budget proves the event too large. Memory stays bounded either way: the buffer is
-    /// reused, and a tree that passes holds at most six times the limit of JSON text for the walk that follows. Writer
-    /// depth equals the walk's container depth, so passing <paramref name="max"/> proves it too deep. Anything else (for
-    /// example a lone surrogate the writer refuses) leaves the decision to the walk.
-    /// </summary>
-    private static Shape Precheck(JsonNode root, int max, long remaining)
-    {
-        if (remaining < 0)
-        {
-            return Shape.TooLarge;
-        }
-
-        if (remaining > long.MaxValue / 6)
-        {
-            return Shape.Ok;
-        }
-
-        var counter = new CountingBuffer(remaining * 6);
-        Utf8JsonWriter? writer = null;
-        try
-        {
-            writer = new Utf8JsonWriter(counter, new JsonWriterOptions { MaxDepth = max, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
-            root.WriteTo(writer);
-            writer.Flush();
-            return Shape.Ok;
-        }
-        catch (BudgetExceededException)
-        {
-            return Shape.TooLarge;
-        }
-        catch (InvalidOperationException) when (writer is not null && writer.CurrentDepth >= max)
-        {
-            return Shape.TooDeep;
-        }
-        catch (Exception)
-        {
-            return Shape.Ok;
-        }
-        finally
-        {
-            try
-            {
-                writer?.Dispose();
-            }
-            catch (Exception)
-            {
-                // Disposing flushes what is pending into the counter, which may stop at its budget again.
-            }
-        }
-    }
-
-    private sealed class BudgetExceededException : Exception
-    {
-    }
-
-    /// <summary>Counts what is written into one reused buffer and stops once the budget is passed.</summary>
-    private sealed class CountingBuffer(long budget) : IBufferWriter<byte>
-    {
-        private byte[] _buffer = new byte[4096];
-        private long _written;
-
-        public void Advance(int count)
-        {
-            _written += count;
-            if (_written > budget)
-            {
-                throw new BudgetExceededException();
-            }
-        }
-
-        public Memory<byte> GetMemory(int sizeHint = 0)
-        {
-            // The writer asks for at most eighteen bytes per character of the value it is about to write (six for its
-            // worst-case escaping, times three for transcoding), and Logbird writes at least one byte per character, so a
-            // request beyond three times the budget (eighteen times the remaining limit) proves that value alone is too
-            // large. This also bounds the buffer.
-            if (sizeHint > (budget * 3) + 1024)
-            {
-                throw new BudgetExceededException();
-            }
-
-            if (sizeHint > _buffer.Length)
-            {
-                _buffer = new byte[sizeHint];
-            }
-
-            return _buffer;
-        }
-
-        public Span<byte> GetSpan(int sizeHint = 0) => GetMemory(sizeHint).Span;
     }
 }

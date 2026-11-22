@@ -63,8 +63,10 @@ app.MapPut("/invoices/{id}", (string id, IAuditLog audit) =>
   `AddLogbird` once; later calls do not change the registered client.
 - **Direct tracking**: events sent with `ILogbirdClient.Track` are not filled in; use `IAuditLog` for request context.
   `IAuditLog` records through the registered `ILogbirdClient`, so a fake registered before `AddLogbird` receives its
-  events in tests; events `IAuditLog` cannot record (a throwing configure callback, an event over the size or depth
-  limit) are still reported through `OnDrop` and counted by Logbird's own client. The container hands out `ILogbirdClient` only; Logbird disposes its client itself at shutdown.
+  events in tests. The size and depth limits are Logbird's: `IAuditLog` drops a prepared event only when its pre-copy
+  check (a lower bound of the size) already finds it over the limit; anything else is the registered client's to judge.
+  Events `IAuditLog` drops itself (a throwing configure callback, or that pre-copy check) are reported through `OnDrop`
+  and counted by Logbird's own client even when another client records. The container hands out `ILogbirdClient` only; Logbird disposes its client itself at shutdown.
 
 See the [`Logbird` package README](https://github.com/joodlab/logbird/tree/master/sdks/dotnet) for options, failure
 handling, redaction, reading the trail and verifying webhooks.

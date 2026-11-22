@@ -464,8 +464,10 @@ public class AspNetCoreTests
         await app.Host.StopAsync();
         await app.Host.DisposeAsync();
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), watch.Elapsed.ToString());
-        Assert.Equal(1, client.Stats.Dropped);
+
+        // The report runs in the background once the host's budget ends.
         Assert.Equal(DropReason.Shutdown, Assert.Single(await Eventually(drops, 1)).Reason);
+        Assert.Equal(1, client.Stats.Dropped);
     }
 
     [Fact]
