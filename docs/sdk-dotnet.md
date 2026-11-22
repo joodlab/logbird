@@ -1,0 +1,218 @@
+# Logbird for .NET
+
+Logbird records who did what, to which record, and when: an audit trail you can search, show to customers and export.
+This guide takes a C# backend from nothing to its first stored audit event and explains what happens when things go
+wrong. It assumes ASP.NET Core on .NET 8 or newer; a plain client for other hosts (including .NET Framework 4.6.2+) is
+at the end.
+
+Two packages:
+
+| Package | For |
+| --- | --- |
+| `Logbird.AspNetCore` | ASP.NET Core apps: `AddLogbird()`, request context on every event, background jobs, flush on shutdown |
+| `Logbird` | The client itself: any .NET host, reading the trail back, verifying webhooks |
+
+## 1. Install
+
+> The packages are not on nuget.org yet. Until they are, build against the source: clone this repository and reference
+> `sdks/dotnet/src/Logbird.AspNetCore/Logbird.AspNetCore.csproj` from your project, as
+> [`examples/aspnetcore`](../examples/aspnetcore) does. Once published, it is one command:
+
+```sh
+dotnet add package Logbird.AspNetCore
+```
+
+## 2. Configure
+
+In Logbird, create a project and an **ingest key** for it. Add the endpoint to `appsettings.json`:
+
+```json
+{
+  "Logbird": { "Endpoint": "https://audit.example.com" }
+}
+```
+
+Keep the key out of source control. Set it with user secrets in development and an environment variable in production:
+
+```sh
+dotnet user-secrets set Logbird:IngestKey <your ingest key>   # development
+export Logbird__IngestKey=<your ingest key>                     # production
+```
+
+`Endpoint` is your Logbird origin (without `/v1/events`). It must be `https`, except `localhost` during development.
+
+## 3. Record your first event
+
+Register Logbird and its middleware in `Program.cs`:
+
+```csharp
+using Logbird.AspNetCore;
+
+builder.Services.AddLogbird(builder.Configuration.GetSection("Logbird"));
+
+var app = builder.Build();
+app.UseAuthentication();
+app.UseLogbird();
+```
+
+Then inject `IAuditLog` wherever a change is committed. In a controller:
+
+```csharp
+[Authorize]
+public class InvoicesController(InvoiceService invoices, IAuditLog audit) : ControllerBase
+{
+    [HttpPut("invoices/{id}/status")]
+    public async Task<IActionResult> SetStatus(string id, [FromBody] string status)
+    {
+        var (before, after) = await invoices.SetStatusAsync(id, status);
+        audit.Record("invoice.status_changed", e => e.Target("invoice", id).Change("status", before, after));
+        return NoContent();
+    }
+}
+```
+
+That is the whole integration. The event Logbird stores looks like this (ids shortened):
+
+```json
+{
+  "action": "invoice.status_changed",
+  "actor": { "type": "user", "id": "user_42", "name": "Ana Fictional" },
+  "tenant": { "id": "acct_7" },
+  "executor": { "type": "api", "id": "billing-api" },
+  "targets": [{ "type": "invoice", "id": "inv_1001" }],
+  "changes": [{ "field": "status", "before": "draft", "after": "sent" }],
+  "context": { "operationId": "0192…", "requestId": "0HN…", "traceId": "4bf9…", "ip": "203.0.113.9", "userAgent": "…" }
+}
+```
+
+Name actions `noun.verb_in_past_tense` (`invoice.status_changed`, `user.signed_in`), record after the change is saved,
+and use your own stable ids for targets.
+
+## 4. How the actor and tenant are found
+
+You did not pass the user or the tenant. `IAuditLog` fills every field the event leaves empty, at the moment you call
+`Record`:
+
+- **Actor**: from the signed-in user's claims, `sub` (or `NameIdentifier`) for the id and `name` for the name. Email
+  is added only if you opt in. Only the request's authenticated primary identity is read.
+- **Tenant**: from the `tenant_id` claim.
+- **Executor**: `api:<your application name>` (set `ServiceName` to choose the name).
+- **Context**: operation, request and trace ids, client IP and user agent, from the request.
+
+Your claims are different? Change the claim types or supply your own resolvers:
+
+```csharp
+builder.Services.AddLogbird(builder.Configuration.GetSection("Logbird"), configureRequests: r =>
+{
+    r.ServiceName = "billing-api";
+    r.ActorIdClaimTypes.Insert(0, "uid");
+    r.ResolveTenant = http => http.Request.RouteValues["tenant"] is string t ? new AuditTenant(t) : null;
+});
+```
+
+Anything the event sets itself wins. At sign-in, for example, the user is not on `HttpContext.User` until the next
+request, so name them on the event:
+
+```csharp
+audit.Record("user.signed_in", e =>
+{
+    e.Actor = AuditActor.User(user.Id, user.Name);
+    e.Tenant = new AuditTenant(user.TenantId);
+});
+```
+
+To leave a field out (for example the IP address), remove its flag: `audit.Record("report.exported", fill: AuditFill.All & ~AuditFill.Ip)`,
+or set `LogbirdRequestOptions.Fill` for every event.
+
+**Background jobs** continue the request's operation. Capture a carrier when you enqueue the work and record from the
+worker with it; the job's events keep the user as actor and link to the request's event:
+
+```csharp
+var requested = audit.Record("invoice.send_requested", e => e.Target("invoice", id));
+jobs.Enqueue(new SendInvoice(id, audit.Carrier(parentEventId: requested)));   // the carrier serializes to JSON
+
+// In the worker (inject IAuditLogFactory):
+var jobAudit = auditFactory.ForJob(job.Carrier, jobId, attempt);
+jobAudit.Record("invoice.emailed", e => e.Target("invoice", job.InvoiceId));
+```
+
+## 5. When Logbird is down
+
+Audit logging never takes your application down with it:
+
+- **`Record` never throws and never waits for the network.** It queues the event in memory and returns. A background
+  loop sends batches every second.
+- **Failures are retried** with backoff (network errors, 429, 5xx), resending identical bytes with the same event ids,
+  so the server never stores an event twice.
+- **The queue is bounded** (`MaxQueueSize`, 10,000 events by default). If Logbird stays unreachable long enough to fill
+  it, the oldest events are dropped and each drop is reported.
+- **Every event that is not stored is reported exactly once**, through `OnDrop` with a reason (`QueueFull`, `HttpError`,
+  `Rejected`, `Shutdown`, …), and counted on the `Logbird` meter (`logbird.events.dropped`).
+- **On shutdown** the host sends what is queued, within `ShutdownTimeout` (10 seconds) and the host's own shutdown
+  budget.
+
+Wire the reports into your logs or alerting:
+
+```csharp
+builder.Services.AddLogbird(builder.Configuration.GetSection("Logbird"), o =>
+{
+    o.OnDrop = dropped => Console.Error.WriteLine($"audit event {dropped.Id} ({dropped.Action}) not stored: {dropped.Reason}");
+});
+```
+
+The queue lives in memory, so a crash loses what is queued. For events that must survive a crash, write them to your
+own database in the same transaction as the change (an outbox) and send them from there with their ids; a resend is
+then always an exact retry.
+
+## 6. Check that it worked
+
+- **In the Logbird console**, open the project's Explorer. Filter by `action:invoice.status_changed`, or by
+  `operation:"<operation id>"` to see a request and the jobs it started together.
+- **From code**, read the trail back with a read key (server side only):
+
+  ```csharp
+  using var reader = new LogbirdReadClient(new LogbirdReadOptions
+  {
+      Endpoint = new Uri("https://audit.example.com"),
+      ReadKey = builder.Configuration["Logbird:ReadKey"],
+  });
+  var page = await reader.SearchAsync(EventSearch.ForTrail(targetId: "inv_1001"));
+  foreach (var e in page.Events) Console.WriteLine($"{e.Timestamp:u} {e.Action} by {e.Actor?.Id}");
+  ```
+
+- **In your process**, `ILogbirdClient.Stats` shows how many events were tracked, delivered, rejected and dropped, and
+  the same numbers are on the `Logbird` meter for OpenTelemetry or `dotnet-counters`.
+
+During development, a quick end-to-end check is the example app: run [`examples/aspnetcore`](../examples/aspnetcore)
+against your Logbird and follow its README.
+
+## Without ASP.NET Core
+
+For a console app, a worker without the generic host, or .NET Framework, create one client for the process and
+dispose it on shutdown:
+
+```csharp
+await using var logbird = new LogbirdClient(new LogbirdOptions
+{
+    Endpoint = new Uri("https://audit.example.com"),
+    IngestKey = Environment.GetEnvironmentVariable("LOGBIRD_INGEST_KEY"),
+});
+
+logbird.Track(new AuditEvent("invoice.status_changed")
+{
+    Actor = AuditActor.User("user_42"),
+    Tenant = new AuditTenant("acct_7"),
+}.Target("invoice", "inv_1001").Change("status", "draft", "sent"));
+```
+
+Without a generic host, call `logbird.Flush(TimeSpan.FromSeconds(5))` before the process exits.
+
+## Going further
+
+- [`Logbird` package README](../sdks/dotnet/README.md): every option, the exact failure contract, redaction (secrets are
+  removed before sending; identifiers are never changed), reading the trail, verifying webhooks, and the guarantees about
+  the wire format.
+- [`Logbird.AspNetCore` README](../sdks/dotnet/src/Logbird.AspNetCore/README.md): request context, fill rules, jobs,
+  shutdown ordering.
+- [Integrating an existing backend](integrating-a-backend.md): what to record and how to model events, whatever the
+  language.

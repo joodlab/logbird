@@ -22,7 +22,8 @@ the next release is a minor bump.
    three user-facing bullets under `### Highlights`. Document configuration,
    migration, recovery and known limits. Keep an empty `## Unreleased` for later work.
 2. Set every tracked package.json version to X.Y.Z, including examples and SDK
-   integrations. Run `pnpm release:version`; passing a tag additionally checks it:
+   integrations, and `<VersionPrefix>` in `sdks/dotnet/Directory.Build.props` (the
+   .NET packages). Run `pnpm release:version`; passing a tag additionally checks it:
    `pnpm release:version v0.1.0`. Update the Compose default and .env.example version
    when selecting a new recommended self-host release.
 3. Use Node 22.18+ and pnpm 10.30.3. Prepare isolated fictional service fixtures,
@@ -200,6 +201,27 @@ and the hosted instance builds the site from `docker-compose.site.yml` (see
 [Coolify](coolify.md#hosted-marketing-site-logbirdjoodlabcom-only)).
 It has read-only repository permissions, no registry login and never pushes.
 The owner explicitly authorized these PR builds and tag-driven publication.
+
+## NuGet packages (.NET SDK)
+
+After the GitHub Release exists, the `nuget` job can publish `Logbird` and
+`Logbird.AspNetCore` to nuget.org at the release version. It is off until the
+maintainers turn it on after the pre-publication gate; a release tag alone never
+publishes a package:
+
+- The job runs only when the repository variable `NUGET_PUBLISH_ENABLED` is `true`
+  (Settings, Secrets and variables, Actions, Variables).
+- It publishes only when the `NUGET_API_KEY` secret also exists. Without it, the job
+  ends with a notice and publishes nothing.
+- It checks that the package version equals the release version, builds, runs the
+  unit tests, packs, and pushes `Logbird` before `Logbird.AspNetCore` with their
+  symbol packages. A rerun skips versions already on nuget.org; a published version
+  can never be replaced.
+
+Before the first publication, an owner reserves the `Logbird.*` ID prefix on
+nuget.org for the publishing account, creates an API key scoped to push
+`Logbird.*` packages only, stores it as `NUGET_API_KEY`, and sets
+`NUGET_PUBLISH_ENABLED=true`. Remove the variable to stop publishing.
 
 ## First publication: make GHCR packages public
 
