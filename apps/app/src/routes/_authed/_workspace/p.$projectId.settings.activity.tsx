@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { EventSheet } from '@/components/explorer/event-sheet';
 import { EventsTable, type EventsTableHandle } from '@/components/explorer/events-table';
 import { TimeZoneInline } from '@/components/time-zone-control';
+import { awaiting, current } from '@/lib/api/current';
 import { workspaceActivityQuery } from '@/lib/api/queries';
 import { includeTerm, removeTerm } from '@/lib/query-language';
 import { rangeLabel } from '@/lib/range';
@@ -45,8 +46,10 @@ function WorkspaceActivity() {
   }, [debounced]);
 
   const activity = useInfiniteQuery(workspaceActivityQuery(range, q));
-  const activityTotal = searchTotal(activity.data?.pages, activity.data?.pages.reduce((n, p) => n + p.data.length, 0) ?? 0, activity.hasNextPage);
-  const rows = useMemo(() => activity.data?.pages.flatMap((p) => p.data) ?? [], [activity.data]);
+  // Another range's or search's actions never show (or count) under this one's label.
+  const pages = current(activity)?.pages;
+  const activityTotal = searchTotal(pages, pages?.reduce((n, p) => n + p.data.length, 0) ?? 0, activity.hasNextPage);
+  const rows = useMemo(() => pages?.flatMap((p) => p.data) ?? [], [pages]);
   // The result set the table shows, as of the last non-placeholder results (the query keeps the previous rows while a
   // new search or chip loads): the table starts a new set at the top even when it shares rows with the old one.
   const resultKey = useRef<string | undefined>(undefined);
@@ -107,7 +110,7 @@ function WorkspaceActivity() {
             ))}
           </fieldset>
           <span className="text-muted-foreground text-xs sm:ms-auto">
-            {activity.data ? `${formatSearchTotal(activityTotal)} ${activityTotal.count === 1 ? 'action' : 'actions'} · ${rangeLabel(range)}` : null}
+            {pages ? `${formatSearchTotal(activityTotal)} ${activityTotal.count === 1 ? 'action' : 'actions'} · ${rangeLabel(range)}` : null}
             {/* Below md the table has no column header: name the zone here (and switch it). */}
             <TimeZoneInline className="md:hidden" />
           </span>
@@ -130,7 +133,7 @@ function WorkspaceActivity() {
             focusFallback={() => searchInput.current}
             hasMore={activity.hasNextPage}
             loadMore={() => activity.fetchNextPage()}
-            loading={activity.isPending}
+            loading={awaiting(activity)}
             onSelect={select}
             ref={table}
             resultKey={resultKey.current}

@@ -18,6 +18,7 @@ import { Explorer, type ExplorerState } from '@/components/explorer/explorer';
 import { RankList } from '@/components/rank-list';
 import { Timestamp } from '@/components/timestamp';
 import { SaveEntityViewButton } from '@/components/views/save-entity-view-button';
+import { current } from '@/lib/api/current';
 import { ApiRequestError } from '@/lib/api/errors';
 import { entityProfileQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
@@ -49,7 +50,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   const navigate = useNavigate();
   // Never another entity's or range's numbers under this URL: a placeholder (the previous query's result) renders as
   // loading, so the name, stats, charts and related lists always belong to this entity and this range.
-  const p = profile.isPlaceholderData ? undefined : profile.data;
+  const p = current(profile);
   const displayId = kind === 'target' ? splitTargetId(entityId).id : entityId;
   useSetCrumb(p?.entity.name || displayId);
   useDocumentTitle(`${p?.entity.name || displayId} · ${meta.singular} · Logbird`);

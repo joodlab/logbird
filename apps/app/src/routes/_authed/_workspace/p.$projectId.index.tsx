@@ -17,6 +17,7 @@ import { RankList } from '@/components/rank-list';
 import { SampleDataBanner } from '@/components/setup/sample-data-banner';
 import { SetupChecklistCard } from '@/components/setup/setup-checklist-card';
 import { Timestamp } from '@/components/timestamp';
+import { awaiting, current } from '@/lib/api/current';
 import { overviewQuery, projectQuery, projectSetupQuery } from '@/lib/api/queries';
 import { eventSentence } from '@/lib/events';
 import { delta, formatNumber, formatPercent } from '@/lib/format';
@@ -49,8 +50,9 @@ function OverviewPage() {
   // The setup checklist scores real events only; say so here while sample data is mixed into this average.
   const setup = useQuery(projectSetupQuery(projectId));
   const hasSampleData = (setup.data?.ingest.sampleEvents ?? 0) > 0;
-  const data = overview.data;
-  const loading = overview.isPending;
+  // Another range's KPIs, chart and lists never show under this range's label.
+  const data = current(overview);
+  const loading = awaiting(overview);
   const k = data?.kpis;
   const explore = (q: string) => navigate({ to: '/p/$projectId/events', params: { projectId }, search: (prev) => ({ range: prev.range, q }) });
 

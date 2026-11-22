@@ -15,6 +15,7 @@ import { EventListContext } from '@/components/impersonation';
 import { QueryInput, type QueryInputHandle } from '@/components/query-input/query-input';
 import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
+import { awaiting, current } from '@/lib/api/current';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
@@ -175,11 +176,11 @@ function ProjectExplorer({
   const exportBlocked = problem ? 'Fix the query first — the export runs the same query.' : null;
   // Rows from a previous search (a placeholder while the new range or query loads) are never shown or selectable as
   // this one's; a rejected query keeps the last good rows, labelled as such.
-  const pages = problem ? fallbackPages : events.isPlaceholderData ? undefined : events.data?.pages;
-  const resultsLoading = (events.isPending || events.isPlaceholderData) && !problem;
+  const pages = problem ? fallbackPages : current(events)?.pages;
+  const resultsLoading = awaiting(events) && !problem;
   // A rejected query shows the last good bars, labelled as such; otherwise bars from a previous search (a placeholder
   // while the new range or query loads) are never drawn as if they were this one's.
-  const histogramData = problem ? fallbackHistogram : histogram.isPlaceholderData ? undefined : histogram.data;
+  const histogramData = problem ? fallbackHistogram : current(histogram);
 
   /* ---------------- live tail ---------------- */
   const relative = isValidRange(range) && !range.includes('..');
@@ -199,7 +200,7 @@ function ProjectExplorer({
   }, [effectiveQ, lang, range, live]);
 
   // The tail follows *arrival* (`receivedAt`), so late or back-dated events still stream in.
-  const firstPage = problem || events.isPlaceholderData ? undefined : events.data?.pages[0]?.data;
+  const firstPage = problem ? undefined : current(events)?.pages[0]?.data;
   useEffect(() => {
     if (!sinceRef.current && firstPage) sinceRef.current = newestArrival(firstPage) ?? new Date().toISOString();
   }, [firstPage]);
@@ -498,7 +499,7 @@ function ProjectExplorer({
                   </button>
                 ) : null}
               </>
-            ) : events.isPending || events.isPlaceholderData ? (
+            ) : awaiting(events) ? (
               'Searching…'
             ) : (
               <>
