@@ -133,7 +133,9 @@ export function normalizeEvent(
   if (occurredAtProblem) {
     // A rejected numeric timestamp is indexed whole like any number (two long values never share a prefix match).
     const rejected = isNumber(e.occurredAt) && !ctx.legacyColumns ? numericId(e.occurredAt, 2048) : capText(wellFormed(value(e.occurredAt)), 256);
+    // Always replace a caller-supplied value of this reserved key, even when the number cannot be indexed.
     if (rejected !== null) attributes['logbird.occurredAt.rejected'] = rejected;
+    else delete attributes['logbird.occurredAt.rejected'];
   }
   const warning =
     [

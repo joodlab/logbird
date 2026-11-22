@@ -206,3 +206,11 @@ it('indexes a rejected numeric timestamp whole, so two long values never match e
   expect(b).toBe(`${'1'.repeat(256)}2`);
   expect(normalize(wire('{"action":"x","occurredAt":"yesterday"}')).row.attributes['logbird.occurredAt.rejected']).toBe('yesterday');
 });
+
+it('never leaves a caller-supplied rejected-timestamp attribute when the number cannot be indexed', () => {
+  const huge = `1${'2'.repeat(2048)}`;
+  const { row } = normalize(wire(`{"action":"x","logbird":{"occurredAt":{"rejected":"42"}},"occurredAt":${huge}}`));
+  expect(row.attributes['logbird.occurredAt.rejected']).toBeUndefined();
+  const small = normalize(wire('{"action":"x","logbird":{"occurredAt":{"rejected":"42"}},"occurredAt":"yesterday"}')).row;
+  expect(small.attributes['logbird.occurredAt.rejected']).toBe('yesterday');
+});
