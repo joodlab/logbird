@@ -50,6 +50,8 @@ public sealed class LogbirdReadClient : IDisposable
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
     private readonly string _eventsUrl;
+    private readonly string _openApiUrl;
+    private Task<Version?>? _serverVersion;
     private readonly AuthenticationHeaderValue _authorization;
     private readonly TimeSpan _timeout;
     private readonly int? _maxPages;
@@ -84,6 +86,7 @@ public sealed class LogbirdReadClient : IDisposable
         }
 
         _eventsUrl = Endpoints.Append(endpoint, "/v1/events").AbsoluteUri;
+        _openApiUrl = Endpoints.Append(endpoint, "/openapi.json").AbsoluteUri;
         _authorization = new AuthenticationHeaderValue("Bearer", options.ReadKey);
         _timeout = options.Timeout;
         _ownsHttp = httpClient is null;
@@ -95,8 +98,111 @@ public sealed class LogbirdReadClient : IDisposable
     /// <param name="search">The search; <see langword="null"/> returns the newest events in the default range.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <exception cref="LogbirdApiException">The server answered an error, or could not be reached.</exception>
-    public Task<EventPage> SearchAsync(EventSearch? search = null, CancellationToken cancellationToken = default)
-        => GetAsync(_eventsUrl + (search ?? new EventSearch()).ToQueryString(), ReadJsonContext.Default.EventPage, cancellationToken)!;
+    /// <exception cref="LogbirdApiException">
+    /// Also when the search needs a newer server than the one answering (<c>server_too_old</c>, or
+    /// <c>server_version_unknown</c> when its version cannot be read): such a search is never sent.
+    /// </exception>
+    public async Task<EventPage> SearchAsync(EventSearch? search = null, CancellationToken cancellationToken = default)
+    {
+        search ??= new EventSearch();
+        await EnsureServerSupportsAsync(search, cancellationToken).ConfigureAwait(false);
+        return (await GetAsync(_eventsUrl + search.ToQueryString(), ReadJsonContext.Default.EventPage, cancellationToken).ConfigureAwait(false))!;
+    }
+
+    /// <summary>
+    /// A trail that needs Logbird 0.2.0 (see <see cref="EventSearch.ForTrail(string, string, string, string, DateTimeOffset?, DateTimeOffset?, int?, string, string)"/>)
+    /// is only sent to a server that reports 0.2.0 or later; an older server would run a different search. The version is
+    /// read once from the server's public OpenAPI document (without the read key) and kept; a failed read is not kept.
+    /// </summary>
+    private async Task EnsureServerSupportsAsync(EventSearch search, CancellationToken cancellationToken)
+    {
+        if (!search.NeedsServer020)
+        {
+            return;
+        }
+
+        var pending = Volatile.Read(ref _serverVersion);
+        if (pending is null)
+        {
+            var created = ReadServerVersionAsync(cancellationToken);
+            pending = Interlocked.CompareExchange(ref _serverVersion, created, null) ?? created;
+        }
+
+        Version? version;
+        try
+        {
+            version = await pending.ConfigureAwait(false);
+        }
+        catch
+        {
+            _ = Interlocked.CompareExchange(ref _serverVersion, null, pending);
+            throw;
+        }
+
+        if (version is null)
+        {
+            _ = Interlocked.CompareExchange(ref _serverVersion, null, pending);
+            throw new LogbirdApiException(null, "server_version_unknown", "This trail needs Logbird 0.2.0 or later, and the server's version could not be read; it was not sent.");
+        }
+
+        if (version < new Version(0, 2, 0))
+        {
+            throw new LogbirdApiException(null, "server_too_old", "This trail needs Logbird 0.2.0 or later (record: and literal * or carriage returns); the server reports " + version + ", so it was not sent.");
+        }
+    }
+
+    private async Task<Version?> ReadServerVersionAsync(CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_timeout);
+        using var request = new HttpRequestMessage(HttpMethod.Get, _openApiUrl);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Logbird.NET", LogbirdClient.Version));
+        HttpResponseMessage? response = null;
+        byte[] body;
+        try
+        {
+            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+            body = await Internal.BatchSender.ReadBodyAsync(response, MaxResponseBytes, timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            response?.Dispose();
+            throw;
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException or System.IO.IOException or ObjectDisposedException or System.IO.InvalidDataException)
+        {
+            response?.Dispose();
+            throw new LogbirdApiException(null, "unreachable", "Logbird could not be reached to read its version: " + e.GetType().Name);
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(body);
+                if (document.RootElement.ValueKind == JsonValueKind.Object
+                    && document.RootElement.TryGetProperty("info", out var info) && info.ValueKind == JsonValueKind.Object
+                    && info.TryGetProperty("version", out var versionElement) && versionElement.ValueKind == JsonValueKind.String)
+                {
+                    // A pre-release or build suffix (0.2.0-rc.1, 0.2.0+abc) is ignored: only the numbers are compared.
+                    var text = versionElement.GetString()!;
+                    var end = text.IndexOfAny(['-', '+']);
+                    return Version.TryParse(end >= 0 ? text.Substring(0, end) : text, out var parsed) ? parsed : null;
+                }
+            }
+            catch (JsonException)
+            {
+            }
+
+            return null;
+        }
+    }
 
     /// <summary>
     /// Iterates every matching event, requesting further pages as you go. Logbird's cursors are keyset-ordered and do not
@@ -109,6 +215,7 @@ public sealed class LogbirdReadClient : IDisposable
     /// <exception cref="LogbirdApiException">The server answered an error, could not be reached, or the page limit was reached.</exception>
     public async IAsyncEnumerable<StoredEvent> SearchAllAsync(EventSearch? search = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        await EnsureServerSupportsAsync(search ?? new EventSearch(), cancellationToken).ConfigureAwait(false);
         var maxPages = _maxPages;
         var pages = 0;
         var current = search ?? new EventSearch();

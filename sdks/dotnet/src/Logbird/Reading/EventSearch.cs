@@ -68,7 +68,10 @@ public sealed record EventSearch
     /// <remarks>
     /// <para>A search filter is not authorization: check that the caller may see this record or tenant first.</para>
     /// <para>A trail needs at least one selector or a query. Selectors must not be empty or contain a lone surrogate;
-    /// every other character, including <c>*</c>, quotes and line breaks, is matched literally.</para>
+    /// every other character, including <c>*</c>, quotes and line breaks, is matched literally. A trail with
+    /// <paramref name="targetType"/>, or with a selector that ends in <c>*</c> or contains a carriage return, needs
+    /// Logbird 0.2.0 or later (older servers read those differently); <see cref="LogbirdReadClient"/> checks the server's
+    /// version before sending such a trail and fails instead of running a different search.</para>
     /// </remarks>
     public static EventSearch ForTrail(
         string? targetId = null,
@@ -127,8 +130,41 @@ public sealed record EventSearch
             To = to,
             Limit = limit,
             Cursor = cursor,
+            NeedsServer020 = targetType is not null || NeedsLiteralEscapes(targetId) || NeedsLiteralEscapes(actorId) || NeedsLiteralEscapes(tenantId),
         };
     }
+
+    /// <summary>The eight-parameter form from earlier releases, kept so compiled code and method groups keep working.</summary>
+    /// <param name="targetId">Only events with a target of this id (of any type).</param>
+    /// <param name="actorId">Only events caused by this actor id.</param>
+    /// <param name="tenantId">Only events in this tenant.</param>
+    /// <param name="query">An extra Logbird query, combined with AND.</param>
+    /// <param name="from">The start of the range.</param>
+    /// <param name="to">The end of the range.</param>
+    /// <param name="limit">Events per page.</param>
+    /// <param name="cursor">A cursor from a previous page.</param>
+    public static EventSearch ForTrail(
+        string? targetId,
+        string? actorId,
+        string? tenantId,
+        string? query,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        int? limit,
+        string? cursor)
+        => ForTrail(targetId, actorId, tenantId, query, from, to, limit, cursor, targetType: null);
+
+    /// <summary>
+    /// Whether this search needs Logbird 0.2.0 or later: it uses <c>record:</c>, or escapes a trailing <c>*</c> or a
+    /// carriage return that older servers read as a wildcard or a letter.
+    /// </summary>
+    internal bool NeedsServer020 { get; init; }
+
+    // Older servers read an escaped trailing star as a prefix wildcard and \r as the letter r; interior stars were literal.
+#pragma warning disable CA2249 // string.Contains(char) is not available on netstandard2.0.
+    private static bool NeedsLiteralEscapes(string? value)
+        => value is { Length: > 0 } && (value[value.Length - 1] == '*' || value.IndexOf('\r') >= 0);
+#pragma warning restore CA2249
 
     /// <summary>
     /// Quotes an exact value for the Logbird query language, the same way the shared <c>quoteQueryValue</c> does:

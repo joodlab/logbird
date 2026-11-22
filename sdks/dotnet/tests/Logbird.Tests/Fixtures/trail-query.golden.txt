@@ -8,6 +8,9 @@
 {"input":{"target":{"type":"star*","id":"prefix*"}},"q":"record:\"star\\*:prefix\\*\""}
 {"input":{"target":{"type":"فاتورة","id":"رقم-١"}},"q":"record:\"فاتورة:رقم-١\""}
 {"input":{"target":{"type":"請求書","id":"番号 7 ✓"}},"q":"record:\"請求書:番号 7 ✓\""}
+{"input":{"target":{"type":"𝄞clef","id":"emoji-😀-𠀀"}},"q":"record:\"𝄞clef:emoji-😀-𠀀\""}
+{"input":{"actor":"user-🎉"},"q":"actor:\"user-🎉\""}
+{"input":{"target":{"id":"inv_1"},"q":"  "},"q":"target:\"inv_1\""}
 {"input":{"actor":"user_42"},"q":"actor:\"user_42\""}
 {"input":{"actor":"user\t\"42\"\\*"},"q":"actor:\"user\t\\\"42\\\"\\\\\\*\""}
 {"input":{"tenant":"acct_*"},"q":"tenant:\"acct_\\*\""}

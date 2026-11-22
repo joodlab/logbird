@@ -195,6 +195,7 @@ public class IngestRoundTripTests(ITestOutputHelper output)
             ("請求書", "番号-" + run + " ✓"),
         };
         var expected = new Dictionary<(string Type, string Id), string>();
+        var crossed = new Dictionary<(string Type, string Id), string>();
         await using (var client = new LogbirdClient(LiveServer.Options()))
         {
             foreach (var (type, id) in cases)
@@ -206,16 +207,23 @@ public class IngestRoundTripTests(ITestOutputHelper output)
                 // The same id under another type, and the same type with a longer id: a record trail matches neither.
                 client.Track(new AuditEvent("record.decoy").Target("decoy", id));
                 client.Track(new AuditEvent("record.decoy").Target(type, id + "-other"));
+
+                // One event with both halves on different targets: a server matching type and id separately would return it.
+                var cross = LogbirdClient.NewEventId();
+                crossed[(type, id)] = cross;
+                client.Track(new AuditEvent("record.cross_decoy") { Id = cross }.Target(type, id + "-other").Target("decoy", id));
             }
 
             Assert.True(await client.FlushAsync());
-            Assert.Equal(cases.Length * 3, client.Stats.Delivered);
+            Assert.Equal(cases.Length * 4, client.Stats.Delivered);
         }
 
         using var reader = LiveServer.Reader();
         foreach (var (type, id) in cases)
         {
             await LiveServer.WaitForEventAsync(reader, expected[(type, id)]);
+            var crossedEvent = (await LiveServer.WaitForEventAsync(reader, crossed[(type, id)])).Event;
+            Assert.Equal(2, crossedEvent.Targets.Count);
             var found = new List<string>();
             var deadline = DateTime.UtcNow.AddSeconds(30);
             do
@@ -231,7 +239,7 @@ public class IngestRoundTripTests(ITestOutputHelper output)
             Assert.Equal([expected[(type, id)]], found);
         }
 
-        output.WriteLine($"server {version}: {cases.Length} record trails matched exactly, decoys excluded");
+        output.WriteLine($"server {version}: {cases.Length} record trails matched exactly; same-id, longer-id and crossed decoys excluded");
 
         static async Task<bool> Delay()
         {

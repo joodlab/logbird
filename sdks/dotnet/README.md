@@ -249,9 +249,11 @@ its last 1,000 pages, and you can bound every iteration with `LogbirdReadOptions
 pages remain).
 
 `ForTrail` builds the same query as the TypeScript SDK's `trailQuery`. With `targetType`, it matches a target of exactly
-that type and id together (the `record:` query field, Logbird 0.2.0 and later); with only `targetId`, any target with that
-id. Every value is quoted, and quotes, backslashes, `*` and line breaks are matched literally, so a value can never widen
-the search. `ForTrail` throws `ArgumentException` when it has no selector or query, or for an empty selector (pass `null`
+that type and id together (the `record:` query field); with only `targetId`, any target with that id. Every value is
+quoted, and quotes, backslashes, `*` and line breaks are matched literally, so a value can never widen the search. A
+trail with `targetType`, or with a selector that ends in `*` or contains a carriage return, needs Logbird 0.2.0 or later
+(older servers read those differently): the read client checks the server's version once (from its public OpenAPI
+document) and throws `LogbirdApiException` (`server_too_old` or `server_version_unknown`) instead of sending it. `ForTrail` throws `ArgumentException` when it has no selector or query, or for an empty selector (pass `null`
 to leave one out), so a bug cannot silently widen a history search to the whole project. A search filter is not authorization. When you show history to your own customers, check that the signed-in user
 may see the tenant or record first, on every request including next-page requests.
 
