@@ -122,17 +122,13 @@ function ProjectExplorer({
   // A rejected query keeps the last good results on screen (dimmed) and explains itself in the bar.
   const problem = queryProblem(events.error, lang) ?? queryProblem(histogram.error, lang);
   const lastGood = useRef<{
-    projectId?: string;
     pages?: SearchResponse[];
     histogram?: HistogramResponse;
     query?: { q: string; lang: QueryLang };
     range?: string;
     resultKey?: string;
   }>({});
-  // The fallback belongs to one project: after switching projects, a rejected query must not show the old project's
-  // rows, chart or total.
-  if (lastGood.current.projectId !== projectId) lastGood.current = { projectId };
-  if (events.data && !events.isError && !events.isPlaceholderData) lastGood.current.pages = events.data.pages;
+  if (events.data && !events.isError) lastGood.current.pages = events.data.pages;
   if (events.isSuccess && !events.isPlaceholderData) {
     lastGood.current.query = { q, lang };
     lastGood.current.range = range;
@@ -142,7 +138,7 @@ function ProjectExplorer({
   // range are committed, so the table starts that set at the top even when it shares rows with the old one (e.g. moving
   // between two entity profiles, where `q` stays empty but `baseQuery` changes).
   const resultKey = lastGood.current.resultKey;
-  if (histogram.data && !histogram.isError && !histogram.isPlaceholderData) lastGood.current.histogram = histogram.data;
+  if (histogram.data && !histogram.isError) lastGood.current.histogram = histogram.data;
   // Nothing valid to save or export while the query is rejected (the export would fail the same way).
   const saveBlocked = problem ? 'Fix the query first — a view must run without errors.' : null;
   const exportBlocked = problem ? 'Fix the query first — the export runs the same query.' : null;
@@ -161,7 +157,7 @@ function ProjectExplorer({
   useEffect(() => {
     setLiveRows([]);
     sinceRef.current = null;
-  }, [projectId, effectiveQ, lang, range, live]);
+  }, [effectiveQ, lang, range, live]);
 
   // The tail follows *arrival* (`receivedAt`), so late or back-dated events still stream in.
   const firstPage = problem ? undefined : events.data?.pages[0]?.data;
