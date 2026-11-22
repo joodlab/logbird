@@ -461,7 +461,14 @@ Full guide: [scoped read access](scoped-read-access.md); token format and secret
 - **Facets:** `field` is an envelope field or `attr.<path>`; JSON-array attribute values count each element. Optional
   `by` + `byLimit` (1–20, default 5) add the top second-level values per returned value with `groupsOtherCount`; the
   console `/facets` accepts the same parameters. The response always has `by` (null without it).
-- **Not yet:** the restricted query user's row policy does not yet enforce the tenant (phase 2).
+- **Row policy (phase 2):** with the restricted query user configured, scoped reads (search, detail, facets, export)
+  run as `logbird_query` and `read()` sends `SQL_logbird_tenant` = the scope's tenant (from the bound `scope_tenant`
+  parameter). The `events` policy is `project_id = getSetting('SQL_logbird_project') AND (getSetting('SQL_logbird_tenant')
+  = '' OR tenant_id = getSetting('SQL_logbird_tenant'))`; rollup tables (no tenant column) add
+  `getSetting('SQL_logbird_tenant') = ''`, so a tenant-bound session sees none of their rows. The settings profile
+  defaults `SQL_logbird_tenant` to '' (not CONST), so unscoped and SQL-mode queries are unchanged. Target and
+  action-prefix limits stay in the query builders. Scoped reads then run under the query user's CONST limits (10 s,
+  5M rows read, 1 GiB) instead of the export budget.
 
 ### Webhook endpoint management
 
@@ -552,7 +559,7 @@ instance-admin feature).
 Isolation is layered: (1) query-language values compile to parameterized SQL; (2) SQL expressions pass the lexical
 scan, EXPLAIN AST baseline comparison and allowlists; (3) the readonly query account has SELECT-only grants and
 CONST safety/resource limits; (4) row policies on events, events_by_minute, entities and attribute_keys enforce
-`project_id = getSetting('SQL_logbird_project')` for `logbird_query`. Each restricted query sends its authorized
+`project_id = getSetting('SQL_logbird_project')` for `logbird_query`, plus the tenant binding for scoped reads (§5.2). Each restricted query sends its authorized
 project in `clickhouse_settings`; validation-only EXPLAIN uses a sentinel project. Missing bindings fail closed.
 Companion `USING 1 TO ALL EXCEPT logbird_query` policies preserve the main user's access. The binding is trusted
 server input, not a substitute for HTTP authorization; holders of database credentials can choose the binding.

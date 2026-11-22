@@ -4,7 +4,7 @@ import { apiKeySchema, createApiKeyResponseSchema, createProjectResponseSchema, 
 import { prisma } from '@logbird/database';
 import { expect, it } from 'vitest';
 import { app } from './app';
-import { clickhouse } from './clickhouse';
+import { clickhouse, queryClickhouse } from './clickhouse';
 import { clearTokenKeyCache, mintViewerToken, tokenKey } from './read-access';
 import { drainTestAudit } from './test-audit';
 
@@ -225,6 +225,23 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     // Totals count in-scope events only.
     const totals = await (await v1(t1.secret, `/events?${new URLSearchParams({ from: '2026-01-01T00:00:00Z', limit: '1' })}`)).json();
     expect(totals.total).toBe(tenant1.length);
+    // #138 phase 2: with the restricted query user configured, scoped reads of this project ran as logbird_query, and
+    // every one that carried a scope also bound its tenant in the row-policy setting (the database-enforced layer).
+    if (queryClickhouse) {
+      await clickhouse.command({ query: 'SYSTEM FLUSH LOGS' });
+      const layered = await (
+        await clickhouse.query({
+          // query_log keeps setting values quoted ("'t1'") and the query text with parameters substituted.
+          query: `SELECT user, Settings['SQL_logbird_tenant'] tenant FROM system.query_log
+            WHERE type = 'QueryFinish' AND event_time > now() - INTERVAL 30 MINUTE AND Settings['SQL_logbird_project'] IN ({p:String}, {quoted:String})`,
+          query_params: { p: project.id, quoted: `'${project.id}'` },
+          format: 'JSONEachRow',
+        })
+      ).json<{ user: string; tenant: string }>();
+      expect(layered.length).toBeGreaterThan(0);
+      expect(layered.every((r) => r.user === 'logbird_query')).toBe(true);
+      expect(layered.some((r) => r.tenant === "'t1'")).toBe(true);
+    }
     // q cannot widen the scope: OR, negation, existence, other fields and free text all stay inside it.
     for (const q of [
       'tenant:t2',

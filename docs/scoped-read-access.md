@@ -13,9 +13,11 @@ There are two ways to grant scoped access:
 The recommended pattern is **one unscoped `read` key on your server**. For every dashboard view, your server mints a
 viewer token for that business or website and gives only the token to the browser.
 
-> **Status.** In this release the scope is enforced in Logbird's query builders on every read path (below). A second,
-> independent layer (ClickHouse row policies on the tenant) follows in a later release. Until then, treat the query
-> builders as the single enforcement layer.
+> **Two layers.** The scope is enforced in Logbird's query builders on every read path (below). When the restricted
+> ClickHouse query user is configured (`CLICKHOUSE_QUERY_USER`, the same account SQL mode uses), scoped reads also
+> run as that user with the tenant bound in a row policy, so ClickHouse itself returns no other tenant's events even
+> if a query forgot the scope. Without that user, the query builders are the single layer. The row policy covers the
+> tenant; the target and action-prefix limits are enforced by the query builders.
 
 ## The scope
 
