@@ -55,8 +55,9 @@ Two different sent ids share a stored id in two cases:
   decimal in the usual case (42, 42.0 and 4.2e1 are all stored as `"42"`), scientific notation for very large or
   very small values (see [numbers and ids](integrating-a-backend.md#numbers-and-ids)). So the number 42 and the
   string `"42"` are one tenant and one scope; the string `"42.0"` is a different id, and so is a string holding the
-  expanded digits of a number stored in scientific notation. Events stored before 0.2.0 with a numeric id were not
-  indexed as an id, so no scope sees them.
+  expanded digits of a number stored in scientific notation. Events stored before 0.2.0 whose tenant id was a number
+  were not indexed under a tenant, so no scope sees them, and one whose target id was a number does not match a
+  target scope.
 
 Capped or Unicode-repaired ids can't match, because scope ids must already be in stored form. This is a maintainer
 decision (#180).

@@ -56,8 +56,9 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
   (the number 1e33 is stored as `"1e33"`); see [numbers and ids](integrating-a-backend.md#numbers-and-ids). A scope
   written as `"42"` therefore matches a tenant sent as the number 42 in any spelling and as the string `"42"`, not
   the string `"42.0"`: a numeric id and a string id with the same stored text are one tenant and one scope. A string
-  holding the expanded digits of 1e33 is a different tenant from the number. Events stored before 0.2.0 with a
-  numeric id were not indexed as an id, so no scope sees them.
+  holding the expanded digits of 1e33 is a different tenant from the number. Events stored before 0.2.0 whose
+  tenant id was a number were not indexed under a tenant, so no scope sees them, and one whose target id was a
+  number does not match a target scope; a numeric actor id does not affect a tenant-only scope.
 - A read-only operator query that counts stored ids differing from the sent ones ships with the ingest change.
 
 ## Where the scope applies

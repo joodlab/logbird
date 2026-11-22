@@ -8,7 +8,7 @@
 
 - Show each customer only its own audit trail: tenant-scoped read keys and short-lived viewer tokens (15 minutes by default) read one tenant's (or one record's) events through search, event detail, counts grouped by a field and export. The server enforces the scope, and ClickHouse enforces the tenant as well when the restricted query user is configured.
 - Stored events are exact: 64-bit ids and long decimals keep every digit, a record's history matches its type and id on the same target, and a slow total count no longer fails a search.
-- Breaking for some saved queries and API filters: `record:` now selects one record (to search a custom attribute named `record`, write `attr.record:`), `\*` and `\r` are now escapes, and numeric attribute values are indexed under one spelling. Read [Breaking changes](https://github.com/joodlab/logbird/blob/v0.2.0/CHANGELOG.md#breaking-changes) before upgrading.
+- Breaking for some saved queries and API filters: `record:` now selects one record (to search a custom attribute named `record`, write `attr.record:`), `\*` and `\r` are now escapes, and numeric attribute values are indexed under one spelling. Read the Breaking changes section of CHANGELOG.md for 0.2.0 before upgrading.
 
 ### Breaking changes
 
@@ -54,9 +54,11 @@ integer epoch milliseconds. The rules are in
 
 **Record histories.** Record pages, the Record facet and the read helper in the TypeScript
 SDK use `record:<type>:<id>`. A saved view that filters `target:` and `target.type:`
-separately opens as saved, with a note that it can include other records. When the view
-can be rewritten as a single `record:` term, the note offers an "Open exact version"
-button.
+separately still opens exactly as saved. When those terms sit at the top level of the
+query, the console adds a note that the view can include other records, and when that
+pair can be rewritten as a single `record:` term the note offers an "Open exact version"
+button. Other shapes, such as the pair inside parentheses, open without a note; the rule
+is in the [query language](docs/query-language.md).
 
 **Search totals.** A slow count no longer fails a search. The count has a one-second
 budget; when it runs out, the rows are returned with `totalExact: false` and `total` as a
@@ -119,8 +121,9 @@ from a previous project or entity is never shown as current.
   `42` and one sent as the string `"42"` are the same tenant and the same scope, while the
   string `"42.0"` is a different one; for very large or very small numbers the canonical
   text is scientific notation, and a string holding the expanded digits is a different
-  tenant. Events stored before this release with a numeric tenant id are not visible to
-  any scope, and older events match a target scope only for the targets indexed when they
+  tenant. Events stored before this release whose tenant id was a number are not visible
+  to any scope (a numeric actor or target id does not hide an event from a tenant-only
+  scope), and older events match a target scope only for the targets indexed when they
   were ingested. With the restricted query user, a scoped read runs under that user's
   limits (10 seconds, 5,000,000 rows read and 1 GiB per query), so a very large tenant
   over a wide range can hit them, and a scoped export takes both of the workspace's export
