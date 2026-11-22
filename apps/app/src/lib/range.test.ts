@@ -39,13 +39,14 @@ describe('historyRange with a future-dated last event', () => {
 });
 
 describe('the "all" range', () => {
-  it('is valid, labelled "All time" and covers every admitted timestamp', () => {
+  it('is valid, labelled "All time" and covers everything stored, from a fixed early bound', () => {
     const now = Date.parse('2026-11-22T12:00:00.000Z');
     expect(isValidRange(ALL_RANGE)).toBe(true);
     expect(rangeLabel(ALL_RANGE)).toBe('All time');
     const r = resolveRange(ALL_RANGE, now);
     expect(r.toMs).toBe(now + 2 * 86_400_000);
-    expect(r.fromMs).toBe(now - 3651 * 86_400_000);
+    expect(r.fromMs).toBe(Date.UTC(2000, 0, 1));
+    expect(resolveRange(ALL_RANGE, now + 5 * 86_400_000).fromMs).toBe(r.fromMs);
   });
 });
 

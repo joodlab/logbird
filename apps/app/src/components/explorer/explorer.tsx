@@ -19,7 +19,7 @@ import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import { andQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
-import { ALL_RANGE, absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
+import { ALL_RANGE, absoluteRange, isValidRange, rangeLabel, resolveRange } from '@/lib/range';
 import { appendSqlPredicate } from '@/lib/sql-language';
 import { EventSheet } from './event-sheet';
 import { EventsTable, type EventsTableHandle } from './events-table';
@@ -317,6 +317,7 @@ export function Explorer({
       projectId={projectId}
       q={q}
       range={range}
+      scope={baseQuery}
     />
   );
 
@@ -454,7 +455,7 @@ export function Explorer({
                   </button>
                 ) : null}
               </>
-            ) : events.isPending ? (
+            ) : events.isPending || events.isPlaceholderData ? (
               'Searching…'
             ) : (
               <>
@@ -477,10 +478,24 @@ export function Explorer({
         </div>
         {showChart ? (
           <EventHistogram
+            // A new search (or Back to a cached one) starts with no drag in progress.
+            key={explorerResultKey(projectId, range, effectiveQ, lang)}
             data={histogramData}
             height={embedded ? 96 : 112}
             loading={histogram.isFetching && !histogram.isPending}
-            onZoom={(from, to) => onChange({ range: absoluteRange(from, to), live: undefined })}
+            onZoom={
+              // Bars from the previous range linger while the new one loads: no zooming on them.
+              histogram.isPlaceholderData
+                ? undefined
+                : (from, to) => {
+                    // Keep the selection inside the search that produced the visible bars (its end can lie ahead of
+                    // now, and a relative range has moved on since).
+                    const shown = histogram.data ?? resolveRange(range);
+                    const start = Math.max(from, shown.fromMs);
+                    const end = Math.min(to, shown.toMs);
+                    if (start < end) onChange({ range: absoluteRange(start, end), live: undefined });
+                  }
+            }
             stale={Boolean(problem)}
           />
         ) : null}

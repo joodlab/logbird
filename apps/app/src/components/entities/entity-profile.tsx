@@ -45,7 +45,9 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   const kind = meta.kind;
   const profile = useQuery(entityProfileQuery(projectId, kind, entityId, timeline.range));
   const navigate = useNavigate();
-  const p = profile.data;
+  // Never another entity's or range's numbers under this URL: a placeholder (the previous query's result) renders as
+  // loading, so the name, stats, charts and related lists always belong to this entity and this range.
+  const p = profile.isPlaceholderData ? undefined : profile.data;
   const displayId = kind === 'target' ? splitTargetId(entityId).id : entityId;
   useSetCrumb(p?.entity.name || displayId);
   useDocumentTitle(`${p?.entity.name || displayId} · ${meta.singular} · Logbird`);
@@ -57,10 +59,12 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   // The history shows everything this entity did unless the reader picked a range; the charts follow the picker.
   const { explicit: rangeChosen, clearRange } = useRange();
   // Only this entity's own profile may define its history (a placeholder can still hold the previous entity's).
-  const own = p && !profile.isPlaceholderData ? p : undefined;
+  const own = p;
   const timelineRange = rangeChosen ? timeline.range : own ? historyRange(own.entity.firstSeen, Date.now(), own.entity.lastSeen) : undefined;
   // Out of a full history, links say "all" rather than this entity's computed window, so the next page is not narrowed.
   const linkRange = rangeChosen ? timeline.range : ALL_RANGE;
+  // What History shows (the entity plus any filters typed or picked there): the explorer links and Save as view use it.
+  const historyQuery = andQuery(baseQuery, timeline.q);
 
   if (profile.isError && !p) {
     const notFound = profile.error instanceof ApiRequestError && profile.error.status === 404;
@@ -145,13 +149,13 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
                   kind={kind}
                   name={own.entity.name || displayId}
                   projectId={projectId}
-                  query={baseQuery}
+                  query={historyQuery}
                   // The scope the reader sees: "all" for an implicit full history, so the view never shrinks.
                   range={linkRange}
                 />
                 <Button
                   nativeButton={false}
-                  render={<Link params={{ projectId }} search={{ range: linkRange, q: baseQuery }} to="/p/$projectId/events" />}
+                  render={<Link params={{ projectId }} search={{ range: linkRange, q: historyQuery }} to="/p/$projectId/events" />}
                   size="sm"
                   variant="outline"
                 >
@@ -232,7 +236,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
                     ? navigate({
                         to: '/p/$projectId/events',
                         params: { projectId },
-                        search: { range: linkRange, q: andQuery(baseQuery, timeline.q) },
+                        search: { range: linkRange, q: historyQuery },
                       })
                     : undefined
                 }

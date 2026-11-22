@@ -13,7 +13,7 @@ import { placeholderKeys } from '@/lib/placeholders';
 import { altClickLabel, useIsMac } from '@/lib/platform';
 import { hasPresenceTerm, togglePresenceTerm, withPresence } from '@/lib/presence-filter';
 import { coreField } from '@/lib/query-catalog';
-import { fieldTerms, hasTerm, queryFieldForFacet, removeTerm, toggleTerm } from '@/lib/query-language';
+import { andQuery, fieldTerms, hasTerm, queryFieldForFacet, removeTerm, toggleTerm } from '@/lib/query-language';
 import { hasSqlPredicate, isColumnPredicate, removeSqlConjuncts, sqlConjuncts, sqlString, toggleSqlPredicate } from '@/lib/sql-language';
 
 interface FacetSpec {
@@ -68,6 +68,11 @@ interface FacetSidebarProps {
   counts?: { q: string; lang: QueryLang };
   /** Why every count is out of date (the current query was rejected or failed). Dims all groups and says so. */
   staleReason?: string | null;
+  /**
+   * A locked filter (an entity page's `tenant:biz_7`), in the query language: ANDed into every count after this field's
+   * own terms are removed, so even the tenant facet of a tenant's history counts only that tenant's events.
+   */
+  scope?: string;
   onChange: (q: string) => void;
   className?: string;
 }
@@ -120,7 +125,7 @@ function presenceOps(field: string, lang: QueryLang): FacetOps {
 }
 
 /** Facet groups with counts. Click includes a value, ⌥/Alt-click (or −) excludes it. */
-export function FacetSidebar({ projectId, range, q, lang = 'query', counts, staleReason, onChange, className }: FacetSidebarProps) {
+export function FacetSidebar({ projectId, range, q, lang = 'query', counts, staleReason, scope, onChange, className }: FacetSidebarProps) {
   const isMac = useIsMac();
   return (
     // Stable gutter: opening a group past the bottom must not narrow every row and move the counts.
@@ -151,6 +156,7 @@ export function FacetSidebar({ projectId, range, q, lang = 'query', counts, stal
           projectId={projectId}
           q={q}
           range={range}
+          scope={scope}
           spec={f}
           stale={Boolean(staleReason)}
         />
@@ -166,11 +172,13 @@ function FacetGroup({
   q,
   lang,
   counts,
+  scope,
   stale,
   isMac,
   onChange,
 }: {
   spec: FacetSpec;
+  scope?: string;
   projectId: string;
   range: string;
   q: string;
@@ -191,7 +199,9 @@ function FacetGroup({
   const without = opsFor(base.lang).without(base.q);
   // A presence facet counts only events that have the field (`field:*`), so the empty bucket never hides in
   // otherCount: its "any value" row is then exactly the listed values plus the overflow.
-  const scopedQ = spec.presence ? withPresence(without, queryField, base.lang) : without;
+  const own = spec.presence ? withPresence(without, queryField, base.lang) : without;
+  // The locked scope is query language; SQL mode is never offered together with one.
+  const scopedQ = scope && base.lang !== 'sql' ? andQuery(scope, own) : own;
   const facet = useQuery({ ...facetQuery(projectId, spec.field, range, scopedQ, 20, base.lang), enabled: open });
   const allValues = facet.data?.values ?? [];
   const values = spec.presence ? allValues.filter((v) => v.value !== '') : allValues;

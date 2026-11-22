@@ -42,7 +42,16 @@ function ExplorerPage() {
   const { range } = useRange();
   const navigate = useNavigate({ from: Route.fullPath });
   const views = useQuery(viewsQuery(projectId));
-  const view = search.view ? views.data?.find((v) => v.id === search.view) : undefined;
+  const savedView = search.view ? views.data?.find((v) => v.id === search.view) : undefined;
+  // The banner (and its Copy link) speaks for the view only while what is on screen is still that view: same query,
+  // language and range. Narrowing it by picker, zoom or Back hides it.
+  const view =
+    savedView &&
+    (search.q ?? '') === (savedView.state.q ?? '') &&
+    (search.lang === 'sql' ? 'sql' : 'query') === (savedView.state.lang === 'sql' ? 'sql' : 'query') &&
+    range === (savedView.state.range ?? DEFAULT_RANGE)
+      ? savedView
+      : undefined;
   const copyLink = useCopyViewLink();
 
   const state: ExplorerState = {

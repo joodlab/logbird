@@ -34,6 +34,8 @@ export interface ResolvedRange {
  * entity from there never inherits a computed window (like "2d") the reader did not choose.
  */
 export const ALL_RANGE = 'all';
+/** 2000-01-01T00:00:00Z: earlier than any event ingest can admit (3650 days before receipt) until 2035. */
+const ALL_FROM_MS = Date.UTC(2000, 0, 1);
 
 export function isValidRange(range: string): boolean {
   if (range === ALL_RANGE || RELATIVE_RE.test(range)) return true;
@@ -49,10 +51,10 @@ export function rangeDurationMs(range: string): number {
 /** Resolve to concrete ISO bounds. Relative ranges end "now" (rounded down to the second). */
 export function resolveRange(range: string, now = Date.now()): ResolvedRange {
   if (range === ALL_RANGE) {
-    // Every timestamp ingest admits (3650 days back, a day ahead), with a day of slack each side.
+    // Everything stored: from a fixed early bound (before any timestamp ingest can have admitted, and stable, so the
+    // window never creeps forward past a row the purge has not removed yet) to two days ahead (ingest admits a day).
     const toMs = Math.floor(now / 1000) * 1000 + 2 * UNIT_MS.d;
-    const fromMs = toMs - 3653 * UNIT_MS.d;
-    return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString(), fromMs, toMs, relative: true };
+    return { from: new Date(ALL_FROM_MS).toISOString(), to: new Date(toMs).toISOString(), fromMs: ALL_FROM_MS, toMs, relative: true };
   }
   const rel = RELATIVE_RE.exec(range);
   if (rel) {
