@@ -137,10 +137,17 @@ function ProjectExplorer({
     range?: string;
     /** The locked filter (an entity page's) the last good result was searched with. */
     base?: string;
+    /** The range and locked filter each part was searched over: rows and bars arrive independently. */
+    pagesScope?: string;
+    histogramScope?: string;
     resultKey?: string;
   }>({});
   // Only settled results become "last good" (a placeholder is another search's data).
-  if (events.data && !events.isError && !events.isPlaceholderData) lastGood.current.pages = events.data.pages;
+  const scope = `${range}|${baseQuery ?? ''}`;
+  if (events.data && !events.isError && !events.isPlaceholderData) {
+    lastGood.current.pages = events.data.pages;
+    lastGood.current.pagesScope = scope;
+  }
   if (events.isSuccess && !events.isPlaceholderData) {
     lastGood.current.base = baseQuery ?? '';
     lastGood.current.query = { q, lang };
@@ -151,20 +158,24 @@ function ProjectExplorer({
   // range are committed, so the table starts that set at the top even when it shares rows with the old one (e.g. moving
   // between two entity profiles, where `q` stays empty but `baseQuery` changes).
   const resultKey = lastGood.current.resultKey;
-  if (histogram.data && !histogram.isError && !histogram.isPlaceholderData) lastGood.current.histogram = histogram.data;
+  if (histogram.data && !histogram.isError && !histogram.isPlaceholderData) {
+    lastGood.current.histogram = histogram.data;
+    lastGood.current.histogramScope = scope;
+  }
   // A rejected query falls back to the last good result only when it was searched over this same range and locked
   // filter (the query itself is what was rejected): never another range's or another entity's rows or bars.
-  const fallback = problem && lastGood.current.range === range && lastGood.current.base === (baseQuery ?? '') ? lastGood.current : null;
+  const fallbackPages = problem && lastGood.current.pagesScope === scope ? lastGood.current.pages : undefined;
+  const fallbackHistogram = problem && lastGood.current.histogramScope === scope ? lastGood.current.histogram : undefined;
   // Nothing valid to save or export while the query is rejected (the export would fail the same way).
   const saveBlocked = problem ? 'Fix the query first — a view must run without errors.' : null;
   const exportBlocked = problem ? 'Fix the query first — the export runs the same query.' : null;
   // Rows from a previous search (a placeholder while the new range or query loads) are never shown or selectable as
   // this one's; a rejected query keeps the last good rows, labelled as such.
-  const pages = problem ? fallback?.pages : events.isPlaceholderData ? undefined : events.data?.pages;
+  const pages = problem ? fallbackPages : events.isPlaceholderData ? undefined : events.data?.pages;
   const resultsLoading = (events.isPending || events.isPlaceholderData) && !problem;
   // A rejected query shows the last good bars, labelled as such; otherwise bars from a previous search (a placeholder
   // while the new range or query loads) are never drawn as if they were this one's.
-  const histogramData = problem ? fallback?.histogram : histogram.isPlaceholderData ? undefined : histogram.data;
+  const histogramData = problem ? fallbackHistogram : histogram.isPlaceholderData ? undefined : histogram.data;
 
   /* ---------------- live tail ---------------- */
   const relative = isValidRange(range) && !range.includes('..');
