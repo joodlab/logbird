@@ -163,8 +163,8 @@ Audit logging never takes your application down with it:
   are skipped, so a slow callback (or a process that exits right after shutdown) can miss them. Events lost
   in a crash are not reported at all (see the outbox below).
 - **`OnDrop` is told about each one** on a background thread; if your callback falls far behind (more than
-  `MaxQueueSize` notifications), further notifications are skipped and counted on `logbird.notifications.lost`, so keep
-  it fast.
+  `MaxQueueSize` notifications, and at least 1,000), further notifications are skipped and counted on
+  `logbird.notifications.lost`, so keep it fast.
 - **Some of those events are unconfirmed rather than lost**: when a request times out, a response's acknowledgement is
   lost on the way back, or shutdown ends while a batch is in flight, the server may already have stored the event.
   Treat `HttpError`, `Unacknowledged` and `Shutdown` drops as "not confirmed".
