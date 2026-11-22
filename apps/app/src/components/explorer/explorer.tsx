@@ -469,7 +469,18 @@ export function Explorer({
             height={embedded ? 96 : 112}
             loading={histogram.isFetching && !histogram.isPending}
             // Clamp to the search's own end (which can lie ahead of now), so a bar's events stay in the zoomed range.
-            onZoom={(from, to) => onChange({ range: absoluteRange(from, Math.min(to, resolveRange(range).toMs)), live: undefined })}
+            onZoom={
+              // Bars from the previous range linger while the new one loads: no zooming on them.
+              histogram.isPlaceholderData
+                ? undefined
+                : (from, to) => {
+                    // Keep the selection inside the displayed search (its end can lie ahead of now).
+                    const shown = resolveRange(range);
+                    const start = Math.max(from, shown.fromMs);
+                    const end = Math.min(to, shown.toMs);
+                    if (start < end) onChange({ range: absoluteRange(start, end), live: undefined });
+                  }
+            }
             stale={Boolean(problem)}
           />
         ) : null}

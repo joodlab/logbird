@@ -31,7 +31,7 @@ import {
   UserIcon,
   VenetianMaskIcon,
 } from 'lucide-react';
-import { type ComponentProps, type ReactNode, useEffect, useState } from 'react';
+import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';
 import { ActionName } from '@/components/action-name';
 import { EntityLink, EntityProfileLink } from '@/components/entity-link';
 import { SupportAgentLink } from '@/components/impersonation';
@@ -229,38 +229,47 @@ interface Children {
 
 /**
  * Direct children of an event (events whose `context.parentEventId` is this event). The count comes from the event
- * detail (all stored history, any operation); the list is read from the event's operation, which the operation page
- * shares through the cache. Both are cached, so they can disagree: the operation read is accepted only when it is not
- * older than the detail, or when both agree. A disagreeing snapshot refreshes whichever side is older, and the heading
- * and rows always come from the same accepted snapshot.
+ * detail (every stored child, in any operation); the list is read from the event's operation, which the operation
+ * page shares through the cache. The operation's rows are a subset of the count (children elsewhere are reached by
+ * "View all"), so fewer rows than the count is normal. Only more rows than the count means one cached side is stale:
+ * then the older side is refreshed, once per side for that disagreement, after which the larger number stands.
  */
 function useChildren(detail: EventDetail | undefined, detailUpdatedAt: number, e: AuditEvent, projectId: string | undefined): Children {
   const operationId = e.context.operationId;
   const lookup = Boolean(projectId && detail && operationId) && (detail?.operationSize ?? Number.POSITIVE_INFINITY) <= CHILD_LOOKUP_MAX_OPERATION;
   const op = useQuery({ ...operationQuery(projectId ?? '', operationId ?? ''), enabled: lookup });
   const queryClient = useQueryClient();
+  const tried = useRef(new Set<string>());
   const counted = detail ? causedCount(detail, e) : 0;
   // A disabled or failed query may still hold older cached data: only a successful lookup counts.
   const children = lookup && op.isSuccess ? directChildren(op.data, e.id) : [];
-  const agree = children.length === counted;
-  const accepted = lookup && op.isSuccess && (agree || op.dataUpdatedAt >= detailUpdatedAt);
-  const refresh = !lookup || !op.isSuccess || op.isFetching || agree ? null : accepted ? 'detail' : 'operation';
+  const mismatch = `${e.id}:${counted}:${children.length}`;
+  let refresh: 'detail' | 'operation' | null = null;
+  if (lookup && op.isSuccess && !op.isFetching && children.length > counted) {
+    const older = op.dataUpdatedAt >= detailUpdatedAt ? 'detail' : 'operation';
+    const other = older === 'detail' ? 'operation' : 'detail';
+    if (!tried.current.has(`${mismatch}:${older}`)) refresh = older;
+    else if (!tried.current.has(`${mismatch}:${other}`)) refresh = other;
+  }
   useEffect(() => {
     if (!(refresh && projectId)) return;
+    tried.current.add(`${mismatch}:${refresh}`);
     const queryKey = refresh === 'detail' ? eventQuery(projectId, e.id).queryKey : operationQuery(projectId, operationId ?? '').queryKey;
     queryClient.invalidateQueries({ queryKey });
-  }, [refresh, queryClient, projectId, e.id, operationId]);
+  }, [refresh, mismatch, queryClient, projectId, e.id, operationId]);
+  const accepted = lookup && op.isSuccess && !refresh;
   return {
     total: accepted ? Math.max(counted, children.length) : counted,
     shown: accepted ? children.slice(0, CHILD_PREVIEW) : [],
-    loading: lookup && (op.isPending || (!accepted && op.isFetching)),
+    loading: lookup && (op.isPending || Boolean(refresh)),
   };
 }
 
 function ChildEvents({ caused: c, event: e, projectId, indent }: { caused: Children; event: AuditEvent; projectId: string; indent: number }) {
   const { total, shown, loading } = c;
-  // Only needed for the "View all" search: how far back the project still holds rows.
-  const retention = useQuery({ ...retentionQuery(projectId), enabled: total > shown.length });
+  const needsLink = !loading && total > shown.length;
+  // Only needed for the "View all" search, once the preview has settled: how far back the project still holds rows.
+  const retention = useQuery({ ...retentionQuery(projectId), enabled: needsLink });
   return (
     <>
       {loading ? (
@@ -290,22 +299,35 @@ function ChildEvents({ caused: c, event: e, projectId, indent }: { caused: Child
           </li>
         ))
       )}
-      {total > shown.length && !loading ? (
+      {needsLink ? (
         <li className="flex items-center gap-2 pt-1 text-xs" style={{ paddingInlineStart: indent }}>
-          <Link
-            className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
-            params={{ projectId }}
-            // Every child, whatever its operation or timestamp: an exact parent search over every timestamp ingest
-            // admits. A self-parented event matches its own search, so it is left out.
-            search={{
-              range: admittedRange(Date.now(), retention.data?.oldestEventAt),
-              q: andQuery(formatExactTerm('parent', e.id), e.context.parentEventId === e.id ? formatExactTerm('id', e.id, true) : ''),
-            }}
-            to="/p/$projectId/events"
-          >
-            {shown.length > 0 ? `View all ${total}` : `View the ${total} event${total === 1 ? '' : 's'} it caused`} in the explorer
-            <ArrowRightIcon className="size-3" />
-          </Link>
+          {retention.isSuccess ? (
+            <Link
+              className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
+              params={{ projectId }}
+              // Every child, whatever its operation or timestamp: an exact parent search over every timestamp ingest
+              // admits and every row the project still stores. A self-parented event is left out of its own search.
+              search={{
+                range: admittedRange(Date.now(), retention.data.oldestEventAt),
+                q: andQuery(formatExactTerm('parent', e.id), e.context.parentEventId === e.id ? formatExactTerm('id', e.id, true) : ''),
+              }}
+              to="/p/$projectId/events"
+            >
+              {shown.length > 0 ? `View all ${total}` : `View the ${total} event${total === 1 ? '' : 's'} it caused`} in the explorer
+              <ArrowRightIcon className="size-3" />
+            </Link>
+          ) : retention.isError ? (
+            <span className="text-muted-foreground">
+              Could not read how far back this project's events go.{' '}
+              <button className="font-medium text-foreground underline-offset-2 hover:underline" onClick={() => retention.refetch()} type="button">
+                Try again
+              </button>
+            </span>
+          ) : (
+            <span aria-live="polite" className="text-muted-foreground">
+              Preparing the link to all {total}…
+            </span>
+          )}
         </li>
       ) : null}
     </>

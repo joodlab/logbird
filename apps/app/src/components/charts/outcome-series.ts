@@ -75,8 +75,8 @@ export function timeTicks(rows: SeriesRow[], intervalSeconds: number, target = 7
   if (first === undefined || last === undefined || last <= first) return { ticks: undefined, format: (ts: number) => formatClock(ts) };
   const span = last + step - first;
   const fitted = NICE_STEPS.find((n) => n >= step && n % step === 0 && span / n <= target);
-  // Buckets wider than the ladder (multi-year searches): label every n-th bucket to stay near the target, with years.
-  if (fitted === undefined && step > (NICE_STEPS.at(-1) ?? DAY)) {
+  // When no round step meets the target (multi-year searches), label every n-th bucket instead, with years on long spans.
+  if (fitted === undefined) {
     const stride = Math.max(1, Math.ceil(rows.length / target));
     const ticks = rows.filter((_, i) => i % stride === 0).map((r) => r.ts);
     return { ticks, format: (ts: number) => (span > 365 * DAY ? formatMonthYear(ts) : formatMonthDay(ts)) };
