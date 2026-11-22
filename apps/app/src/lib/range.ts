@@ -43,7 +43,7 @@ const MAX_MS = Date.UTC(2299, 11, 31, 23, 59, 59, 999);
 /** An endpoint the API and storage accept: a finite instant from 1970 (before any admissible event) to 2299. */
 const representable = (ms: number) => Number.isFinite(ms) && ms >= 0 && ms <= MAX_MS;
 
-const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})$/;
 /** An absolute endpoint as written: an ISO instant whose date and time exist (no Feb 30, no 24:00), else NaN. */
 function parseInstant(text: string): number {
   const m = ISO_INSTANT.exec(text);

@@ -104,6 +104,7 @@ export function EntityDirectory({ projectId, section, q, type, sort = 'events', 
   // While a new search loads, the previous search's rows stay, dimmed and marked busy (the spinner in the search box says
   // why); the empty state and the type chips only ever describe the current answer.
   const updating = list.isPlaceholderData;
+  // placeholder: shown dimmed (aria-busy while `updating`)
   const rows = list.data?.pages.flatMap((p) => p.data) ?? [];
   // Events without a type cannot be filtered by type: only offer real values.
   const typeValues = (current(types)?.values ?? []).filter((t) => t.value);
