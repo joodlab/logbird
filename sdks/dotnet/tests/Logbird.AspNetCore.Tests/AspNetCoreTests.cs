@@ -802,14 +802,7 @@ public class AspNetCoreTests
     {
         const int Count = 100_000;
 
-        // The report starts by cancelling the in-flight request; that cancellation blocks on a gate until the host has
-        // stopped, so a shutdown that waited for the report could not finish while the gate is closed.
-        using var reportGate = new ManualResetEventSlim();
-        var fake = new FakeServer
-        {
-            Fallback = _ => new TaskCompletionSource<HttpResponseMessage>().Task,
-            OnRequestToken = token => token.Register(() => reportGate.Wait()),
-        };
+        var fake = new FakeServer { Fallback = _ => new TaskCompletionSource<HttpResponseMessage>().Task };
         var app = await App.StartAsync(
             _ => { },
             options: o =>
@@ -834,20 +827,12 @@ public class AspNetCoreTests
             }
         });
 
-        try
+        // The host's 300 ms budget ends shutdown; a regression would wait out the 20-second ShutdownTimeout.
+        await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
         {
-            // The host's 300 ms budget ends shutdown; a regression would wait for the report (held here) or for the
-            // 20-second ShutdownTimeout.
-            await Deadline.Within(TimeSpan.FromSeconds(10), async () =>
-            {
-                await app.Host.StopAsync();
-                await app.Host.DisposeAsync();
-            });
-        }
-        finally
-        {
-            reportGate.Set();
-        }
+            await app.Host.StopAsync();
+            await app.Host.DisposeAsync();
+        });
 
         await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
         {

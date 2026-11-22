@@ -58,9 +58,6 @@ internal sealed class FakeServer : HttpMessageHandler
     /// <summary>Answers requests with no scripted response. Defaults to accepting everything.</summary>
     public Func<CapturedRequest, Task<HttpResponseMessage>> Fallback { get; set; } = request => Task.FromResult(Accept(request));
 
-    /// <summary>Called with each request's cancellation token, for tests that act when the client cancels a request.</summary>
-    public Action<CancellationToken>? OnRequestToken { get; set; }
-
     public FakeServer Then(Func<CapturedRequest, HttpResponseMessage> responder)
     {
         _script.Enqueue(request => Task.FromResult(responder(request)));
@@ -106,7 +103,6 @@ internal sealed class FakeServer : HttpMessageHandler
         var body = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(CancellationToken.None).ConfigureAwait(false);
         var captured = new CapturedRequest(request, body);
         Requests.Enqueue(captured);
-        OnRequestToken?.Invoke(cancellationToken);
         var responder = _script.TryDequeue(out var next) ? next : Fallback;
         var task = responder(captured);
         var cancelled = Task.Delay(Timeout.Infinite, cancellationToken);

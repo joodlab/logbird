@@ -153,7 +153,8 @@ public class HardeningTests
         }), handler);
         client.Track(new AuditEvent("in.flight"));
         _ = client.FlushAsync();
-        await handler.Received.Task;
+        await Deadline.Within(TimeSpan.FromSeconds(30), () => handler.Received.Task);
+
         // The documented bound is ShutdownTimeout + 2 s (a cancelled request unwinding) + 5 s (pending callbacks); the
         // failure this test guards against is a hang, so the limit sits well above the bound.
         await Deadline.Within(TimeSpan.FromSeconds(15), () => client.DisposeAsync().AsTask());
@@ -177,7 +178,8 @@ public class HardeningTests
             client.Track(new AuditEvent("in.flight"));
             client.Track(new AuditEvent("queued"));
             _ = client.FlushAsync();
-            await handler.Received.Task;
+            await Deadline.Within(TimeSpan.FromSeconds(30), () => handler.Received.Task);
+
             // Documented bound: ShutdownTimeout + 2 s + 5 s; the callback blocks forever, so a regression would hang.
             await Deadline.Within(TimeSpan.FromSeconds(15), () => client.DisposeAsync().AsTask());
             Assert.Equal(2, drops.Count(d => d.Reason == DropReason.Shutdown));

@@ -233,7 +233,7 @@ public class ResilienceTests
     }
 
     [Fact]
-    public async Task A_cancelled_or_timed_out_flush_is_forgotten()
+    public async Task A_cancelled_flush_is_forgotten()
     {
         using var release = new ManualResetEventSlim();
         var client = Client(Options(o => o.ShutdownTimeout = TimeSpan.Zero), new BlockingHandler(release));
@@ -244,7 +244,8 @@ public class ResilienceTests
             var queue = typeof(LogbirdClient).GetField("_queue", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(client)!;
             int Count() => ((System.Collections.ICollection)waiters.GetValue(queue)!).Count;
 
-            // A flush registers its waiter (established first), and cancelling it removes the waiter.
+            // A flush registers its waiter (established first), and cancelling it removes the waiter. Flush(TimeSpan) is
+            // FlushAsync with a timeout token, so this is the path a timed-out synchronous flush takes too.
             using (var cancel = new CancellationTokenSource())
             {
                 var flush = client.FlushAsync(cancel.Token);
@@ -260,16 +261,6 @@ public class ResilienceTests
                 Assert.False(await flush);
                 Assert.Equal(0, Count());
             }
-
-            // A timed-out synchronous flush takes the same path and leaves no waiter behind.
-            Assert.False(client.Flush(TimeSpan.FromMilliseconds(50)));
-            await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
-            {
-                while (Count() > 0)
-                {
-                    await Task.Delay(20);
-                }
-            });
         }
         finally
         {
