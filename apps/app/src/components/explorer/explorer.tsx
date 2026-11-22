@@ -20,7 +20,7 @@ import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import { andQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
-import { formatSearchTotal, searchTotal } from '@/lib/search-total';
+import { explorerTotal, formatSearchTotal, searchTotal } from '@/lib/search-total';
 import { appendSqlPredicate } from '@/lib/sql-language';
 import { EventSheet } from './event-sheet';
 import { EventsTable, type EventsTableHandle } from './events-table';
@@ -190,14 +190,11 @@ export function Explorer({
   // Search totals are capped for huge ranges; the histogram counts every match exactly.
   const pagedCount = pages?.reduce((n, p) => n + p.data.length, 0) ?? 0;
   const known = searchTotal(pages, pagedCount, events.hasNextPage);
-  const searchCount = known.count;
   const histogramTotal =
     histogramData && (problem || !histogram.isPlaceholderData) ? histogramData.buckets.reduce((n, b) => n + b.total, 0) : undefined;
-  // Live rows the pages do not show may or may not be in the aggregate already, so they never add to it: the label is
-  // at least the aggregate and the visible rows, and becomes a lower bound while such live rows exist.
-  const liveExtra = rows.length - pagedCount;
-  const total = Math.max(histogramTotal ?? searchCount, rows.length);
-  const totalLowerBound = (histogramTotal === undefined && !known.exact) || liveExtra > 0;
+  const label = explorerTotal({ histogramTotal, search: known, pagedCount, hasNextPage: events.hasNextPage, visibleRows: rows.length });
+  const total = label.count;
+  const totalLowerBound = !label.exact;
 
   /* ---------------- selection ---------------- */
   const selectedIndex = ev ? rows.findIndex((e) => e.id === ev) : -1;

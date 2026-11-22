@@ -57,7 +57,7 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       warn.mockRestore();
       expect(slow.data.map((e) => e.id)).toEqual(['e4', 'e3', 'e2', 'e1', 'e0']);
       expect(slow).toMatchObject({ total: 5, totalExact: false });
-      // The count has a one-second wall-clock budget and runs beside the rows; it cannot hold the page much longer.
+      // The count runs after the rows with a one-second wall-clock budget; it cannot hold the page much longer.
       expect(Date.now() - started).toBeLessThan(3000);
 
       // A partial page: the lower bound is the rows seen plus the one extra row proving there are more.

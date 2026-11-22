@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { formatSearchTotal, searchTotal } from './search-total';
+import { explorerTotal, formatSearchTotal, searchTotal } from './search-total';
 
 it('uses the newest page, else a lower bound', () => {
   expect(searchTotal(undefined)).toEqual({ count: 0, exact: true });
@@ -78,4 +78,18 @@ it('lets a newer lower bound disprove an older exact total', () => {
       true,
     ),
   ).toEqual({ count: 10_001, exact: false });
+});
+
+it('never lets the histogram undercut what the page proves', () => {
+  const base = { search: { count: 101, exact: false }, pagedCount: 100, hasNextPage: true, visibleRows: 100 };
+  // The cursor proves at least 101; a histogram of 100 is disproved.
+  expect(explorerTotal({ ...base, histogramTotal: 100 })).toEqual({ count: 101, exact: false });
+  expect(explorerTotal({ ...base, histogramTotal: 150 })).toEqual({ count: 150, exact: true });
+  expect(explorerTotal({ ...base, histogramTotal: undefined })).toEqual({ count: 101, exact: false });
+  // A live row the pages do not show: at least the aggregate, as a lower bound.
+  expect(explorerTotal({ ...base, histogramTotal: 150, visibleRows: 101 })).toEqual({ count: 150, exact: false });
+  expect(explorerTotal({ histogramTotal: 3, search: { count: 3, exact: true }, pagedCount: 3, hasNextPage: false, visibleRows: 3 })).toEqual({
+    count: 3,
+    exact: true,
+  });
 });

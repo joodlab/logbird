@@ -317,7 +317,8 @@ firstEventAt null), not measured emptiness.
 
 Hot-path rules: always filter `project_id` + time range first; never `FINAL` on search; dedupe in the result
 set by `event_id` when needed; cursor = `(timestamp, event_id)` keyset; `total` via a distinct
-count capped at 10,001 with a one-second guard that runs beside the row query. Rows never fail
+count capped at 10,001 with a one-second budget that runs after the row query (a page can take up to one second
+longer than its rows). Rows never fail
 because of the count: when the count is capped, times out or fails, `totalExact: false` marks `total` as a lower
 bound (at least the rows returned, plus one when there is a next page) and the console shows "≥ N" or "10,000+".
 A page waits at most one second for its count, whatever the HTTP request is doing. Server-side cleanup differs: the

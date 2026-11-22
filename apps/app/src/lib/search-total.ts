@@ -22,3 +22,23 @@ export function formatSearchTotal(total: { count: number; exact: boolean }): str
   if (total.exact) return formatNumber(total.count);
   return total.count >= TOTAL_CAP ? '10,000+' : `≥ ${formatNumber(total.count)}`;
 }
+
+/**
+ * The explorer's label: the histogram's exact sum when it has one, else the search total, never below what the page
+ * proves (rows loaded plus one when another page exists, and every visible row). It is a lower bound when the search
+ * total was, when the aggregate falls below that proof, or while live rows the pages do not show exist (they may or
+ * may not be in the aggregate already, so they never add to it).
+ */
+export function explorerTotal(input: {
+  histogramTotal: number | undefined;
+  search: { count: number; exact: boolean };
+  pagedCount: number;
+  hasNextPage: boolean;
+  visibleRows: number;
+}): { count: number; exact: boolean } {
+  const floor = Math.max(input.pagedCount + (input.hasNextPage ? 1 : 0), input.visibleRows);
+  const aggregate = input.histogramTotal ?? input.search.count;
+  const aggregateExact = input.histogramTotal !== undefined || input.search.exact;
+  const liveOnly = input.visibleRows > input.pagedCount;
+  return { count: Math.max(aggregate, floor), exact: aggregateExact && aggregate >= floor && !liveOnly };
+}
