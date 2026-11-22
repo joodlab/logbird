@@ -103,7 +103,8 @@ try {
     results.push(
       await measure(`export 1h csv ${label}`, async () => {
         rows = 0;
-        for await (const chunk of exportEvents(ch, p, { ...hour, q: '', format: 'csv' }, undefined, undefined, { scope })) rows += chunk.split('\n').length - 1;
+        for await (const chunk of exportEvents(ch, p, { ...hour, q: '', format: 'csv' }, undefined, undefined, { scope }))
+          rows += chunk.split('\n').length - 1;
       }),
     );
     console.log(JSON.stringify({ exportRows: label, rows }));

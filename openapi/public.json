@@ -1737,13 +1737,34 @@
                     "executor.type",
                     "target",
                     "target.type",
-                    "source"
+                    "source",
+                    "env",
+                    "actor.id",
+                    "actor.name",
+                    "actor.email",
+                    "tenant.name",
+                    "executor.name",
+                    "job",
+                    "attempt",
+                    "target.name",
+                    "changes.field",
+                    "operation",
+                    "parent",
+                    "request",
+                    "trace",
+                    "id",
+                    "ip",
+                    "conformance",
+                    "occurredAt",
+                    "timestamp",
+                    "receivedAt",
+                    "description"
                   ],
                   "type": "string"
                 },
                 {
                   "maxLength": 256,
-                  "pattern": "^attr\\..+",
+                  "pattern": "^(?:attr|attributes)\\..+",
                   "type": "string"
                 }
               ],
@@ -1780,13 +1801,34 @@
                     "executor.type",
                     "target",
                     "target.type",
-                    "source"
+                    "source",
+                    "env",
+                    "actor.id",
+                    "actor.name",
+                    "actor.email",
+                    "tenant.name",
+                    "executor.name",
+                    "job",
+                    "attempt",
+                    "target.name",
+                    "changes.field",
+                    "operation",
+                    "parent",
+                    "request",
+                    "trace",
+                    "id",
+                    "ip",
+                    "conformance",
+                    "occurredAt",
+                    "timestamp",
+                    "receivedAt",
+                    "description"
                   ],
                   "type": "string"
                 },
                 {
                   "maxLength": 256,
-                  "pattern": "^attr\\..+",
+                  "pattern": "^(?:attr|attributes)\\..+",
                   "type": "string"
                 }
               ],
@@ -2031,7 +2073,7 @@
                           "auth."
                         ],
                         "items": {
-                          "maxLength": 200,
+                          "maxLength": 190,
                           "minLength": 1,
                           "type": "string"
                         },
@@ -2064,12 +2106,12 @@
                         },
                         "properties": {
                           "id": {
-                            "maxLength": 256,
+                            "maxLength": 250,
                             "minLength": 1,
                             "type": "string"
                           },
                           "type": {
-                            "maxLength": 64,
+                            "maxLength": 60,
                             "minLength": 1,
                             "type": "string"
                           }
@@ -2082,7 +2124,7 @@
                       },
                       "tenantId": {
                         "example": "biz_5",
-                        "maxLength": 256,
+                        "maxLength": 250,
                         "minLength": 1,
                         "type": "string"
                       }
@@ -2127,7 +2169,7 @@
                             "auth."
                           ],
                           "items": {
-                            "maxLength": 200,
+                            "maxLength": 190,
                             "minLength": 1,
                             "type": "string"
                           },
@@ -2160,12 +2202,12 @@
                           },
                           "properties": {
                             "id": {
-                              "maxLength": 256,
+                              "maxLength": 250,
                               "minLength": 1,
                               "type": "string"
                             },
                             "type": {
-                              "maxLength": 64,
+                              "maxLength": 60,
                               "minLength": 1,
                               "type": "string"
                             }
@@ -2178,7 +2220,7 @@
                         },
                         "tenantId": {
                           "example": "biz_5",
-                          "maxLength": 256,
+                          "maxLength": 250,
                           "minLength": 1,
                           "type": "string"
                         }
