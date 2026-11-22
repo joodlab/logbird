@@ -48,8 +48,8 @@ export function EventIdsAndRetries() {
         change; array order and string contents must stay identical.
       </p>
       <p>
-        The SDK creates an id and timestamp once per queued event. Deterministic ids need identical content across calls, including occurredAt and
-        executor.attempt. Omitted or invalid occurredAt keeps the first receipt clock.
+        The TypeScript SDK creates an id and timestamp once per queued event. Deterministic ids need identical content across calls, including
+        occurredAt and executor.attempt. Omitted or invalid occurredAt keeps the first receipt clock.
       </p>
       <p>
         <code>duplicate_id_conflict</code> reports: id conflicts with different content in this request or stored history. Send corrections with a new
@@ -61,11 +61,11 @@ export function EventIdsAndRetries() {
         entries include a code and explanation.
       </p>
       <p>
-        The SDK sends <code>Logbird-Retry: subset</code> and, after complete details, resends only the unsettled events with byte-identical JSON. If
-        its retry budget or five-minute send limit runs out, flush rejects and keeps only the unsettled events for a later flush. Raw HTTP clients can
-        send the same header if they resend only <code>details.indices</code> with each event's JSON unchanged. Clients without it get a final 202
-        instead when parse isolation runs out of budget: events it could not check are rejected as <code>unverified_after_parse_failure</code>; resend
-        those on their own. Allow the header through proxies.
+        The TypeScript SDK sends <code>Logbird-Retry: subset</code> and, after complete details, resends only the unsettled events with byte-identical
+        JSON. If its retry budget or five-minute send limit runs out, flush rejects and keeps only the unsettled events for a later flush. Raw HTTP
+        clients can send the same header if they resend only <code>details.indices</code> with each event's JSON unchanged. Clients without it get a
+        final 202 instead when parse isolation runs out of budget: events it could not check are rejected as{' '}
+        <code>unverified_after_parse_failure</code>; resend those on their own. Allow the header through proxies.
       </p>
       <p>
         Use string ids. Numeric ids generate a fresh UUID and a warning; convert with String(id) first. Ids over 256 UTF-16 code units after trimming,
