@@ -579,6 +579,15 @@ it('reports a seeded legacy overlap above ten, warns once when sending, and clea
   expect(await (await request(path)).json()).toMatchObject(warning);
   expect(await (await request(base())).json()).toMatchObject({ data: [warning] });
   expect(await (await request(path, 'PATCH', { description: 'QA legacy overlap' })).json()).toMatchObject(warning);
+  // The count uses PostgreSQL time: an API host clock already past the legacy secrets' expiry still reports the overlap.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(Date.now() + 15 * 60_000));
+  try {
+    expect(await (await request(path)).json()).toMatchObject(warning);
+    expect(await (await request(base())).json()).toMatchObject({ data: [warning] });
+  } finally {
+    vi.useRealTimers();
+  }
   const log = vi.spyOn(console, 'warn');
   try {
     await withLocalReceiver(endpoint.id, async (received) => {

@@ -92,3 +92,52 @@ it('settles a stalled response at the total deadline and preserves its status co
     await new Promise<void>((resolve) => receiver.close(() => resolve()));
   }
 });
+
+it.each([
+  { name: 'keeps the receiver answer', status: 204, stall: false, expected: { responseCode: 204, responseBody: '' } },
+  { name: 'keeps the total deadline for a stalled receiver', status: 410, stall: true, expected: { error: 'timeout', responseCode: 410 } },
+])('when the dispatch commit fails after the request started, $name', async ({ status, stall, expected }) => {
+  let requests = 0;
+  const receiver = createServer((request, response) => {
+    requests++;
+    request.resume();
+    if (stall) response.writeHead(status).flushHeaders();
+    else request.on('end', () => response.writeHead(status).end());
+  });
+  try {
+    receiver.listen(0, '127.0.0.1');
+    await once(receiver, 'listening');
+    const { port } = receiver.address() as AddressInfo;
+    const started = performance.now();
+    const result = await postWebhook(
+      `http://127.0.0.1:${port}/event`,
+      'signed-id',
+      '{}',
+      async (startRequest) => {
+        await sign('signed-id', '{}')(startRequest);
+        throw new Error('commit failed');
+      },
+      { allowHttp: true, allowAddress: (address) => address === '127.0.0.1', totalTimeoutMs: 400 },
+    );
+    expect(result).toEqual(expected);
+    expect(requests).toBe(1);
+    expect(performance.now() - started).toBeLessThan(5000);
+  } finally {
+    receiver.closeAllConnections();
+    await new Promise<void>((resolve) => receiver.close(() => resolve()));
+  }
+});
+
+it('still rejects when the dispatch fails before any request started', async () => {
+  await expect(
+    postWebhook(
+      'http://receiver.example.invalid/event',
+      'signed-id',
+      '{}',
+      async () => {
+        throw new Error('lock failed');
+      },
+      { allowHttp: true, lookup: async () => [{ address: '127.0.0.1', family: 4 }], allowAddress: () => true },
+    ),
+  ).rejects.toThrow('lock failed');
+});

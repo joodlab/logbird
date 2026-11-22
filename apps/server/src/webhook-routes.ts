@@ -74,7 +74,12 @@ function serialize(endpoint: WebhookEndpoint, activeSecretCount = 0) {
     disabledAt: endpoint.disabledAt?.toISOString() ?? null,
   });
 }
-const activeSecretCount = () => ({ _count: { select: { secrets: { where: activeWebhookSecrets(new Date()) } } } });
+const activeSecretCount = (now: Date) => ({ _count: { select: { secrets: { where: activeWebhookSecrets(now) } } } });
+/** PostgreSQL time: the worker signs, expires secrets and schedules attempts on this clock, so the API uses it too. */
+async function databaseNow(db: Pick<Prisma.TransactionClient, '$queryRaw'> = prisma) {
+  const [{ now }] = await db.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;
+  return now;
+}
 const scopeColumns = (scope: WebhookScope | null) => ({
   scopeTenantId: scope?.tenantId ?? null,
   scopeTargetType: scope?.target?.type ?? null,
@@ -155,7 +160,7 @@ export const webhookRoutes = new Hono<AppEnv>()
     const endpoints = await prisma.webhookEndpoint.findMany({
       where: { projectId: c.get('project').id },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      include: activeSecretCount(),
+      include: activeSecretCount(await databaseNow()),
     });
     return c.json({ data: endpoints.map((endpoint) => serialize(endpoint, endpoint._count.secrets)) });
   })
@@ -183,7 +188,7 @@ export const webhookRoutes = new Hono<AppEnv>()
             description: input.description,
             enabled: input.enabled ?? true,
             disabledReason: input.enabled === false ? 'manual' : null,
-            disabledAt: input.enabled === false ? new Date() : null,
+            disabledAt: input.enabled === false ? createdAt : null,
             filterQuery: input.filterQuery ?? '',
             ...scopeColumns(input.scope ?? null),
             createdById: c.get('user').id,
@@ -201,7 +206,7 @@ export const webhookRoutes = new Hono<AppEnv>()
     await requireRole(c);
     const endpoint = await prisma.webhookEndpoint.findFirst({
       where: { id: c.req.param('id'), projectId: c.get('project').id },
-      include: activeSecretCount(),
+      include: activeSecretCount(await databaseNow()),
     });
     if (!endpoint) throw new ApiError(404, 'not_found', 'Webhook endpoint not found.');
     return c.json(serialize(endpoint, endpoint._count.secrets));
@@ -219,9 +224,10 @@ export const webhookRoutes = new Hono<AppEnv>()
       }
       const enabledChanged = input.enabled !== undefined && input.enabled !== before.enabled;
       const scopeCorrected = input.scope !== undefined && (before.scopeReviewRequired || storedWebhookScope(before) === undefined);
+      const now = await databaseNow(tx);
       const after = await tx.webhookEndpoint.update({
         where: { id: before.id },
-        include: activeSecretCount(),
+        include: activeSecretCount(now),
         data: {
           url,
           description: input.description,
@@ -229,7 +235,7 @@ export const webhookRoutes = new Hono<AppEnv>()
           enabled: input.enabled,
           ...(input.scope !== undefined ? scopeColumns(input.scope) : {}),
           ...(scopeCorrected && { scopeReviewRequired: false }),
-          ...(enabledChanged ? { disabledReason: input.enabled ? null : 'manual', disabledAt: input.enabled ? null : new Date() } : {}),
+          ...(enabledChanged ? { disabledReason: input.enabled ? null : 'manual', disabledAt: input.enabled ? null : now } : {}),
           ...((input.enabled && enabledChanged) || (url !== undefined && url !== before.url) ? { consecutiveFailures: 0, failingSince: null } : {}),
         },
       });
@@ -237,7 +243,7 @@ export const webhookRoutes = new Hono<AppEnv>()
         // Preserve attempt history and give previously attempted pending rows a full window after the hold.
         await tx.webhookDelivery.updateMany({
           where: { endpointId: before.id, status: 'pending', OR: [{ retryUntil: { not: null } }, { leaseUntil: { not: null } }] },
-          data: { nextAttemptAt: new Date(), retryUntil: null, windowAttempts: 0, leaseUntil: null },
+          data: { nextAttemptAt: now, retryUntil: null, windowAttempts: 0, leaseUntil: null },
         });
         await tx.webhookAttempt.updateMany({
           where: { status: 'sending', delivery: { endpointId: before.id, status: 'pending' } },
@@ -268,7 +274,7 @@ export const webhookRoutes = new Hono<AppEnv>()
       const endpoint = await findEndpoint(c, tx);
       requireEnabled(endpoint);
       const delivery = await tx.webhookDelivery.create({
-        data: { endpointId: endpoint.id, eventId: randomUUID(), expiresAt: new Date(Date.now() + WEBHOOK_LOG_RETENTION_MS) },
+        data: { endpointId: endpoint.id, eventId: randomUUID(), expiresAt: new Date(+(await databaseNow(tx)) + WEBHOOK_LOG_RETENTION_MS) },
       });
       await record(c, tx, 'webhook.test_queued', endpoint);
       return delivery;
@@ -283,7 +289,7 @@ export const webhookRoutes = new Hono<AppEnv>()
       await requireRole(c);
       const endpoint = await findEndpoint(c);
       const { status, cursor } = c.req.valid('query');
-      const now = new Date();
+      const now = await databaseNow();
       const rows = await prisma.webhookDelivery.findMany({
         where: { endpointId: endpoint.id, status, id: cursor ? { lt: cursor } : undefined, OR: [{ status: 'pending' }, { expiresAt: { gt: now } }] },
         orderBy: { id: 'desc' },
@@ -321,7 +327,7 @@ export const webhookRoutes = new Hono<AppEnv>()
     const row = await lockedProject(c, async (tx) => {
       const endpoint = await findEndpoint(c, tx);
       requireEnabled(endpoint);
-      const now = new Date();
+      const now = await databaseNow(tx);
       const delivery = await tx.webhookDelivery.findFirst({
         where: { id: c.req.param('deliveryId'), endpointId: endpoint.id, OR: [{ status: 'pending' }, { expiresAt: { gt: now } }] },
       });
@@ -356,7 +362,7 @@ export const webhookRoutes = new Hono<AppEnv>()
         // Every earlier secret stops working by the end of this overlap: the current one and any still inside an earlier
         // rotation's window. An expiry already sooner is left alone, so a rotation never extends a secret's life, and a
         // zero overlap retires every earlier secret at once.
-        const [{ now }] = await tx.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;
+        const now = await databaseNow(tx);
         const until = new Date(now.getTime() + overlapSeconds * 1000);
         // Secrets past their window can never sign again: drop them so rotations don't accumulate rows.
         await tx.webhookSecret.deleteMany({ where: { endpointId: endpoint.id, expiresAt: { lte: now } } });

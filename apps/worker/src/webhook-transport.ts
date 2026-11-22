@@ -64,7 +64,19 @@ async function sendWebhook(
     return { error: error instanceof WebhookLookupBusyError ? 'lookup_failed' : 'destination_rejected' };
   }
   if (attempt.signal.aborted) return { error: 'lookup_failed' };
-  const result = await dispatch((timestamp, signature) => ({ response: startWebhook(destination, id, payload, timestamp, signature, attempt) }));
+  let started: StartedRequest | undefined;
+  let result: Awaited<ReturnType<Dispatch>>;
+  try {
+    result = await dispatch((timestamp, signature) => {
+      started = { response: startWebhook(destination, id, payload, timestamp, signature, attempt) };
+      return started;
+    });
+  } catch (error) {
+    // The dispatch transaction only holds locks once the request has started, so a failed commit changes nothing: the
+    // receiver's answer (under the same total deadline) is still this attempt's outcome, never a retryable lookup error.
+    if (started) return started.response;
+    throw error;
+  }
   return result && 'response' in result ? result.response : result;
 }
 

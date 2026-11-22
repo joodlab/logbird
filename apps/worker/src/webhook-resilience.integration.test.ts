@@ -186,30 +186,26 @@ it.each([5.3, 10.8])(
     const time = await storeEvents([`qa-slow-eligibility-${seconds}`]);
     const hook = await endpoint('slow-eligibility');
     const delivery = await enqueue(hook, `qa-slow-eligibility-${seconds}`, time);
-    let checked = false;
+    let checks = 0;
     let eligibility: Promise<unknown> | undefined;
-    const delayed = prisma.$extends({
-      query: {
-        webhookEndpoint: {
-          async count({ args, query }) {
-            await prisma.$executeRaw`SELECT pg_sleep(${seconds}::double precision)`;
-            const count = await query(args);
-            checked = count === 1;
-            return count;
-          },
-        },
-      },
-    });
-    const count = vi.spyOn(prisma.webhookEndpoint, 'count').mockImplementation((args) => {
-      const query = delayed.webhookEndpoint.count(args);
-      eligibility = query.then((result) => result);
-      return query;
-    });
     try {
       const { totalTimeoutMs: _, ...transport } = options.transport;
-      await deliverWebhooks(ch, { ...options, transport }, projectId);
-      expect(count).toHaveBeenCalledTimes(1);
-      expect(checked).toBe(seconds < 10);
+      await deliverWebhooks(
+        ch,
+        {
+          ...options,
+          transport,
+          // The final eligibility check runs in PostgreSQL inside the dispatch transaction, under the endpoint and
+          // delivery locks: make that transaction slow, past the connect (5 s) or total (10 s) budget.
+          beforeRequest: async (tx) => {
+            checks++;
+            eligibility = tx.$executeRaw`SELECT pg_sleep(${seconds}::double precision)`.catch(() => undefined);
+            await eligibility;
+          },
+        },
+        projectId,
+      );
+      expect(checks).toBe(1);
       expect(await log(delivery.id)).toMatchObject({
         status: 'pending',
         leaseUntil: null,
@@ -227,7 +223,6 @@ it.each([5.3, 10.8])(
       expect(await prisma.webhookDisableNotice.count({ where: { endpointId: hook.id } })).toBe(0);
       expect(requests).toEqual([]);
     } finally {
-      count.mockRestore();
       await eligibility;
       expect(requests).toEqual([]);
     }
