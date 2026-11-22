@@ -2,8 +2,8 @@ import { createFileRoute, Outlet, useRouterState } from '@tanstack/react-router'
 import { SettingsTabs } from '@/components/settings-tabs';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings')({
-  staticData: { crumb: 'Settings' },
-  head: () => ({ meta: [{ title: 'Settings · Logbird' }] }),
+  staticData: { crumb: 'Project settings' },
+  head: () => ({ meta: [{ title: 'Project settings · Logbird' }] }),
   component: SettingsLayout,
 });
 
@@ -24,7 +24,7 @@ function SettingsLayout() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-b px-4 pt-5 sm:px-6">
-        <h1 className="font-semibold text-xl tracking-tight">Settings</h1>
+        <h1 className="font-semibold text-xl tracking-tight">Project settings</h1>
         <SettingsTabs label="Settings sections" pathname={pathname} tabs={TABS.map((t) => ({ ...t, params: { projectId } }))} />
       </div>
       <div className="w-full max-w-4xl p-4 sm:p-6">

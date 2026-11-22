@@ -29,7 +29,7 @@ import { useCan } from '@/lib/permissions';
 import { type DeleteBlock, deleteBlock, deleteBlockedMessage, secondsUntil } from '@/lib/project-delete';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/danger')({
-  head: () => ({ meta: [{ title: 'Danger zone · Settings · Logbird' }] }),
+  head: () => ({ meta: [{ title: 'Danger zone · Project settings · Logbird' }] }),
   staticData: { crumb: 'Danger zone' },
   component: DangerZone,
 });

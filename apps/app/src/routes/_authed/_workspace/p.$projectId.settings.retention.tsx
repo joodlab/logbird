@@ -34,7 +34,7 @@ import { formatNumber, formatRetention, pluralize } from '@/lib/format';
 import { useCan } from '@/lib/permissions';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/retention')({
-  head: () => ({ meta: [{ title: 'Retention · Settings · Logbird' }] }),
+  head: () => ({ meta: [{ title: 'Retention · Project settings · Logbird' }] }),
   staticData: { crumb: 'Retention' },
   component: RetentionSettings,
 });

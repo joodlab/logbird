@@ -1,8 +1,10 @@
 import { cn } from '@logbird/ui/lib/utils';
+import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Outlet, useRouterState } from '@tanstack/react-router';
 import { z } from 'zod';
 import { SettingsTabs } from '@/components/settings-tabs';
 import { AppShell } from '@/components/shell/app-shell';
+import { projectsQuery } from '@/lib/api/queries';
 import { lastProject } from '@/lib/session';
 
 export const Route = createFileRoute('/_authed/_workspace/workspace')({
@@ -25,8 +27,11 @@ const TABS = [
 function WorkspaceSettingsLayout() {
   const { workspace } = Route.useRouteContext();
   const pathname = useRouterState({ select: (s) => s.location.pathname.replace(/\/$/, '') });
-  // Keep the project nav in the sidebar when coming from a project (as the Account page does).
-  const projectId = typeof window === 'undefined' ? undefined : (lastProject() ?? undefined);
+  // Keep the project nav in the sidebar when coming from a project of this workspace (a project remembered from another
+  // workspace is not listed here, so the sidebar shows workspace navigation only).
+  const projects = useQuery(projectsQuery());
+  const remembered = typeof window === 'undefined' ? null : lastProject();
+  const projectId = remembered && projects.data?.some((p) => p.id === remembered) ? remembered : undefined;
   const fills = pathname === '/workspace/activity';
   return (
     <AppShell projectId={projectId}>

@@ -61,7 +61,7 @@ import { curlSnippet, readCurlSnippet } from '@/lib/snippets';
 import { describeUserAgent } from '@/lib/user-agent';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/keys')({
-  head: () => ({ meta: [{ title: 'API keys · Settings · Logbird' }] }),
+  head: () => ({ meta: [{ title: 'API keys · Project settings · Logbird' }] }),
   staticData: { crumb: 'API keys' },
   loader: ({ context, params }) => context.queryClient.prefetchQuery(keysQuery(params.projectId)),
   component: KeysSettings,
