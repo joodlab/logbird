@@ -1,21 +1,17 @@
 import { queryLangSchema } from '@logbird/contracts';
 import { Button } from '@logbird/ui/components/ui/button';
-import { Skeleton } from '@logbird/ui/components/ui/skeleton';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { BookmarkIcon, LinkIcon, XIcon } from 'lucide-react';
-import { useCallback, useEffect } from 'react';
-import { toast } from 'sonner';
+import { BookmarkIcon, InfoIcon, LinkIcon, XIcon } from 'lucide-react';
+import { useCallback } from 'react';
 import { z } from 'zod';
 import { parseColumns, serializeColumns } from '@/components/explorer/columns';
 import { Explorer, type ExplorerState } from '@/components/explorer/explorer';
 import { SampleDataBanner } from '@/components/setup/sample-data-banner';
-import { api } from '@/lib/api/client';
-import { errorMessage } from '@/lib/api/errors';
-import { eventsInfiniteQuery, histogramQuery, keys, viewsQuery } from '@/lib/api/queries';
+import { eventsInfiniteQuery, histogramQuery, viewsQuery } from '@/lib/api/queries';
 import { DEFAULT_RANGE, isValidRange } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
-import { holdForSavedView, upgradeRecordView, useConfirmedMissingView, useCopyViewLink } from '@/lib/views';
+import { loosePairNotice, useCopyViewLink } from '@/lib/views';
 
 const searchSchema = z.object({
   q: z.string().optional(),
@@ -30,11 +26,8 @@ const searchSchema = z.object({
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/events')({
   validateSearch: searchSchema,
   staticData: { crumb: 'Explorer', range: true },
-  loaderDeps: ({ search }) => ({ q: search.q ?? '', lang: search.lang ?? 'query', range: search.range, view: search.view }),
+  loaderDeps: ({ search }) => ({ q: search.q ?? '', lang: search.lang ?? 'query', range: search.range }),
   loader: ({ context, params, deps }) => {
-    // Opening a saved view: the view decides the query (an old record-page view opens upgraded), so nothing is
-    // prefetched for the query in the link.
-    if (deps.view) return;
     const range = deps.range && isValidRange(deps.range) ? deps.range : DEFAULT_RANGE;
     context.queryClient.prefetchInfiniteQuery(eventsInfiniteQuery(params.projectId, range, deps.q, deps.lang));
     context.queryClient.prefetchQuery(histogramQuery(params.projectId, range, deps.q, deps.lang));
@@ -49,35 +42,7 @@ function ExplorerPage() {
   const { range } = useRange();
   const navigate = useNavigate({ from: Route.fullPath });
   const views = useQuery(viewsQuery(projectId));
-  const storedView = search.view ? views.data?.find((v) => v.id === search.view) : undefined;
-  // A view saved from a record page before exact record matching opens in its exact form (viewSearch); the banner
-  // says so and the reader decides whether to save it. Nothing is written on load.
-  const upgrade = storedView ? upgradeRecordView(storedView) : undefined;
-  // Every way into an old record-page view (sidebar, command palette, query-bar suggestions, an old shared link) carries
-  // its stored query: show the exact form instead, in place, with the note below. Nothing is saved.
-  const legacyQ = upgrade?.upgraded && storedView ? (storedView.state.q ?? '') : undefined;
-  const upgradedQ = upgrade?.upgraded ? (upgrade.state.q ?? '') : undefined;
-  useEffect(() => {
-    if (legacyQ !== undefined && upgradedQ !== undefined && (search.q ?? '') === legacyQ)
-      navigate({ replace: true, search: (prev) => ({ ...prev, q: upgradedQ || undefined }) });
-  }, [legacyQ, upgradedQ, search.q, navigate]);
-  // Until the view is known (and an old one replaced by its exact form), no search runs: the stored query of an old
-  // record-page view never fetches or renders, not even for a moment. That includes a cached view list that does not
-  // have the linked view yet while it refreshes. A views error, or a view that is gone once the list settles, opens
-  // the link as it is.
-  // A cached list without the linked view may just be out of date (it can still count as fresh): fetch it once more
-  // before treating the view as gone, and hold until that fetch settles.
-  const confirmedMissing = useConfirmedMissingView(views, projectId, search.view, Boolean(storedView));
-  const holdForView = holdForSavedView({
-    viewId: search.view,
-    q: search.q ?? '',
-    listPending: views.isPending,
-    listError: views.isError,
-    found: Boolean(storedView),
-    confirmedMissing,
-    legacyQ,
-  });
-  const savedView = storedView && upgrade ? { ...storedView, state: upgrade.state } : undefined;
+  const savedView = search.view ? views.data?.find((v) => v.id === search.view) : undefined;
   // The banner (and its Copy link) speaks for the view only while what is on screen is still that view: same query,
   // language and range. Narrowing it by picker, zoom or Back hides it.
   const view =
@@ -88,18 +53,9 @@ function ExplorerPage() {
       ? savedView
       : undefined;
   const copyLink = useCopyViewLink();
-  const queryClient = useQueryClient();
-  const saveUpgrade = useMutation({
-    mutationFn: (v: NonNullable<typeof view>) => api.views.create(projectId, { name: v.name, description: v.description, state: v.state }),
-    onSuccess: async (created) => {
-      await queryClient.invalidateQueries({ queryKey: [...keys.project(projectId), 'views'] });
-      toast.success(`Saved “${created.name}” with the exact record filter`, {
-        description: 'The original view is unchanged; delete it from Saved views when you no longer need it.',
-      });
-      navigate({ search: (prev) => ({ ...prev, view: created.id }) });
-    },
-    onError: (error) => toast.error('Could not save the view', { description: errorMessage(error) }),
-  });
+  // A saved query with the loose record pair matches id and type separately: say so, from the query's shape alone. The
+  // view opens exactly as saved; "Open exact version" is the reader's choice, and saving it is their own click.
+  const loose = view ? loosePairNotice(view.state.q ?? '', view.state.lang) : null;
 
   const state: ExplorerState = {
     q: search.q ?? '',
@@ -143,19 +99,8 @@ function ExplorerPage() {
             <BookmarkIcon className="size-4 shrink-0 text-brand" />
             <span className="truncate font-medium">{view.name}</span>
             {view.description ? <span className="hidden truncate text-muted-foreground md:inline">— {view.description}</span> : null}
-            {upgrade?.upgraded ? (
-              <span className="truncate text-muted-foreground text-xs" data-testid="view-upgraded" role="status">
-                · Changed to match this record's type and id together (saved before exact record matching), not saved yet
-              </span>
-            ) : null}
           </span>
           <span className="flex shrink-0 items-center gap-1">
-            {upgrade?.upgraded ? (
-              <Button disabled={saveUpgrade.isPending} onClick={() => saveUpgrade.mutate(view)} size="xs" variant="outline">
-                <BookmarkIcon />
-                Save updated view
-              </Button>
-            ) : null}
             <Button data-testid="banner-copy-view-link" onClick={() => copyLink(projectId, view)} size="xs" variant="ghost">
               <LinkIcon />
               Copy link
@@ -167,16 +112,31 @@ function ExplorerPage() {
           </span>
         </div>
       ) : null}
-      <SampleDataBanner className="border-b" projectId={projectId} />
-      {holdForView ? (
-        <div aria-busy className="flex flex-col gap-2 p-4" data-testid="view-opening">
-          <Skeleton className="h-9 w-full" />
-          <Skeleton className="h-24 w-full" />
-          <Skeleton className="h-64 w-full" />
+      {view && loose ? (
+        <div
+          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b bg-muted/40 px-4 py-2 text-muted-foreground text-xs"
+          data-testid="loose-record-pair"
+          role="note"
+        >
+          <span className="flex min-w-0 items-start gap-2">
+            <InfoIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+            <span>
+              This view matches the target id and the target type separately, so it can include events where another record shares the id or the type.
+            </span>
+          </span>
+          {loose.exact ? (
+            <Button
+              onClick={() => navigate({ search: (prev) => ({ ...prev, q: loose.exact || undefined, view: undefined }) })}
+              size="xs"
+              variant="outline"
+            >
+              Open exact version
+            </Button>
+          ) : null}
         </div>
-      ) : (
-        <Explorer onChange={onChange} projectId={projectId} state={state} />
-      )}
+      ) : null}
+      <SampleDataBanner className="border-b" projectId={projectId} />
+      <Explorer onChange={onChange} projectId={projectId} state={state} />
     </div>
   );
 }
