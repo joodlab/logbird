@@ -7,7 +7,8 @@ Logbird searches one authorized project within a half-open UTC time range. The d
 | Construct | Example | Meaning |
 | --- | --- | --- |
 | Exact | action:hotel.policy.updated | Exact, case-sensitive value |
-| Prefix | action:hotel.* | Trailing wildcard; internal stars are literal |
+| Record | record:booking:bk_1042 | Exact type and id on the same target |
+| Prefix | action:hotel.* | An unescaped trailing star is a prefix wildcard |
 | Negation | -env:staging or NOT env:staging | Exclude matches |
 | Presence | impersonator:* -tenant:* or _exists_:impersonator | Non-empty / missing (numeric/date columns always present) |
 | Text | "free text" bare words | Search description, actor, tenant and target names; adjacency AND |
@@ -22,6 +23,26 @@ Logbird searches one authorized project within a half-open UTC time range. The d
 | Attribute | metadata.channel:whatsapp | Unknown keys are attribute lookups; attr. and attributes. prefixes are aliases |
 
 Arrays (target, target.type, target.name, changes.field) match any element. Attribute comparisons convert strings with toFloat64OrNull, or parseDateTime64BestEffortOrNull for date bounds; invalid conversions do not match. String fields do not support ordered comparisons. Quote values containing whitespace or grammar punctuation; quoted strings accept backslash escapes.
+
+Use `\*` for a literal asterisk in a quoted or unquoted value. For example, `tenant:team\*` and `tenant:"team\*"` both match the exact ID `team*`. An unescaped trailing star remains a wildcard even inside quotes, and unescaped internal stars are literal. An unescaped `*` on its own checks presence. An odd number of consecutive backslashes escapes the following star. In a bare value, only the escaping backslash is removed.
+
+In a quoted value, `\r` means a carriage return, and `\\r` means a backslash followed by `r`. Literal carriage returns in existing quoted queries still work. Generated selectors use the escape so they can be copied and pasted as written.
+
+Field names use their exact spelling when bare. `_exists_:attr.tag\*` checks the attribute named `tag\*`, including the backslash. Quote the field name to use query-value escapes, as in `_exists_:"attr.tag\*"`, which checks `tag*`. The same rule applies to the name before `:`.
+
+Use `record:<type>:<id>` to filter a record's history. The first unescaped colon separates the type from the id. Within the type, `\:` means a literal colon and `\\` means a literal backslash. Everything after the separator is the literal id. For example, `record:order\:archived:A1` matches type `order:archived` and id `A1`, while `record:order:archived:A1` matches type `order` and id `archived:A1`.
+
+Quote the whole pair if it contains whitespace or grammar punctuation such as parentheses. Query-value escapes apply before record-pair escapes. For example, `record:"order\\:archived:A1"` matches type `order:archived` and id `A1`, and `record:"page:home (west)"` matches id `home (west)`. `record:page:/home/`, `record:page:home*`, and `record:page:home\*` use literal ids.
+
+Record pairs support negation and value groups, such as `-record:(page:1 OR site:7)`. `record:*` and `_exists_:record` match events with any target. Use `attr.record` to search a custom attribute named `record`.
+
+The record directory and unscoped record suggestions still group targets by the stored `type:id` key. Pairs that share a key appear together in the directory. A record link from an event carries its original type, and each record profile and timeline uses the exact pair it opened.
+
+For records counted from the rollup, an event that lists the same target twice contributes twice to the directory and the profile's **Events · all time** tile. The timeline and its date-range totals count that event once.
+
+`target:12 target.type:site` checks the arrays independently, so it also matches an event with targets `page:12` and `site:7`. Saved views using those terms, including views saved from record pages before `record:` existed, open exactly as saved. When every `target:` and `target.type:` term of the saved query is a positive term at its top level that names a value (plain, quoted, a prefix wildcard or a regex), and there is at least one of each, the explorer says that the view matches id and type separately. When there is exactly one of each, plain or quoted (no wildcard or regex), and the query has no top-level `OR`, it also offers **Open exact version** with the `record:` form, provided that form is a valid query (for example within the query length limit); saving it is up to you. Use `record:site:12` for the paired match.
+
+An entity page (record, actor, tenant or executor) always applies its own filter to everything typed in its history: `outcome:failure OR action:x` there means that entity AND (`outcome:failure OR action:x`). A query that does not parse is not run there; fix it first.
 
 Examples retained from v0:
 
@@ -70,6 +91,7 @@ resolved dates are parameters. `NOT _exists_:field` means missing.
 | target |  | array | target_ids | entities |
 | target.type |  | array | target_types | entities |
 | target.name |  | array | target_names | none |
+| record |  | record pair | target_types + target_ids | entities |
 | changes.field |  | array | changes_fields | none |
 | operation |  | string | operation_id | none |
 | parent |  | string | parent_event_id | none |
@@ -172,6 +194,6 @@ The explorer's query bar suggests as you type, at any caret position; accepting 
 
 ## Local verification
 
-Use `scripts/search-v2-proof.ts` for local HTTP verification; results are written to gitignored `.tmp/search-v2-evidence.jsonl`. Search total saturates at 10001 (the existing count cap); this is not an exact count above the cap. Run the HTTP tests with SEARCH_V2_HTTP=1, SERVER_URL=http://127.0.0.1:4631, APP_URL=http://localhost:4630 and the server running on port 4631. The ClickHouse integration tests require the root environment. Tests only create fictional records; HTTP security fixtures are retained with a Search v2 security name for inspection.
+Use `scripts/search-v2-proof.ts` for local HTTP verification; results are written to gitignored `.tmp/search-v2-evidence.jsonl`. Search total saturates at 10001 (the existing count cap); this is not an exact count above the cap. `totalExact: false` marks a total that is a lower bound: capped, or the count did not finish within its one-second guard (the rows are still returned). Run the HTTP tests with SEARCH_V2_HTTP=1, SERVER_URL=http://127.0.0.1:4631, APP_URL=http://localhost:4630 and the server running on port 4631. The ClickHouse integration tests require the root environment. Tests only create fictional records; HTTP security fixtures are retained with a Search v2 security name for inspection.
 
 See [event exports](exports.md) for complete original payloads, normalized CSV/JSONL, versioned schemas, fixed query clocks and file-to-record verification.

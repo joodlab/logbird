@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { CHANGELOG_PATH, changelogHighlights, githubRepo, loadReleases } from '../../scripts/releases';
+import { CHANGELOG_PATH, changelogHighlights, githubRepo, loadReleases, withoutLinks } from '../../scripts/releases';
 import { byVersionDesc, releaseUrl } from './releases';
 import { snapshotReleases } from './releases.snapshot';
 
@@ -13,7 +13,7 @@ const changelog = `# Changelog
 ### Highlights
 
 - Fictional \`code\` highlight one.
-- Fictional highlight two.
+- Fictional highlight two, with the [upgrade notes](https://example.test/notes#990).
 
 ### Upgrade and known limits
 
@@ -36,13 +36,39 @@ const respond = (body: unknown, status = 200) => vi.fn(async () => new Response(
 
 describe('release list', () => {
   it('reads only the highlight bullets of the exact version', () => {
-    expect(changelogHighlights(changelog, '9.9.0')).toEqual(['Fictional `code` highlight one.', 'Fictional highlight two.']);
+    // Links keep their text only: the site's highlight renderer has no links, and each release links to its notes.
+    expect(changelogHighlights(changelog, '9.9.0')).toEqual(['Fictional `code` highlight one.', 'Fictional highlight two, with the upgrade notes.']);
     expect(changelogHighlights(changelog, '9.8.0')).toEqual([]);
     expect(changelogHighlights(changelog, '9.9')).toEqual([]);
   });
 
+  it('reduces every supported Markdown link form to its text and keeps code spans as written', () => {
+    const cases: [string, string][] = [
+      ['See the [guide](notes(v2)).', 'See the guide.'],
+      ['[guide](notes "use ) here")', 'guide'],
+      ["[guide](notes 'it (works)') too", 'guide too'],
+      ['Read [the [upgrade] notes](https://example.test/a "Title").', 'Read the [upgrade] notes.'],
+      ['Nested [**[docs](https://example.test/d)** page](https://example.test/p).', 'Nested **docs** page.'],
+      ['![logo](https://example.test/logo.svg) Logbird', 'logo Logbird'],
+      ['A [reference link][notes] here.', 'A reference link here.'],
+      ['An autolink <https://example.test/x>.', 'An autolink https://example.test/x.'],
+      ['Code stays: `[not](a link)` and ``a `[b](c)` d``.', 'Code stays: `[not](a link)` and ``a `[b](c)` d``.'],
+      ['Unbalanced [bracket and [a](b) after.', 'Unbalanced [bracket and a after.'],
+      ['A [label] without a target.', 'A [label] without a target.'],
+      ['Not a link: [text] (spaced).', 'Not a link: [text] (spaced).'],
+      ['An unclosed `tick and [a](b).', 'An unclosed `tick and a.'],
+    ];
+    for (const [input, expected] of cases) {
+      expect(withoutLinks(input)).toBe(expected);
+    }
+  });
+
   it('every snapshot release has its highlights in the real CHANGELOG.md', () => {
     const real = readFileSync(CHANGELOG_PATH, 'utf8');
+    // An empty fallback would pass the loop below; v0.1.2 was tagged but never published, so it must never appear.
+    expect(snapshotReleases.length).toBeGreaterThan(0);
+    expect(snapshotReleases.map((release) => release.version)).not.toContain('0.1.2');
+    expect(snapshotReleases.map((release) => release.version)).toContain('0.1.3');
     for (const release of snapshotReleases) {
       expect(release.highlights).toEqual(changelogHighlights(real, release.version));
       expect(release.highlights.length).toBeGreaterThan(0);
@@ -66,7 +92,7 @@ describe('release list', () => {
     ]);
     const releases = await loadReleases({ githubUrl: 'https://github.com/example-org/example', githubPublic: true, changelog, fetchImpl });
     expect(releases).toEqual([
-      { version: '9.9.0', date: '2026-11-08', highlights: ['Fictional `code` highlight one.', 'Fictional highlight two.'] },
+      { version: '9.9.0', date: '2026-11-08', highlights: ['Fictional `code` highlight one.', 'Fictional highlight two, with the upgrade notes.'] },
       { version: '9.8.0', date: '2026-11-08', highlights: [] },
     ]);
     expect(fetchImpl).toHaveBeenCalledWith('https://api.github.com/repos/example-org/example/releases?per_page=100', expect.anything());

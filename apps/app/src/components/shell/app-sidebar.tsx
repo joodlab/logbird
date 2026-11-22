@@ -33,9 +33,9 @@ import { useTheme } from '@logbird/ui/theme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import {
-  ActivityIcon,
   BookOpenIcon,
   BracesIcon,
+  Building2Icon,
   CheckIcon,
   ChevronsUpDownIcon,
   FolderPlusIcon,
@@ -135,7 +135,7 @@ export function AppSidebar({ projectId }: { projectId?: string }) {
           <SidebarGroup>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive render={<Link to="/projects" />} tooltip="Projects">
+                <SidebarMenuButton isActive={pathname.startsWith('/projects')} render={<Link to="/projects" />} tooltip="Projects">
                   <FolderPlusIcon />
                   <span>Projects</span>
                 </SidebarMenuButton>
@@ -147,20 +147,18 @@ export function AppSidebar({ projectId }: { projectId?: string }) {
       <SidebarFooter>
         <SidebarMenu>
           {projectId ? <SetupProgress projectId={projectId} /> : null}
-          {projectId ? (
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                className="h-8"
-                isActive={pathname.endsWith('/settings/activity')}
-                onClick={closeMobile}
-                render={<Link params={{ projectId }} to="/p/$projectId/settings/activity" />}
-                tooltip="Workspace activity"
-              >
-                <ActivityIcon />
-                <span>Workspace activity</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ) : null}
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              className="h-8"
+              isActive={pathname.startsWith('/workspace')}
+              onClick={closeMobile}
+              render={<Link to="/workspace/members" />}
+              tooltip="Workspace settings"
+            >
+              <Building2Icon />
+              <span>Workspace settings</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <UserMenu />
         </SidebarMenu>
       </SidebarFooter>

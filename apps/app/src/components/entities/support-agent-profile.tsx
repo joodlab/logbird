@@ -15,14 +15,17 @@ import { OutcomeAreaChart } from '@/components/charts/outcome-area-chart';
 import { EntityProfileLink } from '@/components/entity-link';
 import { Explorer, type ExplorerState } from '@/components/explorer/explorer';
 import { RankList } from '@/components/rank-list';
+import { current } from '@/lib/api/current';
 import { facetQuery, histogramQuery, summaryRetry } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
 import { formatNumber } from '@/lib/format';
 import { distinctCount, SUPPORT_TERM, supportAgentQuery } from '@/lib/impersonation';
+import { outcomeBandQuery } from '@/lib/overview-queries';
 import { withPresence } from '@/lib/presence-filter';
 import { failureSummary } from '@/lib/query-budget';
 import { formatTerm } from '@/lib/query-language';
 import { rangeLabel, rangePhrase } from '@/lib/range';
+import { useConsoleZone } from '@/lib/time-zone';
 import { useDocumentTitle } from '@/lib/use-document-title';
 
 interface SupportAgentProfileProps {
@@ -49,6 +52,7 @@ function CouldNotLoad({ className }: { className?: string }) {
  * offers a shorter range or a retry of everything that failed.
  */
 export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineChange }: SupportAgentProfileProps) {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const baseQuery = supportAgentQuery(agentId);
   const { range } = timeline;
   // The five summaries sit under the page banner, whose Retry covers transient failures: no automatic retry of a
@@ -77,14 +81,16 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
     }
   }, [failure]);
 
-  const fresh = (q: { isPlaceholderData: boolean; data?: unknown }) => (q.isPlaceholderData ? undefined : q.data);
-  const selfData = fresh(self) as typeof self.data;
-  const name = selfData?.values[0]?.label || ownAccount.data?.values[0]?.label || agentId;
+  // Another agent's or range's answers never show here (current: placeholder data is not this page's).
+  const selfData = current(self);
+  const ownData = current(ownAccount);
+  const name = selfData?.values[0]?.label || ownData?.values[0]?.label || agentId;
   const total = selfData ? (selfData.values[0]?.count ?? 0) : undefined;
-  const actedAsData = fresh(actedAs) as typeof actedAs.data;
-  const tenantData = fresh(tenants) as typeof tenants.data;
-  const actionData = fresh(actions) as typeof actions.data;
-  const ownEvents = fresh(ownAccount) ? (ownAccount.data?.values[0]?.count ?? 0) : 0;
+  const actedAsData = current(actedAs);
+  const tenantData = current(tenants);
+  const actionData = current(actions);
+  const seriesData = current(series);
+  const ownEvents = ownData ? (ownData.values[0]?.count ?? 0) : 0;
   // Nobody with this id did anything as support in range: one empty state, no callout or zero tiles (n3).
   const none = total === 0;
   const phrase = rangePhrase(range);
@@ -219,11 +225,11 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
             <div className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
               <Panel className="self-start" description="Click a band to filter the timeline below" title="Activity as support">
                 <div className="p-3 pb-2">
-                  {series.data ? (
+                  {seriesData ? (
                     <OutcomeAreaChart
-                      data={series.data}
+                      data={seriesData}
                       height={200}
-                      onSelectOutcome={(o) => onTimelineChange({ q: formatTerm('outcome', o), ev: undefined })}
+                      onSelectOutcome={(o) => onTimelineChange({ q: outcomeBandQuery(o), ev: undefined })}
                     />
                   ) : series.isError ? (
                     <CouldNotLoad className="flex h-[208px] items-center justify-center gap-1.5 text-muted-foreground text-xs" />

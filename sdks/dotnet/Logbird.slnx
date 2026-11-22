@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Logbird/Logbird.csproj" />
+    <Project Path="src/Logbird.AspNetCore/Logbird.AspNetCore.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Logbird.Tests/Logbird.Tests.csproj" />
+    <Project Path="tests/Logbird.IntegrationTests/Logbird.IntegrationTests.csproj" />
+    <Project Path="tests/Logbird.AspNetCore.Tests/Logbird.AspNetCore.Tests.csproj" />
+  </Folder>
+</Solution>

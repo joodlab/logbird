@@ -1,9 +1,12 @@
+import { compileQuery } from '@logbird/clickhouse';
+import { formatRecordTerm } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   andQuery,
   canonicalField,
   excludeTerm,
   formatTerm,
+  hasTerm,
   hasTopLevelOr,
   highlightQuery,
   includeTerm,
@@ -28,6 +31,7 @@ describe('tokenize', () => {
       'occurredAt:[2026-11-01 TO 2026-11-03T12:00:00Z] NOT a AND b -(x OR y) trace:abc:def',
       'action:(booking.* OR "a b"', // unclosed group
       'actor.name:"Ra', // unclosed quote
+      'record \t:  page:7 attempt: >= 2 /a  b/',
     ]) {
       expect(
         tokenize(q)
@@ -51,6 +55,11 @@ describe('tokenize', () => {
 
   it('separates comparison operators from their value', () => {
     expect(tokenize('attempt:>=2')[0]).toMatchObject({ valueKind: 'compare', op: '>=', value: '2', valueStart: 8 });
+  });
+
+  it('reads through spacing around the colon without losing source offsets', () => {
+    expect(tokenize('record :  page:7')[0]).toMatchObject({ field: 'record', value: 'page:7', valueStart: 10, end: 16 });
+    expect(queryCompletionAt('record: ', 8)).toMatchObject({ kind: 'value', field: 'record', prefix: '', from: 8, to: 8 });
   });
 
   it('treats -( as a negated group', () => {
@@ -97,6 +106,20 @@ describe('tokenize', () => {
     // Lower-case boolean words stay text (the server only knows upper-case operators).
     expect(tokenize('a and b').filter((t) => t.kind === 'operator')).toEqual([]);
   });
+});
+
+it('keeps literal whitespace, quotes and escapes when Explorer applies a facet or scopes its counts', () => {
+  const record = formatRecordTerm('page:section\\v2', 'A  B "C"\\root');
+  const filters = String.raw`action:/updated  \(now\)/ /two  words/`;
+  const q = `${record}  outcome:failure \t ${filters}`;
+  expect(removeTerm(q, 'outcome')).toBe(`${record} ${filters}`);
+  expect(toggleTerm(q, 'outcome', 'success', 'include')).toBe(`${record} ${filters} outcome:success`);
+});
+
+it('keeps OR before unary NOT when Explorer applies an outcome facet', () => {
+  const q = 'record:page:7 OR NOT record:site:9';
+  expect(toggleTerm(q, 'outcome', 'success', 'include')).toBe(`(${q}) outcome:success`);
+  expect(removeTerm(`(${q}) outcome:success`, 'outcome')).toBe(`(${q})`);
 });
 
 describe('highlightQuery', () => {
@@ -264,6 +287,46 @@ describe('queryCompletionAt', () => {
 });
 
 describe('removeTerm', () => {
+  it('removes unrelated operands without changing what the remaining query compiles to', () => {
+    const selectors = ['record:page:7', formatRecordTerm('page', 'A  B*'), 'record:(page:7 OR site:/x/)'];
+    const actions = ['action:booked', '- action:booked', 'NOT action:(booked OR paid)', 'NOT -action:/book.*/', '"action":booked'];
+    const outcomes = ['outcome:failure', '-outcome:failure', '- outcome:(failure OR denied)', 'NOT outcome:failure', 'NOT - outcome:failure'];
+    for (const record of selectors) {
+      for (const action of actions) {
+        for (const facet of outcomes) {
+          for (const and of ['', 'AND ']) {
+            const cases = [
+              [`${record} OR ${facet} ${and}${action}`, `${record} OR ${action}`, true],
+              [`${record} ${and}${facet} OR ${action}`, `${record} OR ${action}`, true],
+              [`${record} OR ${facet} OR ${action}`, `${record} OR ${action}`, true],
+              [`${record} ${and}${facet} ${and}${action}`, `${record} ${and}${action}`, false],
+              [`(${record} OR (${facet})) ${and}${action}`, `(${record}) ${and}${action}`, false],
+              [`${record} OR NOT (- (${facet}) AND ${action})`, `${record} OR NOT (${action})`, true],
+            ] as const;
+            for (const [query, expected, topLevelOr] of cases) {
+              expect(compileQuery(query).params, query).toHaveProperty('q0');
+              expect(compileQuery(removeTerm(query, 'outcome')), query).toEqual(compileQuery(expected));
+              const narrowed = `${topLevelOr ? `(${query})` : query} AND severity:warning`;
+              expect(compileQuery(includeTerm(query, 'severity', 'warning')), query).toEqual(compileQuery(narrowed));
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it('keeps a dash parsed as field-name data from becoming a negation at a splice', () => {
+    const q = '(outcome:failure)-action:booked';
+    expect(compileQuery(removeTerm(q, 'outcome'))).toEqual(compileQuery('"-action":booked'));
+  });
+
+  it('uses the effective polarity of standalone and attached negations when toggling a value', () => {
+    expect(toggleTerm('- outcome:failure action:booked', 'outcome', 'failure', 'exclude')).toBe('action:booked');
+    expect(toggleTerm('NOT -outcome:failure action:booked', 'outcome', 'failure', 'include')).toBe('action:booked');
+    // The server rejects !field:value and the editor offers a dialect fix before submission.
+    expect(removeTerm('!outcome:failure action:booked', 'outcome')).toBe('!outcome:failure action:booked');
+  });
+
   it('removes a whole OR group without leaving dangling syntax', () => {
     expect(removeTerm('tenant.name:"Rawda Suites" (outcome:failure OR outcome:denied)', 'outcome')).toBe('tenant.name:"Rawda Suites"');
     expect(removeTerm('(outcome:failure OR outcome:denied) action:booking.*', 'outcome')).toBe('action:booking.*');
@@ -273,6 +336,10 @@ describe('removeTerm', () => {
     expect(removeTerm('(action:a OR outcome:failure) x', 'outcome')).toBe('(action:a) x');
     expect(removeTerm('a OR outcome:failure', 'outcome')).toBe('a');
     expect(removeTerm('a AND outcome:failure', 'outcome')).toBe('a');
+  });
+
+  it('keeps abutting source tokens together', () => {
+    expect(compileQuery(removeTerm('outcome:failure a"b" OR action:c', 'outcome'))).toEqual(compileQuery('a"b" OR action:c'));
   });
 
   it('treats aliases and attribute spellings as the same field', () => {
@@ -301,6 +368,16 @@ describe('include / exclude', () => {
     expect(formatTerm('metadata.jobName', 'hospitality:sync:bookings')).toBe('metadata.jobName:"hospitality:sync:bookings"');
     expect(formatTerm('attr.range', 'a[1]')).toBe('attr.range:"a[1]"');
     expect(formatTerm('action', 'booking.created')).toBe('action:booking.created');
+  });
+
+  it('keeps literal wildcard-looking values exact when including and toggling a facet', () => {
+    const exact = formatTerm('action', 'a*b*');
+    expect(exact).toBe(String.raw`action:"a\*b\*"`);
+    expect(compileQuery(exact).params).toEqual({ q0: 'a*b*' });
+    expect(hasTerm('action:a*b*', 'action', 'a*b*')).toBe(false);
+    expect(hasTerm(exact, 'action', 'a*b*')).toBe(true);
+    expect(toggleTerm(exact, 'action', 'a*b*', 'include')).toBe('');
+    expect(classes(String.raw`tenant:team\*`)).toContain(String.raw`team\*:value`);
   });
 
   it('stacks exclusions and toggles them off', () => {
@@ -343,5 +420,42 @@ describe('removeTerm with a unary NOT', () => {
     expect(removeTerm('action:y NOT actor:x -tenant:t', 'actor')).toBe('action:y -tenant:t');
     expect(removeTerm('NOT (actor:a OR actor:b) action:y', 'actor')).toBe('action:y');
     expect(removeTerm('NOT actor:x action:y', 'action')).toBe('NOT actor:x');
+  });
+});
+
+describe('formatTerm', () => {
+  it('keeps plain ids plain and quotes everything else', () => {
+    expect(formatTerm('parent', 'evt_1')).toBe('parent:evt_1');
+    expect(formatTerm('operation', 'op with space')).toBe('operation:"op with space"');
+    expect(formatTerm('parent', 'TO')).toBe('parent:"TO"');
+    expect(formatTerm('id', 'a&&b')).toBe('id:"a&&b"');
+    expect(formatTerm('id', '-x')).toBe('id:"-x"');
+    expect(formatTerm('id', 'self', true)).toBe('-id:self');
+  });
+
+  it('escapes trailing stars alongside other punctuation and backslashes', () => {
+    expect(formatTerm('parent', 'batch*')).toBe(String.raw`parent:"batch\*"`);
+    expect(formatTerm('id', 'a.b/c(1)*')).toBe(String.raw`id:"a.b/c(1)\*"`);
+    expect(formatTerm('id', String.raw`job\1*`)).toBe(String.raw`id:"job\\1\*"`);
+  });
+
+  it.each([
+    'evt_1',
+    'TO',
+    'AND',
+    'a&&b',
+    'x||y',
+    '-x',
+    'op with space',
+    'with"quote',
+    String.raw`back\slash`,
+    'batch*',
+    'a.b/c(1)*',
+    String.raw`job\1*`,
+    'booking:bk_1',
+  ])('round-trips %s through the server compiler', (id) => {
+    const compiled = compileQuery(formatTerm('parent', id));
+    expect(compiled.params).toEqual({ q0: id });
+    expect(compiled.sql).toBe('(parent_event_id = {q0:String})');
   });
 });

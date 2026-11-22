@@ -1,4 +1,5 @@
 import type { WorkspaceSetup } from '@logbird/contracts';
+import { isLogbirdGeneratedSource } from '@logbird/contracts';
 import type { QueryClient } from '@tanstack/react-query';
 import { redirect } from '@tanstack/react-router';
 import { meQuery, projectsQuery, workspaceSetupQuery } from '@/lib/api/queries';
@@ -77,4 +78,22 @@ export async function activeWorkspaceHasProjects(queryClient: QueryClient): Prom
     // Unknown: keep the wizard reachable rather than bouncing to a list that may not load either.
     return false;
   }
+}
+
+/**
+ * What the first-event step says when an event arrives. A console test event (a Logbird-generated source) proves the
+ * pipeline, not the integration, so it never says "it works".
+ */
+export function firstEventCopy(source: string | null | undefined, justArrived = true) {
+  if (isLogbirdGeneratedSource(source))
+    return {
+      toastTitle: 'Console test received',
+      toastDescription: 'Logbird is receiving events. Send one from your backend to check your integration.',
+      cardTitle: 'Console test received — now send one from your backend',
+    };
+  return {
+    toastTitle: 'First event received',
+    toastDescription: 'Your integration works. Everything else builds on this.',
+    cardTitle: justArrived ? 'It works — your first event just arrived' : 'First event received',
+  };
 }

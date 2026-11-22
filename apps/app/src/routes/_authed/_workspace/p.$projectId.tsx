@@ -9,7 +9,9 @@ import { projectQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { rememberProject } from '@/lib/session';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId')({
-  validateSearch: z.object({ range: z.string().optional() }),
+  // A shared URL can carry `range=0` or `range=true`, which the router decodes as a number or boolean: drop it, so the page
+  // falls back to its default range instead of failing validation.
+  validateSearch: z.object({ range: z.string().optional().catch(undefined) }),
   search: { middlewares: [retainSearchParams(['range'])] },
   loader: async ({ context, params }) => {
     try {

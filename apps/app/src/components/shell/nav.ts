@@ -49,6 +49,6 @@ export const PROJECT_NAV: { group: string | null; items: NavItem[] }[] = [
   },
   {
     group: 'Project',
-    items: [{ to: '/p/$projectId/settings', label: 'Settings', icon: SettingsIcon, keywords: 'retention keys members danger' }],
+    items: [{ to: '/p/$projectId/settings', label: 'Project settings', icon: SettingsIcon, keywords: 'settings retention keys danger general' }],
   },
 ];

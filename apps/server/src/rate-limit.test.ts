@@ -44,7 +44,7 @@ it('fails open and logs storage errors, including abuse protection', async () =>
       })
       .get('/valid', limits.authenticated('read'), (c) => c.json({ ok: true }))
       .get('/invalid', async (c) => {
-        expect(await limits.precheck(c)).toBe(false);
+        expect(await limits.precheck(c)).toBeNull();
         return limits.reject(c);
       });
     expect((await app.request('/valid')).status).toBe(200);
@@ -53,4 +53,43 @@ it('fails open and logs storage errors, including abuse protection', async () =>
   } finally {
     log.mockRestore();
   }
+});
+
+it('#180: denials across a minute rollover advertise the end of the charged window, not a fresh minute', async () => {
+  // The window is captured just before rollover (59.9 s); Redis answers just after it (60.1 s).
+  const times = [59_900, 60_100];
+  let call = 0;
+  const now = () => times[Math.min(call++, times.length - 1)] ?? 60_100;
+  const evalScript = vi.fn().mockResolvedValue(99);
+  const limits = createPublicRateLimits({ store: { eval: evalScript, get: vi.fn() }, prefix: '{test}', mintLimit: 1, peerLimit: 1, now });
+  const app = new Hono<AppEnv>()
+    .use('*', async (c, next) => {
+      c.set('reader', { via: 'key', keyId: 'k1', keyName: 'k', scope: null, embedOrigins: [] });
+      await next();
+    })
+    .post('/mint', limits.mint(), (c) => c.json({ ok: true }))
+    .get('/peer', (c) => limits.reject(c));
+  const minted = await app.request('/mint', { method: 'POST' });
+  expect(minted.status).toBe(429);
+  expect(minted.headers.get('Retry-After')).toBe('1');
+  expect(minted.headers.get('RateLimit-Reset')).toBe('1');
+  expect(evalScript.mock.calls[0]?.[2]).toBe('{test}:rate:mint:k1:0');
+  call = 0;
+  const peer = await app.request('/peer');
+  expect(peer.status).toBe(429);
+  expect(peer.headers.get('Retry-After')).toBe('1');
+  expect(String(evalScript.mock.calls[1]?.[2])).toMatch(/:0$/);
+});
+
+it('#180: the peer precheck denies with the window it looked up', async () => {
+  const times = [59_900, 60_100];
+  let call = 0;
+  const now = () => times[Math.min(call++, times.length - 1)] ?? 60_100;
+  const get = vi.fn().mockResolvedValue('5');
+  const limits = createPublicRateLimits({ store: { eval: vi.fn(), get }, prefix: '{test}', peerLimit: 1, now });
+  const app = new Hono<AppEnv>().get('/pre', async (c) => (await limits.precheck(c)) ?? c.json({ ok: true }));
+  const pre = await app.request('/pre');
+  expect(pre.status).toBe(429);
+  expect(pre.headers.get('Retry-After')).toBe('1');
+  expect(String(get.mock.calls[0]?.[0])).toMatch(/:0$/);
 });

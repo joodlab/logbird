@@ -462,7 +462,7 @@ try {
 
       /* Settings → Members: the invitation's Actions dropdown (ghost icon Button + menu items). */
       await step(`members ${tag}`, async () => {
-        await page.goto(`${BASE}/p/${shell.projectId}/settings/members`);
+        await page.goto(`${BASE}/workspace/members`);
         await settle(page);
         const trigger = page.getByRole('button', { name: `Actions for ${INVITEE}` });
         await keyboardFocus(page, trigger);

@@ -234,7 +234,7 @@ function StepBody({ id, setup, projectId }: { id: SetupStepId; setup: ProjectSet
     case 'read_key':
       return <ReadKeyStep projectId={projectId} />;
     case 'teammate':
-      return <TeammateStep projectId={projectId} />;
+      return <TeammateStep />;
     default:
       return null;
   }
@@ -376,7 +376,7 @@ function ReadKeyStep({ projectId }: { projectId: string }) {
   );
 }
 
-function TeammateStep({ projectId }: { projectId: string }) {
+function TeammateStep() {
   const { org, pending } = useOrganization();
   return (
     <div className="flex flex-col gap-3">
@@ -384,7 +384,7 @@ function TeammateStep({ projectId }: { projectId: string }) {
       <p className="text-muted-foreground text-xs">
         {org.data ? `${org.data.members.length} ${org.data.members.length === 1 ? 'member' : 'members'}` : '—'}
         {pending.length ? ` · ${pending.length} pending` : ''} ·{' '}
-        <Link className="text-foreground underline underline-offset-2" params={{ projectId }} to="/p/$projectId/settings/members">
+        <Link className="text-foreground underline underline-offset-2" to="/workspace/members">
           Manage members
         </Link>
       </p>

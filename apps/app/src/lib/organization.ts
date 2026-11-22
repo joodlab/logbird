@@ -106,6 +106,12 @@ export function useInviteMember() {
           : undefined,
       });
     },
+    // A re-send has no form to show an error in (and may finish after the page is left): say so here. A first invite's
+    // error is shown by its form.
+    onError: (error, value) => {
+      if (value.resend)
+        toast.error(`Could not re-send the invitation to ${value.email}`, { description: error instanceof Error ? error.message : undefined });
+    },
   });
 }
 

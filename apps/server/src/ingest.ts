@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import { normalizeEvent, projectMaintenance, resolveTimestamp } from '@logbird/clickhouse';
-import { ingestPendingDetailsSchema, ingestResponseSchema } from '@logbird/contracts';
+import { ingestPendingDetailsSchema, ingestResponseSchema, parseJsonExact } from '@logbird/contracts';
 import { findIngestProject, prisma, RETENTION_LEASE_MS, recoverAbandonedRetention, withProjectLock } from '@logbird/database';
 import { logIngestRecoveryFailure, recoverProjectIngest } from '@logbird/worker/ingest-recovery';
 import { enqueueProjectRetention } from '@logbird/worker/queue';
@@ -29,7 +29,8 @@ export async function readIngestBody(request: Request): Promise<unknown> {
       if (size > 5 * 1024 * 1024) throw new ApiError(413, 'payload_too_large', 'Request exceeds 5 MB.');
       chunks.push(Buffer.from(chunk));
     }
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    // Keep digits a double cannot hold (64-bit ids, long decimals) exactly as sent.
+    return parseJsonExact(Buffer.concat(chunks).toString('utf8'));
   } catch (error) {
     if (error instanceof ApiError) throw error;
     throw new ApiError(400, 'invalid_json', 'Invalid JSON or gzip body.');
@@ -41,8 +42,9 @@ export async function readIngestBody(request: Request): Promise<unknown> {
 export async function ingest(projectId: string, body: unknown, sdk = '', supportsSubsetRetry = false) {
   const events = Array.isArray(body) ? body : body && typeof body === 'object' && 'events' in body ? (body as { events: unknown }).events : [body];
   if (!Array.isArray(events) || !events.length) throw new ApiError(422, 'validation_error', 'events must be a nonempty array.');
-  if (events.length > 1000 || events.some((e) => Buffer.byteLength(JSON.stringify(e)) > 256 * 1024))
-    throw new ApiError(413, 'payload_too_large', 'Maximum 1000 events and 256 KB per event.');
+  // Request limits stay whole-request. An event over 256 KB is rejected on its own by normalizeEvent
+  // (invalid_event: event exceeds 256 KB), so its healthy siblings are still stored.
+  if (events.length > 1000) throw new ApiError(413, 'payload_too_large', 'Maximum 1000 events per request.');
   const candidates: IngestCandidate[] = [],
     ids: string[] = [],
     rejected: { index: number; reason: string; code: string }[] = [],
@@ -51,7 +53,7 @@ export async function ingest(projectId: string, body: unknown, sdk = '', support
     const normalized = normalizeEvent(event, { projectId, receivedAt: new Date(), sdk });
     if (normalized.ok) {
       // Internal audit callers can pass Dates/toJSON values; identity is always the parsed wire payload.
-      candidates.push({ index, input: JSON.parse(normalized.row.payload), row: normalized.row });
+      candidates.push({ index, input: parseJsonExact(normalized.row.payload), row: normalized.row });
       if (normalized.warning) warnings.push({ index, reason: normalized.warning });
     } else {
       const code = normalized.reason.startsWith('invalid_event_id:') ? 'invalid_event_id' : 'invalid_event';
@@ -72,10 +74,10 @@ export async function ingest(projectId: string, body: unknown, sdk = '', support
       const next = resolveTimestamp(input.occurredAt, acceptedAt);
       if (previous.problem !== next.problem || previous.valid !== next.valid) {
         // Rare timestamp-validity boundary: reuse normalization, including warnings and conformance.
+        const warning = warnings.findIndex((item) => item.index === candidate.index);
         const normalized = normalizeEvent(candidate.input, { projectId, receivedAt: acceptedAt, sdk });
         if (!normalized.ok) throw new Error('Validated event changed during acceptance');
         candidate.row = { ...normalized.row, event_id: candidate.row.event_id };
-        const warning = warnings.findIndex((item) => item.index === candidate.index);
         if (warning >= 0) warnings.splice(warning, 1);
         if (normalized.warning) warnings.push({ index: candidate.index, reason: normalized.warning });
       } else {

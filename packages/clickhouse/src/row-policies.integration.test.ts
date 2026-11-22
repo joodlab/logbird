@@ -1,10 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createClickHouseClient, createQueryClickHouseClient, insertEvents } from './client';
+import { createClickHouseClient, createQueryClickHouseClient, insertEvents, withTenant } from './client';
 import { normalizeEvent } from './normalize';
-import { entityProfile, listFields, liveEvents, overview, projectStats } from './queries';
+import { entityProfile, getEvent, listFields, liveEvents, overview, projectStats, purgeProject, read, searchEvents } from './queries';
 
-const enabled = !!process.env.CLICKHOUSE_QUERY_PASSWORD;
+/**
+ * This suite probes the row policies the migrations install on the `logbird` database (and writes a probe table and
+ * fixture events there). It runs only when the environment explicitly selects that database: on a shared machine it
+ * must never create, insert into or query a database it was not told to use.
+ */
+const REQUIRED_DATABASE = 'logbird';
+const selectedDatabase = process.env.CLICKHOUSE_DATABASE;
+const enabled = !!process.env.CLICKHOUSE_QUERY_PASSWORD && selectedDatabase === REQUIRED_DATABASE;
+if (process.env.CLICKHOUSE_QUERY_PASSWORD && !enabled)
+  console.warn(
+    `row-policies: skipped. It needs CLICKHOUSE_DATABASE=${REQUIRED_DATABASE} (the database whose row policies it probes); got ${selectedDatabase ?? 'none'}.`,
+  );
 const main = enabled ? createClickHouseClient() : null;
 const restricted = enabled ? createQueryClickHouseClient() : null;
 const projects = [`row-policy-a-${randomUUID()}`, `row-policy-b-${randomUUID()}`];
@@ -18,10 +29,15 @@ const range = {
 };
 const tables = ['events', 'events_by_minute', 'entities', 'attribute_keys'];
 afterAll(async () => {
-  if (main) await main.command({ query: `DROP TABLE IF EXISTS logbird.${ddlTable}` });
+  if (main) {
+    await main.command({ query: `DROP TABLE IF EXISTS logbird.${ddlTable}` });
+    // The fixture projects' events (and their rollups) go too, not only the probe table.
+    for (const projectId of projects) await purgeProject(main, projectId);
+  }
   await main?.close();
   await restricted?.close();
-});
+  // Purging runs mutations on the events and rollup tables: allow them to finish.
+}, 120_000);
 
 describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)', () => {
   beforeAll(async () => {
@@ -176,5 +192,263 @@ describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)',
     const stats = await projectStats(restricted!, projects);
     expect(Object.keys(stats).sort()).toEqual([...projects].sort());
     expect(Object.values(stats).map((s) => s.eventsLast24h)).toEqual([1, 1]);
+  });
+});
+
+describe.runIf(enabled)('#138 phase 2: database-enforced tenant binding for scoped reads (real ClickHouse)', () => {
+  const tenantProject = `row-policy-tenant-${randomUUID()}`;
+  beforeAll(async () => {
+    const rows = ['t1', 't2', ''].map((tenant, n) => {
+      const row = normalizeEvent(
+        {
+          id: `tenant-${n}`,
+          action: 'row.policy.tenant',
+          tenant: tenant ? { id: tenant } : undefined,
+          metadata: { policy: 'tenant' },
+          occurredAt: now.toISOString(),
+        },
+        { projectId: tenantProject, receivedAt: now },
+      );
+      if (!row.ok) throw new Error('Fixture normalization failed');
+      return row.row;
+    });
+    await insertEvents(main!, rows);
+  });
+  afterAll(async () => {
+    if (main) await purgeProject(main, tenantProject);
+  }, 120_000);
+  const tenants = async (settings: Record<string, string>, predicate = '1 OR 1') =>
+    (
+      await (
+        await restricted!.query({
+          query: `SELECT tenant_id FROM logbird.events WHERE ${predicate} ORDER BY tenant_id`,
+          clickhouse_settings: { SQL_logbird_project: tenantProject, ...settings },
+          format: 'JSONEachRow',
+        })
+      ).json<{ tenant_id: string }>()
+    ).map((r) => r.tenant_id);
+
+  it('installs the tenant-aware policy on every table', async () => {
+    const policies = await (
+      await main!.query({
+        query: "SELECT table, select_filter FROM system.row_policies WHERE short_name = 'logbird_project_isolation' AND database = 'logbird'",
+        format: 'JSONEachRow',
+      })
+    ).json<{ table: string; select_filter: string }>();
+    expect(policies.map((p) => p.table).sort()).toEqual([...tables].sort());
+    for (const policy of policies) expect(policy.select_filter).toContain('SQL_logbird_tenant');
+  });
+
+  it('binds events to the tenant even when the query has no tenant predicate, and leaves unscoped reads unchanged', async () => {
+    expect(await tenants({ SQL_logbird_tenant: 't1' })).toEqual(['t1']);
+    expect(await tenants({ SQL_logbird_tenant: 't1' }, "tenant_id = 't2' OR tenant_id = ''")).toEqual([]);
+    expect(await tenants({ SQL_logbird_tenant: 't2' })).toEqual(['t2']);
+    expect(await tenants({ SQL_logbird_tenant: 'nobody' })).toEqual([]);
+    // Unscoped: explicitly empty, or not sent at all (profile default) — every tenant of the bound project.
+    expect(await tenants({ SQL_logbird_tenant: '' })).toEqual(['', 't1', 't2']);
+    expect(await tenants({})).toEqual(['', 't1', 't2']);
+  });
+
+  it.each(tables.filter((t) => t !== 'events'))('%s (no tenant column) shows nothing to a tenant-bound session', async (table) => {
+    const count = async (settings: Record<string, string>) =>
+      Number(
+        (
+          await (
+            await restricted!.query({
+              query: `SELECT count() n FROM logbird.${table}`,
+              clickhouse_settings: { SQL_logbird_project: tenantProject, ...settings },
+              format: 'JSONEachRow',
+            })
+          ).json<{ n: number }>()
+        )[0]?.n,
+      );
+    expect(await count({ SQL_logbird_tenant: 't1' })).toBe(0);
+    expect(await count({})).toBeGreaterThan(0); // the rollup really has rows for this project
+  });
+
+  it('a tenant-bound client stays bound even when the query carries no scope at all', async () => {
+    const bound = withTenant(restricted!, 't1');
+    // No scope predicate, no scope parameter: only the row policy stands between this query and other tenants.
+    const rows = await read<{ tenant_id: string }>(bound, 'SELECT tenant_id FROM events WHERE project_id={p:String} ORDER BY tenant_id', {
+      p: tenantProject,
+    });
+    expect(rows.map((r) => r.tenant_id)).toEqual(['t1']);
+    // A scope parameter naming another tenant is refused before the query runs.
+    await expect(read(bound, 'SELECT 1 FROM events WHERE project_id={p:String}', { p: tenantProject, scope_tenant: 't2' })).rejects.toThrow(
+      'Scope tenant does not match the bound tenant',
+    );
+    expect(() => withTenant(main!, 't1')).toThrow();
+  });
+
+  it('detail keeps the project-wide canonical version: a later version of another tenant is not revealed', async () => {
+    // Two stored versions of one id (legacy duplicates): the canonical (oldest receipt) belongs to tA, a later one to tB.
+    const dupe = `dup-${randomUUID()}`;
+    const version = (tenant: string, receivedAt: Date, extra: Record<string, unknown> = {}) => {
+      const row = normalizeEvent(
+        { id: dupe, action: 'row.policy.dup', tenant: { id: tenant }, occurredAt: receivedAt.toISOString(), ...extra },
+        {
+          projectId: tenantProject,
+          receivedAt,
+        },
+      );
+      if (!row.ok) throw new Error('Fixture normalization failed');
+      return row.row;
+    };
+    const child = normalizeEvent(
+      {
+        id: `child-${randomUUID()}`,
+        action: 'row.policy.child',
+        tenant: { id: 'tB' },
+        context: { parentEventId: dupe },
+        occurredAt: now.toISOString(),
+      },
+      { projectId: tenantProject, receivedAt: new Date(now.getTime() + 2000) },
+    );
+    if (!child.ok) throw new Error('Fixture normalization failed');
+    // Distinct occurrence times and separate inserts keep both versions (same-key rows are replaced by ReplacingMergeTree).
+    await insertEvents(main!, [version('tA', new Date(now.getTime() - 1000))]);
+    await insertEvents(main!, [version('tB', new Date(now.getTime() + 1000))]);
+    await insertEvents(main!, [child.row]);
+    const tB = withTenant(restricted!, 'tB');
+    expect(await getEvent(tB, tenantProject, dupe, { tenantId: 'tB' }, main!)).toBeNull();
+    const tA = await getEvent(withTenant(restricted!, 'tA'), tenantProject, dupe, { tenantId: 'tA' }, main!);
+    expect(tA?.event.tenant?.id).toBe('tA');
+    // Parent traversal stops at the out-of-scope canonical parent instead of following tB's later copy.
+    const ofChild = await getEvent(tB, tenantProject, child.row.event_id, { tenantId: 'tB' }, main!);
+    expect(ofChild?.event.id).toBe(child.row.event_id);
+    expect(ofChild?.parents).toEqual([]);
+  });
+
+  it('the tenant-bound handle carries the tenant on raw dispatch and refuses writes, pool shutdown and rebinding', async () => {
+    const bound = withTenant(restricted!, 't1');
+    const raw = await (
+      await bound.query({
+        query: 'SELECT tenant_id FROM logbird.events ORDER BY tenant_id',
+        clickhouse_settings: { SQL_logbird_project: tenantProject },
+        format: 'JSONEachRow',
+      })
+    ).json<{ tenant_id: string }>();
+    expect(raw.map((r) => r.tenant_id)).toEqual(['t1']);
+    expect(() => bound.query({ query: 'SELECT 1', clickhouse_settings: { SQL_logbird_project: tenantProject, SQL_logbird_tenant: 't2' } })).toThrow(
+      'Scope tenant does not match the bound tenant',
+    );
+    // The handle exposes query only: nothing reaches the shared client or its lifecycle.
+    const surface = bound as unknown as Record<PropertyKey, unknown>;
+    for (const name of ['insert', 'command', 'exec', 'ping', 'close', 'valueOf', 'toString', Symbol.asyncDispose])
+      expect(surface[name], String(name)).toBeUndefined();
+    expect(Object.getPrototypeOf(bound)).toBeNull();
+    expect(Object.isFrozen(bound)).toBe(true);
+    expect(() => withTenant(bound, 't2')).toThrow('already bound');
+    // The shared client is unaffected by the handle.
+    expect(await tenants({ SQL_logbird_tenant: 't2' })).toEqual(['t2']);
+  });
+
+  it('detail picks one deterministic canonical version even when legacy rows tie on both timestamps', async () => {
+    const tied = `tie-${randomUUID()}`;
+    const at = new Date(now.getTime() + 5000);
+    const version = (tenant: string, note: string) => {
+      const row = normalizeEvent(
+        { id: tied, action: 'row.policy.tie', tenant: { id: tenant }, metadata: { note }, occurredAt: at.toISOString() },
+        {
+          projectId: tenantProject,
+          receivedAt: at,
+        },
+      );
+      if (!row.ok) throw new Error('Fixture normalization failed');
+      return row.row;
+    };
+    // One insert without on-insert deduplication keeps both same-key versions (as legacy data can).
+    await main!.insert({
+      table: 'events',
+      values: [version('tA', 'first'), version('tB', 'second')],
+      format: 'JSONEachRow',
+      clickhouse_settings: { optimize_on_insert: 0 },
+    });
+    const child = normalizeEvent(
+      {
+        id: `tie-child-${randomUUID()}`,
+        action: 'row.policy.tie.child',
+        tenant: { id: 'tB' },
+        context: { parentEventId: tied },
+        occurredAt: at.toISOString(),
+      },
+      { projectId: tenantProject, receivedAt: new Date(at.getTime() + 1000) },
+    );
+    if (!child.ok) throw new Error('Fixture normalization failed');
+    await insertEvents(main!, [child.row]);
+    const canonical = await getEvent(main!, tenantProject, tied);
+    const owner = canonical?.event.tenant?.id;
+    expect(['tA', 'tB']).toContain(owner);
+    const other = owner === 'tA' ? 'tB' : 'tA';
+    // Every caller sees the same canonical version or nothing — never the other tenant's tied copy.
+    for (let i = 0; i < 3; i++) {
+      expect((await getEvent(withTenant(restricted!, owner!), tenantProject, tied, { tenantId: owner! }, main!))?.payload).toEqual(
+        canonical?.payload,
+      );
+      expect(await getEvent(withTenant(restricted!, other), tenantProject, tied, { tenantId: other }, main!)).toBeNull();
+    }
+    const ofChild = await getEvent(withTenant(restricted!, 'tB'), tenantProject, child.row.event_id, { tenantId: 'tB' }, main!);
+    expect(ofChild?.parents.map((e) => e.tenant?.id)).toEqual(owner === 'tB' ? ['tB'] : []);
+  });
+
+  it('an out-of-scope id answers like an unknown id without touching the restricted client', async () => {
+    // A bound client that cannot authenticate: any query through it fails.
+    const broken = withTenant(createQueryClickHouseClient({ ...process.env, CLICKHOUSE_QUERY_PASSWORD: 'wrong-password-for-test' })!, 't1');
+    const t2Event = (
+      await searchEvents(main!, tenantProject, {
+        from: range.from,
+        to: new Date(now.getTime() + 60_000).toISOString(),
+        limit: 10,
+        order: 'desc',
+        q: 'tenant:t2',
+      })
+    ).data[0];
+    expect(t2Event).toBeTruthy();
+    expect(await getEvent(broken, tenantProject, t2Event!.id, { tenantId: 't1' }, main!)).toBeNull();
+    expect(await getEvent(broken, tenantProject, `unknown-${randomUUID()}`, { tenantId: 't1' }, main!)).toBeNull();
+    // An in-scope id does reach the restricted client (and fails here, proving the two paths differ only for hits).
+    const t1Event = (
+      await searchEvents(main!, tenantProject, {
+        from: range.from,
+        to: new Date(now.getTime() + 60_000).toISOString(),
+        limit: 10,
+        order: 'desc',
+        q: 'tenant:t1 action:row.policy.tenant',
+      })
+    ).data[0];
+    await expect(getEvent(broken, tenantProject, t1Event!.id, { tenantId: 't1' }, main!)).rejects.toThrow();
+  });
+
+  it('the application read path binds the scope tenant automatically', async () => {
+    const page = await searchEvents(
+      restricted!,
+      tenantProject,
+      { from: new Date(now.getTime() - 1000).toISOString(), to: new Date(now.getTime() + 1000).toISOString(), limit: 10, order: 'desc' },
+      undefined,
+      { tenantId: 't1' },
+    );
+    expect(page.data.map((e) => e.tenant?.id)).toEqual(['t1']);
+    expect(page.total).toBe(1);
+  });
+});
+
+describe.runIf(enabled)('#138 phase 2: the restricted client authenticates as the query user', () => {
+  it('ignores main-account credentials embedded in CLICKHOUSE_URL', async () => {
+    const url = new URL(process.env.CLICKHOUSE_URL ?? '');
+    url.username = process.env.CLICKHOUSE_USER ?? '';
+    url.password = process.env.CLICKHOUSE_PASSWORD ?? '';
+    const client = createQueryClickHouseClient({ ...process.env, CLICKHOUSE_URL: url.toString() });
+    try {
+      const [who] = await (
+        await client!.query({
+          query: 'SELECT currentUser() user',
+          clickhouse_settings: { SQL_logbird_project: 'identity-probe' },
+          format: 'JSONEachRow',
+        })
+      ).json<{ user: string }>();
+      expect(who?.user).toBe('logbird_query');
+    } finally {
+      await client?.close();
+    }
   });
 });

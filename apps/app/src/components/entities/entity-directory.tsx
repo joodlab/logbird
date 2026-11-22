@@ -8,18 +8,23 @@ import { Button, buttonVariants } from '@logbird/ui/components/ui/button';
 import { Input } from '@logbird/ui/components/ui/input';
 import { SegmentedControl, SegmentedControlItem } from '@logbird/ui/components/ui/segmented-control';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { cn } from '@logbird/ui/lib/utils';
 import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { BookOpenIcon, Loader2Icon, SearchIcon, SearchXIcon } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { Timestamp } from '@/components/timestamp';
+import { current, shownDimmed } from '@/lib/api/current';
 import { entityListQuery, facetQuery } from '@/lib/api/queries';
 import { ENTITY_SECTIONS, type EntitySection, splitTargetId, typeIcon } from '@/lib/entities';
 import { formatCompact } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 
 const TYPE_FACET = { actor: 'actor.type', executor: 'executor.type', target: 'target.type', tenant: null } as const;
+/** Desktop columns: name, id, [type], events, first seen, last seen. Tenants have no type, so no Type column. */
+const COLUMNS_WITH_TYPE = 'md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_100px_90px_120px_120px]';
+const COLUMNS_WITHOUT_TYPE = 'md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_90px_120px_120px]';
 /** Never-populated state: what the page is for and which envelope field fills it. */
 const EMPTY_EXPLAINERS: Record<EntitySection, { lead: ReactNode; snippet: string; note?: ReactNode }> = {
   actors: {
@@ -96,9 +101,12 @@ export function EntityDirectory({ projectId, section, q, type, sort = 'events', 
   const list = useInfiniteQuery(entityListQuery(projectId, meta.kind, q, type, sort));
   const typeField = TYPE_FACET[meta.kind];
   const types = useQuery({ ...facetQuery(projectId, typeField ?? 'action', '90d', '', 12), enabled: Boolean(typeField) });
-  const rows = list.data?.pages.flatMap((p) => p.data) ?? [];
+  // While a new search loads, the previous search's rows stay, dimmed and marked busy (the spinner in the search box says
+  // why); the empty state and the type chips only ever describe the current answer.
+  const updating = list.isPlaceholderData;
+  const rows = shownDimmed(list)?.pages.flatMap((p) => p.data) ?? [];
   // Events without a type cannot be filtered by type: only offer real values.
-  const typeValues = (types.data?.values ?? []).filter((t) => t.value);
+  const typeValues = (current(types)?.values ?? []).filter((t) => t.value);
 
   return (
     <div className="flex flex-col gap-5 p-4 sm:p-6">
@@ -155,17 +163,22 @@ export function EntityDirectory({ projectId, section, q, type, sort = 'events', 
       </div>
 
       <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
-        {list.isSuccess && rows.length === 0 ? null : (
-          <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_100px_90px_120px_120px] items-center gap-3 border-b bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground uppercase tracking-wider md:grid">
+        {current(list) && rows.length === 0 ? null : (
+          <div
+            className={cn(
+              'hidden items-center gap-3 border-b bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground uppercase tracking-wider md:grid',
+              TYPE_FACET[meta.kind] ? COLUMNS_WITH_TYPE : COLUMNS_WITHOUT_TYPE,
+            )}
+          >
             <span>Name</span>
             <span>Id</span>
-            <span>Type</span>
+            {TYPE_FACET[meta.kind] ? <span>Type</span> : null}
             <span className="text-end">Events</span>
             <span>First seen</span>
             <span>Last seen</span>
           </div>
         )}
-        {list.isPending ? (
+        {list.isPending || (updating && rows.length === 0) ? (
           <div className="flex flex-col gap-1 p-2">
             {placeholderKeys(10).map((k) => (
               <Skeleton className="h-10 w-full" key={k} />
@@ -184,7 +197,7 @@ export function EntityDirectory({ projectId, section, q, type, sort = 'events', 
             <NeverPopulated projectId={projectId} section={section} />
           )
         ) : (
-          <ul className="divide-y">
+          <ul aria-busy={updating || undefined} className={cn('divide-y transition-opacity', updating && 'opacity-60')}>
             {rows.map((e) => (
               <EntityRow entity={e} key={e.id} projectId={projectId} section={section} />
             ))}
@@ -245,14 +258,18 @@ function TypeChip({ label, active, onClick, count }: { label: string; active: bo
 }
 
 function EntityRow({ entity: e, projectId, section }: { entity: Entity; projectId: string; section: EntitySection }) {
-  const displayId = e.kind === 'target' ? splitTargetId(e.id).id : e.id;
+  const displayId = e.kind === 'target' ? splitTargetId(e.id, e.type).id : e.id;
   const showIcon = !(e.kind === 'actor' && (e.type === 'user' || e.type === 'anonymous'));
   return (
     <li>
       <Link
-        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 px-4 py-2.5 text-sm outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted/50 md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_100px_90px_120px_120px]"
+        className={cn(
+          'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 px-4 py-2.5 text-sm outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted/50',
+          TYPE_FACET[e.kind] ? COLUMNS_WITH_TYPE : COLUMNS_WITHOUT_TYPE,
+        )}
         params={{ projectId, entityId: e.id }}
-        to={`/p/$projectId/${section}/$entityId` as '/p/$projectId/actors/$entityId'}
+        search={e.kind === 'target' ? { targetType: e.type } : {}}
+        to={`/p/$projectId/${section}/$entityId` as '/p/$projectId/records/$entityId'}
       >
         <span className="flex min-w-0 items-center gap-2.5">
           <EntityAvatar
@@ -265,7 +282,9 @@ function EntityRow({ entity: e, projectId, section }: { entity: Entity; projectI
           <span className="truncate font-medium">{e.name || displayId}</span>
         </span>
         <span className="truncate font-mono text-[12px] text-muted-foreground max-md:col-start-1 max-md:ps-9.5">{displayId}</span>
-        <span className="hidden md:block">{e.type ? <TypePill>{e.type}</TypePill> : <span className="text-muted-foreground">—</span>}</span>
+        {TYPE_FACET[e.kind] ? (
+          <span className="hidden md:block">{e.type ? <TypePill>{e.type}</TypePill> : <span className="text-muted-foreground">—</span>}</span>
+        ) : null}
         <span className="text-end text-muted-foreground tabular-nums max-md:col-start-2 max-md:row-start-1">{formatCompact(e.events)}</span>
         <Timestamp className="hidden text-muted-foreground text-xs md:block" format="date" iso={e.firstSeen} />
         <Timestamp className="hidden text-muted-foreground text-xs md:block" format="relative" iso={e.lastSeen} />

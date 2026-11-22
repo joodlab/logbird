@@ -4,10 +4,18 @@ import { cn } from '../lib/utils';
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
+/** A number kept with its exact digits (JSON.rawJSON), e.g. a 64-bit id: shown as a number, never as an object. */
+const rawNumber = (value: unknown): string | null => {
+  const isRaw = (JSON as JSON & { isRawJSON?: (v: unknown) => boolean }).isRawJSON;
+  return isRaw?.(value) ? (value as { rawJSON: string }).rawJSON : null;
+};
+
 function Primitive({ value }: { value: Json }) {
   if (value === null) return <span className="text-syntax-keyword">null</span>;
   if (typeof value === 'boolean') return <span className="text-syntax-keyword">{String(value)}</span>;
   if (typeof value === 'number') return <span className="text-syntax-number">{value}</span>;
+  const raw = rawNumber(value);
+  if (raw !== null) return <span className="text-syntax-number">{raw}</span>;
   return <span className="break-all text-syntax-string">"{String(value)}"</span>;
 }
 
@@ -24,7 +32,7 @@ function Node({
   defaultExpandDepth: number;
   last: boolean;
 }) {
-  const isObject = value !== null && typeof value === 'object';
+  const isObject = value !== null && typeof value === 'object' && rawNumber(value) === null;
   const [open, setOpen] = useState(depth < defaultExpandDepth);
   const comma = last ? null : <span className="text-syntax-punct">,</span>;
   const label =

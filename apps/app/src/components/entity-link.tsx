@@ -10,15 +10,30 @@ export function EntityProfileLink({
   projectId,
   kind,
   id,
+  type,
   children,
   className,
 }: {
   projectId: string;
   kind: EntityKind;
   id: string;
+  type?: string;
   children: ReactNode;
   className?: string;
 }) {
+  if (kind === 'target') {
+    return (
+      <Link
+        className={className}
+        onClick={(e) => e.stopPropagation()}
+        params={{ projectId, entityId: id }}
+        search={{ targetType: type }}
+        to="/p/$projectId/records/$entityId"
+      >
+        {children}
+      </Link>
+    );
+  }
   const section = sectionForKind(kind);
   return (
     <Link
@@ -60,6 +75,7 @@ export function EntityLink({
       id={id}
       kind={kind}
       projectId={projectId}
+      type={type}
     >
       <EntityChip icon={showIcon ? typeIcon(kind, type ?? '') : undefined} id={id} meta={meta} name={name} square={kind !== 'actor'} />
     </EntityProfileLink>

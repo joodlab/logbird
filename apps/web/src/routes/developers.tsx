@@ -285,14 +285,14 @@ function DevelopersPage() {
         visual={<SiteCode code={http} language="bash" title="curl" />}
       >
         <code>POST /v1/events</code> accepts one event, a JSON array, or <code>{'{ "events": [...] }'}</code>. Authenticate with an ingest key. A{' '}
-        <code>202</code> means ClickHouse has the rows.
+        <code>202</code> lists the stored event IDs in <code>ids</code> and rejected events in <code>rejected</code>.
       </FeatureRow>
 
       <Section compact id="envelope" labelledBy="envelope-title" tone="sunken">
         <SectionHeader
           eyebrow="The envelope"
           id="envelope-title"
-          lead="Logbird stores anything you send. These recommended fields become indexed columns, each one fills a page in the console, and the conformance score tells you how many of them an event has."
+          lead="Only an action string is required, and each event must fit the ingest limits. These recommended fields become indexed columns, each one fills a page in the console, and the conformance score tells you how many of them an event has."
           title="Six fields that make an audit log useful."
         />
         <div className="panel mt-10 overflow-hidden">
@@ -444,12 +444,15 @@ function DevelopersPage() {
                   are retried with exponential backoff and jitter, up to 5 times. A numeric <code>Retry-After</code> is honoured.
                 </>,
                 <>
-                  <strong className="font-medium text-foreground">Acknowledged after storage.</strong> The server answers <code>202</code> only once
-                  ClickHouse has the rows.
+                  <strong className="font-medium text-foreground">Acknowledged after storage.</strong> On <code>202</code>, <code>ids</code> lists the
+                  accepted events and <code>rejected</code> names the entries that failed. An accepted event was written to ClickHouse by this request
+                  or an earlier identical one.
                 </>,
                 <>
-                  <strong className="font-medium text-foreground">At least once.</strong> A retry after a lost response can store an event twice.
-                  Counts may include duplicates.
+                  <strong className="font-medium text-foreground">At least once, stored once.</strong> The SDK gives every event an id before it
+                  queues it, so a retry after a lost response reuses the stored event while the project retains it. Raw HTTP clients should send their
+                  own string <code>id</code>: a missing, blank or non-string id gets a new generated id on every retry. A string id is rejected with{' '}
+                  <code>invalid_event_id</code> if it contains NUL or an unpaired surrogate, or exceeds 256 UTF-16 code units after trimming.
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Bounded under outage.</strong> The queue holds up to 10,000 events by default. When
@@ -461,9 +464,11 @@ function DevelopersPage() {
                   Call <code>shutdown()</code> on exit.
                 </>,
                 <>
-                  <strong className="font-medium text-foreground">Partial batches.</strong> Events without an <code>action</code> are rejected one by
-                  one, and the rest are stored. Permanent errors other than <code>429</code> drop the batch and report it through <code>onError</code>{' '}
-                  and <code>onDrop</code>, without rejecting <code>flush()</code>.
+                  <strong className="font-medium text-foreground">Partial batches.</strong> Each event is checked on its own. Rejected events, such as
+                  one without an <code>action</code> or an id conflict, are listed in <code>rejected</code>. On <code>202</code> the rest are
+                  accepted. When a <code>503</code> lists the unsettled events, retry only those; otherwise retry the whole batch with the same ids.
+                  Permanent errors other than <code>429</code> drop the batch and report it through <code>onError</code> and <code>onDrop</code>,
+                  without rejecting <code>flush()</code>.
                 </>,
               ]}
             />

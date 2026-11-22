@@ -94,6 +94,7 @@ One .env.example serves source development and containers. Empty URL overrides l
 | TRUST_PROXY / TRUSTED_ORIGINS | Trusted proxy hops: 1 in Compose (the console), 2 behind one reverse proxy; source dev 0 / empty. See ingress rules below |
 | AUTH_RATE_LIMIT_PER_MINUTE / PUBLIC_RATE_LIMIT_PER_MINUTE | 30 / 600 per client: sign-in requests and failed public-API authentications |
 | INGEST_RATE_LIMIT_PER_MINUTE / READ_RATE_LIMIT_PER_MINUTE | 3000 / 1200 per project key (shared Redis limits) |
+| VIEWER_READ_RATE_LIMIT_PER_MINUTE / VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE | 300 per minting key and tenant (viewer-token reads, on top of the project read limit) / 600 viewer tokens minted per key. See [scoped read access](scoped-read-access.md) |
 | LOGBIRD_BIND / LOGBIRD_HTTP_PORT | 127.0.0.1 / 4600; only app is published |
 | LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / 0.1.3; pulls `<registry>/logbird-<role>:<version>` |
 | LOGBIRD_SOURCE_VERSION | local; only the source-build override uses this tag |
@@ -271,6 +272,40 @@ below for older Trailmark installations.
 
 See the [maintainer migration-cancellation check](releases.md#migration-cancellation-check)
 for signal handling; its live acceptance is pending in #77.
+
+### Upgrading to the arrival-time index (010)
+
+Migration 010 adds a minmax skip index on `events.received_at` and materializes it. Arrival-time reads (webhook
+discovery, alert windows, the live view) then skip granules whose arrival range misses the requested range instead of
+reading every granule of the project that the partition and primary-key steps keep, which do not know arrival time
+(how much that is, and how it grows with retained history, depends on the data; it was not measured). Event values are preserved, but the physical work is
+not free: `MATERIALIZE INDEX` writes the new index files for every part, and ClickHouse rewrites the full column data
+of compact parts while doing so, competing with merges and retention mutations. It runs as a background mutation
+(the statement pins `mutations_sync = 0`, so a migration user whose profile waits for mutations does not block):
+the migration returns at once, reads stay correct while it runs (parts without the index are read as before), and new
+parts get the index on insert. Measured locally on a shared 2 GiB ClickHouse: 23.8 million rows (4.05 GiB)
+materialized in about 35 seconds, roughly 2.5 minutes per 100 million rows. That is an extrapolation from one machine,
+not a bound: many compact parts, busy or slower storage take longer.
+
+Check completion in the Logbird database:
+
+```sql
+SELECT mutation_id, is_done, parts_to_do, latest_fail_reason FROM system.mutations
+WHERE database = currentDatabase() AND table = 'events' AND command LIKE '%idx_received_at%';
+```
+
+The migration is recorded as applied once both statements were submitted, so a later `ch:migrate` does not run it
+again. If `is_done` stays 0, first check whether the original mutation is still running (`parts_to_do` falling): a
+part failure can leave it active and retrying, and reissuing then queues duplicate work. Fix any cause shown in
+`latest_fail_reason` (a mutation cancelled with `KILL MUTATION` may show none). Once no materialization of
+`idx_received_at` is active, reissue `ALTER TABLE events MATERIALIZE INDEX idx_received_at SETTINGS mutations_sync = 0`;
+repeating it is safe for event data, though it repeats the physical work.
+
+Known limit: during a large historical import (old event times arriving now), a slice that overlaps the import's
+arrival window can still read granules the import touched whose arrival range overlaps the slice. In the measured
+import (one batch stream over about five minutes) every such granule overlapped it, so the index gave no gain. Draining such
+a slice in small pages repeats that read per page (see #209 for measurements), so larger pages mean fewer repeated
+reads during catch-up.
 
 ### Upgrading to immutable ids
 

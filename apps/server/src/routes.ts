@@ -2,6 +2,7 @@
 import { compileQuery, projectStats, retentionStats, validateSql } from '@logbird/clickhouse';
 import {
   API_KEY_SCOPES,
+  apiErrorSchema,
   apiKeySchema,
   createApiKeyResponseSchema,
   createApiKeySchema,
@@ -13,16 +14,17 @@ import {
   projectSchema,
   retentionStatusQuerySchema,
   retentionStatusSchema,
+  rollApiKeySchema,
   savedViewSchema,
   updateProjectSchema,
   updateWorkspaceSchema,
   workspaceSchema,
 } from '@logbird/contracts';
-import { type Prisma, prisma, withProjectLock } from '@logbird/database';
+import { Prisma, prisma, withProjectLock } from '@logbird/database';
 import { retentionQueue } from '@logbird/worker/queue';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { Hono } from 'hono';
-import { validator } from 'hono-openapi';
+import { resolver, validator } from 'hono-openapi';
 import { z } from 'zod';
 import { clickhouse, purgeProjectEvents, queryClickhouse, settleProjectInserts, stopMaintenance } from './clickhouse';
 import { beginDestructiveMaintenance, reconcileDestructiveMaintenance } from './destructive-maintenance';
@@ -42,10 +44,11 @@ async function activeOrganization(c: import('hono').Context<AppEnv>) {
     throw new ApiError(403, 'organization_required', 'Select an organization you belong to.');
   return id;
 }
+const rollKeyRequestSchema = (await resolver(rollApiKeySchema).toOpenAPISchema()).schema;
 function auditApiKey(
   c: import('hono').Context<AppEnv>,
   action: 'api_key.created' | 'api_key.revoked',
-  key: { id: string; name: string; kind: string; prefix: string },
+  key: { id: string; name: string; kind: string; prefix: string; scope?: unknown; embedOrigins?: string[]; expiresAt?: Date | null },
   project: { id: string; name: string; organizationId: string },
   reason?: 'project_deleted' | 'rotation',
   tx?: Prisma.TransactionClient,
@@ -66,9 +69,13 @@ function auditApiKey(
       ],
       metadata: {
         apiKey: {
-          kind: key.kind,
+          kind: key.scope ? 'scoped-read' : key.kind,
           scope: API_KEY_SCOPES[key.kind as keyof typeof API_KEY_SCOPES],
           prefix: key.prefix,
+          // #138: what the key can read, which browser origins may use its viewer tokens, and when it stops working.
+          ...(key.scope ? { readScope: key.scope as Prisma.InputJsonObject } : {}),
+          ...(key.embedOrigins?.length ? { embedOrigins: key.embedOrigins } : {}),
+          ...(key.expiresAt ? { expiresAt: key.expiresAt.toISOString() } : {}),
           state: action === 'api_key.created' ? 'active' : 'revoked',
           ...(reason ? { reason } : {}),
           ...(replaces ? { replaces: { id: replaces.id, prefix: replaces.prefix } } : {}),
@@ -302,11 +309,25 @@ export const managementRoutes = new Hono<AppEnv>()
     }),
     async (c) => {
       const input = c.req.valid('json');
-      const material = generateApiKey(input.kind);
+      const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
+      if (expiresAt && expiresAt.getTime() <= Date.now()) throw new ApiError(422, 'validation_error', 'expiresAt must be in the future.');
+      // A scoped-read key is stored as a read key with a scope (#138); all read kinds use lb_read_ secrets.
+      const kind = input.kind === 'ingest' ? 'ingest' : 'read';
+      const material = generateApiKey(kind, Boolean(input.scope || expiresAt));
       const key = await withProjectLock(c.get('project').id, () =>
         prisma.$transaction(async (tx) => {
           const key = await tx.apiKey.create({
-            data: { ...input, projectId: c.get('project').id, createdById: c.get('user').id, hash: material.hash, prefix: material.prefix },
+            data: {
+              name: input.name,
+              kind,
+              scope: input.scope ?? Prisma.DbNull,
+              embedOrigins: kind === 'read' ? [...new Set(input.embedOrigins ?? [])] : [],
+              expiresAt,
+              projectId: c.get('project').id,
+              createdById: c.get('user').id,
+              hash: material.hash,
+              prefix: material.prefix,
+            },
             include: creatorSelect,
           });
           await auditApiKey(c, 'api_key.created', key, c.get('project'), undefined, tx);
@@ -319,20 +340,57 @@ export const managementRoutes = new Hono<AppEnv>()
   )
   .post(
     '/projects/:projectId/keys/:keyId/roll',
-    doc('Roll API key: create a replacement with the same name and kind; the old key stays valid until revoked', createApiKeyResponseSchema, 201),
+    routeDoc('Roll API key: create a replacement with the same name and kind; the old key stays valid until revoked', {
+      requestBody: {
+        required: false,
+        description: 'Optional. Without expiresAt the replacement keeps the old key expiry; scope and embed origins are always copied.',
+        content: { 'application/json': { schema: rollKeyRequestSchema, example: { expiresAt: '2027-01-01T00:00:00Z' } } },
+      },
+      responses: {
+        201: {
+          description: 'Replacement key; the secret is shown once',
+          content: { 'application/json': { schema: resolver(createApiKeyResponseSchema) } },
+        },
+        409: {
+          description:
+            'key_revoked: the key is revoked. key_expired: the key has expired; retry with a future expiresAt. key_restricted: the replacement would drop the scope or expiry (database backstop).',
+          content: { 'application/json': { schema: resolver(apiErrorSchema) } },
+        },
+      },
+    }),
     async (c) => {
       const projectId = c.get('project').id;
+      // The body is optional (older clients send none).
+      const raw = await c.req.text();
+      let parsedBody: unknown = {};
+      try {
+        parsedBody = raw.trim() ? JSON.parse(raw) : {};
+      } catch {
+        throw new ApiError(422, 'validation_error', 'Invalid request body.');
+      }
+      const input = rollApiKeySchema.safeParse(parsedBody);
+      if (!input.success) throw new ApiError(422, 'validation_error', 'Invalid request body.', input.error);
+      const requestedExpiry = input.data.expiresAt ? new Date(input.data.expiresAt) : undefined;
+      if (requestedExpiry && requestedExpiry.getTime() <= Date.now()) throw new ApiError(422, 'validation_error', 'expiresAt must be in the future.');
       const created = await withProjectLock(projectId, () =>
         prisma.$transaction(async (tx) => {
           const old = await tx.apiKey.findFirst({ where: { id: c.req.param('keyId'), projectId } });
           if (!old) throw new ApiError(404, 'not_found', 'API key not found.');
           if (old.revokedAt) throw new ApiError(409, 'key_revoked', 'This key is already revoked. Create a new key instead.');
-          const material = generateApiKey(old.kind);
+          // A replacement never outlives the key it replaces unless the roll says so explicitly (#138).
+          const expiresAt = requestedExpiry ?? old.expiresAt;
+          if (expiresAt && expiresAt.getTime() <= Date.now())
+            throw new ApiError(409, 'key_expired', 'This key has expired. Pass a new expiresAt to roll it, or create a new key.');
+          const material = generateApiKey(old.kind, Boolean(old.scope || expiresAt));
           const key = await tx.apiKey.create({
             data: {
               projectId,
               name: old.name,
               kind: old.kind,
+              // Rolling copies what the key can read, where its tokens work and when it expires (#138).
+              scope: old.scope ?? Prisma.DbNull,
+              embedOrigins: old.embedOrigins,
+              expiresAt,
               hash: material.hash,
               prefix: material.prefix,
               createdById: c.get('user').id,
