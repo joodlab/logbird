@@ -98,3 +98,13 @@ export function previousWindow(range: string): { from: string; to: string } {
   const len = r.toMs - r.fromMs;
   return { from: new Date(r.fromMs - len).toISOString(), to: r.from };
 }
+
+/**
+ * A relative range that covers everything since `firstSeenIso` (whole days, plus one so the first event is inside),
+ * for an entity's full history. Relative, so live tail and "now" keep working; the string only changes once a day.
+ */
+export function historyRange(firstSeenIso: string, now = Date.now()): string {
+  const first = Date.parse(firstSeenIso);
+  if (Number.isNaN(first)) return '90d';
+  return `${Math.max(1, Math.ceil((now - first) / UNIT_MS.d) + 1)}d`;
+}

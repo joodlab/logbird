@@ -47,6 +47,8 @@ interface ExplorerProps {
   embedded?: boolean;
   /** Offer SQL mode. Off for embedded timelines: their locked base filter is query language. */
   allowSql?: boolean;
+  /** How to name the range in counts and empty states, when the range string is not what the reader chose ("All history"). */
+  rangeLabel?: string;
   className?: string;
 }
 
@@ -83,9 +85,11 @@ export function Explorer({
   baseLabel,
   embedded = false,
   allowSql = !embedded && !baseQuery,
+  rangeLabel: rangeLabelOverride,
   className,
 }: ExplorerProps) {
   const { q, range, columns, ev, live } = state;
+  const rangeName = rangeLabelOverride ?? rangeLabel(range);
   const lang: QueryLang = allowSql && state.lang === 'sql' ? 'sql' : 'query';
   // The base filter (an entity or support agent) must constrain all of `q`, even one with a top-level OR.
   const effectiveQ = andQuery(baseQuery ?? '', q);
@@ -265,11 +269,11 @@ export function Explorer({
       description={
         q ? (
           <>
-            Nothing in <span className="font-medium text-foreground">{rangeLabel(range).toLowerCase()}</span> matches{' '}
+            Nothing in <span className="font-medium text-foreground">{rangeName.toLowerCase()}</span> matches{' '}
             <span className="font-mono text-foreground">{q}</span>. Try a wider range or remove a filter.
           </>
         ) : (
-          `No events in ${rangeLabel(range).toLowerCase()}. Widen the range, or send events with your ingest key.`
+          `No events in ${rangeName.toLowerCase()}. Widen the range, or send events with your ingest key.`
         )
       }
       icon={SearchXIcon}
@@ -447,7 +451,7 @@ export function Explorer({
               'Searching…'
             ) : (
               <>
-                <span className="font-medium text-foreground">{totalCapped ? '10,000+' : formatNumber(total)}</span> events · {rangeLabel(range)}
+                <span className="font-medium text-foreground">{totalCapped ? '10,000+' : formatNumber(total)}</span> events · {rangeName}
                 {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>

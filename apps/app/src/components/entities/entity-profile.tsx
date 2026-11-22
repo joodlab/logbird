@@ -26,8 +26,9 @@ import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
 import { andQuery, formatTerm } from '@/lib/query-language';
-import { rangeLabel } from '@/lib/range';
+import { historyRange, rangeLabel } from '@/lib/range';
 import { useDocumentTitle } from '@/lib/use-document-title';
+import { useRange } from '@/lib/use-range';
 
 const RELATED_LABEL: Record<EntityKind, string> = { actor: 'Actors', tenant: 'Tenants', executor: 'Executors', target: 'Records' };
 
@@ -53,6 +54,9 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   const lang = timeline.lang ?? 'query';
   const who = whoFilter(timeline.q, lang);
   const onWho = (next: WhoFilter) => onTimelineChange({ q: withWhoFilter(timeline.q, next, lang), ev: undefined });
+  // The history shows everything this entity did unless the reader picked a range; the charts follow the picker.
+  const { explicit: rangeChosen, clearRange } = useRange();
+  const timelineRange = rangeChosen ? timeline.range : p ? historyRange(p.entity.firstSeen) : undefined;
 
   if (profile.isError && !p) {
     const notFound = profile.error instanceof ApiRequestError && profile.error.status === 404;
@@ -136,7 +140,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
               name={p?.entity.name || displayId}
               projectId={projectId}
               query={baseQuery}
-              range={timeline.range}
+              range={timelineRange ?? timeline.range}
             />
             <Button
               nativeButton={false}
@@ -166,8 +170,70 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
           total={p ? outcomeTotal : undefined}
         />
 
+        <section aria-labelledby="entity-history" className="flex flex-col overflow-hidden rounded-xl border bg-card shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-4 py-3">
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <h2 className="font-medium text-sm" id="entity-history">
+                History
+              </h2>
+              <div className="min-h-4 text-muted-foreground text-xs">
+                {!p ? (
+                  <Skeleton className="h-4 w-56" />
+                ) : rangeChosen ? (
+                  <>
+                    {rangeLabel(timeline.range)}, from the time range above ·{' '}
+                    <button className="font-medium text-foreground underline-offset-2 hover:underline" onClick={clearRange} type="button">
+                      Show all {formatNumber(p.entity.events)} events
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    All {formatNumber(p.entity.events)} event{p.entity.events === 1 ? '' : 's'} since{' '}
+                    <Timestamp format="date" iso={p.entity.firstSeen} />, newest first
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              {(support?.support ?? 0) > 0 || who !== 'all' ? <WhoSegmentedControl kind={kind} onWho={onWho} who={who} /> : null}
+              <button
+                className="text-muted-foreground text-xs hover:text-foreground"
+                onClick={() =>
+                  navigate({
+                    to: '/p/$projectId/events',
+                    params: { projectId },
+                    search: { range: timelineRange ?? timeline.range, q: andQuery(baseQuery, timeline.q) },
+                  })
+                }
+                type="button"
+              >
+                Open in the explorer →
+              </button>
+            </div>
+          </div>
+          <div className="flex h-[600px] min-h-0 flex-col">
+            {timelineRange ? (
+              <Explorer
+                baseLabel={`${kind}: ${p?.entity.name || displayId}`}
+                baseQuery={baseQuery}
+                embedded
+                onChange={onTimelineChange}
+                projectId={projectId}
+                rangeLabel={rangeChosen ? undefined : 'All history'}
+                state={{ ...timeline, range: timelineRange }}
+              />
+            ) : (
+              <div className="flex flex-col gap-2 p-4">
+                <Skeleton className="h-9 w-full" />
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-64 w-full" />
+              </div>
+            )}
+          </div>
+        </section>
+
         <div className="grid gap-3 lg:grid-cols-[1fr_320px]">
-          <Panel description="Click a band to filter the timeline below" title="Activity">
+          <Panel description={`${rangeLabel(timeline.range)} · click a band to filter the history`} title="Activity">
             <div className="p-3 pb-2">
               {p ? (
                 <OutcomeAreaChart
@@ -238,36 +304,6 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
 
         {p && p.related.length > 0 ? <Related projectId={projectId} related={p.related} /> : null}
       </div>
-
-      <section aria-label="Timeline" className="flex flex-col border-t">
-        <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-6">
-          <h2 className="font-medium text-sm">Timeline</h2>
-          {(support?.support ?? 0) > 0 || who !== 'all' ? <WhoSegmentedControl kind={kind} onWho={onWho} who={who} /> : null}
-          <button
-            className="text-muted-foreground text-xs hover:text-foreground"
-            onClick={() =>
-              navigate({
-                to: '/p/$projectId/events',
-                params: { projectId },
-                search: (prev) => ({ range: prev.range, q: andQuery(baseQuery, timeline.q) }),
-              })
-            }
-            type="button"
-          >
-            Open full explorer →
-          </button>
-        </div>
-        <div className="flex h-[640px] min-h-0 flex-col">
-          <Explorer
-            baseLabel={`${kind}: ${p?.entity.name || displayId}`}
-            baseQuery={baseQuery}
-            embedded
-            onChange={onTimelineChange}
-            projectId={projectId}
-            state={timeline}
-          />
-        </div>
-      </section>
     </div>
   );
 }
