@@ -86,8 +86,8 @@ it('delivers late audit events once, retries across workers, signs tests and dis
         url,
         cursorReceivedAt: time(-100_000),
         scopeTenantId: 't1',
-        scopeTargetType: 'order',
-        scopeTargetId: 'target-1',
+        scopeTargetType: 'website',
+        scopeTargetId: 'site_a',
         filterQuery: 'action:qa.deliver',
         secrets: {
           create: [{ ciphertext: encryptWebhookSecret(primary, key), expiresAt: time(60_000) }, { ciphertext: encryptWebhookSecret(rotated, key) }],
@@ -101,7 +101,7 @@ it('delivers late audit events once, retries across workers, signs tests and dis
           id: eventId,
           action: 'qa.deliver',
           tenant: { id: 't1' },
-          targets: [{ type: 'order', id: 'target-1' }],
+          targets: [{ type: 'website', id: 'site_a' }],
           ...overrides,
         },
         { projectId: id, receivedAt },
@@ -110,6 +110,10 @@ it('delivers late audit events once, retries across workers, signs tests and dis
       return normalized.row;
     };
     const first = row('newer-visible', time(-50_000));
+    // Store both the raw numeric token and its exact public attribute projection.
+    const numericId = '9876543210987654321';
+    first.payload = `${first.payload.slice(0, -1)},"numericId":${numericId}}`;
+    first.attributes = { ...first.attributes, numericId };
     const delayed = row('late-insert', lateTime);
     await prisma.ingestReceipt.create({
       data: { projectId: id, organizationId: id, eventId: delayed.event_id, eventAt: lateTime, receivedAt: lateTime, fingerprint: 'qa-receipt' },
@@ -120,8 +124,8 @@ it('delivers late audit events once, retries across workers, signs tests and dis
       row('wrong-action', time(-49_000), { action: 'qa.discard' }),
       row('different-targets', time(-49_000), {
         targets: [
-          { type: 'order', id: 'other' },
-          { type: 'invoice', id: 'target-1' },
+          { type: 'website', id: 'x' },
+          { type: 'page', id: 'site_a' },
         ],
       }),
     ]);
@@ -138,6 +142,7 @@ it('delivers late audit events once, retries across workers, signs tests and dis
     await tick();
     await tick();
     expect(requests.map(({ headers }) => headers['webhook-id']).sort()).toEqual(['late-insert', 'newer-visible']);
+    expect(requests.find(({ headers }) => headers['webhook-id'] === first.event_id)?.payload).toContain(`"numericId":"${numericId}"`);
     for (const request of requests) {
       expect((request.headers['webhook-signature'] as string).split(' ')).toHaveLength(2);
       for (const secret of [primary, rotated])
@@ -198,6 +203,14 @@ it('delivers late audit events once, retries across workers, signs tests and dis
       ],
     });
     expect(requests.at(-1)?.headers['webhook-id']).toBe(stranded.eventId);
+
+    const missing = await prisma.webhookDelivery.create({
+      data: { endpointId: endpoint.id, eventId: 'no-stored-row', receivedAt: time(-50_000), expiresAt: time(86_400_000) },
+    });
+    const beforeMissing = requests.length;
+    await tick();
+    expect(await log(missing.id)).toMatchObject({ status: 'failed', attempts: [{ error: 'event_unavailable' }] });
+    expect(requests).toHaveLength(beforeMissing);
 
     const gone = await ping();
     responses.push(410);
