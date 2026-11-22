@@ -8,6 +8,7 @@
 
 import { GITHUB_PUBLIC } from '../env';
 import { CLOUD_OPEN } from './cloud';
+import { firstRelease, latestRelease, NO_RELEASES } from './releases';
 
 export const ACCESSED = '2026-11-07';
 
@@ -60,11 +61,20 @@ const src = (id: string, title: string, url: string, also?: string[]): Compariso
   accessed: ACCESSED,
 });
 
+/** `2026-11-22` as `22 Nov 2026`, the date style of the comparison tables, without locale data. */
+const shortDate = (iso: string) => {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const [year, month, day] = iso.split('-').map(Number);
+  return `${day} ${months[(month ?? 1) - 1]} ${year}`;
+};
+
 const range = (prefix: string, from: number, to: number) => Array.from({ length: to - from + 1 }, (_, index) => `${prefix}${from + index}`);
 
 // Nobody can self-host before the source opens, so the cell says so until WEB_GITHUB_PUBLIC=true.
 const LOGBIRD_SELF_HOST = GITHUB_PUBLIC
-  ? 'Yes: Docker Compose or Coolify, with published images'
+  ? latestRelease
+    ? 'Yes: Docker Compose or Coolify, with published images'
+    : 'Yes: Docker Compose or Coolify, built from source'
   : 'Planned: Docker Compose or Coolify, when the source opens';
 // Licence and hosting cells follow the same availability state.
 const LOGBIRD_SOURCE = GITHUB_PUBLIC ? 'MIT; source on GitHub' : 'MIT; source opens publicly soon';
@@ -125,7 +135,10 @@ const retraced: Comparison = {
     { label: 'Pricing', logbird: LOGBIRD_PRICING, them: 'No pricing page found', sourceIds: ['S8'] },
     {
       label: 'Latest release',
-      logbird: 'Not released yet (0.1 line)',
+      logbird:
+        latestRelease && firstRelease
+          ? `v${latestRelease.version}, ${shortDate(latestRelease.date)}; first release v${firstRelease.version}, ${shortDate(firstRelease.date)}`
+          : NO_RELEASES,
       them: 'v1.13.1, 6 Nov 2024; latest commit on `main` 26 Aug 2025; not archived',
       sourceIds: ['S16', 'S17'],
     },
@@ -134,7 +147,7 @@ const retraced: Comparison = {
     'You want to **embed an audit log viewer in your own React app**, so customers can browse their own events.',
     "Your customers' IT teams need a **programmatic API of their own** to pull their events.",
     'You prefer **Apache-2.0**, or you already run Postgres and Elasticsearch and want the audit log there too.',
-    "You want a project with **a release history** behind it. Logbird hasn't made its first release yet.",
+    `You want a project with **a long release history** behind it. ${firstRelease ? `Logbird's first release was v${firstRelease.version}, on ${shortDate(firstRelease.date)}.` : NO_RELEASES}`,
   ],
   chooseLogbird: [
     'You want to **send any event shape** and get a recommended envelope without a fixed schema.',
@@ -261,7 +274,6 @@ const workos: Comparison = {
       them: "Export API; Widgets GraphQL API to search one organization's events",
       sourceIds: ['W10', 'W12'],
     },
-    { label: 'Storage engine', logbird: LOGBIRD_STORAGE, them: 'Not stated in public docs', sourceIds: [] },
     {
       label: 'Pricing',
       logbird: LOGBIRD_PRICING,
@@ -311,7 +323,7 @@ const workos: Comparison = {
     src('W13', 'Pricing page, Audit Logs section', 'https://workos.com/pricing'),
   ],
   unverified:
-    'Whether `context.location`, `context.user_agent` and actor or target sub-fields are each required; how the per-million-events charge relates to the 30-day default; event size and rate limits; Admin Portal link expiry and filter options; whether the Widgets GraphQL API is generally available; storage engine and data-residency options.',
+    'Which storage engine holds the events; whether `context.location`, `context.user_agent` and actor or target sub-fields are each required; how the per-million-events charge relates to the 30-day default; event size and rate limits; Admin Portal link expiry and filter options; whether the Widgets GraphQL API is generally available; storage engine and data-residency options.',
 };
 
 const pangea: Comparison = {
@@ -374,7 +386,6 @@ const pangea: Comparison = {
       them: 'Embeddable React component, `@pangeacyber/react-mui-audit-log-viewer`, wired to your backend',
       sourceIds: ['P9'],
     },
-    { label: 'Storage engine', logbird: LOGBIRD_STORAGE, them: 'Not stated in public docs', sourceIds: [] },
     {
       label: 'Pricing',
       logbird: LOGBIRD_PRICING,
@@ -441,7 +452,7 @@ const pangea: Comparison = {
     ),
   ],
   unverified:
-    "Whether CrowdStrike still sells Secure Audit Log to new customers; the pricing model (the public billing page describes credit-based pay-as-you-go with a monthly credit, but doesn't render the figures, which exist only in the page's script source, and signup now redirects to CrowdStrike); the signing and hash algorithms; the storage engine; whether `message` is required in the default template.",
+    "Which storage engine holds the events; whether CrowdStrike still sells Secure Audit Log to new customers; the pricing model (the public billing page describes credit-based pay-as-you-go with a monthly credit, but doesn't render the figures, which exist only in the page's script source, and signup now redirects to CrowdStrike); the signing and hash algorithms; the storage engine; whether `message` is required in the default template.",
 };
 
 const bemi: Comparison = {

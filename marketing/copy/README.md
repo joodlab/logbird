@@ -99,7 +99,7 @@ run it on your own servers. <!-- source: docs/brand.md §2 (cloud clause "or our
 | SQL mode runs as a separate read-only ClickHouse user with row policies bound to one project | `docs/SPEC.md` §5.1.2, `docs/query-language.md` |
 | Logbird records its own management actions in a workspace activity stream | `docs/SPEC.md` §1.5 |
 | First-party integrations: Hono, TanStack Start, Vue, Nuxt; worker helper `jobAudit` | `docs/integrations.md`, `packages/sdk/README.md` |
-| Self-host: sequential `docker compose build`, then `docker compose up -d --no-build`, Compose ≥ 2.24.4; Coolify; external Postgres/ClickHouse/Redis or Dragonfly; Caddy TLS | `docs/self-hosting.md`, `docs/coolify.md` |
+| Self-host: pull the four published role images (default; source builds are optional), then `docker compose up -d --no-build`, Compose ≥ 2.24.4; Coolify; external Postgres/ClickHouse/Redis or Dragonfly; Caddy TLS | `docs/self-hosting.md`, `docs/coolify.md` |
 | Suggested starting VM: 4 vCPU, 8 GB RAM, SSD — an initial allocation, not measured capacity | `docs/self-hosting.md` §Sizing |
 
 **Not used on purpose:** performance numbers of any kind (query latency, events per second, "300,000 events in
@@ -108,7 +108,7 @@ can be added when it lands, each with its source.
 
 ## Self-host CTA rule
 
-Nobody outside the team can self-host until the repository is public (no published images, no npm packages). While
+The repository is public and release images are on GHCR; the npm packages aren't published yet. While
 `WEB_GITHUB_PUBLIC` is false the site must not offer a clone/compose quickstart or say "Self-host … today":
 
 - Secondary CTA: **"Self-host when the source opens"** → `/contact?interest=self-host` (the waitlist, self-host preselected).
@@ -151,13 +151,16 @@ These variants are **not** used anywhere on the site. The owner may approve them
 - **Domain (decided).** The public origin is `logbird.joodlab.com`; copy writes it wherever a domain is needed and
   never invents another one. No mailbox is derived from it: contact addresses come only from `WEB_SECURITY_EMAIL` and
   `WEB_CONTACT_EMAIL`, with no default. The engineer keeps the domain in one config value (`apps/web/src/env.ts`).
-- **Public repository timing.** All copy says "the repository opens publicly soon".
+- **Public repository (decided).** The repository is public; copy that depends on it follows `WEB_GITHUB_PUBLIC` (see the
+  self-host CTA rule above).
 - **npm packages.** `@logbird/sdk` and the integrations are not on npm yet (registry returned 404 on 2026-11-07;
-  `docs/roadmap.md` P0-3). Install lines are labelled "after the first npm release".
+  `docs/roadmap.md` P0-3). The public build shows the source install, labelled "From source (not on npm yet)".
 - **Docs links.** Pages link to repository docs (for example `docs/concepts.md`). Those links resolve once the
   repository is public or a docs site exists. Until then, the engineer can hide them or point them at `/developers`.
-- **Security contact.** `SECURITY.md` still lists `SECURITY_CONTACT_EMAIL (not configured)`. The security page needs
-  that address before launch.
+- **Security contact.** `SECURITY.md` sends reports through GitHub private vulnerability reporting, with a fallback
+  route. On the website, `WEB_SECURITY_EMAIL` sets the security mailbox; without it, pages ask researchers to request a
+  private channel through the contact form, and the site stays a release blocker (noindex; the Cloudflare package
+  refuses to build) until it is set (`apps/web/src/lib/release.ts`).
 
 ## Captures
 

@@ -248,6 +248,12 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
 
 ## Upgrades and backups
 
+Run every `docker compose` command below with the active installation's invocation: its project (`-p`), env file
+(`--env-file`), Compose files (`-f`, including any override) and TLS profile. After a restore cutover that is the
+restored project's invocation (see the wrapper in Cut over below). A source-build installation keeps
+`docker-compose.build.yml` in that invocation: in step 5 it builds the four roles from the new revision one at a time
+instead of pulling, and the image-tag check doesn't apply.
+
 1. Block browser/SDK ingress and run `docker compose stop app server worker`.
    The worker has a five-minute grace period to finish its current job; wait for
    stop to complete and inspect logs if it needed a forced kill.
@@ -255,10 +261,19 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
 3. Record `git rev-parse HEAD` and `docker compose images` with the backup receipt.
 4. Fetch/select the tested revision: `git fetch origin`, then
    `git switch --detach <tested-sha>`. Preserve local changes first.
-5. Re-run `sh scripts/selfhost-init.sh` (it preserves existing values and warns if
-   `.env` still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird` namespace; remove that
-   line so the default `ghcr.io/joodlab` applies). Set LOGBIRD_VERSION to the tested
-   release, run `docker compose pull`, then `docker compose up -d --no-build`.
+5. Re-run `sh scripts/selfhost-init.sh <active env file>` (default `.env`; after a
+   restore cutover, the env file the installation now runs with). It preserves existing
+   values and warns if the file still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird`
+   namespace; remove that line so the default `ghcr.io/joodlab` applies. It keeps the
+   existing `LOGBIRD_VERSION`, and that value overrides the new revision's Compose
+   default, so set it to the tested release without the `v` (tag `v0.2.0` means
+   `LOGBIRD_VERSION=0.2.0`). A `LOGBIRD_VERSION` or `LOGBIRD_IMAGE_REGISTRY` exported in
+   your shell overrides the env file: unset it, or set it to the same values. Run
+   `docker compose config --images` with the installation's project, env-file and `-f`
+   flags and check the full names: all four must be
+   `<registry>/logbird-<role>:<version>`, with `ghcr.io/joodlab` as the default
+   registry, before you run
+   `docker compose pull` and `docker compose up -d --no-build`.
    One-shot migrate gates new API/worker startup; failure blocks startup.
 6. Verify readiness, SMTP login, retained events/settings/keys and retention
    receipts before reopening ingress. After a failed receipt the next successful

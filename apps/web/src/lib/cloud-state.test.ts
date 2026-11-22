@@ -48,6 +48,7 @@ describe('Cloud state', () => {
     expect(text(html)).toContain('docker compose pull');
     expect(text(html)).not.toMatch(/no images are published|builds? from source;/i);
     expect(html).toContain('href="https://github.example.test/acme/logbird/blob/master/docs/coolify.md"');
-    expect(text(html)).toContain('ghcr.io/acme');
+    // The registry Compose pulls from, not one derived from the configured repository URL (a fork or mirror).
+    expect(text(html)).toMatch(/images for amd64 and arm64 from GHCR/);
   }, 15_000);
 });

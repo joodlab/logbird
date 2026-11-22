@@ -4,7 +4,7 @@ import { Rich } from '../components/marketing/rich';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import { buildLog, publicationDate as longDate, newestFirst } from '../lib/publications';
-import { byVersionDesc, type Release, releases, releaseUrl } from '../lib/releases';
+import { byVersionDesc, NO_RELEASES, type Release, releases, releaseUrl } from '../lib/releases';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/changelog')({ head: () => pageHead('/changelog'), component: ChangelogPage });
@@ -23,7 +23,9 @@ function ChangelogPage() {
       <PageHero
         eyebrow="Changelog"
         lead={
-          <Rich text="Two lists live here. **Releases** are the versions published on GitHub, with the highlights from the repository's `CHANGELOG.md`; each links to its full notes and upgrade steps. The **build log** is a short post for each day of work, showing what we shipped with a real capture from the product." />
+          <Rich
+            text={`Two lists live here. **Releases** are the versions published on GitHub, with the highlights from the repository's \`CHANGELOG.md\`${GITHUB_PUBLIC && GITHUB_URL ? '; each links to its full notes and upgrade steps' : ''}. The **build log** holds short updates on what we shipped, with a capture from the product when there is one.`}
+          />
         }
         title="What changed, and when."
       />
@@ -67,7 +69,7 @@ function ChangelogPage() {
             })}
           </ol>
         ) : (
-          <Empty>Nothing has been released yet. The first release will list everything since the start of the project.</Empty>
+          <Empty>{`${NO_RELEASES} The first release will list everything since the start of the project.`}</Empty>
         )}
       </Section>
 
