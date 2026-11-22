@@ -188,6 +188,25 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior, Actio
     }
 
     /// <summary>
+    /// Settles an event and counts it in one step under the queue lock, the lock flush waiters are added and completed
+    /// under, so no flush can see the event settled before it is counted. <paramref name="count"/> must only update
+    /// counters. Returns false when the event was already settled or abandoned.
+    /// </summary>
+    public bool Settle(QueuedEvent item, Action count)
+    {
+        lock (_gate)
+        {
+            if (!item.TrySettle())
+            {
+                return false;
+            }
+
+            count();
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Registers a flush for everything queued so far, sharing the waiter of a caller with the same target. Returns null
     /// when nothing queued before now is outstanding.
     /// </summary>
