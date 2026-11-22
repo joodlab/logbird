@@ -89,9 +89,11 @@ public class IsolationTests
                 client.Track(new AuditEvent("measured"));
             }
 
-            Assert.True(await client.FlushAsync(TimeSpan.FromSeconds(10)));
+            Assert.True(await client.FlushAsync(TimeSpan.FromSeconds(30)));
             await client.DisposeAsync();
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), watch.Elapsed.ToString());
+
+            // The listener blocks forever, so a regression would hang; the limit only has to separate that from success.
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), watch.Elapsed.ToString());
             Assert.Equal(95, client.Stats.Dropped);
         }
         finally

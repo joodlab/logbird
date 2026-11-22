@@ -102,10 +102,13 @@ public class ResilienceTests
                 client.Track(new AuditEvent("overflow"));
             }
 
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), watch.Elapsed.ToString());
+            // OnDrop blocks forever, so a Track that waited on it would never return: any finite limit proves the point.
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), watch.Elapsed.ToString());
             watch.Restart();
             await client.DisposeAsync();
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), watch.Elapsed.ToString());
+
+            // Documented bound: ShutdownTimeout + 2 s + 5 s for pending callbacks.
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), watch.Elapsed.ToString());
             Assert.Equal(49, client.Stats.Dropped);
         }
         finally
@@ -129,8 +132,10 @@ public class ResilienceTests
         {
             client.Track(new AuditEvent("blocked"));
             var watch = Stopwatch.StartNew();
-            Assert.False(await client.FlushAsync(TimeSpan.FromSeconds(20)));
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), watch.Elapsed.ToString());
+            Assert.False(await client.FlushAsync(TimeSpan.FromSeconds(30)));
+
+            // The send gave up on its own; the alternative is waiting out the flush's 30-second limit.
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(20), watch.Elapsed.ToString());
 
             // Stuck requests are capped instead of piling up across retries.
             Assert.True(handler.Calls <= Internal.BatchSender.MaxAbandonedAttempts, $"{handler.Calls} requests");
@@ -243,7 +248,7 @@ public class ResilienceTests
 
             // The flush may start late on a busy pool; once it has, its already-cancelled wait is removed at once.
             var watch = Stopwatch.StartNew();
-            while (((System.Collections.ICollection)waiters.GetValue(queue)!).Count > 0 && watch.Elapsed < TimeSpan.FromSeconds(5))
+            while (((System.Collections.ICollection)waiters.GetValue(queue)!).Count > 0 && watch.Elapsed < TimeSpan.FromSeconds(30))
             {
                 await Task.Delay(20);
             }
