@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rangePhrase } from './range';
+import { historyRange, rangePhrase } from './range';
 
 describe('rangePhrase', () => {
   it('reads presets as a phrase with "the"', () => {
@@ -12,5 +12,18 @@ describe('rangePhrase', () => {
     const phrase = rangePhrase('2026-11-01T09:00:00.000Z..2026-11-07T09:00:00.000Z');
     expect(phrase).not.toMatch(/^the /);
     expect(phrase).not.toMatch(/\bnov\b/);
+  });
+});
+
+describe('historyRange', () => {
+  const now = Date.parse('2026-11-22T12:00:00.000Z');
+
+  it('covers everything since the first event, in whole days plus one', () => {
+    expect(historyRange('2026-11-22T11:00:00.000Z', now)).toBe('2d');
+    expect(historyRange('2026-09-24T08:00:00.000Z', now)).toBe('61d');
+  });
+
+  it('falls back to 90 days for an unreadable first-seen time', () => {
+    expect(historyRange('not a date', now)).toBe('90d');
   });
 });
