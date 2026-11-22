@@ -51,10 +51,13 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
 - Ingest also caps ids (256 characters) and replaces invalid Unicode. Scope ids are refused unless they are already
   in stored form (at most 250 characters, no surrounding whitespace, no U+FFFD), so a capped or repaired stored id can
   never match a scope.
-- An id sent as a JSON number is not stored as an id today, so no scope sees it. With the change above, a numeric
-  identifier is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are stored as `"42"`); a
-  string identifier is stored exactly as sent. A scope written as `"42"` then matches the number 42 in any spelling
-  and the string `"42"`, not the string `"42.0"`.
+- An id sent as a JSON number is stored as one canonical text of its exact value: its plain decimal in the usual
+  case (42, 42.0 and 4.2e1 are all stored as `"42"`), scientific notation for very large or very small values
+  (the number 1e33 is stored as `"1e33"`); see [numbers and ids](integrating-a-backend.md#numbers-and-ids). A scope
+  written as `"42"` therefore matches a tenant sent as the number 42 in any spelling and as the string `"42"`, not
+  the string `"42.0"`: a numeric id and a string id with the same stored text are one tenant and one scope. A string
+  holding the expanded digits of 1e33 is a different tenant from the number. Events stored before 0.2.0 whose
+  tenant id was a number were not indexed under a tenant, so no scope sees them. Before 0.2.0, Logbird indexed a numeric target id as an empty string, so that target cannot satisfy a scope naming its numeric id, but another target can independently satisfy the scope. A numeric actor id does not affect a tenant-only scope.
 - A read-only operator query that counts stored ids differing from the sent ones ships with the ingest change.
 
 ## Where the scope applies
@@ -99,7 +102,7 @@ POST /api/projects/:projectId/keys
 - `embedOrigins` (read kinds only): browser origins allowed to use this key's viewer tokens, for example
   `https://cms.example.com`. Exact origins, lowercase, no path.
 - `expiresAt` (optional, in the future): an expired key is rejected like a revoked one, and so are its tokens.
-- **Check the response before you hand out a secret.** A server older than this release (during a rolling upgrade, or
+- **Check the response before you hand out a secret.** A server older than 0.2.0 (during a rolling upgrade, or
   after a rollback) ignores `expiresAt` on `read` and `ingest` keys and returns a permanent key, and ignores `expiresAt` on
   a roll. Compare the returned key's `kind`, `scope` and `expiresAt` with what you asked for; if they differ, revoke it.
   Older servers refuse `kind: "scoped-read"` outright (422).
@@ -107,8 +110,8 @@ POST /api/projects/:projectId/keys
   origins and keeps the old key's absolute expiry; pass `{ "expiresAt": "…" }` to give the replacement a different
   one. Rolling an expired key requires a new `expiresAt` (409 `key_expired` otherwise). In the console, **Roll** asks
   whether the replacement keeps the current expiry or gets a new one, and offers only a new one for an expired key.
-  A database trigger refuses any replacement that drops the scope or the expiry: this release answers 409
-  `key_restricted`; an older release (after a rollback) fails that roll with a server error and creates nothing.
+  A database trigger refuses any replacement that drops the scope or the expiry: 0.2.0 and later answer
+  409 `key_restricted`; an older release (after a rollback) fails that roll with a server error and creates nothing.
 - `api_key.created` and `api_key.revoked` in workspace activity record the scope, origins and expiry.
 
 ## Viewer tokens
