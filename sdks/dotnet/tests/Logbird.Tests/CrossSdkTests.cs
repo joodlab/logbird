@@ -75,7 +75,26 @@ public class CrossSdkTests
             Changes = new List<AuditChange>(),
             Metadata = { ["list"] = new JsonArray(1, "two", null, new JsonObject { ["deep"] = new JsonArray() }) },
         });
+        client.Track(new AuditEvent("numbers.checked")
+        {
+            Id = "0193f2b6-6c00-7abc-8def-0123456789ae",
+            OccurredAt = new DateTimeOffset(2026, 11, 22, 8, 0, 3, TimeSpan.Zero),
+            Metadata =
+            {
+                ["10"] = "a",
+                ["b"] = "x",
+                ["2"] = "y",
+                ["01"] = "z",
+                ["ratio"] = 1.5,
+                ["one"] = 1.00m,
+                ["big"] = 1e21,
+                ["tiny"] = 1e-7,
+                ["neg0"] = -0.0,
+                ["tenth"] = 0.10m,
+                ["max"] = 9_007_199_254_740_991L,
+            },
+        });
         Assert.True(await client.FlushAsync());
-        Assert.Equal(expected, server.Requests.Single().RawEvents);
+        Assert.Equal(expected, server.Requests.SelectMany(r => r.RawEvents).ToArray());
     }
 }

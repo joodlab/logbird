@@ -23,6 +23,13 @@ public enum DropReason
 
     /// <summary>The event could not be prepared, for example because <see cref="LogbirdOptions.BeforeSend"/> threw.</summary>
     Invalid = 5,
+
+    /// <summary>
+    /// An entity identifier cannot be stored exactly as sent (<c>invalid_entity_id</c>): an actor, impersonator,
+    /// executor or tenant id or a target id longer than 256 UTF-16 code units, a target type longer than 64, a lone
+    /// surrogate, or more than 256 targets. Checked before sending, with the same rule as the server.
+    /// </summary>
+    InvalidEntityId = 6,
 }
 
 /// <summary>An event that will not be stored, passed to <see cref="LogbirdOptions.OnDrop"/>.</summary>
@@ -69,6 +76,7 @@ public sealed class DroppedEvent
 /// <param name="Filtered">Events <see cref="LogbirdOptions.BeforeSend"/> chose to skip.</param>
 /// <param name="FailedSends">Batches that failed after all retries and went back to the queue.</param>
 /// <param name="QueueLength">Events currently waiting, including a batch being sent.</param>
+/// <param name="Warnings">Warnings about stored events: surrounding whitespace in an identifier, or a server warning such as an adjusted timestamp.</param>
 public readonly record struct LogbirdStats(
     long Tracked,
     long Delivered,
@@ -76,4 +84,5 @@ public readonly record struct LogbirdStats(
     long Dropped,
     long Filtered,
     long FailedSends,
-    int QueueLength);
+    int QueueLength,
+    long Warnings = 0);

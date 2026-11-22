@@ -216,11 +216,21 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior)
     /// still pending, all under the lock so no flush can observe a half-abandoned state. Returns the abandoned events
     /// (an in-flight event already settled by a response is not included), split into queued and in-flight.
     /// </summary>
-    public (List<QueuedEvent> Queued, List<QueuedEvent> InFlight) Abandon()
+    public (List<QueuedEvent> Queued, List<QueuedEvent> InFlight, List<(TaskCompletionSource<bool> Completion, bool Result)> Waiters) Abandon()
     {
         lock (_gate)
         {
             _abandoned = true;
+
+            // Decide each flush before anything is abandoned: true only if its own events were already settled.
+            var min = MinOutstanding();
+            var waiters = new List<(TaskCompletionSource<bool> Completion, bool Result)>(_waiters.Count);
+            foreach (var waiter in _waiters)
+            {
+                waiters.Add((waiter.Completion, waiter.Target < min));
+            }
+
+            _waiters.Clear();
             var inFlight = new List<QueuedEvent>();
             if (_inFlight is not null)
             {
@@ -245,7 +255,7 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior)
                 }
             }
 
-            return (queued, inFlight);
+            return (queued, inFlight, waiters);
         }
     }
 

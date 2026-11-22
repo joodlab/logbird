@@ -65,13 +65,22 @@ client.track({
   context: {},
   metadata: { list: [1, 'two', null, { deep: [] }] },
 });
+// Number layout and key order follow JavaScript: integer-like keys first (ascending), 1.0 as 1, 1e21 and 1e-7 in
+// exponent form, -0 as 0.
+client.track({
+  id: '0193f2b6-6c00-7abc-8def-0123456789ae',
+  action: 'numbers.checked',
+  occurredAt: '2026-11-22T08:00:03.000Z',
+  context: {},
+  metadata: { '10': 'a', b: 'x', '2': 'y', '01': 'z', ratio: 1.5, one: 1.0, big: 1e21, tiny: 1e-7, neg0: -0, tenth: 0.1, max: 9_007_199_254_740_991 },
+});
 await client.shutdown();
 globalThis.fetch = realFetch;
 
 const events: unknown[] = JSON.parse(body).events;
 // Re-serializing each parsed event keeps key order and escapes, matching what the SDK sent.
 const lines = events.map((event) => JSON.stringify(event));
-if (events.length !== 3 || !lines.every((line) => body.includes(line))) throw new Error('Unexpected TypeScript SDK body shape');
+if (events.length !== 4 || !lines.every((line) => body.includes(line))) throw new Error('Unexpected TypeScript SDK body shape');
 const event = `${lines.join('\n')}\n`;
 if (process.argv.includes('--check')) {
   if (readFileSync(output, 'utf8') !== event) throw new Error(`${output} is stale: run this script without --check`);

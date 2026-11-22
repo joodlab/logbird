@@ -81,6 +81,26 @@ Change values and metadata are JSON (`JsonNode`). Strings, numbers and booleans 
 `ulong` or `decimal` is sent with every digit. `AuditChange.Set` records a new field, `AuditChange.Removed` a deleted
 one, and `AuditChange.Secret("password")` records that a secret changed without storing it.
 
+### Identifiers
+
+Actor, impersonator, executor and tenant ids and each target's type and id are **sent exactly as you give them**:
+never trimmed, truncated or converted. The text is the identity, so `"user_42"` and `" user_42 "` are different
+actors. Before sending, the client applies the server's rule:
+
+- An identifier that cannot be stored as sent drops the event with `DropReason.InvalidEntityId` (reason
+  `invalid_entity_id`): longer than 256 UTF-16 code units (64 for a target type), containing a lone surrogate, or more
+  than 256 targets on one event.
+- Surrounding whitespace is kept and reported as a `LogbirdEventWarning` through `OnError` and the logger.
+- An empty string means the field is absent.
+
+Identifiers are strings in this SDK. For a numeric id, pass `id.ToString(CultureInfo.InvariantCulture)` (for example
+`"42"`, never `"42.0"`); the server stores a numeric identifier as the plain decimal text of its value, so the string
+`"42"` and the number `42` are the same identity, while `"42.0"` is a different one. For a `Guid`, pick one format
+(`guid.ToString()` gives lowercase `d0c4…`) and keep it, because a different format is a different identity.
+
+The server can also attach warnings to stored events (for example an `occurredAt` outside the accepted window, stored
+at receive time); they arrive the same way, as `LogbirdEventWarning`, and are counted in `Stats.Warnings`.
+
 A worker doing work a user requested keeps the user as the `Actor` and sets itself as the `Executor`. Carry the
 `OperationId` (and the request event's id as `ParentEventId`) into background jobs so Logbird can group the request
 with everything it caused.
@@ -106,7 +126,12 @@ var options = new LogbirdOptions
 - A 4xx other than 429 (for example a revoked key) drops the batch (`DropReason.HttpError`) and reports it. So does
   a redirect: the client never follows one, because that would send audit data to another address. If you pass your
   own `HttpClient`, configure its handler with `AllowAutoRedirect = false` as well.
-- `client.Stats` gives counts of tracked, delivered, rejected, dropped and filtered events. The `Logbird` meter
+- `OnDrop`, `OnError` and log messages run in order on a background thread, never on the thread that called `Track`
+  and never on the shutdown path, so a slow callback cannot slow your requests. If the callbacks fall more than
+  `MaxQueueSize` (at least 1,000) notifications behind, further notifications are skipped and counted on the
+  `logbird.notifications.lost` meter; the counters below still record every event. `FlushAsync` returns after the
+  callbacks for what it settled have run.
+- `client.Stats` gives counts of tracked, delivered, rejected, dropped, filtered and warned events. The `Logbird` meter
   publishes the same counts for OpenTelemetry (`logbird.events.*`, `logbird.queue.length`).
 - `await client.FlushAsync()` waits until everything queued so far is settled and returns `false` if delivery failed.
   It never throws. Without a generic host (console apps, .NET Framework services), call
@@ -161,7 +186,8 @@ await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: inv
 EventDetail? detail = await reader.GetAsync(eventId);   // null when it does not exist
 ```
 
-`ForTrail` throws `ArgumentException` for an empty selector (pass `null` to leave one out), so a bug cannot silently
+`ForTrail` throws `ArgumentException` when it has no selector or query, for an empty selector (pass `null` to leave one
+out) and for a value ending in `*` (the query language would read it as a prefix wildcard), so a bug cannot silently
 widen a history search to the whole project. A search filter is not authorization. When you show history to your own customers, check that the signed-in user
 may see the tenant or record first, on every request including next-page requests.
 
@@ -194,6 +220,10 @@ signatures in constant time. It passes the same test vectors as the TypeScript S
 | .NET 8, 9, 10 and later | `net8.0` (trimming and Native AOT compatible) |
 | .NET Framework 4.6.2+ (tested on 4.8) | `netstandard2.0` |
 
-The wire format is byte-for-byte identical to the TypeScript SDK's, including emoji and other non-ASCII text, so an
-event sent from either SDK and replayed from the other is recognised as the same event. Tests serialize the same events
-in both SDKs and compare the bytes.
+The wire format follows the TypeScript SDK byte for byte: field names and order, `JSON.stringify` string escaping
+(emoji and other non-ASCII text stay raw, lone surrogates are escaped, never replaced), JavaScript key order (integer-like
+keys first) and JavaScript number layout (`1.0` as `1`, `1e21` as `1e+21`). An event sent from either SDK and replayed
+from the other is therefore recognised as the same event. Tests serialize the same events in both SDKs and compare the
+bytes, and a live test replays a TypeScript event from C#. Two intended differences: `long`, `ulong` and `decimal`
+values keep every digit (JavaScript cannot represent more than about 16), and `OccurredAt` is always sent as UTC with
+milliseconds (`2026-11-22T08:00:00.123Z`), the form the TypeScript SDK generates by default.

@@ -39,6 +39,33 @@ public class LogbirdDeliveryException : Exception
     public HttpStatusCode? StatusCode { get; }
 }
 
+/// <summary>
+/// A stored event needs attention, reported through <see cref="LogbirdOptions.OnError"/> and the logger. The event was
+/// sent (and, for a server warning, stored); nothing was dropped.
+/// </summary>
+public sealed class LogbirdEventWarning : LogbirdDeliveryException
+{
+    internal LogbirdEventWarning(string eventId, string action, string reason)
+        : base($"Logbird warning for event {eventId} ({action}): {reason}")
+    {
+        EventId = eventId;
+        Action = action;
+        Reason = reason;
+    }
+
+    /// <summary>The event id.</summary>
+    public string EventId { get; }
+
+    /// <summary>The event action.</summary>
+    public string Action { get; }
+
+    /// <summary>
+    /// What to look at, for example <c>surrounding whitespace in actor.id is kept as sent</c> or the server's reason for
+    /// an adjusted <c>occurredAt</c>.
+    /// </summary>
+    public string Reason { get; }
+}
+
 /// <summary>The server stored a batch but rejected some of its events. Each rejected event is also passed to <see cref="LogbirdOptions.OnDrop"/>.</summary>
 public sealed class LogbirdRejectedException : LogbirdDeliveryException
 {

@@ -37,12 +37,18 @@ internal sealed class BatchSender
     internal static readonly TimeSpan MaxSendTime = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan MaxCancelGrace = TimeSpan.FromSeconds(2);
 
+    /// <summary>Requests abandoned after their deadline that have not returned yet; new attempts wait while this is reached.</summary>
+    internal const int MaxAbandonedAttempts = 4;
+
     private readonly HttpClient _http;
     private readonly Uri _eventsUri;
     private readonly AuthenticationHeaderValue _authorization;
     private readonly int _maxRetries;
     private readonly TimeSpan _requestTimeout;
     private readonly Action<QueuedEvent, DropReason, string?> _drop;
+    private readonly Action<QueuedEvent, string> _warn;
+    private readonly Action _progress;
+    private int _abandonedAttempts;
     private readonly Action<Exception> _report;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly Func<double> _random;
@@ -55,6 +61,8 @@ internal sealed class BatchSender
         int maxRetries,
         TimeSpan requestTimeout,
         Action<QueuedEvent, DropReason, string?> drop,
+        Action<QueuedEvent, string> warn,
+        Action progress,
         Action<Exception> report,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         Func<double>? random = null,
@@ -66,6 +74,8 @@ internal sealed class BatchSender
         _maxRetries = maxRetries;
         _requestTimeout = requestTimeout;
         _drop = drop;
+        _warn = warn;
+        _progress = progress;
         _report = report;
         _delay = delay ?? Task.Delay;
         var jitter = new Random();
@@ -155,6 +165,12 @@ internal sealed class BatchSender
                         {
                             Reject(state, attempt, rejected);
                         }
+
+                        if (document.RootElement.ValueKind == JsonValueKind.Object
+                            && document.RootElement.TryGetProperty("warnings", out var warnings))
+                        {
+                            Warn(state, attempt, warnings, unresolved: null);
+                        }
                     }
 
                     state.DeliverRest(attempt);
@@ -171,16 +187,18 @@ internal sealed class BatchSender
                             && errorElement.ValueKind == JsonValueKind.Object
                             && errorElement.TryGetProperty("code", out var code)
                             && code.ValueKind == JsonValueKind.String
-                            && code.GetString() is "ingest_pending" or "ingest_unavailable")
+                            && Text(code) is "ingest_pending" or "ingest_unavailable")
                         {
                             var hasDetails = errorElement.TryGetProperty("details", out var details) && details.ValueKind == JsonValueKind.Object;
                             if (hasDetails && details.TryGetProperty("rejected", out var detailRejected))
                             {
                                 Reject(state, attempt, detailRejected);
+                                _progress();
                             }
 
                             if (hasDetails && CompleteDetails(batch, attempt, details, out var acceptedIds, out var unresolved))
                             {
+                                Warn(state, attempt, details.GetProperty("warnings"), unresolved);
                                 for (var wire = 0; wire < attempt.Length; wire++)
                                 {
                                     var index = attempt[wire];
@@ -200,6 +218,9 @@ internal sealed class BatchSender
                                         break;
                                     }
                                 }
+
+                                // Flushes whose events this response settled need not wait for the rest of the batch.
+                                _progress();
 
                                 if (allAccounted)
                                 {
@@ -274,8 +295,16 @@ internal sealed class BatchSender
     /// </summary>
     private async Task<(HttpResponseMessage? Response, byte[]? Body, Exception? Error)> AttemptAsync(byte[] body, TimeSpan limit, CancellationToken stop)
     {
+        if (Volatile.Read(ref _abandonedAttempts) >= MaxAbandonedAttempts)
+        {
+            // Earlier requests are still stuck in the handler: do not pile up more, treat this like a network error.
+            return (null, null, new TimeoutException("Earlier Logbird requests have not returned; waiting before sending again."));
+        }
+
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stop);
-        var send = SendOnceAsync(body, cancellation.Token);
+
+        // Dispatch on the thread pool: a handler that blocks before returning its task cannot hold the deadline below.
+        var send = Task.Run(() => SendOnceAsync(body, cancellation.Token), CancellationToken.None);
         var first = await Task.WhenAny(send, Task.Delay(limit, stop)).ConfigureAwait(false);
         if (first != send)
         {
@@ -293,9 +322,11 @@ internal sealed class BatchSender
             var grace = limit < MaxCancelGrace ? limit : MaxCancelGrace;
             if (await Task.WhenAny(send, Task.Delay(grace, CancellationToken.None)).ConfigureAwait(false) != send)
             {
+                Interlocked.Increment(ref _abandonedAttempts);
                 _ = send.ContinueWith(
                     late =>
                     {
+                        Interlocked.Decrement(ref _abandonedAttempts);
                         if (late.Status == TaskStatus.RanToCompletion)
                         {
                             late.Result.Response.Dispose();
@@ -393,8 +424,8 @@ internal sealed class BatchSender
             }
 
             // Read everything that can throw before settling, so a malformed reason never settles an unreported event.
-            var reason = reasonElement.GetString();
-            var code = rejection.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String ? codeElement.GetString()! : "rejected";
+            var reason = Text(reasonElement);
+            var code = rejection.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String ? Text(codeElement) : "rejected";
             var index = attempt[(int)wire];
             if (!state.TryReject(index))
             {
@@ -408,6 +439,34 @@ internal sealed class BatchSender
         if (codes.Count > 0)
         {
             _report(new LogbirdRejectedException(codes.Count, codes));
+        }
+    }
+
+    /// <summary>
+    /// Reports the server's per-event warnings (for example an adjusted timestamp or whitespace kept in an identifier).
+    /// Warnings for still-unresolved rows of a 503 are left for the attempt that settles them.
+    /// </summary>
+    private void Warn(State state, int[] attempt, JsonElement warnings, HashSet<long>? unresolved)
+    {
+        if (warnings.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var warning in warnings.EnumerateArray())
+        {
+            if (warning.ValueKind != JsonValueKind.Object
+                || !warning.TryGetProperty("index", out var indexElement)
+                || !TryGetInteger(indexElement, out var wire)
+                || wire < 0 || wire >= attempt.Length
+                || unresolved?.Contains(wire) == true
+                || !warning.TryGetProperty("reason", out var reasonElement)
+                || reasonElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            _warn(state.Batch[attempt[(int)wire]], Text(reasonElement));
         }
     }
 
@@ -434,7 +493,7 @@ internal sealed class BatchSender
                 return false;
             }
 
-            idList.Add(id.GetString()!);
+            idList.Add(Text(id));
         }
 
         if (acceptedCount != idList.Count)
@@ -483,7 +542,7 @@ internal sealed class BatchSender
                 return false;
             }
 
-            eventIdList.Add(element.GetString()!);
+            eventIdList.Add(Text(element));
         }
 
         if (indexList.Count != eventIdList.Count || new HashSet<long>(indexList).Count != indexList.Count)
@@ -536,6 +595,23 @@ internal sealed class BatchSender
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Decodes diagnostic text without letting its content change an outcome: a JSON string with an escaped lone
+    /// surrogate (valid JSON, which JavaScript accepts) falls back to its raw JSON text.
+    /// </summary>
+    private static string Text(JsonElement element)
+    {
+        try
+        {
+            return element.GetString() ?? string.Empty;
+        }
+        catch (InvalidOperationException)
+        {
+            var raw = element.GetRawText();
+            return raw.Length >= 2 ? raw.Substring(1, raw.Length - 2) : raw;
+        }
     }
 
     private static bool TryParse(byte[]? body, out JsonDocument document)

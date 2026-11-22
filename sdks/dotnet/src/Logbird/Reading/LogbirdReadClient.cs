@@ -62,9 +62,9 @@ public sealed class LogbirdReadClient : IDisposable
             throw new ArgumentException("ReadKey is required.", nameof(options));
         }
 
-        if (options.Timeout <= TimeSpan.Zero)
+        if (options.Timeout <= TimeSpan.Zero || options.Timeout > TimeSpan.FromMilliseconds(int.MaxValue))
         {
-            throw new ArgumentException("Timeout must be positive.", nameof(options));
+            throw new ArgumentException("Timeout must be positive and at most 24 days.", nameof(options));
         }
 
         _eventsUrl = Endpoints.Append(endpoint, "/v1/events").AbsoluteUri;
@@ -89,25 +89,34 @@ public sealed class LogbirdReadClient : IDisposable
     public async IAsyncEnumerable<StoredEvent> SearchAllAsync(EventSearch? search = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var current = search ?? new EventSearch();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        if (!string.IsNullOrEmpty(current.Cursor))
+        {
+            seen.Add(current.Cursor!);
+        }
+
         while (true)
         {
             var page = await SearchAsync(current, cancellationToken).ConfigureAwait(false);
+
+            // Check the next cursor before yielding, so a cursor cycle never yields the same page twice.
+            var next = page.NextCursor;
+            if (!string.IsNullOrEmpty(next) && !seen.Add(next!))
+            {
+                throw new LogbirdApiException(null, "pagination_stalled", "Logbird returned a cursor it had already returned; the results are incomplete.");
+            }
+
             foreach (var item in page.Events)
             {
                 yield return item;
             }
 
-            if (string.IsNullOrEmpty(page.NextCursor))
+            if (string.IsNullOrEmpty(next))
             {
                 yield break;
             }
 
-            if (page.NextCursor == current.Cursor)
-            {
-                throw new LogbirdApiException(null, "pagination_stalled", "Logbird returned the same cursor again; the results are incomplete.");
-            }
-
-            current = current with { Cursor = page.NextCursor };
+            current = current with { Cursor = next };
         }
     }
 
@@ -118,6 +127,11 @@ public sealed class LogbirdReadClient : IDisposable
     public Task<EventDetail?> GetAsync(string eventId, CancellationToken cancellationToken = default)
     {
         Guard.NotBlank(eventId, nameof(eventId));
+        if (eventId is "." or "..")
+        {
+            // URL normalization would turn these into a different route.
+            throw new ArgumentException("Event ids \".\" and \"..\" cannot be addressed by URL; search with id:\".\" instead.", nameof(eventId));
+        }
         return GetAsync(_eventsUrl + "/" + Uri.EscapeDataString(eventId), ReadJsonContext.Default.EventDetail, cancellationToken, notFoundIsNull: true);
     }
 

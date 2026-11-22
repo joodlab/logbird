@@ -70,6 +70,7 @@ public class RobustnessTests
         client.Track(new AuditEvent("b"));
         await client.DisposeAsync();
         client.Track(new AuditEvent("after.dispose"));
+        Assert.True(await client.FlushAsync());
         Assert.Equal(2, drops);
     }
 

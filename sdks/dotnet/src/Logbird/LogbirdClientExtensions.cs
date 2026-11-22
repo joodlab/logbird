@@ -53,7 +53,14 @@ public static class LogbirdClientExtensions
         {
             using var cancellation = new CancellationTokenSource(timeout);
             var flush = Task.Run(() => client.FlushAsync(cancellation.Token), cancellation.Token);
-            return flush.Wait(timeout) && flush.Result;
+            if (!flush.Wait(timeout))
+            {
+                // Cancel explicitly so the pending flush is forgotten, even if its timer has not fired yet.
+                cancellation.Cancel();
+                return false;
+            }
+
+            return flush.Result;
         }
         catch (Exception)
         {
@@ -61,7 +68,7 @@ public static class LogbirdClientExtensions
         }
     }
 
-    /// <summary>Timers accept at most about 24.8 days; anything longer means "no limit".</summary>
+    /// <summary>Timers accept at most about 24.8 days; a longer finite timeout is shortened to that.</summary>
     private static TimeSpan Clamp(TimeSpan timeout)
-        => timeout > TimeSpan.FromMilliseconds(int.MaxValue) ? Timeout.InfiniteTimeSpan : timeout;
+        => timeout > TimeSpan.FromMilliseconds(int.MaxValue) ? TimeSpan.FromMilliseconds(int.MaxValue) : timeout;
 }

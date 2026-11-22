@@ -7,7 +7,7 @@
     <RollForward>Major</RollForward>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <NoWarn>$(NoWarn);CA1707;CA2007;CA1515;CA1861;CA2000;CA1031;CA5394;CA1849;CA1859</NoWarn>
+    <NoWarn>$(NoWarn);CA1707;CA2007;CA1515;CA1861;CA2000;CA1031;CA5394;CA1849;CA1859;CA2016;CA2022;CA1835</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

@@ -196,6 +196,42 @@ public class IngestRoundTripTests(ITestOutputHelper output)
         Assert.Equal("12345678901234.567890123456", detail.Event.Attributes["metadata.amount"]);
     }
 
+    [LiveFact]
+    public async Task Identifiers_are_sent_exactly_and_whitespace_is_reported()
+    {
+        var id = LogbirdClient.NewEventId();
+        var warnings = new ConcurrentQueue<LogbirdEventWarning>();
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        await using (var client = new LogbirdClient(LiveServer.Options(o =>
+        {
+            o.OnError = e =>
+            {
+                if (e is LogbirdEventWarning warning)
+                {
+                    warnings.Enqueue(warning);
+                }
+            };
+            o.OnDrop = drops.Enqueue;
+        })))
+        {
+            client.Track(new AuditEvent("identity.checked") { Id = id, Actor = AuditActor.User(" user_42 ") }.Target("invoice", "inv_1"));
+            client.Track(new AuditEvent("identity.too-long") { Actor = AuditActor.User(new string('u', 257)) });
+            Assert.True(await client.FlushAsync());
+        }
+
+        Assert.Contains(warnings, w => w.EventId == id && w.Reason.Contains("actor.id"));
+        Assert.Equal(DropReason.InvalidEntityId, Assert.Single(drops).Reason);
+        using var reader = LiveServer.Reader();
+        var stored = await LiveServer.WaitForEventAsync(reader, id);
+        output.WriteLine($"server {await LiveServer.ServerVersionAsync()} stored actor id \"{stored.Event.Actor?.Id}\"; warnings: {string.Join(" | ", warnings.Select(w => w.Reason))}");
+
+        // The exact-identifier rule ships after the exact-number fix; until then the server may trim.
+        if (Environment.GetEnvironmentVariable("LOGBIRD_IT_ENTITY_IDS") == "1")
+        {
+            Assert.Equal(" user_42 ", stored.Event.Actor?.Id);
+        }
+    }
+
     [LiveFact(requires: "LOGBIRD_IT_LOAD")]
     public async Task Load_50000_events()
     {

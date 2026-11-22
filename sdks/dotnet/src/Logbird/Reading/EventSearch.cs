@@ -74,6 +74,11 @@ public sealed record EventSearch
             throw new ArgumentException("targetType needs a targetId.", nameof(targetType));
         }
 
+        if (targetId is null && actorId is null && tenantId is null && string.IsNullOrWhiteSpace(query))
+        {
+            throw new ArgumentException("A trail needs a target, actor, tenant or query; an empty trail would be the whole project.");
+        }
+
         var terms = new List<string>();
         if (!string.IsNullOrEmpty(query))
         {
@@ -119,6 +124,12 @@ public sealed record EventSearch
         if (value is not null && value.Length == 0)
         {
             throw new ArgumentException("A trail selector must not be empty; pass null to leave it out.", name);
+        }
+
+        // The query language reads a trailing * as a prefix wildcard, even inside quotes, and has no escape for it.
+        if (value is { Length: > 0 } && value[value.Length - 1] == '*')
+        {
+            throw new ArgumentException("A trail selector must not end with '*': Logbird would read it as a prefix wildcard.", name);
         }
     }
 

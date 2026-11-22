@@ -401,6 +401,7 @@ public class LogbirdClientTests
         await h.Client.DisposeAsync();
         Assert.Equal(7, h.Client.Stats.Delivered);
         h.Client.Track(Event(8));
+        Assert.True(await h.Client.FlushAsync());
         Assert.Equal(DropReason.Shutdown, Assert.Single(h.Drops).Reason);
         Assert.True(await h.Client.FlushAsync());
         await h.Client.DisposeAsync();

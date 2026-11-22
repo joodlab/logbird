@@ -171,8 +171,8 @@ public class SettlementTests
                 return FakeServer.Json(HttpStatusCode.ServiceUnavailable, JsonSerializer.Serialize(new { error = new { code = "ingest_pending", details } }));
             })
 
-            // A rejection reason that cannot be decoded (a lone surrogate escape) makes the response unreadable.
-            .Then(_ => FakeServer.Json(HttpStatusCode.Accepted, "{\"accepted\":0,\"ids\":[],\"rejected\":[{\"index\":0,\"reason\":\"" + '\\' + "ud800\",\"code\":\"x\"}]}"));
+            // The resend fails in an unexpected way (a handler bug); settlement from the first response must survive.
+            .Then(_ => throw new InvalidOperationException("fictional handler bug"));
         await using var client = new LogbirdClient(Options(o =>
         {
             o.MaxRetries = 0;
