@@ -66,10 +66,11 @@ app.MapPut("/invoices/{id}", (string id, IAuditLog audit) =>
   events in tests. `IAuditLog` itself drops an event it cannot build or copy, and reports it through `OnDrop` (counted
   by Logbird's own client even when another client records): a throwing configure callback, a prepared event whose
   pre-copy check (depth, and a lower bound of the size) already finds it over Logbird's limits, or a prepared event that
-  cannot be copied (for example JSON with duplicate property names). The one exception is code running inside Logbird's
-  own `OnDrop` or `OnError` callbacks: there, like events tracked from those callbacks, such a drop is only counted as
-  `Filtered`, so a callback cannot feed itself. Every other event goes to the registered client, which applies its own
-  limits. The container hands out `ILogbirdClient` only; Logbird disposes its client itself at
+  cannot be copied (for example JSON with duplicate property names). Two exceptions: with `Enabled = false` nothing is
+  recorded, reported or counted; and wherever `ILogbirdClient.Track` itself counts an event as `Filtered` instead of
+  recording it (in any of your code that Logbird runs: `BeforeSend`, redaction patterns, `OnDrop`, `OnError`, the logger
+  and HTTP handlers), such a drop is likewise only counted as `Filtered`, so that code cannot feed itself. Every other
+  event goes to the registered client, which applies its own limits. The container hands out `ILogbirdClient` only; Logbird disposes its client itself at
   shutdown.
 
 See the [`Logbird` package README](https://github.com/joodlab/logbird/tree/master/sdks/dotnet) for options, failure
