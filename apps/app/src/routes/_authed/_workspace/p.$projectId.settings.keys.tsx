@@ -684,7 +684,8 @@ function CreateKeyDialog({
                     <legend className="px-1 font-medium text-sm">What it can read</legend>
                     <p className="-mt-1 text-muted-foreground text-xs">
                       Use ids exactly as Logbird stored them, as shown on a tenant’s page and matched by <code>tenant:&lt;id&gt;</code>. Events
-                      without a tenant are never visible to this key.
+                      without a tenant are never visible to this key. The API enforces the whole scope on every read; when the restricted
+                      query user is configured, the database also enforces the tenant.
                     </p>
                     <form.Field name="tenantId">
                       {(field) => (
