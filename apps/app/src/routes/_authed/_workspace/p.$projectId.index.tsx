@@ -20,6 +20,7 @@ import { Timestamp } from '@/components/timestamp';
 import { overviewQuery, projectQuery, projectSetupQuery } from '@/lib/api/queries';
 import { eventSentence } from '@/lib/events';
 import { delta, formatNumber, formatPercent } from '@/lib/format';
+import { outcomeBandQuery, RECENT_PROBLEMS_QUERY } from '@/lib/overview-queries';
 import { placeholderKeys } from '@/lib/placeholders';
 import { ALL_RANGE, DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
 import { useRange } from '@/lib/use-range';
@@ -136,7 +137,7 @@ function OverviewPage() {
               // The chart (240 px), the gap and the one-row legend below it.
               <Skeleton className="h-[276px] w-full" />
             ) : (
-              <OutcomeAreaChart data={data?.series} height={240} onSelectOutcome={(o) => explore(`outcome:${o}`)} />
+              <OutcomeAreaChart data={data?.series} height={240} onSelectOutcome={(o) => explore(outcomeBandQuery(o))} />
             )}
           </div>
         </Panel>
@@ -267,13 +268,7 @@ function OverviewPage() {
         actions={
           <Button
             nativeButton={false}
-            render={
-              <Link
-                params={{ projectId }}
-                search={(prev) => ({ range: prev.range, q: '-outcome:success -outcome:partial' })}
-                to="/p/$projectId/events"
-              />
-            }
+            render={<Link params={{ projectId }} search={(prev) => ({ range: prev.range, q: RECENT_PROBLEMS_QUERY })} to="/p/$projectId/events" />}
             size="xs"
             variant="ghost"
           >

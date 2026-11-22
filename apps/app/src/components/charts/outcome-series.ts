@@ -1,6 +1,7 @@
 import type { HistogramResponse } from '@logbird/contracts';
 import type { ChartConfig } from '@logbird/ui/components/ui/chart';
 import { formatClock, formatDate, formatDayTime, formatMonthDay, formatMonthYear, zoneOffsetMs } from '@/lib/format';
+import { NAMED_OUTCOMES } from '@/lib/overview-queries';
 
 export const SERIES = ['success', 'partial', 'denied', 'failure', 'unknown'] as const;
 export type SeriesKey = (typeof SERIES)[number];
@@ -32,7 +33,8 @@ export function toSeries(h: HistogramResponse | undefined): SeriesRow[] {
   return h.buckets.map((b) => {
     const row: SeriesRow = { ts: Date.parse(b.ts), total: b.total, success: 0, partial: 0, denied: 0, failure: 0, unknown: 0 };
     for (const [outcome, count] of Object.entries(b.byOutcome)) {
-      if ((SERIES as readonly string[]).includes(outcome)) row[outcome as SeriesKey] += count;
+      // The named bands; everything else (unknown and custom outcomes) is Other, which `outcomeBandQuery('unknown')` opens.
+      if ((NAMED_OUTCOMES as readonly string[]).includes(outcome)) row[outcome as (typeof NAMED_OUTCOMES)[number]] += count;
       else row.unknown += count;
     }
     return row;

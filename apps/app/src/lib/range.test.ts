@@ -84,3 +84,33 @@ describe('admittedRange with stored rows older than the admission window', () =>
     expect(resolveRange(admittedRange(now, null)).fromMs).toBe(now - 3651 * 86_400_000);
   });
 });
+
+describe('isValidRange rejects ranges that name no window (#203)', () => {
+  const now = Date.parse('2026-11-22T12:00:00.000Z');
+  it('accepts real windows', () => {
+    for (const r of ['all', '15m', '24h', '7d', '3650d', '2026-11-22T00:00:00.000Z..2026-11-22T04:00:00.000Z'])
+      expect(isValidRange(r, now), r).toBe(true);
+  });
+  it('rejects zero, unrepresentable, reversed, equal and malformed ranges', () => {
+    for (const r of [
+      '0d',
+      '0h',
+      '0m',
+      '99999999999d',
+      '9999999999999999999999m',
+      '2026-11-22T04:00:00.000Z..2026-11-22T00:00:00.000Z',
+      '2026-11-22T04:00:00.000Z..2026-11-22T04:00:00.000Z',
+      '1969-12-31T00:00:00.000Z..2026-11-22T00:00:00.000Z',
+      '2026-11-22T00:00:00.000Z..+275760-09-13T00:00:00.000Z',
+      '2026-11-22T00:00:00.000Z..2026-11-23T00:00:00.000Z..2026-11-24T00:00:00.000Z',
+      'yesterday',
+      '',
+    ])
+      expect(isValidRange(r, now), r).toBe(false);
+  });
+  it('resolves an invalid range to the default window instead of throwing', () => {
+    const fallback = resolveRange('24h', now);
+    expect(resolveRange('99999999999d', now)).toEqual(fallback);
+    expect(resolveRange('0d', now)).toEqual(fallback);
+  });
+});

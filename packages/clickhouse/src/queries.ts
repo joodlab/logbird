@@ -19,7 +19,7 @@ import type {
   SearchQuery,
   SearchResponse,
 } from '@logbird/contracts';
-import { EXPORT_SCHEMA_VERSION, pickHistogramInterval, QUERY_FIELDS } from '@logbird/contracts';
+import { EXPORT_SCHEMA_VERSION, pickHistogramInterval, QUERY_FIELDS, RECENT_PROBLEM_OUTCOMES, RECENT_PROBLEM_SEVERITY } from '@logbird/contracts';
 import type { z } from 'zod';
 import type { ClickHouseClient } from './client';
 import { boundTenant, isQueryClient } from './client';
@@ -557,7 +557,7 @@ export async function overview(ch: ClickHouseClient, p: string, q: RangeQuery): 
     top(ch, p, q, 'executor_id', 'executor_name', 'executor_type'),
     read<EventRow>(
       ch,
-      `SELECT * FROM events WHERE ${(await where(ch, p, q)).sql} AND (outcome IN ('failure','denied') OR severity='critical') ORDER BY timestamp DESC LIMIT 10`,
+      `SELECT * FROM events WHERE ${(await where(ch, p, q)).sql} AND (outcome IN (${RECENT_PROBLEM_OUTCOMES.map((o) => `'${o}'`).join(',')}) OR severity='${RECENT_PROBLEM_SEVERITY}') ORDER BY timestamp DESC LIMIT 10`,
       (await where(ch, p, q)).params,
     ),
     projectStats(ch, [p]),

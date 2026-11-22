@@ -37,10 +37,33 @@ export const ALL_RANGE = 'all';
 /** 2000-01-01T00:00:00Z: earlier than any event ingest can admit (3650 days before receipt) until 2035. */
 const ALL_FROM_MS = Date.UTC(2000, 0, 1);
 
-export function isValidRange(range: string): boolean {
-  if (range === ALL_RANGE || RELATIVE_RE.test(range)) return true;
-  const [a, b] = range.split('..');
-  return Boolean(a && b && !Number.isNaN(Date.parse(a)) && !Number.isNaN(Date.parse(b)) && Date.parse(a) < Date.parse(b));
+/** Latest instant a range may name: 9999-12-31T23:59:59.999Z, the last one `toISOString` writes in four-digit form. */
+const MAX_MS = Date.UTC(9999, 11, 31, 23, 59, 59, 999);
+/** An endpoint the API accepts: a finite instant from 1970 (before any admissible event) to the year 9999. */
+const representable = (ms: number) => Number.isFinite(ms) && ms >= 0 && ms <= MAX_MS;
+
+/** Bounds of a relative or absolute range, or null when it names no window (zero, reversed or unrepresentable). */
+function windowOf(range: string, now: number): { fromMs: number; toMs: number; relative: boolean } | null {
+  const rel = RELATIVE_RE.exec(range);
+  if (rel) {
+    const toMs = Math.floor(now / 1000) * 1000;
+    const fromMs = toMs - Number(rel[1]) * UNIT_MS[rel[2] as keyof typeof UNIT_MS];
+    return representable(fromMs) && fromMs < toMs ? { fromMs, toMs, relative: true } : null;
+  }
+  const [a, b, extra] = range.split('..');
+  if (!a || !b || extra !== undefined) return null;
+  const fromMs = Date.parse(a);
+  const toMs = Date.parse(b);
+  return representable(fromMs) && representable(toMs) && fromMs < toMs ? { fromMs, toMs, relative: false } : null;
+}
+
+/**
+ * Whether a range (from a URL, a saved view or a link someone shared) names a real window: "all", a positive relative
+ * duration whose start is representable ("0d" and "99999999999d" are not), or two representable instants in order.
+ * Anything else falls back to the page's default range.
+ */
+export function isValidRange(range: string, now = Date.now()): boolean {
+  return range === ALL_RANGE || windowOf(range, now) !== null;
 }
 
 export function rangeDurationMs(range: string): number {
@@ -56,20 +79,9 @@ export function resolveRange(range: string, now = Date.now()): ResolvedRange {
     const toMs = Math.floor(now / 1000) * 1000 + 2 * UNIT_MS.d;
     return { from: new Date(ALL_FROM_MS).toISOString(), to: new Date(toMs).toISOString(), fromMs: ALL_FROM_MS, toMs, relative: true };
   }
-  const rel = RELATIVE_RE.exec(range);
-  if (rel) {
-    const toMs = Math.floor(now / 1000) * 1000;
-    const fromMs = toMs - Number(rel[1]) * UNIT_MS[rel[2] as keyof typeof UNIT_MS];
-    return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString(), fromMs, toMs, relative: true };
-  }
-  const [a, b] = range.split('..');
-  if (a && b) {
-    const fromMs = Date.parse(a);
-    const toMs = Date.parse(b);
-    if (!(Number.isNaN(fromMs) || Number.isNaN(toMs)) && fromMs < toMs) {
-      return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString(), fromMs, toMs, relative: false };
-    }
-  }
+  // The same rule as isValidRange: a range that names no window resolves to the default instead of throwing.
+  const w = windowOf(range, now);
+  if (w) return { from: new Date(w.fromMs).toISOString(), to: new Date(w.toMs).toISOString(), ...w };
   return resolveRange(DEFAULT_RANGE, now);
 }
 
