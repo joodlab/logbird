@@ -310,7 +310,10 @@ function SelfHostingPage() {
                   title: 'Back up',
                   body: 'With writers stopped: matched Postgres (pg_dump) and ClickHouse (BACKUP DATABASE) backups and a SHA-256 checksum file. Keep the original .env; record the release version and image digests.',
                 },
-                { title: 'Pin the new version', body: 'Check out the new release tag; its Compose file pins the matching images.' },
+                {
+                  title: 'Pin the new version',
+                  body: 'Check out the new release tag, then set LOGBIRD_VERSION in .env to that version: the value already in .env overrides the Compose default. Run docker compose config --images and check every Logbird image shows the new tag.',
+                },
                 {
                   title: 'Pull, then start',
                   body: "docker compose pull, then docker compose up -d --no-build. Migrations run first; if one fails, the new version doesn't start.",

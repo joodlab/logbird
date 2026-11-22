@@ -256,8 +256,11 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
    `git switch --detach <tested-sha>`. Preserve local changes first.
 5. Re-run `sh scripts/selfhost-init.sh` (it preserves existing values and warns if
    `.env` still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird` namespace; remove that
-   line so the default `ghcr.io/joodlab` applies). Set LOGBIRD_VERSION to the tested
-   release, run `docker compose pull`, then `docker compose up -d --no-build`.
+   line so the default `ghcr.io/joodlab` applies). It keeps the existing
+   `LOGBIRD_VERSION`, and that `.env` value overrides the new revision's Compose
+   default, so edit it to the tested release. Run `docker compose config --images`
+   and check that every `logbird-*` image shows the new tag, then run
+   `docker compose pull` and `docker compose up -d --no-build`.
    One-shot migrate gates new API/worker startup; failure blocks startup.
 6. Verify readiness, SMTP login, retained events/settings/keys and retention
    receipts before reopening ingress. After a failed receipt the next successful

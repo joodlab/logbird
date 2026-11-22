@@ -145,14 +145,16 @@ path: /self-hosting
 
 - **id:** `upgrades`
 - **eyebrow:** Upgrades and backups
-- **heading:** Upgrade with a pinned revision, after a backup.
+- **heading:** Upgrade to a pinned release, after a backup.
 - **steps:**
   1. Stop writes: block ingress and stop the console, server and worker (the worker finishes its current job first).
   2. Back up, with writers stopped: matched Postgres (`pg_dump`) and ClickHouse (`BACKUP DATABASE`) backups and a
      SHA-256 checksum file. Keep the original `.env`; record the Git revision and image IDs.
-  3. Switch to a tested revision.
-  4. Build the four roles one at a time, then `docker compose up -d --no-build`. Migrations run first; if one fails,
-     the new version doesn't start.
+  3. Pin the new version: check out the new release tag, then set `LOGBIRD_VERSION` in `.env` to that version (the
+     value already in `.env` overrides the Compose default). Run `docker compose config --images` and check every
+     Logbird image shows the new tag.
+  4. `docker compose pull`, then `docker compose up -d --no-build`. Migrations run first; if one fails, the new
+     version doesn't start.
   5. Verify readiness, sign-in, your events, settings and keys, and the retention runs before reopening ingress.
 - **bullets:**
   - `docker compose down` keeps your data. `docker compose down -v` deletes it, permanently.
