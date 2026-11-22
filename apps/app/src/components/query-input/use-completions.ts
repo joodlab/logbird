@@ -236,8 +236,11 @@ export function useCompletions({
   });
   // The previous prefix's suggestions stay while the next prefix loads (same field only), with the loading indicator on.
   const valuesData = rawPrefix && !complete ? (shownDimmed(narrowed) ?? base.data) : base.data;
-  const valuesLoading = Boolean(valueField) && (base.isFetching || (Boolean(rawPrefix) && !complete && narrowed.isFetching));
-  const valuesStale = Boolean(valueField) && Boolean(rawPrefix) && !complete && narrowed.isPlaceholderData;
+  // While the prefix is still being debounced, the list shown is the previous prefix's too: stale and loading.
+  const debouncing = debouncedPrefix !== rawPrefix;
+  const narrowing = Boolean(valueField) && Boolean(rawPrefix) && !complete;
+  const valuesLoading = Boolean(valueField) && (base.isFetching || (narrowing && (narrowed.isFetching || debouncing)));
+  const valuesStale = narrowing && (narrowed.isPlaceholderData || debouncing);
 
   /* ---------------- free text that names an entity (`rawd` → tenant:biz_2 Rawda Suites) ---------------- */
   const word =

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { parse } from '@babel/parser';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -86,156 +87,121 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-/**
- * Direct `.data` reads of a placeholder-enabled query's result. Each `const x = useQuery(...)` (or `useInfiniteQuery`)
- * built from such a query (directly or through an options variable), or given `placeholderData` at the call site, may
- * be read only through `current(x)` or `shownDimmed(x)`: any `x.data` is a finding. No heuristics about branches: the
- * helpers are the only way in.
- */
-/** The text of a declaration's initializer: from `start` to the first `;` or line break outside brackets. */
-function initializerAt(src: string, start: number): string {
-  let depth = 0;
-  for (let i = start; i < src.length; i++) {
-    const c = src[i];
-    if (c === '(' || c === '{' || c === '[') depth++;
-    else if (c === ')' || c === '}' || c === ']') depth--;
-    else if (depth <= 0 && (c === ';' || c === '\n')) return src.slice(start, i);
-  }
-  return src.slice(start);
+type Node = { type: string; loc?: { start: { line: number } } | null; [key: string]: unknown };
+const isNode = (value: unknown): value is Node => typeof value === 'object' && value !== null && typeof (value as Node).type === 'string';
+
+/** The syntax tree of a source file (TypeScript, with JSX for .tsx), so comments, strings and JSX text are never code. */
+function syntaxTree(src: string, jsx: boolean): Node {
+  return parse(src, { sourceType: 'module', errorRecovery: true, plugins: jsx ? ['typescript', 'jsx'] : ['typescript'] }) as unknown as Node;
 }
 
+/** Every node of the tree, depth first. */
+function* walk(node: Node): Generator<Node> {
+  yield node;
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'loc' || key === 'extra' || key.endsWith('Comments')) continue;
+    for (const child of Array.isArray(value) ? value : [value]) if (isNode(child)) yield* walk(child);
+  }
+}
+
+/** The expression under TypeScript wrappers and parentheses: `x as T`, `x satisfies T`, `x!`, `<T>x`, `(x)`. */
+function unwrap(node: unknown): Node | undefined {
+  let n = isNode(node) ? node : undefined;
+  while (n && ['TSAsExpression', 'TSSatisfiesExpression', 'TSNonNullExpression', 'TSTypeAssertion', 'ParenthesizedExpression'].includes(n.type)) {
+    n = isNode(n.expression) ? n.expression : undefined;
+  }
+  return n;
+}
+const nameOf = (node: unknown): string | undefined => {
+  const n = unwrap(node);
+  return n?.type === 'Identifier' ? (n.name as string) : undefined;
+};
+/** A property's key when it is written out (`data`, `'data'`, `['data']`), not computed from a variable. */
+const keyOf = (key: unknown, computed: unknown): string | undefined => {
+  if (!isNode(key)) return undefined;
+  if (key.type === 'StringLiteral') return key.value as string;
+  return !computed && key.type === 'Identifier' ? (key.name as string) : undefined;
+};
+const isQueryHook = (node: Node | undefined): node is Node => {
+  if (node?.type !== 'CallExpression') return false;
+  const callee = unwrap(node.callee);
+  const name = callee?.type === 'MemberExpression' ? nameOf(callee.property) : nameOf(callee);
+  return name === 'useQuery' || name === 'useInfiniteQuery';
+};
+
 /**
- * The source with comments, string contents, template text and regex literals blanked to spaces (line breaks and every
- * offset kept), so brackets, `)` and words inside them never count as code. Template `${…}` expressions stay code.
+ * Direct `.data` reads of a placeholder-enabled query's result. Each `useQuery(...)` (or `useInfiniteQuery`) whose
+ * options come from a placeholder-enabled factory (directly, spread into an object, or through options variables), or
+ * that set `placeholderData` themselves, may be read only through `current(x)` or `shownDimmed(x)`: any `x.data` (or
+ * destructured `data`) is a finding. No heuristics about branches: the helpers are the only way in. The guard walks
+ * the syntax tree, so comments, strings, JSX text, regex literals and line breaks neither hide nor invent a read.
  */
-export function scrub(src: string): string {
-  const blank = (s: string) => s.replace(/[^\n]/g, ' ');
-  const templates: number[] = []; // brace depth at each open `${`
-  let out = '';
-  let depth = 0;
-  let prev = ''; // last significant character, to tell a regex literal from a division
-  let i = 0;
-  const skipQuoted = (from: number, isEnd: (j: number) => boolean) => {
-    let j = from;
-    while (j < src.length && !isEnd(j)) j += src[j] === '\\' ? 2 : 1;
-    return Math.min(j, src.length);
+export function unguardedReads(src: string, queries: readonly string[], jsx = true): string[] {
+  const tree = syntaxTree(src, jsx);
+  const lines = src.split('\n');
+  const at = (node: Node) => {
+    const line = node.loc?.start.line ?? 0;
+    return `line ${line}: ${lines[line - 1]?.trim()}`;
   };
-  while (i < src.length) {
-    const c = src[i] as string;
-    const next = src[i + 1];
-    if (c === '/' && (next === '/' || next === '*')) {
-      const close = next === '/' ? src.indexOf('\n', i) : src.indexOf('*/', i + 2);
-      const end = close === -1 ? src.length : next === '/' ? close : close + 2;
-      out += blank(src.slice(i, end));
-      i = end;
-    } else if (c === "'" || c === '"') {
-      const end = skipQuoted(i + 1, (j) => src[j] === c || src[j] === '\n');
-      out += c + blank(src.slice(i + 1, end)) + (src[end] ?? '');
-      i = end + 1;
-      prev = c;
-    } else if (c === '`' || (c === '}' && templates.at(-1) === depth)) {
-      if (c === '}') templates.pop();
-      const end = skipQuoted(i + 1, (j) => src[j] === '`' || (src[j] === '$' && src[j + 1] === '{'));
-      out += c + blank(src.slice(i + 1, end));
-      if (src[end] === '$') {
-        out += '${';
-        templates.push(depth);
-        i = end + 2;
-        prev = '{';
-      } else {
-        out += src[end] ?? '';
-        i = end + 1;
-        prev = '`';
+  const factories = new Set(queries);
+  const optionVariables = new Set<string>();
+  // Options: a whole factory call (not `factory(...).queryKey`), a known options variable, or an object literal that
+  // spreads one of those or sets `placeholderData` itself (`placeholderData: x` or the shorthand; not a value so named).
+  const isOptions = (node: unknown): boolean => {
+    const n = unwrap(node);
+    if (!n) return false;
+    if (n.type === 'CallExpression') return factories.has(nameOf(n.callee) ?? '');
+    if (n.type === 'Identifier') return optionVariables.has(n.name as string);
+    if (n.type === 'ConditionalExpression') return isOptions(n.consequent) || isOptions(n.alternate);
+    if (n.type !== 'ObjectExpression') return false;
+    return (n.properties as Node[]).some((p) =>
+      p.type === 'SpreadElement' ? isOptions(p.argument) : keyOf(p.key, p.computed) === 'placeholderData',
+    );
+  };
+  const nodes = [...walk(tree)];
+  const declarators = nodes.filter((n) => n.type === 'VariableDeclarator');
+  // Options variables, in any order and through any number of steps (`base = factory()`, `opts = { ...base }`).
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const d of declarators) {
+      const name = nameOf(d.id);
+      if (name && !optionVariables.has(name) && !isQueryHook(unwrap(d.init)) && isOptions(d.init)) {
+        optionVariables.add(name);
+        grew = true;
       }
-    } else if (c === '/' && (prev === '' || '(,=:[!&|?{};'.includes(prev))) {
-      let inClass = false;
-      const end = skipQuoted(i + 1, (j) => {
-        if (src[j] === '[') inClass = true;
-        else if (src[j] === ']') inClass = false;
-        return src[j] === '\n' || (src[j] === '/' && !inClass);
-      });
-      out += `/${blank(src.slice(i + 1, end))}${src[end] ?? ''}`;
-      i = end + 1;
-      prev = '/';
-    } else {
-      if (c === '{') depth++;
-      else if (c === '}') depth--;
-      out += c;
-      if (!/\s/.test(c)) prev = c;
-      i++;
     }
   }
-  return out;
-}
-
-/** A `placeholderData` property in an options object (`placeholderData: …` or the shorthand), not a value named so. */
-const SETS_PLACEHOLDER = /[{,]\s*placeholderData\s*[:,}]/;
-
-/** Index just past the `)` that closes the call opening at `open` (an index of `(`), or -1. */
-function callEnd(text: string, open: number): number {
-  let depth = 0;
-  for (let i = open; i < text.length; i++) {
-    if (text[i] === '(') depth++;
-    else if (text[i] === ')' && --depth === 0) return i + 1;
+  const problems = new Set<string>();
+  const results = new Set<string>();
+  const destructuresData = (pattern: unknown) =>
+    isNode(pattern) &&
+    pattern.type === 'ObjectPattern' &&
+    (pattern.properties as Node[]).some((p) => p.type === 'ObjectProperty' && keyOf(p.key, p.computed) === 'data');
+  for (const d of declarators) {
+    const init = unwrap(d.init);
+    if (!isQueryHook(init) || !isOptions((init.arguments as unknown[])[0])) continue;
+    const name = nameOf(d.id);
+    if (name) results.add(name);
+    else if (destructuresData(d.id)) problems.add(`destructured data on ${at(d)}`);
   }
-  return -1;
-}
-/** `q(...)` and nothing after it (not `q(...).queryKey`). */
-function isWholeCall(init: string, q: string): boolean {
-  const open = new RegExp(String.raw`^${q}\s*\(`).exec(init);
-  if (!open) return false;
-  const end = callEnd(init, open[0].length - 1);
-  return end > 0 && init.slice(end).trim() === '';
-}
-/** An object literal with `...q(...)` as one of its own (top-level) properties: the spread call ends at `,` or `}`. */
-function spreadsCall(init: string, q: string): boolean {
-  if (!init.startsWith('{')) return false;
-  let depth = 0;
-  for (let i = 0; i < init.length; i++) {
-    const c = init[i];
-    if (c === '(' || c === '{' || c === '[') depth++;
-    else if (c === ')' || c === '}' || c === ']') depth--;
-    else if (depth === 1 && c === '.') {
-      // `...q(…)`, with any spacing or line breaks after the dots and before the parenthesis.
-      const spread = new RegExp(String.raw`^\.\.\.\s*${q}\s*\(`).exec(init.slice(i));
-      if (!spread) continue;
-      const end = callEnd(init, i + spread[0].length - 1);
-      if (end > 0 && /^\s*[,}]/.test(init.slice(end))) return true;
+  for (const n of nodes) {
+    if (n.type === 'MemberExpression' || n.type === 'OptionalMemberExpression') {
+      const result = nameOf(n.object);
+      if (result && results.has(result) && keyOf(n.property, n.computed) === 'data') problems.add(`${result}.data on ${at(n)}`);
+    } else if (n.type === 'VariableDeclarator' && results.has(nameOf(n.init) ?? '') && destructuresData(n.id)) {
+      problems.add(`destructured data on ${at(n)}`);
     }
+  }
+  return [...problems];
+}
+
+/** Whether a file uses a placeholder-enabled factory or sets `placeholderData` on any options object. */
+function usesPlaceholders(src: string, queries: readonly string[], jsx: boolean): boolean {
+  for (const n of walk(syntaxTree(src, jsx))) {
+    if (n.type === 'CallExpression' && queries.includes(nameOf(n.callee) ?? '')) return true;
+    if ((n.type === 'ObjectProperty' || n.type === 'ObjectMethod') && keyOf(n.key, n.computed) === 'placeholderData') return true;
   }
   return false;
-}
-
-export function unguardedReads(original: string, queries: readonly string[]): string[] {
-  // Match against code only; report the original lines (scrub keeps every offset).
-  const src = scrub(original);
-  const lines = original.split('\n');
-  const declarations = [...src.matchAll(/(?:const|let)\s+(\{[^}]*\}|\w+)\s*=\s*/g)].map((m) => ({
-    target: m[1] ?? '',
-    init: initializerAt(src, (m.index ?? 0) + m[0].length),
-  }));
-  // Options variables: the factory call itself (`fieldsQuery(...)`), or an object literal spreading one
-  // (`{ enabled, ...fieldsQuery(...) }`). A value that merely mentions a factory (`!!getQueryData(fieldsQuery(...).queryKey)`)
-  // is not options.
-  const sources = [...queries];
-  const isOptions = (init: string) => sources.some((q) => isWholeCall(init.trim(), q) || spreadsCall(init.trim(), q));
-  for (const d of declarations) if (/^\w+$/.test(d.target) && !/^use(?:Infinite)?Query\(/.test(d.init) && isOptions(d.init)) sources.push(d.target);
-  // A result is placeholder-enabled when its options come from such a query, or when the call sets `placeholderData` itself.
-  const built = (init: string) =>
-    /^use(?:Infinite)?Query\(/.test(init) && (SETS_PLACEHOLDER.test(init) || sources.some((q) => new RegExp(String.raw`\b${q}\b`).test(init)));
-  const problems: string[] = [];
-  const results: string[] = [];
-  for (const d of declarations) {
-    if (!built(d.init)) continue;
-    // Destructuring `data` out of the result reads it directly.
-    if (d.target.startsWith('{')) {
-      if (/\bdata\b/.test(d.target)) problems.push(`destructured data: ${d.target} = ${d.init.split('\n')[0]}`);
-    } else results.push(d.target);
-  }
-  src.split('\n').forEach((line, i) => {
-    for (const r of results) if (new RegExp(String.raw`\b${r}\.data\b`).test(line)) problems.push(`${r}.data on line ${i + 1}: ${lines[i]?.trim()}`);
-  });
-  return problems;
 }
 
 describe('the guard catches direct reads', () => {
@@ -262,7 +228,7 @@ describe('the guard catches direct reads', () => {
       'if (!fields.isPlaceholderData) {',
       '// placeholder: shown dimmed',
     ]) {
-      const src = ['const fields = useQuery(fieldsQuery(p, r));', before, 'render(fields.data);'].join('\n');
+      const src = ['const fields = useQuery(fieldsQuery(p, r));', before, 'render(fields.data);', before.endsWith('{') ? '}' : ''].join('\n');
       expect(unguardedReads(src, ['fieldsQuery']), before).toHaveLength(1);
     }
   });
@@ -351,13 +317,45 @@ describe('the guard catches direct reads', () => {
     ].join('\n');
     expect(unguardedReads(src, ['fieldsQuery'])).toEqual([`list.data on line 4: ${title}`]);
   });
-  it('scrubs without moving anything', () => {
-    const src = `const a = 'x)'; // y(\nconst r = /[/]'/; const t = \`a${open}b('}')}c\`;`;
-    const out = scrub(src);
-    expect(out).toHaveLength(src.length);
-    expect(out.split('\n')).toHaveLength(2);
-    expect(out).not.toMatch(/x\)|y\(/);
-    expect(out).toContain("b(' ')");
+  it('sees reads next to JSX text, URLs, regex literals and non-null division', () => {
+    for (const line of [
+      "return <p>Today's fields: {result.data?.length}</p>;",
+      'return <p>See https://example.org for {result.data?.length} fields.</p>;',
+      "return /'/.test(label) && result.data?.length;",
+      'return count! / result.data.total;',
+    ]) {
+      const src = ['const result = useQuery(fieldsQuery(p, r));', line].join('\n');
+      expect(unguardedReads(src, ['fieldsQuery']), line).toEqual([`result.data on line 2: ${line}`]);
+    }
+  });
+  it('does not take JSX text that spells a read for one', () => {
+    const src = ['const result = useQuery(fieldsQuery(p, r));', 'return <code>result.data</code>;'].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toEqual([]);
+  });
+  it('follows a spread of an options variable, and options objects that set placeholderData', () => {
+    const spread = [
+      'const base = fieldsQuery(p, r);',
+      'const options = { ...base, enabled };',
+      'const fields = useQuery(options);',
+      'return fields.data;',
+    ];
+    expect(unguardedReads(spread.join('\n'), ['fieldsQuery'])).toHaveLength(1);
+    const extracted = [
+      'const options = {',
+      "  queryKey: ['preview'],",
+      '  queryFn: loadPreview,',
+      '  placeholderData: keepPreviousData,',
+      '};',
+      'const preview = useQuery(options);',
+      'return preview.data;',
+    ].join('\n');
+    expect(unguardedReads(extracted, [])).toHaveLength(1);
+    // The file filter selects it too: placeholderData before the query call.
+    expect(usesPlaceholders(extracted, [], false)).toBe(true);
+  });
+  it('flags data destructured from a result later', () => {
+    const src = ['const fields = useQuery(fieldsQuery(p, r));', 'const { data, isFetching } = fields;'].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toEqual(['destructured data on line 2: const { data, isFetching } = fields;']);
   });
   it('accepts reads through the helpers', () => {
     const src = [
@@ -378,13 +376,8 @@ describe('every consumer of a placeholder-enabled query reads it through current
   });
   const root = join(import.meta.dirname, '..', '..');
   // Every file using a placeholder-enabled factory, or setting `placeholderData` on a query call itself.
-  const files = sourceFiles(root).filter((file) => {
-    const src = scrub(readFileSync(file, 'utf8'));
-    return (
-      queries.some((q) => new RegExp(String.raw`\b${q}\s*\(`).test(src)) || /use(?:Infinite)?Query\([\s\S]*?[{,]\s*placeholderData\s*[:,}]/.test(src)
-    );
-  });
+  const files = sourceFiles(root).filter((file) => usesPlaceholders(readFileSync(file, 'utf8'), queries, file.endsWith('.tsx')));
   it.each(files.map((f) => [relative(root, f).replaceAll('\\', '/'), f]))('%s', (_name, file) => {
-    expect(unguardedReads(readFileSync(file, 'utf8'), queries)).toEqual([]);
+    expect(unguardedReads(readFileSync(file, 'utf8'), queries, file.endsWith('.tsx'))).toEqual([]);
   });
 });
