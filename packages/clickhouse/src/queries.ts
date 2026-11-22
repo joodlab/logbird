@@ -618,6 +618,13 @@ const ENTITY_ORDER: Record<EntitySort, { keys: string; types: [string, string] }
  * `biz_27`.
  */
 const ENTITY_BARE_ID = "lowerUTF8(if(kind='target' AND type!='' AND startsWith(id,concat(type,':')),substring(id,length(type)+2),id))";
+/**
+ * Which stored rows a search keeps, before grouping. Three or more characters: the id or name contains the text, or
+ * resembles it (ngram). One or two characters say too little for that (on a project with a million records they match
+ * most of them), so they match ids, a record's bare id, and names that start with the text: an id like `7` is still
+ * found exactly.
+ */
+const ENTITY_SEARCH_ROWS = `{q:String}='' OR (lengthUTF8({q:String})>=3 AND (positionCaseInsensitiveUTF8(concat(entities.entity_id,' ',entities.name),{q:String})>0 OR ngramSearchCaseInsensitiveUTF8(concat(entities.entity_id,' ',entities.name),{q:String})>0.3)) OR (lengthUTF8({q:String})<3 AND (startsWith(lowerUTF8(entities.entity_id),lowerUTF8({q:String})) OR startsWith(lowerUTF8(if(entities.kind='target' AND entities.type!='' AND startsWith(entities.entity_id,concat(entities.type,':')),substring(entities.entity_id,length(entities.type)+2),entities.entity_id)),lowerUTF8({q:String})) OR startsWith(lowerUTF8(entities.name),lowerUTF8({q:String}))))`;
 const ENTITY_MATCH_RANK = `multiIf(
   lowerUTF8(id)=lowerUTF8({q:String}) OR ${ENTITY_BARE_ID}=lowerUTF8({q:String}),0,
   startsWith(lowerUTF8(id),lowerUTF8({q:String})) OR startsWith(${ENTITY_BARE_ID},lowerUTF8({q:String})),1,
@@ -627,7 +634,9 @@ const ENTITY_MATCH_RANK = `multiIf(
 export async function listEntities(ch: ClickHouseClient, p: string, q: EntityListQuery) {
   const sort = q.sort ?? 'events',
     order = ENTITY_ORDER[sort];
-  // A search ranks by match quality first (an exact id always leads, whatever the limit), then by the chosen sort.
+  // A search ranks by match quality first (an exact id always leads, whatever the limit), then by the chosen sort. It
+  // filters stored rows before grouping (a kind can hold a million records; matching after the GROUP BY cost ~0.85 s
+  // on a 5M-event project, before it ~15 ms), so an entity matches on any name it was stored with.
   const search = Boolean(q.q);
   let after = '';
   const params: Params = { p, kind: q.kind, q: q.q ?? '', type: q.type ?? '', limit: q.limit + 1 };
@@ -638,7 +647,7 @@ export async function listEntities(ch: ClickHouseClient, p: string, q: EntityLis
   }
   const rows = await read<Entity & { k1: string | number; k2: string | number; r: number }>(
     ch,
-    `SELECT *,tupleElement(k,1) k1,tupleElement(k,2) k2 FROM (SELECT *,tuple(${order.keys}) k,${search ? ENTITY_MATCH_RANK : '0'} r FROM (SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} GROUP BY kind,id HAVING ({q:String}='' OR positionCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0 OR ngramSearchCaseInsensitiveUTF8(concat(id,' ',name),{q:String})>0.3) AND ({type:String}='' OR type={type:String}))) ${after} ORDER BY r,k,id LIMIT {limit:UInt32}`,
+    `SELECT *,tupleElement(k,1) k1,tupleElement(k,2) k2 FROM (SELECT *,tuple(${order.keys}) k,${search ? ENTITY_MATCH_RANK : '0'} r FROM (SELECT kind,entity_id id,anyLast(type) type,anyLast(name) name,min(first_seen) firstSeen,max(last_seen) lastSeen,sum(events) events FROM entities WHERE project_id={p:String} AND kind={kind:String} AND (${ENTITY_SEARCH_ROWS}) GROUP BY kind,id HAVING {type:String}='' OR type={type:String})) ${after} ORDER BY r,k,id LIMIT {limit:UInt32}`,
     params,
     // Directory pages aggregate the whole kind; keep the guard roomy but bounded.
     isQueryClient(ch) ? 10 : 20,

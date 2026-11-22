@@ -230,7 +230,8 @@ export const entityListQuerySchema = z.object({
   kind: entityKindSchema,
   /**
    * Search by id and name. Results rank by match first (exact id, id prefix, name prefix, substring, fuzzy; a record's
-   * bare id counts as its id), then by `sort`, so an exact id always leads whatever the limit.
+   * bare id counts as its id), then by `sort`, so an exact id always leads whatever the limit. One or two characters
+   * match only ids and names that start with them.
    */
   q: z.string().max(1024).optional(),
   type: z.string().optional(),

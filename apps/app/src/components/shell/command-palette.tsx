@@ -28,7 +28,7 @@ import {
   UsersIcon,
   VenetianMaskIcon,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api/client';
 import { entitySearchQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { ENTITY_SECTIONS, entityMatchRank, entityQuery, sectionForKind } from '@/lib/entities';
@@ -79,19 +79,29 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   const others = (found ?? []).filter((e) => !exact.includes(e));
   // "Search events for": an id searches its own events, never free text (which matches names, not ids). Enter can land
   // before the lookup for this exact text (debounce, a slow kind): then finish the lookup first and decide.
+  // Each selection or close bumps the token: a lookup that lands after the palette closed or moved on does nothing.
+  const selection = useRef(0);
+  useEffect(() => {
+    if (!open) selection.current += 1;
+  }, [open]);
   const searchEvents = async () => {
     if (!projectId || !trimmed) return;
     const pid = projectId;
-    let q = trimmed;
-    if (!/\s/.test(trimmed)) {
-      const answer = await queryClient.fetchQuery(entitySearchQuery(pid, trimmed)).catch(() => undefined);
-      const id = answer?.entities.find((e) => entityMatchRank(e, trimmed) === 0);
-      if (id) q = entityQuery(id.kind, id.id, id.type);
+    const text = trimmed;
+    const token = ++selection.current;
+    // The row shows the id query once the exact id is known: submit exactly that. Otherwise finish the lookup first.
+    let id = firstExact;
+    if (!id) {
+      const answer = await queryClient.fetchQuery(entitySearchQuery(pid, text)).catch(() => undefined);
+      if (token !== selection.current) return;
+      id = answer?.entities.find((e) => entityMatchRank(e, text) === 0);
     }
+    const q = id ? entityQuery(id.kind, id.id, id.type) : text;
     go(() => navigate({ to: '/p/$projectId/events', params: { projectId: pid }, search: { q } }));
   };
 
   const go = (fn: () => void) => {
+    selection.current += 1;
     onOpenChange(false);
     setSearch('');
     fn();
@@ -112,7 +122,14 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
       open={open}
       title="Command palette"
     >
-      <CommandInput onValueChange={setSearch} placeholder="Search pages, actors, tenants, records, or paste an event id…" value={search} />
+      <CommandInput
+        onValueChange={(value) => {
+          selection.current += 1;
+          setSearch(value);
+        }}
+        placeholder="Search pages, actors, tenants, records, or paste an event id…"
+        value={search}
+      />
       <CommandList className="max-h-[min(60vh,28rem)]">
         <CommandEmpty>No matches. Try an id like usr_42 or op_…</CommandEmpty>
         {projectId && agents.data && agents.data.length > 0 ? (

@@ -30,7 +30,8 @@ describe('the id that free text could be', () => {
   it('is one bare word with no field, operator, group, wildcard or negation, or one quoted term', () => {
     for (const id of ['biz_27', 'usr_131', 'article_27_2', 'crm-hourly-biz_7', '7']) expect(idFromFreeText(id), id).toBe(id);
     expect(idFromFreeText('"acme:27"')).toBe('acme:27');
-    for (const text of ['', 'tenant:biz_27', 'two words', '"two words"', 'biz*', '-biz_27', '(biz)', 'AND', 'NOT'])
+    expect(idFromFreeText('"acme west"')).toBe('acme west');
+    for (const text of ['', 'tenant:biz_27', 'two words', '"a"b"', 'biz*', '-biz_27', '(biz)', 'AND', 'NOT'])
       expect(idFromFreeText(text), text).toBe('');
   });
   it('builds the id query for each kind', () => {

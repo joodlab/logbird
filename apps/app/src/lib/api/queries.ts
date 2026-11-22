@@ -284,15 +284,11 @@ export const entitySearchQuery = (projectId: string, text: string, perKind = 4) 
     queryKey: [...keys.project(projectId), 'entity-search', text, perKind] as const,
     queryFn: async ({ signal }) => {
       const kinds: EntityKind[] = ['actor', 'tenant', 'executor', 'target'];
-      let partial = false;
-      const lists = await Promise.all(
-        kinds.map((kind) =>
-          api.entities.list(projectId, { kind, q: text, limit: perKind }, signal).catch(() => {
-            partial = true;
-            return { data: [] };
-          }),
-        ),
-      );
+      const settled = await Promise.allSettled(kinds.map((kind) => api.entities.list(projectId, { kind, q: text, limit: perKind }, signal)));
+      const failure = settled.find((r) => r.status === 'rejected');
+      if (failure && settled.every((r) => r.status === 'rejected')) throw failure.reason;
+      const partial = Boolean(failure);
+      const lists = settled.map((r) => (r.status === 'fulfilled' ? r.value : { data: [] }));
       const found = lists
         .flatMap((l) => l.data)
         .map((e, i) => ({ e, i, rank: entityMatchRank(e, text) }))

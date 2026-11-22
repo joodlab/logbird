@@ -91,8 +91,8 @@ export function entityMatchRank(entity: { kind?: EntityKind; id: string; name: s
  */
 export function idFromFreeText(text: string): string {
   const t = text.trim();
-  const quoted = /^"([^"\\\s]+)"$/.exec(t);
-  if (quoted) return quoted[1] ?? '';
+  const quoted = /^"([^"\\]+)"$/.exec(t);
+  if (quoted) return quoted[1]?.trim() ?? '';
   return /^[^\s:()"'*-][^\s:()"'*]*$/.test(t) && !/^(AND|OR|NOT)$/.test(t) ? t : '';
 }
 

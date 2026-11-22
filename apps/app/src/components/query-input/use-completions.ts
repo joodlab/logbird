@@ -262,11 +262,12 @@ export function useCompletions({
   // and busy (entitiesStale below), never as current.
   // Per field: the field's own answer for this word, else its last answer (any earlier word), else nothing. One field
   // answering first never clears the others' kept rows; a field whose lookup failed shows nothing from before.
-  const lastAnswered = useRef<(SuggestResponse | undefined)[]>([]);
-  const entityData = entityQueries.map((q, i) => q.data ?? (word && !q.isError ? lastAnswered.current[i] : undefined));
+  const lastAnswered = useRef<{ projectId: string; data: (SuggestResponse | undefined)[] }>({ projectId, data: [] });
+  if (lastAnswered.current.projectId !== projectId) lastAnswered.current = { projectId, data: [] };
+  const entityData = entityQueries.map((q, i) => (q.isError ? undefined : (q.data ?? (word ? lastAnswered.current.data[i] : undefined))));
   useEffect(() => {
     entityQueries.forEach((q, i) => {
-      if (q.data) lastAnswered.current[i] = q.data;
+      if (q.data && !q.isError) lastAnswered.current.data[i] = q.data;
     });
   });
   const entitiesPending = Boolean(word) && (debouncedWord !== word || entityQueries.some((q) => q.isFetching));

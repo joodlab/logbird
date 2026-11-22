@@ -300,6 +300,10 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       // A name prefix beats a busier entity that only contains the words.
       expect(await ids('tenant', 'Marsa', 1)).toEqual(['biz_7']);
       expect(await ids('actor', 'marsa')).toContain('crm-hourly-biz_7');
+      // One or two characters match only what starts with them (ids, a record's bare id, names), exact first.
+      expect(await ids('tenant', 'bi')).toEqual(expect.arrayContaining(['biz_2']));
+      expect(await ids('tenant', 'Ma', 1)).toEqual(['biz_7']);
+      expect(await ids('actor', 'rs')).toEqual([]);
       // Without a search, the directory order is unchanged (most active first).
       expect((await listEntities(ch, p, { kind: 'tenant', limit: 2 })).data.map((e) => e.id)).toEqual(['biz_2', 'biz_7']);
       // A search pages by rank, then activity, without gaps or repeats; its cursor only fits a search.
