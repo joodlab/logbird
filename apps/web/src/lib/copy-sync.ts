@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pricing } from '../content/pricing';
 import { type CopyClaim, normalize } from './copy-claims';
 import { elementChildren, elements, inlineRuns, type PageElement, parsePage, textOf } from './page-dom';
 import { firstRelease, latestRelease, supportedLine } from './releases';
@@ -26,6 +27,7 @@ export const NOT_CHECKED: Record<string, string> = {
     'a placeholder brief: the legal pages are their own wording source (owner-approved TSX); legal-pages.test.ts checks selected facts',
   'arabic-notes.md': 'reference strings for a future localization, not a page',
   'home.md': 'a brief: the page renders apps/web/src/content/home.ts, and content-modules.test.ts guards the route file',
+  'pricing.md': 'a brief: the page renders apps/web/src/content/pricing.ts; pricing.test.ts and content-modules.test.ts guard it',
   'use-cases/compliance-evidence.md': 'a brief: the page renders apps/web/src/content/use-cases/compliance-evidence.ts',
 };
 
@@ -44,6 +46,10 @@ export const PLACEHOLDERS: Record<string, string> = {
   'security contact': 'security@example.test',
   'sign-in URL': 'https://app.example.test/login',
   'contact email': 'hello@example.test',
+  // Pricing words come from content/pricing.ts (brief: pricing.md), so approval stays a data-only change.
+  'pricing heading': pricing.cloud.title,
+  'pricing summary': pricing.cloud.lead,
+  'pricing status': `${pricing.cloud.status.value} ${pricing.cloud.status.note}`,
 };
 export const PUBLIC = { WEB_GITHUB_PUBLIC: 'true', WEB_GITHUB_URL: 'https://github.com/example-org/logbird' };
 export const CLOUD_OPEN = { ...PUBLIC, WEB_APP_URL: 'https://app.example.test' };

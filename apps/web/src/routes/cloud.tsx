@@ -1,14 +1,13 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { CloudIcon, LifeBuoyIcon, ServerIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
 import { ButtonLink } from '../components/marketing/button-link';
 import { CtaBand } from '../components/marketing/cta-band';
 import { type FaqItem, FaqList } from '../components/marketing/faq';
+import { PlanCards } from '../components/marketing/plan-cards';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
+import { pricing } from '../content/pricing';
 import { GITHUB_PUBLIC } from '../env';
 import { ACCESS_CTA, CLOUD_OPEN, SIGN_IN_URL } from '../lib/cloud';
-import { cx } from '../lib/cx';
 import { faqLd, pageHead } from '../lib/seo';
 import { getPage } from '../lib/site-map';
 
@@ -25,30 +24,33 @@ const faq: FaqItem[] = [
   {
     q: 'Where will my data be stored?',
     a: CLOUD_OPEN
-      ? "We'll publish the hosting region with the Cloud's launch terms. Ask us before you send production data. If your data must stay in a particular place, self-host Logbird."
+      ? GITHUB_PUBLIC
+        ? "We'll publish the hosting region with the Cloud's launch terms. Ask us before you send production data. If your data must stay in a particular place, self-host Logbird."
+        : "We'll publish the hosting region with the Cloud's launch terms. Ask us before you send production data. If your data must stay in a particular place, self-hosting is an option once the source opens."
       : GITHUB_PUBLIC
         ? "Not decided yet. We'll publish the hosting region before the cloud opens. If your data must stay in a particular place today, self-host Logbird."
         : "Not decided yet. We'll publish the hosting region before the cloud opens. If your data must stay in a particular place, self-hosting is an option once the source opens.",
   },
   {
     q: 'Is the cloud a different product?',
-    a: "No. It runs the same codebase as the self-hosted version. One difference is already decided: Logbird Cloud won't offer a free-form SQL console. The guarded SQL WHERE mode in the explorer is in both.",
+    a: `No. It ${CLOUD_OPEN ? 'runs' : 'will run'} the same codebase as the self-hosted version. One difference is already decided: Logbird Cloud won't offer a free-form SQL console. The guarded SQL WHERE mode in the explorer is in both.`,
     body: (
       <>
-        No. It runs the same codebase as the self-hosted version. One difference is already decided: Logbird Cloud won't offer a free-form SQL
-        console. The guarded SQL <code>WHERE</code> mode in the explorer is in both.
+        No. It {CLOUD_OPEN ? 'runs' : 'will run'} the same codebase as the self-hosted version. One difference is already decided: Logbird Cloud won't
+        offer a free-form SQL console. The guarded SQL <code>WHERE</code> mode in the explorer is in both.
       </>
     ),
   },
   {
     q: 'Can I move between self-host and cloud?',
-    a: "Not with a tool or a guide today. Both run the same codebase, but there's no migration tool and no documented migration path yet.",
+    a: CLOUD_OPEN
+      ? "Not with a tool or a guide today. Both run the same codebase, but there's no migration tool and no documented migration path yet."
+      : "Not with a tool or a guide. Logbird Cloud will run the same codebase, but there's no migration tool and no documented migration path yet.",
   },
   {
     q: 'How much will it cost?',
-    a: CLOUD_OPEN
-      ? "Logbird Cloud is free during early access, and pricing for later isn't set yet. Self-hosting is free under the MIT licence."
-      : "Pricing isn't set yet. Self-hosting is free under the MIT licence.",
+    // From content/pricing.ts, so the answer changes with the pricing data.
+    a: pricing.cloud.lead,
   },
   {
     q: 'Will there be an SLA?',
@@ -82,49 +84,12 @@ export const Route = createFileRoute('/cloud')({
   component: CloudPage,
 });
 
-const plans: {
-  id: string;
-  name: string;
-  status: string;
-  body: string;
-  icon: ReactNode;
-  cta: { label: string; to: string; primary?: boolean; search?: Record<string, string> };
-}[] = [
-  {
-    id: 'self-host',
-    name: 'Self-host',
-    status: 'Free, MIT',
-    body: 'Free and MIT-licensed. Every feature in the repository. You run it.',
-    icon: <ServerIcon className="size-4" />,
-    // Until the repository is public nobody can self-host: the card leads to the waitlist instead.
-    cta: GITHUB_PUBLIC
-      ? { label: 'Self-host it', to: '/self-hosting' }
-      : { label: 'Self-host when the source opens', to: '/contact', search: { interest: 'self-host' } },
-  },
-  {
-    id: 'cloud',
-    name: 'Cloud',
-    status: CLOUD_OPEN ? 'Early access' : 'Waitlist',
-    body: CLOUD_OPEN ? 'We run it for you. Open to invited teams for now.' : 'We run it for you. Waitlist only for now.',
-    icon: <CloudIcon className="size-4" />,
-    cta: { label: ACCESS_CTA, to: '/contact', primary: true },
-  },
-  {
-    id: 'support',
-    name: 'Support and enterprise',
-    status: 'Talk to us',
-    body: "For teams that want help running Logbird, or terms we haven't covered here.",
-    icon: <LifeBuoyIcon className="size-4" />,
-    cta: { label: 'Contact us', to: '/contact' },
-  },
-];
-
 function StatusPanel() {
   const rows = [
     CLOUD_OPEN
       ? { label: 'Logbird Cloud', value: 'Early access', note: 'Invited teams' }
       : { label: 'Logbird Cloud', value: 'Not open yet', note: 'Waitlist' },
-    { label: 'Pricing', value: "Isn't set yet", note: CLOUD_OPEN ? 'Published before sign-ups open' : 'Published before launch' },
+    pricing.cloud.status,
     GITHUB_PUBLIC
       ? { label: 'Self-host', value: 'Available today', note: 'Free, MIT' }
       : { label: 'Self-host', value: 'When the source opens', note: 'Free, MIT' },
@@ -178,38 +143,16 @@ function CloudPage() {
       />
 
       <Section id="pricing" labelledBy="pricing-title" tone="sunken">
-        <SectionHeader
-          eyebrow="Pricing"
-          id="pricing-title"
-          lead={
-            CLOUD_OPEN
-              ? "We'll publish prices before sign-ups open to everyone. Here is the shape we're planning. Nothing here is final."
-              : "We'll publish prices before Logbird Cloud opens. Here is the shape we're planning. Nothing here is final."
-          }
-          title="Pricing isn't set yet."
-        />
-        <ul className="mt-12 grid gap-4 md:grid-cols-3">
-          {plans.map((plan) => (
-            <li className={cx('panel flex flex-col gap-5 p-6 md:p-7', plan.cta.primary && 'panel-accent')} key={plan.id}>
-              <div className="flex items-center gap-3">
-                <span aria-hidden="true" className="inline-flex size-9 items-center justify-center rounded-lg border bg-background text-brand">
-                  {plan.icon}
-                </span>
-                <h3 className="h3">{plan.name}</h3>
-              </div>
-              <p className="font-semibold text-2xl tracking-tight">{plan.status}</p>
-              <p className="text-muted-foreground leading-relaxed">{plan.body}</p>
-              <div className="mt-auto pt-2">
-                <ButtonLink className="w-full" search={plan.cta.search} to={plan.cta.to} variant={plan.cta.primary ? 'default' : 'outline'}>
-                  {plan.cta.label}
-                </ButtonLink>
-              </div>
-            </li>
-          ))}
-        </ul>
-        <p className="mt-6 text-muted-foreground text-sm">
-          Plans, prices and limits will be announced before launch. Nothing on this page is an offer.
-        </p>
+        <SectionHeader eyebrow={pricing.cloud.eyebrow} id="pricing-title" lead={pricing.cloud.lead} title={pricing.cloud.title} />
+        <div className="mt-12">
+          <PlanCards dimensions={pricing.dimensions} plans={pricing.plans} />
+        </div>
+        <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
+          <ButtonLink to={pricing.cloud.more.to} variant="outline">
+            {pricing.cloud.more.label}
+          </ButtonLink>
+          <p className="text-muted-foreground text-sm">{pricing.cloud.note}</p>
+        </div>
       </Section>
 
       <Section id="faq" labelledBy="faq-title">

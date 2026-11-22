@@ -11,6 +11,7 @@
         "WEB_ORG_NAME",
         "WEB_SECURITY_EMAIL",
         "WEB_CONTACT_EMAIL",
+        "WEB_CHECKOUT_URL",
         "WEB_PRIVACY_EMAIL",
         "WEB_LEGAL_ADDRESS",
         "WEB_GOVERNING_LAW",
