@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react';
-import { ACCESS_CTA } from '../../lib/cloud';
+import { shared } from '../../content/shared';
 import { ButtonLink } from './button-link';
 import { LogStack } from './log-stack';
-import { CTA_BODY, SelfHostCta } from './self-host-cta';
+import { SelfHostCta } from './self-host-cta';
 
-/** The closing call to action used at the bottom of most pages. */
-export function CtaBand({ title = 'Start with one event.', body = CTA_BODY, note }: { title?: string; body?: ReactNode; note?: ReactNode }) {
+/** The closing call to action used at the bottom of most pages. Words: content/shared.ts (ctaBand). */
+export function CtaBand({ title = shared.ctaBand.title, body = shared.ctaBand.body, note }: { title?: string; body?: ReactNode; note?: ReactNode }) {
   return (
     <section aria-labelledby="cta-title" className="py-20 md:py-24">
       <div className="container-site">
@@ -18,7 +18,7 @@ export function CtaBand({ title = 'Start with one event.', body = CTA_BODY, note
             <p className="lead">{body}</p>
             <div className="flex flex-wrap gap-3 pt-2">
               <ButtonLink size="lg" to="/contact">
-                {ACCESS_CTA}
+                {shared.accessCta}
               </ButtonLink>
               <SelfHostCta />
             </div>
