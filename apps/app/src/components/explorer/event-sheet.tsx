@@ -223,6 +223,8 @@ const causationIndent = (depth: number) => Math.min(depth, 6) * 14;
 interface Children {
   /** How many events this event caused: the stored count, or more when a fresher operation already shows more. */
   total: number;
+  /** The two reads disagree and are being rechecked: show neither the count nor the rows until they settle. */
+  disputed: boolean;
   /** Up to CHILD_PREVIEW direct children, oldest first (empty when they could not be read from the operation). */
   shown: AuditEvent[];
   loading: boolean;
@@ -251,8 +253,9 @@ function useChildren(
   const children = lookup && op.isSuccess ? directChildren(op.data, e.id) : [];
   const mismatch = `${e.id}:${counted}:${children.length}`;
   const exceeds = lookup && op.isSuccess && children.length > counted;
-  // While either read of a known disagreement is in flight, neither side may be trusted yet.
-  const settling = exceeds && (op.isFetching || detailSync.fetching);
+  // While a recheck is under way (a disagreement was seen, or a refresh was sent and its answer is still in flight),
+  // neither side may be trusted yet.
+  const settling = (exceeds || tried.current.size > 0) && (op.isFetching || detailSync.fetching);
   let refresh: 'detail' | 'operation' | null = null;
   if (exceeds && !settling) {
     const older = op.dataUpdatedAt >= detailSync.updatedAt ? 'detail' : 'operation';
@@ -277,6 +280,7 @@ function useChildren(
   }, [refresh, mismatch, queryClient, projectId, e.id, operationId]);
   const accepted = lookup && op.isSuccess && !refresh && !settling;
   return {
+    disputed: Boolean(refresh) || settling,
     total: accepted ? Math.max(counted, children.length) : counted,
     shown: accepted ? children.slice(0, CHILD_PREVIEW) : [],
     loading: lookup && (op.isPending || Boolean(refresh) || settling),
@@ -730,7 +734,7 @@ function EventDetailBody({
           </Section>
         ) : null}
 
-        {ctx.parentEventId || ctx.operationId || caused.total > 0 ? (
+        {ctx.parentEventId || ctx.operationId || caused.total > 0 || caused.disputed ? (
           <Section title="Causation">
             {detailLoading ? (
               <Skeleton className="h-8 w-full" />
@@ -760,13 +764,15 @@ function EventDetailBody({
                 <li className="flex items-center gap-2 font-medium text-[13px]" style={{ paddingInlineStart: causationIndent(depth) }}>
                   <OutcomeDot outcome={e.outcome} />
                   <span className="min-w-0 truncate">This event</span>
-                  {caused.total > 0 ? (
+                  {caused.disputed ? (
+                    <span className="shrink-0 font-normal text-muted-foreground text-xs">checking what it caused…</span>
+                  ) : caused.total > 0 ? (
                     <span className="shrink-0 font-normal text-muted-foreground text-xs">
                       caused {caused.total} event{caused.total === 1 ? '' : 's'}
                     </span>
                   ) : null}
                 </li>
-                {caused.total > 0 && projectId ? (
+                {(caused.total > 0 || caused.disputed) && projectId ? (
                   <ChildEvents caused={caused} event={e} indent={causationIndent(depth + 1)} projectId={projectId} />
                 ) : null}
                 {ctx.parentEventId === e.id ? (

@@ -465,6 +465,8 @@ export function Explorer({
         </div>
         {showChart ? (
           <EventHistogram
+            // A new search (or Back to a cached one) starts with no drag in progress.
+            key={explorerResultKey(projectId, range, effectiveQ, lang)}
             data={histogramData}
             height={embedded ? 96 : 112}
             loading={histogram.isFetching && !histogram.isPending}
