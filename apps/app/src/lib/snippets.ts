@@ -55,6 +55,31 @@ export function curlSnippet(key?: string): string {
   }'`;
 }
 
+/**
+ * C# (.NET 8+): a plain `HttpClient` POST, no package. The Logbird package for .NET is not published yet, so no install
+ * command and no package name here; this works today.
+ */
+export function dotnetSnippet(key?: string): string {
+  const apiKey = key ? `"${key}"` : `Environment.GetEnvironmentVariable("${INGEST_ENV}")`;
+  return `using System.Net.Http.Json;
+
+using var http = new HttpClient();
+http.DefaultRequestHeaders.Authorization = new("Bearer", ${apiKey});
+
+var response = await http.PostAsJsonAsync("${ingestOrigin()}/v1/events", new
+{
+    action = "hotel.policy.updated",
+    outcome = "success",
+    description = "Lina changed the cancellation policy of Hotel Sunrise",
+    actor = new { type = "user", id = "usr_42", name = "Lina Haddad" },
+    tenant = new { id = "biz_7", name = "Azure Hotels" },
+    targets = new[] { new { type = "hotel", id = "hotel_123", name = "Hotel Sunrise" } },
+    changes = new[] { new { field = "cancellationHours", before = 24, after = 48 } },
+});
+if (response.StatusCode != System.Net.HttpStatusCode.Accepted)
+    throw new Exception(await response.Content.ReadAsStringAsync());`;
+}
+
 /** Plain `fetch` (Node 18+, Deno, Bun, edge runtimes): no dependency at all. */
 export function fetchSnippet(key?: string): string {
   const auth = key ? `'Bearer ${key}'` : `\`Bearer \${process.env.${INGEST_ENV}}\``;

@@ -73,7 +73,7 @@ function HomePage() {
             <SectionHeader
               eyebrow="For developers"
               id="developers-title"
-              lead="Any JSON object with an action string is a valid event. Add the fields you have: who did it, in which customer account, to which records, what changed. Logbird lifts the fields it knows into indexed columns and keeps everything else as searchable attributes. Off-standard events are stored, never dropped."
+              lead="Only an action string is required, and each event must fit the ingest limits. Add the fields you have: who did it, in which customer account, to which records, what changed. Logbird lifts the fields it knows into their own columns. Custom top-level fields and anything under metadata are searchable as attributes within the indexing limits, and the full parsed event is available as JSON. Recommended fields are optional: an event is never rejected for missing them."
               title="One call per action. No schema to migrate."
             />
             <ul className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
@@ -93,7 +93,10 @@ function HomePage() {
               </li>
               <li className="text-sm leading-relaxed">
                 <strong className="font-medium">A conformance score</strong>
-                <span className="text-muted-foreground"> on every event shows which recommended fields you're missing.</span>
+                <span className="text-muted-foreground">
+                  {' '}
+                  on every event: the share of nine recommended checks it passes. The setup page shows which fields your events miss.
+                </span>
               </li>
             </ul>
             {isReady('/developers') ? (
@@ -120,12 +123,12 @@ function HomePage() {
         <SectionHeader
           eyebrow="For support, operations and compliance"
           id="operators-title"
-          lead="The console is built for the people who get the question: support, operators, and whoever answers the auditor. Search every event, open a customer account or a single record, and see each change with its before and after values."
+          lead="The console is built for the people who get the question: support, operators, and whoever answers the auditor. Search every event, open a customer account or a single record, and see the before and after values you send for the first 256 changes of each event."
           title={'Answer "what happened in this account?" in one search.'}
         />
         <div className="mt-12 grid gap-10 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] lg:items-start">
           <ScreenshotFrame
-            caption="An event in detail: who asked, what did the work, whose account, which records, and the before and after of each change."
+            caption="An event in detail: who asked, what did the work, whose account, which records, and the before and after values sent for each change (the first 256 per event)."
             id="event-sheet"
             label="Event detail"
             sizes="(min-width: 1024px) 680px, calc(100vw - 2rem)"
@@ -135,13 +138,13 @@ function HomePage() {
               <code>actor:usr_42 action:booking.* outcome:failure</code>, or a guarded SQL <code>WHERE</code> expression.
             </Feature>
             <Feature compact icon={<BoxesIcon className="size-4" />} title="Entity pages">
-              Every actor, tenant, executor and record gets its own page and timeline.
+              Actors, tenants, executors and records get their own pages and timelines.
             </Feature>
             <Feature compact icon={<GitBranchIcon className="size-4" />} title="Operation trees">
-              One request, the jobs it spawned and every record they changed, as one tree.
+              The events that share an operation id, from the request to the jobs it spawned, as one tree.
             </Feature>
             <Feature compact icon={<UserCogIcon className="size-4" />} title="Impersonation">
-              When support acts for a customer, both names are on the event.
+              When support acts for a customer, the event records who acted for whom.
             </Feature>
             <Feature compact icon={<TimerResetIcon className="size-4" />} title="Retention">
               Per project, from 7 days to 10 years. Expired events are permanently deleted.
@@ -164,7 +167,16 @@ function HomePage() {
             items={[
               { title: 'Create a project', body: "Copy its ingest key. It's shown once and stored only as a hash." },
               { title: 'Send events', body: 'Over HTTP or the SDK: one event, or up to 1000 per request.', detail: 'POST /v1/events' },
-              { title: 'Logbird stores them', body: 'The server answers 202 only after ClickHouse has the rows.', detail: '202 Accepted' },
+              {
+                title: 'Logbird stores them',
+                body: (
+                  <>
+                    On <code>202</code>, <code>ids</code> lists the events written to ClickHouse, by this request or an earlier identical one, and{' '}
+                    <code>rejected</code> names the entries that failed.
+                  </>
+                ),
+                detail: '202 Accepted',
+              },
               {
                 title: 'Search, follow, keep',
                 body: 'Use the console, or read events from your own backend with a read key. Expired events are deleted every hour.',
@@ -200,7 +212,7 @@ function HomePage() {
               id="oss-title"
               lead={
                 GITHUB_PUBLIC
-                  ? 'The whole product is in one repository: the API, the console, the retention worker, the SDK and the integrations. Self-hosting runs the published, versioned images on your server, so your events stay on your infrastructure.'
+                  ? 'The whole product is in one repository: the API, the console, the retention worker, the SDK and the integrations. Self-hosting runs on your server, from the published, versioned images once a release exists, so your events stay on your infrastructure.'
                   : 'The whole product is in one repository: the API, the console, the retention worker, the SDK and the integrations. Self-hosting runs it on your server, so your events stay on your infrastructure.'
               }
               title={<>MIT-licensed. Runs with Docker Compose.</>}
@@ -231,7 +243,11 @@ function HomePage() {
           </div>
           {GITHUB_PUBLIC ? (
             <div className="flex min-w-0 flex-col gap-3">
-              <SiteCode code={selfHostQuickstart} language="bash" title={`Self-host ${SELF_HOST_VERSION}`} />
+              <SiteCode
+                code={selfHostQuickstart}
+                language="bash"
+                title={SELF_HOST_VERSION ? `Self-host ${SELF_HOST_VERSION}` : 'Self-host from source'}
+              />
               <p className="text-muted-foreground text-sm">
                 Then open <code>http://localhost:4600</code>, sign in with the emailed code and create a project. Configure SMTP first, or enable
                 sign-in codes in the server log.
@@ -242,8 +258,8 @@ function HomePage() {
               <p className="eyebrow">Self-host quickstart</p>
               <p className="font-semibold text-lg">Available when the repository opens.</p>
               <p className="text-muted-foreground text-sm leading-relaxed">
-                On one VM: clone, generate secrets, configure SMTP, build the four roles, then <code>docker compose up -d --no-build</code>. We'll
-                publish the commands here the day the source is public.
+                On one VM: clone, generate secrets, configure SMTP, pull the images, then <code>docker compose up -d --no-build</code>. We'll publish
+                the commands here the day the source is public.
               </p>
               <div>
                 <ButtonLink search={{ interest: 'self-host' }} to="/contact" variant="outline">
@@ -260,17 +276,26 @@ function HomePage() {
         <div className="mt-12">
           <Guarantees
             items={[
-              { promise: 'A 202 means the event is stored in ClickHouse.', limit: 'Delivery is at least once; counts may include duplicates.' },
+              {
+                promise: 'A `202` lists accepted event IDs in `ids` and rejected events in `rejected`.',
+                limit:
+                  'Delivery is at least once when the client retries unsettled events, as the SDK does. An exact retry with the same valid, non-blank string `id` is stored once while the project retains the event; changed content under that id is rejected with `duplicate_id_conflict`. An event sent without an id gets a new one on every retry.',
+              },
               {
                 promise: 'The SDK batches and retries for you.',
                 limit: 'Its queue is in memory: a crash before the server acknowledges can lose pending events.',
               },
               {
-                promise: 'Any shape is accepted; only action is required.',
-                limit: 'Events without an action are rejected one by one; the rest of the batch is stored.',
+                promise: 'Only an `action` string is required, and each event must fit the ingest limits.',
+                limit:
+                  'Each event is checked on its own: rejected events are listed in `rejected` with a reason. On `202`, the rest of the batch is accepted. When a `503` lists the unsettled events, retry only those; otherwise retry the whole batch with the same ids.',
               },
               { promise: 'Retention deletes expired events for good.', limit: "There's no archive and no undo." },
-              { promise: 'History starts the day you start sending.', limit: 'There is no backfill.' },
+              {
+                promise: 'Import history by sending events with their original `occurredAt`, up to 3650 days back.',
+                limit:
+                  "An older `occurredAt` is stored at receive time with a warning, and project retention still applies to imports. Logbird doesn't rebuild history from your database.",
+              },
             ]}
           />
         </div>

@@ -24,14 +24,14 @@ import { formatNumber } from '@/lib/format';
 import { firstEventCopy } from '@/lib/onboarding';
 import { useCan } from '@/lib/permissions';
 import { formatTerm } from '@/lib/query-language';
-import { curlSnippet, fetchSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
+import { curlSnippet, dotnetSnippet, fetchSnippet, SDK_INSTALL, sdkSnippet } from '@/lib/snippets';
 import { useSessionKey } from './api-key-step';
 import { useInvalidateSetup, useSampleData, useTestEvent } from './use-setup';
 
 /** How often the first-event step polls setup while nothing has arrived. */
 export const FIRST_EVENT_POLL_MS = 2500;
 
-/** curl / TypeScript SDK / fetch, pre-filled with this origin and the session's ingest key. */
+/** curl / TypeScript SDK / C# (.NET) / fetch, pre-filled with this origin and the session's ingest key. */
 export function SendEventSnippets({ projectId }: { projectId: string }) {
   const key = useSessionKey(projectId, 'ingest');
   return (
@@ -40,9 +40,14 @@ export function SendEventSnippets({ projectId }: { projectId: string }) {
         tabs={[
           { id: 'curl', label: 'curl', code: curlSnippet(key), language: 'bash' },
           { id: 'sdk', label: 'TypeScript SDK', code: `// ${SDK_INSTALL}\n${sdkSnippet(key)}`, language: 'ts' },
+          { id: 'dotnet', label: 'C# (.NET)', code: dotnetSnippet(key), language: 'csharp' },
           { id: 'fetch', label: 'fetch', code: fetchSnippet(key), language: 'ts' },
         ]}
       />
+      {/* Not every backend is TypeScript. No package name until the .NET package is published. */}
+      <p className="text-muted-foreground text-xs">
+        Any language that can POST JSON works: curl, C# and fetch show the plain HTTP call. A Logbird package for .NET is coming.
+      </p>
       {key ? null : (
         <p className="text-muted-foreground text-xs">
           No key in this tab, so the snippets read <span className="font-mono text-foreground">LOGBIRD_INGEST_KEY</span> from the environment. Create
@@ -87,7 +92,11 @@ export function FirstEventPanel({ projectId, showSnippets = true }: { projectId:
   return (
     <div className="flex flex-col gap-4">
       {showSnippets ? <SendEventSnippets projectId={projectId} /> : null}
-      {first ? <ReceivedEvent celebrate={celebrate} event={first} projectId={projectId} /> : <Listening projectId={projectId} setup={data} />}
+      {first ? (
+        <ReceivedEvent backendSeen={Boolean(data.ingest.lastEventAt)} celebrate={celebrate} event={first} projectId={projectId} />
+      ) : (
+        <Listening projectId={projectId} setup={data} />
+      )}
       <SampleDataControl projectId={projectId} setup={data} />
     </div>
   );
@@ -130,7 +139,18 @@ function Listening({ projectId, setup }: { projectId: string; setup: ProjectSetu
   );
 }
 
-function ReceivedEvent({ projectId, event, celebrate }: { projectId: string; event: AuditEvent; celebrate: boolean }) {
+function ReceivedEvent({
+  projectId,
+  event,
+  celebrate,
+  backendSeen,
+}: {
+  projectId: string;
+  event: AuditEvent;
+  celebrate: boolean;
+  /** The backend has sent an event since: stop asking for one. */
+  backendSeen: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div
@@ -148,7 +168,7 @@ function ReceivedEvent({ projectId, event, celebrate }: { projectId: string; eve
           </span>
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p className="font-medium text-sm">{firstEventCopy(event.source, celebrate).cardTitle}</p>
+          <p className="font-medium text-sm">{firstEventCopy(event.source, celebrate, backendSeen).cardTitle}</p>
           <p className="text-muted-foreground text-xs">
             <Timestamp format="full" iso={event.receivedAt} /> · via {event.sdk || 'HTTP'}
           </p>
