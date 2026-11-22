@@ -425,7 +425,8 @@ function RollKeyDialog({
         : expiryNote(expiryFor(value));
   return (
     <Dialog onOpenChange={(open) => (open ? undefined : close())} open={Boolean(apiKey)}>
-      <DialogContent className="sm:max-w-md">
+      {/* Short phone screens: the expiry choices and Roll stay reachable by scrolling inside the dialog. */}
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto overflow-x-hidden sm:max-w-md">
         {apiKey ? (
           <div className="flex min-w-0 flex-col gap-4">
             <DialogHeader>
