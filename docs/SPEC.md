@@ -501,6 +501,7 @@ receive time and pages up to 100 matching event occurrences, ordered by receive 
 the cursor too. The event-time predicate covers the full ingest window of 3650 days before receipt
 through 24 hours after receipt. Physical reads can still span historical partitions because ClickHouse
 sorts by event time. On very large projects delivery can stall until the arrival-time index is present.
+A large historical import (many events arriving with old occurrence times) can also delay deliveries for that project until discovery has worked through it.
 The cursor remains in place when a scan exceeds its read budget. Discovery pauses on an implausible cursor and the
 API returns `cursorWarning: webhook_cursor_review_required` until [operator reconciliation](self-hosting.md#reconcile-a-webhook-discovery-cursor).
 The worker inserts deliveries and advances the cursor in one Postgres transaction. Deliveries are unique
