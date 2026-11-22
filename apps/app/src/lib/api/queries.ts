@@ -12,6 +12,15 @@ import { ApiRequestError, isBusyError, isTimeoutError, withDeadline } from './er
  * Ranges are keyed by their *string* ("24h"), and resolved to concrete bounds inside the
  * query function, so a relative range refreshes on refetch without changing identity.
  */
+/**
+ * `keepPreviousData`, but only within one project: while project B's first result loads, project A's rows, counts or
+ * charts must never show (or be opened) under B. Project query keys start with `keys.project(projectId)`.
+ */
+export function keepPreviousInProject(projectId: string) {
+  return <T>(previous: T | undefined, previousQuery?: { queryKey: readonly unknown[] }): T | undefined =>
+    previousQuery?.queryKey[0] === 'projects' && previousQuery.queryKey[1] === projectId ? previous : undefined;
+}
+
 export const keys = {
   me: ['me'] as const,
   projects: ['projects'] as const,
@@ -110,7 +119,7 @@ export const overviewQuery = (projectId: string, range: string, q = '') =>
       const r = resolveRange(range);
       return api.overview(projectId, { from: r.from, to: r.to, q: q || undefined }, signal);
     },
-    placeholderData: keepPreviousData,
+    placeholderData: keepPreviousInProject(projectId),
     refetchInterval: 60_000,
   });
 
@@ -129,18 +138,24 @@ export const eventsInfiniteQuery = (projectId: string, range: string, q: string,
     },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    placeholderData: keepPreviousData,
+    placeholderData: keepPreviousInProject(projectId),
     retry: shouldRetry,
   });
 
 export const histogramQuery = (projectId: string, range: string, q: string, lang: QueryLang = 'query', interval?: number) =>
   queryOptions({
     queryKey: [...keys.project(projectId), 'histogram', range, q, q ? lang : 'query', interval ?? null] as const,
-    queryFn: ({ signal }) => {
+    queryFn: async ({ signal }) => {
       const r = resolveRange(range);
-      return api.events.histogram(projectId, { from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, interval }, signal);
+      const data = await api.events.histogram(
+        projectId,
+        { from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, interval },
+        signal,
+      );
+      // The bounds these bars were counted over: a relative range moves on, the drawn bars do not.
+      return { ...data, fromMs: r.fromMs, toMs: r.toMs };
     },
-    placeholderData: keepPreviousData,
+    placeholderData: keepPreviousInProject(projectId),
     retry: shouldRetry,
   });
 
@@ -151,7 +166,7 @@ export const facetQuery = (projectId: string, field: string, range: string, q: s
       const r = resolveRange(range);
       return api.events.facets(projectId, { field, from: r.from, to: r.to, q: q || undefined, lang: q ? langParam(lang) : undefined, limit }, signal);
     },
-    placeholderData: keepPreviousData,
+    placeholderData: keepPreviousInProject(projectId),
     staleTime: 30_000,
     retry: shouldRetry,
   });
@@ -160,6 +175,26 @@ export const eventQuery = (projectId: string, eventId: string) =>
   queryOptions({
     queryKey: [...keys.project(projectId), 'event', eventId] as const,
     queryFn: ({ signal }) => api.events.get(projectId, eventId, signal),
+    staleTime: 5 * 60_000,
+    retry: shouldRetry,
+  });
+
+/**
+ * The oldest event the project still stores (its timestamp), or null when it holds none: one ascending search row over
+ * every timestamp ingest can admit. Used to bound searches that must reach every stored match.
+ */
+export const oldestStoredQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: [...keys.project(projectId), 'oldest-stored'] as const,
+    queryFn: async ({ signal }) => {
+      const now = Date.now();
+      const page = await api.events.search(
+        projectId,
+        { from: new Date(now - 20 * 365 * 86_400_000).toISOString(), to: new Date(now + 2 * 86_400_000).toISOString(), order: 'asc', limit: 1 },
+        signal,
+      );
+      return page.data[0]?.timestamp ?? null;
+    },
     staleTime: 5 * 60_000,
     retry: shouldRetry,
   });
@@ -179,7 +214,7 @@ export const entityListQuery = (projectId: string, kind: EntityKind, q: string, 
       api.entities.list(projectId, { kind, q: q || undefined, type: type || undefined, sort, limit: 50, cursor: pageParam }, signal),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    placeholderData: keepPreviousData,
+    placeholderData: keepPreviousInProject(projectId),
     retry: shouldRetry,
   });
 
@@ -190,7 +225,7 @@ export const entityProfileQuery = (projectId: string, kind: EntityKind, entityId
       const r = resolveRange(range);
       return api.entities.profile(projectId, kind, entityId, { from: r.from, to: r.to }, signal);
     },
-    placeholderData: keepPreviousData,
+    placeholderData: keepPreviousInProject(projectId),
     retry: shouldRetry,
   });
 
@@ -201,7 +236,7 @@ export const fieldsQuery = (projectId: string, range: string) =>
       const r = resolveRange(range);
       return api.fields(projectId, { from: r.from, to: r.to }, signal);
     },
-    placeholderData: keepPreviousData,
+    placeholderData: keepPreviousInProject(projectId),
     retry: shouldRetry,
   });
 
