@@ -1,4 +1,4 @@
-import type { ClickHouseClient } from '@logbird/clickhouse';
+import { type ClickHouseClient, fieldMaskKey } from '@logbird/clickhouse';
 import { Queue, Worker } from 'bullmq';
 import { env } from './env';
 import { connection } from './queue';
@@ -9,6 +9,7 @@ import { pruneWebhookLogs } from './webhook-retention';
 
 export async function startWebhookQueues(ch: ClickHouseClient, key: Buffer | null) {
   const options = { connection, prefix: env.BULLMQ_PREFIX };
+  const maskKey = env.BETTER_AUTH_SECRET ? fieldMaskKey(env.BETTER_AUTH_SECRET) : undefined;
   const jobs = [
     { name: 'webhook-discovery', interval: 2000, run: () => scanWebhooks(ch) },
     {
@@ -18,6 +19,7 @@ export async function startWebhookQueues(ch: ClickHouseClient, key: Buffer | nul
         if (key)
           await deliverWebhooks(ch, {
             secretKey: key,
+            maskKey,
             concurrency: env.WEBHOOKS_WORKER_CONCURRENCY,
             perEndpoint: env.WEBHOOKS_ENDPOINT_CONCURRENCY,
             failureLimit: env.WEBHOOKS_FAILURE_LIMIT,

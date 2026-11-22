@@ -447,6 +447,10 @@ configure the bundled administrator; migrate later reprovisions the restricted
 query account without rotation. Custom access settings need a separate backup.
 See the [ClickHouse backup reference](https://clickhouse.com/docs/concepts/features/backup-restore/overview).
 
+Before re-enabling webhook discovery after a restore, review enabled endpoints
+against the restored delivery history and the original rollout time. See
+[Reconcile a webhook discovery cursor](#reconcile-a-webhook-discovery-cursor).
+
 ### Normalize restored ClickHouse parts
 
 **Normalize after every native ClickHouse restore before starting writers.** The
@@ -1025,7 +1029,27 @@ validation uses a cancellable DNS resolver. The sender resolves again and pins
 an allowed address on every attempt.
 
 PATCH `scope` replaces the whole scope; `null` clears it. `filterQuery` uses the
-Logbird query language (empty matches everything). Secret rotation accepts an
+Logbird query language (empty matches everything). A scope can name a tenant, a
+target, or both. Like scoped read access, it uses [stored IDs](security.md#scopes-name-stored-ids),
+including the maintainer decision about whitespace on ingest. The scope input
+allows at most 250 UTF-16 code units per ID and 60 for a target type, with no
+surrounding whitespace, NUL, U+FFFD or lone surrogates. The API shows
+`scopeWarning: webhook_invalid_scope` on legacy endpoints with invalid stored
+scopes. The worker skips discovery without advancing their cursors and blocks
+delivery. Replace the scope through PATCH to resume processing.
+
+`scope.mask` accepts `ip`, `user_agent` and `actor_email`. The signed event uses
+the same [field masks as scoped reads](scoped-read-access.md#masks), with empty
+IP and user agent, a stable project-keyed actor email hash, and the corresponding
+attribute paths removed. The webhook body is the event projection. It excludes
+the original document. Create and PATCH reject filters on masked fields with
+HTTP 422 `invalid_query`. Retries and resends apply the endpoint's current scope
+and masks. To use `actor_email`, give the worker the server's `BETTER_AUTH_SECRET`
+even when `WEBHOOK_SECRET_KEY` is configured separately. Upgrade all workers
+before enabling masks, and disable masked endpoints before rolling workers back
+to code that predates masks.
+
+Secret rotation accepts an
 `overlapSeconds` integer from 0 to 604800 (default 86400); omitted fields in PATCH
 remain unchanged.
 
@@ -1058,3 +1082,40 @@ If an endpoint carries more than ten active secrets from an earlier version,
 the API reports `secretOverlapWarning: webhook_secret_overlap_limit` and the
 worker signs with the ten newest active secrets. Wait for an overlap to expire,
 or rotate with `overlapSeconds` set to `0` and update the receiver with the new secret.
+
+### Reconcile a webhook discovery cursor
+
+The rollout repair uses the original PostgreSQL fast-default metadata. A table
+rewrite or logical restore can remove that metadata while leaving an original
+cursor shifted by the former database session time zone. Discovery compares
+the stored cursor to database time, the later of endpoint creation and the UTC
+rollout, and the last recorded scan. It allows a minute for prior workers to
+acquire their scan watermark. A cursor outside those bounds is held in place.
+The worker logs `webhook.cursor_review_required` and the endpoint API returns
+`cursorWarning: webhook_cursor_review_required`. The hold persists until an
+operator clears it. The check detects impossible positions and cannot establish
+that scans completed through an otherwise plausible position.
+
+1. Stop webhook workers while reconciling the affected endpoint. Take a database
+   backup and record the endpoint ID, project ID, `createdAt`, `cursorReceivedAt`,
+   `cursorEventId` and `lastScannedAt`. Use the original rollout's `started_at`
+   from `_prisma_migrations` for `20261122140000_webhook_deliveries`, converted to
+   UTC. If the migration ledger was rebuilt, use the original backup or rollout
+   record.
+2. Compare with retained `WebhookDelivery.receivedAt` and receiver records. Test
+   pings (`receivedAt IS NULL`), a scan timestamp, and the newest successful
+   delivery alone cannot prove coverage. Choose the earliest uncertain receive
+   millisecond, no earlier than the later of endpoint creation and rollout. If
+   you cannot prove coverage, use that starting bound. Preserve the delivery
+   history so rediscovery can deduplicate retained occurrences. Receivers may
+   see duplicates where earlier delivery records have expired.
+3. In one transaction, lock and re-read the exact endpoint by project and ID.
+   Set `cursorReceivedAt` to the chosen UTC millisecond, set `cursorEventId` to
+   `NULL` to include all events at that millisecond, and clear
+   `cursorReviewRequired`. If using a later independently verified checkpoint,
+   preserve `lastScannedAt` or set it to the checkpoint if the stored value was
+   absent or earlier. Update `updatedAt` in UTC. Verify exactly one row changed
+   before committing. Leave delivery and attempt records intact.
+4. Restart workers. Verify the warning clears, the cursor resumes moving and
+   expected deliveries appear in the log. Keep workers stopped if the restored
+   data cannot establish a trustworthy starting bound.

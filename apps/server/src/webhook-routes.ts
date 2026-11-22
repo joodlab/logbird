@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { compileQuery } from '@logbird/clickhouse';
+import { compileMaskedQuery } from '@logbird/clickhouse';
 import {
+  apiErrorSchema,
   createWebhookResponseSchema,
   createWebhookSchema,
   listWebhookDeliveriesQuerySchema,
@@ -10,9 +11,12 @@ import {
   queuedWebhookDeliverySchema,
   rotateWebhookSecretResponseSchema,
   rotateWebhookSecretSchema,
+  storedWebhookScope,
   updateWebhookSchema,
+  type WebhookScope,
   webhookEndpointSchema,
   webhookLookupBusySchema,
+  webhookScopeFromColumns,
   webhookSecretOverlapLimitSchema,
 } from '@logbird/contracts';
 import { Prisma, prisma, type WebhookAttempt, type WebhookEndpoint } from '@logbird/database';
@@ -44,6 +48,10 @@ const webhookUrlDoc = (summary: string, schema: ZodType, status = 200) =>
   routeDoc(summary, {
     responses: {
       [status]: { description: summary, content: { 'application/json': { schema: resolver(schema) } } },
+      422: {
+        description: 'Invalid endpoint configuration or filter. Filters cannot reference masked fields.',
+        content: { 'application/json': { schema: resolver(apiErrorSchema) } },
+      },
       503: {
         description: 'Destination lookup capacity is busy. Retry after the indicated delay.',
         headers: { 'Retry-After': { description: 'Seconds before retrying', schema: { type: 'integer', example: 3 } } },
@@ -53,26 +61,25 @@ const webhookUrlDoc = (summary: string, schema: ZodType, status = 200) =>
   });
 const updateWebhookDoc = webhookUrlDoc('Update webhook endpoint', webhookEndpointSchema);
 function serialize(endpoint: WebhookEndpoint, activeSecretCount = 0) {
+  const scope = storedWebhookScope(endpoint);
+  const responseScope = scope === undefined ? (webhookEndpointSchema.shape.scope.safeParse(webhookScopeFromColumns(endpoint)).data ?? null) : scope;
   return webhookEndpointSchema.parse({
     ...endpoint,
     ...(activeSecretCount > MAX_WEBHOOK_SIGNATURES && { secretOverlapWarning: 'webhook_secret_overlap_limit' }),
-    scope:
-      endpoint.scopeTenantId || endpoint.scopeTargetType
-        ? {
-            ...(endpoint.scopeTenantId ? { tenantId: endpoint.scopeTenantId } : {}),
-            ...(endpoint.scopeTargetType ? { target: { type: endpoint.scopeTargetType, id: endpoint.scopeTargetId } } : {}),
-          }
-        : null,
+    ...(scope === undefined && { scopeWarning: 'webhook_invalid_scope' }),
+    ...(endpoint.cursorReviewRequired && { cursorWarning: 'webhook_cursor_review_required' }),
+    scope: responseScope,
     createdAt: endpoint.createdAt.toISOString(),
     updatedAt: endpoint.updatedAt.toISOString(),
     disabledAt: endpoint.disabledAt?.toISOString() ?? null,
   });
 }
 const activeSecretCount = () => ({ _count: { select: { secrets: { where: activeWebhookSecrets(new Date()) } } } });
-const scopeColumns = (scope: { tenantId?: string; target?: { type: string; id: string } } | null) => ({
+const scopeColumns = (scope: WebhookScope | null) => ({
   scopeTenantId: scope?.tenantId ?? null,
   scopeTargetType: scope?.target?.type ?? null,
   scopeTargetId: scope?.target?.id ?? null,
+  scopeMask: scope?.mask ?? [],
 });
 async function allowedUrl(c: Context<AppEnv>, url: string) {
   try {
@@ -85,6 +92,8 @@ async function allowedUrl(c: Context<AppEnv>, url: string) {
 }
 function requireEnabled(endpoint: WebhookEndpoint) {
   if (!endpoint.enabled) throw new ApiError(409, 'webhook_disabled', 'Enable this webhook before queuing a delivery.');
+  if (storedWebhookScope(endpoint) === undefined)
+    throw new ApiError(409, 'webhook_invalid_scope', 'Correct the stored webhook scope before queuing a delivery.');
 }
 const invalidBody = (result: { success: boolean; error?: unknown }) => {
   if (!result.success) throw new ApiError(422, 'validation_error', 'Invalid request body.', result.error);
@@ -156,7 +165,7 @@ export const webhookRoutes = new Hono<AppEnv>()
     validator('json', createWebhookSchema, webhookBody),
     async (c) => {
       const input = c.req.valid('json');
-      compileQuery(input.filterQuery ?? '');
+      compileMaskedQuery(input.filterQuery ?? '', input.scope?.mask);
       const url = await allowedUrl(c, input.url);
       const secret = generateWebhookSecret();
       const endpoint = await lockedProject(c, async (tx) => {
@@ -199,12 +208,15 @@ export const webhookRoutes = new Hono<AppEnv>()
   })
   .patch(`${base}/:id`, updateWebhookDoc, validator('json', updateWebhookSchema, webhookBody), async (c) => {
     const input = c.req.valid('json');
-    if (input.filterQuery !== undefined) compileQuery(input.filterQuery);
     // A missing endpoint is a 404 before any DNS lookup; the locked re-read below still decides.
     if (input.url !== undefined) await findEndpoint(c);
     const url = input.url === undefined ? undefined : await allowedUrl(c, input.url);
     const endpoint = await lockedProject(c, async (tx) => {
       const before = await findEndpoint(c, tx);
+      if (input.scope !== undefined || input.filterQuery !== undefined) {
+        const scope = input.scope === undefined ? storedWebhookScope(before) : input.scope;
+        compileMaskedQuery(input.filterQuery ?? before.filterQuery, scope?.mask);
+      }
       const enabledChanged = input.enabled !== undefined && input.enabled !== before.enabled;
       const after = await tx.webhookEndpoint.update({
         where: { id: before.id },

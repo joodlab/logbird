@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { type Prisma, prisma } from '@logbird/database';
+import { webhookCursorClock, webhookCursorNeedsReview } from '@logbird/database/webhooks';
 import { expect, it } from 'vitest';
 
 const rolloutName = '20261122140000_webhook_deliveries';
@@ -78,5 +79,42 @@ it.each(['Pacific/Auckland', 'America/Los_Angeles'])('repairs untouched webhook 
       expect(clock.created).toBeCloseTo(0, 2);
       expect(clock.due).toBeCloseTo(0, 2);
     }
+  });
+});
+
+it.each(['Pacific/Auckland', 'America/Los_Angeles'])('detects a stranded rollout cursor after a table rewrite in %s', async (zone) => {
+  const repair = await migration(originalCursorRepairName);
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('TimeZone', ${zone}, true)`;
+    await tx.$executeRaw`CREATE TEMP TABLE "WebhookEndpoint" (
+      id text PRIMARY KEY, "createdAt" timestamp(3), "cursorEventId" text, "lastScannedAt" timestamp(3)
+    ) ON COMMIT DROP`;
+    await tx.$executeRaw`CREATE TEMP TABLE "WebhookDelivery" ("endpointId" text, "receivedAt" timestamp(3)) ON COMMIT DROP`;
+    await tx.$executeRaw`CREATE TEMP TABLE "_prisma_migrations" (
+      migration_name text, started_at timestamptz, finished_at timestamptz, rolled_back_at timestamptz
+    ) ON COMMIT DROP`;
+    await tx.$executeRaw`INSERT INTO "_prisma_migrations" VALUES (
+      ${rolloutName}, CURRENT_TIMESTAMP - interval '2 days', CURRENT_TIMESTAMP - interval '2 days', NULL
+    )`;
+    await tx.$executeRaw`INSERT INTO "WebhookEndpoint" VALUES (
+      'qa-rewritten', (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - interval '3 days', NULL,
+      (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - interval '2 days' + interval '5 minutes'
+    )`;
+    await tx.$executeRaw`ALTER TABLE "WebhookEndpoint" ADD COLUMN "cursorReceivedAt" timestamp(3)
+      NOT NULL DEFAULT (CURRENT_TIMESTAMP - interval '2 days')`;
+    await tx.$executeRaw`ALTER TABLE "WebhookEndpoint" ALTER COLUMN "cursorReceivedAt" TYPE timestamp(3)
+      USING ("cursorReceivedAt" + interval '0 seconds')`;
+    expect(
+      await tx.$queryRaw`SELECT atthasmissing FROM pg_attribute
+      WHERE attrelid = '"WebhookEndpoint"'::regclass AND attname = 'cursorReceivedAt'`,
+    ).toEqual([{ atthasmissing: false }]);
+    for (const sql of repair) expect(await tx.$executeRawUnsafe(sql)).toBe(0);
+    const clock = await webhookCursorClock(tx);
+    const [stranded] = await tx.$queryRaw<{ createdAt: Date; cursorReceivedAt: Date; lastScannedAt: Date }[]>`
+      SELECT "createdAt", "cursorReceivedAt", "lastScannedAt" FROM "WebhookEndpoint"`;
+    if (!stranded) throw new Error('Missing restored cursor fixture');
+    expect(+stranded.cursorReceivedAt).toBeLessThan(+clock.now);
+    expect(webhookCursorNeedsReview(stranded, clock)).toBe(true);
+    expect(webhookCursorNeedsReview({ ...stranded, cursorReceivedAt: clock.rollout }, clock)).toBe(false);
   });
 });

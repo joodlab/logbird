@@ -3,17 +3,23 @@ import { once } from 'node:events';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
-import { insertEvents } from '@logbird/clickhouse';
-import { createWebhookResponseSchema, listWebhooksResponseSchema, MAX_WEBHOOK_ENDPOINTS, webhookEndpointSchema } from '@logbird/contracts';
-import { prisma } from '@logbird/database';
-import { decryptWebhookSecret, encryptWebhookSecret, type WebhookLookup, webhookSecretKey } from '@logbird/database/webhooks';
+import { fieldMaskKey, insertEvents, normalizeEvent } from '@logbird/clickhouse';
+import {
+  createWebhookResponseSchema,
+  listWebhooksResponseSchema,
+  MAX_WEBHOOK_ENDPOINTS,
+  SCOPE_MASKS,
+  webhookEndpointSchema,
+} from '@logbird/contracts';
+import { prisma, withProjectLock } from '@logbird/database';
+import { decryptWebhookSecret, encryptWebhookSecret, type WebhookLookup, webhookCursorClock, webhookSecretKey } from '@logbird/database/webhooks';
 import { generateWebhookSecret, MAX_WEBHOOK_SIGNATURES, verifyWebhook } from '@logbird/sdk';
 import { enforceProjectRetention } from '@logbird/worker/retention';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { deliverWebhooks } from '../../worker/src/webhook-delivery';
 import { discoverWebhookDeliveries } from '../../worker/src/webhook-discovery';
 import { app } from './app';
-import { clickhouse } from './clickhouse';
+import { clickhouse, purgeProjectEvents } from './clickhouse';
 import { env } from './env';
 import { immutableFixture } from './immutable-fixture';
 
@@ -84,6 +90,7 @@ const send = (project = projectId) =>
     clickhouse,
     {
       secretKey: webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY),
+      maskKey: fieldMaskKey(env.BETTER_AUTH_SECRET),
       concurrency: 1,
       perEndpoint: 1,
       failureLimit: 50,
@@ -267,11 +274,15 @@ it('advances discovery while HTTP ingest keeps arriving behind a slow admitted w
   const exec = clickhouse.exec.bind(clickhouse);
   let holdNextWrite = false;
   let held = false;
+  let releaseWrite!: () => void;
+  const writeGate = new Promise<void>((resolve) => {
+    releaseWrite = resolve;
+  });
   const wrapped = vi.spyOn(clickhouse, 'exec').mockImplementation(async (params) => {
     const result = await exec(params);
     if (holdNextWrite && !held && params.query.startsWith('INSERT INTO events ')) {
       held = true;
-      await delay(3800);
+      await writeGate;
       held = false;
       holdNextWrite = false;
     }
@@ -283,11 +294,11 @@ it('advances discovery while HTTP ingest keeps arriving behind a slow admitted w
     await insertEvents(clickhouse, [fixture.row({ id: 'qa-already-stored', action: 'qa.webhook' }, from)]);
     holdNextWrite = true;
     const hook = await prisma.webhookEndpoint.create({
-      data: { projectId: fixture.project, url: receiver, cursorReceivedAt: from },
+      data: { projectId: fixture.project, url: receiver, createdAt: from, cursorReceivedAt: from },
     });
     const admitted = Promise.resolve(fixture.post({ id: 'qa-slow', action: 'qa.webhook' }));
     ongoing = [admitted];
-    await expect.poll(() => held, { interval: 20 }).toBe(true);
+    await expect.poll(() => held, { interval: 20, timeout: 20_000 }).toBe(true);
     const scan = discoverWebhookDeliveries(clickhouse, hook);
     const arrivals = [0, 100, 250, 400].map(async (ms) => {
       await delay(ms);
@@ -302,9 +313,11 @@ it('advances discovery while HTTP ingest keeps arriving behind a slow admitted w
     expect(await prisma.webhookDelivery.findMany({ where: { endpointId: hook.id }, select: { eventId: true } })).toEqual([
       { eventId: 'qa-already-stored' },
     ]);
+    releaseWrite();
     expect((await admitted).status).toBe(202);
     expect(await fixture.count()).toBe(6);
   } finally {
+    releaseWrite();
     await Promise.allSettled(ongoing);
     wrapped.mockRestore();
     await fixture.cleanup();
@@ -665,6 +678,13 @@ it('rejects invalid filters, scopes and URLs on create and PATCH without writing
     [{ url: `https://8.8.8.8/${'a'.repeat(2048)}` }, 400, 'webhook_url_not_allowed'],
     [{ filterQuery: '(' }, 422, 'invalid_query'],
     [{ scope: { target: { type: 'qa' } } }, 422, 'validation_error'],
+    [{ scope: { tenantId: 'a'.repeat(251) } }, 422, 'validation_error'],
+    [{ scope: { tenantId: ' qa-tenant' } }, 422, 'validation_error'],
+    [{ scope: { tenantId: 'qa\0id' } }, 422, 'validation_error'],
+    [{ scope: { target: { type: 'q'.repeat(61), id: 'qa-id' } } }, 422, 'validation_error'],
+    [{ scope: { target: { type: 'qa', id: 'qa\uFFFD' } } }, 422, 'validation_error'],
+    [{ scope: { target: { type: 'qa', id: 'qa\uD800' } } }, 422, 'validation_error'],
+    [{ scope: { target: { type: 'qa', id: 'a'.repeat(251) } } }, 422, 'validation_error'],
   ] as const) {
     for (const method of ['POST', 'PATCH']) {
       const response = await request(method === 'POST' ? base() : `${base()}/${endpoint.id}`, method, { url: receiver, ...input });
@@ -674,6 +694,145 @@ it('rejects invalid filters, scopes and URLs on create and PATCH without writing
   }
   expect(await prisma.webhookEndpoint.count({ where: { projectId } })).toBe(1);
 });
+
+it('blocks a seeded legacy scope that would match a truncated tenant and resumes after correction', async () => {
+  const legacyTenant = 'q'.repeat(256);
+  const at = new Date(Date.now() - 60_000);
+  const { endpoint } = await create();
+  const path = `${base()}/${endpoint.id}`;
+  const hook = await prisma.webhookEndpoint.update({
+    where: { id: endpoint.id },
+    data: { createdAt: at, cursorReceivedAt: at, scopeTenantId: legacyTenant },
+  });
+  const event = normalizeEvent(
+    { id: 'qa-legacy-collision', action: 'qa.webhook', tenant: { id: `${legacyTenant}-other` } },
+    { projectId, receivedAt: at },
+  );
+  if (!event.ok) throw new Error(event.reason);
+  expect(event.row.tenant_id).toBe(legacyTenant);
+  try {
+    await insertEvents(clickhouse, [event.row]);
+    await discoverWebhookDeliveries(clickhouse, hook);
+    expect(await prisma.webhookDelivery.count({ where: { endpointId: hook.id } })).toBe(0);
+    expect(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } })).toMatchObject({ cursorReceivedAt: at, cursorEventId: null });
+    const warning = { scope: { tenantId: legacyTenant }, scopeWarning: 'webhook_invalid_scope' };
+    expect(await (await request(path)).json()).toMatchObject(warning);
+    expect(await (await request(base())).json()).toMatchObject({ data: [warning] });
+    const test = await request(`${path}/test`, 'POST');
+    expect(test.status).toBe(409);
+    expect(await test.json()).toMatchObject({ error: { code: 'webhook_invalid_scope' } });
+
+    await withLocalReceiver(hook.id, async (received) => {
+      // A delivery claimed before the upgrade must recheck the stored scope too.
+      await prisma.webhookDelivery.create({
+        data: { endpointId: hook.id, eventId: event.row.event_id, receivedAt: at, expiresAt: new Date(Date.now() + 60_000) },
+      });
+      await send();
+      expect(received).toHaveLength(0);
+    });
+    const fixed = await request(path, 'PATCH', { scope: { target: { type: 'website', id: 'qa-site' } } });
+    expect(fixed.status).toBe(200);
+    expect(await fixed.json()).not.toHaveProperty('scopeWarning');
+    await discoverWebhookDeliveries(clickhouse, await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } }));
+    expect(+(await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } })).cursorReceivedAt).toBeGreaterThan(+at);
+  } finally {
+    await withProjectLock(projectId, () => purgeProjectEvents(projectId));
+  }
+});
+
+it('rejects filters on masked columns and attribute paths using the combined old and new configuration', async () => {
+  const scope = { target: { type: 'website', id: 'qa-site' }, mask: SCOPE_MASKS };
+  const { endpoint } = await create('owner', { url: receiver, filterQuery: 'ip:*' });
+  const path = `${base()}/${endpoint.id}`;
+  const reject = async (response: Response) => {
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ error: { code: 'invalid_query', details: { reason: 'not_allowed' } } });
+  };
+  await reject(await request(path, 'PATCH', { scope }));
+  for (const filterQuery of ['ip:*', 'NOT actor.email:*', 'action:qa OR _exists_:attr.context.userAgent', 'attributes.actor.email:*'])
+    await reject(await request(base(), 'POST', { url: receiver, scope, filterQuery }));
+  expect((await request(path, 'PATCH', { scope, filterQuery: 'action:qa.webhook' })).status).toBe(200);
+  await reject(await request(path, 'PATCH', { filterQuery: 'attr.context.ip:*' }));
+  expect(await (await request(path)).json()).toMatchObject({ scope, filterQuery: 'action:qa.webhook' });
+});
+
+it('signs identical masked bytes on initial delivery and resend of a target-only event', async () => {
+  const at = new Date(Date.now() - 60_000);
+  const ip = '203.0.113.27';
+  const userAgent = 'QA-Private-UA/1.0';
+  const email = 'qa-private@example.invalid';
+  const scope = { target: { type: 'website', id: 'qa-site' }, mask: SCOPE_MASKS };
+  const { endpoint, secret } = await create('owner', { url: receiver, scope });
+  expect(endpoint.scope).toEqual(scope);
+  await prisma.webhookEndpoint.update({ where: { id: endpoint.id }, data: { createdAt: at, cursorReceivedAt: at } });
+  const event = normalizeEvent(
+    {
+      id: 'qa-masked-wire',
+      action: 'qa.webhook',
+      targets: [scope.target],
+      context: { ip, userAgent },
+      actor: { type: 'user', id: 'qa-actor', email },
+      'context.ip': ip,
+      'context.userAgent': userAgent,
+      'actor.email': email,
+      'qa.keep': 'visible',
+    },
+    { projectId, receivedAt: at },
+  );
+  if (!event.ok) throw new Error(event.reason);
+  expect(event.row.attributes).toMatchObject({ 'context.ip': ip, 'context.userAgent': userAgent, 'actor.email': email });
+  try {
+    await insertEvents(clickhouse, [event.row]);
+    await withLocalReceiver(endpoint.id, async (received) => {
+      await discoverWebhookDeliveries(clickhouse, await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } }));
+      await send();
+      const delivery = await prisma.webhookDelivery.findFirstOrThrow({ where: { endpointId: endpoint.id, status: 'succeeded' } });
+      expect((await request(`${base()}/${endpoint.id}/deliveries/${delivery.id}/resend`, 'POST')).status).toBe(202);
+      await send();
+      expect(received).toHaveLength(2);
+      expect(received[0]?.payload).toBe(received[1]?.payload);
+      expect(received[0]?.headers['webhook-id']).toBe(received[1]?.headers['webhook-id']);
+      const emailPseudonym = createHmac('sha256', fieldMaskKey(env.BETTER_AUTH_SECRET)).update(`${projectId}\0${email}`).digest('hex').slice(0, 24);
+      for (const wire of received) {
+        for (const privateValue of [ip, userAgent, email]) expect(wire.payload).not.toContain(privateValue);
+        const body = await verifyWebhook({ ...wire, secret });
+        expect(body).toMatchObject({ id: 'qa-masked-wire', context: { ip: '', userAgent: '' }, actor: { email: `masked:${emailPseudonym}` } });
+        expect(body).toHaveProperty('attributes', { 'qa.keep': 'visible' });
+        expect(body).not.toHaveProperty('payload');
+      }
+    });
+  } finally {
+    await withProjectLock(projectId, () => purgeProjectEvents(projectId));
+  }
+});
+
+it('preserves future and implausibly old rollout cursors, records a sticky warning, and scans after operator reconciliation', async () => {
+  const { now, rollout } = await webhookCursorClock(prisma);
+  const repairAt = new Date(+now - 60_000);
+  const createdAt = new Date(Math.min(+rollout, +repairAt) - 60_000);
+  for (const cursorReceivedAt of [new Date(+now + 60_000), new Date(+createdAt - 3_600_000)]) {
+    const hook = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('TimeZone', 'America/Los_Angeles', true)`;
+      return tx.webhookEndpoint.create({ data: { projectId, url: receiver, createdAt, cursorReceivedAt } });
+    });
+    await discoverWebhookDeliveries(clickhouse, hook);
+    const blocked = await prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } });
+    expect(blocked).toMatchObject({ cursorReceivedAt, cursorEventId: null, lastScannedAt: null, cursorReviewRequired: true });
+    const path = `${base()}/${hook.id}`;
+    const warning = { cursorWarning: 'webhook_cursor_review_required' };
+    expect(await (await request(path)).json()).toMatchObject(warning);
+    expect((await (await request(base())).json()).data).toContainEqual(expect.objectContaining({ ...warning, id: hook.id }));
+    const start = new Date(Math.max(+repairAt, +rollout));
+    const reconciled = await prisma.webhookEndpoint.update({
+      where: { id: hook.id },
+      data: { cursorReceivedAt: start, lastScannedAt: now, cursorReviewRequired: false },
+    });
+    await discoverWebhookDeliveries(clickhouse, reconciled);
+    expect(await (await request(path)).json()).not.toHaveProperty('cursorWarning');
+    expect(await prisma.webhookDelivery.count({ where: { endpointId: hook.id } })).toBe(0);
+  }
+});
+
 it('sets creator to null when deleted and cascades endpoint secrets on project deletion', async () => {
   const creator = `qa-webhook-creator-${randomUUID()}`;
   users.push(creator);

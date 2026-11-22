@@ -374,6 +374,7 @@ model WebhookEndpoint {
   scopeTenantId String?
   scopeTargetType String?
   scopeTargetId String?
+  scopeMask String[] @default([])
   createdById String?
   createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
@@ -381,6 +382,7 @@ model WebhookEndpoint {
   secrets WebhookSecret[]
   cursorReceivedAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)"))
   cursorEventId String?
+  cursorReviewRequired Boolean @default(false)
   lastScannedAt DateTime?
   secretOverlapWarnedAt DateTime?
   consecutiveFailures Int @default(0)

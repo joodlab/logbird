@@ -351,6 +351,9 @@ importers:
       '@logbird/clickhouse':
         specifier: workspace:*
         version: link:../../packages/clickhouse
+      '@logbird/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@logbird/database':
         specifier: workspace:*
         version: link:../../packages/database

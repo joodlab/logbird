@@ -123,6 +123,7 @@ it('delivers a late non-UTC insert once, signs stored text and catches up on dis
       data: {
         projectId: id,
         url,
+        createdAt: time(-100_000),
         cursorReceivedAt: time(-100_000),
         scopeTenantId: 't1',
         scopeTargetType: 'website',

@@ -475,14 +475,16 @@ stable `WEBHOOK_SECRET_KEY` or HKDF-SHA256 from `BETTER_AUTH_SECRET`. See
 [self-hosting](self-hosting.md#webhook-endpoint-settings) before rotating keys.
 
 Endpoint configuration includes URL, description, enabled state/disabled reason,
-Logbird `filterQuery`, and optional `{ tenantId?, target?: { type, id } }` scope.
+Logbird `filterQuery`, and optional `{ tenantId?, target?: { type, id }, mask? }` scope.
 PATCH scope replaces the whole scope (`null` clears it); absent fields preserve
 stored values. URLs require HTTPS unless `WEBHOOKS_ALLOW_HTTP=true`; every resolved
 address must be public unicast. Save-time DNS uses a cancellable c-ares resolver
 with a 3-second deadline and separate per-workspace capacity. Invalid destinations
 return 400 `webhook_url_not_allowed`. A lookup timeout or exhausted capacity
 returns 503 `webhook_lookup_busy` with `Retry-After: 3`. A scope needs a `tenantId`
-or a `target`. Use `null` to clear it.
+or a `target` and uses the same [stored-ID rules as scoped reads](security.md#scopes-name-stored-ids).
+An invalid legacy scope returns `scopeWarning: webhook_invalid_scope` and blocks discovery and delivery until corrected.
+Create and update reject filters on masked fields with HTTP 422 `invalid_query`.
 
 Each endpoint starts at the creation millisecond, inclusive, or at rollout for existing endpoints.
 There is no historical backfill. The worker reads ClickHouse in
@@ -499,7 +501,8 @@ receive time and pages up to 100 matching event occurrences, ordered by receive 
 the cursor too. The event-time predicate covers the full ingest window of 3650 days before receipt
 through 24 hours after receipt. Physical reads can still span historical partitions because ClickHouse
 sorts by event time. On very large projects delivery can stall until the arrival-time index is present.
-The cursor never skips events when a scan exceeds its read budget.
+The cursor remains in place when a scan exceeds its read budget. Discovery pauses on an implausible cursor and the
+API returns `cursorWarning: webhook_cursor_review_required` until [operator reconciliation](self-hosting.md#reconcile-a-webhook-discovery-cursor).
 The worker inserts deliveries and advances the cursor in one Postgres transaction. Deliveries are unique
 by endpoint, event ID, and stored receive time. If retention frees an event ID and it is used again,
 the new occurrence gets its own delivery even while the earlier delivery is retained. Disabled endpoints pause scanning and sending. On
@@ -511,7 +514,9 @@ rechecks use the same clock for that delivery.
 
 Each POST body is the public event shape returned in `/v1/events/:id`'s
 `event`. It is built from stored event columns, which preserve exact attribute
-text such as large numeric identifiers supplied as strings. The worker signs the exact bytes with the Standard Webhooks headers
+text such as large numeric identifiers supplied as strings. The body excludes the original document and applies the
+[scoped-read field masks](scoped-read-access.md#masks) when configured, including on retry and resend.
+The worker signs the exact bytes with the Standard Webhooks headers
 `webhook-id`, `webhook-timestamp` (Unix seconds), and `webhook-signature`.
 New event deliveries use an opaque `lb1_`-prefixed header ID for the stored occurrence. A reused event ID
 gets a distinct header ID, and the original event ID stays in the JSON body. Test pings and deliveries queued

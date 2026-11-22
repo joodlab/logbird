@@ -1,16 +1,44 @@
 import { z } from 'zod';
+import { readScopeSchema } from './api';
 
 export const MAX_WEBHOOK_ENDPOINTS = 10;
 export const webhookScopeSchema = z
   .object({
-    tenantId: z.string().min(1).max(256).optional(),
-    target: z
-      .object({ type: z.string().min(1).max(256), id: z.string().min(1).max(256) })
-      .strict()
-      .optional(),
+    tenantId: readScopeSchema.shape.tenantId.optional(),
+    target: readScopeSchema.shape.target,
+    mask: readScopeSchema.shape.mask,
   })
   .strict()
   .refine((scope) => scope.tenantId !== undefined || scope.target !== undefined, 'A scope needs a tenantId or a target; use null for none.');
+export type WebhookScope = z.infer<typeof webhookScopeSchema>;
+
+// Keep legacy IDs readable in endpoint responses so an admin can see and correct the stored scope.
+const webhookScopeResponseSchema = z.object({
+  tenantId: z.string().optional(),
+  target: z.object({ type: z.string(), id: z.string() }).optional(),
+  mask: readScopeSchema.shape.mask,
+});
+
+export function webhookScopeFromColumns(endpoint: {
+  scopeTenantId: string | null;
+  scopeTargetType: string | null;
+  scopeTargetId: string | null;
+  scopeMask: string[];
+}) {
+  const { scopeTenantId, scopeTargetType, scopeTargetId, scopeMask } = endpoint;
+  const target = scopeTargetType !== null || scopeTargetId !== null ? { type: scopeTargetType, id: scopeTargetId } : undefined;
+  const scope = {
+    tenantId: scopeTenantId ?? undefined,
+    target,
+    mask: scopeMask.length ? scopeMask : undefined,
+  };
+  return scope.tenantId !== undefined || target || scope.mask ? scope : null;
+}
+
+export function storedWebhookScope(endpoint: Parameters<typeof webhookScopeFromColumns>[0]): WebhookScope | null | undefined {
+  const scope = webhookScopeFromColumns(endpoint);
+  return scope === null ? null : webhookScopeSchema.safeParse(scope).data;
+}
 const webhookFields = {
   url: z.string().min(1).max(2048),
   description: z.string().max(1000).nullable().optional(),
@@ -33,9 +61,14 @@ export const webhookEndpointSchema = z.object({
     .literal('webhook_secret_overlap_limit')
     .optional()
     .describe('Only the newest ten active secrets sign deliveries. Wait for an overlap to expire or rotate with overlapSeconds set to 0.'),
+  scopeWarning: z.literal('webhook_invalid_scope').optional().describe('Delivery is blocked. Replace the scope with valid stored IDs and masks.'),
+  cursorWarning: z
+    .literal('webhook_cursor_review_required')
+    .optional()
+    .describe('Event discovery is blocked until an operator reconciles the stored cursor with rollout and delivery history.'),
   disabledAt: z.iso.datetime().nullable(),
   filterQuery: z.string(),
-  scope: webhookScopeSchema.nullable(),
+  scope: webhookScopeResponseSchema.nullable(),
   createdById: z.string().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),

@@ -1,4 +1,5 @@
-import { type ClickHouseClient, normalizeEvent, toEvent } from '@logbird/clickhouse';
+import { type ClickHouseClient, maskEvent, normalizeEvent, toEvent } from '@logbird/clickhouse';
+import { storedWebhookScope } from '@logbird/contracts';
 import { hasAdminRole, Prisma, prisma, storeAuditEvent, type WebhookDelivery, type WebhookEndpoint, workspaceAdminRoles } from '@logbird/database';
 import { activeWebhookSecrets, decryptWebhookSecret, WEBHOOK_LOG_RETENTION_MS } from '@logbird/database/webhooks';
 import { MAX_WEBHOOK_SIGNATURES } from '@logbird/sdk';
@@ -11,6 +12,7 @@ const MAX_ENDPOINT_ATTEMPTS_PER_SECOND = 50;
 type Claim = { delivery: WebhookDelivery; expired: boolean };
 type DeliveryOptions = {
   secretKey: Buffer;
+  maskKey?: Buffer;
   concurrency: number;
   perEndpoint: number;
   failureLimit: number;
@@ -197,8 +199,11 @@ async function interruptClaim(delivery: WebhookDelivery) {
 }
 
 async function attemptDelivery(ch: ClickHouseClient, delivery: WebhookDelivery, endpoint: WebhookEndpoint, options: DeliveryOptions) {
+  const scope = storedWebhookScope(endpoint);
+  if (scope === undefined) return { error: 'event_unavailable' } as const;
+  if (scope?.mask?.includes('actor_email') && !options.maskKey) return { error: 'signing_failed' } as const;
   const event = delivery.receivedAt
-    ? await webhookEvent(ch, endpoint, delivery.eventId, delivery.receivedAt, delivery.createdAt)
+    ? await webhookEvent(ch, endpoint, scope, delivery.eventId, delivery.receivedAt, delivery.createdAt)
     : testEvent(delivery, endpoint.projectId);
   if (!event) return { error: 'event_unavailable' } as const;
   const now = new Date();
@@ -226,13 +231,20 @@ async function attemptDelivery(ch: ClickHouseClient, delivery: WebhookDelivery, 
   }
   // Check the snapshot after DNS so an edit during resolution cannot send to a superseded URL or scope.
   const webhookId = delivery.webhookId ?? legacyWebhookHeaderId(delivery.eventId);
-  return postWebhook(endpoint.url, webhookId, JSON.stringify(event), keys, options.transport, async () => {
+  const body = JSON.stringify(maskEvent(event, scope?.mask, options.maskKey));
+  return postWebhook(endpoint.url, webhookId, body, keys, options.transport, async () => {
     const now = new Date();
     const unchanged = await prisma.webhookEndpoint.count({
       where: {
         id: endpoint.id,
         updatedAt: endpoint.updatedAt,
         enabled: true,
+        scopeTenantId: endpoint.scopeTenantId,
+        scopeTargetType: endpoint.scopeTargetType,
+        scopeTargetId: endpoint.scopeTargetId,
+        scopeMask: { equals: endpoint.scopeMask },
+        filterQuery: endpoint.filterQuery,
+        url: endpoint.url,
         deliveries: {
           some: { id: delivery.id, attemptNumber: delivery.attemptNumber, leaseUntil: { gt: now }, retryUntil: { gt: now }, status: 'pending' },
         },
