@@ -13,15 +13,17 @@ import { toast } from 'sonner';
 import { EventHistogram } from '@/components/charts/event-histogram';
 import { EventListContext } from '@/components/impersonation';
 import { QueryInput, type QueryInputHandle } from '@/components/query-input/query-input';
+import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
 import { andQuery, scopedQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
-import { ALL_RANGE, absoluteRange, isValidRange, rangeLabel, resolveRange } from '@/lib/range';
+import { ALL_RANGE, absoluteRange, isValidRange, rangeInSentence, rangeLabel, resolveRange } from '@/lib/range';
 import { explorerTotal, formatSearchTotal, searchTotal } from '@/lib/search-total';
 import { appendSqlPredicate } from '@/lib/sql-language';
+import { useConsoleZone } from '@/lib/time-zone';
 import { EventSheet } from './event-sheet';
 import { EventsTable, type EventsTableHandle } from './events-table';
 import { ColumnPicker, ExplorerOverflowMenu, ExportMenu, SaveViewButton } from './explorer-toolbar';
@@ -102,6 +104,7 @@ function ProjectExplorer({
   rangeComplete = false,
   className,
 }: ExplorerProps) {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const { q, range, columns, ev, live } = state;
   const rangeName = rangeLabelOverride ?? rangeLabel(range);
   const complete = rangeComplete || range === ALL_RANGE;
@@ -317,14 +320,14 @@ function ProjectExplorer({
       description={
         q ? (
           <>
-            Nothing in <span className="font-medium text-foreground">{rangeName.toLowerCase()}</span> matches{' '}
+            Nothing in <span className="font-medium text-foreground">{rangeInSentence(rangeName)}</span> matches{' '}
             <span className="font-mono text-foreground">{q}</span>.{' '}
             {complete ? 'Remove a filter to see more.' : 'Try a wider range or remove a filter.'}
           </>
         ) : complete ? (
-          `No events in ${rangeName.toLowerCase()}.`
+          `No events in ${rangeInSentence(rangeName)}.`
         ) : (
-          `No events in ${rangeName.toLowerCase()}. Widen the range, or send events with your ingest key.`
+          `No events in ${rangeInSentence(rangeName)}. Widen the range, or send events with your ingest key.`
         )
       }
       icon={SearchXIcon}
@@ -511,6 +514,9 @@ function ProjectExplorer({
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>
             )}
+            {/* Below md the table has no column header (useIsMobile): name the zone here (and switch it) in every state,
+                including the last good rows shown after a rejected query. */}
+            <TimeZoneInline className="md:hidden" />
           </span>
           <button
             aria-expanded={showChart}

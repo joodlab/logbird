@@ -23,6 +23,7 @@ import { withPresence } from '@/lib/presence-filter';
 import { failureSummary } from '@/lib/query-budget';
 import { formatTerm } from '@/lib/query-language';
 import { rangeLabel, rangePhrase } from '@/lib/range';
+import { useConsoleZone } from '@/lib/time-zone';
 import { useDocumentTitle } from '@/lib/use-document-title';
 
 interface SupportAgentProfileProps {
@@ -49,6 +50,7 @@ function CouldNotLoad({ className }: { className?: string }) {
  * offers a shorter range or a retry of everything that failed.
  */
 export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineChange }: SupportAgentProfileProps) {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const baseQuery = supportAgentQuery(agentId);
   const { range } = timeline;
   // The five summaries sit under the page banner, whose Retry covers transient failures: no automatic retry of a

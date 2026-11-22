@@ -204,6 +204,9 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
     const fixtures = [
       { eventId: 'archived-order', type: 'order:archived', id: 'A1', name: 'Archived order' },
       { eventId: 'regular-order', type: 'order', id: 'archived:A1', name: 'Regular order' },
+      // The rollup key's ambiguity (#223): both pairs are stored under `asset:line:42`, yet each lookup stays exact.
+      { eventId: 'asset-line', type: 'asset:line', id: '42', name: 'Asset line 42' },
+      { eventId: 'asset-plain', type: 'asset', id: 'line:42', name: 'Asset line:42' },
       { eventId: 'long-record', type: `${'t'.repeat(63)}:`, id: 'i'.repeat(150), name: 'Long record name' },
       { eventId: 'control-id', type: 'page:section\\v2', id: 'a\tb\nc\rd', name: 'Literal control characters' },
       { eventId: 'plain-id', type: 'page:section\\v2', id: 'atbncrd', name: 'Plain characters' },

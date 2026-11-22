@@ -4,6 +4,7 @@ import { cn } from '@logbird/ui/lib/utils';
 import { useMemo, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { formatAxis } from '@/lib/format';
+import { useConsoleZone } from '@/lib/time-zone';
 import { OutcomeTooltip } from './chart-tooltip';
 import { outcomeChartConfig, SERIES, type SeriesKey, timeTicks, toSeries } from './outcome-series';
 
@@ -21,7 +22,9 @@ export function OutcomeAreaChart({ data, height = 240, onSelectOutcome, classNam
   const [hover, setHover] = useState<SeriesKey | null>(null);
   const present = SERIES.filter((k) => rows.some((r) => r[k] > 0));
   const interval = data?.interval ?? 60;
-  const axis = useMemo(() => timeTicks(rows, interval), [rows, interval]);
+  const zone = useConsoleZone();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the formatters read the console zone; recompute when it changes.
+  const axis = useMemo(() => timeTicks(rows, interval), [rows, interval, zone]);
 
   return (
     <div className={cn('flex flex-col gap-3', className)}>

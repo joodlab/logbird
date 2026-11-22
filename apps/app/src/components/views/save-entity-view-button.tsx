@@ -6,13 +6,24 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keys, viewsQuery } from '@/lib/api/queries';
-import { rangeLabel } from '@/lib/range';
+import { rangeInSentence, rangeLabel } from '@/lib/range';
 import { nameableTerms, useCopyViewLink, viewSearch } from '@/lib/views';
 
-/** "Bayt Al Rimal — last 7 days". */
+/** "Bayt Al Rimal — last 7 days" ("… — Nov 22, 08:00 – 10:00 Berlin time" for an absolute range). */
 export function entityViewName(name: string, range: string): string {
-  const label = rangeLabel(range);
-  return `${name} — ${label.charAt(0).toLowerCase()}${label.slice(1)}`.slice(0, 80);
+  return `${name} — ${rangeInSentence(rangeLabel(range))}`.slice(0, 80);
+}
+
+/**
+ * The saved view this button would create, if one exists: the same query, language and exact range. Names are not
+ * compared: they are generated (and an absolute range's name now names its zone), and a renamed view is still the view.
+ */
+export function findSavedEntityView<V extends { state: { q?: string | null; lang?: string | null; range?: string | null } }>(
+  views: readonly V[] | undefined,
+  query: string,
+  range: string,
+): V | undefined {
+  return views?.find((v) => (v.state.q ?? '') === query && (v.state.lang ?? 'query') === 'query' && (v.state.range ?? '24h') === range);
 }
 
 /**
@@ -40,7 +51,7 @@ export function SaveEntityViewButton({
   const views = useQuery(viewsQuery(projectId));
   const copyLink = useCopyViewLink();
   const viewName = entityViewName(name, range);
-  const existing = views.data?.find((v) => v.name === viewName && (v.state.q ?? '') === query && (v.state.range ?? '24h') === range);
+  const existing = findSavedEntityView(views.data, query, range);
   const open = (view: { id: string; state: Parameters<typeof viewSearch>[0]['state'] }) =>
     navigate({ to: '/p/$projectId/events', params: { projectId }, search: viewSearch(view) });
   const labelTerm = nameableTerms(query)[0];

@@ -26,7 +26,8 @@ import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
 import { formatTerm, scopedQuery } from '@/lib/query-language';
-import { ALL_RANGE, historyRange, rangeLabel } from '@/lib/range';
+import { ALL_RANGE, historyRange, rangeInSentence, rangeLabel } from '@/lib/range';
+import { useConsoleZone } from '@/lib/time-zone';
 import { useDocumentTitle } from '@/lib/use-document-title';
 import { useRange } from '@/lib/use-range';
 
@@ -42,6 +43,7 @@ interface EntityProfileProps {
 }
 
 export function EntityProfile({ projectId, section, entityId, targetType, timeline, onTimelineChange }: EntityProfileProps) {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const meta = ENTITY_SECTIONS[section];
   const kind = meta.kind;
   const profile = useQuery(entityProfileQuery(projectId, kind, entityId, timeline.range, targetType));
@@ -182,7 +184,7 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
         </div>
 
         <StatTileGrid className="grid-cols-2 sm:grid-cols-4">
-          <StatTile label={`Events · ${rangeLabel(timeline.range).toLowerCase()}`} loading={!p} value={p ? formatNumber(outcomeTotal) : ''} />
+          <StatTile label={`Events · ${rangeInSentence(rangeLabel(timeline.range))}`} loading={!p} value={p ? formatNumber(outcomeTotal) : ''} />
           <StatTile label="Events · all time" loading={!p} value={p ? formatNumber(p.entity.events) : ''} />
           <StatTile label="First seen" loading={!p} value={p ? <Timestamp format="date" iso={p.entity.firstSeen} /> : ''} />
           <StatTile label="Last seen" loading={!p} value={p ? <Timestamp format="relative" iso={p.entity.lastSeen} /> : ''} />
