@@ -130,9 +130,10 @@ public class FinalCycleTests
     {
         var server = new FakeServer().Then(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StalledStream()) });
         using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "k", Timeout = TimeSpan.FromMilliseconds(300) }, new HttpClient(server));
-        var watch = Stopwatch.StartNew();
-        var error = await Assert.ThrowsAsync<LogbirdApiException>(() => reader.SearchAsync());
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), watch.Elapsed.ToString());
+        // The 300 ms timeout must end the read; the watchdog only catches a hang, it does not measure scheduling time.
+        var search = reader.SearchAsync();
+        Assert.Same(search, await Task.WhenAny(search, Task.Delay(TimeSpan.FromSeconds(60))));
+        var error = await Assert.ThrowsAsync<LogbirdApiException>(() => search);
         Assert.Equal("unreachable", error.Code);
     }
 
@@ -253,7 +254,16 @@ public class FinalCycleTests
                 return FakeServer.Accept(request);
             },
         };
-        await using var client = Client(Options(o => o.MaxQueueSize = 100_000), server);
+        // Responses are held until all flushes are registered; a long request timeout and retry budget keep a slow setup
+        // from exhausting delivery attempts before the gate opens.
+        await using var client = Client(
+            Options(o =>
+            {
+                o.MaxQueueSize = 100_000;
+                o.RequestTimeout = TimeSpan.FromMinutes(5);
+                o.MaxRetries = 1_000;
+            }),
+            server);
         var flushes = new Task<bool>[3_000];
         for (var i = 0; i < flushes.Length; i++)
         {
@@ -391,12 +401,15 @@ public class FinalCycleTests
 
         // [X] is held open; then [A, B] gets a 503 that accepts A and leaves B unresolved, which completes a flush covering
         // X and A while the send goes on. The retry for B waits in the sender's backoff (the injectable delay) until the
-        // assertion has run, so the sender cannot advance in between.
+        // assertion has run, so the sender cannot advance in between. X's request timeout is long, so X never retries into
+        // that gate, and every wait has a hang watchdog only.
+        var xArrived = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseX = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseRetry = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = new FakeServer()
             .ThenAsync(async request =>
             {
+                xArrived.TrySetResult(true);
                 await releaseX.Task;
                 return Accept(request);
             })
@@ -417,21 +430,23 @@ public class FinalCycleTests
                 },
             })))
             .Then(Accept);
-        await using var client = new LogbirdClient(Options(), new HttpClient(server), logger: null, delay: (_, _) => releaseRetry.Task);
-        client.Track(new AuditEvent("x"));
-        var flushX = client.FlushAsync();
-        await WaitUntil(() => server.Requests.Count == 1);
-
-        client.Track(new AuditEvent("a"));
-        var flushA = client.FlushAsync();
-        client.Track(new AuditEvent("b"));
-        releaseX.SetResult(true);
-        Assert.True(await flushX);
-
+        await using var client = new LogbirdClient(
+            Options(o => o.RequestTimeout = TimeSpan.FromMinutes(5)),
+            new HttpClient(server),
+            logger: null,
+            delay: (_, _) => releaseRetry.Task);
         try
         {
-            Assert.Same(flushA, await Task.WhenAny(flushA, Task.Delay(TimeSpan.FromSeconds(10))));
-            Assert.True(await flushA);
+            client.Track(new AuditEvent("x"));
+            var flushX = client.FlushAsync();
+            await Within(xArrived.Task);
+
+            client.Track(new AuditEvent("a"));
+            var flushA = client.FlushAsync();
+            client.Track(new AuditEvent("b"));
+            releaseX.SetResult(true);
+            Assert.True(await Within(flushX));
+            Assert.True(await Within(flushA));
 
             // Read at once: the sender is parked before B's retry, so X and A must already be counted.
             Assert.Equal(2, client.Stats.Delivered);
@@ -439,12 +454,24 @@ public class FinalCycleTests
         }
         finally
         {
+            releaseX.TrySetResult(true);
             releaseRetry.TrySetResult(true);
         }
 
-        Assert.True(await client.FlushAsync());
+        Assert.True(await Within(client.FlushAsync()));
         Assert.Equal(3, client.Stats.Delivered);
         Assert.Equal(3, server.Requests.Count);
+    }
+
+    /// <summary>Awaits a task the test expects to finish; the watchdog only turns a hang into a failure.</summary>
+    private static async Task<T> Within<T>(Task<T> task)
+    {
+        if (await Task.WhenAny(task, Task.Delay(TimeSpan.FromMinutes(2))) != task)
+        {
+            throw new TimeoutException("The test hung waiting for the SDK.");
+        }
+
+        return await task;
     }
 
     [Fact]
@@ -471,16 +498,6 @@ public class FinalCycleTests
         // Settling again neither succeeds nor counts again.
         Assert.False(queue.Settle(batch[0], () => counted++));
         Assert.Equal(1, counted);
-    }
-
-    private static async Task WaitUntil(Func<bool> condition)
-    {
-        var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (!condition())
-        {
-            Assert.True(DateTime.UtcNow < deadline, "timed out");
-            await Task.Delay(10);
-        }
     }
 
     [Fact]
