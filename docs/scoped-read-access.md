@@ -57,9 +57,7 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
   written as `"42"` therefore matches a tenant sent as the number 42 in any spelling and as the string `"42"`, not
   the string `"42.0"`: a numeric id and a string id with the same stored text are one tenant and one scope. A string
   holding the expanded digits of 1e33 is a different tenant from the number. Events stored before 0.2.0 whose
-  tenant id was a number were not indexed under a tenant, so no scope sees them. In those older events, a target sent with a numeric id
-  was not indexed, so a scope that names that target does not match the event through it (the event's other targets
-  still match their own scopes). A numeric actor id does not affect a tenant-only scope.
+  tenant id was a number were not indexed under a tenant, so no scope sees them. Before 0.2.0, Logbird indexed a numeric target id as an empty string, so that target cannot satisfy a scope naming its numeric id, but another target can independently satisfy the scope. A numeric actor id does not affect a tenant-only scope.
 - A read-only operator query that counts stored ids differing from the sent ones ships with the ingest change.
 
 ## Where the scope applies
