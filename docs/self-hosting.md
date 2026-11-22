@@ -314,7 +314,7 @@ socket-idle timeout grows to the budget plus five minutes. Progress headers are
 spaced so a statement emits at most about 20 (every 30 seconds at the default),
 well under Node's 16 KiB response-header limit. A proxy between the worker and
 ClickHouse must therefore allow at least that long without bytes (raise its idle timeout above
-30 seconds, or above budget/20 for larger budgets), or it cuts long statements. The final 007/008 coverage pass
+30 seconds, or above the budget divided by 20 and rounded up to a whole second for larger budgets), or it cuts long statements. The final 007/008 coverage pass
 runs in id-hash buckets, each capped at one fifth of the budget (120 seconds by
 default). Each bucket rescans both raw and index tables, so per-bucket time grows
 linearly with history and the whole pass roughly with its square.

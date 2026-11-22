@@ -21,7 +21,7 @@ rejected before insert.
 Ingest receipts use compare-and-set settlement, receipt seeks stay on their index,
 and the worker rebuilds a bloated receipt primary key online and cancels the
 rebuild on shutdown. A failed ingest repair no longer triggers two full rollup
-rebuilds, fenced projects show in `/readyz`, and every receipt conflict is a
+rebuilds, `/readyz` counts the projects fenced by one, and every receipt conflict is a
 retryable 503.
 
 The website deletes contact and early-access submissions after the privacy
@@ -46,7 +46,7 @@ are listed under "Check before upgrading".
   contain these migrations.
 - **Check before upgrading.**
   - A proxy between Logbird and ClickHouse must allow more than 30 seconds without
-    bytes (above budget/20 if you raised `CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS`).
+    bytes (if you raised `CLICKHOUSE_MAINTENANCE_MAX_EXECUTION_SECONDS`, more than the budget divided by 20, rounded up to a whole second).
     Long maintenance statements now send a progress header every 30 seconds instead
     of every 10, so a shorter idle timeout cuts them. The default Compose stack has
     no such proxy.
