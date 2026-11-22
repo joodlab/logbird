@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { searchResponseSchema } from '@logbird/contracts';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import type { ClickHouseClient } from './client';
 import { createClickHouseClient, insertEvents, normalizeEvent, purgeProject, searchEvents } from './index';
 
@@ -48,12 +48,17 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       const exact = searchResponseSchema.parse(await searchEvents(ch, p, { ...range, limit: 10, order: 'desc' }));
       expect(exact).toMatchObject({ total: 5, totalExact: true });
 
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       const started = Date.now();
       const slow = searchResponseSchema.parse(await searchEvents(slowCount(ch), p, { ...range, limit: 10, order: 'desc' }));
+      // The count failed for its time budget (client abort or ClickHouse TIMEOUT_EXCEEDED), not for a broken statement.
+      const reasons = warn.mock.calls.map(([line]) => JSON.parse(String(line))).filter((l) => l.event === 'search.count_unavailable');
+      expect(reasons.map((l) => l.reason)).toEqual([expect.stringMatching(/^(budget|limit)$/)]);
+      warn.mockRestore();
       expect(slow.data.map((e) => e.id)).toEqual(['e4', 'e3', 'e2', 'e1', 'e0']);
       expect(slow).toMatchObject({ total: 5, totalExact: false });
-      // The count is bounded by its own guard and runs beside the rows; it cannot hold the page much longer.
-      expect(Date.now() - started).toBeLessThan(5000);
+      // The count has a one-second wall-clock budget and runs beside the rows; it cannot hold the page much longer.
+      expect(Date.now() - started).toBeLessThan(3000);
 
       // A partial page: the lower bound is the rows seen plus the one extra row proving there are more.
       const page = searchResponseSchema.parse(await searchEvents(slowCount(ch), p, { ...range, limit: 2, order: 'desc' }));

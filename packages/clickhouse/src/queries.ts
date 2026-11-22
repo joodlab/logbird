@@ -47,6 +47,8 @@ export async function read<T>(
   guard = 10,
   exportBudget = false,
   execution?: ExportExecution,
+  /** Aborting closes the HTTP request; ClickHouse then cancels the read-only statement. */
+  abortSignal?: AbortSignal,
 ): Promise<T[]> {
   const query_params = { ...parameters };
   for (const key of ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff', 'exportReceivedBefore']) {
@@ -74,7 +76,9 @@ export async function read<T>(
         query_id: queryId,
         query_params,
         format: 'JSONEachRow',
+        abort_signal: abortSignal,
         clickhouse_settings: {
+          ...(abortSignal ? { cancel_http_readonly_queries_on_client_close: 1 } : {}),
           max_execution_time: isQueryClient(ch) ? 10 : guard,
           // Restricted SQL's CONST profile supplies 1-GiB memory/read limits and reserves both API admission slots.
           ...(exportBudget && !isQueryClient(ch)
@@ -169,21 +173,27 @@ function cursor(s: string): [string, string] {
   }
   throw new Error('Invalid cursor');
 }
-/** Distinct matches up to the 10,001 cap. `exact` is false when capped, over its one-second guard, or failed. */
+/** Distinct matches up to the 10,001 cap. `exact` is false when capped, past its budget, cancelled or failed. */
 export const COUNT_CAP = 10_001;
-async function countMatches(ch: ClickHouseClient, w: { sql: string; params: Params }): Promise<{ n: number; exact: boolean }> {
-  try {
-    const n = Number(
-      (
-        await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT ${COUNT_CAP})`, w.params, 1)
-      )[0]?.n ?? 0,
-    );
-    return { n, exact: n < COUNT_CAP };
-  } catch (error) {
-    const reason = error instanceof QueryError ? error.details.reason : 'error';
-    console.warn(JSON.stringify({ level: 'warn', event: 'search.count_unavailable', reason }));
-    return { n: 0, exact: false };
-  }
+/** Wall-clock budget for the count, also for restricted SQL whose CONST profile allows statements 10 seconds. */
+export const COUNT_BUDGET_MS = 1000;
+function countMatches(ch: ClickHouseClient, w: { sql: string; params: Params }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), COUNT_BUDGET_MS);
+  const result = (async (): Promise<{ n: number; exact: boolean }> => {
+    try {
+      const sql = `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT ${COUNT_CAP})`;
+      const n = Number((await read<{ n: number }>(ch, sql, w.params, 1, false, undefined, controller.signal))[0]?.n ?? 0);
+      return { n, exact: n < COUNT_CAP };
+    } catch (error) {
+      const reason = controller.signal.aborted ? 'budget' : error instanceof QueryError ? error.details.reason : 'error';
+      console.warn(JSON.stringify({ level: 'warn', event: 'search.count_unavailable', reason }));
+      return { n: 0, exact: false };
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
+  return { result, cancel: () => controller.abort() };
 }
 async function searchPage(
   ch: ClickHouseClient,
@@ -223,16 +233,19 @@ async function searchPage(
     Boolean(exportClock),
     execution,
   ).catch(async (error) => {
-    await counted; // never leave the count running unobserved
+    // A failed row query must not wait for the count: cancel it, then observe its settlement.
+    counted?.cancel();
+    await counted?.result;
     throw error;
   });
   const hasMore = rows.length > q.limit,
     data = rows.slice(0, q.limit).map(toEvent),
     last = data.at(-1);
-  const count = await counted;
+  const count = await counted?.result;
   // Lower bound when the count did not finish: the rows seen, plus the extra row that proves there are more.
   const seen = data.length + (hasMore ? 1 : 0);
-  const total = count === undefined ? 0 : count.exact ? count.n : Math.max(count.n, seen);
+  // A count from an earlier snapshot can be below what this page proves; never report less than that.
+  const total = count === undefined ? 0 : Math.max(count.n, seen);
   const totalExact = count === undefined ? true : count.exact && count.n >= seen;
   return {
     page: { data, total, totalExact, nextCursor: hasMore && last ? encode([last.timestamp, last.id]) : null, tookMs: performance.now() - start },

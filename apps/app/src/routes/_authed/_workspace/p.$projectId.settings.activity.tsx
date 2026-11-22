@@ -11,9 +11,9 @@ import { z } from 'zod';
 import { EventSheet } from '@/components/explorer/event-sheet';
 import { EventsTable, type EventsTableHandle } from '@/components/explorer/events-table';
 import { workspaceActivityQuery } from '@/lib/api/queries';
-import { formatNumber } from '@/lib/format';
 import { includeTerm, removeTerm } from '@/lib/query-language';
 import { rangeLabel } from '@/lib/range';
+import { formatSearchTotal, searchTotal } from '@/lib/search-total';
 import { useRange } from '@/lib/use-range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/activity')({
@@ -104,7 +104,7 @@ function WorkspaceActivity() {
           </fieldset>
           <span className="text-muted-foreground text-xs sm:ms-auto">
             {activity.data
-              ? `${activity.data.pages[0]?.totalExact === false ? '≥ ' : ''}${formatNumber(activity.data.pages[0]?.total ?? 0)} ${(activity.data.pages[0]?.total ?? 0) === 1 ? 'action' : 'actions'} · ${rangeLabel(range)}`
+              ? `${formatSearchTotal(searchTotal(activity.data.pages))} ${searchTotal(activity.data.pages).count === 1 ? 'action' : 'actions'} · ${rangeLabel(range)}`
               : null}
           </span>
         </div>

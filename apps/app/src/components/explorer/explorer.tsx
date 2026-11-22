@@ -20,6 +20,7 @@ import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import { andQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
+import { formatSearchTotal, searchTotal } from '@/lib/search-total';
 import { appendSqlPredicate } from '@/lib/sql-language';
 import { EventSheet } from './event-sheet';
 import { EventsTable, type EventsTableHandle } from './events-table';
@@ -187,12 +188,13 @@ export function Explorer({
     return [...liveRows, ...paged.filter((e) => !seen.has(e.id))];
   }, [pages, liveRows]);
   // Search totals are capped for huge ranges; the histogram counts every match exactly.
-  const searchTotal = pages?.[0]?.total ?? 0;
+  const known = searchTotal(pages);
+  const searchCount = known.count;
   const histogramTotal =
     histogramData && (problem || !histogram.isPlaceholderData) ? histogramData.buckets.reduce((n, b) => n + b.total, 0) : undefined;
-  const total = (histogramTotal ?? searchTotal) + liveRows.length;
+  const total = (histogramTotal ?? searchCount) + liveRows.length;
   // Without the histogram, the search total may be a lower bound (capped, or its count did not finish in time).
-  const totalLowerBound = histogramTotal === undefined && (searchTotal > 10_000 || pages?.[0]?.totalExact === false);
+  const totalLowerBound = histogramTotal === undefined && !known.exact;
 
   /* ---------------- selection ---------------- */
   const selectedIndex = ev ? rows.findIndex((e) => e.id === ev) : -1;
@@ -449,7 +451,7 @@ export function Explorer({
             ) : (
               <>
                 <span className="font-medium text-foreground">
-                  {totalLowerBound ? (searchTotal > 10_000 ? '10,000+' : `≥ ${formatNumber(total)}`) : formatNumber(total)}
+                  {totalLowerBound ? formatSearchTotal({ count: total, exact: false }) : formatNumber(total)}
                 </span>{' '}
                 events · {rangeLabel(range)}
                 {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
