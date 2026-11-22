@@ -28,7 +28,7 @@ switcher). Keep these notes as the reference.
   `public/brand/` for later, but nothing renders them.
 - **Hero tagline:** "Retrace every step." only.
 
-## How to set it, once Arabic ships
+## How to set it, if an Arabic localization is ever built
 
 - Wrap Arabic in `lang="ar" dir="rtl"` (for example `<span lang="ar" dir="rtl">تتبّع كل خطوة.</span>`), so screen
   readers and line breaking work.
