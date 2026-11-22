@@ -181,12 +181,12 @@ path: /
 - **eyebrow:** Guarantees and limits
 - **heading:** What Logbird promises, and where the promise ends.
 - **bullets (two columns: "We guarantee" / "The limit")**
-  - A `202` lists accepted event IDs in `ids` and rejected events in `rejected`. / Delivery is at least once. An
+  - A `202` lists accepted event IDs in `ids` and rejected events in `rejected`. / Delivery is at least once when the client retries unsettled events, as the SDK does. An
     exact retry with the same valid, non-blank string `id` is stored once while the project retains the event; changed content under that id is rejected
     with `duplicate_id_conflict`. An event sent without an id gets a new one on every retry. <!-- source: docs/SPEC.md §2, §3; docs/concepts.md -->
   - The SDK batches and retries for you. / Its queue is in memory: a crash before the server acknowledges can lose
     pending events. <!-- source: packages/sdk/README.md -->
-  - Any shape within the ingest limits is accepted; only `action` is required. / Each event is checked on its own: rejected events are
+  - Only an `action` string is required, and each event must fit the ingest limits. / Each event is checked on its own: rejected events are
     listed in `rejected` with a reason. On `202`, the rest of the batch is accepted. When a `503` lists the
     unsettled events, retry only those; otherwise retry the whole batch with the same ids. <!-- source: docs/integrations.md §Outage backpressure (ingest paragraph) -->
   - Retention deletes expired events for good. / There's no archive and no undo.

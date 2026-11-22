@@ -254,9 +254,7 @@ path: /developers
   - **Acknowledged after storage.** On `202`, `ids` lists the accepted events and `rejected` names the entries that
     failed. An accepted event was written to ClickHouse by this request or an earlier identical one.
   - **At least once, stored once.** The SDK gives every event an id before it queues it, so a retry after a lost
-    response reuses the stored event while the project retains it. Raw HTTP clients should send their own string `id`: a missing, blank or
-    non-string id gets a new generated id on every retry, and an invalid one (over 256 UTF-16 code units, or containing NUL)
-    is rejected with `invalid_event_id`.
+    response reuses the stored event while the project retains it. Raw HTTP clients should send their own string `id`: a missing, blank or non-string id gets a new generated id on every retry. A string id is rejected with `invalid_event_id` if it contains NUL or an unpaired surrogate, or exceeds 256 UTF-16 code units after trimming.
   - **Bounded under outage.** The queue holds up to 10,000 events by default. When it's full, `dropPolicy: 'oldest'`
     (the default) or `'newest'` decides what goes, and `onDrop` reports each event dropped.
   - **In memory.** A crash before the server acknowledges can lose pending events. Call `shutdown()` on exit.

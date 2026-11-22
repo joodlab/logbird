@@ -272,14 +272,14 @@ function HomePage() {
               {
                 promise: 'A `202` lists accepted event IDs in `ids` and rejected events in `rejected`.',
                 limit:
-                  'Delivery is at least once. An exact retry with the same valid, non-blank string `id` is stored once while the project retains the event; changed content under that id is rejected with `duplicate_id_conflict`. An event sent without an id gets a new one on every retry.',
+                  'Delivery is at least once when the client retries unsettled events, as the SDK does. An exact retry with the same valid, non-blank string `id` is stored once while the project retains the event; changed content under that id is rejected with `duplicate_id_conflict`. An event sent without an id gets a new one on every retry.',
               },
               {
                 promise: 'The SDK batches and retries for you.',
                 limit: 'Its queue is in memory: a crash before the server acknowledges can lose pending events.',
               },
               {
-                promise: 'Any shape within the ingest limits is accepted; only `action` is required.',
+                promise: 'Only an `action` string is required, and each event must fit the ingest limits.',
                 limit:
                   'Each event is checked on its own: rejected events are listed in `rejected` with a reason. On `202`, the rest of the batch is accepted. When a `503` lists the unsettled events, retry only those; otherwise retry the whole batch with the same ids.',
               },
