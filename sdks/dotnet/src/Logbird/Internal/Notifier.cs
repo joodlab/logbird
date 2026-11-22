@@ -16,7 +16,7 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed)
 {
     private readonly object _gate = new();
     private readonly Queue<Action> _pending = new();
-    private readonly List<(long Target, TaskCompletionSource<bool> Completion)> _waiters = [];
+    private readonly List<Entry> _waiters = [];
     private bool _running;
     private long _accepted;
     private long _completed;
@@ -49,41 +49,52 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed)
 
     /// <summary>
     /// Waits until every notification accepted before the call has run (skipped ones never count), or the token is
-    /// cancelled. A cancelled wait is forgotten at once.
+    /// cancelled. Callers waiting for the same point share one entry; a cancelled caller releases only its own share.
     /// </summary>
-    public Task WaitAsync(CancellationToken cancellationToken)
+    public async Task WaitAsync(CancellationToken cancellationToken)
     {
-        TaskCompletionSource<bool> completion;
+        Entry entry;
         lock (_gate)
         {
             if (_completed >= _accepted)
             {
-                return Task.CompletedTask;
+                return;
             }
 
-            completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _waiters.Add((_accepted, completion));
+            if (_waiters.Count > 0 && _waiters[_waiters.Count - 1].Target == _accepted)
+            {
+                entry = _waiters[_waiters.Count - 1];
+                entry.Callers++;
+            }
+            else
+            {
+                entry = new Entry(_accepted);
+                _waiters.Add(entry);
+            }
         }
 
         if (!cancellationToken.CanBeCanceled)
         {
-            return completion.Task;
+            await entry.Completion.Task.ConfigureAwait(false);
+            return;
         }
 
-        var registration = cancellationToken.Register(() =>
+        var cancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using (cancellationToken.Register(() => cancelled.TrySetResult(false)))
         {
-            lock (_gate)
+            if (await Task.WhenAny(entry.Completion.Task, cancelled.Task).ConfigureAwait(false) == entry.Completion.Task)
             {
-                _waiters.RemoveAll(waiter => waiter.Completion == completion);
+                return;
             }
+        }
 
-            completion.TrySetResult(false);
-        });
-        return completion.Task.ContinueWith(
-            _ => registration.Dispose(),
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
+        lock (_gate)
+        {
+            if (--entry.Callers == 0)
+            {
+                _waiters.Remove(entry);
+            }
+        }
     }
 
     private void Start()
@@ -150,6 +161,7 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed)
                 }
             }
 
+
             if (done is not null)
             {
                 foreach (var completion in done)
@@ -158,5 +170,14 @@ internal sealed class Notifier(int capacity, Action<int> lost, Action failed)
                 }
             }
         }
+    }
+
+    private sealed class Entry(long target)
+    {
+        public long Target { get; } = target;
+
+        public TaskCompletionSource<bool> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int Callers { get; set; } = 1;
     }
 }

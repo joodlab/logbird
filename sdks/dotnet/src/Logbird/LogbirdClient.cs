@@ -84,7 +84,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private readonly Task? _loop;
 
     private int _signaled;
-    private int _disposed;
+    private readonly object _disposeGate = new();
+    private Task? _disposeTask;
     private volatile bool _closing;
     private volatile bool _flushRequested;
     private long _firstQueuedAtTicks;
@@ -135,19 +136,27 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         _onDrop = options.OnDrop;
         _logger = logger ?? NullLogger.Instance;
         _notifier = new Notifier(Math.Max(1_000, options.MaxQueueSize), lost => Interlocked.Add(ref _notificationsLost, lost), () => Interlocked.Increment(ref _callbackFailures));
+        if (_redactor?.IdentifierFieldsMatched() is { Count: > 0 } identifierFields)
+        {
+            // Reported once, at startup: identifier fields are structural and are never redacted.
+            Report(new LogbirdDeliveryException(
+                $"The redaction pattern matches identifier field(s) {string.Join(", ", identifierFields)}. Identifier fields are never redacted; "
+                + "to pseudonymise an id, transform it before recording."));
+        }
+
         if (!_enabled)
         {
             return;
         }
 
         var http = httpClient ?? (_ownedHttp = CreateHttpClient());
-        _queue = new EventQueue(options.MaxQueueSize, options.QueueFullBehavior);
+        _queue = new EventQueue(options.MaxQueueSize, options.QueueFullBehavior, OnEvicted);
         _sender = new BatchSender(http, options.Endpoint!, options.IngestKey!, options.MaxRetries, options.RequestTimeout, OnSenderDrop, OnSenderWarning, () => _queue!.CompleteSatisfiedWaiters(), Report, delay);
         _loop = Task.Run(RunAsync);
         LogbirdMetrics.Register(this);
     }
 
-    internal const int DropReasonCount = (int)DropReason.InvalidEntityId + 1;
+    internal const int DropReasonCount = (int)DropReason.Unacknowledged + 1;
 
     /// <summary>The SDK version sent in the <c>X-Logbird-SDK</c> header.</summary>
     public static string Version { get; } = ReadVersion();
@@ -198,20 +207,27 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             }
 
             var source = auditEvent!;
-            if (JsonDepth.Exceeds(source))
+            if (CheckShape(source, auditEvent!.Id, action))
             {
-                throw new LogbirdDeliveryException($"An audit event nests JSON deeper than {JsonDepth.Max} levels and was dropped.");
+                return;
             }
 
             id = source.Id ?? UuidV7.NewId();
-            var occurredAt = source.OccurredAt ?? DateTimeOffset.UtcNow;
+            DateTimeOffset? occurredAt = source.OccurredAt ?? DateTimeOffset.UtcNow;
+            string? environment = _environment;
+            string? defaultSource = _source;
+            var fullEnvelope = true;
             if (_beforeSend is not null)
             {
+                // Like the TypeScript SDK: defaults, id, timestamp, context and metadata are applied before the hook, and
+                // what the hook returns is sent as it is (only a missing or blank id is repaired).
                 var copy = source.Clone();
                 copy.Id = id;
                 copy.OccurredAt = occurredAt;
                 copy.Environment ??= _environment;
                 copy.Source ??= _source;
+                _ = copy.Context;
+                _ = copy.Metadata;
                 var result = _beforeSend(copy);
                 if (result is null)
                 {
@@ -222,12 +238,14 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 source = result;
                 action = source.Action ?? string.Empty;
                 id = source.Id;
-                occurredAt = source.OccurredAt ?? occurredAt;
-            }
-
-            if (_beforeSend is not null && JsonDepth.Exceeds(source))
-            {
-                throw new LogbirdDeliveryException($"An audit event nests JSON deeper than {JsonDepth.Max} levels and was dropped.");
+                occurredAt = source.OccurredAt;
+                environment = null;
+                defaultSource = null;
+                fullEnvelope = false;
+                if (CheckShape(source, id, action))
+                {
+                    return;
+                }
             }
 
             // The server mints a fresh id for a missing or blank id, which a retry could never match. Mint it here instead.
@@ -247,12 +265,13 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 return;
             }
 
-            var node = EventJson.ToJsonObject(source, id, occurredAt, _environment, _source);
+            var node = EventJson.ToJsonObject(source, id, occurredAt, environment, defaultSource, fullEnvelope);
             _redactor?.RedactInPlace(node);
             json = EventJson.ToUtf8(node);
             if (json.Length > MaxEventBytes)
             {
-                Drop(DropReason.TooLarge, id, action, json, "The event exceeds 256 KB.");
+                // The payload is not kept: holding oversized bodies in the callback backlog could exhaust memory.
+                Drop(DropReason.TooLarge, id, action, null, "The event exceeds 256 KB.");
                 Report(new LogbirdDeliveryException("An audit event exceeds 256 KB and was dropped."));
                 return;
             }
@@ -301,7 +320,10 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         catch (Exception e)
         {
             Drop(DropReason.Invalid, id, action, json, e.GetType().Name);
-            Report(e is LogbirdDeliveryException ? e : new LogbirdDeliveryException("An audit event could not be recorded: " + e.GetType().Name, e));
+
+            // Host exceptions (from BeforeSend, a redaction pattern, a JSON value) can quote event data, so only the
+            // exception type is reported, never the exception itself.
+            Report(e is LogbirdDeliveryException ? e : new LogbirdDeliveryException("An audit event could not be recorded: " + e.GetType().Name));
         }
         finally
         {
@@ -342,8 +364,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     {
         try
         {
-            var completion = _queue!.AddWaiter();
-            if (completion is null)
+            var waiter = _queue!.AddWaiter();
+            if (waiter is null)
             {
                 return true;
             }
@@ -355,18 +377,27 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 _queue.CompleteAllWaiters(_queue.Outstanding == 0);
             }
 
-            using (cancellationToken.Register(() =>
+            if (!cancellationToken.CanBeCanceled)
             {
-                completion.TrySetResult(false);
-                _queue.RemoveWaiter(completion);
-            }))
+                return await waiter.Completion.Task.ConfigureAwait(false);
+            }
+
+            // Concurrent flushes for the same events share one waiter; each caller cancels only its own wait.
+            var cancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using (cancellationToken.Register(() => cancelled.TrySetResult(false)))
             {
-                return await completion.Task.ConfigureAwait(false);
+                if (await Task.WhenAny(waiter.Completion.Task, cancelled.Task).ConfigureAwait(false) == waiter.Completion.Task)
+                {
+                    return await waiter.Completion.Task.ConfigureAwait(false);
+                }
+
+                _queue.ReleaseWaiter(waiter);
+                return false;
             }
         }
         catch (Exception e)
         {
-            Report(e);
+            Report(new LogbirdDeliveryException("Logbird flush failed unexpectedly: " + e.GetType().Name));
             return false;
         }
     }
@@ -377,13 +408,21 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     /// whose request has not returned, are reported once each through <see cref="LogbirdOptions.OnDrop"/>; a late
     /// response is then ignored. Never throws.
     /// </summary>
-    public async ValueTask DisposeAsync()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) == 1)
-        {
-            return;
-        }
+    public ValueTask DisposeAsync() => new(StartDispose());
 
+    /// <summary>Starts disposal once; every disposer waits for the same operation.</summary>
+    private Task StartDispose()
+    {
+        lock (_disposeGate)
+        {
+            // Closing is set before anything else, so Track rejects new events even if disposal has not run yet.
+            _closing = true;
+            return _disposeTask ??= DisposeCoreAsync();
+        }
+    }
+
+    private async Task DisposeCoreAsync()
+    {
         if (_loop is null)
         {
             _ownedHttp?.Dispose();
@@ -407,7 +446,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                     }
                     catch (Exception e)
                     {
-                        Report(e);
+                        Report(new LogbirdDeliveryException("Logbird shutdown step failed: " + e.GetType().Name));
                     }
                 });
                 await Task.WhenAny(_loop, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
@@ -415,7 +454,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
         catch (Exception e)
         {
-            Report(e);
+            Report(new LogbirdDeliveryException("Logbird shutdown step failed: " + e.GetType().Name));
         }
         finally
         {
@@ -460,13 +499,14 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
             var abandoned = queued.Count + inFlight.Count;
 
-            // Each flush learns whether its own events were settled before shutdown took the rest.
-            foreach (var (completion, result) in waiters)
+            // Each flush learns whether its own events were settled before shutdown took the rest; flushes that
+            // arrived during the report complete now.
+            foreach (var (waiter, result) in waiters)
             {
-                completion.TrySetResult(result);
+                waiter.Completion.TrySetResult(result);
             }
 
-            _queue.CompleteAllWaiters(outstandingResult: false);
+            _queue.FinishAbandon(abandoned > 0);
             if (abandoned > 0)
             {
                 Notify(() => LogShutdownDropped(_logger, abandoned));
@@ -475,7 +515,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         }
         catch (Exception e)
         {
-            Report(e);
+            Report(new LogbirdDeliveryException("Logbird shutdown step failed: " + e.GetType().Name));
         }
         finally
         {
@@ -492,12 +532,18 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     {
         try
         {
-            var task = Task.Run(() => DisposeAsync().AsTask());
-            task.Wait(_shutdownTimeout + TimeSpan.FromSeconds(10));
+            // Starts (or joins) disposal on this thread up to its first await, then waits without capturing a
+            // synchronization context. If the pool is too busy to finish in time, shutdown takes ownership of the
+            // remaining events right here, so nothing stays queued unreported when Dispose returns.
+            var dispose = StartDispose();
+            if (!dispose.Wait(_shutdownTimeout + TimeSpan.FromSeconds(10)) && _queue is not null)
+            {
+                AbandonRemaining();
+            }
         }
         catch (Exception e)
         {
-            Report(e);
+            Report(new LogbirdDeliveryException("Logbird shutdown step failed: " + e.GetType().Name));
         }
     }
 
@@ -588,7 +634,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             catch (Exception e)
             {
                 // Defensive: the loop must survive anything, or capture would silently stop.
-                Report(e);
+                Report(new LogbirdDeliveryException("Logbird delivery loop recovered from " + e.GetType().Name));
                 _queue!.CompleteWaitersAfterFailure();
                 await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
             }
@@ -626,7 +672,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             catch (Exception e)
             {
                 // Defensive (SendAsync catches everything): requeue only events nobody has settled.
-                result = new SendResult([.. batch.Where(item => item.IsPending)], new LogbirdDeliveryException("Logbird delivery failed unexpectedly: " + e.GetType().Name, e), 0);
+                result = new SendResult([.. batch.Where(item => item.IsPending)], new LogbirdDeliveryException("Logbird delivery failed unexpectedly: " + e.GetType().Name), 0);
             }
 
             if (result.Delivered > 0)
@@ -634,8 +680,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 Interlocked.Add(ref _delivered, result.Delivered);
             }
 
-            var overflow = _queue.FinishBatch(result.Failure is null ? [] : result.Unsettled);
-            if (overflow is null)
+            if (!_queue.FinishBatch(result.Failure is null ? [] : result.Unsettled, out _))
             {
                 // Shutdown took ownership of this batch and reported it; ignore the late result.
                 return false;
@@ -643,14 +688,6 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
             if (result.Failure is { } failure)
             {
-                foreach (var item in overflow)
-                {
-                    if (item.TrySettle())
-                    {
-                        Drop(DropReason.QueueFull, item.Id, item.Action, item.Json, "The queue is full.");
-                    }
-                }
-
                 Interlocked.Increment(ref _failedSends);
                 _consecutiveFailures++;
                 var backoff = TimeSpan.FromSeconds(Math.Min(60, Math.Pow(2, Math.Min(_consecutiveFailures - 1, 6))));
@@ -696,6 +733,35 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             notification();
         });
 
+    /// <summary>
+    /// Checks depth and size before anything clones or serializes the event. Returns true when it was dropped (and
+    /// reported); oversized events are dropped without keeping their payload.
+    /// </summary>
+    private bool CheckShape(AuditEvent auditEvent, string? id, string action)
+    {
+        var shape = JsonDepth.Measure(auditEvent, MaxEventBytes);
+        if (shape == JsonDepth.Shape.TooDeep)
+        {
+            throw new LogbirdDeliveryException($"An audit event nests JSON deeper than {JsonDepth.Max} levels and was dropped.");
+        }
+
+        if (shape == JsonDepth.Shape.TooLarge)
+        {
+            Drop(DropReason.TooLarge, id, action, null, "The event exceeds 256 KB.");
+            Report(new LogbirdDeliveryException("An audit event exceeds 256 KB and was dropped."));
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Accounts an event evicted from a full queue. Runs under the queue lock: counters and a posted notification only.</summary>
+    private void OnEvicted(QueuedEvent item)
+    {
+        Drop(DropReason.QueueFull, item.Id, item.Action, item.Json, "The queue is full.");
+        LogQueueFull();
+    }
+
     private void OnSenderDrop(QueuedEvent item, DropReason reason, string? detail)
         => Drop(reason, item.Id, item.Action, item.Json, detail);
 
@@ -705,13 +771,22 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     private static string SafePrefix(string reason)
     {
-        var end = 0;
-        while (end < reason.Length && end < 40 && (char.IsLetterOrDigit(reason[end]) || reason[end] is '_' or '.' or '-'))
+        var colon = reason.IndexOf(':');
+        if (colon is <= 0 or > 40)
         {
-            end++;
+            return "unspecified";
         }
 
-        return end == 0 ? "unspecified" : reason.Substring(0, end);
+        for (var i = 0; i < colon; i++)
+        {
+            var c = reason[i];
+            if (c is not ((>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '_' or '.'))
+            {
+                return "unspecified";
+            }
+        }
+
+        return reason.Substring(0, colon);
     }
 
     private void Warn(string id, string action, string reason, string summary)
@@ -766,7 +841,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         {
             try
             {
-                LogError(_logger, error.Message, error is LogbirdDeliveryException ? null : error);
+                // Only SDK-owned messages reach the logger; never a raw exception that could quote event data.
+                LogError(_logger, error is LogbirdDeliveryException or ObjectDisposedException ? error.Message : "An unexpected error: " + error.GetType().Name, null);
             }
             catch
             {

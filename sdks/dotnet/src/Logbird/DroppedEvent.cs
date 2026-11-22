@@ -30,6 +30,12 @@ public enum DropReason
     /// surrogate, or more than 256 targets. Checked before sending, with the same rule as the server.
     /// </summary>
     InvalidEntityId = 6,
+
+    /// <summary>
+    /// The server (or something in front of it) answered with success but without acknowledging the event, and it was
+    /// still unacknowledged after the retry budget. It is not counted as delivered.
+    /// </summary>
+    Unacknowledged = 7,
 }
 
 /// <summary>An event that will not be stored, passed to <see cref="LogbirdOptions.OnDrop"/>.</summary>

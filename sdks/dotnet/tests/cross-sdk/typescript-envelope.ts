@@ -7,11 +7,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { Logbird } from '../../../../packages/sdk/src/index';
 
 const output = 'sdks/dotnet/tests/Logbird.Tests/Fixtures/typescript-envelope.golden.txt';
-let body = '';
+const bodies: string[] = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
-  body = String(init?.body ?? '');
-  return new Response(JSON.stringify({ accepted: 1, ids: [], rejected: [], warnings: [] }), { status: 202 });
+  const body = String(init?.body ?? '');
+  bodies.push(body);
+  const ids = (JSON.parse(body).events as { id: string }[]).map((event) => event.id);
+  return new Response(JSON.stringify({ accepted: ids.length, ids, rejected: [], warnings: [] }), { status: 202 });
 }) as typeof fetch;
 
 const client = new Logbird({ endpoint: 'https://audit.example.invalid', apiKey: 'lb_ingest_fictional' });
@@ -91,12 +93,37 @@ client.track({
   },
 });
 await client.shutdown();
+
+// What a BeforeSend hook returns is sent as it is (only a missing id is repaired): a replacement event built by the
+// hook has no occurredAt, context or metadata.
+const replacing = new Logbird({
+  endpoint: 'https://audit.example.invalid',
+  apiKey: 'lb_ingest_fictional',
+  beforeSend: () => ({ id: '0193f2b6-6c00-7abc-8def-0123456789af', action: 'replaced.by.hook' }),
+});
+replacing.track({ action: 'original.event' });
+await replacing.shutdown();
+
+// Defaults apply before the hook; a hook that clears a default or the timestamp keeps it cleared.
+const clearing = new Logbird({
+  endpoint: 'https://audit.example.invalid',
+  apiKey: 'lb_ingest_fictional',
+  defaults: { source: 'default-service' },
+  beforeSend: (event) => {
+    delete event.occurredAt;
+    event.source = undefined;
+    return event;
+  },
+});
+clearing.track({ id: '0193f2b6-6c00-7abc-8def-0123456789b0', action: 'cleared.by.hook' });
+await clearing.shutdown();
 globalThis.fetch = realFetch;
 
-const events: unknown[] = JSON.parse(body).events;
+const events: unknown[] = bodies.flatMap((body) => JSON.parse(body).events);
 // Re-serializing each parsed event keeps key order and escapes, matching what the SDK sent.
 const lines = events.map((event) => JSON.stringify(event));
-if (events.length !== 4 || !lines.every((line) => body.includes(line))) throw new Error('Unexpected TypeScript SDK body shape');
+if (events.length !== 6 || !lines.every((line) => bodies.some((body) => body.includes(line))))
+  throw new Error('Unexpected TypeScript SDK body shape');
 const event = `${lines.join('\n')}\n`;
 if (process.argv.includes('--check')) {
   if (readFileSync(output, 'utf8') !== event) throw new Error(`${output} is stale: run this script without --check`);

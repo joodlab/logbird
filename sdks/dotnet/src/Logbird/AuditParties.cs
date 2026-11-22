@@ -8,6 +8,13 @@ namespace Logbird;
 /// <param name="Id">A stable identifier for the actor, such as a user id.</param>
 public sealed record AuditActor(string Type, string Id)
 {
+    /// <summary>Lists only the kind of value, never ids, names or emails, so logging this object cannot leak them.</summary>
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Type = ").Append(Type);
+        return true;
+    }
+
     /// <summary>A display name shown in the Logbird console.</summary>
     public string? Name { get; init; }
 
@@ -41,6 +48,15 @@ public sealed record AuditActor(string Type, string Id)
 /// <param name="Id">The impersonator's stable id.</param>
 public sealed record AuditImpersonator(string Id)
 {
+    /// <summary>Lists no values, so logging this object cannot leak ids or names.</summary>
+#pragma warning disable CA1822 // The compiler-generated record ToString calls this instance member by name.
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        _ = builder;
+        return false;
+    }
+#pragma warning restore CA1822
+
     /// <summary>A display name.</summary>
     public string? Name { get; init; }
 }
@@ -52,6 +68,13 @@ public sealed record AuditImpersonator(string Id)
 /// <param name="Type">The kind of executor, for example <c>api</c> or <c>worker</c>.</param>
 public sealed record AuditExecutor(string Type)
 {
+    /// <summary>Lists only the kind of value, never ids, names or emails, so logging this object cannot leak them.</summary>
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Type = ").Append(Type);
+        return true;
+    }
+
     /// <summary>The executor's id, for example a service or queue name.</summary>
     public string? Id { get; init; }
 
@@ -82,6 +105,15 @@ public sealed record AuditExecutor(string Type)
 /// <param name="Id">The tenant's stable id.</param>
 public sealed record AuditTenant(string Id)
 {
+    /// <summary>Lists no values, so logging this object cannot leak ids or names.</summary>
+#pragma warning disable CA1822 // The compiler-generated record ToString calls this instance member by name.
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        _ = builder;
+        return false;
+    }
+#pragma warning restore CA1822
+
     /// <summary>A display name.</summary>
     public string? Name { get; init; }
 }
@@ -91,6 +123,13 @@ public sealed record AuditTenant(string Id)
 /// <param name="Id">The record's stable id.</param>
 public sealed record AuditTarget(string Type, string Id)
 {
+    /// <summary>Lists only the kind of value, never ids, names or emails, so logging this object cannot leak them.</summary>
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Type = ").Append(Type);
+        return true;
+    }
+
     /// <summary>A safe display name, for example an invoice number.</summary>
     public string? Name { get; init; }
 }

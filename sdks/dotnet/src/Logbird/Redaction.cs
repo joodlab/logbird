@@ -48,7 +48,7 @@ public sealed class RedactionOptions
         }
 
         var added = string.Join("|", names.Select(Regex.Escape));
-        Keys = new Regex($"{Keys}|{added}", Keys.Options | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        Keys = new Regex($"{Keys}|{added}", Keys.Options | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, Keys.MatchTimeout);
         return this;
     }
 
@@ -100,6 +100,29 @@ public sealed class Redactor
         return copy;
     }
 
+    /// <summary>
+    /// Field names that identify entities. They are never redacted: a redacted id would merge every identity into one.
+    /// To pseudonymise an id, transform it before recording.
+    /// </summary>
+    public static IReadOnlyList<string> IdentifierFields { get; } = ["actor.id", "impersonator.id", "executor.id", "tenant.id", "targets[].type", "targets[].id"];
+
+    private static readonly string[] StructuralKeys = ["actor", "impersonator", "executor", "tenant", "targets", "id", "type"];
+
+    /// <summary>The identifier-related keys this redactor's patterns would match (they are exempt from redaction).</summary>
+    internal List<string> IdentifierFieldsMatched()
+    {
+        var matched = new List<string>();
+        foreach (var key in StructuralKeys)
+        {
+            if (_keys.IsMatch(key))
+            {
+                matched.Add(key);
+            }
+        }
+
+        return matched;
+    }
+
     internal void RedactInPlace(JsonObject copy)
     {
         if (copy["changes"] is JsonArray changes)
@@ -123,37 +146,59 @@ public sealed class Redactor
             }
         }
 
-        Walk(copy, top: true);
+        Walk(copy, Level.Top);
     }
 
-    private void Walk(JsonNode? node, bool top = false)
+    private enum Level
+    {
+        Nested,
+        Top,
+        Entity,
+        Targets,
+    }
+
+    private void Walk(JsonNode? node, Level level = Level.Nested)
     {
         switch (node)
         {
             case JsonObject obj:
                 foreach (var key in obj.Select(pair => pair.Key).ToList())
                 {
-                    if (top && key is "id" or "action")
+                    // Event identity and entity identifiers are structural: never replaced, whatever the pattern.
+                    if ((level == Level.Top && key is "id" or "action") || (level == Level.Entity && key is "id" or "type"))
                     {
                         continue;
                     }
 
-                    if (_keys.IsMatch(key))
+                    var child = level == Level.Top
+                        ? key switch
+                        {
+                            "actor" or "impersonator" or "executor" or "tenant" => Level.Entity,
+                            "targets" => Level.Targets,
+                            _ => Level.Nested,
+                        }
+                        : Level.Nested;
+                    if (child == Level.Nested && _keys.IsMatch(key))
                     {
                         obj[key] = _replacement;
                     }
                     else
                     {
-                        Walk(obj[key]);
+                        Walk(obj[key], child);
                     }
                 }
 
                 break;
             case JsonArray array:
-                // JavaScript walks arrays by index keys ("0", "1", ...); match them the same way.
+                // JavaScript walks arrays by index keys ("0", "1", ...); match them the same way. Target entries are
+                // entities: never replaced as a whole, and their type and id are kept.
                 for (var i = 0; i < array.Count; i++)
                 {
-                    if (_keys.IsMatch(i.ToString(CultureInfo.InvariantCulture)))
+                    if (level == Level.Targets)
+                    {
+                        Walk(array[i], Level.Entity);
+                    }
+                    else if (_keys.IsMatch(i.ToString(CultureInfo.InvariantCulture)))
                     {
                         array[i] = _replacement;
                     }

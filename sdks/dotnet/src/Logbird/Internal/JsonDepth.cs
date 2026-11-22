@@ -4,42 +4,99 @@ using System.Text.Json.Nodes;
 namespace Logbird.Internal;
 
 /// <summary>
-/// Checks caller-built JSON depth iteratively, before anything walks it recursively (cloning, redaction, writing), so a
-/// deeply nested tree is dropped as invalid instead of exhausting the host's stack.
+/// Measures caller-built event data iteratively, before anything walks it recursively (cloning, redaction, writing):
+/// a deeply nested tree is dropped as invalid instead of exhausting the host's stack, and an event whose text alone
+/// already exceeds the size limit is dropped before it is copied or serialized.
 /// </summary>
 internal static class JsonDepth
 {
     /// <summary>Levels allowed inside metadata and change values; the event envelope adds a few on top.</summary>
     public const int Max = 48;
 
-    public static bool Exceeds(AuditEvent e)
+    public enum Shape
     {
-        if (Exceeds(e.MetadataOrNull))
+        Ok,
+        TooDeep,
+        TooLarge,
+    }
+
+    public static bool Exceeds(AuditEvent e) => Measure(e, long.MaxValue) == Shape.TooDeep;
+
+    /// <summary>
+    /// Checks depth and a lower bound of the UTF-8 size (every UTF-16 code unit of text is at least one byte), stopping
+    /// as soon as either limit is passed.
+    /// </summary>
+    public static Shape Measure(AuditEvent e, long maxBytes)
+    {
+        long size = 0;
+        bool Add(string? text)
         {
-            return true;
+            size += text?.Length ?? 0;
+            return size > maxBytes;
         }
 
-        if (!e.EmitChanges)
+        if (Add(e.Action) || Add(e.Id) || Add(e.Description) || Add(e.Environment) || Add(e.Outcome) || Add(e.Severity) || Add(e.Source)
+            || Add(e.Actor?.Id) || Add(e.Actor?.Name) || Add(e.Actor?.Email) || Add(e.Tenant?.Id) || Add(e.Tenant?.Name)
+            || Add(e.Executor?.Id) || Add(e.Executor?.Name) || Add(e.Impersonator?.Name))
         {
-            return false;
+            return Shape.TooLarge;
+        }
+
+        if (e.EmitTargets)
+        {
+            foreach (var target in e.Targets)
+            {
+                if (target is not null && (Add(target.Type) || Add(target.Id) || Add(target.Name)))
+                {
+                    return Shape.TooLarge;
+                }
+            }
+        }
+
+        var shape = Walk(e.MetadataOrNull, Max, maxBytes, ref size);
+        if (shape != Shape.Ok || !e.EmitChanges)
+        {
+            return shape;
         }
 
         foreach (var change in e.Changes)
         {
-            if (change is not null && (Exceeds(change.Before) || Exceeds(change.After)))
+            if (change is null)
             {
-                return true;
+                continue;
+            }
+
+            if (Add(change.Field))
+            {
+                return Shape.TooLarge;
+            }
+
+            shape = Walk(change.Before, Max, maxBytes, ref size);
+            if (shape == Shape.Ok)
+            {
+                shape = Walk(change.After, Max, maxBytes, ref size);
+            }
+
+            if (shape != Shape.Ok)
+            {
+                return shape;
             }
         }
 
-        return false;
+        return Shape.Ok;
     }
 
     public static bool Exceeds(JsonNode? root, int max = Max)
     {
+        long size = 0;
+        return Walk(root, max, long.MaxValue, ref size) == Shape.TooDeep;
+    }
+
+    private static Shape Walk(JsonNode? root, int max, long maxBytes, ref long size)
+    {
         if (root is null)
         {
-            return false;
+            return Shape.Ok;
         }
 
         var pending = new Stack<(JsonNode Node, int Depth)>();
@@ -49,7 +106,7 @@ internal static class JsonDepth
             var (node, depth) = pending.Pop();
             if (depth > max)
             {
-                return true;
+                return Shape.TooDeep;
             }
 
             switch (node)
@@ -57,6 +114,7 @@ internal static class JsonDepth
                 case JsonObject obj:
                     foreach (var pair in obj)
                     {
+                        size += pair.Key.Length;
                         if (pair.Value is not null)
                         {
                             pending.Push((pair.Value, depth + 1));
@@ -74,9 +132,17 @@ internal static class JsonDepth
                     }
 
                     break;
+                case JsonValue value when value.TryGetValue<string>(out var text):
+                    size += text.Length;
+                    break;
+            }
+
+            if (size > maxBytes)
+            {
+                return Shape.TooLarge;
             }
         }
 
-        return false;
+        return Shape.Ok;
     }
 }

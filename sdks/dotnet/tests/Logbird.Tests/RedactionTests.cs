@@ -40,7 +40,7 @@ public class RedactionTests
     }
 
     [Fact]
-    public void Supports_custom_patterns_and_protects_top_level_identity()
+    public void Supports_custom_patterns_and_never_redacts_identifiers()
     {
         var redactor = new Redactor(new Regex("id|email"), new Regex("phone"), "hidden");
         var result = redactor.Redact(JsonNode.Parse("""
@@ -48,7 +48,8 @@ public class RedactionTests
             """)!.AsObject());
         Assert.Equal("id", (string?)result["id"]);
         Assert.Equal("action", (string?)result["action"]);
-        Assert.Equal("hidden", (string?)result["actor"]!["id"]);
+        // Identifier fields are structural and never redacted (stricter than the TypeScript redact()); the email is.
+        Assert.Equal("u", (string?)result["actor"]!["id"]);
         Assert.Equal("hidden", (string?)result["actor"]!["email"]);
         Assert.Equal("hidden", (string?)result["changes"]![0]!["after"]);
         Assert.False(result["changes"]![0]!.AsObject().ContainsKey("before"));

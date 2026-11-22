@@ -12,14 +12,18 @@ internal static class EventJson
         => value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 
     /// <summary>Converts an event into a JSON object the redactor can walk. Caller-owned JSON nodes are deep cloned.</summary>
-    public static JsonObject ToJsonObject(AuditEvent e, string id, DateTimeOffset occurredAt, string? environment, string? source)
+    public static JsonObject ToJsonObject(AuditEvent e, string id, DateTimeOffset? occurredAt, string? environment, string? source, bool fullEnvelope)
     {
         var json = new JsonObject
         {
             ["id"] = id,
             ["action"] = e.Action,
-            ["occurredAt"] = FormatTimestamp(occurredAt),
         };
+        if (occurredAt is { } at)
+        {
+            json["occurredAt"] = FormatTimestamp(at);
+        }
+
         Add(json, "environment", e.Environment ?? environment);
         Add(json, "outcome", e.Outcome);
         Add(json, "severity", e.Severity);
@@ -108,19 +112,28 @@ internal static class EventJson
 
         // Like the TypeScript SDK, context and metadata are always present (empty when unset). The server fingerprints
         // the parsed input, so the same event replayed from either SDK must have the same shape.
-        var contextNode = new JsonObject();
-        if (e.ContextOrNull is { } context)
+        // Without a BeforeSend hook, like the TypeScript SDK's merge, both are always present. After a hook, what it returned
+        // is sent as it is: an event it built without them has neither.
+        if (fullEnvelope || e.ContextOrNull is not null)
         {
-            Add(contextNode, "operationId", context.OperationId);
-            Add(contextNode, "parentEventId", context.ParentEventId);
-            Add(contextNode, "requestId", context.RequestId);
-            Add(contextNode, "traceId", context.TraceId);
-            Add(contextNode, "ip", context.Ip);
-            Add(contextNode, "userAgent", context.UserAgent);
+            var contextNode = new JsonObject();
+            if (e.ContextOrNull is { } context)
+            {
+                Add(contextNode, "operationId", context.OperationId);
+                Add(contextNode, "parentEventId", context.ParentEventId);
+                Add(contextNode, "requestId", context.RequestId);
+                Add(contextNode, "traceId", context.TraceId);
+                Add(contextNode, "ip", context.Ip);
+                Add(contextNode, "userAgent", context.UserAgent);
+            }
+
+            json["context"] = contextNode;
         }
 
-        json["context"] = contextNode;
-        json["metadata"] = e.MetadataOrNull?.DeepClone() ?? new JsonObject();
+        if (fullEnvelope || e.MetadataOrNull is not null)
+        {
+            json["metadata"] = e.MetadataOrNull?.DeepClone() ?? new JsonObject();
+        }
 
         Add(json, "schemaVersion", e.SchemaVersion);
         return json;

@@ -103,9 +103,14 @@ internal static class JsJson
         // laid out like JavaScript's Number#toString but keep every significant digit, so long, ulong and decimal values
         // stay exact (they never pass through double).
         string json;
-        if (value.TryGetValue<JsonElement>(out var element))
+        if (value.TryGetValue<JsonElement>(out var element) && element.ValueKind == JsonValueKind.Number)
         {
-            // Parsed JSON: keep the number exactly as it was written.
+            // Parsed JSON: send the number exactly as it was written (a maintainer decision: never round on purpose).
+            builder.Append(element.GetRawText());
+            return;
+        }
+        else if (value.TryGetValue<JsonElement>(out element))
+        {
             json = element.GetRawText();
         }
         else if (value.TryGetValue<double>(out var number))

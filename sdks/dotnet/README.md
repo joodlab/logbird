@@ -127,6 +127,9 @@ var options = new LogbirdOptions
   ignores cancellation. If a batch still fails, it goes back to the front of the queue and is tried again later.
 - When the server rejects single events in a batch (for example an invalid id), only those events are dropped
   (`DropReason.Rejected`, with the server's reason in `Detail`). The rest of the batch is stored.
+- A success response counts only for events it acknowledges (accepted by id, or rejected by index). If something in
+  front of Logbird answers 2xx without acknowledging events, they are retried with the same bytes and, once the retry
+  budget is spent, dropped with `DropReason.Unacknowledged`; they are never counted as delivered.
 - A 4xx other than 429 (for example a revoked key) drops the batch (`DropReason.HttpError`) and reports it. So does
   a redirect: the client never follows one, because that would send audit data to another address. If you pass your
   own `HttpClient`, configure its handler with `AllowAutoRedirect = false` as well.
@@ -202,7 +205,13 @@ The default does not cover personal data, so add your own keys:
 options.Redaction.AddKeys("email", "phone", "iban");
 ```
 
-Redaction behaves like the TypeScript SDK's `redact()`. Set `Redaction.Enabled = false` to turn it off, or replace
+**Identifier fields are never redacted**: actor, impersonator, executor and tenant ids, and each target's type and id.
+They are structural; a redacted id would merge every identity into one and destroy the trail. If your pattern would match
+one of them (for example `AddKeys("id")`), Logbird reports it once at startup through the logger and `OnError` and keeps
+running, redacting everything else. To pseudonymise an id, transform it before recording, for example with a keyed hash.
+This is stricter than today's TypeScript `redact()`, which redacts any matching key.
+
+Otherwise redaction behaves like the TypeScript SDK's `redact()`. Set `Redaction.Enabled = false` to turn it off, or replace
 `Redaction.Keys` with your own pattern. `BeforeSend` runs before redaction on a copy of each event; return `null`
 to skip an event.
 
@@ -267,6 +276,13 @@ treats as the same content), `JSON.stringify` string escaping
 (emoji and other non-ASCII text stay raw, lone surrogates are escaped, never replaced), JavaScript key order (integer-like
 keys first) and JavaScript number layout (`1.0` as `1`, `1e21` as `1e+21`). An event sent from either SDK and replayed
 from the other is therefore recognised as the same event. Tests serialize the same events in both SDKs and compare the
-bytes, and a live test replays a TypeScript event from C#. Two intended differences: `long`, `ulong` and `decimal`
-values keep every digit (JavaScript cannot represent more than about 16), and `OccurredAt` is always sent as UTC with
-milliseconds (`2026-11-22T08:00:00.123Z`), the form the TypeScript SDK generates by default.
+bytes, and a live test replays a TypeScript event from C#. Deliberate differences, where .NET can hold values JavaScript cannot:
+
+- **Numbers are sent as the exact value you hold.** `float` and `double` use the shortest text that reads back as the
+  same value (`1.1f` is sent as `1.1`, what you wrote), and integer types, `decimal` and raw JSON numbers from a
+  `JsonElement` keep every digit (`1234567890123456789` and `1e-400` are sent as written). JavaScript would round these
+  to binary64. `NaN` and infinities are sent as `null`, as `JSON.stringify` does. The golden comparison covers the values
+  both SDKs can represent; a test lists these differences.
+- `OccurredAt` is always sent as UTC with milliseconds (`2026-11-22T08:00:00.123Z`), the form the TypeScript SDK
+  generates by default.
+- Identifier fields are never redacted (see Redaction).

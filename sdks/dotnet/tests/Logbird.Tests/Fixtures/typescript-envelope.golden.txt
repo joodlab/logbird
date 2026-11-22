@@ -2,3 +2,5 @@
 {"id":"0193f2b6-6c00-7abc-8def-0123456789ac","action":"session.started","occurredAt":"2026-11-22T08:00:01.000Z","context":{},"metadata":{}}
 {"id":"0193f2b6-6c00-7abc-8def-0123456789ad","action":"unicode.checked","occurredAt":"2026-11-22T08:00:02.000Z","description":"emoji 😀 lone \ud800 ls   del ","targets":[],"changes":[],"context":{},"metadata":{"list":[1,"two",null,{"deep":[]}]}}
 {"id":"0193f2b6-6c00-7abc-8def-0123456789ae","action":"numbers.checked","occurredAt":"2026-11-22T08:00:03.000Z","context":{},"metadata":{"2":"y","10":"a","b":"x","01":"z","ratio":1.5,"one":1,"big":1e+21,"tiny":1e-7,"neg0":0,"tenth":0.1,"max":9007199254740991,"nan":null,"inf":null,"ninf":null,"eps":5e-324}}
+{"id":"0193f2b6-6c00-7abc-8def-0123456789af","action":"replaced.by.hook"}
+{"id":"0193f2b6-6c00-7abc-8def-0123456789b0","action":"cleared.by.hook","context":{},"metadata":{}}
