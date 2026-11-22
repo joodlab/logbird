@@ -332,10 +332,14 @@ describe.runIf(enabled)('#138 phase 2: database-enforced tenant binding for scop
     expect(() => bound.query({ query: 'SELECT 1', clickhouse_settings: { SQL_logbird_project: tenantProject, SQL_logbird_tenant: 't2' } })).toThrow(
       'Scope tenant does not match the bound tenant',
     );
-    expect(() => bound.insert).toThrow('read-only');
-    await expect(bound.close()).rejects.toThrow('does not own the shared pool');
+    // The handle exposes query only: nothing reaches the shared client or its lifecycle.
+    const surface = bound as unknown as Record<PropertyKey, unknown>;
+    for (const name of ['insert', 'command', 'exec', 'ping', 'close', 'valueOf', 'toString', Symbol.asyncDispose])
+      expect(surface[name], String(name)).toBeUndefined();
+    expect(Object.getPrototypeOf(bound)).toBeNull();
+    expect(Object.isFrozen(bound)).toBe(true);
     expect(() => withTenant(bound, 't2')).toThrow('already bound');
-    // The shared client is still usable after the handle refused close().
+    // The shared client is unaffected by the handle.
     expect(await tenants({ SQL_logbird_tenant: 't2' })).toEqual(['t2']);
   });
 
@@ -425,5 +429,26 @@ describe.runIf(enabled)('#138 phase 2: database-enforced tenant binding for scop
     );
     expect(page.data.map((e) => e.tenant?.id)).toEqual(['t1']);
     expect(page.total).toBe(1);
+  });
+});
+
+describe.runIf(enabled)('#138 phase 2: the restricted client authenticates as the query user', () => {
+  it('ignores main-account credentials embedded in CLICKHOUSE_URL', async () => {
+    const url = new URL(process.env.CLICKHOUSE_URL ?? '');
+    url.username = process.env.CLICKHOUSE_USER ?? '';
+    url.password = process.env.CLICKHOUSE_PASSWORD ?? '';
+    const client = createQueryClickHouseClient({ ...process.env, CLICKHOUSE_URL: url.toString() });
+    try {
+      const [who] = await (
+        await client!.query({
+          query: 'SELECT currentUser() user',
+          clickhouse_settings: { SQL_logbird_project: 'identity-probe' },
+          format: 'JSONEachRow',
+        })
+      ).json<{ user: string }>();
+      expect(who?.user).toBe('logbird_query');
+    } finally {
+      await client?.close();
+    }
   });
 });

@@ -217,7 +217,17 @@ export async function insertEvents(
 const restricted = new WeakSet<ClickHouseClient>();
 export function createQueryClickHouseClient(env = process.env): ClickHouseClient | null {
   if (!env.CLICKHOUSE_QUERY_USER || !env.CLICKHOUSE_QUERY_PASSWORD) return null;
-  const client = createClickHouseClient({ ...env, CLICKHOUSE_USER: env.CLICKHOUSE_QUERY_USER, CLICKHOUSE_PASSWORD: env.CLICKHOUSE_QUERY_PASSWORD });
+  // Credentials embedded in CLICKHOUSE_URL would take precedence over the username/password options and silently
+  // authenticate as the main account: the restricted client always connects with the URL's credentials removed.
+  const url = new URL(env.CLICKHOUSE_URL ?? '');
+  url.username = '';
+  url.password = '';
+  const client = createClickHouseClient({
+    ...env,
+    CLICKHOUSE_URL: url.toString().replace(/\/$/, ''),
+    CLICKHOUSE_USER: env.CLICKHOUSE_QUERY_USER,
+    CLICKHOUSE_PASSWORD: env.CLICKHOUSE_QUERY_PASSWORD,
+  });
   restricted.add(client);
   return client;
 }
@@ -233,26 +243,16 @@ export function withTenant(ch: ClickHouseClient, tenantId: string): ClickHouseCl
   if (!restricted.has(ch)) throw new Error('Only the restricted query client can be bound to a tenant');
   if (boundTenants.has(ch)) throw new Error('This client is already bound to a tenant');
   if (!tenantId) throw new Error('A tenant binding needs a tenant');
-  // Read dispatch (query, command, exec) always carries the tenant setting, even when a caller supplies its own
-  // settings; a different tenant is refused. Writes and shutting down the shared pool are not available on the handle.
-  const dispatch =
-    (method: (params: Record<string, unknown>) => unknown) =>
-    (params: Record<string, unknown> = {}) => {
-      const settings = (params.clickhouse_settings ?? {}) as Record<string, unknown>;
-      if (settings.SQL_logbird_tenant !== undefined && settings.SQL_logbird_tenant !== tenantId)
-        throw new Error('Scope tenant does not match the bound tenant');
-      return method({ ...params, clickhouse_settings: { ...settings, SQL_logbird_tenant: tenantId } });
-    };
-  const bound = new Proxy(ch, {
-    get(target, property) {
-      if (property === 'insert') throw new Error('A tenant-bound client is read-only');
-      if (property === 'close') return () => Promise.reject(new Error('A tenant-bound client does not own the shared pool'));
-      const value = Reflect.get(target, property, target);
-      if (typeof value !== 'function') return value;
-      const method = value.bind(target);
-      return property === 'query' || property === 'command' || property === 'exec' ? dispatch(method) : method;
-    },
-  });
+  // An explicit read handle, not a view of the client: it exposes only `query` (what read() uses), always with the
+  // tenant setting (a different tenant is refused). Nothing else reaches the shared client — no ping, exec, command,
+  // insert, streaming of unbound queries, close or disposal of the shared pool, and no way back to the client itself.
+  const query = (params: Parameters<ClickHouseClient['query']>[0]) => {
+    const settings = (params.clickhouse_settings ?? {}) as Record<string, unknown>;
+    if (settings.SQL_logbird_tenant !== undefined && settings.SQL_logbird_tenant !== tenantId)
+      throw new Error('Scope tenant does not match the bound tenant');
+    return ch.query({ ...params, clickhouse_settings: { ...params.clickhouse_settings, SQL_logbird_tenant: tenantId } });
+  };
+  const bound = Object.freeze(Object.assign(Object.create(null), { query })) as unknown as ClickHouseClient;
   restricted.add(bound);
   boundTenants.set(bound, tenantId);
   return bound;

@@ -18,6 +18,7 @@ import {
   getEvent,
   purgeProject,
   searchEvents,
+  withTenant,
 } from '../src/index';
 
 const total = Number(process.argv[2] ?? 1_000_000);
@@ -29,7 +30,7 @@ const ch = createClickHouseClient();
 // BENCH_CLIENT=query: scoped reads run as the restricted query user, as the API does when it is configured (#138 phase 2).
 const restricted = process.env.BENCH_CLIENT === 'query' ? createQueryClickHouseClient() : null;
 if (process.env.BENCH_CLIENT === 'query' && !restricted) throw new Error('BENCH_CLIENT=query needs CLICKHOUSE_QUERY_USER/PASSWORD');
-const reader = (scope: ReadScope | null): ClickHouseClient => (scope && restricted ? restricted : ch);
+const reader = (scope: ReadScope | null): ClickHouseClient => (scope && restricted ? withTenant(restricted, scope.tenantId) : ch);
 const p = `qa-bench-scoped-${randomUUID()}`;
 const span = 7 * 86_400_000;
 const step = Math.floor(span / total);

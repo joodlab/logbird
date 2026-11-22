@@ -149,7 +149,10 @@ Authorization: Bearer lb_read_…
 
 `GET /v1/export?format=csv|jsonl|jsonl-evidence&q=&from=&to=` streams like the console export
 ([exports](exports.md)): `X-Logbird-Export-Id` and `X-Logbird-Export-Schema` headers, the same CSV columns, and the
-same admission limits (one running export per API key, two per workspace; a busy key answers 429 `export_busy`). There
+same admission limits (one running export per API key, two per workspace; a busy key answers 429 `export_busy`). When
+scoped reads run as the restricted query user (see "Two layers"), a scoped export takes both of the workspace's export
+slots by itself, like a console SQL export, so another key's export answers 429 `export_busy` while it runs, and each
+scoped query runs under that user's limits (10 s, 5,000,000 rows read and 1 GiB per query). There
 is no trailer: a complete download is one that ends normally (a non-empty file ends with a newline; no matching events
 gives an empty JSONL body or a CSV header only). A failure after the headers aborts the connection, so discard any
 download that ends with a transport error.
