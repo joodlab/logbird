@@ -41,7 +41,12 @@ async function filter(ch: ClickHouseClient, q: { q?: string; lang?: string }, no
 }
 
 type Params = Record<string, unknown>;
-export type ExportExecution = { signal: AbortSignal; cancelQuery: (queryId: string) => Promise<void> };
+export type ExportExecution = {
+  signal: AbortSignal;
+  cancelQuery: (queryId: string) => Promise<void>;
+  /** Recorded as ClickHouse `log_comment` on every page query (e.g. the export id), for audits and tests. */
+  tag?: string;
+};
 export async function read<T>(
   ch: ClickHouseClient,
   query: string,
@@ -49,6 +54,8 @@ export async function read<T>(
   guard = 10,
   exportBudget = false,
   execution?: ExportExecution,
+  /** Aborting closes the HTTP request; ClickHouse then cancels the read-only statement. */
+  abortSignal?: AbortSignal,
 ): Promise<T[]> {
   const query_params = { ...parameters };
   for (const key of ['from', 'to', 'cursorTs', 'hour', 'since', 'cutoff', 'exportReceivedBefore']) {
@@ -64,8 +71,9 @@ export async function read<T>(
   if (bound !== undefined && typeof query_params.scope_tenant === 'string' && query_params.scope_tenant !== bound)
     throw new Error('Scope tenant does not match the bound tenant');
   const tenant = bound ?? (typeof query_params.scope_tenant === 'string' ? query_params.scope_tenant : '');
-  // Only SQL-mode filters carry the expression symbol: error reports name the language the caller actually used.
-  const lang = sqlExpression in query_params ? 'sql' : 'query';
+  // Error reports name the language the caller used: SQL-mode filters carry the expression symbol, and the unbound
+  // restricted client serves only the console's SQL mode (its auxiliary reads too); tenant-bound clients serve /v1.
+  const lang = sqlExpression in query_params || (isQueryClient(ch) && bound === undefined) ? 'sql' : 'query';
   execution?.signal.throwIfAborted();
   const queryId = execution ? randomUUID() : undefined;
   let cancellation: Promise<void> | undefined;
@@ -76,24 +84,34 @@ export async function read<T>(
     });
   };
   execution?.signal.addEventListener('abort', cancel, { once: true });
+  let closeOnAbort: (() => void) | undefined;
   try {
-    const rows = await (
-      await ch.query({
-        query,
-        query_id: queryId,
-        query_params,
-        format: 'JSONEachRow',
-        clickhouse_settings: {
-          max_execution_time: isQueryClient(ch) ? 10 : guard,
-          // Restricted SQL's CONST profile supplies 1-GiB memory/read limits and reserves both API admission slots.
-          ...(exportBudget && !isQueryClient(ch)
-            ? { max_memory_usage: '134217728', max_bytes_to_read: '268435456', read_overflow_mode: 'throw' as const, max_threads: 2 }
-            : {}),
-          // Scoped reads bind their tenant (the scope predicate's parameter) so the row policy enforces it too (#138).
-          ...(isQueryClient(ch) ? { SQL_logbird_project: project as string, SQL_logbird_tenant: tenant } : {}),
-        },
-      })
-    ).json<T>();
+    const resultSet = await ch.query({
+      query,
+      query_id: queryId,
+      query_params,
+      format: 'JSONEachRow',
+      abort_signal: abortSignal,
+      clickhouse_settings: {
+        ...(abortSignal ? { cancel_http_readonly_queries_on_client_close: 1 } : {}),
+        ...(execution?.tag ? { log_comment: execution.tag } : {}),
+        max_execution_time: isQueryClient(ch) ? 10 : guard,
+        // Restricted SQL's CONST profile supplies 1-GiB memory/read limits and reserves both API admission slots.
+        ...(exportBudget && !isQueryClient(ch)
+          ? { max_memory_usage: '134217728', max_bytes_to_read: '268435456', read_overflow_mode: 'throw' as const, max_threads: 2 }
+          : {}),
+        // Scoped reads bind their tenant so the row policy enforces it too (#138 phase 2).
+        ...(isQueryClient(ch) ? { SQL_logbird_project: project as string, SQL_logbird_tenant: tenant } : {}),
+      },
+    });
+    // The driver stops watching abort_signal once headers arrive; close the body stream ourselves so a stalled body
+    // cannot outlive an abort.
+    if (abortSignal) {
+      closeOnAbort = () => resultSet.close();
+      if (abortSignal.aborted) closeOnAbort();
+      else abortSignal.addEventListener('abort', closeOnAbort, { once: true });
+    }
+    const rows = await resultSet.json<T>();
     execution?.signal.throwIfAborted();
     return rows;
   } catch (error) {
@@ -113,6 +131,7 @@ export async function read<T>(
       throw sqlSyntaxError(error, query, (query_params as Record<symbol, string>)[sqlExpression] ?? '');
     throw error;
   } finally {
+    if (closeOnAbort) abortSignal?.removeEventListener('abort', closeOnAbort);
     execution?.signal.removeEventListener('abort', cancel);
     // Keep the original response open: aborting HTTP alone does not prove the SELECT stopped.
     // An early KILL with no match still waits for this read to finish before releasing capacity.
@@ -207,6 +226,52 @@ function cursor(s: string, projectId: string, scope?: ReadScope | null): [string
   }
   throw new CursorError();
 }
+/** Distinct matches up to the 10,001 cap. `exact` is false when capped, past its budget, cancelled or failed. */
+export const COUNT_CAP = 10_001;
+/** Wall-clock budget for the count, also for restricted SQL whose CONST profile allows statements 10 seconds. */
+export const COUNT_BUDGET_MS = 1000;
+type CountResult = { n: number; exact: boolean };
+/**
+ * The count settles by its deadline whatever its HTTP request is doing (stalled headers or body): the deadline resolves
+ * the lower-bound fallback and aborts the request. Server cleanup differs by client: the writable client's statement
+ * stops at its one-second max_execution_time; the restricted readonly client's statement is cancelled when ClickHouse
+ * notices the closed connection (cooperative), bounded by its CONST ten-second profile.
+ */
+function countMatches(ch: ClickHouseClient, w: { sql: string; params: Params }) {
+  const controller = new AbortController();
+  const fallback: CountResult = { n: 0, exact: false };
+  let stopped: 'budget' | 'settled' | undefined;
+  let settle: (value: CountResult) => void = () => undefined;
+  const deadline = new Promise<CountResult>((resolve) => {
+    settle = resolve;
+  });
+  const stop = (why: 'budget') => {
+    if (stopped) return;
+    stopped = why;
+    console.warn(JSON.stringify({ level: 'warn', event: 'search.count_unavailable', reason: why }));
+    controller.abort();
+    settle(fallback);
+  };
+  const timer = setTimeout(() => stop('budget'), COUNT_BUDGET_MS);
+  const counted = (async (): Promise<CountResult> => {
+    try {
+      const sql = `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT ${COUNT_CAP})`;
+      const n = Number((await read<{ n: number }>(ch, sql, w.params, 1, false, undefined, controller.signal))[0]?.n ?? 0);
+      stopped ??= 'settled'; // a later cancel() is a no-op
+      return { n, exact: n < COUNT_CAP };
+    } catch (error) {
+      if (!stopped) {
+        stopped = 'settled';
+        const reason = error instanceof QueryError ? error.details.reason : 'error';
+        console.warn(JSON.stringify({ level: 'warn', event: 'search.count_unavailable', reason }));
+      }
+      return fallback;
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
+  return { result: Promise.race([counted, deadline]) };
+}
 async function searchPage(
   ch: ClickHouseClient,
   projectId: string,
@@ -234,29 +299,34 @@ async function searchPage(
     params.cursorId = id;
     tail = ` AND (timestamp,event_id) ${op} ({cursorTs:DateTime64(3)},{cursorId:String})`;
   }
-  const rows = await read<EventRow>(
-    ch,
-    // Select pairs in the MergeTree's timestamp/id order; resolve receipt ties only in the bounded fetch.
-    // Legacy versions can share the entire pointer tuple; recheck their filters before outer dedupe.
-    `SELECT * EXCEPT(${includePayload ? 'search_text' : 'payload,search_text'}) FROM events WHERE ${w.sql} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
-    params,
-    10,
-    Boolean(exportClock),
-    execution,
-  );
+  const readRows = () =>
+    read<EventRow>(
+      ch,
+      // Select pairs in the MergeTree's timestamp/id order; resolve receipt ties only in the bounded fetch.
+      // Legacy versions can share the entire pointer tuple; recheck their filters before outer dedupe.
+      `SELECT * EXCEPT(${includePayload ? 'search_text' : 'payload,search_text'}) FROM events WHERE ${w.sql} AND (timestamp,event_id) IN (SELECT timestamp,event_id FROM events WHERE ${w.sql}${tail} ORDER BY timestamp ${order},event_id ${order} LIMIT 1 BY event_id LIMIT {limit:UInt32}) ORDER BY timestamp ${order},event_id ${order},received_at ASC LIMIT 1 BY event_id LIMIT {limit:UInt32}`,
+      params,
+      10,
+      Boolean(exportClock),
+      execution,
+    );
+  // Rows first and alone, as before: the optional count never competes with them for a ClickHouse query slot, and a
+  // row error surfaces unchanged. The count then gets at most COUNT_BUDGET_MS and can only lower the total's precision.
+  const rows = await readRows();
   const hasMore = rows.length > q.limit,
     data = rows.slice(0, q.limit).map(toEvent),
     last = data.at(-1);
-  const total = exportClock
-    ? 0
-    : Number(
-        (await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT 10001)`, w.params, 1))[0]
-          ?.n ?? 0,
-      );
+  const count = exportClock ? undefined : await countMatches(ch, w).result;
+  // Lower bound when the count did not finish: the rows seen, plus the extra row that proves there are more.
+  const seen = data.length + (hasMore ? 1 : 0);
+  // A count from an earlier snapshot can be below what this page proves; never report less than that.
+  const total = count === undefined ? 0 : Math.max(count.n, seen);
+  const totalExact = count === undefined ? true : count.exact && count.n >= seen;
   return {
     page: {
       data,
       total,
+      totalExact,
       nextCursor: hasMore && last ? encode([last.timestamp, last.id, cursorBinding(projectId, scope)]) : null,
       tookMs: performance.now() - start,
     },
@@ -273,24 +343,28 @@ export async function searchEvents(
   return (await searchPage(ch, projectId, q, compiled, false, undefined, undefined, scope)).page;
 }
 async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: ReadScope | null, canonicalClient?: ClickHouseClient) {
-  const canonical = 'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp LIMIT 1';
+  // Oldest receipt first, then timestamp, then a hash of the stored document: a deterministic canonical version even
+  // for legacy rows that tie on both timestamps.
+  const canonical =
+    'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1';
   if (!scope) return (await read<EventRow>(ch, canonical, { p, id }))[0];
   const s = scopePredicate(scope);
   if (canonicalClient && canonicalClient !== ch) {
     // A row-policy-bound client only sees its tenant's rows, so it would pick the oldest version *of its tenant* as
-    // canonical. Choose the canonical version project-wide (pointer only, nothing returned to the caller), then fetch
-    // exactly that version through the bound client: if it belongs to another tenant, the caller gets nothing.
-    const [pointer] = await read<{ received_at: string; timestamp: string }>(
+    // canonical. Choose the canonical version project-wide and test the scope on it in the same lookup (a pointer and
+    // a flag, nothing else). An unknown id and an out-of-scope id both end here, with one query and the same answer;
+    // only an in-scope version is then fetched, exactly, through the bound client.
+    const [pointer] = await read<{ received_at: string; timestamp: string; h: string; in_scope: number }>(
       canonicalClient,
-      'SELECT received_at, timestamp FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp LIMIT 1',
-      { p, id },
+      `SELECT received_at, timestamp, toString(sipHash64(payload)) h, (${s.sql}) in_scope FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp,sipHash64(payload) LIMIT 1`,
+      { p, id, ...s.params },
     );
-    if (!pointer) return;
+    if (!pointer || !Number(pointer.in_scope)) return;
     return (
       await read<EventRow>(
         ch,
-        `SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} AND received_at={pointerReceived:DateTime64(3, 'UTC')} AND timestamp={pointerTimestamp:DateTime64(3, 'UTC')} AND ${s.sql} ORDER BY received_at,timestamp LIMIT 1`,
-        { p, id, pointerReceived: pointer.received_at, pointerTimestamp: pointer.timestamp, ...s.params },
+        `SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} AND received_at={pointerReceived:DateTime64(3, 'UTC')} AND timestamp={pointerTimestamp:DateTime64(3, 'UTC')} AND sipHash64(payload)={pointerHash:UInt64} AND ${s.sql} LIMIT 1`,
+        { p, id, pointerReceived: pointer.received_at, pointerTimestamp: pointer.timestamp, pointerHash: pointer.h, ...s.params },
       )
     )[0];
   }

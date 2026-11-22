@@ -325,7 +325,7 @@ async function runExport(c: Context<AppEnv>, input: s.ExportQuery, caller: Expor
         project.id,
         input,
         resolved,
-        { signal, cancelQuery: cancelExportQuery },
+        { signal, cancelQuery: cancelExportQuery, tag: exportId },
         { scope: caller.scope, map: caller.map },
       );
     },
@@ -534,6 +534,7 @@ export const dataRoutes = new Hono<AppEnv>()
         context: { requestId: c.get('requestId'), operationId: c.get('requestId') },
         description: 'Updated a sample record',
         occurredAt: new Date().toISOString(),
+        source: s.CONSOLE_TEST_EVENT_SOURCE,
       }),
       202,
     ),

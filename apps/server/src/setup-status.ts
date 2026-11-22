@@ -44,7 +44,8 @@ export function computeSetup(project: SetupProjectFacts, events: SetupEventFacts
     status: done[id]
       ? ('done' as const)
       : (id === 'first_event' && events.sampleEvents > 0) ||
-          (id === 'recent_events' && !!events.firstEventAt) ||
+          // Needs attention only when the integration itself once sent events (a console test alone is not one).
+          (id === 'recent_events' && !!events.lastEventAt) ||
           (id === 'envelope' && events.sampledEvents > 0)
         ? ('attention' as const)
         : ('todo' as const),

@@ -517,6 +517,7 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     }
     const evidenceBulk = await v1(bulk.secret, `/export?${new URLSearchParams({ format: 'jsonl-evidence', from: '2026-01-01T00:00:00Z' })}`);
     expect(evidenceBulk.status).toBe(200);
+    const evidenceExportId = evidenceBulk.headers.get('x-logbird-export-id') ?? '';
     const evidenceLines = (await evidenceBulk.text()).trim().split('\n');
     const evidenceIds = evidenceLines.map((line) => (JSON.parse(line) as { event: { id: string } }).event.id);
     expect(evidenceIds).toHaveLength(230);
@@ -576,6 +577,17 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
         })
       ).json<{ user: string; tenant: string; expected: string }>();
       expect(logged.filter((r) => r.expected === 'tbulk').length).toBeGreaterThanOrEqual(2); // both export pages
+      // The evidence export's own page queries, identified by their log_comment (the export id): 230 rows = 2 pages.
+      const pages = await (
+        await clickhouse.query({
+          query: `SELECT user, Settings['SQL_logbird_tenant'] tenant FROM system.query_log
+            WHERE type = 'QueryFinish' AND event_time > now() - INTERVAL 30 MINUTE AND log_comment = {exportId:String}`,
+          query_params: { exportId: evidenceExportId },
+          format: 'JSONEachRow',
+        })
+      ).json<{ user: string; tenant: string }>();
+      expect(pages.length).toBeGreaterThanOrEqual(2);
+      for (const page of pages) expect(page).toEqual({ user: 'logbird_query', tenant: "'tbulk'" });
       expect(logged.filter((r) => r.expected === 'tfacet').length).toBeGreaterThanOrEqual(1);
       // query_log keeps setting values quoted ("'tbulk'").
       for (const row of logged) expect(row, JSON.stringify(row)).toMatchObject({ user: 'logbird_query', tenant: `'${row.expected}'` });

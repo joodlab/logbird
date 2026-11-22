@@ -8,6 +8,7 @@ import { Button, buttonVariants } from '@logbird/ui/components/ui/button';
 import { Input } from '@logbird/ui/components/ui/input';
 import { SegmentedControl, SegmentedControlItem } from '@logbird/ui/components/ui/segmented-control';
 import { Skeleton } from '@logbird/ui/components/ui/skeleton';
+import { cn } from '@logbird/ui/lib/utils';
 import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
@@ -20,6 +21,9 @@ import { formatCompact } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 
 const TYPE_FACET = { actor: 'actor.type', executor: 'executor.type', target: 'target.type', tenant: null } as const;
+/** Desktop columns: name, id, [type], events, first seen, last seen. Tenants have no type, so no Type column. */
+const COLUMNS_WITH_TYPE = 'md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_100px_90px_120px_120px]';
+const COLUMNS_WITHOUT_TYPE = 'md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_90px_120px_120px]';
 /** Never-populated state: what the page is for and which envelope field fills it. */
 const EMPTY_EXPLAINERS: Record<EntitySection, { lead: ReactNode; snippet: string; note?: ReactNode }> = {
   actors: {
@@ -156,10 +160,15 @@ export function EntityDirectory({ projectId, section, q, type, sort = 'events', 
 
       <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
         {list.isSuccess && rows.length === 0 ? null : (
-          <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_100px_90px_120px_120px] items-center gap-3 border-b bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground uppercase tracking-wider md:grid">
+          <div
+            className={cn(
+              'hidden items-center gap-3 border-b bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground uppercase tracking-wider md:grid',
+              TYPE_FACET[meta.kind] ? COLUMNS_WITH_TYPE : COLUMNS_WITHOUT_TYPE,
+            )}
+          >
             <span>Name</span>
             <span>Id</span>
-            <span>Type</span>
+            {TYPE_FACET[meta.kind] ? <span>Type</span> : null}
             <span className="text-end">Events</span>
             <span>First seen</span>
             <span>Last seen</span>
@@ -250,7 +259,10 @@ function EntityRow({ entity: e, projectId, section }: { entity: Entity; projectI
   return (
     <li>
       <Link
-        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 px-4 py-2.5 text-sm outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted/50 md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_100px_90px_120px_120px]"
+        className={cn(
+          'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 px-4 py-2.5 text-sm outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted/50',
+          TYPE_FACET[e.kind] ? COLUMNS_WITH_TYPE : COLUMNS_WITHOUT_TYPE,
+        )}
         params={{ projectId, entityId: e.id }}
         to={`/p/$projectId/${section}/$entityId` as '/p/$projectId/actors/$entityId'}
       >
@@ -265,7 +277,9 @@ function EntityRow({ entity: e, projectId, section }: { entity: Entity; projectI
           <span className="truncate font-medium">{e.name || displayId}</span>
         </span>
         <span className="truncate font-mono text-[12px] text-muted-foreground max-md:col-start-1 max-md:ps-9.5">{displayId}</span>
-        <span className="hidden md:block">{e.type ? <TypePill>{e.type}</TypePill> : <span className="text-muted-foreground">—</span>}</span>
+        {TYPE_FACET[e.kind] ? (
+          <span className="hidden md:block">{e.type ? <TypePill>{e.type}</TypePill> : <span className="text-muted-foreground">—</span>}</span>
+        ) : null}
         <span className="text-end text-muted-foreground tabular-nums max-md:col-start-2 max-md:row-start-1">{formatCompact(e.events)}</span>
         <Timestamp className="hidden text-muted-foreground text-xs md:block" format="date" iso={e.firstSeen} />
         <Timestamp className="hidden text-muted-foreground text-xs md:block" format="relative" iso={e.lastSeen} />

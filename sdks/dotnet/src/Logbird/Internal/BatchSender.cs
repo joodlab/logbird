@@ -131,6 +131,12 @@ internal sealed class BatchSender
                 return state.Fail(new LogbirdDeliveryException("Logbird send exceeded its five-minute time limit."));
             }
 
+            // Shutdown took ownership of these events and reported them; sending them now would contradict the report.
+            if (stop.IsCancellationRequested || Array.TrueForAll(attempt, index => batch[index].IsAbandoned))
+            {
+                return state.Fail(new LogbirdDeliveryException("Logbird delivery was stopped by shutdown."));
+            }
+
             var progressed = false;
             var unacknowledged = false;
             var (response, responseBody, error) = await AttemptAsync(body, remaining < _requestTimeout ? remaining : _requestTimeout, stop).ConfigureAwait(false);

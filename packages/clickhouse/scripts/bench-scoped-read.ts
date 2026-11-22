@@ -123,7 +123,7 @@ try {
     const id = scope?.tenantId === 'tiny' ? 'bench-7' : scope?.tenantId === 'm16' ? 'bench-16' : 'bench-2';
     results.push(
       await measure(`detail ${label}`, async () => {
-        if (!(await getEvent(reader(scope), p, id, scope))) throw new Error(`detail ${id} missing for ${label}`);
+        if (!(await getEvent(reader(scope), p, id, scope, ch))) throw new Error(`detail ${id} missing for ${label}`);
       }),
     );
     // Full CSV export of the last hour (every page, every row), as GET /v1/export streams it.

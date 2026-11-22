@@ -319,6 +319,102 @@ describe.runIf(enabled)('#138 phase 2: database-enforced tenant binding for scop
     expect(ofChild?.parents).toEqual([]);
   });
 
+  it('the tenant-bound handle carries the tenant on raw dispatch and refuses writes, pool shutdown and rebinding', async () => {
+    const bound = withTenant(restricted!, 't1');
+    const raw = await (
+      await bound.query({
+        query: 'SELECT tenant_id FROM logbird.events ORDER BY tenant_id',
+        clickhouse_settings: { SQL_logbird_project: tenantProject },
+        format: 'JSONEachRow',
+      })
+    ).json<{ tenant_id: string }>();
+    expect(raw.map((r) => r.tenant_id)).toEqual(['t1']);
+    expect(() => bound.query({ query: 'SELECT 1', clickhouse_settings: { SQL_logbird_project: tenantProject, SQL_logbird_tenant: 't2' } })).toThrow(
+      'Scope tenant does not match the bound tenant',
+    );
+    expect(() => bound.insert).toThrow('read-only');
+    await expect(bound.close()).rejects.toThrow('does not own the shared pool');
+    expect(() => withTenant(bound, 't2')).toThrow('already bound');
+    // The shared client is still usable after the handle refused close().
+    expect(await tenants({ SQL_logbird_tenant: 't2' })).toEqual(['t2']);
+  });
+
+  it('detail picks one deterministic canonical version even when legacy rows tie on both timestamps', async () => {
+    const tied = `tie-${randomUUID()}`;
+    const at = new Date(now.getTime() + 5000);
+    const version = (tenant: string, note: string) => {
+      const row = normalizeEvent(
+        { id: tied, action: 'row.policy.tie', tenant: { id: tenant }, metadata: { note }, occurredAt: at.toISOString() },
+        {
+          projectId: tenantProject,
+          receivedAt: at,
+        },
+      );
+      if (!row.ok) throw new Error('Fixture normalization failed');
+      return row.row;
+    };
+    // One insert without on-insert deduplication keeps both same-key versions (as legacy data can).
+    await main!.insert({
+      table: 'events',
+      values: [version('tA', 'first'), version('tB', 'second')],
+      format: 'JSONEachRow',
+      clickhouse_settings: { optimize_on_insert: 0 },
+    });
+    const child = normalizeEvent(
+      {
+        id: `tie-child-${randomUUID()}`,
+        action: 'row.policy.tie.child',
+        tenant: { id: 'tB' },
+        context: { parentEventId: tied },
+        occurredAt: at.toISOString(),
+      },
+      { projectId: tenantProject, receivedAt: new Date(at.getTime() + 1000) },
+    );
+    if (!child.ok) throw new Error('Fixture normalization failed');
+    await insertEvents(main!, [child.row]);
+    const canonical = await getEvent(main!, tenantProject, tied);
+    const owner = canonical?.event.tenant?.id;
+    expect(['tA', 'tB']).toContain(owner);
+    const other = owner === 'tA' ? 'tB' : 'tA';
+    // Every caller sees the same canonical version or nothing — never the other tenant's tied copy.
+    for (let i = 0; i < 3; i++) {
+      expect((await getEvent(withTenant(restricted!, owner!), tenantProject, tied, { tenantId: owner! }, main!))?.payload).toEqual(
+        canonical?.payload,
+      );
+      expect(await getEvent(withTenant(restricted!, other), tenantProject, tied, { tenantId: other }, main!)).toBeNull();
+    }
+    const ofChild = await getEvent(withTenant(restricted!, 'tB'), tenantProject, child.row.event_id, { tenantId: 'tB' }, main!);
+    expect(ofChild?.parents.map((e) => e.tenant?.id)).toEqual(owner === 'tB' ? ['tB'] : []);
+  });
+
+  it('an out-of-scope id answers like an unknown id without touching the restricted client', async () => {
+    // A bound client that cannot authenticate: any query through it fails.
+    const broken = withTenant(createQueryClickHouseClient({ ...process.env, CLICKHOUSE_QUERY_PASSWORD: 'wrong-password-for-test' })!, 't1');
+    const t2Event = (
+      await searchEvents(main!, tenantProject, {
+        from: range.from,
+        to: new Date(now.getTime() + 60_000).toISOString(),
+        limit: 10,
+        order: 'desc',
+        q: 'tenant:t2',
+      })
+    ).data[0];
+    expect(t2Event).toBeTruthy();
+    expect(await getEvent(broken, tenantProject, t2Event!.id, { tenantId: 't1' }, main!)).toBeNull();
+    expect(await getEvent(broken, tenantProject, `unknown-${randomUUID()}`, { tenantId: 't1' }, main!)).toBeNull();
+    // An in-scope id does reach the restricted client (and fails here, proving the two paths differ only for hits).
+    const t1Event = (
+      await searchEvents(main!, tenantProject, {
+        from: range.from,
+        to: new Date(now.getTime() + 60_000).toISOString(),
+        limit: 10,
+        order: 'desc',
+        q: 'tenant:t1 action:row.policy.tenant',
+      })
+    ).data[0];
+    await expect(getEvent(broken, tenantProject, t1Event!.id, { tenantId: 't1' }, main!)).rejects.toThrow();
+  });
+
   it('the application read path binds the scope tenant automatically', async () => {
     const page = await searchEvents(
       restricted!,

@@ -2195,6 +2195,9 @@
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
+                    },
+                    "totalExact": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -9600,6 +9603,9 @@
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
+                    },
+                    "totalExact": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -10831,6 +10837,9 @@
                       "maximum": 9007199254740991,
                       "minimum": -9007199254740991,
                       "type": "integer"
+                    },
+                    "totalExact": {
+                      "type": "boolean"
                     }
                   },
                   "required": [

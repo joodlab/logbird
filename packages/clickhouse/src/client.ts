@@ -231,11 +231,26 @@ const boundTenants = new WeakMap<ClickHouseClient, string>();
  */
 export function withTenant(ch: ClickHouseClient, tenantId: string): ClickHouseClient {
   if (!restricted.has(ch)) throw new Error('Only the restricted query client can be bound to a tenant');
+  if (boundTenants.has(ch)) throw new Error('This client is already bound to a tenant');
   if (!tenantId) throw new Error('A tenant binding needs a tenant');
+  // Read dispatch (query, command, exec) always carries the tenant setting, even when a caller supplies its own
+  // settings; a different tenant is refused. Writes and shutting down the shared pool are not available on the handle.
+  const dispatch =
+    (method: (params: Record<string, unknown>) => unknown) =>
+    (params: Record<string, unknown> = {}) => {
+      const settings = (params.clickhouse_settings ?? {}) as Record<string, unknown>;
+      if (settings.SQL_logbird_tenant !== undefined && settings.SQL_logbird_tenant !== tenantId)
+        throw new Error('Scope tenant does not match the bound tenant');
+      return method({ ...params, clickhouse_settings: { ...settings, SQL_logbird_tenant: tenantId } });
+    };
   const bound = new Proxy(ch, {
     get(target, property) {
+      if (property === 'insert') throw new Error('A tenant-bound client is read-only');
+      if (property === 'close') return () => Promise.reject(new Error('A tenant-bound client does not own the shared pool'));
       const value = Reflect.get(target, property, target);
-      return typeof value === 'function' ? value.bind(target) : value;
+      if (typeof value !== 'function') return value;
+      const method = value.bind(target);
+      return property === 'query' || property === 'command' || property === 'exec' ? dispatch(method) : method;
     },
   });
   restricted.add(bound);
