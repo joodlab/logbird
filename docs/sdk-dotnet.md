@@ -158,7 +158,8 @@ Audit logging never takes your application down with it:
 - **Every event the running client gives up on is counted**, once, with a reason (`QueueFull`, `HttpError`,
   `Rejected`, `Shutdown`, …): rejections by the server on the `logbird.events.rejected` counter, everything else on
   `logbird.events.dropped`. A client being disposed leaves the meter, so a collection after shutdown may miss its last
-  drops; `OnDrop` and the log still report them. Events lost in a crash are not reported at all (see the outbox below).
+  drops; `OnDrop` and the log report them too, unless those notifications are skipped because your callback fell far
+  behind (next point). Events lost in a crash are not reported at all (see the outbox below).
 - **`OnDrop` is told about each one** on a background thread; if your callback falls far behind (more than
   `MaxQueueSize` notifications), further notifications are skipped and counted on `logbird.notifications.lost`, so keep
   it fast.
@@ -185,9 +186,10 @@ with a new timestamp would conflict with the copy the server already has.
 
 `Track` only queues an event, and a successful `FlushAsync` means each event was stored *or* given up on, so neither
 proves an event was stored. Keep each outbox row until you have confirmed its event, for example by reading it back by
-id with `LogbirdReadClient.GetAsync`, and resend it, exactly as stored, until then. Resending a stored event is always
-safe. Decide yourself what happens to a row that is never confirmed (for example alert and keep it); Logbird cannot
-make that choice for you.
+id with `LogbirdReadClient.GetAsync`, and resend it, exactly as stored, until then. Resending an event the server
+still holds is always safe (an exact retry), but do not resend rows older than the project's retention period: once
+retention has deleted an event, a resend would store it again. Decide yourself what happens to a row that is never
+confirmed (for example alert and keep it); Logbird cannot make that choice for you.
 
 ## 6. Check that it worked
 
