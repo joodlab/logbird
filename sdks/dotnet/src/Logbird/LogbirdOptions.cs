@@ -11,6 +11,18 @@ public sealed class LogbirdOptions
     /// </summary>
     public Uri? Endpoint { get; set; }
 
+    /// <summary>
+    /// Allows a plain <c>http</c> endpoint on a non-loopback host. Off by default, because every request carries the
+    /// ingest key and the audit data. Use it only on a private network you trust.
+    /// </summary>
+    public bool AllowInsecureHttp { get; set; }
+
+    /// <summary>
+    /// The time limit for one HTTP request, enforced even if a custom handler ignores cancellation. Defaults to 30
+    /// seconds, between 1 ms and 5 minutes. A request that runs out is retried like a network error.
+    /// </summary>
+    public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
     /// <summary>A project ingest key (<c>lb_ingest_…</c>). Keep it on the server. Required when <see cref="Enabled"/> is <see langword="true"/>.</summary>
     public string? IngestKey { get; set; }
 
@@ -94,9 +106,14 @@ public sealed class LogbirdOptions
             throw new ArgumentOutOfRangeException(nameof(FlushInterval), FlushInterval, "FlushInterval must be between 1 ms and 1 hour.");
         }
 
-        if (ShutdownTimeout < TimeSpan.Zero)
+        if (ShutdownTimeout < TimeSpan.Zero || ShutdownTimeout > TimeSpan.FromHours(1))
         {
-            throw new ArgumentOutOfRangeException(nameof(ShutdownTimeout), ShutdownTimeout, "ShutdownTimeout must not be negative.");
+            throw new ArgumentOutOfRangeException(nameof(ShutdownTimeout), ShutdownTimeout, "ShutdownTimeout must be between 0 and 1 hour.");
+        }
+
+        if (RequestTimeout < TimeSpan.FromMilliseconds(1) || RequestTimeout > TimeSpan.FromMinutes(5))
+        {
+            throw new ArgumentOutOfRangeException(nameof(RequestTimeout), RequestTimeout, "RequestTimeout must be between 1 ms and 5 minutes.");
         }
 
         if (QueueFullBehavior is not (QueueFullBehavior.DropOldest or QueueFullBehavior.DropNewest))
@@ -114,10 +131,7 @@ public sealed class LogbirdOptions
             return;
         }
 
-        if (Endpoint is null || !Endpoint.IsAbsoluteUri || (Endpoint.Scheme != Uri.UriSchemeHttps && Endpoint.Scheme != Uri.UriSchemeHttp))
-        {
-            throw new ArgumentException("Endpoint must be an absolute http or https URL when Logbird is enabled.", nameof(Endpoint));
-        }
+        Internal.Endpoints.Validate(Endpoint, AllowInsecureHttp, nameof(Endpoint));
 
         if (string.IsNullOrWhiteSpace(IngestKey))
         {

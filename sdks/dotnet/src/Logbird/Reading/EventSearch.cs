@@ -42,7 +42,7 @@ public sealed record EventSearch
 
     /// <summary>
     /// Builds the search for one record's or person's history, quoting every value so it cannot change the query.
-    /// Equivalent to the TypeScript SDK's <c>trailQuery</c>.
+    /// Equivalent to the TypeScript SDK's <c>trailQuery</c>, except that an empty selector throws instead of being ignored.
     /// </summary>
     /// <param name="targetId">Only events that affected this record id.</param>
     /// <param name="targetType">Only targets of this type (used together with <paramref name="targetId"/>).</param>
@@ -65,6 +65,15 @@ public sealed record EventSearch
         int? limit = null,
         string? cursor = null)
     {
+        RejectEmpty(targetId, nameof(targetId));
+        RejectEmpty(targetType, nameof(targetType));
+        RejectEmpty(actorId, nameof(actorId));
+        RejectEmpty(tenantId, nameof(tenantId));
+        if (targetType is not null && targetId is null)
+        {
+            throw new ArgumentException("targetType needs a targetId.", nameof(targetType));
+        }
+
         var terms = new List<string>();
         if (!string.IsNullOrEmpty(query))
         {
@@ -102,40 +111,15 @@ public sealed record EventSearch
 
     /// <summary>Quotes a value for the query language exactly like JavaScript's <c>JSON.stringify</c>.</summary>
     /// <param name="value">The raw value.</param>
-    public static string Quote(string value)
+    public static string Quote(string value) => JsJson.Quote(Guard.NotNull(value, nameof(value)));
+
+    // An empty selector would silently widen a history search to the whole project; treat it as a caller bug.
+    private static void RejectEmpty(string? value, string name)
     {
-        Guard.NotNull(value, nameof(value));
-        var builder = new StringBuilder(value.Length + 2);
-        builder.Append('"');
-        for (var i = 0; i < value.Length; i++)
+        if (value is not null && value.Length == 0)
         {
-            var c = value[i];
-            switch (c)
-            {
-                case '"': builder.Append("\\\""); break;
-                case '\\': builder.Append("\\\\"); break;
-                case '\b': builder.Append("\\b"); break;
-                case '\f': builder.Append("\\f"); break;
-                case '\n': builder.Append("\\n"); break;
-                case '\r': builder.Append("\\r"); break;
-                case '\t': builder.Append("\\t"); break;
-                default:
-                    var lone = (char.IsHighSurrogate(c) && (i + 1 >= value.Length || !char.IsLowSurrogate(value[i + 1])))
-                        || (char.IsLowSurrogate(c) && (i == 0 || !char.IsHighSurrogate(value[i - 1])));
-                    if (c < 0x20 || lone)
-                    {
-                        builder.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
-                    }
-                    else
-                    {
-                        builder.Append(c);
-                    }
-
-                    break;
-            }
+            throw new ArgumentException("A trail selector must not be empty; pass null to leave it out.", name);
         }
-
-        return builder.Append('"').ToString();
     }
 
     internal string ToQueryString()

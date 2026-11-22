@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 
 namespace Logbird.Tests;
@@ -63,6 +65,15 @@ public class CrossSdkTests
         {
             Id = "0193f2b6-6c00-7abc-8def-0123456789ac",
             OccurredAt = new DateTimeOffset(2026, 11, 22, 8, 0, 1, TimeSpan.Zero),
+        });
+        client.Track(new AuditEvent("unicode.checked")
+        {
+            Id = "0193f2b6-6c00-7abc-8def-0123456789ad",
+            OccurredAt = new DateTimeOffset(2026, 11, 22, 8, 0, 2, TimeSpan.Zero),
+            Description = "emoji " + char.ConvertFromUtf32(0x1F600) + " lone " + Chars(0xD800) + " ls " + Chars(0x2028) + " del " + Chars(0x7F),
+            Targets = new List<AuditTarget>(),
+            Changes = new List<AuditChange>(),
+            Metadata = { ["list"] = new JsonArray(1, "two", null, new JsonObject { ["deep"] = new JsonArray() }) },
         });
         Assert.True(await client.FlushAsync());
         Assert.Equal(expected, server.Requests.Single().RawEvents);

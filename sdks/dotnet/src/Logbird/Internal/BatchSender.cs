@@ -35,12 +35,13 @@ internal sealed class BatchSender
     internal const string RetryHeader = "Logbird-Retry";
     internal const string RetrySubset = "subset";
     internal static readonly TimeSpan MaxSendTime = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan MaxAttemptTime = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan MaxCancelGrace = TimeSpan.FromSeconds(2);
 
     private readonly HttpClient _http;
     private readonly Uri _eventsUri;
     private readonly AuthenticationHeaderValue _authorization;
     private readonly int _maxRetries;
+    private readonly TimeSpan _requestTimeout;
     private readonly Action<QueuedEvent, DropReason, string?> _drop;
     private readonly Action<Exception> _report;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
@@ -52,6 +53,7 @@ internal sealed class BatchSender
         Uri endpoint,
         string ingestKey,
         int maxRetries,
+        TimeSpan requestTimeout,
         Action<QueuedEvent, DropReason, string?> drop,
         Action<Exception> report,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
@@ -62,6 +64,7 @@ internal sealed class BatchSender
         _eventsUri = EventsUri(endpoint);
         _authorization = new AuthenticationHeaderValue("Bearer", ingestKey);
         _maxRetries = maxRetries;
+        _requestTimeout = requestTimeout;
         _drop = drop;
         _report = report;
         _delay = delay ?? Task.Delay;
@@ -84,7 +87,7 @@ internal sealed class BatchSender
         }
     }
 
-    internal static Uri EventsUri(Uri endpoint) => new(endpoint.AbsoluteUri.TrimEnd('/') + "/v1/events");
+    internal static Uri EventsUri(Uri endpoint) => Endpoints.Append(endpoint, "/v1/events");
 
     public async Task<SendResult> SendAsync(QueuedEvent[] batch, CancellationToken stop)
     {
@@ -118,29 +121,7 @@ internal sealed class BatchSender
             }
 
             var progressed = false;
-            HttpResponseMessage? response = null;
-            byte[]? responseBody = null;
-            Exception? error = null;
-            try
-            {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stop);
-                timeout.CancelAfter(remaining < MaxAttemptTime ? remaining : MaxAttemptTime);
-                using var request = CreateRequest(body);
-                response = await _http.SendAsync(request, timeout.Token).ConfigureAwait(false);
-#if NET8_0_OR_GREATER
-                responseBody = await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
-#else
-                // SendAsync already buffered the body (ResponseContentRead), so no token is needed here.
-                responseBody = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-#endif
-            }
-            catch (Exception e)
-            {
-                // Any transport failure, including one thrown by a custom handler in the pipeline, is retryable.
-                response?.Dispose();
-                response = null;
-                error = e;
-            }
+            var (response, responseBody, error) = await AttemptAsync(body, remaining < _requestTimeout ? remaining : _requestTimeout, stop).ConfigureAwait(false);
 
             using (response)
             {
@@ -282,6 +263,94 @@ internal sealed class BatchSender
                     return state.Fail(new LogbirdDeliveryException("Logbird delivery was stopped by shutdown."));
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// One HTTP attempt, bounded even when a handler ignores cancellation: after the limit the request is cancelled on
+    /// the thread pool (a throwing or blocking cancellation callback cannot stall the sender), and after a short grace
+    /// the attempt is abandoned and treated like a network error. A late response is then disposed unread, which is
+    /// safe because the retry resends identical bytes.
+    /// </summary>
+    private async Task<(HttpResponseMessage? Response, byte[]? Body, Exception? Error)> AttemptAsync(byte[] body, TimeSpan limit, CancellationToken stop)
+    {
+        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stop);
+        var send = SendOnceAsync(body, cancellation.Token);
+        var first = await Task.WhenAny(send, Task.Delay(limit, stop)).ConfigureAwait(false);
+        if (first != send)
+        {
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    cancellation.Cancel();
+                }
+                catch
+                {
+                    // A handler's cancellation callback failed; the attempt is bounded below regardless.
+                }
+            }, CancellationToken.None);
+            var grace = limit < MaxCancelGrace ? limit : MaxCancelGrace;
+            if (await Task.WhenAny(send, Task.Delay(grace, CancellationToken.None)).ConfigureAwait(false) != send)
+            {
+                _ = send.ContinueWith(
+                    late =>
+                    {
+                        if (late.Status == TaskStatus.RanToCompletion)
+                        {
+                            late.Result.Response.Dispose();
+                        }
+
+                        _ = late.Exception;
+                        cancellation.Dispose();
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+                return (null, null, new TimeoutException("The Logbird request did not finish within RequestTimeout."));
+            }
+        }
+
+        try
+        {
+            var (response, responseBody) = await send.ConfigureAwait(false);
+            return (response, responseBody, null);
+        }
+        catch (Exception e)
+        {
+            // Any transport failure, including one thrown by a custom handler in the pipeline, is retryable.
+            return (null, null, e);
+        }
+        finally
+        {
+            cancellation.Dispose();
+        }
+    }
+
+    private async Task<(HttpResponseMessage Response, byte[] Body)> SendOnceAsync(byte[] body, CancellationToken cancellationToken)
+    {
+        using var request = CreateRequest(body);
+        var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // .NET Framework leaves Content null when a handler builds a response without a body.
+            if (response.Content is null)
+            {
+                return (response, []);
+            }
+
+#if NET8_0_OR_GREATER
+            var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+#else
+            // SendAsync already buffered the body (ResponseContentRead), so no token is needed here.
+            var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+#endif
+            return (response, bytes);
+        }
+        catch
+        {
+            response.Dispose();
+            throw;
         }
     }
 

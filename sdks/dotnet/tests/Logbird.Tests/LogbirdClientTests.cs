@@ -463,10 +463,10 @@ public class LogbirdClientTests
     [Fact]
     public void Event_ids_are_time_ordered_uuidv7()
     {
-        var a = LogbirdClient.NewEventId();
-        Thread.Sleep(2);
-        var b = LogbirdClient.NewEventId();
-        Assert.True(string.CompareOrdinal(a, b) < 0);
+        Assert.Matches("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", LogbirdClient.NewEventId());
+        var earlier = Internal.UuidV7.Format(1_721_000_000_000);
+        var later = Internal.UuidV7.Format(1_721_000_000_001);
+        Assert.True(string.CompareOrdinal(earlier, later) < 0);
         Assert.Equal("0190b397-fa00", Internal.UuidV7.Format(1_721_000_000_000).Substring(0, 13));
     }
 

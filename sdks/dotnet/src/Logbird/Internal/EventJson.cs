@@ -1,8 +1,6 @@
 using System;
 using System.Globalization;
 using System.IO;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Logbird.Internal;
@@ -10,13 +8,6 @@ namespace Logbird.Internal;
 /// <summary>Builds the wire JSON for events. Hand-written so it needs no reflection (trimming and AOT safe).</summary>
 internal static class EventJson
 {
-    // Non-ASCII text stays readable in the stored raw payload; the output is never embedded in HTML.
-    public static readonly JsonWriterOptions WriterOptions = new()
-    {
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        Indented = false,
-    };
-
     public static string FormatTimestamp(DateTimeOffset value)
         => value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 
@@ -70,7 +61,7 @@ internal static class EventJson
         }
 
         Add(json, "source", e.Source ?? source);
-        if (e.HasTargets)
+        if (e.EmitTargets)
         {
             var targets = new JsonArray();
             foreach (var target in e.Targets)
@@ -88,7 +79,7 @@ internal static class EventJson
             json["targets"] = targets;
         }
 
-        if (e.HasChanges)
+        if (e.EmitChanges)
         {
             var changes = new JsonArray();
             foreach (var change in e.Changes)
@@ -135,16 +126,7 @@ internal static class EventJson
         return json;
     }
 
-    public static byte[] ToUtf8(JsonNode node)
-    {
-        using var stream = new MemoryStream(512);
-        using (var writer = new Utf8JsonWriter(stream, WriterOptions))
-        {
-            node.WriteTo(writer);
-        }
-
-        return stream.ToArray();
-    }
+    public static byte[] ToUtf8(JsonNode node) => JsJson.ToUtf8(node);
 
     public static byte[] BuildBatchBody(QueuedEvent[] batch, int[] indices)
     {

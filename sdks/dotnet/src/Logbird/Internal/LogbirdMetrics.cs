@@ -25,8 +25,55 @@ internal static class LogbirdMetrics
     public static readonly Counter<long> FailedSends = Meter.CreateCounter<long>(
         "logbird.batches.failed", "{batch}", "Batches that failed after all retries and were queued again.");
 
+    public static readonly Counter<long> Filtered = Meter.CreateCounter<long>(
+        "logbird.events.filtered", "{event}", "Events skipped by BeforeSend or by the feedback-loop guard.");
+
     public static readonly UpDownCounter<long> QueueLength = Meter.CreateUpDownCounter<long>(
         "logbird.queue.length", "{event}", "Events waiting to be sent.");
+
+    /// <summary>Records a measurement. A throwing <c>MeterListener</c> must never break delivery or reach the host.</summary>
+    public static void Record(Counter<long> counter, long value)
+    {
+        try
+        {
+            counter.Add(value);
+        }
+        catch
+        {
+            // Telemetry is best effort.
+        }
+    }
+
+    /// <summary>Records a dropped event with its reason tag.</summary>
+    public static void RecordDropped(DropReason reason)
+    {
+        try
+        {
+            Dropped.Add(1, Reason(reason));
+        }
+        catch
+        {
+            // Telemetry is best effort.
+        }
+    }
+
+    /// <summary>Changes the queue length gauge.</summary>
+    public static void RecordQueueLength(long delta)
+    {
+        if (delta == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            QueueLength.Add(delta);
+        }
+        catch
+        {
+            // Telemetry is best effort.
+        }
+    }
 
     public static KeyValuePair<string, object?> Reason(DropReason reason) => new("reason", ReasonName(reason));
 

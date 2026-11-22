@@ -53,13 +53,25 @@ client.track({
 // The minimal envelope: the TypeScript SDK always adds empty context and metadata objects, and the server
 // fingerprints the parsed input, so the .NET SDK must send the same shape for a replay to match.
 client.track({ id: '0193f2b6-6c00-7abc-8def-0123456789ac', action: 'session.started', occurredAt: '2026-11-22T08:00:01.000Z' });
+// Text the .NET encoder would otherwise change: an emoji (raw), a lone surrogate (escaped, never replaced), U+2028
+// and DEL (raw), plus explicitly empty arrays, which are part of the server's identity fingerprint.
+client.track({
+  id: '0193f2b6-6c00-7abc-8def-0123456789ad',
+  action: 'unicode.checked',
+  occurredAt: '2026-11-22T08:00:02.000Z',
+  description: 'emoji \u{1F600} lone \uD800 ls \u2028 del \u007F',
+  targets: [],
+  changes: [],
+  context: {},
+  metadata: { list: [1, 'two', null, { deep: [] }] },
+});
 await client.shutdown();
 globalThis.fetch = realFetch;
 
 const events: unknown[] = JSON.parse(body).events;
 // Re-serializing each parsed event keeps key order and escapes, matching what the SDK sent.
 const lines = events.map((event) => JSON.stringify(event));
-if (events.length !== 2 || !lines.every((line) => body.includes(line))) throw new Error('Unexpected TypeScript SDK body shape');
+if (events.length !== 3 || !lines.every((line) => body.includes(line))) throw new Error('Unexpected TypeScript SDK body shape');
 const event = `${lines.join('\n')}\n`;
 if (process.argv.includes('--check')) {
   if (readFileSync(output, 'utf8') !== event) throw new Error(`${output} is stale: run this script without --check`);

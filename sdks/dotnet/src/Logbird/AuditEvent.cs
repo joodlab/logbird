@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json.Nodes;
 using Logbird.Internal;
 
@@ -22,8 +23,10 @@ namespace Logbird;
 /// </example>
 public sealed class AuditEvent
 {
-    private List<AuditTarget>? _targets;
-    private List<AuditChange>? _changes;
+    private IList<AuditTarget>? _targets;
+    private IList<AuditChange>? _changes;
+    private bool _targetsAssigned;
+    private bool _changesAssigned;
     private AuditContext? _context;
     private JsonObject? _metadata;
 
@@ -77,11 +80,33 @@ public sealed class AuditEvent
     /// <summary>The envelope schema version. Leave empty unless you know you need it.</summary>
     public string? SchemaVersion { get; set; }
 
-    /// <summary>The records the event affected.</summary>
-    public IList<AuditTarget> Targets => _targets ??= [];
+    /// <summary>
+    /// The records the event affected. Add to it, or assign a list; an assigned empty list is sent as <c>[]</c>, while
+    /// an untouched one is omitted (this matters only for replaying an event first sent by another SDK).
+    /// </summary>
+    public IList<AuditTarget> Targets
+    {
+        get => _targets ??= new List<AuditTarget>();
+        set
+        {
+            _targets = value;
+            _targetsAssigned = value is not null;
+        }
+    }
 
-    /// <summary>The before and after values that are allowed to be stored.</summary>
-    public IList<AuditChange> Changes => _changes ??= [];
+    /// <summary>
+    /// The before and after values that are allowed to be stored. Add to it, or assign a list; an assigned empty list
+    /// is sent as <c>[]</c>, while an untouched one is omitted.
+    /// </summary>
+    public IList<AuditChange> Changes
+    {
+        get => _changes ??= new List<AuditChange>();
+        set
+        {
+            _changes = value;
+            _changesAssigned = value is not null;
+        }
+    }
 
     /// <summary>Correlation and request details.</summary>
     public AuditContext Context
@@ -97,9 +122,9 @@ public sealed class AuditEvent
         set => _metadata = value;
     }
 
-    internal bool HasTargets => _targets is { Count: > 0 };
+    internal bool EmitTargets => _targets is { Count: > 0 } || (_targetsAssigned && _targets is not null);
 
-    internal bool HasChanges => _changes is { Count: > 0 };
+    internal bool EmitChanges => _changes is { Count: > 0 } || (_changesAssigned && _changes is not null);
 
     internal AuditContext? ContextOrNull => _context;
 
@@ -138,8 +163,8 @@ public sealed class AuditEvent
     public AuditEvent Clone()
     {
         var copy = (AuditEvent)MemberwiseClone();
-        copy._targets = _targets is null ? null : [.. _targets];
-        copy._changes = _changes is null ? null : [.. _changes];
+        copy._targets = _targets is null ? null : new List<AuditTarget>(_targets);
+        copy._changes = _changes is null ? null : _changes.Select(change => change?.DeepClone()!).ToList();
         copy._context = _context?.Clone();
         copy._metadata = (JsonObject?)_metadata?.DeepClone();
         return copy;

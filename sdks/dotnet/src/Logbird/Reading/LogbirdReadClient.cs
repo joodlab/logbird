@@ -18,6 +18,12 @@ public sealed class LogbirdReadOptions
     /// <summary>Your Logbird public origin, for example <c>https://audit.example.com</c>.</summary>
     public Uri? Endpoint { get; set; }
 
+    /// <summary>
+    /// Allows a plain <c>http</c> endpoint on a non-loopback host. Off by default, because every request carries the
+    /// read key, which can read the whole project.
+    /// </summary>
+    public bool AllowInsecureHttp { get; set; }
+
     /// <summary>A project read key (<c>lb_read_…</c>). Server-side only: never send it to a browser.</summary>
     public string? ReadKey { get; set; }
 
@@ -37,21 +43,19 @@ public sealed class LogbirdReadClient : IDisposable
 {
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
-    private readonly string _baseUrl;
+    private readonly string _eventsUrl;
     private readonly AuthenticationHeaderValue _authorization;
     private readonly TimeSpan _timeout;
 
     /// <summary>Creates a read client.</summary>
     /// <param name="options">The endpoint and read key.</param>
     /// <param name="httpClient">An <see cref="HttpClient"/> to use, for example from <c>IHttpClientFactory</c>. Not disposed by this client.</param>
-    /// <exception cref="ArgumentException">The endpoint or key is missing.</exception>
+    /// <exception cref="ArgumentException">The endpoint or key is missing, or the endpoint is not https (see <see cref="LogbirdReadOptions.AllowInsecureHttp"/>).</exception>
     public LogbirdReadClient(LogbirdReadOptions options, HttpClient? httpClient = null)
     {
         Guard.NotNull(options, nameof(options));
-        if (options.Endpoint is not { IsAbsoluteUri: true } endpoint || (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp))
-        {
-            throw new ArgumentException("Endpoint must be an absolute http or https URL.", nameof(options));
-        }
+        Endpoints.Validate(options.Endpoint, options.AllowInsecureHttp, nameof(options));
+        var endpoint = options.Endpoint!;
 
         if (string.IsNullOrWhiteSpace(options.ReadKey))
         {
@@ -63,11 +67,12 @@ public sealed class LogbirdReadClient : IDisposable
             throw new ArgumentException("Timeout must be positive.", nameof(options));
         }
 
-        _baseUrl = endpoint.AbsoluteUri.TrimEnd('/');
+        _eventsUrl = Endpoints.Append(endpoint, "/v1/events").AbsoluteUri;
         _authorization = new AuthenticationHeaderValue("Bearer", options.ReadKey);
         _timeout = options.Timeout;
         _ownsHttp = httpClient is null;
-        _http = httpClient ?? new HttpClient { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+        // An owned client never follows redirects: a redirect could carry the read key's results to another origin.
+        _http = httpClient ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
     }
 
     /// <summary>Searches stored events and returns one page.</summary>
@@ -75,7 +80,7 @@ public sealed class LogbirdReadClient : IDisposable
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <exception cref="LogbirdApiException">The server answered an error, or could not be reached.</exception>
     public Task<EventPage> SearchAsync(EventSearch? search = null, CancellationToken cancellationToken = default)
-        => GetAsync(_baseUrl + "/v1/events" + (search ?? new EventSearch()).ToQueryString(), ReadJsonContext.Default.EventPage, cancellationToken)!;
+        => GetAsync(_eventsUrl + (search ?? new EventSearch()).ToQueryString(), ReadJsonContext.Default.EventPage, cancellationToken)!;
 
     /// <summary>Iterates every matching event, requesting further pages as you go.</summary>
     /// <param name="search">The search. Its <see cref="EventSearch.Cursor"/> is the starting point.</param>
@@ -92,9 +97,14 @@ public sealed class LogbirdReadClient : IDisposable
                 yield return item;
             }
 
-            if (string.IsNullOrEmpty(page.NextCursor) || page.NextCursor == current.Cursor)
+            if (string.IsNullOrEmpty(page.NextCursor))
             {
                 yield break;
+            }
+
+            if (page.NextCursor == current.Cursor)
+            {
+                throw new LogbirdApiException(null, "pagination_stalled", "Logbird returned the same cursor again; the results are incomplete.");
             }
 
             current = current with { Cursor = page.NextCursor };
@@ -108,7 +118,7 @@ public sealed class LogbirdReadClient : IDisposable
     public Task<EventDetail?> GetAsync(string eventId, CancellationToken cancellationToken = default)
     {
         Guard.NotBlank(eventId, nameof(eventId));
-        return GetAsync(_baseUrl + "/v1/events/" + Uri.EscapeDataString(eventId), ReadJsonContext.Default.EventDetail, cancellationToken, notFoundIsNull: true);
+        return GetAsync(_eventsUrl + "/" + Uri.EscapeDataString(eventId), ReadJsonContext.Default.EventDetail, cancellationToken, notFoundIsNull: true);
     }
 
     /// <inheritdoc />
@@ -135,9 +145,9 @@ public sealed class LogbirdReadClient : IDisposable
         {
             response = await _http.SendAsync(request, timeout.Token).ConfigureAwait(false);
 #if NET8_0_OR_GREATER
-            body = await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
+            body = response.Content is null ? [] : await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
 #else
-            body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            body = response.Content is null ? [] : await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
 #endif
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

@@ -21,7 +21,9 @@ applications can use it too. Dependencies: `System.Text.Json` and `Microsoft.Ext
 dotnet add package Logbird
 ```
 
-You need a Logbird project and an **ingest key** (`lb_ingest_…`). Keep the key on the server.
+You need a Logbird project and an **ingest key** (`lb_ingest_…`). Keep the key on the server. The endpoint must use
+`https`; plain `http` is accepted for `localhost` (local development) or when you set `AllowInsecureHttp = true` for a
+private network you trust.
 
 ## Record events
 
@@ -97,10 +99,13 @@ var options = new LogbirdOptions
 ```
 
 - Network errors, 429 and 5xx are retried with exponential backoff and `Retry-After`, up to `MaxRetries` (5) and
-  five minutes per batch. If a batch still fails, it goes back to the front of the queue and is tried again later.
+  five minutes per batch. Each request is limited by `RequestTimeout` (30 seconds), even if a custom HTTP handler
+  ignores cancellation. If a batch still fails, it goes back to the front of the queue and is tried again later.
 - When the server rejects single events in a batch (for example an invalid id), only those events are dropped
   (`DropReason.Rejected`, with the server's reason in `Detail`). The rest of the batch is stored.
-- A 4xx other than 429 (for example a revoked key) drops the batch (`DropReason.HttpError`) and reports it.
+- A 4xx other than 429 (for example a revoked key) drops the batch (`DropReason.HttpError`) and reports it. So does
+  a redirect: the client never follows one, because that would send audit data to another address. If you pass your
+  own `HttpClient`, configure its handler with `AllowAutoRedirect = false` as well.
 - `client.Stats` gives counts of tracked, delivered, rejected, dropped and filtered events. The `Logbird` meter
   publishes the same counts for OpenTelemetry (`logbird.events.*`, `logbird.queue.length`).
 - `await client.FlushAsync()` waits until everything queued so far is settled and returns `false` if delivery failed.
@@ -113,8 +118,9 @@ var options = new LogbirdOptions
   its id is the same.
 
 The queue lives in memory, so a crash loses events that were not yet sent. If an event must survive a crash, save
-it in your database in the same transaction as the change (an outbox), keep its id (`LogbirdClient.NewEventId()`),
-and track it from there. Sending it twice is safe.
+it in your database in the same transaction as the change (an outbox) with its `Id` (`LogbirdClient.NewEventId()`)
+**and** its `OccurredAt`, and track it from there with both set. Sending it twice is then safe; a resend with a new
+timestamp would be a different event and is rejected as `duplicate_id_conflict`.
 
 Logbird's own HTTP calls, log messages and callbacks never record events. If your host audits all outgoing HTTP
 or forwards logs to Logbird, there is no feedback loop.
@@ -155,7 +161,8 @@ await foreach (var e in reader.SearchAllAsync(EventSearch.ForTrail(targetId: inv
 EventDetail? detail = await reader.GetAsync(eventId);   // null when it does not exist
 ```
 
-A search filter is not authorization. When you show history to your own customers, check that the signed-in user
+`ForTrail` throws `ArgumentException` for an empty selector (pass `null` to leave one out), so a bug cannot silently
+widen a history search to the whole project. A search filter is not authorization. When you show history to your own customers, check that the signed-in user
 may see the tenant or record first, on every request including next-page requests.
 
 ## Verify webhooks
@@ -187,5 +194,6 @@ signatures in constant time. It passes the same test vectors as the TypeScript S
 | .NET 8, 9, 10 and later | `net8.0` (trimming and Native AOT compatible) |
 | .NET Framework 4.6.2+ (tested on 4.8) | `netstandard2.0` |
 
-The wire format is byte-for-byte identical to the TypeScript SDK's. A test serializes the same event in both SDKs
-and compares the bytes.
+The wire format is byte-for-byte identical to the TypeScript SDK's, including emoji and other non-ASCII text, so an
+event sent from either SDK and replayed from the other is recognised as the same event. Tests serialize the same events
+in both SDKs and compare the bytes.

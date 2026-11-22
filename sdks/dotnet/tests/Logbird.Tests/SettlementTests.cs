@@ -125,12 +125,14 @@ public class SettlementTests
         client.Track(new AuditEvent("queued.behind"));
         await client.DisposeAsync();
         Assert.Equal(4, drops.Count(d => d.Reason == DropReason.Shutdown));
+        var atShutdown = client.Stats;
+        Assert.Equal((4L, 0L, 4L, 0), (atShutdown.Tracked, atShutdown.Delivered, atShutdown.Dropped, atShutdown.QueueLength));
 
         // The request finally returns after disposal: nothing is requeued, counted or reported again.
         handler.Release.SetResult(true);
         await Task.Delay(300);
         Assert.Equal(4, drops.Count);
-        Assert.Equal(new LogbirdStats(4, 0, 0, 4, 0, 0, 0), client.Stats);
+        Assert.Equal(atShutdown, client.Stats);
 
         // Nothing is outstanding any more: the four events were settled by being dropped and reported.
         Assert.True(await client.FlushAsync());

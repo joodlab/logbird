@@ -105,11 +105,16 @@ public class IngestRoundTripTests(ITestOutputHelper output)
     public async Task Shutdown_flush_loses_nothing()
     {
         var operation = "op_" + Guid.NewGuid().ToString("N");
-        const int total = 2_500;
+        // Defaults suit a local server; against production use a small, slow run (for example 300 events in batches of 5)
+        // to stay inside its rate limits.
+        var total = int.TryParse(Environment.GetEnvironmentVariable("LOGBIRD_IT_SHUTDOWN_EVENTS"), out var events) ? events : 2_500;
+        var batch = int.TryParse(Environment.GetEnvironmentVariable("LOGBIRD_IT_SHUTDOWN_BATCH"), out var size) ? size : 100;
         var client = new LogbirdClient(LiveServer.Options(o =>
         {
             o.FlushInterval = TimeSpan.FromMinutes(10);
             o.ShutdownTimeout = TimeSpan.FromSeconds(60);
+            o.BatchSize = batch;
+            o.MaxQueueSize = Math.Max(total, 1);
         }));
         for (var i = 0; i < total; i++)
         {
@@ -159,10 +164,10 @@ public class IngestRoundTripTests(ITestOutputHelper output)
     [LiveFact]
     public async Task Large_integers_and_decimals_round_trip_with_exact_digits()
     {
-        // Servers up to 0.1.2 round integers above 2^53 in the stored payload and attributes (issue #168). The bytes this
-        // SDK sends are exact (see RobustnessTests); the server-side assertions run once the server has the fix.
+        // Servers up to at least 0.1.3 round integers above 2^53 in the stored payload and attributes (issue #168). The
+        // bytes this SDK sends are exact (see RobustnessTests). Set LOGBIRD_IT_EXACT_NUMBERS=1 against a server with the fix.
         var version = await LiveServer.ServerVersionAsync();
-        var serverKeepsDigits = version > new Version(0, 1, 2) || Environment.GetEnvironmentVariable("LOGBIRD_IT_EXACT_NUMBERS") == "1";
+        var serverKeepsDigits = Environment.GetEnvironmentVariable("LOGBIRD_IT_EXACT_NUMBERS") == "1";
         var id = LogbirdClient.NewEventId();
         await using (var client = new LogbirdClient(LiveServer.Options()))
         {
@@ -181,7 +186,7 @@ public class IngestRoundTripTests(ITestOutputHelper output)
             + $"attributes snowflake={detail.Event.Attributes["metadata.snowflake"]} amount={detail.Event.Attributes["metadata.amount"]}");
         if (!serverKeepsDigits)
         {
-            output.WriteLine("server predates the exact-number fix (#168): server-side digit checks skipped");
+            output.WriteLine("server-side digit checks skipped until the exact-number fix (#168) ships; set LOGBIRD_IT_EXACT_NUMBERS=1 to run them");
             return;
         }
 
@@ -247,6 +252,11 @@ public class CrossSdkReplayTests(ITestOutputHelper output)
     {
         var id = Environment.GetEnvironmentVariable("LOGBIRD_IT_TS_EVENT_ID")!;
         var at = DateTimeOffset.Parse(Environment.GetEnvironmentVariable("LOGBIRD_IT_TS_EVENT_AT")!, System.Globalization.CultureInfo.InvariantCulture);
+        using var reader = LiveServer.Reader();
+
+        // The stored event must come from the TypeScript SDK, so the replay below cannot pass as a fresh insert.
+        var original = await LiveServer.WaitForEventAsync(reader, id);
+        Assert.StartsWith("typescript/", original.Event.Sdk);
         var drops = new ConcurrentQueue<DroppedEvent>();
         await using (var client = new LogbirdClient(new LogbirdOptions
         {
@@ -262,7 +272,9 @@ public class CrossSdkReplayTests(ITestOutputHelper output)
         }
 
         Assert.Empty(drops);
-        using var reader = LiveServer.Reader();
         Assert.Equal(1, await LiveServer.CountAsync(reader, $"id:\"{id}\"", 1));
+        var after = await LiveServer.WaitForEventAsync(reader, id);
+        Assert.StartsWith("typescript/", after.Event.Sdk);
+        Assert.Equal(original.Event.ReceivedAt, after.Event.ReceivedAt);
     }
 }

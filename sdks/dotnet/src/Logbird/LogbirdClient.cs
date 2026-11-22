@@ -82,7 +82,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private long _firstQueuedAtTicks;
     private long _retryAtTicks;
     private int _consecutiveFailures;
-    private long _lastQueueFullLogTicks = long.MinValue;
+    private long _lastQueueFullLogTicks = long.MinValue / 2; // far enough back that the first warning is logged, without overflow
 
     private long _tracked;
     private long _delivered;
@@ -126,7 +126,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
         var http = httpClient ?? (_ownedHttp = CreateHttpClient());
         _queue = new EventQueue(options.MaxQueueSize, options.QueueFullBehavior);
-        _sender = new BatchSender(http, options.Endpoint!, options.IngestKey!, options.MaxRetries, OnSenderDrop, Report, delay);
+        _sender = new BatchSender(http, options.Endpoint!, options.IngestKey!, options.MaxRetries, options.RequestTimeout, OnSenderDrop, Report, delay);
         _loop = Task.Run(RunAsync);
     }
 
@@ -160,6 +160,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         if (InsideLogbird.Value)
         {
             Interlocked.Increment(ref _filtered);
+            LogbirdMetrics.Record(LogbirdMetrics.Filtered, 1);
             return;
         }
 
@@ -191,6 +192,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 if (result is null)
                 {
                     Interlocked.Increment(ref _filtered);
+                    LogbirdMetrics.Record(LogbirdMetrics.Filtered, 1);
                     return;
                 }
 
@@ -230,8 +232,8 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             if (added is not null)
             {
                 Interlocked.Increment(ref _tracked);
-                LogbirdMetrics.Tracked.Add(1);
-                LogbirdMetrics.QueueLength.Add(1);
+                LogbirdMetrics.Record(LogbirdMetrics.Tracked, 1);
+                LogbirdMetrics.RecordQueueLength(1);
                 if (count == 1)
                 {
                     Interlocked.Exchange(ref _firstQueuedAtTicks, _clock.Elapsed.Ticks);
@@ -247,7 +249,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             {
                 if (added is not null)
                 {
-                    LogbirdMetrics.QueueLength.Add(-1);
+                    LogbirdMetrics.RecordQueueLength(-1);
                 }
 
                 overflow.TrySettle();
@@ -295,7 +297,11 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 _queue.CompleteAllWaiters(_queue.Outstanding == 0);
             }
 
-            using (cancellationToken.Register(() => completion.TrySetResult(false)))
+            using (cancellationToken.Register(() =>
+            {
+                completion.TrySetResult(false);
+                _queue.RemoveWaiter(completion);
+            }))
             {
                 return await completion.Task.ConfigureAwait(false);
             }
@@ -320,39 +326,73 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             return;
         }
 
+        if (_loop is null)
+        {
+            _ownedHttp?.Dispose();
+            return;
+        }
+
         try
         {
-            if (_loop is not null)
+            _closing = true;
+            Signal();
+            var finished = await Task.WhenAny(_loop, Task.Delay(_shutdownTimeout)).ConfigureAwait(false) == _loop;
+            if (!finished)
             {
-                _closing = true;
-                Signal();
-                var finished = await Task.WhenAny(_loop, Task.Delay(_shutdownTimeout)).ConfigureAwait(false) == _loop;
-                if (!finished)
+                // Cancellation runs the handlers' callbacks synchronously; one that throws or blocks must not stop
+                // shutdown, so cancel on the thread pool and wait only briefly for the loop to unwind.
+                _ = Task.Run(() =>
                 {
-                    _stop.Cancel();
-                    await Task.WhenAny(_loop, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
-                }
-
-                // Shutdown takes ownership of everything unsent, in flight included; each event is reported exactly once.
-                var abandoned = 0;
-                foreach (var item in _queue!.Abandon())
-                {
-                    if (!item.TryAbandon())
+                    try
                     {
-                        continue;
+                        _stop.Cancel();
                     }
+                    catch (Exception e)
+                    {
+                        Report(e);
+                    }
+                });
+                await Task.WhenAny(_loop, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
+            }
+        }
+        catch (Exception e)
+        {
+            Report(e);
+        }
+        finally
+        {
+            AbandonRemaining();
+        }
+    }
 
-                    abandoned++;
-                    LogbirdMetrics.QueueLength.Add(-1);
-                    Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before the event was sent.");
-                }
+    /// <summary>
+    /// Shutdown takes ownership of everything unsent, the in-flight batch included, and reports each event exactly
+    /// once. A late response for an abandoned batch is ignored.
+    /// </summary>
+    private void AbandonRemaining()
+    {
+        try
+        {
+            var (queued, inFlight) = _queue!.Abandon();
 
-                _queue.CompleteAllWaiters(abandoned == 0);
-                if (abandoned > 0)
-                {
-                    SafeLog(() => LogShutdownDropped(_logger, abandoned));
-                    Report(new LogbirdDeliveryException($"{abandoned} audit event(s) were not sent before shutdown."), log: false);
-                }
+            // In-flight events already left the queue-length gauge when they were dequeued.
+            LogbirdMetrics.RecordQueueLength(-queued.Count);
+            foreach (var item in inFlight)
+            {
+                Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before the event was sent.");
+            }
+
+            foreach (var item in queued)
+            {
+                Drop(DropReason.Shutdown, item.Id, item.Action, item.Json, "The shutdown timeout ran out before the event was sent.");
+            }
+
+            var abandoned = queued.Count + inFlight.Count;
+            _queue.CompleteAllWaiters(outstandingResult: abandoned == 0);
+            if (abandoned > 0)
+            {
+                SafeLog(() => LogShutdownDropped(_logger, abandoned));
+                Report(new LogbirdDeliveryException($"{abandoned} audit event(s) were not sent before shutdown."), log: false);
             }
         }
         catch (Exception e)
@@ -388,10 +428,13 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private static HttpClient CreateHttpClient()
     {
 #if NET8_0_OR_GREATER
-        var handler = new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) };
+        var handler = new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false };
 #else
-        var handler = new HttpClientHandler();
+        var handler = new HttpClientHandler { AllowAutoRedirect = false };
 #endif
+
+        // Never follow redirects: a redirect would forward the audit body to another origin. A 3xx is reported as a
+        // permanent HTTP error instead.
         return new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
     }
 
@@ -468,7 +511,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             {
                 // Defensive: the loop must survive anything, or capture would silently stop.
                 Report(e);
-                _queue!.CompleteAllWaiters(false);
+                _queue!.CompleteWaitersAfterFailure();
                 await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
             }
         }
@@ -497,7 +540,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 break;
             }
 
-            LogbirdMetrics.QueueLength.Add(-batch.Length);
+            LogbirdMetrics.RecordQueueLength(-batch.Length);
             SendResult result;
             try
             {
@@ -512,7 +555,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
             if (result.Delivered > 0)
             {
                 Interlocked.Add(ref _delivered, result.Delivered);
-                LogbirdMetrics.Delivered.Add(result.Delivered);
+                LogbirdMetrics.Record(LogbirdMetrics.Delivered, result.Delivered);
             }
 
             var overflow = _queue.FinishBatch(result.Failure is null ? [] : result.Unsettled);
@@ -524,7 +567,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
             if (result.Failure is { } failure)
             {
-                LogbirdMetrics.QueueLength.Add(result.Unsettled.Count - overflow.Count);
+                LogbirdMetrics.RecordQueueLength(result.Unsettled.Count - overflow.Count);
                 foreach (var item in overflow)
                 {
                     if (item.TrySettle())
@@ -534,7 +577,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 }
 
                 Interlocked.Increment(ref _failedSends);
-                LogbirdMetrics.FailedSends.Add(1);
+                LogbirdMetrics.Record(LogbirdMetrics.FailedSends, 1);
                 _consecutiveFailures++;
                 var backoff = TimeSpan.FromSeconds(Math.Min(60, Math.Pow(2, Math.Min(_consecutiveFailures - 1, 6))));
                 if (backoff < _flushInterval)
@@ -547,7 +590,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 Interlocked.Exchange(ref _firstQueuedAtTicks, now);
 
                 // Settle the flush waiters before any diagnostics, so a throwing logger or callback cannot hold them.
-                _queue.CompleteAllWaiters(false);
+                _queue.CompleteWaitersAfterFailure();
                 SafeLog(() => LogDeliveryFailed(_logger, result.Unsettled.Count, backoff.TotalSeconds, failure));
                 Report(failure, log: false);
                 return false;
@@ -587,12 +630,12 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         if (reason == DropReason.Rejected)
         {
             Interlocked.Increment(ref _rejected);
-            LogbirdMetrics.Rejected.Add(1);
+            LogbirdMetrics.Record(LogbirdMetrics.Rejected, 1);
         }
         else
         {
             Interlocked.Increment(ref _dropped);
-            LogbirdMetrics.Dropped.Add(1, LogbirdMetrics.Reason(reason));
+            LogbirdMetrics.RecordDropped(reason);
         }
 
         if (_onDrop is null)

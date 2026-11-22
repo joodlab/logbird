@@ -190,47 +190,77 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior)
         }
     }
 
-    /// <summary>Completes (with true) every flush whose events are all settled.</summary>
-    public void CompleteSatisfiedWaiters() => Complete(all: false, result: true);
-
-    /// <summary>Completes every flush with <paramref name="result"/>.</summary>
-    public void CompleteAllWaiters(bool result) => Complete(all: true, result);
+    /// <summary>Completes (with true) every flush whose events are all settled; the others keep waiting.</summary>
+    public void CompleteSatisfiedWaiters() => Complete(failOutstanding: false, outstandingResult: false);
 
     /// <summary>
-    /// Shutdown deadline: stops accepting and requeueing, and returns every queued and in-flight event so the caller
-    /// can report the ones it manages to abandon (an in-flight event may still be settled by a late response first).
+    /// After a failed delivery: a flush whose events are all settled still succeeds; a flush with events still
+    /// outstanding completes with false (they stay queued for a later attempt).
     /// </summary>
-    public List<QueuedEvent> Abandon()
+    public void CompleteWaitersAfterFailure() => Complete(failOutstanding: true, outstandingResult: false);
+
+    /// <summary>Completes every flush: true when its events are settled, otherwise <paramref name="outstandingResult"/>.</summary>
+    public void CompleteAllWaiters(bool outstandingResult) => Complete(failOutstanding: true, outstandingResult);
+
+    /// <summary>Forgets a flush whose caller stopped waiting, so cancelled flushes do not accumulate.</summary>
+    public void RemoveWaiter(TaskCompletionSource<bool> completion)
+    {
+        lock (_gate)
+        {
+            _waiters.RemoveAll(waiter => waiter.Completion == completion);
+        }
+    }
+
+    /// <summary>
+    /// Shutdown deadline: stops accepting and requeueing, detaches the in-flight batch, and abandons every event that is
+    /// still pending, all under the lock so no flush can observe a half-abandoned state. Returns the abandoned events
+    /// (an in-flight event already settled by a response is not included), split into queued and in-flight.
+    /// </summary>
+    public (List<QueuedEvent> Queued, List<QueuedEvent> InFlight) Abandon()
     {
         lock (_gate)
         {
             _abandoned = true;
-            var all = new List<QueuedEvent>(_count + (_inFlight?.Length ?? 0));
+            var inFlight = new List<QueuedEvent>();
             if (_inFlight is not null)
             {
-                all.AddRange(_inFlight);
+                foreach (var item in _inFlight)
+                {
+                    if (item.TryAbandon())
+                    {
+                        inFlight.Add(item);
+                    }
+                }
+
+                _inFlight = null;
             }
 
+            var queued = new List<QueuedEvent>(_count);
             while (_count > 0)
             {
-                all.Add(RemoveFirst());
+                var item = RemoveFirst();
+                if (item.TryAbandon())
+                {
+                    queued.Add(item);
+                }
             }
 
-            return all;
+            return (queued, inFlight);
         }
     }
 
-    private void Complete(bool all, bool result)
+    private void Complete(bool failOutstanding, bool outstandingResult)
     {
-        List<TaskCompletionSource<bool>>? done = null;
+        List<(TaskCompletionSource<bool> Completion, bool Result)>? done = null;
         lock (_gate)
         {
             var min = MinOutstanding();
             for (var i = _waiters.Count - 1; i >= 0; i--)
             {
-                if (all || _waiters[i].Target < min)
+                var settled = _waiters[i].Target < min;
+                if (settled || failOutstanding)
                 {
-                    (done ??= []).Add(_waiters[i].Completion);
+                    (done ??= []).Add((_waiters[i].Completion, settled || outstandingResult));
                     _waiters.RemoveAt(i);
                 }
             }
@@ -238,7 +268,7 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior)
 
         if (done is not null)
         {
-            foreach (var completion in done)
+            foreach (var (completion, result) in done)
             {
                 completion.TrySetResult(result);
             }

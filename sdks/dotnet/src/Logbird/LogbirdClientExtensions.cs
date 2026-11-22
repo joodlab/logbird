@@ -22,6 +22,12 @@ public static class LogbirdClientExtensions
             return false;
         }
 
+        timeout = Clamp(timeout);
+        if (timeout == Timeout.InfiniteTimeSpan)
+        {
+            return await client.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
         using var cancellation = new CancellationTokenSource(timeout);
         return await client.FlushAsync(cancellation.Token).ConfigureAwait(false);
     }
@@ -42,6 +48,7 @@ public static class LogbirdClientExtensions
             return false;
         }
 
+        timeout = Clamp(timeout);
         try
         {
             using var cancellation = new CancellationTokenSource(timeout);
@@ -53,4 +60,8 @@ public static class LogbirdClientExtensions
             return false;
         }
     }
+
+    /// <summary>Timers accept at most about 24.8 days; anything longer means "no limit".</summary>
+    private static TimeSpan Clamp(TimeSpan timeout)
+        => timeout > TimeSpan.FromMilliseconds(int.MaxValue) ? Timeout.InfiniteTimeSpan : timeout;
 }
