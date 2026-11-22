@@ -249,7 +249,8 @@ jobs:
     name: Publish NuGet packages
     needs: [preflight, release]
     # The first NuGet publication is the maintainers' decision after the pre-publication gate, not a side effect of a tag.
-    # Publishing needs the repository variable NUGET_PUBLISH_ENABLED set to exactly `true` (checked case-sensitively
+    # Publishing needs the Actions variable NUGET_PUBLISH_ENABLED (a repository variable, or an organization variable
+    # shared with this repository when the repository defines none) set to exactly `true` (checked case-sensitively
     # below; this job-level condition only skips the job early) and the NUGET_API_KEY secret. Package versions are the
     # release version.
     if: vars.NUGET_PUBLISH_ENABLED == 'true'
