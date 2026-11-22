@@ -20,6 +20,7 @@ import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import { andQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { ALL_RANGE, absoluteRange, isValidRange, rangeLabel, resolveRange } from '@/lib/range';
+import { explorerTotal, formatSearchTotal, searchTotal } from '@/lib/search-total';
 import { appendSqlPredicate } from '@/lib/sql-language';
 import { EventSheet } from './event-sheet';
 import { EventsTable, type EventsTableHandle } from './events-table';
@@ -232,11 +233,13 @@ function ProjectExplorer({
     return [...liveRows, ...paged.filter((e) => !seen.has(e.id))];
   }, [pages, liveRows]);
   // Search totals are capped for huge ranges; the histogram counts every match exactly.
-  const searchTotal = pages?.[0]?.total ?? 0;
+  const pagedCount = pages?.reduce((n, p) => n + p.data.length, 0) ?? 0;
+  const known = searchTotal(pages, pagedCount, events.hasNextPage);
   const histogramTotal =
     histogramData && (problem || !histogram.isPlaceholderData) ? histogramData.buckets.reduce((n, b) => n + b.total, 0) : undefined;
-  const total = (histogramTotal ?? searchTotal) + liveRows.length;
-  const totalCapped = histogramTotal === undefined && searchTotal > 10_000;
+  const label = explorerTotal({ histogramTotal, search: known, pagedCount, hasNextPage: events.hasNextPage, visibleRows: rows.length });
+  const total = label.count;
+  const totalLowerBound = !label.exact;
 
   /* ---------------- selection ---------------- */
   const selectedIndex = ev ? rows.findIndex((e) => e.id === ev) : -1;
@@ -496,8 +499,10 @@ function ProjectExplorer({
               'Searching…'
             ) : (
               <>
-                <span className="font-medium text-foreground">{totalCapped ? '10,000+' : formatNumber(total)}</span>{' '}
-                {!totalCapped && total === 1 ? 'event' : 'events'} · {rangeName}
+                <span className="font-medium text-foreground">
+                  {totalLowerBound ? formatSearchTotal({ count: total, exact: false }) : formatNumber(total)}
+                </span>{' '}
+                {!totalLowerBound && total === 1 ? 'event' : 'events'} · {rangeName}
                 {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>

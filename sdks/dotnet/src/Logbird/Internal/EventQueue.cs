@@ -29,6 +29,8 @@ internal sealed class QueuedEvent(byte[] json, string id, string action, long se
 
     public bool IsPending => Volatile.Read(ref _state) == Pending;
 
+    public bool IsAbandoned => Volatile.Read(ref _state) == Abandoned;
+
     public bool TrySettle() => Interlocked.CompareExchange(ref _state, Settled, Pending) == Pending;
 
     public bool TryAbandon() => Interlocked.CompareExchange(ref _state, Abandoned, Pending) == Pending;
