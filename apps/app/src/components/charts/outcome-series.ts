@@ -1,6 +1,6 @@
 import type { HistogramResponse } from '@logbird/contracts';
 import type { ChartConfig } from '@logbird/ui/components/ui/chart';
-import { formatClock, formatDate, formatDayTime, formatMonthDay, formatMonthYear, localDayKey, zoneOffsetMs } from '@/lib/format';
+import { formatClock, formatDate, formatDayTime, formatMonthDay, formatMonthYear, formatOffset, localDayKey, zoneOffsetMs } from '@/lib/format';
 
 export const SERIES = ['success', 'partial', 'denied', 'failure', 'unknown'] as const;
 export type SeriesKey = (typeof SERIES)[number];
@@ -111,5 +111,8 @@ export function bucketLabel(ts: number, intervalSeconds: number): string {
     if (intervalSeconds > 86_400) return `${formatDate(new Date(ts).toISOString())} – ${formatDate(new Date(end - 1).toISOString())}`;
     return formatMonthDay(ts);
   }
-  return localDayKey(ts) === localDayKey(end) ? `${formatDayTime(ts)} – ${formatClock(end)}` : `${formatDayTime(ts)} – ${formatDayTime(end)}`;
+  const shift = localOffset(ts) === localOffset(end) ? '' : ` (${formatOffset(ts)} → ${formatOffset(end)})`;
+  if (intervalSeconds > 86_400)
+    return `${formatDate(new Date(ts).toISOString())} ${formatClock(ts)} – ${formatDate(new Date(end).toISOString())} ${formatClock(end)}${shift}`;
+  return `${localDayKey(ts) === localDayKey(end) ? `${formatDayTime(ts)} – ${formatClock(end)}` : `${formatDayTime(ts)} – ${formatDayTime(end)}`}${shift}`;
 }

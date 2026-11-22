@@ -38,6 +38,7 @@ describe('eventRowLabel', () => {
     expect(label.startsWith('Vera Validator ')).toBe(true);
     expect(label).toContain('B-1042');
     expect(label).toContain(', success, booking.cancelled, ');
+    expect(label).toMatch(/ (UTC|[A-Za-z ]+ time)$/);
   });
 
   it('names the actor when the producer description leaves them out', () => {

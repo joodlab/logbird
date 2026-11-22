@@ -102,6 +102,22 @@ export const formatFull = (iso: string): string => `${fullFmt().format(new Date(
 export const formatDate = (iso: string): string => dateOnlyFmt().format(new Date(iso));
 /** "Wed, Nov 4, 2026, 15:32:10 Europe/Berlin" in a given zone, whatever the console zone is. */
 export const formatInZone = (iso: string, zone: string): string => `${fullFmt(zone).format(new Date(iso))} ${zone}`;
+/** True when the console zone shows this instant's wall clock twice that day (the hour repeated when clocks go back). */
+export function isRepeatedWallTime(v: Instant): boolean {
+  const ms = at(v).getTime();
+  const own = zoneOffsetMs(ms);
+  return [zoneOffsetMs(ms - 86_400_000), zoneOffsetMs(ms + 86_400_000)].some((other) => {
+    if (other === own) return false;
+    const twin = ms + own - other;
+    return twin + zoneOffsetMs(twin) === ms + own;
+  });
+}
+/** "GMT+2", "GMT-3:30": the console zone's offset at an instant (named where a window crosses a clock change). */
+export function formatOffset(v: Instant): string {
+  const m = Math.round(zoneOffsetMs(v) / 60_000);
+  const abs = Math.abs(m);
+  return `GMT${m < 0 ? '-' : '+'}${Math.floor(abs / 60)}${abs % 60 ? `:${String(abs % 60).padStart(2, '0')}` : ''}`;
+}
 /** "2026-11-04 14:32:10.123 UTC" — the unambiguous instant, for tooltips and copying. */
 export const formatUtc = (iso: string): string => `${new Date(iso).toISOString().replace('T', ' ').replace('Z', '')} UTC`;
 

@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { EventSheet } from '@/components/explorer/event-sheet';
 import { EventsTable, type EventsTableHandle } from '@/components/explorer/events-table';
+import { TimeZoneInline } from '@/components/time-zone-control';
 import { workspaceActivityQuery } from '@/lib/api/queries';
 import { includeTerm, removeTerm } from '@/lib/query-language';
 import { rangeLabel } from '@/lib/range';
@@ -107,6 +108,8 @@ function WorkspaceActivity() {
           </fieldset>
           <span className="text-muted-foreground text-xs sm:ms-auto">
             {activity.data ? `${formatSearchTotal(activityTotal)} ${activityTotal.count === 1 ? 'action' : 'actions'} · ${rangeLabel(range)}` : null}
+            {/* Below md the table has no column header: name the zone here (and switch it). */}
+            <TimeZoneInline className="md:hidden" />
           </span>
         </div>
       </div>

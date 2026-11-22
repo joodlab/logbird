@@ -26,7 +26,7 @@ import { JobHint, SupportMarker } from '@/components/impersonation';
 import { TimeColumnHeader } from '@/components/time-zone-control';
 import { Timestamp } from '@/components/timestamp';
 import { eventSentence } from '@/lib/events';
-import { formatNumber, timestampNeedsYear } from '@/lib/format';
+import { formatNumber, localDayKey, timestampNeedsYear } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { useConsoleZone } from '@/lib/time-zone';
 import { EVENT_COLUMNS } from './columns';
@@ -162,8 +162,10 @@ export function EventsTable({
 
   const visible = table.getVisibleLeafColumns();
   // "Dec 31, 2025, 23:59:59" is wider than this year's "Nov 22, 10:17:20": widen the time column only when a row needs it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: whether a row needs its year depends on the console zone.
-  const withYear = useMemo(() => rows.some((e) => timestampNeedsYear(e.timestamp)), [rows, zone]);
+  // Whether a row needs its year depends on the console zone and on the current year there.
+  const thisYear = localDayKey(Date.now()).slice(0, 4);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: zone and thisYear are what timestampNeedsYear reads.
+  const withYear = useMemo(() => rows.some((e) => timestampNeedsYear(e.timestamp)), [rows, zone, thisYear]);
   const width = (id: string) => (id === 'time' && withYear ? TIME_WIDTH_WITH_YEAR : WIDTH.get(id));
   const template = visible.map((c) => (width(c.id) === 'flex' ? 'minmax(200px,1fr)' : `${width(c.id)}px`)).join(' ');
   const minWidth = visible.reduce((sum, c) => sum + (width(c.id) === 'flex' ? 200 : Number(width(c.id))), 0) + 16;

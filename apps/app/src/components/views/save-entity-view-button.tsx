@@ -12,8 +12,20 @@ import { rangeInSentence, rangeLabel } from '@/lib/range';
 import { useCopyViewLink, type ViewLabelField, viewSearch } from '@/lib/views';
 
 /** "Bayt Al Rimal — last 7 days" ("… — Nov 22, 08:00 – 10:00 Berlin time" for an absolute range). */
-export function entityViewName(name: string, range: string, options?: { zone?: boolean }): string {
-  return `${name} — ${rangeInSentence(rangeLabel(range, options))}`.slice(0, 80);
+export function entityViewName(name: string, range: string): string {
+  return `${name} — ${rangeInSentence(rangeLabel(range))}`.slice(0, 80);
+}
+
+/**
+ * The saved view this button would create, if one exists: the same query, language and exact range. Names are not
+ * compared: they are generated (and an absolute range's name now names its zone), and a renamed view is still the view.
+ */
+export function findSavedEntityView<V extends { state: { q?: string | null; lang?: string | null; range?: string | null } }>(
+  views: readonly V[] | undefined,
+  query: string,
+  range: string,
+): V | undefined {
+  return views?.find((v) => (v.state.q ?? '') === query && (v.state.lang ?? 'query') === 'query' && (v.state.range ?? '24h') === range);
 }
 
 /**
@@ -43,9 +55,7 @@ export function SaveEntityViewButton({
   const views = useQuery(viewsQuery(projectId));
   const copyLink = useCopyViewLink();
   const viewName = entityViewName(name, range);
-  // Views saved before absolute-range names carried their zone keep matching under the old name.
-  const names = new Set([viewName, entityViewName(name, range, { zone: false })]);
-  const existing = views.data?.find((v) => names.has(v.name) && (v.state.q ?? '') === query && (v.state.range ?? '24h') === range);
+  const existing = findSavedEntityView(views.data, query, range);
   const open = (view: { id: string; state: Parameters<typeof viewSearch>[0]['state'] }) =>
     navigate({ to: '/p/$projectId/events', params: { projectId }, search: viewSearch(view) });
   const value = kind === 'target' ? splitTargetId(entityId).id : entityId;

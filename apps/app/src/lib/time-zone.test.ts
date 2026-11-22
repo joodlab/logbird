@@ -14,7 +14,7 @@ async function load(zone: string, storage?: Partial<Storage>) {
   const range = await import('./range');
   const series = await import('@/components/charts/outcome-series');
   const picker = await import('@logbird/ui/components/time-range-picker');
-  return { ...tz, ...format, ...range, ...series, toWall: picker.toWall, fromWall: picker.fromWall };
+  return { ...tz, ...format, ...range, ...series, toWall: picker.toWall, fromWall: picker.fromWall, resolveWall: picker.resolveWall };
 }
 
 beforeEach(() => vi.unstubAllGlobals());
@@ -69,8 +69,6 @@ describe('console time zone', () => {
     m.setZonePreference('utc');
     expect(m.bucketLabel(day, 86_400)).toBe('Nov 22');
     expect(m.rangeLabel('2026-11-22T00:00:00.000Z..2026-11-22T04:00:00.000Z')).toBe('Nov 22, 00:00 – 04:00 UTC');
-    // Saved views named before absolute ranges carried their zone are still found under the zone-free name.
-    expect(m.rangeLabel('2026-11-22T00:00:00.000Z..2026-11-22T04:00:00.000Z', { zone: false })).toBe('Nov 22, 00:00 – 04:00');
   });
 
   it('edits custom ranges in the console zone, even on a day the browser skips an hour', async () => {
@@ -81,13 +79,48 @@ describe('console time zone', () => {
     const wall = m.toWall(start, m.zoneOffsetMs);
     expect(wall.time).toBe('02:30');
     expect(wall.day.getDate()).toBe(29);
-    expect(m.fromWall(wall.day, wall.time, m.zoneOffsetMs).toISOString()).toBe('2026-03-29T02:30:00.000Z');
+    expect(m.fromWall(wall.day, wall.time, m.zoneOffsetMs)?.toISOString()).toBe('2026-03-29T02:30:00.000Z');
     m.setZonePreference('local');
     const local = m.toWall(start, m.zoneOffsetMs);
     expect(local.time).toBe('04:30');
-    expect(m.fromWall(local.day, local.time, m.zoneOffsetMs).toISOString()).toBe('2026-03-29T02:30:00.000Z');
+    expect(m.fromWall(local.day, local.time, m.zoneOffsetMs)?.toISOString()).toBe('2026-03-29T02:30:00.000Z');
     // Typing 09:00 in UTC applies 09:00Z, not the browser's 09:00.
-    expect(m.fromWall(new Date(2026, 10, 22, 12), '09:00', () => 0).toISOString()).toBe('2026-11-22T09:00:00.000Z');
+    expect(m.fromWall(new Date(2026, 10, 22, 12), '09:00', () => 0)?.toISOString()).toBe('2026-11-22T09:00:00.000Z');
+  });
+
+  it('flags clocks that do not exist or happen twice, and never reads a window across a clock change backwards', async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-11-22T12:00:00.000Z'), toFake: ['Date'] });
+    const m = await load('Europe/Berlin');
+    const oct25 = new Date(2026, 9, 25, 12);
+    const mar29 = new Date(2026, 2, 29, 12);
+    // Berlin falls back on Oct 25 (02:00–03:00 twice) and springs forward on Mar 29 (02:00–03:00 never).
+    const twice = m.resolveWall(oct25, '02:30', m.zoneOffsetMs);
+    expect(twice.status).toBe('repeated');
+    expect(twice.date?.toISOString()).toBe('2026-10-25T00:30:00.000Z');
+    expect(m.resolveWall(mar29, '02:30', m.zoneOffsetMs).status).toBe('gap');
+    expect(m.resolveWall(mar29, '', m.zoneOffsetMs).status).toBe('invalid');
+    expect(m.resolveWall(mar29, '03:30', m.zoneOffsetMs)).toMatchObject({ status: 'ok', offsetMs: 7_200_000 });
+    expect(m.rangeLabel('2026-10-25T00:45:00.000Z..2026-10-25T01:00:00.000Z')).toBe('Oct 25, 02:45 (GMT+2) – 02:00 (GMT+1) Berlin time');
+    // Both occurrences of 02:30–02:45 read differently.
+    expect(m.rangeLabel('2026-10-25T00:30:00.000Z..2026-10-25T00:45:00.000Z')).toBe('Oct 25, 02:30 (GMT+2) – 02:45 (GMT+2) Berlin time');
+    expect(m.rangeLabel('2026-10-25T01:30:00.000Z..2026-10-25T01:45:00.000Z')).toBe('Oct 25, 02:30 (GMT+1) – 02:45 (GMT+1) Berlin time');
+    expect(m.rangeLabel('2026-10-25T04:00:00.000Z..2026-10-25T05:00:00.000Z')).toBe('Oct 25, 05:00 – 06:00 Berlin time');
+    expect(m.bucketLabel(Date.parse('2026-10-25T00:00:00.000Z'), 3600)).toBe('Oct 25, 02:00 – 02:00 (GMT+2 → GMT+1)');
+    // Multi-day buckets off the zone's midnight keep their years.
+    expect(m.bucketLabel(Date.parse('2025-12-29T00:00:00.000Z'), 7 * 86_400)).toBe('Dec 29, 2025 01:00 – Jan 5, 2026 01:00');
+  });
+
+  it('finds a saved entity view by its query and range, whatever its name or the zone it was saved in', async () => {
+    const m = await load('Europe/Berlin');
+    const { findSavedEntityView } = await import('@/components/views/save-entity-view-button');
+    const range = '2026-11-22T00:00:00.000Z..2026-11-22T04:00:00.000Z';
+    const views = [
+      { id: 'other', name: 'Hotel — nov 22, 01:00 – 05:00', state: { q: 'tenant:other', range } },
+      { id: 'legacy', name: 'Hotel — nov 22, 01:00 – 05:00', state: { q: 'tenant:biz_5', lang: 'query', range } },
+    ];
+    m.setZonePreference('utc');
+    expect(findSavedEntityView(views, 'tenant:biz_5', range)?.id).toBe('legacy');
+    expect(findSavedEntityView(views, 'tenant:biz_5', '7d')).toBeUndefined();
   });
 
   it('reads a saved choice, and keeps working in this tab when storage is blocked', async () => {

@@ -57,7 +57,9 @@ export function TimeZoneSetting() {
           <span className="text-muted-foreground text-xs">The same as exports and the API</span>
         </RadioChoice>
       </RadioGroup>
-      <p className="text-muted-foreground text-xs">Saved for this browser. Every time in the console follows it, and tooltips always show both.</p>
+      <p className="text-muted-foreground text-xs">
+        Saved for this browser. Every time in the console follows it, and timestamp tooltips always show both.
+      </p>
     </div>
   );
 }
