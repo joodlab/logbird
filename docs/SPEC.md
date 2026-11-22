@@ -497,14 +497,16 @@ target. The scan window ends at the earlier of:
 
 The worker queues for the receipt gate while writers assign their arrival clocks and register receipts.
 Unconfirmed receipts then fence the scan during ClickHouse writes. Each query examines up to five minutes of
-receive time and pages up to 100 matching event occurrences, ordered by receive time and ID. Empty slices advance
+receive time and reads up to 10,000 matching event positions, ordered by receive time and ID. Empty slices advance
 the cursor too. The event-time predicate covers the full ingest window of 3650 days before receipt
 through 24 hours after receipt. Physical reads can still span historical partitions because ClickHouse
 sorts by event time. On very large projects delivery can stall until the arrival-time index is present.
 A large historical import (many events arriving with old occurrence times) can also delay deliveries for that project until discovery has worked through it.
+Larger pages shorten that delay by requiring fewer ClickHouse queries to drain the import.
 The cursor remains in place when a scan exceeds its read budget. Discovery pauses on an implausible cursor and the
 API returns `cursorWarning: webhook_cursor_review_required` until [operator reconciliation](self-hosting.md#reconcile-a-webhook-discovery-cursor).
-The worker inserts deliveries and advances the cursor in one Postgres transaction. Deliveries are unique
+The worker commits at most 100 deliveries with their cursor position in each Postgres transaction. An interrupted page
+resumes after the last committed position. Deliveries are unique
 by endpoint, event ID, and stored receive time. If retention frees an event ID and it is used again,
 the new occurrence gets its own delivery even while the earlier delivery is retained. Disabled endpoints pause scanning and sending. On
 re-enable, scanning resumes from the saved cursor. The worker rechecks the

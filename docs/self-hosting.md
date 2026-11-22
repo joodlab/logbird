@@ -1078,6 +1078,8 @@ delivery-log pruning and retry when SMTP is available again for eligible recipie
 On very large projects delivery can stall until the arrival-time index is present.
 The cursor never skips events when a scan exceeds its read budget.
 A large historical import (many events arriving with old occurrence times) can also delay deliveries for that project until discovery has worked through it.
+Discovery reads up to 10,000 event positions per query to move through imports with fewer queries. It commits deliveries
+in batches of up to 100 and resumes after the last committed position if a scan is interrupted.
 
 If an endpoint carries more than ten active secrets from an earlier version,
 the API reports `secretOverlapWarning: webhook_secret_overlap_limit` and the
