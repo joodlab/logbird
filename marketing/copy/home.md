@@ -48,14 +48,14 @@ Every claim on the page, with its source in the repository. Update the source an
 
 | Claim (module key) | Source |
 | --- | --- |
-| Only `action` is required; recommended fields never cause a rejection (`hero.sample.caption`, `developers.lead`, `envelope.lead`, `guarantees.items[2]`) | `docs/SPEC.md` §1.1, §3 normalization rules |
+| Only `action` is required; a missing recommended field never causes a rejection (a supplied field can still be rejected, for example an `id` over 256 trimmed UTF-16 units) (`hero.sample.caption`, `developers.lead`, `envelope.lead`, `guarantees.items[2]`) | `docs/SPEC.md` §1.1, §3 normalization rules (id limits) |
 | The curl sample is a valid event (`hero.sample`) | `README.md` Quickstart; `docs/SPEC.md` §1.1 |
 | Custom fields and `metadata` searchable as attributes within the indexing limits (`developers.lead`) | `docs/SPEC.md` §3 |
 | SDK batching, retries, explicit flush and shutdown (`developers.items[0]`) | `packages/sdk/README.md` |
 | Middleware for Hono, TanStack Start and Nuxt; Vue is a reader (`developers.items[1]`) | `docs/integrations.md` (Vue is `useAuditTrail`/`AuditTimeline`, not middleware) |
 | `jobAudit` keeps the actor and joins the operation (`developers.items[2]`, `developers.code`, `developers.codeCaption`) | `packages/sdk/README.md` § Requests and workers |
 | Conformance score: nine recommended checks; the setup page lists missing fields (`developers.items[3]`) | `docs/SPEC.md` §3 (`conformance`); `packages/clickhouse/src/normalize.ts`; the setup page's field list, `ENVELOPE_FIELDS` in `packages/contracts/src/setup.ts` |
-| Before and after values for the first 256 changes per event (`operators.lead`, `operators.screenshot.caption`) | `packages/contracts/src/events.ts` (`changes` holds at most 256 entries) |
+| Before and after values for the first 256 changes per event (`operators.lead`, `operators.screenshot.caption`) | `packages/clickhouse/src/normalize.ts` (`e.changes.slice(0, 256)`: the first 256 are kept, with their before and after values) |
 | Search syntax and guarded SQL `WHERE` (`operators.features.search`) | `docs/SPEC.md` §5.1 Query language (and its SQL mode) |
 | Entity pages, operation trees, impersonation (`operators.features`) | `docs/concepts.md` (actors, tenants, executors, records, operations; `impersonator`) |
 | Retention from 7 days to 10 years, permanent deletion (`operators.features.retention`, `guarantees.items[3]`) | `packages/contracts/src/api.ts` `RETENTION_OPTIONS` (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days); `docs/SPEC.md` §1.4, §4 |
@@ -68,7 +68,7 @@ Every claim on the page, with its source in the repository. Update the source an
 | The quickstart commands (`openSource.quickstart`) | `docs/self-hosting.md` § Five-minute quickstart, via `lib/selfhost.ts` |
 | At-least-once delivery, exact retries stored once, `duplicate_id_conflict` (`guarantees.items[0]`) | `docs/SPEC.md` §2, §3; `docs/concepts.md` |
 | The SDK queue is in memory (`guarantees.items[1]`) | `packages/sdk/README.md` |
-| Per-event validation and `503` retry rules (`guarantees.items[2]`) | `docs/integrations.md` § Outage backpressure (ingest paragraph) |
+| Per-event validation and `503` retry rules (`guarantees.items[2]`) | Per-event validation: `docs/integrations.md` § Outage backpressure (ingest paragraph). Retrying only the unsettled events when a `503` lists them: `docs/SPEC.md` §2 (`Logbird-Retry: subset`) |
 | Imports with the original `occurredAt`, up to 3650 days back (`guarantees.items[4]`) | `docs/SPEC.md` §3 |
 
 ## Owner notes

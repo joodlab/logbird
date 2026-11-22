@@ -23,6 +23,15 @@ const MOVED = [
 
 /** Props and keys whose string value is always wording, even one word. */
 const WORDING = new Set(['alt', 'aria-label', 'body', 'caption', 'description', 'eyebrow', 'label', 'lead', 'note', 'placeholder', 'title']);
+/** Expressions a string passes through on its way to where it's used: `a ? 'x' : 'y'`, `ok && 'x'`, `{'x'}`, `'x' as const`. */
+const PASS_THROUGH = new Set([
+  'ConditionalExpression',
+  'LogicalExpression',
+  'JSXExpressionContainer',
+  'ParenthesizedExpression',
+  'TSAsExpression',
+  'TSSatisfiesExpression',
+]);
 /** Attributes whose value is layout, whatever it looks like. */
 const LAYOUT_ATTRIBUTES = new Set(['className', 'sizes']);
 const LAYOUT_CALLS = new Set(['cn', 'cx']);
@@ -47,21 +56,31 @@ function proseLiterals(source: string, file = 'file.tsx'): string[] {
   const found: string[] = [];
   const lineOf = (offset: number) => source.slice(0, offset).split('\n').length;
   const visit = (node: AstNode, ancestors: AstNode[]) => {
-    const layout = ancestors.some(
-      (up) =>
-        (up.type === 'JSXAttribute' && LAYOUT_ATTRIBUTES.has(nameOf(up.name) ?? '')) ||
-        (up.type === 'CallExpression' && LAYOUT_CALLS.has(nameOf(up.callee) ?? '')) ||
-        (up.type === 'VariableDeclarator' && /Class$/.test(nameOf(up.id) ?? '')),
-    );
+    // A `…Class` variable holds class names, but only as its own value: an object or array inside it is data.
+    const classVariable = ancestors.findLastIndex((up) => up.type === 'VariableDeclarator' && /Class$/.test(nameOf(up.id) ?? ''));
+    const layout =
+      ancestors.some(
+        (up) =>
+          (up.type === 'JSXAttribute' && LAYOUT_ATTRIBUTES.has(nameOf(up.name) ?? '')) ||
+          (up.type === 'Property' && LAYOUT_ATTRIBUTES.has(nameOf(up.key) ?? '')) ||
+          (up.type === 'CallExpression' && LAYOUT_CALLS.has(nameOf(up.callee) ?? '')),
+      ) ||
+      (classVariable >= 0 && !ancestors.slice(classVariable).some((up) => up.type === 'ObjectExpression' || up.type === 'ArrayExpression'));
     // A module specifier is a path, not words.
     const specifier = ancestors.at(-1)?.source === node;
-    const parent = ancestors.at(-1);
+    // Who receives the string: a prop, an object key, or the element's children (visible text, like JSX text).
+    let at = ancestors.length - 1;
+    let child: AstNode = node;
+    while (at >= 0 && PASS_THROUGH.has((ancestors[at] as AstNode).type)) child = ancestors[at--] as AstNode;
+    const holder = ancestors[at];
     const owner =
-      parent?.type === 'JSXAttribute' || (parent?.type === 'JSXExpressionContainer' && ancestors.at(-2)?.type === 'JSXAttribute')
-        ? nameOf((parent.type === 'JSXAttribute' ? parent : ancestors.at(-2))?.name)
-        : parent?.type === 'Property' && parent.value === node
-          ? nameOf(parent.key)
-          : undefined;
+      holder?.type === 'JSXAttribute'
+        ? nameOf(holder.name)
+        : holder?.type === 'Property' && holder.value === child
+          ? nameOf(holder.key)
+          : holder?.type === 'JSXElement' || holder?.type === 'JSXFragment'
+            ? 'children'
+            : undefined;
     const report = (text: string) => found.push(`${file}:${lineOf(node.start)}: "${text.trim().replace(/\s+/g, ' ')}"`);
     if (node.type === 'JSXText' && /\p{L}/u.test(node.value as string)) report(node.value as string);
     const texts =
@@ -74,7 +93,8 @@ function proseLiterals(source: string, file = 'file.tsx'): string[] {
       if (layout || specifier) continue;
       const letters = /\p{L}/u.test(text);
       // A template with text around a value is a sentence being built, so any letter counts.
-      if (TWO_WORDS.test(text) || (letters && node.type === 'TemplateElement') || (letters && owner && WORDING.has(owner))) report(text);
+      if (TWO_WORDS.test(text) || (letters && node.type === 'TemplateElement') || (letters && owner && (owner === 'children' || WORDING.has(owner))))
+        report(text);
     }
     for (const [key, value] of Object.entries(node)) {
       if (key === 'parent') continue;
@@ -97,8 +117,11 @@ describe('content modules', () => {
       '    <Tabs tabs={[{ id: "route", label: "Route", language: "ts" }]} />',
       // biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the parser, not a template
       '    {ok ? `Self-host ${version}` : "from source"}',
+      "    <p>{'Join'}</p>",
+      "    <Badge title={open ? 'Public' : 'Private'} />",
       '  </section>',
       ');',
+      "const planClass = { className: 'grid gap-2', label: 'Plans' };",
     ].join('\n');
     expect(proseLiterals(sample)).toEqual([
       'file.tsx:4: "The explorer"',
@@ -107,6 +130,11 @@ describe('content modules', () => {
       'file.tsx:7: "Route"',
       'file.tsx:8: "Self-host"',
       'file.tsx:8: "from source"',
+      'file.tsx:9: "Join"',
+      'file.tsx:10: "Public"',
+      'file.tsx:10: "Private"',
+      // The class-name exemption covers the variable's own value, not data nested in it.
+      'file.tsx:13: "Plans"',
     ]);
   });
 
