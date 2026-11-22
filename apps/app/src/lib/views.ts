@@ -6,6 +6,7 @@ import { api } from '@/lib/api/client';
 import { meQuery } from '@/lib/api/queries';
 import { splitTargetId, targetEntityId } from '@/lib/entities';
 import { canonicalField, fieldTerms, hasTopLevelOr } from '@/lib/query-language';
+import { DEFAULT_RANGE, rangeInSentence, rangeLabel } from '@/lib/range';
 
 export type ViewLabel = NonNullable<SavedView['state']['labels']>[number];
 export type ViewLabelField = ViewLabel['field'];
@@ -34,6 +35,18 @@ const MAX_RESOLVED_TERMS = 6;
 const ENTITY_VIEW_NAME_MAX = 80;
 
 /**
+ * Whether `name` is exactly what the record page generated for this label and range: `<label> — <range>` cut to 80
+ * characters, in the current spelling (`rangeInSentence`) or the earlier one (the range label with a lowercase first
+ * letter). Any other name, such as one typed through the API, is not the page's own save. An absolute range whose label
+ * has changed since the view was saved no longer matches, so that view stays as saved (the safe side).
+ */
+function recordPageName(name: string, label: string, range: string): boolean {
+  const rl = rangeLabel(range);
+  const forms = [rangeInSentence(rl), `${rl.charAt(0).toLowerCase()}${rl.slice(1)}`];
+  return forms.some((r) => `${label} — ${r}`.slice(0, ENTITY_VIEW_NAME_MAX) === name);
+}
+
+/**
  * Views saved from a record page before exact record matching (#169) hold `target:<id> target.type:<type>` (which also
  * matches the type on one target and the id on another) plus a Record label for that id. Opening one shows the exact
  * `record:<type>:<id>` form instead; nothing is written until the reader saves it. Only a record page's own save is
@@ -46,10 +59,7 @@ export function upgradeRecordView(view: Pick<SavedView, 'name' | 'state'>): { st
   const q = state.q ?? '';
   const label = state.labels?.find((l) => l.field === 'target');
   if (state.lang === 'sql' || !label || hasTopLevelOr(q)) return { state, upgraded: false };
-  // The record page named it `<label> — <range>`, cut to 80 characters: a long label can leave only a prefix of it.
-  const generated = `${label.label} — `;
-  const pageName = view.name.startsWith(generated) || (view.name.length === ENTITY_VIEW_NAME_MAX && generated.startsWith(view.name));
-  if (state.columns !== undefined || !pageName) return { state, upgraded: false };
+  if (state.columns !== undefined || !recordPageName(view.name, label.label, state.range ?? DEFAULT_RANGE)) return { state, upgraded: false };
   const [first, second] = fieldTerms(q);
   const simple = (t: typeof first) => t && !t.negated && !t.wildcard && (t.valueKind === 'plain' || t.valueKind === 'quoted') && t.value;
   if (!simple(first) || !simple(second) || !first || !second) return { state, upgraded: false };
