@@ -55,6 +55,8 @@ const FIELD_KINDS: Record<string, FieldKind> = {
   cards: 'list',
   annotations: 'list',
   'topic options': 'list',
+  'volume options': 'list',
+  'needs options': 'list',
   fields: 'list',
   'facts panel': 'dots',
   checklist: 'dots',
