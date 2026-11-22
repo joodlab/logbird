@@ -97,7 +97,7 @@ public class IngestRoundTripTests(ITestOutputHelper output)
         var count = await LiveServer.CountAsync(reader, $"operation:\"{operation}\"", 20);
         await Task.Delay(2000);
         count = await LiveServer.CountAsync(reader, $"operation:\"{operation}\"", 20);
-        output.WriteLine($"server received the batch {handler.Forwarded} times; stored {count} events");
+        output.WriteLine($"server accepted the batch {handler.Forwarded} times (other responses passed through: {handler.OtherResponses}); stored {count} events");
         Assert.Equal(20, count);
     }
 
