@@ -320,6 +320,11 @@ set by `event_id` when needed; cursor = `(timestamp, event_id)` keyset; `total` 
 count capped at 10,001 with a one-second guard that runs beside the row query. Rows never fail
 because of the count: when the count is capped, times out or fails, `totalExact: false` marks `total` as a lower
 bound (at least the rows returned, plus one when there is a next page) and the console shows "≥ N" or "10,000+".
+A page waits at most one second for its count, whatever the HTTP request is doing. Server-side cleanup differs: the
+writable client's count stops at its one-second `max_execution_time`; a restricted SQL count is cancelled when
+ClickHouse notices the closed connection, which is cooperative, and is otherwise bounded by the restricted profile's
+10 seconds (measured locally: a deliberately sleeping restricted count finished after 3 s while the page had returned at
+1.0 s).
 
 ## 5. Server API
 

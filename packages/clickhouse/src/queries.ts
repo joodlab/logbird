@@ -69,25 +69,32 @@ export async function read<T>(
     });
   };
   execution?.signal.addEventListener('abort', cancel, { once: true });
+  let closeOnAbort: (() => void) | undefined;
   try {
-    const rows = await (
-      await ch.query({
-        query,
-        query_id: queryId,
-        query_params,
-        format: 'JSONEachRow',
-        abort_signal: abortSignal,
-        clickhouse_settings: {
-          ...(abortSignal ? { cancel_http_readonly_queries_on_client_close: 1 } : {}),
-          max_execution_time: isQueryClient(ch) ? 10 : guard,
-          // Restricted SQL's CONST profile supplies 1-GiB memory/read limits and reserves both API admission slots.
-          ...(exportBudget && !isQueryClient(ch)
-            ? { max_memory_usage: '134217728', max_bytes_to_read: '268435456', read_overflow_mode: 'throw' as const, max_threads: 2 }
-            : {}),
-          ...(isQueryClient(ch) ? { SQL_logbird_project: project as string } : {}),
-        },
-      })
-    ).json<T>();
+    const resultSet = await ch.query({
+      query,
+      query_id: queryId,
+      query_params,
+      format: 'JSONEachRow',
+      abort_signal: abortSignal,
+      clickhouse_settings: {
+        ...(abortSignal ? { cancel_http_readonly_queries_on_client_close: 1 } : {}),
+        max_execution_time: isQueryClient(ch) ? 10 : guard,
+        // Restricted SQL's CONST profile supplies 1-GiB memory/read limits and reserves both API admission slots.
+        ...(exportBudget && !isQueryClient(ch)
+          ? { max_memory_usage: '134217728', max_bytes_to_read: '268435456', read_overflow_mode: 'throw' as const, max_threads: 2 }
+          : {}),
+        ...(isQueryClient(ch) ? { SQL_logbird_project: project as string } : {}),
+      },
+    });
+    // The driver stops watching abort_signal once headers arrive; close the body stream ourselves so a stalled body
+    // cannot outlive an abort.
+    if (abortSignal) {
+      closeOnAbort = () => resultSet.close();
+      if (abortSignal.aborted) closeOnAbort();
+      else abortSignal.addEventListener('abort', closeOnAbort, { once: true });
+    }
+    const rows = await resultSet.json<T>();
     execution?.signal.throwIfAborted();
     return rows;
   } catch (error) {
@@ -107,6 +114,7 @@ export async function read<T>(
       throw sqlSyntaxError(error, query, (query_params as Record<symbol, string>)[sqlExpression] ?? '');
     throw error;
   } finally {
+    if (closeOnAbort) abortSignal?.removeEventListener('abort', closeOnAbort);
     execution?.signal.removeEventListener('abort', cancel);
     // Keep the original response open: aborting HTTP alone does not prove the SELECT stopped.
     // An early KILL with no match still waits for this read to finish before releasing capacity.
@@ -177,23 +185,45 @@ function cursor(s: string): [string, string] {
 export const COUNT_CAP = 10_001;
 /** Wall-clock budget for the count, also for restricted SQL whose CONST profile allows statements 10 seconds. */
 export const COUNT_BUDGET_MS = 1000;
+type CountResult = { n: number; exact: boolean };
+/**
+ * The count settles by its deadline whatever its HTTP request is doing (stalled headers or body): the deadline resolves
+ * the lower-bound fallback and aborts the request. Server cleanup differs by client: the writable client's statement
+ * stops at its one-second max_execution_time; the restricted readonly client's statement is cancelled when ClickHouse
+ * notices the closed connection (cooperative), bounded by its CONST ten-second profile.
+ */
 function countMatches(ch: ClickHouseClient, w: { sql: string; params: Params }) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), COUNT_BUDGET_MS);
-  const result = (async (): Promise<{ n: number; exact: boolean }> => {
+  const fallback: CountResult = { n: 0, exact: false };
+  let stopped: 'budget' | 'cancelled' | undefined;
+  let settle: (value: CountResult) => void = () => undefined;
+  const deadline = new Promise<CountResult>((resolve) => {
+    settle = resolve;
+  });
+  const stop = (why: 'budget' | 'cancelled') => {
+    if (stopped) return;
+    stopped = why;
+    console.warn(JSON.stringify({ level: 'warn', event: 'search.count_unavailable', reason: why }));
+    controller.abort();
+    settle(fallback);
+  };
+  const timer = setTimeout(() => stop('budget'), COUNT_BUDGET_MS);
+  const counted = (async (): Promise<CountResult> => {
     try {
       const sql = `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT ${COUNT_CAP})`;
       const n = Number((await read<{ n: number }>(ch, sql, w.params, 1, false, undefined, controller.signal))[0]?.n ?? 0);
       return { n, exact: n < COUNT_CAP };
     } catch (error) {
-      const reason = controller.signal.aborted ? 'budget' : error instanceof QueryError ? error.details.reason : 'error';
-      console.warn(JSON.stringify({ level: 'warn', event: 'search.count_unavailable', reason }));
-      return { n: 0, exact: false };
+      if (!stopped) {
+        const reason = error instanceof QueryError ? error.details.reason : 'error';
+        console.warn(JSON.stringify({ level: 'warn', event: 'search.count_unavailable', reason }));
+      }
+      return fallback;
     } finally {
       clearTimeout(timer);
     }
   })();
-  return { result, cancel: () => controller.abort() };
+  return { result: Promise.race([counted, deadline]), cancel: () => stop('cancelled') };
 }
 async function searchPage(
   ch: ClickHouseClient,
@@ -233,7 +263,7 @@ async function searchPage(
     Boolean(exportClock),
     execution,
   ).catch(async (error) => {
-    // A failed row query must not wait for the count: cancel it, then observe its settlement.
+    // A failed row query must not wait for the count: cancelling settles it at once.
     counted?.cancel();
     await counted?.result;
     throw error;

@@ -28,3 +28,30 @@ it('formats exact totals, lower bounds and the cap', () => {
   expect(formatSearchTotal({ count: 101, exact: false })).toBe('≥ 101');
   expect(formatSearchTotal({ count: 10_001, exact: false })).toBe('10,000+');
 });
+
+it('never shows a total below the rows on screen', () => {
+  // Page one said 101 exactly; later pages brought 200 distinct rows and say 200 exactly.
+  expect(
+    searchTotal(
+      [
+        { total: 101, totalExact: true },
+        { total: 200, totalExact: true },
+      ],
+      200,
+      false,
+    ),
+  ).toEqual({ count: 200, exact: true });
+  // Every count timed out; two full pages and a next page prove at least 201.
+  expect(
+    searchTotal(
+      [
+        { total: 101, totalExact: false },
+        { total: 101, totalExact: false },
+      ],
+      200,
+      true,
+    ),
+  ).toEqual({ count: 201, exact: false });
+  // An exact total below what is loaded is disproved.
+  expect(searchTotal([{ total: 50, totalExact: true }], 80, false)).toEqual({ count: 80, exact: false });
+});

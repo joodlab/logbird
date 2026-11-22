@@ -17,9 +17,9 @@ const isCount = (sql: string) => sql.startsWith('SELECT count() n FROM (SELECT D
 // The row and count statements run concurrently: answer and inspect each by purpose, never by call order.
 function client(rows: ReturnType<typeof row>[], total: number | Error = rows.length) {
   const query = vi.fn(async (args: { query: string }) => {
-    if (!isCount(args.query)) return { json: async () => rows };
+    if (!isCount(args.query)) return { json: async () => rows, close: vi.fn() };
     if (total instanceof Error) throw total;
-    return { json: async () => [{ n: total }] };
+    return { json: async () => [{ n: total }], close: vi.fn() };
   });
   const call = (count: boolean) =>
     query.mock.calls.find(([args]) => isCount(args.query) === count)?.[0] as { query: string; query_params: Record<string, unknown> };
@@ -99,6 +99,36 @@ it('never reports a total below the rows a page proves, and marks a failed count
     total: 10_001,
     totalExact: false,
   });
+});
+it('settles a stalled count body by its deadline and closes the stream', async () => {
+  const b = row('b', '2026-11-07T10:02:00.000Z');
+  const close = vi.fn();
+  const query = vi.fn(async (args: { query: string }) =>
+    isCount(args.query) ? { json: () => new Promise(() => undefined), close } : { json: async () => [b], close: vi.fn() },
+  );
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const started = Date.now();
+  const page = await searchEvents({ query } as unknown as ClickHouseClient, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 });
+  expect(Date.now() - started).toBeLessThan(1500);
+  expect(page).toMatchObject({ total: 1, totalExact: false });
+  expect(close).toHaveBeenCalled();
+  expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)).reason)).toEqual(['budget']);
+  warn.mockRestore();
+});
+it('fails a row error at once, cancelling a stalled count instead of waiting for it', async () => {
+  const close = vi.fn();
+  const query = vi.fn(async (args: { query: string }) => {
+    if (isCount(args.query)) return { json: () => new Promise(() => undefined), close };
+    throw new Error('fictional row failure');
+  });
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const started = Date.now();
+  await expect(searchEvents({ query } as unknown as ClickHouseClient, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 })).rejects.toThrow(
+    'fictional row failure',
+  );
+  expect(Date.now() - started).toBeLessThan(500);
+  expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)).reason)).toEqual(['cancelled']);
+  warn.mockRestore();
 });
 it('returns no cursor for an empty page', async () => {
   const { ch } = client([], 0);

@@ -42,6 +42,7 @@ function WorkspaceActivity() {
   }, [debounced]);
 
   const activity = useInfiniteQuery(workspaceActivityQuery(range, q));
+  const activityTotal = searchTotal(activity.data?.pages, activity.data?.pages.reduce((n, p) => n + p.data.length, 0) ?? 0, activity.hasNextPage);
   const rows = useMemo(() => activity.data?.pages.flatMap((p) => p.data) ?? [], [activity.data]);
   // The result set the table shows, as of the last non-placeholder results (the query keeps the previous rows while a
   // new search or chip loads): the table starts a new set at the top even when it shares rows with the old one.
@@ -103,9 +104,7 @@ function WorkspaceActivity() {
             ))}
           </fieldset>
           <span className="text-muted-foreground text-xs sm:ms-auto">
-            {activity.data
-              ? `${formatSearchTotal(searchTotal(activity.data.pages))} ${searchTotal(activity.data.pages).count === 1 ? 'action' : 'actions'} · ${rangeLabel(range)}`
-              : null}
+            {activity.data ? `${formatSearchTotal(activityTotal)} ${activityTotal.count === 1 ? 'action' : 'actions'} · ${rangeLabel(range)}` : null}
           </span>
         </div>
       </div>
