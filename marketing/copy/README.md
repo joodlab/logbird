@@ -106,7 +106,7 @@ can be added when it lands, each with its source.
 
 ## Self-host CTA rule
 
-Nobody outside the team can self-host until the repository is public (no published images, no npm packages). While
+The repository is public and release images are on GHCR; the npm packages aren't published yet. While
 `WEB_GITHUB_PUBLIC` is false the site must not offer a clone/compose quickstart or say "Self-host … today":
 
 - Secondary CTA: **"Self-host when the source opens"** → `/contact?interest=self-host` (the waitlist, self-host preselected).

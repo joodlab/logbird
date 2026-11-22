@@ -4,12 +4,18 @@ import { SiteCode, SiteCodeTabs } from '../components/marketing/code';
 import { CtaBand } from '../components/marketing/cta-band';
 import { FeatureRow } from '../components/marketing/feature-row';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
-import { GITHUB_PUBLIC } from '../env';
+import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
+import { SELF_HOST_VERSION } from '../lib/selfhost';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/developers')({ head: () => pageHead('/developers'), component: DevelopersPage });
 
 // Copy: marketing/copy/developers.md. Every sample is checked against packages/sdk and packages/integrations READMEs.
+/** The working install until the packages are on npm (packages/sdk/README.md): link the SDK from a checkout of the release. */
+const sourceInstall = `git clone --branch v${SELF_HOST_VERSION} ${GITHUB_URL}.git ../logbird
+pnpm -C ../logbird install
+pnpm add @logbird/sdk@link:../logbird/packages/sdk`;
+
 const quickstart = `import { Logbird } from '@logbird/sdk';
 
 const client = new Logbird({
@@ -263,12 +269,12 @@ function DevelopersPage() {
         title="Install, create a client, track an event."
         visual={
           <div className="flex flex-col gap-3">
-            <SiteCode code="npm install @logbird/sdk" language="bash" title="After the first npm release" />
+            {GITHUB_PUBLIC ? <SiteCode code={sourceInstall} language="bash" title="From source (not on npm yet)" /> : null}
             <SiteCode code={quickstart} language="ts" title="server.ts" />
             <p className="text-muted-foreground text-sm">
               {GITHUB_PUBLIC
-                ? 'The packages publish to npm with the first release.'
-                : 'The packages publish to npm with the first release, when the repository opens.'}
+                ? "The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite or esbuild."
+                : "The packages aren't on npm yet."}
             </p>
           </div>
         }

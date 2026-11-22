@@ -8,6 +8,7 @@
 
 import { GITHUB_PUBLIC } from '../env';
 import { CLOUD_OPEN } from './cloud';
+import { latestRelease } from './releases';
 
 export const ACCESSED = '2026-11-07';
 
@@ -59,6 +60,10 @@ const src = (id: string, title: string, url: string, also?: string[]): Compariso
   ...(also ? { also } : {}),
   accessed: ACCESSED,
 });
+
+/** `2026-11-22` as `22 Nov 2026`, the date style of the comparison tables (UTC, so server and client agree). */
+const shortDate = (date: string) =>
+  new Date(`${date}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
 const range = (prefix: string, from: number, to: number) => Array.from({ length: to - from + 1 }, (_, index) => `${prefix}${from + index}`);
 
@@ -125,7 +130,7 @@ const retraced: Comparison = {
     { label: 'Pricing', logbird: LOGBIRD_PRICING, them: 'No pricing page found', sourceIds: ['S8'] },
     {
       label: 'Latest release',
-      logbird: 'Not released yet (0.1 line)',
+      logbird: latestRelease ? `v${latestRelease.version}, ${shortDate(latestRelease.date)}; first release v0.1.0, 9 Nov 2026` : 'v0.1.0, 9 Nov 2026',
       them: 'v1.13.1, 6 Nov 2024; latest commit on `main` 26 Aug 2025; not archived',
       sourceIds: ['S16', 'S17'],
     },
@@ -134,7 +139,7 @@ const retraced: Comparison = {
     'You want to **embed an audit log viewer in your own React app**, so customers can browse their own events.',
     "Your customers' IT teams need a **programmatic API of their own** to pull their events.",
     'You prefer **Apache-2.0**, or you already run Postgres and Elasticsearch and want the audit log there too.',
-    "You want a project with **a release history** behind it. Logbird hasn't made its first release yet.",
+    "You want a project with **a long release history** behind it. Logbird's first release was in November 2026.",
   ],
   chooseLogbird: [
     'You want to **send any event shape** and get a recommended envelope without a fixed schema.',

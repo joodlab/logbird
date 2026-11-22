@@ -242,8 +242,8 @@ function HomePage() {
               <p className="eyebrow">Self-host quickstart</p>
               <p className="font-semibold text-lg">Available when the repository opens.</p>
               <p className="text-muted-foreground text-sm leading-relaxed">
-                On one VM: clone, generate secrets, configure SMTP, build the four roles, then <code>docker compose up -d --no-build</code>. We'll
-                publish the commands here the day the source is public.
+                On one VM: clone, generate secrets, configure SMTP, pull the images, then <code>docker compose up -d --no-build</code>. We'll publish
+                the commands here the day the source is public.
               </p>
               <div>
                 <ButtonLink search={{ interest: 'self-host' }} to="/contact" variant="outline">

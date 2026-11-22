@@ -30,7 +30,7 @@ path: /compare/pangea
   | | Logbird | Pangea Secure Audit Log |
   | --- | --- | --- |
   | Licence and source | MIT | Hosted service, no source published; SDKs and the viewer component are MIT [P8, P9] |
-  | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: …, built from source" once public) | No self-host option documented; Pangea's Edge and Private Cloud models don't list the audit service [P10, P11] |
+  | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: Docker Compose or Coolify, with published images" once public) | No self-host option documented; Pangea's Edge and Private Cloud models don't list the audit service [P10, P11] |
   | Hosting model | Self-hosted when the source opens (MIT); Logbird Cloud waitlist <!-- public repo: Self-hosted, MIT; Logbird Cloud waitlist --> | Hosted by Pangea [P12] |
   | Schema | Any JSON with an `action`; recommended envelope | Templates (for example Timestamp, Actor, Action, Status, Target, Source, Tenant ID, Old, New, Message) or a custom schema per configuration; the schema can't change after creation [P13] |
   | Tamper evidence | None | Merkle-tree tamperproofing, roots published to Arweave, optional event signing [P2] |

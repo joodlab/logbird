@@ -8,6 +8,7 @@ import { SecurityContact } from '../components/marketing/security-contact';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { StackedTable } from '../components/marketing/stacked-table';
 import { GITHUB_PUBLIC, GITHUB_URL, ORG_NAME } from '../env';
+import { latestRelease } from '../lib/releases';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/open-source')({ head: () => pageHead('/open-source'), component: OpenSourcePage });
@@ -154,7 +155,10 @@ function OpenSourcePage() {
               </li>
               <li className="flex gap-3">
                 <span aria-hidden="true" className="mt-2.5 size-1.5 shrink-0 rounded-full bg-brand" />
-                <span>There are no CI workflows yet. Checks and Docker builds run by hand before a release.</span>
+                <span>
+                  GitHub Actions runs the checks on every pull request and push to master. A <code>v*</code> tag builds the release images for amd64
+                  and arm64 and publishes them to GHCR.
+                </span>
               </li>
             </ul>
           </div>
@@ -199,7 +203,7 @@ function OpenSourcePage() {
             <SectionHeader
               eyebrow="Versions"
               id="versions-title"
-              lead="Version 0.1 is the first supported line. The SDK and the Hono integration are at 0.2. Nothing has been released yet: there are no npm packages or Docker images. Both come with the first release."
+              lead={`Version 0.1 is the first supported line.${latestRelease ? ` The latest release is ${latestRelease.version}, with Docker images on GHCR for amd64 and arm64.` : ''} The SDK and the integrations aren't on npm yet: use them from source.`}
               title="Where the project is today."
             />
             <div>
@@ -211,9 +215,9 @@ function OpenSourcePage() {
           <dl className="panel grid grid-cols-2 overflow-hidden">
             {[
               { label: 'Supported line', value: '0.1' },
-              { label: 'SDK and Hono integration', value: '0.2' },
-              { label: 'npm packages', value: 'Not released' },
-              { label: 'Docker images', value: 'Not released' },
+              { label: 'Latest release', value: latestRelease ? latestRelease.version : '—' },
+              { label: 'Docker images', value: 'GHCR' },
+              { label: 'npm packages', value: 'Not yet' },
             ].map((item) => (
               <div className="flex flex-col gap-1 border-b p-5 odd:border-e [&:nth-last-child(-n+2)]:border-b-0" key={item.label}>
                 <dt className="text-muted-foreground text-sm">{item.label}</dt>

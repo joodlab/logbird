@@ -27,7 +27,7 @@ path: /compare/retraced
   | | Logbird | Retraced |
   | --- | --- | --- |
   | Licence | MIT | Apache-2.0 [S5] |
-  | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: …, built from source" once public) | Yes: Docker Compose; also documented for DigitalOcean, AWS and Skaffold; the Kubernetes docs page says "Coming soon" [S6, S7] |
+  | Self-host | Planned: Docker Compose or Coolify, when the source opens ("Yes: Docker Compose or Coolify, with published images" once public) | Yes: Docker Compose; also documented for DigitalOcean, AWS and Skaffold; the Kubernetes docs page says "Coming soon" [S6, S7] |
   | Hosted offering | Logbird Cloud: waitlist only | None found [S8] |
   | Required event fields | `action` only; any other shape accepted | `action` and `crud` in the API spec; the docs also list `actor` as mandatory [S9, S10] |
   | Tenant field | `tenant` (optional) | `group` (optional in the API spec) [S10] |
@@ -37,7 +37,7 @@ path: /compare/retraced
   | Programmatic read | `GET /v1/events` with a project read key | Enterprise API (GraphQL) for end customers [S15] |
   | Storage | ClickHouse for events, Postgres for metadata | Postgres; optional Elasticsearch; NSQ queue [S4, S13] |
   | Pricing | Self-host free (MIT); Cloud pricing not set | No pricing page found [S8] |
-  | Latest release | Not released yet (0.1 line) | v1.13.1, 6 Nov 2024; latest commit on `main` 26 Aug 2025; not archived [S16, S17] |
+  | Latest release | `<latest release>`; first release v0.1.0, 9 Nov 2026 | v1.13.1, 6 Nov 2024; latest commit on `main` 26 Aug 2025; not archived [S16, S17] |
 
 - **visual:** none
 
@@ -49,7 +49,7 @@ path: /compare/retraced
   - You want to **embed an audit log viewer in your own React app**, so customers can browse their own events.
   - Your customers' IT teams need a **programmatic API of their own** to pull their events.
   - You prefer **Apache-2.0**, or you already run Postgres and Elasticsearch and want the audit log there too.
-  - You want a project with **a release history** behind it. Logbird hasn't made its first release yet.
+  - You want a project with **a long release history** behind it. Logbird's first release was in November 2026.
 - **visual:** none
 
 ## choose-us

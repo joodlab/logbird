@@ -25,15 +25,17 @@ path: /developers
 - **body:** The SDK has no dependencies. It runs on Node 22+ and in modern runtimes with Fetch and Web Crypto. It
   batches events, retries failures and gives each event an id and a timestamp if you don't.
   <!-- source: packages/sdk/README.md -->
-- **install (labelled "After the first npm release"):**
+- **install (labelled "From source (not on npm yet)", shown once `WEB_GITHUB_PUBLIC=true`):**
 
   ```sh
-  npm install @logbird/sdk
+  git clone --branch v<latest release> <WEB_GITHUB_URL>.git ../logbird
+  pnpm -C ../logbird install
+  pnpm add @logbird/sdk@link:../logbird/packages/sdk
   ```
 
-  Small print: "The packages publish to npm with the first release, when the repository opens." Once
-  `WEB_GITHUB_PUBLIC=true`: "The packages publish to npm with the first release."
-  <!-- source: docs/roadmap.md P0-3; npm registry 404 for @logbird/sdk on 2026-11-07 -->
+  Small print: "The packages aren't on npm yet. The SDK exports TypeScript: run it with tsx or a bundler such as Vite
+  or esbuild." While the repository is private: "The packages aren't on npm yet."
+  <!-- source: packages/sdk/README.md (source install); npm registry 404 for @logbird/sdk on 2026-11-22 -->
 - **code sample:**
 
   ```ts

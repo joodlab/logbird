@@ -21,7 +21,8 @@ path: /self-hosting
   own servers. It's the same codebase Logbird Cloud will run.
   <!-- source: LICENSE; docs/SPEC.md intro ("one codebase, self-host or cloud") -->
 - **cta:** Quickstart ↓ `#quickstart` (public repo only) · Join the Cloud waitlist → `/contact`
-- **small print:** Source on GitHub — coming soon. Self-hosting builds from source; no images are published yet.
+- **small print:** Source on GitHub — coming soon. Once `WEB_GITHUB_PUBLIC=true`: "Compose pulls the published
+  `<latest release>` images for amd64 and arm64 from `ghcr.io/<owner>`."
   <!-- when WEB_GITHUB_PUBLIC=true: drop "Source on GitHub — coming soon." -->
 - **visual:** a diagram of the Compose stack (console, api, worker, postgres, clickhouse, redis). The 2026-11-05
   self-hosting captures show the old name and a real key prefix, so they aren't used.
@@ -30,25 +31,22 @@ path: /self-hosting
 
 - **id:** `quickstart`
 - **eyebrow:** Quickstart
-- **heading:** From clone to your first event. <!-- no time claim: source builds vary by machine -->
-- **body:** You need Docker Engine and Docker Compose 2.24.4 or newer. The first build takes longer, depending on
-  your CPU and network. <!-- source: docs/self-hosting.md §Five-minute quickstart -->
+- **heading:** From clone to your first event.
+- **body:** You need Docker Engine and Docker Compose 2.24.4 or newer. Compose pulls four published images; nothing
+  is compiled on your server. <!-- source: docs/self-hosting.md §Five-minute quickstart -->
 - **code sample (rendered only once `WEB_GITHUB_PUBLIC=true`; until then the section reads "The quickstart is published
   when the repository opens." with the self-host CTA — see `README.md` § Self-host CTA rule):**
 
   ```sh
-  git clone <WEB_GITHUB_URL>.git
+  git clone --branch v<latest release> <WEB_GITHUB_URL>.git
   cd logbird
   sh scripts/selfhost-init.sh   # creates .env and generates secrets
-  # Set SMTP in .env, or set AUTH_LOG_SIGN_IN_CODES=true for a first test.
-  # Build the four roles one at a time (less peak memory), then start without rebuilding.
-  docker compose build migrate
-  docker compose build server
-  docker compose build worker
-  docker compose build app
+  # Set SMTP in .env, or AUTH_LOG_SIGN_IN_CODES=true for a first local test.
+  # Internet-facing? Also set AUTH_SIGNUP=restricted and AUTH_SIGNUP_DOMAINS.
+  docker compose pull
   docker compose up -d --no-build
   ```
-  <!-- source: docs/self-hosting.md (after #51): sequential builds, pull_policy: build, up --no-build -->
+  <!-- source: apps/web/src/lib/selfhost.ts; docs/self-hosting.md §Five-minute quickstart -->
 
 - **steps after the code:**
   1. Open `http://localhost:4600` and sign in with the code sent to your email.
@@ -78,9 +76,8 @@ path: /self-hosting
   - A Linux host, or any machine that runs Linux containers, with Docker Engine and Compose 2.24.4 or newer.
   - An SMTP provider for sign-in codes and invitations, for example Amazon SES, Postmark or Brevo.
   - A domain and ports 80 and 443 if you want automatic HTTPS.
-  - **Starting size:** 4 vCPU, 8 GB RAM and SSD storage. That's an initial allocation, not measured capacity. Building
-    from source needs more headroom: build the roles one at a time, and leave disk for images and build cache as well
-    as your data, ClickHouse merges and backups.
+  - **Starting size:** 4 vCPU, 8 GB RAM and SSD storage. That's an initial allocation, not measured capacity. Leave disk
+    for images as well as your data, ClickHouse merges and backups; building from source needs more headroom still.
   - **Access:** sign-up is open: anyone who can reach the console can create an account and a workspace. Keep it private
     while you evaluate, or restrict who can reach it.
   <!-- source: docs/self-hosting.md §SMTP and first login, §Caddy TLS, §Sizing, §Five-minute quickstart (after #51) -->
@@ -97,7 +94,7 @@ path: /self-hosting
      the API and worker start.
      <!-- source: docs/self-hosting.md; docs/deployment.md -->
   2. **Coolify.** Point Coolify's Docker Compose build pack at `docker-compose.coolify.yml`. Coolify generates the
-     secrets and routes your domain to the console. Builds run from source.
+     secrets, pulls the published images and routes your domain to the console.
      <!-- source: docs/coolify.md -->
   3. **Bring your own databases.** Use your own Postgres, ClickHouse and Redis (or Dragonfly) with
      `docker-compose.external.yml`. Use ClickHouse 26.9. Logbird creates its own restricted query user
@@ -169,8 +166,6 @@ path: /self-hosting
 - **eyebrow:** Not there yet
 - **heading:** What self-hosting doesn't include today.
 - **bullets:**
-  - **Published images.** You build from source; publishing to a registry is still being decided (#88). Smaller runtime
-    images are in progress (#67, #68).
   - **High availability.** The Compose setup is a single VM. It has no failover.
   - **Published capacity numbers.** We haven't published load-test results yet. Size from your own measurements.
   - **SSO.** Sign-in is by emailed code only. SSO is on the roadmap.

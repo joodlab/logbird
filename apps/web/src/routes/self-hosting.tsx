@@ -90,7 +90,7 @@ function SelfHostingPage() {
             <p className="text-muted-foreground text-sm">
               {GITHUB_PUBLIC
                 ? `Compose pulls the published ${SELF_HOST_VERSION} images for amd64 and arm64 from ${IMAGE_NAMESPACE}.`
-                : 'Source on GitHub — coming soon. Self-hosting builds from source; no images are published yet.'}
+                : 'Source on GitHub — coming soon.'}
             </p>
           </div>
         }
@@ -160,9 +160,8 @@ function SelfHostingPage() {
               The quickstart is published when the repository opens.
             </h2>
             <p className="lead max-w-3xl">
-              On one VM: clone the repository, generate secrets, configure SMTP, build the four roles one at a time, start them with{' '}
+              On one VM: clone the repository, generate secrets, configure SMTP, pull the published images, start them with{' '}
               <code>docker compose up -d --no-build</code> and send your first event. You need Docker Engine and Docker Compose 2.24.4 or newer.
-              Self-hosting builds from source; no images are published yet.
             </p>
             <div>
               <SelfHostCta size="default" variant="outline" />

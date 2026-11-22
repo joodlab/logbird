@@ -62,7 +62,8 @@ path: /open-source
   Maintainers merge.
 - **bullets:**
   - API changes start in `packages/contracts`. The server and console change in the same pull request.
-  - There are no CI workflows yet. Checks and Docker builds run by hand before a release.
+  - GitHub Actions runs the checks on every pull request and push to master. A `v*` tag builds the release images for
+    amd64 and arm64 and publishes them to GHCR.
 - **visual:** none
 
 ## conduct
@@ -94,10 +95,11 @@ path: /open-source
 - **id:** `versions`
 - **eyebrow:** Versions
 - **heading:** Where the project is today.
-- **body:** Version 0.1 is the first supported line. The SDK and the Hono integration are at 0.2. Nothing has been
-  released yet: there are no npm packages or Docker images. Both come with the first release.
+- **body:** Version 0.1 is the first supported line. The latest release is `<latest release>`, with Docker images on
+  GHCR for amd64 and arm64. The SDK and the integrations aren't on npm yet: use them from source.
+  <!-- the version comes from the release list (apps/web/src/lib/releases.ts); packages/*/package.json are 0.1.3 -->
   <!-- source: SECURITY.md ("Version 0.1.x is the initial supported line"); CHANGELOG.md (both "Unreleased"); packages/sdk/package.json (0.2.0) -->
-- **facts panel:** Supported line — 0.1 · SDK and Hono integration — 0.2 · npm packages — Not released · Docker images —
-  Not released.
+- **facts panel:** Supported line — 0.1 · Latest release — `<latest release>` · Docker images — GHCR · npm packages —
+  Not yet.
 - **cta:** Read the changelog → `/changelog`
 - **visual:** none
