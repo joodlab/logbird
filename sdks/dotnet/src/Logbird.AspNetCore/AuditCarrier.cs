@@ -9,7 +9,10 @@ namespace Logbird.AspNetCore;
 /// </summary>
 public sealed record AuditCarrier
 {
-    /// <summary>Lists no values (it carries user and tenant ids), so logging this object cannot leak them.</summary>
+    /// <summary>
+    /// <c>ToString()</c> lists no values (the carrier holds user and tenant ids). A structured logger that serializes its
+    /// properties still sees them, so do not log carriers.
+    /// </summary>
 #pragma warning disable CA1822 // The compiler-generated record ToString calls this instance member by name.
     private bool PrintMembers(System.Text.StringBuilder builder)
     {

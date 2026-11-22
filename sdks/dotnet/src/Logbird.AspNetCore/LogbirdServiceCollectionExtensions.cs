@@ -21,12 +21,13 @@ public static class LogbirdServiceCollectionExtensions
     public const string LogbirdHttpClientName = "Logbird";
 
     /// <summary>
-    /// Registers a singleton <see cref="ILogbirdClient"/>, a scoped <see cref="IAuditLog"/>, an <see cref="IAuditLogFactory"/>
-    /// for background jobs, and a hosted service that sends what is queued when the host stops.
+    /// Registers an <see cref="ILogbirdClient"/>, a scoped <see cref="IAuditLog"/>, an <see cref="IAuditLogFactory"/> for
+    /// background jobs, and a hosted service that sends what is queued when the host stops. Call it once; later calls do
+    /// not change the registered client.
     /// </summary>
     /// <param name="services">The services.</param>
     /// <param name="configure">Sets the client options (endpoint, ingest key, batching, redaction, callbacks).</param>
-    /// <param name="configureRequests">Optionally changes how requests fill the audit context.</param>
+    /// <param name="configureRequests">Optionally changes how requests fill the audit context. Runs during this call.</param>
     /// <example>
     /// <code>
     /// builder.Services.AddLogbird(o =>
@@ -55,7 +56,7 @@ public static class LogbirdServiceCollectionExtensions
     /// <param name="services">The services.</param>
     /// <param name="section">The configuration section.</param>
     /// <param name="configure">Adjusts the options after binding.</param>
-    /// <param name="configureRequests">Optionally changes how requests fill the audit context.</param>
+    /// <param name="configureRequests">Optionally changes how requests fill the audit context. Runs during this call.</param>
     public static IServiceCollection AddLogbird(
         this IServiceCollection services,
         IConfiguration section,
@@ -71,36 +72,37 @@ public static class LogbirdServiceCollectionExtensions
 
     private static IServiceCollection AddLogbirdCore(this IServiceCollection services, LogbirdOptions options, Action<LogbirdRequestOptions>? configureRequests)
     {
-        // Fail at startup, not on the first event.
-        options.ValidateForHost();
+        // Fail at startup, not on the first event or job: the options are checked and the request callback runs now.
+        options.Validate();
+        var requestOptions = new LogbirdRequestOptions();
+        configureRequests?.Invoke(requestOptions);
         services.AddHttpContextAccessor();
 
-        // A long-lived client: connections are recycled by the handler, and redirects are never followed (they could
-        // forward the audit body to another origin).
+        // A long-lived client: connections are recycled by the handler, redirects are never followed by this handler
+        // (they could forward the audit body to another origin), and the factory's request logging never prints header
+        // values, so the Authorization header cannot reach a log on any runtime.
         services.AddHttpClient(LogbirdHttpClientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false })
-            .SetHandlerLifetime(Timeout.InfiniteTimeSpan);
+            .SetHandlerLifetime(Timeout.InfiniteTimeSpan)
+            .RedactLoggedHeaders(static _ => true);
 
         services.TryAddSingleton(provider =>
         {
-            var requestOptions = new LogbirdRequestOptions();
-            requestOptions.ServiceName = provider.GetService<IHostEnvironment>()?.ApplicationName;
-            configureRequests?.Invoke(requestOptions);
+            requestOptions.ServiceName ??= provider.GetService<IHostEnvironment>()?.ApplicationName;
             return requestOptions;
         });
-        services.TryAddSingleton<LogbirdClient>(provider => new LogbirdClient(
+        services.TryAddSingleton(provider => new LogbirdClientOwner(new LogbirdClient(
             options,
             provider.GetRequiredService<IHttpClientFactory>().CreateClient(LogbirdHttpClientName),
-            provider.GetService<ILoggerFactory>()?.CreateLogger("Logbird")));
-        services.TryAddSingleton<ILogbirdClient>(provider => provider.GetRequiredService<LogbirdClient>());
+            provider.GetService<ILoggerFactory>()?.CreateLogger("Logbird"))));
+
+        // Not disposable: the owner alone decides how shutdown waits, so disposing the container cannot wait again.
+        services.TryAddSingleton<ILogbirdClient>(provider => new HostedLogbirdClient(provider.GetRequiredService<LogbirdClientOwner>().Client));
         services.TryAddScoped<IAuditLog, RequestAuditLog>();
         services.TryAddSingleton<IAuditLogFactory, AuditLogFactory>();
-        services.AddHostedService<LogbirdShutdown>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, LogbirdShutdown>());
         return services;
     }
-
-    // The same checks the client runs, without starting one.
-    private static void ValidateForHost(this LogbirdOptions options) => options.Validate();
 
     private static LogbirdOptions Bind(IConfiguration section)
     {
@@ -124,9 +126,9 @@ public static class LogbirdServiceCollectionExtensions
         options.RequestTimeout = Time(section, "RequestTimeout") ?? options.RequestTimeout;
         if (section["QueueFullBehavior"] is { Length: > 0 } behavior)
         {
-            options.QueueFullBehavior = Enum.TryParse<QueueFullBehavior>(behavior, ignoreCase: true, out var parsed)
+            options.QueueFullBehavior = Enum.TryParse<QueueFullBehavior>(behavior, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
                 ? parsed
-                : throw Invalid("QueueFullBehavior", "Block, DropNewest or DropOldest");
+                : throw Invalid("QueueFullBehavior", "DropOldest or DropNewest");
         }
 
         if (section["RedactKeys"] is { Length: > 0 } keys)
@@ -166,42 +168,5 @@ public static class LogbirdApplicationBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(app);
         return app.UseMiddleware<LogbirdMiddleware>();
-    }
-}
-
-/// <summary>Captures the request's audit context once per request.</summary>
-internal sealed class LogbirdMiddleware(RequestDelegate next, LogbirdRequestOptions options)
-{
-    public Task InvokeAsync(HttpContext context)
-    {
-        try
-        {
-            context.Features.Set(RequestContext.Capture(context, options));
-        }
-        catch
-        {
-            // Audit context is best effort; the request must go on.
-        }
-
-        return next(context);
-    }
-}
-
-/// <summary>Sends what is queued when the host stops, within the host's shutdown budget.</summary>
-internal sealed class LogbirdShutdown(LogbirdClient client) : IHostedService
-{
-    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public async Task StopAsync(CancellationToken cancellationToken)
-    {
-        // DisposeAsync is bounded by ShutdownTimeout and reports anything unsent through OnDrop; it never throws. If the
-        // host's own shutdown budget runs out first, the host moves on and the client still finishes within ShutdownTimeout.
-        try
-        {
-            await client.DisposeAsync().AsTask().WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-        }
     }
 }

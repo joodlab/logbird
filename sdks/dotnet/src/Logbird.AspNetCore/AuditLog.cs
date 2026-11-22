@@ -1,16 +1,19 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
-using System.Globalization;
+using System.Security.Claims;
 using System.Text.RegularExpressions;
+using Logbird.Internal;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
 
 namespace Logbird.AspNetCore;
 
 /// <summary>
 /// Records audit events with the current request's context filled in: actor and tenant from the signed-in user, IP,
 /// user agent, request, trace and operation ids, and an <c>api</c> executor. Inject it into controllers, minimal API
-/// handlers and services. Like the client, it never throws and never waits for the network.
+/// handlers and services. Like the client, it never throws and never waits for the network; it does run your configure
+/// callback, the resolvers in <see cref="LogbirdRequestOptions"/> and the event's serialization synchronously, so keep
+/// those fast. Events tracked directly through <see cref="ILogbirdClient"/> are not filled in.
 /// </summary>
 /// <example>
 /// <code>
@@ -23,20 +26,34 @@ namespace Logbird.AspNetCore;
 /// </example>
 public interface IAuditLog
 {
-    /// <summary>Records an event and returns its id (use it as a <see cref="AuditContext.ParentEventId"/> for follow-up events).</summary>
+    /// <summary>
+    /// Records an event and returns the id it was recorded under (use it as a <see cref="AuditContext.ParentEventId"/>
+    /// for follow-up events). If <paramref name="configure"/> throws, the half-built event is not recorded: it is
+    /// reported once through <see cref="LogbirdOptions.OnDrop"/> as <see cref="DropReason.Invalid"/>.
+    /// </summary>
     /// <param name="action">A stable, dot-separated name, for example <c>invoice.updated</c>.</param>
-    /// <param name="configure">Fills targets, changes and anything else; values set here win over the request context.</param>
-    string Record(string action, Action<AuditEvent>? configure = null);
+    /// <param name="configure">
+    /// Fills targets, changes and anything else; values set here win over the request context. It must complete
+    /// synchronously (an <c>async</c> lambda would let the event be recorded before it finishes).
+    /// </param>
+    /// <param name="fill">
+    /// Which empty fields are filled from the request. Defaults to <see cref="LogbirdRequestOptions.Fill"/>. A field set to
+    /// <see langword="null"/> counts as empty; to leave it out, remove its flag.
+    /// </param>
+    string Record(string action, Action<AuditEvent>? configure = null, AuditFill? fill = null);
 
-    /// <summary>Records a prepared event, filling in what it leaves empty, and returns its id.</summary>
-    /// <param name="auditEvent">The event. Values it sets win over the request context.</param>
-    string Record(AuditEvent auditEvent);
+    /// <summary>Records a copy of a prepared event, filling in what it leaves empty, and returns the id it was recorded under.</summary>
+    /// <param name="auditEvent">The event. It is never changed; values it sets win over the request context.</param>
+    /// <param name="fill">Which empty fields are filled from the request. Defaults to <see cref="LogbirdRequestOptions.Fill"/>.</param>
+    string Record(AuditEvent auditEvent, AuditFill? fill = null);
 
     /// <summary>
     /// Captures the context a background job needs to continue this operation (operation, request and trace ids, actor,
-    /// impersonator, tenant). Pass the id of the event that started the job as <paramref name="parentEventId"/>.
+    /// impersonator, tenant), as the request or job sees it, not as one event overrode it. Pass the id of the event that
+    /// started the job as <paramref name="parentEventId"/>; to carry an event's own actor or operation instead, adjust
+    /// the result with a <c>with</c> expression.
     /// </summary>
-    /// <param name="parentEventId">The event that caused the job, usually the id <see cref="Record(string, Action{AuditEvent})"/> returned.</param>
+    /// <param name="parentEventId">The event that caused the job, usually the id <see cref="Record(string, Action{AuditEvent}, AuditFill?)"/> returned.</param>
     AuditCarrier Carrier(string? parentEventId = null);
 }
 
@@ -44,8 +61,11 @@ public interface IAuditLog
 public interface IAuditLogFactory
 {
     /// <summary>
-    /// An audit log for one job attempt. Events keep the carrier's actor, tenant, operation and parent event, and record
-    /// the worker as executor. Without a carrier, the actor defaults to <c>AuditActor.System(worker)</c>.
+    /// An audit log for one job attempt. With a carrier, events keep exactly the carrier's actor, impersonator, tenant,
+    /// operation, request and trace ids and parent event (absent values stay absent), and record the worker as executor.
+    /// Without a carrier (scheduled work), the actor is <c>AuditActor.System(worker)</c>, the operation is new and the
+    /// trace id is the one current when this method is called. <see cref="IAuditLog.Carrier"/> on the result hands the
+    /// same context to a follow-up job.
     /// </summary>
     /// <param name="carrier">The context captured with <see cref="IAuditLog.Carrier"/> when the job was enqueued.</param>
     /// <param name="jobId">The job id.</param>
@@ -54,12 +74,44 @@ public interface IAuditLogFactory
     IAuditLog ForJob(AuditCarrier? carrier, string? jobId = null, int? attempt = null, string? worker = null);
 }
 
-/// <summary>The per-request context captured by the Logbird middleware.</summary>
+/// <summary>Which empty fields <see cref="IAuditLog"/> fills from the request or job context.</summary>
+[Flags]
+public enum AuditFill
+{
+    /// <summary>Fill nothing.</summary>
+    None = 0,
+
+    /// <summary>The actor (from the signed-in user, or the job's carrier).</summary>
+    Actor = 1,
+
+    /// <summary>The tenant.</summary>
+    Tenant = 2,
+
+    /// <summary>The impersonator (only when a resolver or carrier provides one).</summary>
+    Impersonator = 4,
+
+    /// <summary>The executor (<c>api</c> for requests, <c>worker</c> for jobs).</summary>
+    Executor = 8,
+
+    /// <summary>The operation, request and trace ids, and a job's parent event.</summary>
+    Correlation = 16,
+
+    /// <summary>The client IP address.</summary>
+    Ip = 32,
+
+    /// <summary>The user agent.</summary>
+    UserAgent = 64,
+
+    /// <summary>Everything above.</summary>
+    All = Actor | Tenant | Impersonator | Executor | Correlation | Ip | UserAgent,
+}
+
+/// <summary>The per-request context, captured once per request (the middleware, or the first event or carrier).</summary>
 internal sealed class AuditRequestFeature
 {
     public string OperationId { get; init; } = string.Empty;
 
-    public string RequestId { get; init; } = string.Empty;
+    public string? RequestId { get; init; }
 
     public string? TraceId { get; init; }
 
@@ -68,227 +120,311 @@ internal sealed class AuditRequestFeature
     public string? UserAgent { get; init; }
 }
 
-/// <summary>The request-scoped <see cref="IAuditLog"/>.</summary>
-internal sealed partial class RequestAuditLog(ILogbirdClient client, IHttpContextAccessor accessor, LogbirdRequestOptions options, ILogger<RequestAuditLog> logger)
-    : IAuditLog
+/// <summary>The path every <see cref="IAuditLog"/> records through: copy, fill, track, never throw.</summary>
+internal static class Recording
 {
-    public string Record(string action, Action<AuditEvent>? configure = null)
+    public static string RecordNew(LogbirdClient client, string? action, Action<AuditEvent>? configure, Action<AuditEvent> fill)
     {
-        AuditEvent auditEvent;
+        var name = action ?? string.Empty;
+        var auditEvent = new AuditEvent(name);
         try
         {
-            auditEvent = new AuditEvent(action ?? string.Empty);
             configure?.Invoke(auditEvent);
         }
         catch (Exception e)
         {
-            // A throwing configure callback is the caller's bug; record what we can rather than throw into the request.
-            LogConfigureFailed(logger, e.GetType().Name);
-            auditEvent = new AuditEvent(action ?? string.Empty);
+            // A half-built event would record wrong data, so it is not recorded; the drop is reported once.
+            var id = SafeId(auditEvent);
+            client.DropUnrecorded(DropReason.Invalid, id, name, "the configure callback threw " + e.GetType().Name + ".");
+            return id ?? string.Empty;
         }
 
-        return RecordOwned(auditEvent);
+        return Finish(client, auditEvent, fill);
     }
 
-    // The caller's instance is never changed: reusing it for another Record must not reuse its id.
-    public string Record(AuditEvent auditEvent) => RecordPrepared(client, auditEvent, RecordOwned);
-
-    /// <summary>Records a copy of a prepared event; the caller's instance is never changed.</summary>
-    internal static string RecordPrepared(ILogbirdClient client, AuditEvent? auditEvent, Func<AuditEvent, string> recordOwned)
+    public static string RecordPrepared(LogbirdClient client, AuditEvent? prepared, Action<AuditEvent> fill)
     {
-        if (auditEvent is null)
+        if (prepared is null)
         {
+            client.DropUnrecorded(DropReason.Invalid, null, null, "Record was called without an event.");
             return string.Empty;
         }
 
         AuditEvent copy;
         try
         {
-            copy = auditEvent.Clone();
-        }
-        catch (InvalidOperationException)
-        {
-            // Too deep to copy safely. The client checks it without changing it, drops it as invalid and reports it.
-            client.Track(auditEvent);
-            return auditEvent.Id ?? string.Empty;
-        }
-
-        return recordOwned(copy);
-    }
-
-    private string RecordOwned(AuditEvent auditEvent)
-    {
-        try
-        {
-            auditEvent.Id ??= LogbirdClient.NewEventId();
-            auditEvent.OccurredAt ??= DateTimeOffset.UtcNow;
-            var http = accessor.HttpContext;
-            if (http is not null)
+            // The client's own depth and size limits apply before anything is copied: an event it would drop is handed
+            // over unchanged, and the client reports it.
+            if (JsonDepth.Measure(prepared, LogbirdClient.MaxEventBytes) != JsonDepth.Shape.Ok)
             {
-                Fill(auditEvent, http);
+                return client.TrackCore(prepared) ?? SafeId(prepared) ?? string.Empty;
             }
 
-            auditEvent.Executor ??= AuditExecutor.Api(options.ServiceName);
-            client.Track(auditEvent);
-            return auditEvent.Id;
+            copy = prepared.Clone();
         }
         catch (Exception e)
         {
-            LogRecordFailed(logger, e.GetType().Name);
-            return auditEvent?.Id ?? string.Empty;
+            var id = SafeId(prepared);
+            client.DropUnrecorded(DropReason.Invalid, id, SafeAction(prepared), "the event could not be copied (" + e.GetType().Name + ").");
+            return id ?? string.Empty;
+        }
+
+        return Finish(client, copy, fill);
+    }
+
+    private static string Finish(LogbirdClient client, AuditEvent auditEvent, Action<AuditEvent> fill)
+    {
+        try
+        {
+            // The context may be a template the caller shares between events; fill a private copy.
+            var context = auditEvent.Context;
+            auditEvent.Context = new AuditContext
+            {
+                OperationId = context.OperationId,
+                ParentEventId = context.ParentEventId,
+                RequestId = context.RequestId,
+                TraceId = context.TraceId,
+                Ip = context.Ip,
+                UserAgent = context.UserAgent,
+            };
+            fill(auditEvent);
+        }
+        catch (Exception e)
+        {
+            // Each fill step is guarded on its own; this only catches the unexpected, and the event is still recorded.
+            client.ReportDiagnostic("Logbird could not fill an audit event's context (" + e.GetType().Name + "); it was recorded with what was available.");
+        }
+
+        return client.TrackCore(auditEvent) ?? SafeId(auditEvent) ?? string.Empty;
+    }
+
+    private static string? SafeId(AuditEvent auditEvent)
+    {
+        try
+        {
+            return auditEvent.Id;
+        }
+        catch
+        {
+            return null;
         }
     }
+
+    private static string? SafeAction(AuditEvent auditEvent)
+    {
+        try
+        {
+            return auditEvent.Action;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}
+
+/// <summary>The request-scoped <see cref="IAuditLog"/>.</summary>
+internal sealed class RequestAuditLog(LogbirdClientOwner owner, IHttpContextAccessor accessor, LogbirdRequestOptions options) : IAuditLog
+{
+    // Resolvers are synchronous, so a thread-static flag sees a Record made from inside one.
+    [ThreadStatic]
+    private static bool t_resolving;
+
+    private LogbirdClient Client => owner.Client;
+
+    public string Record(string action, Action<AuditEvent>? configure = null, AuditFill? fill = null)
+        => Recording.RecordNew(Client, action, configure, e => Fill(e, fill ?? options.Fill));
+
+    public string Record(AuditEvent auditEvent, AuditFill? fill = null)
+        => Recording.RecordPrepared(Client, auditEvent, e => Fill(e, fill ?? options.Fill));
 
     public AuditCarrier Carrier(string? parentEventId = null)
     {
         try
         {
             var http = accessor.HttpContext;
-            var feature = http?.Features.Get<AuditRequestFeature>();
+            var feature = http is null ? null : RequestContext.GetOrCapture(http, options, Client);
             return new AuditCarrier
             {
                 OperationId = feature?.OperationId ?? LogbirdClient.NewEventId(),
-                RequestId = feature?.RequestId ?? http?.TraceIdentifier,
-                TraceId = feature?.TraceId ?? RequestContext.CurrentTraceId(),
+                RequestId = feature?.RequestId,
+                TraceId = feature is null ? RequestContext.CurrentTraceId() : feature.TraceId,
                 ParentEventId = parentEventId,
-                Actor = http is null ? null : Resolve(options.ResolveActor ?? DefaultActor, http),
-                Impersonator = http is null || options.ResolveImpersonator is null ? null : Resolve(options.ResolveImpersonator, http),
-                Tenant = http is null ? null : Resolve(options.ResolveTenant ?? DefaultTenant, http),
+                Actor = http is null ? null : Resolve(options.ResolveActor ?? DefaultActor, http, "actor"),
+                Impersonator = http is null || options.ResolveImpersonator is null ? null : Resolve(options.ResolveImpersonator, http, "impersonator"),
+                Tenant = http is null ? null : Resolve(options.ResolveTenant ?? DefaultTenant, http, "tenant"),
             };
         }
         catch (Exception e)
         {
-            LogRecordFailed(logger, e.GetType().Name);
+            Client.ReportDiagnostic("Logbird could not capture an audit carrier (" + e.GetType().Name + "); a new operation was started.");
             return new AuditCarrier { OperationId = LogbirdClient.NewEventId(), ParentEventId = parentEventId };
         }
     }
 
-    private void Fill(AuditEvent e, HttpContext http)
+    private void Fill(AuditEvent e, AuditFill fill)
     {
-        var feature = http.Features.Get<AuditRequestFeature>() ?? RequestContext.Capture(http, options);
-        var context = e.Context;
-        context.OperationId ??= feature.OperationId;
-        context.RequestId ??= feature.RequestId;
-        context.TraceId ??= feature.TraceId;
-        context.Ip ??= feature.Ip;
-        context.UserAgent ??= feature.UserAgent;
-        e.Actor ??= Resolve(options.ResolveActor ?? DefaultActor, http);
-        e.Tenant ??= Resolve(options.ResolveTenant ?? DefaultTenant, http);
-        if (options.ResolveImpersonator is not null)
+        var http = accessor.HttpContext;
+        if (http is not null)
         {
-            e.Impersonator ??= Resolve(options.ResolveImpersonator, http);
+            var feature = RequestContext.GetOrCapture(http, options, Client);
+            var context = e.Context;
+            if ((fill & AuditFill.Correlation) != 0)
+            {
+                context.OperationId ??= feature.OperationId;
+                context.RequestId ??= feature.RequestId;
+                context.TraceId ??= feature.TraceId;
+            }
+
+            if ((fill & AuditFill.Ip) != 0)
+            {
+                context.Ip ??= feature.Ip;
+            }
+
+            if ((fill & AuditFill.UserAgent) != 0)
+            {
+                context.UserAgent ??= feature.UserAgent;
+            }
+
+            if ((fill & AuditFill.Actor) != 0 && e.Actor is null)
+            {
+                e.Actor = Resolve(options.ResolveActor ?? DefaultActor, http, "actor");
+            }
+
+            if ((fill & AuditFill.Tenant) != 0 && e.Tenant is null)
+            {
+                e.Tenant = Resolve(options.ResolveTenant ?? DefaultTenant, http, "tenant");
+            }
+
+            if ((fill & AuditFill.Impersonator) != 0 && e.Impersonator is null && options.ResolveImpersonator is not null)
+            {
+                e.Impersonator = Resolve(options.ResolveImpersonator, http, "impersonator");
+            }
+        }
+
+        if ((fill & AuditFill.Executor) != 0)
+        {
+            e.Executor ??= AuditExecutor.Api(options.ServiceName);
         }
     }
 
-    private T? Resolve<T>(Func<HttpContext, T?> resolver, HttpContext http)
+    private T? Resolve<T>(Func<HttpContext, T?> resolver, HttpContext http, string kind)
         where T : class
     {
+        // A resolver that records an audit event itself would otherwise resolve again for that event, without end.
+        if (t_resolving)
+        {
+            return null;
+        }
+
+        t_resolving = true;
         try
         {
             return resolver(http);
         }
         catch (Exception e)
         {
-            LogResolverFailed(logger, typeof(T).Name, e.GetType().Name);
+            Client.ReportDiagnostic("Logbird: the " + kind + " resolver threw " + e.GetType().Name + "; the event was recorded without it.");
             return null;
+        }
+        finally
+        {
+            t_resolving = false;
         }
     }
 
+    // Defaults read only the authenticated primary identity, so claims from another identity on the principal never mix in.
     private AuditActor? DefaultActor(HttpContext http)
     {
-        var user = http.User;
-        if (user?.Identity?.IsAuthenticated != true)
+        var identity = RequestContext.AuthenticatedIdentity(http);
+        var id = identity is null ? null : RequestContext.FirstClaim(identity, options.ActorIdClaimTypes);
+        if (identity is null || string.IsNullOrEmpty(id))
         {
             return null;
         }
 
-        var id = RequestContext.FirstClaim(user, options.ActorIdClaimTypes);
-        if (string.IsNullOrEmpty(id))
-        {
-            return null;
-        }
-
-        return AuditActor.User(id!, RequestContext.FirstClaim(user, options.ActorNameClaimTypes), RequestContext.FirstClaim(user, options.ActorEmailClaimTypes));
+        return AuditActor.User(id!, RequestContext.FirstClaim(identity, options.ActorNameClaimTypes), RequestContext.FirstClaim(identity, options.ActorEmailClaimTypes));
     }
 
     private AuditTenant? DefaultTenant(HttpContext http)
     {
-        var id = http.User is null ? null : RequestContext.FirstClaim(http.User, options.TenantIdClaimTypes);
+        var identity = RequestContext.AuthenticatedIdentity(http);
+        var id = identity is null ? null : RequestContext.FirstClaim(identity, options.TenantIdClaimTypes);
         return string.IsNullOrEmpty(id) ? null : new AuditTenant(id!);
     }
-
-    [LoggerMessage(EventId = 101, Level = LogLevel.Warning, Message = "Logbird: an audit event's configure callback threw {ExceptionType}; the event was recorded without it")]
-    private static partial void LogConfigureFailed(ILogger logger, string exceptionType);
-
-    [LoggerMessage(EventId = 102, Level = LogLevel.Warning, Message = "Logbird: recording an audit event failed with {ExceptionType}")]
-    private static partial void LogRecordFailed(ILogger logger, string exceptionType);
-
-    [LoggerMessage(EventId = 103, Level = LogLevel.Warning, Message = "Logbird: the {Kind} resolver threw {ExceptionType}; the event was recorded without it")]
-    private static partial void LogResolverFailed(ILogger logger, string kind, string exceptionType);
 }
 
 /// <summary>An <see cref="IAuditLog"/> for one background job attempt.</summary>
-internal sealed class JobAuditLog(ILogbirdClient client, AuditCarrier? carrier, AuditExecutor executor) : IAuditLog
+internal sealed class JobAuditLog : IAuditLog
 {
-    private readonly string _operationId = carrier?.OperationId ?? LogbirdClient.NewEventId();
+    private readonly LogbirdClient _client;
+    private readonly AuditCarrier _context;
+    private readonly AuditExecutor _executor;
+    private readonly AuditFill _defaultFill;
 
-    public string Record(string action, Action<AuditEvent>? configure = null)
+    public JobAuditLog(LogbirdClient client, AuditCarrier? carrier, AuditExecutor executor, AuditFill defaultFill)
     {
-        var auditEvent = new AuditEvent(action ?? string.Empty);
-        try
-        {
-            configure?.Invoke(auditEvent);
-        }
-        catch
-        {
-            auditEvent = new AuditEvent(action ?? string.Empty);
-        }
+        _client = client;
+        _executor = executor;
+        _defaultFill = defaultFill;
 
-        return RecordOwned(auditEvent);
+        // Decided once, so Record and Carrier agree: a carrier is kept as it is (absent values stay absent); scheduled
+        // work gets a system actor, a new operation and the trace current now.
+        _context = carrier is not null
+            ? carrier with { OperationId = carrier.OperationId ?? LogbirdClient.NewEventId() }
+            : new AuditCarrier
+            {
+                OperationId = LogbirdClient.NewEventId(),
+                TraceId = RequestContext.CurrentTraceId(),
+                Actor = AuditActor.System(executor.Id ?? "worker"),
+            };
     }
 
-    public string Record(AuditEvent auditEvent) => RequestAuditLog.RecordPrepared(client, auditEvent, RecordOwned);
+    public string Record(string action, Action<AuditEvent>? configure = null, AuditFill? fill = null)
+        => Recording.RecordNew(_client, action, configure, e => Fill(e, fill ?? _defaultFill));
 
-    private string RecordOwned(AuditEvent auditEvent)
+    public string Record(AuditEvent auditEvent, AuditFill? fill = null)
+        => Recording.RecordPrepared(_client, auditEvent, e => Fill(e, fill ?? _defaultFill));
+
+    public AuditCarrier Carrier(string? parentEventId = null) => _context with { ParentEventId = parentEventId };
+
+    private void Fill(AuditEvent e, AuditFill fill)
     {
-        try
+        if ((fill & AuditFill.Actor) != 0)
         {
-            auditEvent.Id ??= LogbirdClient.NewEventId();
-            auditEvent.OccurredAt ??= DateTimeOffset.UtcNow;
-            auditEvent.Actor ??= carrier?.Actor ?? AuditActor.System(executor.Id ?? "worker");
-            auditEvent.Impersonator ??= carrier?.Impersonator;
-            auditEvent.Tenant ??= carrier?.Tenant;
-            auditEvent.Executor ??= executor;
-            var context = auditEvent.Context;
-            context.OperationId ??= _operationId;
-            context.RequestId ??= carrier?.RequestId;
-            context.TraceId ??= carrier?.TraceId ?? RequestContext.CurrentTraceId();
-            context.ParentEventId ??= carrier?.ParentEventId;
-            client.Track(auditEvent);
-            return auditEvent.Id;
+            e.Actor ??= _context.Actor;
         }
-        catch
+
+        if ((fill & AuditFill.Impersonator) != 0)
         {
-            return auditEvent?.Id ?? string.Empty;
+            e.Impersonator ??= _context.Impersonator;
+        }
+
+        if ((fill & AuditFill.Tenant) != 0)
+        {
+            e.Tenant ??= _context.Tenant;
+        }
+
+        if ((fill & AuditFill.Executor) != 0)
+        {
+            e.Executor ??= _executor;
+        }
+
+        if ((fill & AuditFill.Correlation) != 0)
+        {
+            var context = e.Context;
+            context.OperationId ??= _context.OperationId;
+            context.RequestId ??= _context.RequestId;
+            context.TraceId ??= _context.TraceId;
+            context.ParentEventId ??= _context.ParentEventId;
         }
     }
-
-    public AuditCarrier Carrier(string? parentEventId = null) => new()
-    {
-        OperationId = _operationId,
-        RequestId = carrier?.RequestId,
-        TraceId = carrier?.TraceId,
-        ParentEventId = parentEventId,
-        Actor = carrier?.Actor,
-        Impersonator = carrier?.Impersonator,
-        Tenant = carrier?.Tenant,
-    };
 }
 
-internal sealed class AuditLogFactory(ILogbirdClient client, LogbirdRequestOptions options) : IAuditLogFactory
+internal sealed class AuditLogFactory(LogbirdClientOwner owner, LogbirdRequestOptions options) : IAuditLogFactory
 {
     public IAuditLog ForJob(AuditCarrier? carrier, string? jobId = null, int? attempt = null, string? worker = null)
-        => new JobAuditLog(client, carrier, AuditExecutor.Worker(worker ?? options.ServiceName ?? "worker", jobId, attempt));
+        => new JobAuditLog(owner.Client, carrier, AuditExecutor.Worker(worker ?? options.ServiceName ?? "worker", jobId, attempt), options.Fill);
 }
 
 /// <summary>Captures request details once per request.</summary>
@@ -297,18 +433,52 @@ internal static partial class RequestContext
     private const int MaxIdLength = 256;
     private const int MaxUserAgentLength = 1024;
 
-    public static AuditRequestFeature Capture(HttpContext http, LogbirdRequestOptions options)
+    /// <summary>
+    /// The request's context: captured once and stored on the request, so the middleware, events recorded before it,
+    /// and a re-executed pipeline (an exception handler) all share one operation id.
+    /// </summary>
+    public static AuditRequestFeature GetOrCapture(HttpContext http, LogbirdRequestOptions options, LogbirdClient client)
     {
-        var headers = http.Request.Headers;
-        var operation = options.UseOperationHeader ? Header(headers, "X-Logbird-Operation", MaxIdLength) : null;
-        var requestId = options.UseRequestIdHeader ? Header(headers, "X-Request-Id", MaxIdLength) : null;
+        AuditRequestFeature? existing = null;
+        try
+        {
+            existing = http.Features.Get<AuditRequestFeature>();
+        }
+        catch (Exception e)
+        {
+            Report(client, "stored context", e);
+        }
+
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var captured = Capture(http, options, client);
+        try
+        {
+            http.Features.Set(captured);
+        }
+        catch (Exception e)
+        {
+            Report(client, "stored context", e);
+        }
+
+        return captured;
+    }
+
+    private static AuditRequestFeature Capture(HttpContext http, LogbirdRequestOptions options, LogbirdClient client)
+    {
+        // Each detail is optional: one that cannot be read is left out and reported; the rest are still captured.
+        var operation = options.UseOperationHeader ? Read(client, "operation header", () => Id(http.Request.Headers, "X-Logbird-Operation")) : null;
+        var requestId = options.UseRequestIdHeader ? Read(client, "request id header", () => Id(http.Request.Headers, "X-Request-Id")) : null;
         return new AuditRequestFeature
         {
             OperationId = operation ?? LogbirdClient.NewEventId(),
-            RequestId = requestId ?? http.TraceIdentifier,
-            TraceId = CurrentTraceId() ?? TraceParent(Header(headers, "traceparent", 128)),
-            Ip = http.Connection.RemoteIpAddress?.ToString(),
-            UserAgent = Header(headers, "User-Agent", MaxUserAgentLength),
+            RequestId = requestId ?? Read(client, "trace identifier", () => http.TraceIdentifier),
+            TraceId = Read(client, "trace id", () => CurrentTraceId() ?? TraceParent(Header(http.Request.Headers, "traceparent"))),
+            Ip = Read(client, "client IP", () => http.Connection.RemoteIpAddress?.ToString()),
+            UserAgent = Read(client, "user agent", () => Truncate(Header(http.Request.Headers, "User-Agent"), MaxUserAgentLength)),
         };
     }
 
@@ -325,11 +495,15 @@ internal static partial class RequestContext
         return id == "00000000000000000000000000000000" ? null : id;
     }
 
-    public static string? FirstClaim(System.Security.Claims.ClaimsPrincipal user, System.Collections.Generic.IEnumerable<string> types)
+    /// <summary>The request's primary identity, when it is authenticated.</summary>
+    public static ClaimsIdentity? AuthenticatedIdentity(HttpContext http)
+        => http.User?.Identity is ClaimsIdentity { IsAuthenticated: true } identity ? identity : null;
+
+    public static string? FirstClaim(ClaimsIdentity identity, IEnumerable<string> types)
     {
         foreach (var type in types)
         {
-            var value = user.FindFirst(type)?.Value;
+            var value = identity.FindFirst(type)?.Value;
             if (!string.IsNullOrEmpty(value))
             {
                 return value;
@@ -339,6 +513,22 @@ internal static partial class RequestContext
         return null;
     }
 
+    private static string? Read(LogbirdClient client, string what, Func<string?> read)
+    {
+        try
+        {
+            return read();
+        }
+        catch (Exception e)
+        {
+            Report(client, what, e);
+            return null;
+        }
+    }
+
+    private static void Report(LogbirdClient client, string what, Exception e)
+        => client.ReportDiagnostic("Logbird could not read the request's " + what + " (" + e.GetType().Name + "); events are recorded without it.");
+
     private static string? TraceParent(string? header)
     {
         if (header is null)
@@ -347,15 +537,21 @@ internal static partial class RequestContext
         }
 
         var match = TraceParentPattern().Match(header);
-        if (!match.Success || match.Groups[1].Value == "00000000000000000000000000000000" || match.Groups[2].Value == "0000000000000000")
+
+        // Version ff is forbidden; an all-zero trace or parent id is invalid.
+        if (!match.Success || match.Groups[1].Value == "ff" || match.Groups[2].Value == "00000000000000000000000000000000" || match.Groups[3].Value == "0000000000000000")
         {
             return null;
         }
 
-        return match.Groups[1].Value;
+        return match.Groups[2].Value;
     }
 
-    private static string? Header(IHeaderDictionary headers, string name, int maxLength)
+    // A correlation id is used whole or not at all: cutting it could make two different ids equal.
+    private static string? Id(IHeaderDictionary headers, string name)
+        => Header(headers, name) is { Length: <= MaxIdLength } value ? value : null;
+
+    private static string? Header(IHeaderDictionary headers, string name)
     {
         if (!headers.TryGetValue(name, out var values) || values.Count != 1)
         {
@@ -363,14 +559,21 @@ internal static partial class RequestContext
         }
 
         var value = values[0];
-        if (string.IsNullOrEmpty(value))
-        {
-            return null;
-        }
-
-        return value!.Length > maxLength ? value.Substring(0, maxLength) : value;
+        return string.IsNullOrEmpty(value) ? null : value;
     }
 
-    [GeneratedRegex("^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 100)]
+    // Descriptive text only; never splits a surrogate pair.
+    private static string? Truncate(string? value, int maxLength)
+    {
+        if (value is null || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        var length = char.IsHighSurrogate(value[maxLength - 1]) ? maxLength - 1 : maxLength;
+        return value.Substring(0, length);
+    }
+
+    [GeneratedRegex("^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 100)]
     private static partial Regex TraceParentPattern();
 }

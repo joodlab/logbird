@@ -17,7 +17,17 @@ public sealed class LogbirdRequestOptions
     /// </summary>
     public string? ServiceName { get; set; }
 
-    /// <summary>Claim types tried, in order, for the actor id. Defaults to <c>sub</c> and <see cref="ClaimTypes.NameIdentifier"/>.</summary>
+    /// <summary>
+    /// Which empty fields every event is filled with, unless a <c>Record</c> call passes its own. Defaults to
+    /// <see cref="AuditFill.All"/>; remove <see cref="AuditFill.Ip"/> or <see cref="AuditFill.UserAgent"/>, for example,
+    /// to never record them.
+    /// </summary>
+    public AuditFill Fill { get; set; } = AuditFill.All;
+
+    /// <summary>
+    /// Claim types tried, in order, for the actor id. Defaults to <c>sub</c> and <see cref="ClaimTypes.NameIdentifier"/>.
+    /// The default resolvers read only the request's authenticated primary identity (<c>HttpContext.User.Identity</c>).
+    /// </summary>
     public IList<string> ActorIdClaimTypes { get; } = ["sub", ClaimTypes.NameIdentifier];
 
     /// <summary>Claim types tried, in order, for the actor's display name. Defaults to <c>name</c> and <see cref="ClaimTypes.Name"/>.</summary>
@@ -35,7 +45,8 @@ public sealed class LogbirdRequestOptions
     /// <summary>
     /// Resolves the actor for a request. Defaults to a <c>user</c> actor from the claims above when the request is
     /// authenticated, otherwise none. Return <see langword="null"/> for no actor. Runs on the request thread when an
-    /// event is recorded; it must be fast. If it throws, the event is recorded without an actor and the error reported.
+    /// event is recorded; it must be fast. If it throws, the event is recorded without an actor and the error reported
+    /// (exception type only). An event recorded from inside a resolver is recorded without running the resolvers again.
     /// </summary>
     public Func<HttpContext, AuditActor?>? ResolveActor { get; set; }
 
@@ -46,14 +57,15 @@ public sealed class LogbirdRequestOptions
     public Func<HttpContext, AuditImpersonator?>? ResolveImpersonator { get; set; }
 
     /// <summary>
-    /// Use an incoming <c>X-Request-Id</c> header as the request id when present (at most 256 characters); otherwise
+    /// Use an incoming <c>X-Request-Id</c> header as the request id when present (a longer value than 256 characters is
+    /// ignored, never cut); otherwise
     /// <see cref="HttpContext.TraceIdentifier"/>. Defaults to <see langword="true"/>.
     /// </summary>
     public bool UseRequestIdHeader { get; set; } = true;
 
     /// <summary>
     /// Use an incoming <c>X-Logbird-Operation</c> header as the operation id, so one operation can span services.
-    /// Defaults to <see langword="true"/>; when absent, each request gets a new operation id.
+    /// Defaults to <see langword="true"/>; when absent or longer than 256 characters, each request gets a new operation id.
     /// </summary>
     public bool UseOperationHeader { get; set; } = true;
 }

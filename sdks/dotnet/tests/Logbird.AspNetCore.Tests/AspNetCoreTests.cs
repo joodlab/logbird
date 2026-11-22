@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -18,6 +19,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Logbird.AspNetCore.Tests;
 
@@ -44,11 +46,15 @@ public class AspNetCoreTests
             Action<WebApplication> map,
             Action<LogbirdRequestOptions>? requests = null,
             Action<LogbirdOptions>? options = null,
-            ClaimsPrincipal? user = null)
+            ClaimsPrincipal? user = null,
+            Action<WebApplication>? pipeline = null,
+            Action<WebApplicationBuilder>? services = null,
+            FakeServer? fake = null)
         {
-            var server = new FakeServer();
+            var server = fake ?? new FakeServer();
             var builder = WebApplication.CreateBuilder();
             builder.WebHost.UseTestServer();
+            services?.Invoke(builder);
             builder.Services.AddLogbird(
                 o =>
                 {
@@ -72,6 +78,7 @@ public class AspNetCoreTests
 
                 return next(context);
             });
+            pipeline?.Invoke(app);
             app.UseLogbird();
             map(app);
             await app.StartAsync();
@@ -278,30 +285,6 @@ public class AspNetCoreTests
     }
 
     [Fact]
-    public async Task Stopping_the_host_returns_when_the_hosts_budget_runs_out_even_if_the_server_hangs()
-    {
-        var server = new FakeServer { Fallback = _ => new TaskCompletionSource<HttpResponseMessage>().Task };
-        var client = new LogbirdClient(
-            new LogbirdOptions
-            {
-                Endpoint = new Uri("https://audit.example.invalid"),
-                IngestKey = "lb_ingest_fictional",
-                FlushInterval = TimeSpan.FromHours(1),
-                ShutdownTimeout = TimeSpan.FromSeconds(3),
-            },
-            new HttpClient(server));
-        client.Track(new AuditEvent("stuck.recorded"));
-        var shutdown = new LogbirdShutdown(client);
-        using var budget = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
-        var watch = Stopwatch.StartNew();
-        await shutdown.StopAsync(budget.Token);
-        // The host's 200 ms budget wins over the client's 3 s ShutdownTimeout; the client then finishes on its own.
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), watch.Elapsed.ToString());
-        await client.DisposeAsync();
-        Assert.Equal(1, client.Stats.Dropped);
-    }
-
-    [Fact]
     public async Task Stopping_the_host_sends_what_is_queued()
     {
         var app = await App.StartAsync(a => a.MapPost("/", (IAuditLog audit) =>
@@ -336,7 +319,7 @@ public class AspNetCoreTests
         services.AddLogging();
         services.AddLogbird(configuration.GetSection("Logbird"));
         using var provider = services.BuildServiceProvider();
-        Assert.IsType<LogbirdClient>(provider.GetRequiredService<ILogbirdClient>());
+        Assert.IsType<HostedLogbirdClient>(provider.GetRequiredService<ILogbirdClient>());
 
         var missingKey = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Logbird:Endpoint"] = "https://audit.example.invalid" }).Build();
         Assert.Throws<ArgumentException>(() => new ServiceCollection().AddLogbird(missingKey.GetSection("Logbird")));
@@ -361,5 +344,415 @@ public class AspNetCoreTests
         var error = Assert.Throws<ArgumentException>(() => new ServiceCollection().AddLogbird(configuration.GetSection("Logbird")));
         Assert.Contains("'" + key + "'", error.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("secret", error.ToString(), StringComparison.Ordinal);
+    }
+
+    private static async Task<T[]> Eventually<T>(ConcurrentQueue<T> queue, int count)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (queue.Count < count && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
+
+        return queue.ToArray();
+    }
+
+    private sealed class CapturedLogs : ILoggerProvider
+    {
+        public ConcurrentQueue<(string Category, string Message)> Entries { get; } = new();
+
+        public Func<string, bool> Blocks { get; set; } = _ => false;
+
+        public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Logger(CapturedLogs owner, string category) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state)
+                where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                if (owner.Blocks(category))
+                {
+                    Thread.Sleep(TimeSpan.FromSeconds(3));
+                    throw new InvalidOperationException("fictional broken log sink");
+                }
+
+                owner.Entries.Enqueue((category, formatter(state, exception)));
+            }
+        }
+    }
+
+    private sealed class ThrowingConnection : Microsoft.AspNetCore.Http.Features.IHttpConnectionFeature
+    {
+        public string ConnectionId { get; set; } = "c1";
+
+        public IPAddress? RemoteIpAddress { get => throw new InvalidOperationException("fictional"); set { } }
+
+        public IPAddress? LocalIpAddress { get; set; }
+
+        public int RemotePort { get; set; }
+
+        public int LocalPort { get; set; }
+    }
+
+    [Fact]
+    public async Task A1_the_ingest_key_never_reaches_http_client_logs()
+    {
+        var logs = new CapturedLogs();
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("logged.request"))),
+            services: b =>
+            {
+                b.Logging.ClearProviders();
+                b.Logging.SetMinimumLevel(LogLevel.Trace);
+                b.Logging.AddProvider(logs);
+            });
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        await app.FlushedEventsAsync();
+        Assert.Contains(logs.Entries, e => e.Category.StartsWith("System.Net.Http.HttpClient.Logbird", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs.Entries, e => e.Message.Contains("lb_ingest_fictional", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A2_the_whole_host_lifecycle_ends_within_the_hosts_budget_and_unsent_events_are_reported()
+    {
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("stuck.recorded"))),
+            options: o =>
+            {
+                o.ShutdownTimeout = TimeSpan.FromSeconds(20);
+                o.OnDrop = drops.Enqueue;
+            },
+            services: b => b.Services.Configure<HostOptions>(h => h.ShutdownTimeout = TimeSpan.FromMilliseconds(300)),
+            fake: new FakeServer { Fallback = _ => new TaskCompletionSource<HttpResponseMessage>().Task });
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        var client = app.Client;
+        var watch = Stopwatch.StartNew();
+        await app.Host.StopAsync();
+        await app.Host.DisposeAsync();
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), watch.Elapsed.ToString());
+        Assert.Equal(1, client.Stats.Dropped);
+        Assert.Equal(DropReason.Shutdown, Assert.Single(await Eventually(drops, 1)).Reason);
+    }
+
+    [Fact]
+    public async Task A3_default_actor_and_tenant_come_only_from_the_authenticated_primary_identity()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "alice")], "primary"));
+        principal.AddIdentity(new ClaimsIdentity([new Claim("sub", "bob"), new Claim("tenant_id", "t_bob")], "secondary"));
+        await using var app = await App.StartAsync(a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("mixed.identities"))), user: principal);
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        var e = Assert.Single(await app.FlushedEventsAsync());
+        Assert.Equal("alice", e.GetProperty("actor").GetProperty("id").GetString());
+        Assert.False(e.TryGetProperty("tenant", out _));
+
+        var anonymous = new ClaimsPrincipal(new ClaimsIdentity([new Claim("tenant_id", "t_spoofed")]));
+        await using var second = await App.StartAsync(a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("anonymous.request"))), user: anonymous);
+        (await second.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        var anon = Assert.Single(await second.FlushedEventsAsync());
+        Assert.False(anon.TryGetProperty("tenant", out _));
+        Assert.False(anon.TryGetProperty("actor", out _));
+    }
+
+    [Fact]
+    public async Task A4_a_prepared_event_that_cannot_be_copied_or_is_too_large_is_reported_without_copying_or_throwing()
+    {
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        var huge = new JsonArray();
+        for (var i = 0; i < 300_000; i++)
+        {
+            huge.Add("x");
+        }
+
+        var large = new AuditEvent("large.prepared") { Metadata = { ["list"] = huge } };
+        var duplicate = new AuditEvent("duplicate.prepared");
+        JsonNode? parsed = null;
+        try
+        {
+            parsed = JsonNode.Parse("{\"a\":1,\"a\":2}");
+            duplicate.Metadata["dup"] = parsed;
+        }
+        catch (Exception)
+        {
+            // This runtime rejects duplicate names while parsing, so the copy path cannot meet one.
+        }
+
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) =>
+            {
+                audit.Record(large);
+                audit.Record(duplicate);
+                return Results.Ok();
+            }),
+            options: o => o.OnDrop = drops.Enqueue);
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        var reasons = (await Eventually(drops, parsed is null ? 1 : 2)).Select(d => d.Reason).ToArray();
+        Assert.Contains(DropReason.TooLarge, reasons);
+        Assert.Null(large.Id);
+        Assert.Null(large.Actor);
+    }
+
+    [Fact]
+    public async Task A5_a_blocked_or_throwing_logger_never_stalls_the_request()
+    {
+        var logs = new CapturedLogs { Blocks = category => category == "Logbird" };
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("resolver.failed"))),
+            requests: r => r.ResolveTenant = _ => throw new InvalidOperationException("fictional resolver bug"),
+            user: User(("sub", "user_1")),
+            services: b => b.Logging.AddProvider(logs));
+        var watch = Stopwatch.StartNew();
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), watch.Elapsed.ToString());
+        var e = Assert.Single(app.Server.Requests.IsEmpty ? await app.FlushedEventsAsync() : app.Server.Requests.SelectMany(r => r.Events).ToArray());
+        Assert.False(e.TryGetProperty("tenant", out _));
+    }
+
+    [Fact]
+    public async Task A6_a_resolver_that_records_an_event_does_not_recurse()
+    {
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("page.viewed"))),
+            requests: r => r.ResolveTenant = http =>
+            {
+                http.RequestServices.GetRequiredService<IAuditLog>().Record("tenant.lookup");
+                return new AuditTenant("t_1");
+            },
+            user: User(("sub", "user_1")));
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        var events = await app.FlushedEventsAsync();
+        Assert.Equal(2, events.Length);
+        var viewed = events.Single(e => e.GetProperty("action").GetString() == "page.viewed");
+        Assert.Equal("t_1", viewed.GetProperty("tenant").GetProperty("id").GetString());
+        Assert.False(events.Single(e => e.GetProperty("action").GetString() == "tenant.lookup").TryGetProperty("tenant", out _));
+    }
+
+    [Fact]
+    public async Task A7_an_unreadable_request_detail_is_left_out_and_the_event_is_still_recorded()
+    {
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("partial.context"))),
+            pipeline: a => a.Use((context, next) =>
+            {
+                context.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpConnectionFeature>(new ThrowingConnection());
+                return next(context);
+            }),
+            user: User(("sub", "user_1")));
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/");
+        request.Headers.Add("X-Request-Id", "req_partial");
+        (await app.Http.SendAsync(request)).EnsureSuccessStatusCode();
+        var e = Assert.Single(await app.FlushedEventsAsync());
+        Assert.False(e.GetProperty("context").TryGetProperty("ip", out _));
+        Assert.Equal("req_partial", e.GetProperty("context").GetProperty("requestId").GetString());
+        Assert.Equal("user_1", e.GetProperty("actor").GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public async Task A8_a_throwing_configure_callback_drops_the_half_built_event_once_and_returns_its_id()
+    {
+        var drops = new ConcurrentQueue<DroppedEvent>();
+        string? returned = null;
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) =>
+            {
+                returned = audit.Record("half.built", e =>
+                {
+                    e.Id = "evt_stable_1";
+                    e.Actor = AuditActor.User("explicit");
+                    throw new InvalidOperationException("fictional callback bug");
+                });
+                return Results.Ok();
+            }),
+            options: o => o.OnDrop = drops.Enqueue);
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        Assert.Empty(await app.FlushedEventsAsync());
+        Assert.Equal("evt_stable_1", returned);
+        var drop = Assert.Single(await Eventually(drops, 1));
+        Assert.Equal(DropReason.Invalid, drop.Reason);
+        Assert.Equal("evt_stable_1", drop.Id);
+        Assert.DoesNotContain("fictional", drop.Detail ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A9_a_shared_context_template_is_never_written_to()
+    {
+        var template = new AuditContext { ParentEventId = "evt_parent" };
+        await using var app = await App.StartAsync(a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("templated", e => e.Context = template))));
+        foreach (var id in new[] { "req_a", "req_b" })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/");
+            request.Headers.Add("X-Request-Id", id);
+            (await app.Http.SendAsync(request)).EnsureSuccessStatusCode();
+        }
+
+        var events = await app.FlushedEventsAsync();
+        Assert.Null(template.RequestId);
+        Assert.Null(template.Ip);
+        Assert.Equal(new[] { "req_a", "req_b" }, events.Select(e => e.GetProperty("context").GetProperty("requestId").GetString()!).ToArray());
+        Assert.All(events, e => Assert.Equal("evt_parent", e.GetProperty("context").GetProperty("parentEventId").GetString()));
+    }
+
+    [Fact]
+    public async Task A10_fill_flags_leave_chosen_fields_out_per_event_and_globally()
+    {
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) =>
+            {
+                audit.Record("no.ip.or.actor", fill: AuditFill.All & ~AuditFill.Ip & ~AuditFill.Actor);
+                audit.Record("defaults");
+                return Results.Ok();
+            }),
+            requests: r => r.Fill = AuditFill.All & ~AuditFill.UserAgent,
+            user: User(("sub", "user_1")));
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/");
+        request.Headers.UserAgent.ParseAdd("Fictional/1.0");
+        (await app.Http.SendAsync(request)).EnsureSuccessStatusCode();
+        var events = await app.FlushedEventsAsync();
+        Assert.False(events[0].TryGetProperty("actor", out _));
+        Assert.False(events[0].GetProperty("context").TryGetProperty("ip", out _));
+        Assert.Equal("user_1", events[1].GetProperty("actor").GetProperty("id").GetString());
+        Assert.Equal("203.0.113.9", events[1].GetProperty("context").GetProperty("ip").GetString());
+        // A per-event value replaces the default entirely; the default (without the user agent) applies to the second.
+        Assert.Equal("Fictional/1.0", events[0].GetProperty("context").GetProperty("userAgent").GetString());
+        Assert.False(events[1].GetProperty("context").TryGetProperty("userAgent", out _));
+    }
+
+    [Fact]
+    public async Task A11_record_returns_the_id_the_event_was_recorded_under()
+    {
+        var ids = new List<string>();
+        await using var app = await App.StartAsync(
+            a => a.MapPost("/", (IAuditLog audit) =>
+            {
+                ids.Add(audit.Record("blank.id", e => e.Id = "   "));
+                ids.Add(audit.Record("replaced.id"));
+                return Results.Ok();
+            }),
+            options: o => o.BeforeSend = e =>
+            {
+                if (e.Action == "replaced.id")
+                {
+                    e.Id = "evt_from_hook";
+                }
+
+                return e;
+            });
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        var stored = (await app.FlushedEventsAsync()).Select(e => e.GetProperty("id").GetString()).ToArray();
+        Assert.Equal(stored, ids.ToArray());
+        Assert.Equal("evt_from_hook", ids[1]);
+        Assert.False(string.IsNullOrWhiteSpace(ids[0]));
+    }
+
+    [Fact]
+    public async Task A12_an_overlength_correlation_header_is_ignored_never_cut()
+    {
+        await using var app = await App.StartAsync(a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("long.headers"))));
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/");
+        request.Headers.Add("X-Request-Id", new string('r', 257));
+        request.Headers.Add("X-Logbird-Operation", new string('o', 257));
+        (await app.Http.SendAsync(request)).EnsureSuccessStatusCode();
+        var context = Assert.Single(await app.FlushedEventsAsync()).GetProperty("context");
+        Assert.DoesNotContain("rrrr", context.GetProperty("requestId").GetString(), StringComparison.Ordinal);
+        Assert.Matches("^[0-9a-f]{8}-", context.GetProperty("operationId").GetString());
+    }
+
+    [Fact]
+    public async Task A13_job_context_is_decided_once_and_carriers_keep_absent_values_absent()
+    {
+        AuditCarrier? anonymous = null;
+        await using var app = await App.StartAsync(a => a.MapPost("/", (IAuditLog audit) =>
+        {
+            anonymous = audit.Carrier();
+            return Results.Ok();
+        }));
+        (await app.Http.PostAsync("/", null)).EnsureSuccessStatusCode();
+        var factory = app.Host.Services.GetRequiredService<IAuditLogFactory>();
+
+        using var unrelated = new Activity("unrelated").SetIdFormat(ActivityIdFormat.W3C).Start();
+        factory.ForJob(anonymous! with { TraceId = null }, worker: "w").Record("from.anonymous");
+        unrelated.Stop();
+
+        var scheduled = factory.ForJob(null, worker: "nightly");
+        var chained = factory.ForJob(scheduled.Carrier("evt_1"), worker: "follow-up");
+        chained.Record("chained");
+
+        var events = await app.FlushedEventsAsync();
+        var fromAnonymous = events.Single(e => e.GetProperty("action").GetString() == "from.anonymous");
+        Assert.False(fromAnonymous.TryGetProperty("actor", out _));
+        Assert.False(fromAnonymous.GetProperty("context").TryGetProperty("traceId", out _));
+        var chainedEvent = events.Single(e => e.GetProperty("action").GetString() == "chained");
+        Assert.Equal("system", chainedEvent.GetProperty("actor").GetProperty("type").GetString());
+        Assert.Equal("nightly", chainedEvent.GetProperty("actor").GetProperty("id").GetString());
+        Assert.Equal("evt_1", chainedEvent.GetProperty("context").GetProperty("parentEventId").GetString());
+    }
+
+    [Fact]
+    public async Task A14_a_re_executed_request_and_events_recorded_before_the_middleware_share_one_operation()
+    {
+        await using var app = await App.StartAsync(
+            a =>
+            {
+                a.MapPost("/fail", (IAuditLog audit) =>
+                {
+                    audit.Record("before.failure");
+                    throw new InvalidOperationException("fictional endpoint failure");
+                });
+                a.Map("/error", (IAuditLog audit) => Results.Text(audit.Record("error.handled")));
+            },
+            pipeline: a =>
+            {
+                a.UseExceptionHandler("/error");
+                a.Use((context, next) =>
+                {
+                    context.RequestServices.GetRequiredService<IAuditLog>().Record("early.event");
+                    return next(context);
+                });
+            });
+        await app.Http.PostAsync("/fail", null);
+        var events = await app.FlushedEventsAsync();
+        Assert.Contains(events, e => e.GetProperty("action").GetString() == "error.handled");
+        Assert.Single(events.Select(e => e.GetProperty("context").GetProperty("operationId").GetString()).Distinct());
+    }
+
+    [Fact]
+    public void A15_out_of_range_settings_and_request_callbacks_fail_inside_AddLogbird_without_values()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Logbird:Endpoint"] = "https://audit.example.invalid",
+            ["Logbird:IngestKey"] = "lb_ingest_fictional",
+            ["Logbird:BatchSize"] = "1001",
+        }).Build();
+        var error = Assert.ThrowsAny<ArgumentException>(() => new ServiceCollection().AddLogbird(configuration.GetSection("Logbird")));
+        Assert.Contains("BatchSize", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("1001", error.ToString(), StringComparison.Ordinal);
+
+        Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddLogbird(
+            o =>
+            {
+                o.Endpoint = new Uri("https://audit.example.invalid");
+                o.IngestKey = "lb_ingest_fictional";
+            },
+            _ => throw new InvalidOperationException("fictional bad request options")));
+    }
+
+    [Fact]
+    public async Task B3_a_traceparent_with_the_forbidden_version_is_not_used()
+    {
+        await using var app = await App.StartAsync(a => a.MapPost("/", (IAuditLog audit) => Results.Text(audit.Record("bad.trace"))));
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/");
+        request.Headers.Add("traceparent", "ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+        (await app.Http.SendAsync(request)).EnsureSuccessStatusCode();
+        var context = Assert.Single(await app.FlushedEventsAsync()).GetProperty("context");
+        Assert.False(context.TryGetProperty("traceId", out var trace) && trace.GetString() == "4bf92f3577b34da6a3ce929d0e0e4736");
     }
 }
