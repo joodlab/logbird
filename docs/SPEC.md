@@ -385,8 +385,11 @@ UTC multiples of their size, so ≥ 1h buckets start on whole hours (24h → 15m
 
 `GET /api/projects/:projectId/entities?kind=…&sort=events|lastSeen|name` lists a directory.
 `events` (default) is most active first, ties broken by most recently seen; `lastSeen` is most
-recent first; `name` is A→Z (unnamed entities by id). `nextCursor` is an opaque keyset cursor
-bound to its sort.
+recent first; `name` is A→Z (unnamed entities by id). With `q`, entities whose id or name contains
+it or resembles it are listed best match first: exact id, id prefix, name prefix, substring, then
+fuzzy (a record's bare id, `article_27_2` for `article:article_27_2`, counts as its id), and the
+sort orders each group, so an exact id always leads whatever the limit. `nextCursor` is an opaque
+keyset cursor bound to its sort (and, for a search, to the match rank).
 
 `GET /api/projects/:projectId/entities/:kind/:entityId/metadata` returns `kind`, `id`, `type` and `name` for an
 exact entity under the same session and project access rules as the profile. For targets, pass the composite
