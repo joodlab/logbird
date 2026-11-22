@@ -15,6 +15,14 @@ rateLimitStore.on('error', () => console.error(JSON.stringify({ level: 'error', 
 const script = `local n = redis.call('INCR', KEYS[1])
 if n == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
 return n`;
+// Two buckets, both in the same hash slot (the prefix carries the hash tag): the first (tenant) is always charged; the
+// second (project) only when the first admits. Returns {first, second}, second = -1 when the first refused.
+const viewerScript = `local t = redis.call('INCR', KEYS[1])
+if t == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+if t > tonumber(ARGV[2]) then return {t, -1} end
+local p = redis.call('INCR', KEYS[2])
+if p == 1 then redis.call('PEXPIRE', KEYS[2], ARGV[1]) end
+return {t, p}`;
 /**
  * The client address we can trust: with TRUST_PROXY hops, the X-Forwarded-For entry written by the outermost
  * trusted proxy (see client-address.ts); otherwise the socket peer. Used for rate limits, audit context and the
@@ -53,7 +61,6 @@ export const rateLimit = createMiddleware((c, next) => {
   return next();
 });
 
-const projectRemaining = new WeakMap<Context, number>();
 /** Injectable store/clock keep tests isolated without changing process configuration. */
 export function createPublicRateLimits({
   store = rateLimitStore,
@@ -104,32 +111,16 @@ export function createPublicRateLimits({
       return c.json({ error: { code: 'invalid_api_key', message: 'A valid API key is required.' } }, 401);
     },
     denied,
-    /**
-     * Second bucket for the reader (#138): viewer-token reads per minting key and tenant, and token minting per key.
-     * Runs after the project bucket; the tighter of the two answers RateLimit-*.
-     */
-    reader: (bucket: 'mint' | 'viewer') =>
+    /** Viewer-token minting per key (#138). */
+    mint: () =>
       createMiddleware<AppEnv>(async (c, next) => {
-        const reader = c.get('reader');
-        if (bucket === 'viewer' && reader.via !== 'token') return next();
-        const limit = bucket === 'mint' ? mintLimit : viewerReadLimit;
-        const tenant =
-          bucket === 'viewer'
-            ? `:${createHash('sha256')
-                .update(reader.scope?.tenantId ?? '')
-                .digest('hex')
-                .slice(0, 32)}`
-            : '';
         try {
-          const key = `${prefix}:rate:${bucket}:${reader.keyId}${tenant}:${window()}`;
+          const key = `${prefix}:rate:mint:${c.get('reader').keyId}:${window()}`;
           const count = Number(await store.eval(script, 1, key, 120_000));
-          const remaining = Math.max(0, limit - count);
-          if (bucket === 'mint' || remaining < (projectRemaining.get(c) ?? Number.POSITIVE_INFINITY)) {
-            c.header('RateLimit-Limit', String(limit));
-            c.header('RateLimit-Remaining', String(remaining));
-            c.header('RateLimit-Reset', String(retryAfter()));
-          }
-          if (count > limit) return denied(c);
+          c.header('RateLimit-Limit', String(mintLimit));
+          c.header('RateLimit-Remaining', String(Math.max(0, mintLimit - count)));
+          c.header('RateLimit-Reset', String(retryAfter()));
+          if (count > mintLimit) return denied(c);
         } catch {
           storageError();
         }
@@ -138,12 +129,37 @@ export function createPublicRateLimits({
     authenticated: (kind: 'ingest' | 'read') =>
       createMiddleware<AppEnv>(async (c, next) => {
         const limit = kind === 'ingest' ? ingestLimit : readLimit;
+        const projectKey = `${prefix}:rate:project:${c.get('project').id}:${kind}:${window()}`;
+        const reader = kind === 'read' ? c.get('reader') : undefined;
         try {
-          const key = `${prefix}:rate:project:${c.get('project').id}:${kind}:${window()}`;
-          const count = Number(await store.eval(script, 1, key, 120_000));
+          if (reader?.via === 'token') {
+            // #138: a viewer-token read is charged to its minting key + tenant bucket first, and to the project only
+            // when that bucket admits it (one atomic script), so a throttled tenant can't drain other tenants' budget.
+            const tenant = createHash('sha256')
+              .update(reader.scope?.tenantId ?? '')
+              .digest('hex')
+              .slice(0, 32);
+            const [tenantCount, projectCount] = (await store.eval(
+              viewerScript,
+              2,
+              `${prefix}:rate:viewer:${reader.keyId}:${tenant}:${window()}`,
+              projectKey,
+              120_000,
+              viewerReadLimit,
+            )) as [number, number];
+            const tenantRemaining = Math.max(0, viewerReadLimit - Number(tenantCount));
+            const projectRemaining = Number(projectCount) < 0 ? limit : Math.max(0, limit - Number(projectCount));
+            // RateLimit-* report the tighter bucket.
+            const tighter = tenantRemaining <= projectRemaining;
+            c.header('RateLimit-Limit', String(tighter ? viewerReadLimit : limit));
+            c.header('RateLimit-Remaining', String(tighter ? tenantRemaining : projectRemaining));
+            c.header('RateLimit-Reset', String(retryAfter()));
+            if (Number(projectCount) < 0 || Number(projectCount) > limit) return denied(c);
+            return next();
+          }
+          const count = Number(await store.eval(script, 1, projectKey, 120_000));
           c.header('RateLimit-Limit', String(limit));
           c.header('RateLimit-Remaining', String(Math.max(0, limit - count)));
-          projectRemaining.set(c, Math.max(0, limit - count));
           c.header('RateLimit-Reset', String(retryAfter()));
           if (count > limit) return denied(c);
         } catch {

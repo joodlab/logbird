@@ -61,6 +61,26 @@ describe('#138 scoped read contract', () => {
     expect(createApiKeySchema.safeParse({ name: 'x', kind: 'ingest', embedOrigins: ['https://cms.example.com'] }).success).toBe(false);
     expect(createApiKeySchema.safeParse({ name: 'x', kind: 'read', embedOrigins: ['https://CMS.example.com/'] }).success).toBe(false);
     expect(createApiKeySchema.safeParse({ name: 'x', kind: 'scoped-read', scope: { tenantId: 'b', extra: 1 } }).success).toBe(false);
+    // Scope ids must be stored exactly as sent: no surrounding whitespace, no invalid Unicode, under the stored caps.
+    for (const tenantId of [' biz_5', 'biz_5 ', 'biz�', 'biz\uD800', 'x'.repeat(251)])
+      expect(createApiKeySchema.safeParse({ name: 'x', kind: 'scoped-read', scope: { tenantId } }).success, JSON.stringify(tenantId)).toBe(false);
+    expect(createApiKeySchema.safeParse({ name: 'x', kind: 'scoped-read', scope: { tenantId: 'x'.repeat(250) } }).success).toBe(true);
+    expect(
+      createApiKeySchema.safeParse({ name: 'x', kind: 'scoped-read', scope: { tenantId: 'b', actionPrefixes: ['a'.repeat(191)] } }).success,
+    ).toBe(false);
+    expect(
+      createApiKeySchema.safeParse({ name: 'x', kind: 'scoped-read', scope: { tenantId: 'b', target: { type: 't'.repeat(61), id: 'i' } } }).success,
+    ).toBe(false);
+    // Scope ids must be stored exactly as sent: no surrounding whitespace, no invalid Unicode, under the stored caps.
+    for (const tenantId of [' biz_5', 'biz_5 ', 'biz�', 'biz�', 'x'.repeat(251)])
+      expect(createApiKeySchema.safeParse({ name: 'x', kind: 'scoped-read', scope: { tenantId } }).success, JSON.stringify(tenantId)).toBe(false);
+    expect(createApiKeySchema.safeParse({ name: 'x', kind: 'scoped-read', scope: { tenantId: 'x'.repeat(250) } }).success).toBe(true);
+    expect(
+      createApiKeySchema.safeParse({ name: 'x', kind: 'scoped-read', scope: { tenantId: 'b', actionPrefixes: ['a'.repeat(191)] } }).success,
+    ).toBe(false);
+    expect(
+      createApiKeySchema.safeParse({ name: 'x', kind: 'scoped-read', scope: { tenantId: 'b', target: { type: 't'.repeat(61), id: 'i' } } }).success,
+    ).toBe(false);
   });
   it('bounds viewer-token lifetimes and keeps roll bodies strict', () => {
     expect(viewerTokenRequestSchema.parse({ scope: { tenantId: 'b' } }).ttlSeconds).toBe(900);

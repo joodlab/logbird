@@ -3,6 +3,7 @@ import * as ch from '@logbird/clickhouse';
 import * as s from '@logbird/contracts';
 import { type AuditPayload, type Prisma, prisma } from '@logbird/database';
 import { type Context, Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { createMiddleware } from 'hono/factory';
 import { resolver, validator } from 'hono-openapi';
 import { z } from 'zod';
@@ -139,7 +140,6 @@ export const publicRoutes = new Hono<AppEnv>()
     '/events',
     requireReader(),
     publicRateLimits.authenticated('read'),
-    publicRateLimits.reader('viewer'),
     publicQueryLanguage,
     projectRead,
     doc('Search events', s.searchResponseSchema, 200, 'readKeyOrViewerToken'),
@@ -156,7 +156,6 @@ export const publicRoutes = new Hono<AppEnv>()
     '/events/:eventId',
     requireReader(),
     publicRateLimits.authenticated('read'),
-    publicRateLimits.reader('viewer'),
     publicQueryLanguage,
     projectRead,
     doc('Event detail', s.eventDetailSchema, 200, 'readKeyOrViewerToken'),
@@ -178,7 +177,6 @@ export const publicRoutes = new Hono<AppEnv>()
     '/facets',
     requireReader(),
     publicRateLimits.authenticated('read'),
-    publicRateLimits.reader('viewer'),
     publicQueryLanguage,
     projectRead,
     doc('Facets', s.facetResponseSchema, 200, 'readKeyOrViewerToken'),
@@ -194,7 +192,6 @@ export const publicRoutes = new Hono<AppEnv>()
     '/export',
     requireReader(),
     publicRateLimits.authenticated('read'),
-    publicRateLimits.reader('viewer'),
     publicQueryLanguage,
     projectRead,
     routeDoc('Stream CSV or JSONL', { responses: exportResponses }, 'readKeyOrViewerToken'),
@@ -224,7 +221,12 @@ export const publicRoutes = new Hono<AppEnv>()
   .post(
     '/viewer-tokens',
     requireReader({ tokens: false }),
-    publicRateLimits.reader('mint'),
+    publicRateLimits.mint(),
+    // A valid scope is a few KB at most: refuse larger bodies before buffering them for JSON parsing.
+    bodyLimit({
+      maxSize: 16 * 1024,
+      onError: (c) => c.json({ error: { code: 'payload_too_large', message: 'Request exceeds 16 KB.' } }, 413),
+    }),
     routeDoc(
       'Mint viewer token',
       {

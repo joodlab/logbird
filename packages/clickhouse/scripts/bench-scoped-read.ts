@@ -43,16 +43,25 @@ try {
   for (let offset = 0; offset < total; offset += 100_000)
     await ch.command({
       query: `INSERT INTO events (project_id,event_id,timestamp,received_at,action,description,actor_type,actor_id,actor_name,tenant_id,tenant_name,target_types,target_ids,target_names,operation_id,parent_event_id,attributes,payload)
-      SELECT {p:String}, concat('bench-', toString(number)),
-        now64(3) - toIntervalMillisecond(number * {step:UInt64}), now64(3),
-        arrayElement(['booking.created','booking.cancelled','auth.login','page.updated'], number % 4 + 1),
-        'Fictional benchmark event', 'user', concat('u', toString(number % 5000)), 'Fictional user',
-        multiIf(number % 20000 = 7, 'tiny', number % 10 < 6, 'big', concat('m', toString(number % 200))),
-        'Fictional tenant',
-        ['website'], [concat('site_', toString(number % 50))], ['Fictional site'],
+      SELECT {p:String}, id, now64(3) - toIntervalMillisecond(number * {step:UInt64}), now64(3), act,
+        'Fictional benchmark event', 'user', actor, 'Fictional user', tenant, 'Fictional tenant',
+        ['website'], [site], ['Fictional site'],
         concat('op', toString(intDiv(number, 3))), if(number % 3 = 0, '', concat('bench-', toString(number - 1))),
-        map('metadata.missing', if(number % 3 = 0, '["roles:create"]', '["staff:invite","roles:create"]')), '{}'
-      FROM numbers({offset:UInt64}, {batch:UInt64})`,
+        map('metadata.missing', missing),
+        -- A realistic original document (~700 bytes): the scoped-read predicate checks tenant/target/action in it.
+        concat('{"id":"', id, '","occurredAt":"2026-11-22T10:00:00.000Z","action":"', act, '","outcome":"success",',
+          '"actor":{"type":"user","id":"', actor, '","name":"Fictional user","email":"', actor, '@example.invalid"},',
+          '"tenant":{"id":"', tenant, '","name":"Fictional tenant"},"targets":[{"type":"website","id":"', site,
+          '","name":"Fictional site"}],"context":{"ip":"203.0.113.10","userAgent":"Mozilla/5.0 (fictional benchmark agent)",',
+          '"requestId":"req-', id, '","operationId":"op', toString(intDiv(number, 3)), '"},"metadata":{"missing":', missing,
+          ',"note":"', repeat('fictional padding ', 18), '"}}')
+      FROM (SELECT number, concat('bench-', toString(number)) id,
+              arrayElement(['booking.created','booking.cancelled','auth.login','page.updated'], number % 4 + 1) act,
+              concat('u', toString(number % 5000)) actor,
+              multiIf(number % 20000 = 7, 'tiny', number % 10 < 6, 'big', concat('m', toString(number % 200))) tenant,
+              concat('site_', toString(number % 50)) site,
+              if(number % 3 = 0, '["roles:create"]', '["staff:invite","roles:create"]') missing
+            FROM numbers({offset:UInt64}, {batch:UInt64}))`,
       query_params: { p, step, offset, batch: Math.min(100_000, total - offset) },
       clickhouse_settings: { max_insert_threads: '2', max_memory_usage: '1073741824' },
     });

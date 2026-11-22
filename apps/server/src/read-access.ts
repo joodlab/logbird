@@ -84,7 +84,15 @@ export function mintViewerToken(
     jti: randomUUID(),
   };
   const body = `${VIEWER_TOKEN_PREFIX}.${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;
-  return { token: `${body}.${mac(secret, body).toString('base64url')}`, expiresAt: new Date(payload.exp * 1000).toISOString(), payload };
+  const token = `${body}.${mac(secret, body).toString('base64url')}`;
+  // Same budget as verification: never hand out a token the read routes would refuse.
+  if (token.length > MAX_TOKEN_LENGTH)
+    throw new ApiError(
+      422,
+      'validation_error',
+      `This scope makes a token longer than ${MAX_TOKEN_LENGTH} characters. Use fewer or shorter action prefixes.`,
+    );
+  return { token, expiresAt: new Date(payload.exp * 1000).toISOString(), payload };
 }
 
 /** A token's verified payload, or null (bad shape, bad MAC, expired, issued in the future). Constant-time MAC check. */
@@ -141,22 +149,25 @@ const maskKey = () => {
 /** `actor_email` mask: a per-project keyed hash, stable for the same address so a viewer can still group by person. */
 export const maskedEmail = (projectId: string, email: string, secret = maskKey()) =>
   email ? `masked:${createHmac('sha256', secret).update(`${projectId}\0${email.toLowerCase()}`).digest('hex').slice(0, 24)}` : '';
-const MASKED_ATTRIBUTES: Record<string, string[]> = { ip: ['context.ip'], user_agent: ['context.userAgent'], actor_email: ['actor.email'] };
-
 export function maskEvent(event: AuditEvent, mask: ReadScope['mask']): AuditEvent {
   if (!mask?.length) return event;
   const masked: AuditEvent = { ...event, context: { ...event.context }, attributes: { ...event.attributes } };
   if (mask.includes('ip')) masked.context.ip = '';
   if (mask.includes('user_agent')) masked.context.userAgent = '';
   if (mask.includes('actor_email') && masked.actor) masked.actor = { ...masked.actor, email: maskedEmail(event.projectId, masked.actor.email) };
-  for (const preset of mask) for (const key of MASKED_ATTRIBUTES[preset] ?? []) delete masked.attributes[key];
+  for (const preset of mask) for (const key of ch.MASKED_ATTRIBUTES[preset]) delete masked.attributes[key];
   return masked;
 }
 
-/** A masked scope may not filter or group on a masked column: the result would reveal the hidden value. */
+/**
+ * A masked scope may not filter or group on a masked column or a masked attribute path: the result would reveal the
+ * hidden value. Attribute paths are checked on the compiled query's bound attribute keys (`attributes[{qN:String}]`)
+ * and on both facet levels, before anything reaches ClickHouse.
+ */
 export function assertNotMasked(scope: ReadScope | null, input: { q?: string; field?: string; by?: string }) {
   if (!scope?.mask?.length) return;
   const hidden = scope.mask.map((m) => ch.MASKED_COLUMNS[m]);
+  const hiddenPaths = scope.mask.flatMap((m) => ch.MASKED_ATTRIBUTES[m]);
   const fail = (start: number | null, end: number | null) => {
     throw new ch.QueryError('This field is masked for this key or token.', {
       lang: 'query',
@@ -169,10 +180,14 @@ export function assertNotMasked(scope: ReadScope | null, input: { q?: string; fi
   if (input.q) {
     const compiled = ch.compileQuery(input.q);
     if (hidden.some((column) => new RegExp(`\\b${column}\\b`).test(compiled.sql))) fail(0, input.q.length);
+    for (const [, key] of compiled.sql.matchAll(/(?:attributes\[|mapContains\(attributes,)\{(q\d+):String\}/g))
+      if (key && hiddenPaths.includes(String(compiled.params[key]))) fail(0, input.q.length);
   }
   for (const field of [input.field, input.by]) {
-    const column = field ? ch.facetColumn(field) : undefined;
+    if (!field) continue;
+    const column = ch.facetColumn(field);
     if (column && hidden.includes(column)) fail(null, null);
+    if (!column && hiddenPaths.includes(field.replace(/^(attr|attributes)\./, ''))) fail(null, null);
   }
 }
 export const forbidMaskedEvidence = (scope: ReadScope | null, format: string) => {

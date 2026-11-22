@@ -130,6 +130,12 @@ app.onError((error, c) => {
       c.header('Retry-After', String(Math.max(1, Math.ceil(error.retryAfter ?? 1))));
     return c.json({ error: { code: error.code, message: error.message, details: error.details } }, error.status);
   }
+  // The ApiKey roll fence (database backstop, #138). The API checks the same rule first, so this is a safety net.
+  if (/logbird_api_key_roll_fence/.test(`${error.message} ${String((error as { cause?: unknown }).cause ?? '')}`))
+    return c.json(
+      { error: { code: 'key_restricted', message: 'A replacement key must keep the scope and the expiry of the key it replaces.' } },
+      409,
+    );
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
     return c.json({ error: { code: 'conflict', message: 'This record already exists.' } }, 409);
   if (error instanceof HTTPException) return c.json({ error: { code: 'invalid_request', message: error.message } }, error.status);

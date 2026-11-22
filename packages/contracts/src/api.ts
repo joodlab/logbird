@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { eventSchema } from './events';
-import { queryLangSchema } from './query';
+import { QUERY_FIELDS, queryLangSchema } from './query';
 export const API_KEY_SCOPES = { read: 'events:read', ingest: 'events:ingest' } as const;
 export const updateWorkspaceSchema = z
   .object({
@@ -124,13 +124,18 @@ export const FACET_FIELDS = [
   'target.type',
   'source',
 ] as const;
-/** An envelope field, or any attribute key as `attr.<path>` (array-valued attributes count each element). */
+/** Every query-language field key and alias (`QUERY_FIELDS`), all of which can be faceted (#140). */
+export const FACETABLE_FIELDS = [...new Set([...FACET_FIELDS, ...QUERY_FIELDS.flatMap((f) => [f.key, ...(f.aliases ?? [])])])] as [
+  string,
+  ...string[],
+];
+/** Any envelope field, or any attribute key as `attr.<path>` or `attributes.<path>` (array-valued attributes count each element). */
 export const facetFieldSchema = z.union([
-  z.enum(FACET_FIELDS),
+  z.enum(FACETABLE_FIELDS),
   z
     .string()
     .max(256)
-    .regex(/^attr\..+/),
+    .regex(/^(?:attr|attributes)\..+/),
 ]);
 export const facetQuerySchema = rangeQuerySchema.extend({
   field: facetFieldSchema.meta({ example: 'attr.metadata.missing' }),
@@ -297,16 +302,29 @@ export const scopeMaskSchema = z.enum(SCOPE_MASKS);
  * - `mask`: field-mask presets applied to every returned event.
  * v1 allows one tenant per scope; the shape stays list-ready (a future `tenantIds` would be additive).
  */
+/**
+ * Scope identifiers must be exactly what ingest stores for them: no surrounding whitespace, no U+FFFD or lone
+ * surrogates, and shorter than the stored caps. The server additionally checks the original stored payload.
+ */
+const scopeIdentifier = (max: number) =>
+  z
+    .string()
+    .min(1)
+    .max(max)
+    .refine(
+      (v) => v === v.trim() && !/�|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(v),
+      'Use the identifier exactly as sent: no surrounding whitespace or invalid Unicode.',
+    );
 export const readScopeSchema = z
   .object({
-    tenantId: z.string().min(1).max(256).meta({ example: 'biz_5' }),
+    tenantId: scopeIdentifier(250).meta({ example: 'biz_5' }),
     target: z
-      .object({ type: z.string().min(1).max(64), id: z.string().min(1).max(256) })
+      .object({ type: scopeIdentifier(60), id: scopeIdentifier(250) })
       .strict()
       .optional()
       .meta({ example: { type: 'website', id: 'site_42' } }),
     actionPrefixes: z
-      .array(z.string().min(1).max(200))
+      .array(scopeIdentifier(190))
       .min(1)
       .max(20)
       .optional()

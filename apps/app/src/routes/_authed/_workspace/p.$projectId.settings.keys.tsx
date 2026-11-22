@@ -144,6 +144,10 @@ function KeysSettings() {
                         <TypePill tone="warning">
                           revoked <Timestamp format="relative" iso={k.revokedAt} />
                         </TypePill>
+                      ) : k.expiresAt && Date.parse(k.expiresAt) <= Date.now() ? (
+                        <TypePill tone="warning">
+                          expired <Timestamp format="relative" iso={k.expiresAt} />
+                        </TypePill>
                       ) : replacement ? (
                         <TypePill tone="warning">replaced · still valid</TypePill>
                       ) : null}

@@ -114,7 +114,7 @@ export const routes = {
     get: { method: 'GET', path: '/v1/events/:eventId', auth: 'readKeyOrViewerToken' }, // → EventDetail (payload null when masked)
     /** Count/group by any field, including `attr.*` (#140). Not under /v1/events/: an event id may be "facets". */
     facets: { method: 'GET', path: '/v1/facets', auth: 'readKeyOrViewerToken' }, // publicFacetQuerySchema → FacetResponse
-    /** Streamed csv | jsonl | jsonl-evidence (refused with 422 for masked scopes); audited as export.created. */
+    /** Streamed csv | jsonl | jsonl-evidence (refused with 422 for masked scopes); audited as export.requested, then export.completed or export.failed. */
     export: { method: 'GET', path: '/v1/export', auth: 'readKeyOrViewerToken' }, // publicExportQuerySchema
     /** Mint a short-lived viewer token (viewerTokenRequestSchema → ViewerTokenResponse) with a read or scoped-read key. */
     viewerTokens: { method: 'POST', path: '/v1/viewer-tokens', auth: 'readKey' },

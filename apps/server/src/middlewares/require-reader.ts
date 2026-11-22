@@ -1,7 +1,7 @@
 import { prisma } from '@logbird/database';
 import { createMiddleware } from 'hono/factory';
 import { ApiError } from '../errors';
-import { hashApiKey } from '../keys';
+import { API_KEY_BODY, hashApiKey } from '../keys';
 import { publicRateLimits } from '../rate-limit';
 import { keyUsable, type Reader, scopeWithin, storedScope, tokenKey, VIEWER_TOKEN_PREFIX, verifyViewerToken } from '../read-access';
 import type { AppEnv } from '../types';
@@ -52,7 +52,7 @@ export const requireReader = ({ tokens = true, limits = publicRateLimits } = {})
       } satisfies Reader);
       return next();
     }
-    const secret = bearer?.match(/^(?:lb|tm)_read_[A-Za-z0-9]{32}$/)?.[0];
+    const secret = bearer?.match(new RegExp(`^(?:lb|tm)_read_${API_KEY_BODY}$`))?.[0];
     if (!secret) {
       if (await limits.precheck(c)) return limits.denied(c);
       return limits.reject(c);

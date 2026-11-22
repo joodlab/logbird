@@ -34,7 +34,9 @@ viewer token for that business or website and gives only the token to the browse
 - Events without a tenant are never visible to a scoped caller.
 - One tenant per scope in this version.
 
-The scope is a predicate the server ANDs **outside** your `q` filter. Nothing in `q` can widen it: `tenant:other`,
+The scope is a predicate the server ANDs **outside** your `q` filter. It is checked on the indexed search columns and,
+exactly, on the original stored event, so two ids that look the same after storage normalization (whitespace, length
+caps) never see each other's events. Nothing in `q` can widen it: `tenant:other`,
 `OR`, negation, `tenant:*` and free text all stay inside the scope. SQL mode (`lang=sql`) is console-only.
 
 ## Where the scope applies
@@ -53,12 +55,14 @@ The scope is a predicate the server ANDs **outside** your `q` filter. Nothing in
   can still group by person without seeing the address.
 - **Any mask also drops the original payload:** detail returns `payload: null`, and `jsonl-evidence` exports answer
   422 `masked_export`.
-- A masked scope can't filter or facet on a masked field (422 `invalid_query`, reason `not_allowed`), because the
-  answer would reveal the hidden value.
+- A masked scope can't filter or facet on a masked field or on the matching attribute paths (`context.ip`,
+  `context.userAgent`, `actor.email`) (422 `invalid_query`, reason `not_allowed`), because the answer would reveal the
+  hidden value.
 
 ## Keys
 
-Create keys in the console or with `POST /api/projects/:projectId/keys`:
+Create scoped keys with `POST /api/projects/:projectId/keys` (a console form follows; today the console creates ingest and
+ordinary read keys):
 
 ```http
 POST /api/projects/:projectId/keys
@@ -68,12 +72,18 @@ POST /api/projects/:projectId/keys
 ```
 
 - `scope` is required for `scoped-read` and refused on other kinds. All read kinds use `lb_read_…` secrets.
+- Scope identifiers must be exactly what your events send: at most 250 characters (60 for a target type, 190 for an
+  action prefix), with no leading or trailing whitespace and no invalid Unicode. Tenant and target ids must be JSON
+  strings in your events; an id sent as a number is not stored as an id and is never visible to a scoped reader.
+- Keys with a scope or an expiry have 48 random characters after the prefix (other keys have 32). Releases before
+  scoped keys reject that format, so if you roll back, these keys stop working instead of becoming project-wide.
 - `embedOrigins` (read kinds only): browser origins allowed to use this key's viewer tokens, for example
   `https://cms.example.com`. Exact origins, lowercase, no path.
 - `expiresAt` (optional, in the future): an expired key is rejected like a revoked one, and so are its tokens.
 - Scope, origins and expiry are fixed at creation. **Rolling** (`POST …/keys/:keyId/roll`) copies the scope and
   origins and keeps the old key's absolute expiry; pass `{ "expiresAt": "…" }` to give the replacement a different
-  one. Rolling an expired key requires a new `expiresAt` (409 `key_expired` otherwise).
+  one. Rolling an expired key requires a new `expiresAt` (409 `key_expired` otherwise). A database trigger refuses any
+  replacement that drops the scope or the expiry (409 `key_restricted`), also when an older release does the roll.
 - `api_key.created` and `api_key.revoked` in workspace activity record the scope, origins and expiry.
 
 ## Viewer tokens
@@ -108,9 +118,9 @@ Authorization: Bearer lb_read_…
 
 ## Rate limits
 
-- Viewer-token reads count toward the project read limit (`READ_RATE_LIMIT_PER_MINUTE`) **and** toward a bucket per
-  minting key and tenant (`VIEWER_READ_RATE_LIMIT_PER_MINUTE`, default 300), so one tenant's dashboards can't use up
-  another's budget. `RateLimit-*` headers report the tighter bucket.
+- Viewer-token reads are charged first to a bucket per minting key and tenant (`VIEWER_READ_RATE_LIMIT_PER_MINUTE`,
+  default 300) and, only when that admits them, to the project read limit (`READ_RATE_LIMIT_PER_MINUTE`), in one atomic
+  step. A throttled tenant can't use up the project's budget. `RateLimit-*` headers report the tighter bucket.
 - Minting is limited per key (`VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE`, default 600).
 
 ## Exports

@@ -171,13 +171,16 @@ export function toEvent(r: EventRow & { category?: string }): AuditEvent {
 }
 const encode = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
 /** Search cursors are `[timestamp, eventId]`, plus the scope fingerprint when minted by a scoped caller. */
-function cursor(s: string, scope?: ReadScope | null): [string, string] {
-  const bound = scopeFingerprint(scope);
+function cursor(s: string, projectId: string, scope?: ReadScope | null): [string, string] {
+  const bound = scopeFingerprint(scope, projectId);
   try {
     const a: unknown = JSON.parse(Buffer.from(s, 'base64url').toString());
-    // A cursor only pages within the scope that minted it: unscoped ↔ scoped and scope A ↔ scope B are rejected.
-    if (Array.isArray(a) && a.length === (bound ? 3 : 2) && a.every((v) => typeof v === 'string') && (!bound || a[2] === bound))
-      return [a[0] as string, a[1] as string];
+    // A cursor only pages within the project and scope that minted it: unscoped ↔ scoped and scope A ↔ scope B are
+    // rejected, and so is a malformed position (a non-ISO timestamp would otherwise fail later as a 500).
+    if (Array.isArray(a) && a.length === (bound ? 3 : 2) && a.every((v) => typeof v === 'string') && (!bound || a[2] === bound)) {
+      const [ts, id] = a as [string, string];
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(ts) && Number.isFinite(Date.parse(ts)) && id.length <= 1024) return [ts, id];
+    }
   } catch {
     /* Report malformed cursors with a stable public error below. */
   }
@@ -205,7 +208,7 @@ async function searchPage(
     params.exportReceivedBefore = exportClock;
   }
   if (q.cursor) {
-    const [ts, id] = cursor(q.cursor, scope);
+    const [ts, id] = cursor(q.cursor, projectId, scope);
     params.cursorTs = ts;
     params.cursorId = id;
     tail = ` AND (timestamp,event_id) ${op} ({cursorTs:DateTime64(3)},{cursorId:String})`;
@@ -233,7 +236,7 @@ async function searchPage(
     page: {
       data,
       total,
-      nextCursor: hasMore && last ? encode([last.timestamp, last.id, ...(scope ? [scopeFingerprint(scope)] : [])]) : null,
+      nextCursor: hasMore && last ? encode([last.timestamp, last.id, ...(scope ? [scopeFingerprint(scope, projectId)] : [])]) : null,
       tookMs: performance.now() - start,
     },
     payloads: includePayload ? rows.slice(0, q.limit).map((row) => row.payload) : [],
@@ -324,13 +327,20 @@ export async function histogram(ch: ClickHouseClient, p: string, q: z.infer<type
   }
   return { interval, buckets: [...buckets.values()] };
 }
+const TARGET_COLUMNS = ['target_ids', 'target_types', 'target_names'];
+/** Two target-level facets expand ONE (id, type, name) tuple, so an id is never paired with another target's type. */
+const SHARED_TARGETS = 'ARRAY JOIN arrayZip(target_ids,target_types,target_names) AS facet_targets';
 /** SQL for one facet level: the grouped value, its display label and an optional ARRAY JOIN. */
-function facetLevel(field: string, n: number) {
+function facetLevel(field: string, n: number, sharedTargets = false) {
   const col = Object.hasOwn(columns, field) ? columns[field] : undefined;
   let expr = col ?? `attributes[{attr${n}:String}]`;
   let join = '';
   let label = expr;
-  if (expr === 'target_ids') {
+  if (sharedTargets && col && TARGET_COLUMNS.includes(col)) {
+    // The caller adds SHARED_TARGETS once for both levels.
+    expr = `facet_targets.${TARGET_COLUMNS.indexOf(col) + 1}`;
+    label = col === 'target_ids' ? 'facet_targets.3' : expr;
+  } else if (expr === 'target_ids') {
     join = `ARRAY JOIN arrayZip(target_ids,target_names) AS facet_target${n}`;
     expr = `facet_target${n}.1`;
     label = `facet_target${n}.2`;
@@ -373,10 +383,14 @@ export async function facets(
   if (!q.by || !values.length) return { field: q.field, by: q.by ?? null, values, otherCount };
   // Second level (#140): the top `byLimit` values of `by` within each returned value, and the count of the rest.
   // One bounded query: the outer filter keeps only the returned first-level values.
-  const two = facetLevel(q.by, 2);
+  const isTarget = (field: string) => TARGET_COLUMNS.includes(facetColumn(field) ?? '');
+  const shared = isTarget(q.field) && isTarget(q.by);
+  const both = shared ? { one: facetLevel(q.field, 1, true), two: facetLevel(q.by, 2, true) } : { one, two: facetLevel(q.by, 2) };
+  const two = both.two;
+  const joins = shared ? SHARED_TARGETS : `${one.join} ${two.join}`;
   const groups = await read<{ value: string; grp: string; label: string; count: number; total: number }>(
     ch,
-    `SELECT value,grp,coalesce(nullIf(argMaxIf(glabel,received_at,glabel!=''),''),grp) label,count() count,sum(count()) OVER (PARTITION BY value) total FROM (SELECT ${one.expr} value,${two.expr} grp,${two.label} glabel,received_at FROM events ${one.join} ${two.join} WHERE ${w.sql}) WHERE value IN {facetValues:Array(String)} GROUP BY value,grp ORDER BY value,count DESC,grp LIMIT {byLimit:UInt32} BY value`,
+    `SELECT value,grp,coalesce(nullIf(argMaxIf(glabel,received_at,glabel!=''),''),grp) label,count() count,sum(count()) OVER (PARTITION BY value) total FROM (SELECT ${both.one.expr} value,${two.expr} grp,${two.label} glabel,received_at FROM events ${joins} WHERE ${w.sql}) WHERE value IN {facetValues:Array(String)} GROUP BY value,grp ORDER BY value,count DESC,grp LIMIT {byLimit:UInt32} BY value`,
     { ...w.params, ...one.params, ...two.params, facetValues: values.map((v) => v.value), byLimit: q.byLimit ?? 5 },
   );
   for (const v of values) {

@@ -312,7 +312,7 @@ export const managementRoutes = new Hono<AppEnv>()
       if (expiresAt && expiresAt.getTime() <= Date.now()) throw new ApiError(422, 'validation_error', 'expiresAt must be in the future.');
       // A scoped-read key is stored as a read key with a scope (#138); all read kinds use lb_read_ secrets.
       const kind = input.kind === 'ingest' ? 'ingest' : 'read';
-      const material = generateApiKey(kind);
+      const material = generateApiKey(kind, Boolean(input.scope || expiresAt));
       const key = await withProjectLock(c.get('project').id, () =>
         prisma.$transaction(async (tx) => {
           const key = await tx.apiKey.create({
@@ -375,7 +375,7 @@ export const managementRoutes = new Hono<AppEnv>()
           const expiresAt = requestedExpiry ?? old.expiresAt;
           if (expiresAt && expiresAt.getTime() <= Date.now())
             throw new ApiError(409, 'key_expired', 'This key has expired. Pass a new expiresAt to roll it, or create a new key.');
-          const material = generateApiKey(old.kind);
+          const material = generateApiKey(old.kind, Boolean(old.scope || expiresAt));
           const key = await tx.apiKey.create({
             data: {
               projectId,

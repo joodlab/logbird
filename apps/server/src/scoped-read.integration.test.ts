@@ -5,7 +5,7 @@ import { prisma } from '@logbird/database';
 import { expect, it } from 'vitest';
 import { app } from './app';
 import { clickhouse } from './clickhouse';
-import { clearTokenKeyCache, mintViewerToken } from './read-access';
+import { clearTokenKeyCache, mintViewerToken, tokenKey } from './read-access';
 import { drainTestAudit } from './test-audit';
 
 /**
@@ -158,6 +158,19 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
           { type: 'page', id: 'site_a' },
         ],
       },
+      // Collisions: ingest trims ids, so these are STORED as tenant "t1", target "site_a" and action "booking.leak",
+      // but their original ids differ. The exact check on the stored payload keeps them out of those scopes.
+      { id: 'qa-collide-tenant', occurredAt: ts(8), action: 'booking.created', tenant: { id: 't1 ', name: 'Lookalike' }, targets: [site_a] },
+      {
+        id: 'qa-collide-target',
+        occurredAt: ts(9),
+        action: 'booking.created',
+        tenant: { id: 't1', name: 'Tenant one' },
+        targets: [{ type: 'website', id: 'site_a ' }],
+      },
+      { id: 'qa-collide-action', occurredAt: ts(10), action: ' booking.leak', tenant: { id: 't1', name: 'Tenant one' } },
+      // A literal dotted key: stored as the attribute path "context.ip", which an ip mask hides like the real field.
+      { id: 'qa-dotted-ip', occurredAt: ts(11), action: 'auth.login', tenant: { id: 't1', name: 'Tenant one' }, 'context.ip': '198.51.100.9' },
     ];
     const ingested = await app.request('/v1/events', {
       method: 'POST',
@@ -167,12 +180,33 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect(ingested.status).toBe(202);
     expect((await ingested.json()).accepted).toBe(events.length);
 
-    const all = ['qa-none', 'qa-t1-a1', 'qa-t1-b1', 'qa-t1-child', 'qa-t1-page', 'qa-t2-child', 'qa-t2-x'];
-    const tenant1 = ['qa-t1-a1', 'qa-t1-b1', 'qa-t1-child', 'qa-t1-page'];
+    const all = [
+      'qa-collide-action',
+      'qa-collide-target',
+      'qa-collide-tenant',
+      'qa-dotted-ip',
+      'qa-none',
+      'qa-t1-a1',
+      'qa-t1-b1',
+      'qa-t1-child',
+      'qa-t1-page',
+      'qa-t2-child',
+      'qa-t2-x',
+    ];
+    const tenant1 = ['qa-collide-action', 'qa-collide-target', 'qa-dotted-ip', 'qa-t1-a1', 'qa-t1-b1', 'qa-t1-child', 'qa-t1-page'];
     expect(await ids(read.secret)).toEqual(all);
+    // escape: collision — tenant id that differs only by whitespace (stored identically) stays out of the t1 scope.
     expect(await ids(t1.secret)).toEqual(tenant1);
+    // escape: collision — target id that differs only by whitespace stays out of the website scope.
     expect(await ids(site.secret)).toEqual(['qa-t1-a1', 'qa-t1-child']);
-    expect(await ids(bookings.secret)).toEqual(['qa-t1-a1', 'qa-t1-b1']);
+    // escape: collision — an action whose original does not start with the prefix stays out of the prefix scope.
+    expect(await ids(bookings.secret)).toEqual(['qa-collide-target', 'qa-t1-a1', 'qa-t1-b1']);
+    expect((await v1(t1.secret, '/events/qa-collide-tenant')).status).toBe(404);
+    expect((await v1(site.secret, '/events/qa-collide-target')).status).toBe(404);
+    expect((await v1(bookings.secret, '/events/qa-collide-action')).status).toBe(404);
+    // Totals count in-scope events only.
+    const totals = await (await v1(t1.secret, `/events?${new URLSearchParams({ from: '2026-01-01T00:00:00Z', limit: '1' })}`)).json();
+    expect(totals.total).toBe(tenant1.length);
     // q cannot widen the scope: OR, negation, existence, other fields and free text all stay inside it.
     for (const q of [
       'tenant:t2',
@@ -215,6 +249,8 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
       [site.secret, t1Cursor],
       [read.secret, t1Cursor],
       [t1.secret, Buffer.from(JSON.stringify(['2030-01-01T00:00:00.000Z', 'x', 'forged'])).toString('base64url')],
+      // A malformed position under the right fingerprint is a 422 too, never a 500.
+      [read.secret, Buffer.from(JSON.stringify(['not-a-date', 'x'])).toString('base64url')],
     ] as const) {
       const r = await page(bearer, cursor);
       expect(r.status).toBe(422);
@@ -252,7 +288,7 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     };
     expect((await facets(t1.secret, { field: 'tenant' })).values.map((v) => v.value)).toEqual(['t1']);
     expect((await facets(t1.secret, { field: 'tenant', q: 'tenant:t2 OR tenant:t1' })).values).toEqual([
-      { value: 't1', label: 'Tenant one', count: 4 },
+      { value: 't1', label: 'Tenant one', count: tenant1.length },
     ]);
     const missing = await facets(read.secret, { field: 'attr.metadata.missing', by: 'tenant', q: 'attr.metadata.missing:*' });
     expect(missing.by).toBe('tenant');
@@ -271,6 +307,23 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     const scopedMissing = await facets(t1.secret, { field: 'attr.metadata.missing', q: 'attr.metadata.missing:*' });
     expect(scopedMissing.values.map((v) => [v.value, v.count])).toEqual([['roles:create', 1]]);
     expect(scopedMissing.by).toBeNull();
+    // Scoped two-level facets: labels and remainders come from in-scope events only.
+    const scopedGroups = await facets(t1.secret, { field: 'tenant', by: 'action', byLimit: '2' });
+    expect(scopedGroups.values).toHaveLength(1);
+    expect(scopedGroups.values[0]).toMatchObject({ value: 't1', label: 'Tenant one', count: tenant1.length });
+    expect(scopedGroups.values[0]?.groups).toEqual([
+      { value: 'auth.login', label: 'auth.login', count: 2 },
+      { value: 'booking.created', label: 'booking.created', count: 2 },
+    ]);
+    expect(scopedGroups.values[0]?.groupsOtherCount).toBe(tenant1.length - 4);
+    // Two target levels expand ONE target tuple: qa-t1-page has website:site_x and page:site_a, never website:site_a.
+    const targetPairs = await facets(read.secret, { field: 'target', by: 'target.type', q: 'id:qa-t1-page', limit: '10' });
+    expect(targetPairs.values.map((v) => [v.value, v.groups?.map((g) => g.value)]).sort()).toEqual([
+      ['site_a', ['page']],
+      ['site_x', ['website']],
+    ]);
+    // Any query field can be faceted (#140), e.g. the actor email for an unmasked reader.
+    expect((await facets(t1.secret, { field: 'actor.email' })).values.map((v) => v.value)).toContain('Lina@example.invalid');
 
     // Masks: values hidden in results and the original payload dropped; masked fields cannot be filtered or faceted.
     const maskedPage = await (await v1(masked.secret, `/events?${new URLSearchParams({ q: 'id:qa-t1-a1', from: '2026-01-01T00:00:00Z' })}`)).json();
@@ -285,12 +338,22 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
       `/events?${new URLSearchParams({ q: 'actor.email:lina@example.invalid' })}`,
       `/events?${new URLSearchParams({ q: 'ip:203.0.113.*' })}`,
       `/facets?${new URLSearchParams({ field: 'ip' })}`,
+      `/facets?${new URLSearchParams({ field: 'actor.email' })}`,
       `/facets?${new URLSearchParams({ field: 'tenant', by: 'actor.email' })}`,
       `/export?${new URLSearchParams({ format: 'csv', q: 'ip:203.0.113.7' })}`,
+      // The literal "context.ip" attribute path is masked like the field itself, in filters and in both facet levels.
+      `/events?${new URLSearchParams({ q: 'attr.context.ip:198.51.*' })}`,
+      `/events?${new URLSearchParams({ q: 'context.ip:*' })}`,
+      `/facets?${new URLSearchParams({ field: 'attr.context.ip' })}`,
+      `/facets?${new URLSearchParams({ field: 'tenant', by: 'attributes.context.ip' })}`,
     ]) {
       const r = await v1(masked.secret, path);
       expect(r.status, path).toBe(422);
+      expect((await r.json()).error, path).toMatchObject({ code: 'invalid_query', details: { reason: 'not_allowed' } });
     }
+    expect(JSON.stringify(await (await v1(masked.secret, '/events/qa-dotted-ip')).json())).not.toContain('198.51.100.9');
+    // Unmasked readers still facet on that attribute.
+    expect((await facets(t1.secret, { field: 'attr.context.ip' })).values.map((v) => v.value)).toContain('198.51.100.9');
     const evidence = await v1(masked.secret, '/export?format=jsonl-evidence');
     expect(evidence.status).toBe(422);
     expect((await evidence.json()).error.code).toBe('masked_export');
@@ -378,7 +441,7 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
         .slice(1)
         .map((row) => row.split(',')[0])
         .sort(),
-    ).toEqual(['"qa-t1-a1"', '"qa-t1-b1"', '"qa-t1-child"', '"qa-t1-page"']);
+    ).toEqual(tenant1.map((id) => `"${id}"`));
     expect(csv).not.toMatch(/203\.0\.113\.7|Lina@example/);
     await drainTestAudit(organizationId);
     const receipts = await (
@@ -392,6 +455,37 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect(completed.actor).toMatchObject({ type: 'api_key', id: read.key.id, name: 'CMS server' });
     expect(completed.metadata.access).toMatchObject({ via: 'viewer_token', apiKeyId: read.key.id, viaToken: true, tenantId: 't1' });
     expect(completed.metadata.export.rows).toBe(2);
+
+    // Evidence export with a scoped (unmasked) key across export page boundaries (200 rows per page): every in-scope
+    // row exactly once, original payload text unchanged (19-digit number kept), nothing from other tenants.
+    const bulkEvents = Array.from({ length: 230 }, (_, n) => ({
+      id: `qa-bulk-${String(n).padStart(3, '0')}`,
+      occurredAt: ts(12),
+      action: 'booking.created',
+      tenant: { id: 'tbulk' },
+      metadata: { big: 'BIG', n },
+    }));
+    const bulkIngest = await app.request('/v1/events', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${result.ingestKey.secret}`, 'Content-Type': 'application/json' },
+      body: `{"events":[${bulkEvents.map((e) => JSON.stringify(e).replace('"big":"BIG"', '"big":1234567890123456789')).join(',')}]}`,
+    });
+    expect((await bulkIngest.json()).accepted).toBe(230);
+    const bulk = await createKey({ name: 'Bulk tenant', kind: 'scoped-read', scope: { tenantId: 'tbulk' } });
+    const evidenceBulk = await v1(bulk.secret, `/export?${new URLSearchParams({ format: 'jsonl-evidence', from: '2026-01-01T00:00:00Z' })}`);
+    expect(evidenceBulk.status).toBe(200);
+    const evidenceLines = (await evidenceBulk.text()).trim().split('\n');
+    const evidenceIds = evidenceLines.map((line) => (JSON.parse(line) as { event: { id: string } }).event.id);
+    expect(evidenceIds).toHaveLength(230);
+    expect(new Set(evidenceIds).size).toBe(230);
+    expect(evidenceIds.every((id) => id.startsWith('qa-bulk-'))).toBe(true);
+    // The original payload rides along unchanged (exact 19-digit numbers depend on the ingest fix in #168).
+    for (const line of evidenceLines) {
+      const row = JSON.parse(line) as { event: { id: string }; payload: { id: string; tenant: { id: string }; metadata: { n: number } } };
+      expect(row.payload.id).toBe(row.event.id);
+      expect(row.payload.tenant.id).toBe('tbulk');
+      expect(row.event.id).toBe(`qa-bulk-${String(row.payload.metadata.n).padStart(3, '0')}`);
+    }
 
     // Rolling copies scope, origins and the absolute expiry (a replacement never outlives the key it replaces unless the
     // roll passes a new expiry); revoking or expiring the key kills it and its tokens.
@@ -417,10 +511,60 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect(expiredRoll.status).toBe(409);
     expect((await expiredRoll.json()).error.code).toBe('key_expired');
     expect((await console_(ownerCookie, `${keysPath}/${t1.key.id}/roll`, 'POST', { expiresAt: later })).status).toBe(201);
+
+    // escape: rollback — restricted keys (scope or expiry) carry 48 random characters, which releases before scoped
+    // keys reject (their authenticator accepts exactly 32), so a rollback fails closed instead of widening them.
+    const preScopeAuthenticator = /^(?:lb|tm)_(?:ingest|read)_[A-Za-z0-9]{32}$/;
+    for (const restricted of [t1.secret, site.secret, masked.secret, replacement.secret]) {
+      expect(restricted).toMatch(/^lb_read_[A-Za-z0-9]{48}$/);
+      expect(preScopeAuthenticator.test(restricted)).toBe(false);
+    }
+    expect(preScopeAuthenticator.test(read.secret)).toBe(true); // unrestricted keys keep the old format
+    const expiringIngest = await createKey({ name: 'Expiring ingest', kind: 'ingest', expiresAt: later });
+    expect(preScopeAuthenticator.test(expiringIngest.secret)).toBe(false);
+    // escape: rollback — the database fence refuses a roll (as an older release would do it) that drops the scope or
+    // the expiry; legitimate rolls and plain inserts are untouched.
+    const oldReleaseRoll = (replaced: { id: string; kind: string }, extra: Record<string, unknown> = {}) =>
+      prisma.apiKey.create({
+        data: {
+          projectId: project?.id ?? '',
+          name: 'qa old-release roll',
+          kind: replaced.kind === 'ingest' ? 'ingest' : 'read',
+          hash: randomUUID(),
+          prefix: 'lb_read_qa',
+          replacesKeyId: replaced.id,
+          ...extra,
+        },
+      });
+    await expect(oldReleaseRoll(site.key, { expiresAt: new Date(later) })).rejects.toThrow(/logbird_api_key_roll_fence/);
+    await expect(oldReleaseRoll(expiringIngest.key)).rejects.toThrow(/logbird_api_key_roll_fence/);
+    await expect(oldReleaseRoll(site.key, { scope: site.key.scope ?? undefined })).rejects.toThrow(/logbird_api_key_roll_fence/);
+    expect((await oldReleaseRoll(site.key, { scope: site.key.scope ?? undefined, expiresAt: new Date(later) })).id).toBeTruthy();
+    expect((await oldReleaseRoll(expiringIngest.key, { expiresAt: new Date(later) })).id).toBeTruthy();
+    expect((await oldReleaseRoll({ id: result.ingestKey.key.id, kind: 'ingest' })).id).toBeTruthy();
+    expect(
+      (await prisma.apiKey.create({ data: { projectId: project.id, name: 'qa plain', kind: 'read', hash: randomUUID(), prefix: 'lb_read_qa' } })).id,
+    ).toBeTruthy();
+
+    // Revocation reaches tokens within the 30 s key cache: still cached right after, refused once the cache refreshes.
+    clearTokenKeyCache(); // start the 30 s window now, so the timing below is deterministic
+    expect((await v1(token.token, '/events')).status).toBe(200); // warms the cache for this key
     expect((await console_(ownerCookie, `${keysPath}/${read.key.id}`, 'DELETE')).status).toBe(204);
     expect((await v1(read.secret, '/events')).status).toBe(401);
-    clearTokenKeyCache(); // tokens die with their key within the 30 s cache window; skip the wait here
+    expect((await v1(token.token, '/events')).status).toBe(200); // documented ≤ 30 s window
+    expect((await tokenKey(read.key.id, Date.now() + 29_000))?.revokedAt).toBeNull();
+    expect((await tokenKey(read.key.id, Date.now() + 31_000))?.revokedAt).not.toBeNull(); // the deadline refreshes it
     expect((await v1(token.token, '/events')).status).toBe(401);
+
+    // Minting refuses oversized bodies before parsing, and scopes whose token would exceed the verifier's budget.
+    const oversized = await v1(bulk.secret, '/viewer-tokens', { method: 'POST', body: { scope: { tenantId: 'tbulk' }, pad: 'x'.repeat(20_000) } });
+    expect(oversized.status).toBe(413);
+    const huge = await createKey({ name: 'Huge scope', kind: 'read' });
+    const wide = await v1(huge.secret, '/viewer-tokens', {
+      method: 'POST',
+      body: { scope: { tenantId: 'tbulk', actionPrefixes: Array.from({ length: 20 }, (_, n) => `${'€'.repeat(185)}${n}`) } },
+    });
+    expect(wide.status).toBe(422);
     // Ingest keys cannot read; the ingest path still works for ingest keys only.
     expect((await v1(result.ingestKey.secret, '/events')).status).toBe(401);
   } finally {

@@ -13,7 +13,7 @@ vi.mock('./rate-limit', () => ({
   requestRateLimit: () => (_c: unknown, next: () => Promise<void>) => next(),
   publicRateLimits: {
     authenticated: () => (_c: unknown, next: () => Promise<void>) => next(),
-    reader: () => (_c: unknown, next: () => Promise<void>) => next(),
+    mint: () => (_c: unknown, next: () => Promise<void>) => next(),
   },
 }));
 vi.mock('@logbird/worker/queue', () => ({ connection: {}, retentionQueue: {} }));
