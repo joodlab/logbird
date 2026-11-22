@@ -103,9 +103,10 @@ path: /developers
 
 - **id:** `envelope`
 - **eyebrow:** The envelope
-- **heading:** Six fields that make an audit log useful.
-- **body:** Only an `action` string is required, and each event must fit the ingest limits. These recommended fields become indexed columns, and actors, workers,
-  support agents, tenants, records and operations each get their own page in the console. The conformance score is the
+- **heading:** The fields that make an audit log useful.
+- **body:** Only an `action` string is required, and each event must fit the ingest limits. These recommended fields are normalized into columns: actor, tenant,
+  executor, target and operation ids are indexed for search, and actors, workers, support agents, tenants, records and
+  operations each get their own page in the console. The conformance score is the
   share of nine recommended checks an event passes.
   <!-- source: docs/concepts.md; docs/SPEC.md §3 -->
 - **table:**
@@ -283,7 +284,7 @@ path: /developers
   | Events per request | 1 to 1000 |
   | Request size | 5 MB |
   | Event size | 256 KB |
-  | Attributes per event | Up to 256 indexed, 6 levels deep, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON) |
+  | Attributes per event | Up to 256 custom attributes indexed, 6 levels deep, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON) |
   | `occurredAt` | ISO-8601 or epoch milliseconds, from 3650 days ago to 24 hours ahead |
   | Ingest rate (default, per project) | 3000 requests a minute |
   | Read rate (default, per project) | 1200 requests a minute |

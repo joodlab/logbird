@@ -25,8 +25,8 @@ path: /changelog
   bullets of its `CHANGELOG.md` section and, once the repository is public, a link to its full release notes. The
   build reads the list from the GitHub API and falls back to `apps/web/src/lib/releases.snapshot.ts`; run
   `pnpm --filter @logbird/web releases:sync` after each release.
-- **empty state (until the first release):** Nothing has been released yet. The first release, 0.1.0, is in progress
-  and will list everything since the start of the project. (Said once, here; there's no separate status line.)
+- **empty state (only when the release list is empty):** Nothing has been released yet. The first release will list
+  everything since the start of the project. (Said once, here; there's no separate status line.)
 - **visual:** none
 
 ## build-log

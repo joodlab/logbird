@@ -151,9 +151,10 @@ These variants are **not** used anywhere on the site. The owner may approve them
 - **Domain (decided).** The public origin is `logbird.joodlab.com`; copy writes it wherever a domain is needed and
   never invents another one. No mailbox is derived from it: contact addresses come only from `WEB_SECURITY_EMAIL` and
   `WEB_CONTACT_EMAIL`, with no default. The engineer keeps the domain in one config value (`apps/web/src/env.ts`).
-- **Public repository timing.** All copy says "the repository opens publicly soon".
+- **Public repository (decided).** The repository is public; copy that depends on it follows `WEB_GITHUB_PUBLIC` (see the
+  self-host CTA rule above).
 - **npm packages.** `@logbird/sdk` and the integrations are not on npm yet (registry returned 404 on 2026-11-07;
-  `docs/roadmap.md` P0-3). Install lines are labelled "after the first npm release".
+  `docs/roadmap.md` P0-3). The public build shows the source install, labelled "From source (not on npm yet)".
 - **Docs links.** Pages link to repository docs (for example `docs/concepts.md`). Those links resolve once the
   repository is public or a docs site exists. Until then, the engineer can hide them or point them at `/developers`.
 - **Security contact.** `SECURITY.md` still lists `SECURITY_CONTACT_EMAIL (not configured)`. The security page needs

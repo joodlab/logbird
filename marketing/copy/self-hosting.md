@@ -49,7 +49,8 @@ path: /self-hosting
   <!-- source: apps/web/src/lib/selfhost.ts; docs/self-hosting.md §Five-minute quickstart -->
 
 - **steps after the code:**
-  1. Open `http://localhost:4600` and sign in with the code sent to your email.
+  1. Open `http://localhost:4600` and sign in with the code sent to your email, or printed in the server log if you set
+     `AUTH_LOG_SIGN_IN_CODES=true`.
   2. Create a workspace and a project. Copy the ingest key; it's shown once.
   3. Send an event:
 
@@ -144,13 +145,17 @@ path: /self-hosting
 - **eyebrow:** Upgrades and backups
 - **heading:** Upgrade to a pinned release, after a backup.
 - **steps:**
-  1. Stop writes: block ingress and stop the console, server and worker (the worker finishes its current job first).
+  1. Stop writes: block ingress and stop the console, server and worker. The worker gets five minutes to finish its
+     current job: wait for the stop to complete, and check its logs if it had to be killed.
   2. Back up, with writers stopped: matched Postgres (`pg_dump`) and ClickHouse (`BACKUP DATABASE`) backups and a
-     SHA-256 checksum file. Keep the original `.env`; record the Git revision and image IDs.
-  3. Pin the new version: check out the release tag `vX.Y.Z`, then set `LOGBIRD_VERSION=X.Y.Z` in `.env`, without the
-     `v` (the value already in `.env` overrides the Compose default). Run `docker compose config --images` and check
+     SHA-256 checksum file. Keep the original env file; record the Git revision (`git rev-parse HEAD`) and the images
+     (`docker compose images`).
+  3. Pin the new version: check out the release tag `vX.Y.Z`, then set `LOGBIRD_VERSION=X.Y.Z`, without the `v`, in
+     the env file the installation runs with (`.env`, or the one you cut over to after a restore): its value overrides
+     the Compose default, and a `LOGBIRD_VERSION` exported in your shell overrides both. Run
+     `docker compose config --images` with the same project, env file and `-f` flags as the installation, and check
      all four `logbird-*` images end in `:X.Y.Z`.
-  4. `docker compose pull`, then `docker compose up -d --no-build`. Migrations run first; if one fails, the new
+  4. `docker compose pull`, then `docker compose up -d --no-build`, with those same flags. Migrations run first; if one fails, the new
      version doesn't start.
   5. Verify readiness, sign-in, your events, settings and keys, and the retention runs before reopening ingress.
 - **bullets:**

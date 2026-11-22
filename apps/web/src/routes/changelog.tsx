@@ -23,7 +23,9 @@ function ChangelogPage() {
       <PageHero
         eyebrow="Changelog"
         lead={
-          <Rich text="Two lists live here. **Releases** are the versions published on GitHub, with the highlights from the repository's `CHANGELOG.md`; each links to its full notes and upgrade steps. The **build log** is a short post for each day of work, showing what we shipped with a real capture from the product." />
+          <Rich
+            text={`Two lists live here. **Releases** are the versions published on GitHub, with the highlights from the repository's \`CHANGELOG.md\`${GITHUB_PUBLIC && GITHUB_URL ? '; each links to its full notes and upgrade steps' : ''}. The **build log** is a short post for each day of work, showing what we shipped with a real capture from the product.`}
+          />
         }
         title="What changed, and when."
       />

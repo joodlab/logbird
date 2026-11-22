@@ -57,7 +57,7 @@ path: /product
 - **bullets:**
   - Fields are suggested from what your project actually sends, with how often each one appears.
   - Errors point at the exact token and say what was expected, for example "attempt is a number".
-  - Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 attributes
+  - Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 custom attributes
     and text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON). Search limits apply to the index. You can inspect the full parsed event as JSON.
     <!-- source: docs/SPEC.md §3 (flattening); packages/clickhouse/src/normalize.ts -->
 - **visual:** `marketing/media/staydesk/query-suggestions-light.webp` (manifest id `query-suggestions`) under the query-language code sample.
@@ -215,7 +215,7 @@ path: /product
 - **eyebrow:** Read API
 - **heading:** Show history inside your own product.
 - **body:** Give your customers a "History" tab. Your backend calls `GET /v1/events` with a read key and a query
-  such as `target:bk_1042 tenant:biz_7`, then returns the page to your UI. Results are paginated with a cursor. The
+  such as `record:booking:bk_1042 tenant:biz_7`, then returns the page to your UI. Results are paginated with a cursor. The
   Vue, Nuxt and TanStack Start packages include helpers for this.
   <!-- source: packages/contracts/src/routes.ts, api.ts; docs/integrations.md -->
 - **limit line:** A read key can read the whole project. Your backend must check that the person asking may see

@@ -51,7 +51,7 @@ export const siteMap: SitePage[] = [
     path: '/developers',
     title: 'Developers',
     description:
-      'Send audit events from TypeScript, Hono, TanStack Start, Vue, Nuxt or any HTTP client. Envelope guide, workers, delivery semantics and limits.',
+      'Send audit events from TypeScript, Hono, TanStack Start, Nuxt or any HTTP client, and show history with the Vue helpers. Envelope guide, workers, delivery semantics and limits.',
     section: 'developers',
     priority: 0.9,
     changefreq: 'weekly',

@@ -72,7 +72,9 @@ const range = (prefix: string, from: number, to: number) => Array.from({ length:
 
 // Nobody can self-host before the source opens, so the cell says so until WEB_GITHUB_PUBLIC=true.
 const LOGBIRD_SELF_HOST = GITHUB_PUBLIC
-  ? 'Yes: Docker Compose or Coolify, with published images'
+  ? latestRelease
+    ? 'Yes: Docker Compose or Coolify, with published images'
+    : 'Yes: Docker Compose or Coolify, built from source'
   : 'Planned: Docker Compose or Coolify, when the source opens';
 // Licence and hosting cells follow the same availability state.
 const LOGBIRD_SOURCE = GITHUB_PUBLIC ? 'MIT; source on GitHub' : 'MIT; source opens publicly soon';

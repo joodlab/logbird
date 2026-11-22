@@ -12,7 +12,7 @@ export const Route = createFileRoute('/developers')({ head: () => pageHead('/dev
 
 // Copy: marketing/copy/developers.md. Every sample is checked against packages/sdk and packages/integrations READMEs.
 /** The working install until the packages are on npm (packages/sdk/README.md): link the SDK from a checkout of the release. */
-const sourceInstall = `git clone --branch v${SELF_HOST_VERSION} ${CLONE_URL} ../logbird
+const sourceInstall = `git clone ${SELF_HOST_VERSION ? `--branch v${SELF_HOST_VERSION} ` : ''}${CLONE_URL} ../logbird
 pnpm -C ../logbird install
 pnpm add @logbird/sdk@link:../logbird/packages/sdk`;
 
@@ -35,10 +35,11 @@ client.track({
   changes: [{ field: 'status', before: 'confirmed', after: 'cancelled' }],
 });
 
-// flush() rejects only when retryable delivery (network, 429, 5xx) runs out of retries; the batch stays
-// queued for the next flush. Permanent rejections don't reject: they arrive through onError and onDrop.
+// flush() can reject, for example when retryable delivery (network, 429, 5xx) runs out of retries or the send
+// deadline passes. Unsettled events are then queued again, as far as the queue's capacity allows.
+// Permanent rejections don't reject flush(): they arrive through onError and onDrop.
 await client.flush().catch((error) => console.error('audit delivery pending', error));
-// On exit: stop accepting events and drain the queue. Rejects under the same condition as flush().
+// On exit: stop accepting events and drain the queue. Can reject like flush().
 await client.shutdown().catch((error) => console.error('audit events left undelivered', error));`;
 
 const http = `curl https://audit.example.com/v1/events \\
@@ -144,7 +145,7 @@ const limits: [string, string][] = [
   ['Event size', '256 KB'],
   [
     'Attributes per event',
-    'Up to 256 indexed, 6 levels deep, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON)',
+    'Up to 256 custom attributes indexed, 6 levels deep, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON)',
   ],
   ['occurredAt', 'ISO-8601 or epoch milliseconds, from 3650 days ago to 24 hours ahead'],
   ['Ingest rate (default, per project)', '3000 requests a minute'],
@@ -252,8 +253,9 @@ function DevelopersPage() {
             <code>track(event)</code> never throws and never waits for the network.
           </>,
           <>
-            <code>flush()</code> and <code>shutdown()</code> reject when retryable delivery (network, <code>429</code>, <code>5xx</code>) runs out of
-            retries, and the batch stays queued. Permanent rejections arrive through <code>onError</code> and <code>onDrop</code> instead.
+            <code>flush()</code> and <code>shutdown()</code> can reject, for example when retryable delivery (network, <code>429</code>,{' '}
+            <code>5xx</code>) runs out of retries or the send deadline passes. Unsettled events are queued again, as far as the queue's capacity
+            allows. Permanent rejections arrive through <code>onError</code> and <code>onDrop</code> instead.
           </>,
           <>
             Call <code>shutdown()</code> from your host's own exit hook. The SDK installs no process handlers.
@@ -301,8 +303,8 @@ function DevelopersPage() {
         <SectionHeader
           eyebrow="The envelope"
           id="envelope-title"
-          lead="Only an action string is required, and each event must fit the ingest limits. These recommended fields become indexed columns, and actors, workers, support agents, tenants, records and operations each get their own page in the console. The conformance score is the share of nine recommended checks an event passes."
-          title="Six fields that make an audit log useful."
+          lead="Only an action string is required, and each event must fit the ingest limits. These recommended fields are normalized into columns: actor, tenant, executor, target and operation ids are indexed for search, and actors, workers, support agents, tenants, records and operations each get their own page in the console. The conformance score is the share of nine recommended checks an event passes."
+          title="The fields that make an audit log useful."
         />
         <div className="panel mt-10 overflow-hidden">
           <table className="table-site">
@@ -355,8 +357,8 @@ function DevelopersPage() {
                 <>
                   <strong className="font-medium text-foreground">Everything else is kept.</strong> Custom top-level keys and anything under{' '}
                   <code>metadata</code> stay in the event's JSON and are indexed as searchable attributes, for example{' '}
-                  <code>metadata.channel:whatsapp</code>: up to 256 per event, 6 levels deep, text values indexed up to their first 2 KiB (a number
-                  too long to index stays in the event JSON).
+                  <code>metadata.channel:whatsapp</code>: up to 256 custom attributes per event, 6 levels deep, text values indexed up to their first
+                  2 KiB (a number too long to index stays in the event JSON).
                 </>,
               ]}
             />

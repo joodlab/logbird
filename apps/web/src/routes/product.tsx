@@ -106,7 +106,7 @@ function ProductPage() {
         bullets={[
           'Fields are suggested from what your project actually sends, with how often each one appears.',
           'Errors point at the exact token and say what was expected, for example "attempt is a number".',
-          'Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 attributes, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON). Search limits apply to the index. You can inspect the full parsed event as JSON.',
+          'Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 custom attributes, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON). Search limits apply to the index. You can inspect the full parsed event as JSON.',
         ]}
         eyebrow="Search"
         id="search"
@@ -193,8 +193,9 @@ function ProductPage() {
           />
         }
       >
-        Every actor, tenant, executor and record in your events gets its own page. Each one shows an activity chart, its top actions, its outcome
-        split, related entities and a full timeline. Directory pages list them all, most active first, with fuzzy search.
+        Actors, tenants, executors and records in your events get their own pages (records from the first 64 targets of each event). Each one shows an
+        activity chart, its top actions, its outcome split, related entities and a full timeline. Directory pages list them all, most active first,
+        with fuzzy search.
       </FeatureRow>
 
       <FeatureRow
@@ -320,8 +321,8 @@ function ProductPage() {
         visual={<SiteCode code={readSample} language="ts" title="Your backend" />}
       >
         Give your customers a "History" tab. Your backend calls <code>GET /v1/events</code> with a read key and a query such as{' '}
-        <code>target:bk_1042 tenant:biz_7</code>, then returns the page to your UI. Results are paginated with a cursor. The Vue, Nuxt and TanStack
-        Start packages include helpers for this.
+        <code>record:booking:bk_1042 tenant:biz_7</code>, then returns the page to your UI. Results are paginated with a cursor. The Vue, Nuxt and
+        TanStack Start packages include helpers for this.
         <span className="mt-4 block">
           <ButtonLink to="/developers" variant="link">
             Read API on the developer page

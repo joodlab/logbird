@@ -41,7 +41,7 @@ path: /
 - **eyebrow:** For developers
 - **heading:** One call per action. No schema to migrate.
 - **body:** Only an `action` string is required, and each event must fit the ingest limits. Add the fields you have: who did it, in which
-  customer account, to which records, what changed. Logbird lifts the fields it knows into indexed columns. Custom
+  customer account, to which records, what changed. Logbird lifts the fields it knows into their own columns. Custom
   top-level fields and anything under `metadata` are searchable as attributes within the indexing limits, and the full
   parsed event is available as JSON. Recommended fields are optional: an event is never
   rejected for missing them.
