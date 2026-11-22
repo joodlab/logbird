@@ -57,7 +57,10 @@ const LAYOUT_ATTRIBUTES = new Set([
   'points',
   'transform',
 ]);
+const LAYOUT_KEYS = new Set(['className', 'style', 'sizes']);
 const LAYOUT_CALLS = new Set(['cn', 'cx']);
+/** A prop named like wording (`frameTitle`, `requiredBadge`, `codeCaption`…) is wording too. */
+const WORDING_NAME = /(title|label|badge|caption|text|heading|lead|note|description|eyebrow|prompt)$/i;
 /** Two words, the first of at least two letters ("Join a team", "Retrace every step"). */
 const TWO_WORDS = /\p{L}{2,}[^\S\n]+\p{L}/u;
 
@@ -86,7 +89,8 @@ function proseLiterals(source: string, file = 'file.tsx'): string[] {
       ancestors.some(
         (up) =>
           (up.type === 'JSXAttribute' && LAYOUT_ATTRIBUTES.has(nameOf(up.name) ?? '')) ||
-          (up.type === 'Property' && LAYOUT_ATTRIBUTES.has(nameOf(up.key) ?? '')) ||
+          // As an object key only class names and styles are layout: a `role`, `type` or `id` key in data can be visible text.
+          (up.type === 'Property' && LAYOUT_KEYS.has(nameOf(up.key) ?? '')) ||
           (up.type === 'CallExpression' && LAYOUT_CALLS.has(nameOf(up.callee) ?? '')),
       ) ||
       (classVariable >= 0 && !ancestors.slice(classVariable).some((up) => up.type === 'ObjectExpression' || up.type === 'ArrayExpression'));
@@ -117,7 +121,11 @@ function proseLiterals(source: string, file = 'file.tsx'): string[] {
       if (layout || specifier) continue;
       const letters = /\p{L}/u.test(text);
       // A template with text around a value is a sentence being built, so any letter counts.
-      if (TWO_WORDS.test(text) || (letters && node.type === 'TemplateElement') || (letters && owner && (owner === 'children' || WORDING.has(owner))))
+      if (
+        TWO_WORDS.test(text) ||
+        (letters && node.type === 'TemplateElement') ||
+        (letters && owner && (owner === 'children' || WORDING.has(owner) || WORDING_NAME.test(owner)))
+      )
         report(text);
     }
     for (const [key, value] of Object.entries(node)) {
@@ -149,6 +157,8 @@ describe('content modules', () => {
       '  </section>',
       ');',
       "const planClass = { className: 'grid gap-2', label: 'Plans' };",
+      "const flow = [{ name: 'API', role: 'Validates each event' }];",
+      'const E = () => <Envelope frameTitle="POST /v1/events" requiredBadge="required" />;',
     ].join('\n');
     expect(proseLiterals(sample)).toEqual([
       'file.tsx:4: "The explorer"',
@@ -165,6 +175,11 @@ describe('content modules', () => {
       // Line 13: a style value and an id list are layout and references, not prose.
       // The class-name exemption covers the variable's own value, not data nested in it.
       'file.tsx:16: "Plans"',
+      // A `role` key in data is visible text (the architecture figure renders it), unlike the JSX `role` attribute.
+      'file.tsx:17: "Validates each event"',
+      // Props named like wording are wording.
+      'file.tsx:18: "POST /v1/events"',
+      'file.tsx:18: "required"',
     ]);
   });
 
