@@ -85,7 +85,10 @@ internal static class LiveServer
     {
         using var http = new HttpClient();
         using var document = JsonDocument.Parse(await http.GetStringAsync(new Uri(new Uri(Endpoint!), "/openapi.json")));
-        return Version.Parse(document.RootElement.GetProperty("info").GetProperty("version").GetString()!);
+        // A pre-release or build suffix (0.2.1-rc.1, 0.2.0+abc) is ignored, as the read client's own version check does.
+        var text = document.RootElement.GetProperty("info").GetProperty("version").GetString()!;
+        var end = text.IndexOfAny(['-', '+']);
+        return Version.Parse(end >= 0 ? text.Substring(0, end) : text);
     }
 }
 

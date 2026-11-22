@@ -6,6 +6,7 @@ on:
       - 'sdks/dotnet/**'
       - 'examples/aspnetcore/**'
       - 'packages/sdk/src/**'
+      - 'packages/contracts/src/record-selector.ts'
       - '.github/workflows/dotnet.yml'
   push:
     branches: [master]
@@ -13,6 +14,7 @@ on:
       - 'sdks/dotnet/**'
       - 'examples/aspnetcore/**'
       - 'packages/sdk/src/**'
+      - 'packages/contracts/src/record-selector.ts'
       - '.github/workflows/dotnet.yml'
 
 permissions:
@@ -81,3 +83,5 @@ jobs:
       - run: pnpm install --frozen-lockfile --filter . --filter @logbird/sdk
       # Fails when the TypeScript SDK's wire JSON drifts from the golden file the .NET tests compare against.
       - run: pnpm exec tsx sdks/dotnet/tests/cross-sdk/typescript-envelope.ts --check
+      # Fails when the TypeScript trailQuery output drifts from the golden file EventSearch.ForTrail is compared against.
+      - run: pnpm exec tsx sdks/dotnet/tests/cross-sdk/trail-query.ts --check

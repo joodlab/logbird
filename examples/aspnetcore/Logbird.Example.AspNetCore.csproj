@@ -13,8 +13,7 @@
   <ItemGroup>
     <!--
       This example builds against the SDK source in this repository. In your own application, reference the package
-      instead (once it is published on nuget.org):
-        <PackageReference Include="Logbird.AspNetCore" Version="0.2.0" />
+      instead once it is published on nuget.org: `dotnet add package Logbird.AspNetCore` adds the version nuget.org lists.
     -->
     <ProjectReference Include="..\..\sdks\dotnet\src\Logbird.AspNetCore\Logbird.AspNetCore.csproj" />
   </ItemGroup>

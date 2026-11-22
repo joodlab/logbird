@@ -386,7 +386,8 @@ UTC multiples of their size, so ≥ 1h buckets start on whole hours (24h → 15m
 `GET /api/projects/:projectId/entities?kind=…&sort=events|lastSeen|name` lists a directory.
 `events` (default) is most active first, ties broken by most recently seen; `lastSeen` is most
 recent first; `name` is A→Z (unnamed entities by id). With `q`, entities whose id or name contains
-it or resembles it are listed best match first: exact id, id prefix, name prefix, substring, then
+it or resembles it are listed best match first: the id exactly as typed, the same id in another
+case, id prefix, name prefix, substring, then
 fuzzy (a record's bare id, `article_27_2` for `article:article_27_2`, counts as its id), and the
 sort orders each group, so an exact id always leads whatever the limit. One or two characters
 match only ids and names that start with them. `nextCursor` is an opaque
