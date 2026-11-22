@@ -239,9 +239,9 @@ when pending captures may still exist rather than calling client.shutdown direct
 
 ## Event ids and retries
 
-Large numbers: a JavaScript `number` cannot hold integers above 2^53 − 1. Send 64-bit ids as strings, or as
-`JSON.rawJSON('9007199254740993')` (Node 21+, current browsers), whose exact digits the SDK keeps through batching,
-`redact()` and retries. Numeric entity ids (`actor: { id: 42 }`) are fine. See
+Large numbers: a JavaScript `number` cannot hold integers above 2^53 − 1, and the SDK copies events through JSON.
+Send 64-bit ids and long decimals as strings. Numeric entity ids within the safe range (`actor: { id: 42 }`) are fine
+and are indexed as `"42"`. `verifyWebhook()` keeps exact digits in parsed webhook payloads. See
 [numbers and ids](../../docs/integrating-a-backend.md#numbers-and-ids).
 
 

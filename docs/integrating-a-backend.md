@@ -94,12 +94,12 @@ and a warning).
 JavaScript numbers cannot hold integers above 2^53 − 1 (`Number.MAX_SAFE_INTEGER`):
 `9007199254740993` is already `9007199254740992` in your process before any SDK sees it.
 From TypeScript, send such ids **as strings** (`String(row.id)` from a `bigint` or a
-database driver's string mode), or as `JSON.rawJSON(text)` where the runtime supports it
-(Node 21+, current browsers); the SDK keeps a `JSON.rawJSON` value's digits. Backends with
+database driver's string mode). The TypeScript SDK copies events through JSON, so it does
+not carry `JSON.rawJSON` values or other exact-number wrappers; use strings. Backends with
 exact 64-bit types (.NET `long` and `decimal`, Java `long`, Go `int64`) can send numbers
-directly. Logbird never rounds a number it receives; what a client rounded before sending
-cannot be recovered. An SDK carrier that crosses a queue (for example BullMQ job data)
-is parsed again by the queue, so 64-bit ids in carriers should be strings.
+directly over HTTP. Logbird never rounds a number it receives; what a client rounded before
+sending cannot be recovered. A body nested thousands of levels deep is parsed like plain
+`JSON.parse` (its long numbers round) rather than refused.
 
 An event first stored before this release that contains such a number had its digits
 rounded; a retry of it now answers `duplicate_id_conflict` (its content differs from what
