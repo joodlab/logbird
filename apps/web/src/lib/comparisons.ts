@@ -75,7 +75,7 @@ const LOGBIRD_SELF_HOST = GITHUB_PUBLIC
   ? latestRelease
     ? 'Yes: Docker Compose or Coolify, with published images'
     : 'Yes: Docker Compose or Coolify, built from source'
-  : 'Planned: Docker Compose or Coolify, when the source opens';
+  : 'Docker Compose or Coolify, once the source opens';
 // Licence and hosting cells follow the same availability state.
 const LOGBIRD_SOURCE = GITHUB_PUBLIC ? 'MIT; source on GitHub' : 'MIT; source opens publicly soon';
 const LOGBIRD_CLOUD = CLOUD_OPEN ? 'Logbird Cloud early access (invited teams)' : 'Logbird Cloud waitlist';
@@ -260,7 +260,12 @@ const workos: Comparison = {
       them: 'CSV export through the Dashboard and the API, one organization and date range at a time, covering the past three months',
       sourceIds: ['W10'],
     },
-    { label: 'Streaming to SIEM', logbird: 'On the roadmap', them: 'Log Streams to seven destination types', sourceIds: ['W5'] },
+    {
+      label: 'Streaming to SIEM',
+      logbird: 'No',
+      them: 'Log Streams to seven destination types',
+      sourceIds: ['W5'],
+    },
     {
       label: 'Retention',
       logbird: 'Per project, 7 days to 10 years; can be lowered, with a preview and permanent deletion',

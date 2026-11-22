@@ -212,8 +212,8 @@ path: /developers
     authenticated backend, with loading, error, refresh and load-more states.
   - **Nuxt** (`@logbird/nuxt`): a Nitro plugin adds `event.context.audit`. A built-in history route denies every
     request until your `authorize(event, query)` hook returns a trusted query.
-- **limit line:** Express, Next.js, Laravel and Django are planned. We'll add them when we use those stacks
-  ourselves. <!-- source: docs/integrations.md (intro) -->
+- **limit line:** There are no Express, Next.js, Laravel or Django integrations. Use the TypeScript SDK or plain HTTP from
+  those stacks. <!-- source: docs/integrations.md (intro). Not on docs/roadmap.md, so not called planned. -->
 - **visual:** code sample
 
 ## workers
@@ -325,7 +325,7 @@ path: /developers
 
 - **limit line:** A read key can read the whole project. A query filter is not authorization: your backend must
   check the tenant and record on every request, including each next page. The read API accepts the query language,
-  not SQL mode. Tenant-scoped read tokens are on the roadmap.
+  not SQL mode. <!-- Scoped read access (0.2.0) is not described here until the maintainer confirms its production proof. -->
   <!-- source: docs/integrations.md §Design; docs/query-language.md; docs/roadmap.md P1-1 -->
 - **visual:** code sample
 

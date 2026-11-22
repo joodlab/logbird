@@ -7,8 +7,9 @@ path: (not a page)
 # Arabic and bilingual notes
 
 The product and the site are **English-only for now**. No Arabic appears anywhere in the UI, on social cards or in the
-README: no bilingual lockup and no Arabic tagline beside the English one. Arabic will ship later as a real localization
-with Paraglide JS (inlang) and a language switcher (`docs/brand.md` §8). Keep these notes as the reference until then.
+README: no bilingual lockup and no Arabic tagline beside the English one. There is no Arabic localization, and it isn't on
+`docs/roadmap.md`. If one is ever built, `docs/brand.md` §8 describes the intended approach (Paraglide JS and a language
+switcher). Keep these notes as the reference.
 
 ## The fixed strings
 
@@ -27,7 +28,7 @@ with Paraglide JS (inlang) and a language switcher (`docs/brand.md` §8). Keep t
   `public/brand/` for later, but nothing renders them.
 - **Hero tagline:** "Retrace every step." only.
 
-## How to set it, once Arabic ships
+## How to set it, if an Arabic localization is ever built
 
 - Wrap Arabic in `lang="ar" dir="rtl"` (for example `<span lang="ar" dir="rtl">تتبّع كل خطوة.</span>`), so screen
   readers and line breaking work.

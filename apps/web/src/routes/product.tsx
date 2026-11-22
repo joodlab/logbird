@@ -336,17 +336,15 @@ function ProductPage() {
         <SectionHeader
           eyebrow="On the roadmap"
           id="roadmap-title"
-          lead="These are plans, not features. Order and timing can change."
-          title="What we plan to build next."
+          lead="These are candidates from our public roadmap, not features or commitments. Order and timing can change."
+          title="What's on our roadmap."
         />
         <ul className="mt-10 grid gap-x-10 gap-y-3 md:grid-cols-2">
           {[
-            "Tenant-scoped read tokens, so a browser can read one customer's history without a project-wide key.",
-            'Per-project redaction rules, applied before events are stored.',
-            'Alert rules on chosen actions, by email or webhook.',
-            'Webhooks and streaming export for SIEM and long-term archives.',
-            'Per-tenant export on the read API.',
-            'SSO (OIDC) for the console.',
+            'Project-level redaction controls, behind the redaction your client already does.',
+            'Alerts on chosen actions.',
+            'Signed webhooks and archive exports.',
+            'Single sign-on for the console.',
           ].map((item) => (
             <li className="flex gap-3 border-b py-3 text-sm leading-relaxed" key={item}>
               <span aria-hidden="true" className="mt-1.5 size-2 shrink-0 rounded-full border border-dashed border-muted-foreground" />

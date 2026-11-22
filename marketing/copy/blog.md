@@ -69,8 +69,8 @@ gone. We'd rather you read those sentences now than discover them during an inci
 ClickHouse and Redis. Your events never leave your servers. Logbird Cloud will run the same codebase for people who
 don't want to operate it. It isn't open yet, and we haven't set prices.
 
-What's not there yet: published images, npm packages, SSO, alerts, streaming export, and a customer-facing viewer
-with tenant-scoped tokens. They're on the roadmap, and we'll write about each one as it lands.
+What's not there yet: published SDK packages, SSO, alerts and archive exports. They're candidates on our public roadmap,
+and we'll write about each one if it lands.
 
 The repository opens publicly soon. If you'd like to hear when Logbird Cloud opens, join the waitlist.
 

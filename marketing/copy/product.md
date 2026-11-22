@@ -233,13 +233,11 @@ path: /product
 
 - **id:** `roadmap`
 - **eyebrow:** On the roadmap
-- **heading:** What we plan to build next.
-- **body:** These are plans, not features. Order and timing can change.
-- **bullets:** <!-- source: docs/roadmap.md P1, P2 -->
-  - Tenant-scoped read tokens, so a browser can read one customer's history without a project-wide key.
-  - Per-project redaction rules, applied before events are stored.
-  - Alert rules on chosen actions, by email or webhook.
-  - Webhooks and streaming export for SIEM and long-term archives.
-  - Per-tenant export on the read API.
-  - SSO (OIDC) for the console.
+- **heading:** What's on our roadmap.
+- **body:** These are candidates from our public roadmap, not features or commitments. Order and timing can change.
+- **bullets:** <!-- source: docs/roadmap.md (Customer-facing history; Later candidates), worded no stronger than it. Only items docs/roadmap.md or a milestone lists may appear here (maintainer rule, 2026-11-22), and not items already built: tenant-scoped read tokens and scoped exports are on master, unreleased, and not presented until their production proof. -->
+  - Project-level redaction controls, behind the redaction your client already does.
+  - Alerts on chosen actions.
+  - Signed webhooks and archive exports.
+  - Single sign-on for the console.
 - **visual:** none
