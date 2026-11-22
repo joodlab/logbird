@@ -26,6 +26,7 @@ import { ENTITY_SECTIONS, type EntitySection, entityQuery, splitTargetId, typeIc
 import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
+import { outcomeBandQuery } from '@/lib/overview-queries';
 import { andQuery, formatTerm } from '@/lib/query-language';
 import { ALL_RANGE, historyRange, rangeInSentence, rangeLabel } from '@/lib/range';
 import { useConsoleZone } from '@/lib/time-zone';
@@ -275,11 +276,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
           <Panel description={`${rangeLabel(timeline.range)} · click a band to filter the history`} title="Activity">
             <div className="p-3 pb-2">
               {p ? (
-                <OutcomeAreaChart
-                  data={p.series}
-                  height={236}
-                  onSelectOutcome={(o) => onTimelineChange({ q: formatTerm('outcome', o), ev: undefined })}
-                />
+                <OutcomeAreaChart data={p.series} height={236} onSelectOutcome={(o) => onTimelineChange({ q: outcomeBandQuery(o), ev: undefined })} />
               ) : (
                 <Skeleton className="h-[244px] w-full" />
               )}

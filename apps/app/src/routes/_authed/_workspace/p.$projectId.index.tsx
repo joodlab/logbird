@@ -23,6 +23,7 @@ import { eventSentence } from '@/lib/events';
 import { delta, formatNumber, formatPercent } from '@/lib/format';
 import { outcomeBandQuery, RECENT_PROBLEMS_QUERY } from '@/lib/overview-queries';
 import { placeholderKeys } from '@/lib/placeholders';
+import { formatExactTerm } from '@/lib/query-language';
 import { ALL_RANGE, DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
 import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
@@ -208,7 +209,7 @@ function OverviewPage() {
               label: <ActionName action={a.id} />,
               count: a.count,
               render: (children, className) => (
-                <button className={className} onClick={() => explore(`action:${a.id}`)} type="button">
+                <button className={className} onClick={() => explore(formatExactTerm('action', a.id))} type="button">
                   {children}
                 </button>
               ),
@@ -309,7 +310,7 @@ function ProblemRow({ event, projectId }: { event: AuditEvent; projectId: string
       <Link
         className="flex flex-col gap-1 px-4 py-2.5 outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 sm:flex-row sm:items-center sm:gap-3"
         params={{ projectId }}
-        search={(prev) => ({ range: prev.range, ev: event.id, q: `id:${event.id}` })}
+        search={(prev) => ({ range: prev.range, ev: event.id, q: formatExactTerm('id', event.id) })}
         to="/p/$projectId/events"
       >
         <span className="flex min-w-0 flex-1 items-center gap-2.5">

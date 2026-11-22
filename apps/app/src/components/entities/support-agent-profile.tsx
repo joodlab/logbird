@@ -20,6 +20,7 @@ import { facetQuery, histogramQuery, summaryRetry } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
 import { formatNumber } from '@/lib/format';
 import { distinctCount, SUPPORT_TERM, supportAgentQuery } from '@/lib/impersonation';
+import { outcomeBandQuery } from '@/lib/overview-queries';
 import { withPresence } from '@/lib/presence-filter';
 import { failureSummary } from '@/lib/query-budget';
 import { formatTerm } from '@/lib/query-language';
@@ -228,7 +229,7 @@ export function SupportAgentProfile({ projectId, agentId, timeline, onTimelineCh
                     <OutcomeAreaChart
                       data={seriesData}
                       height={200}
-                      onSelectOutcome={(o) => onTimelineChange({ q: formatTerm('outcome', o), ev: undefined })}
+                      onSelectOutcome={(o) => onTimelineChange({ q: outcomeBandQuery(o), ev: undefined })}
                     />
                   ) : series.isError ? (
                     <CouldNotLoad className="flex h-[208px] items-center justify-center gap-1.5 text-muted-foreground text-xs" />

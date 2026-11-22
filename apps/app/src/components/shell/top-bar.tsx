@@ -12,7 +12,7 @@ import { projectQuery } from '@/lib/api/queries';
 import { useCrumb } from '@/lib/crumbs';
 import { zoneOffsetMs } from '@/lib/format';
 import { modKeyLabel, useIsMac } from '@/lib/platform';
-import { ALL_RANGE, absoluteRange, RANGE_PRESETS, rangeLabel, rangeShortLabel, resolveRange } from '@/lib/range';
+import { absoluteRange, RANGE_PRESETS, rangeLabel, rangeShortLabel, resolveRange } from '@/lib/range';
 import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
 
@@ -95,14 +95,14 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
         {showRange ? (
           <TimeRangePicker
             className="w-auto max-w-[min(60vw,15rem)]"
-            // An entity page with no range chosen shows its whole history: the picker says so instead of naming the default
-            // window it does not use; picking a range narrows the page as before.
-            label={wholeHistory ? 'All history' : typeof window !== 'undefined' && window.innerWidth < 640 ? rangeShortLabel(range) : rangeLabel(range)}
+            // An entity page with no range chosen shows its whole History; the range scopes only the summary (stats,
+            // support split, activity chart). The picker says so; picking a range narrows the History too.
+            label={rangeButtonLabel(range, wholeHistory, typeof window !== 'undefined' && window.innerWidth < 640)}
             onChange={setRange}
             presets={RANGE_PRESETS}
             resolved={resolved}
             toAbsolute={(from, to) => absoluteRange(from.getTime(), to.getTime())}
-            value={wholeHistory ? ALL_RANGE : range}
+            value={range}
             zone={pickerZone}
           />
         ) : null}
@@ -120,4 +120,10 @@ export function TopBar({ onOpenPalette }: { onOpenPalette: () => void }) {
       </div>
     </header>
   );
+}
+
+/** The picker's label: "Last 24 hours", or "Summary: Last 24 hours" on an entity page whose History shows everything. */
+export function rangeButtonLabel(range: string, wholeHistory: boolean, phone: boolean): string {
+  const label = phone ? rangeShortLabel(range) : rangeLabel(range);
+  return wholeHistory ? `Summary: ${label}` : label;
 }
