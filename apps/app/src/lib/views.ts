@@ -30,6 +30,9 @@ const RESOLVABLE: Partial<Record<string, ViewLabelField>> = {
 /** Bounded: one small entity lookup per term. */
 const MAX_RESOLVED_TERMS = 6;
 
+/** The length a record page cut its generated view names to (`entityViewName`). */
+const ENTITY_VIEW_NAME_MAX = 80;
+
 /**
  * Views saved from a record page before exact record matching (#169) hold `target:<id> target.type:<type>` (which also
  * matches the type on one target and the id on another) plus a Record label for that id. Opening one shows the exact
@@ -43,7 +46,10 @@ export function upgradeRecordView(view: Pick<SavedView, 'name' | 'state'>): { st
   const q = state.q ?? '';
   const label = state.labels?.find((l) => l.field === 'target');
   if (state.lang === 'sql' || !label || hasTopLevelOr(q)) return { state, upgraded: false };
-  if (state.columns !== undefined || !view.name.startsWith(`${label.label} — `)) return { state, upgraded: false };
+  // The record page named it `<label> — <range>`, cut to 80 characters: a long label can leave only a prefix of it.
+  const generated = `${label.label} — `;
+  const pageName = view.name.startsWith(generated) || (view.name.length === ENTITY_VIEW_NAME_MAX && generated.startsWith(view.name));
+  if (state.columns !== undefined || !pageName) return { state, upgraded: false };
   const [first, second] = fieldTerms(q);
   const simple = (t: typeof first) => t && !t.negated && !t.wildcard && (t.valueKind === 'plain' || t.valueKind === 'quoted') && t.value;
   if (!simple(first) || !simple(second) || !first || !second) return { state, upgraded: false };

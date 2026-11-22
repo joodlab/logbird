@@ -265,6 +265,10 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect(recordTotal.total).toBe(4);
     // The site-scoped key: page:site_a sits on an event whose website target is site_x, so nothing is in scope.
     expect(await ids(site.secret, 'record:page:site_a')).toEqual([]);
+    const siteTotal = await (
+      await v1(site.secret, `/events?${new URLSearchParams({ q: 'record:page:site_a', from: '2026-01-01T00:00:00Z', limit: '1' })}`)
+    ).json();
+    expect(siteTotal.total).toBe(0);
     const sql = await v1(t1.secret, `/events?${new URLSearchParams({ lang: 'sql', q: '1 OR 1' })}`);
     expect(sql.status).toBe(422);
 

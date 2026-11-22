@@ -1,5 +1,6 @@
 import { formatRecordTerm } from '@logbird/contracts';
 import { expect, it } from 'vitest';
+import { entityViewName } from '@/components/views/save-entity-view-button';
 import { upgradeRecordView, viewSearch } from './views';
 
 // What a record page saved before exact record matching: generated name, no columns, a Record label for the id.
@@ -53,4 +54,16 @@ it('leaves a hand-typed lookalike exactly as written, even with a resolved Recor
   ])
     same({ ...legacy, state: { ...state, q } });
   same({ ...legacy, state: { ...state, lang: 'sql' as const } });
+});
+
+it('upgrades a record page save whose long name was cut to 80 characters', () => {
+  for (const label of ['L'.repeat(78), 'L'.repeat(80), 'L'.repeat(200)]) {
+    const view = { name: entityViewName(label, '7d'), state: { ...state, labels: [{ field: 'target' as const, value: '12', label }] } };
+    expect(view.name.length).toBeLessThanOrEqual(80);
+    expect(upgradeRecordView(view).upgraded, String(label.length)).toBe(true);
+  }
+  // A shorter name that is merely a prefix of the label was typed by someone, not generated.
+  expect(
+    upgradeRecordView({ name: 'L'.repeat(40), state: { ...state, labels: [{ field: 'target', value: '12', label: 'L'.repeat(200) }] } }).upgraded,
+  ).toBe(false);
 });

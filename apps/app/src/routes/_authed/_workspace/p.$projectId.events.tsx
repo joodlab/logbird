@@ -1,5 +1,6 @@
 import { queryLangSchema } from '@logbird/contracts';
 import { Button } from '@logbird/ui/components/ui/button';
+import { Skeleton } from '@logbird/ui/components/ui/skeleton';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { BookmarkIcon, LinkIcon, XIcon } from 'lucide-react';
@@ -29,8 +30,11 @@ const searchSchema = z.object({
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/events')({
   validateSearch: searchSchema,
   staticData: { crumb: 'Explorer', range: true },
-  loaderDeps: ({ search }) => ({ q: search.q ?? '', lang: search.lang ?? 'query', range: search.range }),
+  loaderDeps: ({ search }) => ({ q: search.q ?? '', lang: search.lang ?? 'query', range: search.range, view: search.view }),
   loader: ({ context, params, deps }) => {
+    // Opening a saved view: the view decides the query (an old record-page view opens upgraded), so nothing is
+    // prefetched for the query in the link.
+    if (deps.view) return;
     const range = deps.range && isValidRange(deps.range) ? deps.range : DEFAULT_RANGE;
     context.queryClient.prefetchInfiniteQuery(eventsInfiniteQuery(params.projectId, range, deps.q, deps.lang));
     context.queryClient.prefetchQuery(histogramQuery(params.projectId, range, deps.q, deps.lang));
@@ -57,6 +61,9 @@ function ExplorerPage() {
     if (legacyQ !== undefined && upgradedQ !== undefined && (search.q ?? '') === legacyQ)
       navigate({ replace: true, search: (prev) => ({ ...prev, q: upgradedQ || undefined }) });
   }, [legacyQ, upgradedQ, search.q, navigate]);
+  // Until the view is known (and an old one replaced by its exact form), no search runs: the stored query of an old
+  // record-page view never fetches or renders, not even for a moment. A views error opens the link as it is.
+  const holdForView = Boolean(search.view) && (views.isPending || (legacyQ !== undefined && (search.q ?? '') === legacyQ));
   const savedView = storedView && upgrade ? { ...storedView, state: upgrade.state } : undefined;
   // The banner (and its Copy link) speaks for the view only while what is on screen is still that view: same query,
   // language and range. Narrowing it by picker, zoom or Back hides it.
@@ -148,7 +155,15 @@ function ExplorerPage() {
         </div>
       ) : null}
       <SampleDataBanner className="border-b" projectId={projectId} />
-      <Explorer onChange={onChange} projectId={projectId} state={state} />
+      {holdForView ? (
+        <div aria-busy className="flex flex-col gap-2 p-4" data-testid="view-opening">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      ) : (
+        <Explorer onChange={onChange} projectId={projectId} state={state} />
+      )}
     </div>
   );
 }
