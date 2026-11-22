@@ -145,7 +145,7 @@ export function homeContent(site: SiteState) {
           },
         ] satisfies Item[],
         limit:
-          "One customer account per scope, matched on the id Logbird stored. Logbird's query builders always apply the scope. ClickHouse checks the customer account as well only when the restricted query user carries the tenant row policy: after upgrading, self-hosters run `create-query-user` once more to install it. A browser can read with a token only from the origins listed on the key.",
+          "One customer account per scope, matched on the id Logbird stored. Logbird's query builders always apply the scope. ClickHouse checks the customer account as well once the restricted query user has its tenant row policy: the Compose and Coolify stacks install it on upgrade, and a source installation runs `create-query-user` once. A web page on another origin can read with a token only if that origin is listed on the key.",
       },
       /** What the page shows: scoped access only once its production proof is confirmed. */
       get access() {
