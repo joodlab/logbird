@@ -15,8 +15,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/
 import { useCopy } from '@logbird/ui/hooks/use-copy';
 import { SUPPORT_SURFACE } from '@logbird/ui/lib/tones';
 import { cn } from '@logbird/ui/lib/utils';
-import { useQuery } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useRouter } from '@tanstack/react-router';
 import {
   ArrowRightIcon,
   ChevronDownIcon,
@@ -31,18 +31,18 @@ import {
   UserIcon,
   VenetianMaskIcon,
 } from 'lucide-react';
-import { type ComponentProps, type ReactNode, useState } from 'react';
+import { type ComponentProps, type ReactNode, useEffect, useState } from 'react';
 import { ActionName } from '@/components/action-name';
 import { EntityLink, EntityProfileLink } from '@/components/entity-link';
 import { SupportAgentLink } from '@/components/impersonation';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
-import { eventQuery, operationQuery } from '@/lib/api/queries';
+import { eventQuery, operationQuery, projectQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
 import { actorAttributeHint, causedCount, directChildren, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
-import { formatExactTerm, formatTerm } from '@/lib/query-language';
-import { absoluteRange } from '@/lib/range';
+import { andQuery, formatExactTerm, formatTerm } from '@/lib/query-language';
+import { allStoredRange } from '@/lib/range';
 import { eventCurl } from '@/lib/snippets';
 
 interface EventSheetProps {
@@ -222,18 +222,28 @@ const CHILD_LOOKUP_MAX_OPERATION = 1000;
  */
 function ChildEvents({ detail, event: e, projectId, indent }: { detail: EventDetail; event: AuditEvent; projectId: string; indent: number }) {
   const operationId = e.context.operationId;
-  const total = causedCount(detail, e);
+  const counted = causedCount(detail, e);
   const lookup = Boolean(operationId) && detail.operationSize <= CHILD_LOOKUP_MAX_OPERATION;
   const op = useQuery({ ...operationQuery(projectId, operationId ?? ''), enabled: lookup });
+  const project = useQuery(projectQuery(projectId));
+  const queryClient = useQueryClient();
   // Only a lookup that ran and succeeded counts: a disabled or failed query may still hold older cached data.
   const loaded = lookup && op.isSuccess;
   const loading = lookup && op.isPending;
   const children = loaded ? directChildren(op.data, e.id) : [];
+  // The detail (cached longer) can lag behind a fresher operation: trust the larger number and refresh the detail.
+  const total = Math.max(counted, children.length);
+  const stale = children.length > counted;
+  useEffect(() => {
+    if (stale) queryClient.invalidateQueries({ queryKey: eventQuery(projectId, e.id).queryKey });
+  }, [stale, queryClient, projectId, e.id]);
   const shown = children.slice(0, CHILD_PREVIEW);
   const allInOperation = loaded && children.length === total;
-  // The count spans all stored history, so the search starts a day before this event (children follow their parent;
-  // the day absorbs clock skew between services) and runs to now, whatever range the explorer had.
-  const searchRange = absoluteRange(Date.parse(e.timestamp) - 86_400_000, Date.now());
+  // The count spans every stored child, whose timestamps may sit anywhere in the retention window (or up to a day
+  // ahead, the ingest limit). Search exactly that window, whatever range the explorer had.
+  const searchRange = allStoredRange(project.data?.retentionDays);
+  // An event that names itself as its parent matches its own `parent:` search; leave it out.
+  const childrenQuery = andQuery(formatExactTerm('parent', e.id), e.context.parentEventId === e.id ? formatExactTerm('id', e.id, true) : '');
   return (
     <>
       {loading ? (
@@ -252,13 +262,12 @@ function ChildEvents({ detail, event: e, projectId, indent }: { detail: EventDet
             <OutcomeDot outcome={c.outcome} />
             <Link
               className="min-w-0 truncate py-[3px] hover:underline"
-              dir="auto"
               params={{ projectId }}
               search={(prev) => ({ ...prev, ev: c.id })}
               to="/p/$projectId/events"
             >
               <span className="sr-only">{c.outcome}: </span>
-              {eventSentence(c)}
+              <bdi dir="auto">{eventSentence(c)}</bdi>
             </Link>
             <Timestamp className="shrink-0 font-mono text-[11px] text-muted-foreground" format="ms" iso={c.timestamp} />
           </li>
@@ -280,7 +289,7 @@ function ChildEvents({ detail, event: e, projectId, indent }: { detail: EventDet
             <Link
               className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
               params={{ projectId }}
-              search={{ range: searchRange, q: formatExactTerm('parent', e.id) }}
+              search={{ range: searchRange, q: childrenQuery }}
               to="/p/$projectId/events"
             >
               {shown.length > 0 ? `View all ${total}` : `View the ${total} event${total === 1 ? '' : 's'} it caused`} in the explorer
@@ -454,10 +463,14 @@ function EventDetailBody({
 }) {
   const link = useCopy();
   const curl = useCopy();
+  const router = useRouter();
+  // Built by the router so the search params round-trip exactly (an id like "123" stays a string).
   const shareUrl =
-    typeof window === 'undefined'
+    typeof window === 'undefined' || !projectId
       ? ''
-      : `${window.location.origin}/p/${projectId}/events?q=${encodeURIComponent(formatExactTerm('id', e.id))}&ev=${encodeURIComponent(e.id)}`;
+      : `${window.location.origin}${
+          router.buildLocation({ to: '/p/$projectId/events', params: { projectId }, search: { q: formatExactTerm('id', e.id), ev: e.id } }).href
+        }`;
   const attributes = Object.entries(e.attributes).sort(([a], [b]) => a.localeCompare(b));
   const ctx = e.context;
 
@@ -492,10 +505,12 @@ function EventDetailBody({
           </span>
         </SheetDescription>
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => link.copy(shareUrl)} size="xs" variant="outline">
-            <LinkIcon />
-            <StableText reserve={['Copy link', 'Link copied']}>{link.copied ? 'Link copied' : 'Copy link'}</StableText>
-          </Button>
+          {shareUrl ? (
+            <Button onClick={() => link.copy(shareUrl)} size="xs" variant="outline">
+              <LinkIcon />
+              <StableText reserve={['Copy link', 'Link copied']}>{link.copied ? 'Link copied' : 'Copy link'}</StableText>
+            </Button>
+          ) : null}
           <Button onClick={() => curl.copy(eventCurl(e))} size="xs" variant="outline">
             <TerminalIcon />
             <StableText reserve={['Copy as curl', 'Copied']}>{curl.copied ? 'Copied' : 'Copy as curl'}</StableText>
@@ -709,7 +724,9 @@ function EventDetailBody({
                 {detail && causedCount(detail, e) > 0 && projectId ? (
                   <ChildEvents detail={detail} event={e} indent={(detail.parents.length + 1) * 14} projectId={projectId} />
                 ) : null}
-                {ctx.parentEventId && (detail?.parents.length ?? 0) === 0 ? (
+                {ctx.parentEventId === e.id ? (
+                  <li className="text-muted-foreground text-xs">This event names itself as its parent, so it has no parent to show.</li>
+                ) : ctx.parentEventId && (detail?.parents.length ?? 0) === 0 ? (
                   <li className="text-muted-foreground text-xs">Parent {ctx.parentEventId} is not stored (outside retention or never sent).</li>
                 ) : null}
               </ol>

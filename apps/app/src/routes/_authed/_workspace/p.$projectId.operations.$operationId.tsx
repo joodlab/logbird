@@ -21,6 +21,7 @@ import { eventSentence } from '@/lib/events';
 import { formatDuration, formatNumber } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
 import { formatExactTerm } from '@/lib/query-language';
+import { absoluteRange } from '@/lib/range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/operations/$operationId')({
   validateSearch: z.object({ focus: z.string().optional(), ev: z.string().optional() }),
@@ -154,7 +155,8 @@ function OperationPage() {
           render={
             <Link
               params={{ projectId }}
-              search={(prev) => ({ range: prev.range, q: formatExactTerm('operation', operationId) })}
+              // Exactly the operation's own span (the search's upper bound is exclusive), not whatever range was open.
+              search={(prev) => ({ range: nodes.length ? absoluteRange(t0, t1 + 1) : prev.range, q: formatExactTerm('operation', operationId) })}
               to="/p/$projectId/events"
             />
           }

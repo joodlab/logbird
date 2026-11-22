@@ -98,3 +98,15 @@ export function previousWindow(range: string): { from: string; to: string } {
   const len = r.toMs - r.fromMs;
   return { from: new Date(r.fromMs - len).toISOString(), to: r.from };
 }
+
+/** How far ahead of its arrival an event's `occurredAt` may be (the ingest admission limit). */
+const MAX_FUTURE_MS = UNIT_MS.d;
+
+/**
+ * Every timestamp a stored event can have: the retention window (plus a day of slack for the hourly purge) up to a
+ * day ahead. Without a known retention it falls back to the ingest limit of 3650 days.
+ */
+export function allStoredRange(retentionDays?: number, now = Date.now()): string {
+  const days = retentionDays && retentionDays > 0 ? retentionDays + 1 : 3650;
+  return absoluteRange(now - days * UNIT_MS.d, now + MAX_FUTURE_MS);
+}

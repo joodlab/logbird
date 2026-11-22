@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+// The real server compiler: console links must survive it unchanged.
+import { compileQuery } from '../../../../packages/clickhouse/src/query';
 import {
   andQuery,
   canonicalField,
@@ -348,13 +350,47 @@ describe('removeTerm with a unary NOT', () => {
 });
 
 describe('formatExactTerm', () => {
-  it('keeps ordinary ids as plain or quoted terms', () => {
+  it('keeps plain ids plain and quotes everything else', () => {
     expect(formatExactTerm('parent', 'evt_1')).toBe('parent:evt_1');
     expect(formatExactTerm('operation', 'op with space')).toBe('operation:"op with space"');
+    expect(formatExactTerm('parent', 'TO')).toBe('parent:"TO"');
+    expect(formatExactTerm('id', 'a&&b')).toBe('id:"a&&b"');
+    expect(formatExactTerm('id', '-x')).toBe('id:"-x"');
+    expect(formatExactTerm('id', 'self', true)).toBe('-id:self');
   });
 
   it('turns a trailing star into an anchored literal regex instead of a prefix search', () => {
     expect(formatExactTerm('parent', 'batch*')).toBe(String.raw`parent:/batch\*/`);
     expect(formatExactTerm('id', 'a.b/c(1)*')).toBe(String.raw`id:/a\.b\/c\(1\)\*/`);
+    expect(formatExactTerm('id', String.raw`job\1*`)).toBe(String.raw`id:/job\x5c1\*/`);
+  });
+
+  // The server compiles these terms: each must parse and bind exactly the original value (or an anchored regex for it).
+  it.each([
+    'evt_1',
+    'TO',
+    'AND',
+    'a&&b',
+    'x||y',
+    '-x',
+    'op with space',
+    'with"quote',
+    String.raw`back\slash`,
+    'batch*',
+    'a.b/c(1)*',
+    String.raw`job\1*`,
+    'booking:bk_1',
+  ])('round-trips %s through the server compiler', (id) => {
+    const compiled = compileQuery(formatExactTerm('parent', id));
+    const bound = Object.values(compiled.params);
+    if (id.endsWith('*')) {
+      const pattern = String(bound[0]);
+      expect(new RegExp(pattern).test(id)).toBe(true);
+      expect(new RegExp(pattern).test(`${id.slice(0, -1)}-other`)).toBe(false);
+      expect(compiled.sql).toContain('match(');
+    } else {
+      expect(bound).toEqual([id]);
+      expect(compiled.sql).not.toContain('startsWith');
+    }
   });
 });
