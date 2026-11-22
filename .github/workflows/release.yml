@@ -53,10 +53,10 @@ jobs:
           path: release-notes.md
           retention-days: 7
 
-  images:
-    name: Publish ${{ matrix.role }}
+  build:
+    name: Build ${{ matrix.role }} (${{ matrix.arch }})
     needs: preflight
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 90
     permissions:
       contents: read
@@ -64,6 +64,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        role: [server, worker, app, migrate]
+        arch: [amd64, arm64]
         include:
           - {role: server, dockerfile: apps/server/Dockerfile, target: runtime}
           - {role: worker, dockerfile: apps/worker/Dockerfile, target: runtime}
@@ -71,7 +73,8 @@ jobs:
           - {role: migrate, dockerfile: apps/server/Dockerfile, target: migrate}
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -83,40 +86,139 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/joodlab/logbird-${{ matrix.role }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ needs.preflight.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=MIT
-      - name: Build and publish
+      - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=ghcr.io/joodlab/logbird-${{ matrix.role }},push-by-digest=true,name-canonical=true,push=true
           labels: ${{ steps.meta.outputs.labels }}
           provenance: mode=max
           sbom: true
-          cache-from: type=gha,scope=release-${{ matrix.role }}
-          cache-to: type=gha,mode=max,scope=release-${{ matrix.role }}
-      - name: Record image digest
+          cache-from: type=gha,scope=release-${{ matrix.role }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.role }}-${{ matrix.arch }}
+      - name: Record platform digest
         env:
-          IMAGE: ghcr.io/joodlab/logbird-${{ matrix.role }}
-          VERSION: ${{ needs.preflight.outputs.version }}
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: printf '%s:%s@%s\n' "$IMAGE" "$VERSION" "$DIGEST" > image-${{ matrix.role }}.txt
+        shell: bash
+        run: |
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "The build returned no valid image digest" >&2
+            exit 1
+          fi
+          printf '%s\n' "$DIGEST" > "${{ matrix.arch }}.txt"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.role }}-${{ matrix.arch }}
+          path: ${{ matrix.arch }}.txt
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+  images:
+    name: Publish ${{ matrix.role }}
+    needs: [preflight, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [server, worker, app, migrate]
+    env:
+      IMAGE: ghcr.io/joodlab/logbird-${{ matrix.role }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: digest-${{ matrix.role }}-*
+          path: digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - name: Publish multi-platform image and record index digest
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          sources=()
+          for arch in amd64 arm64; do
+            digest=$(cat "digests/$arch.txt")
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Invalid image digest for $arch" >&2
+              exit 1
+            fi
+            sources+=("$IMAGE@$digest")
+          done
+
+          # Publish the exact version first. The moving aliases (X.Y, latest) only follow once the
+          # published index is verified, so a wrong index never reaches users who pull an alias.
+          docker buildx imagetools create --tag "$IMAGE:$VERSION" "${sources[@]}"
+
+          docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' > index.json
+          digest=$(jq -er '.digest' index.json)
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Invalid index digest for $IMAGE:$VERSION" >&2
+            exit 1
+          fi
+          platforms=$(jq -r '[.manifests[] | select(.platform.os == "linux") | .platform.architecture] | sort | join(",")' index.json)
+          if [[ "$platforms" != "amd64,arm64" ]]; then
+            echo "Expected linux/amd64 and linux/arm64 in $IMAGE:$VERSION, found: $platforms" >&2
+            exit 1
+          fi
+
+          # The tag list can name an alias twice (the semver rule and the explicit latest rule both
+          # produce "latest"), so each alias is passed once.
+          alias_args=()
+          declare -A seen=()
+          version_tagged=false
+          while IFS= read -r tag; do
+            if [[ -z "$tag" || -n "${seen[$tag]:-}" ]]; then
+              continue
+            fi
+            seen[$tag]=1
+            if [[ "$tag" == "$IMAGE:$VERSION" ]]; then
+              version_tagged=true
+            else
+              alias_args+=(--tag "$tag")
+            fi
+          done <<< "$TAGS"
+          if [[ "$version_tagged" != true ]]; then
+            echo "The tag list does not contain $IMAGE:$VERSION" >&2
+            exit 1
+          fi
+          if (( ${#alias_args[@]} > 0 )); then
+            docker buildx imagetools create "${alias_args[@]}" "$IMAGE@$digest"
+          fi
+          printf '%s:%s@%s\n' "$IMAGE" "$VERSION" "$digest" > "image-${{ matrix.role }}.txt"
       - uses: actions/upload-artifact@v7
         with:
           name: image-${{ matrix.role }}
           path: image-${{ matrix.role }}.txt
+          if-no-files-found: error
+          overwrite: true
           retention-days: 7
 
   release:
