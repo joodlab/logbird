@@ -13,7 +13,6 @@ path: /developers
 - **heading (H1):** Add an audit log in an afternoon. Keep it for years.
 - **body:** Send events over HTTP or with the TypeScript SDK. Only `action` is required, so you can start with one line
   and fill in the envelope as you go. This page covers the SDK, the envelope, workers, delivery guarantees and limits.
-  The full API reference is served by your own Logbird server at `/docs`.
 - **cta:** Quickstart ↓ `#quickstart` · Self-host a server → `/self-hosting`
 - **visual:** none
 
@@ -338,7 +337,7 @@ path: /developers
 - **eyebrow:** API reference
 - **heading:** Your server documents itself.
 - **body:** Every Logbird server serves its OpenAPI document at `/openapi.json` and an interactive reference
-  (Scalar) at `/docs`, so the reference always matches the version you run. The API listener stays on the private
+  at `/docs`, so the reference always matches the version you run. The API listener stays on the private
   network; your public origin forwards `/api`, `/v1`, the health checks and these two read-only reference paths, and
   nothing else. Open `https://your-logbird-origin/docs`, or `localhost:4600/docs` when you run locally.
   <!-- source: docs/SPEC.md §2, §5; docs/decisions.md (2026-11-08); apps/server/src/app.ts (/docs, /openapi.json); apps/app/server/proxy-paths.ts (proxies /api, /v1, /health, /livez, /readyz, /docs, /openapi.json only) -->

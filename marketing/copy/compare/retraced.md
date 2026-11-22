@@ -49,7 +49,7 @@ path: /compare/retraced
   - You want to **embed an audit log viewer in your own React app**, so customers can browse their own events.
   - Your customers' IT teams need a **programmatic API of their own** to pull their events.
   - You prefer **Apache-2.0**, or you already run Postgres and Elasticsearch and want the audit log there too.
-  - You want a project with **a long release history** behind it. Logbird's first release was `<first release>`, on its date.
+  - You want a project with **a long release history** behind it. Logbird's first release was `<first release>`, on `<its date>`.
 - **visual:** none
 
 ## choose-us
@@ -69,7 +69,7 @@ path: /compare/retraced
 ## sources
 
 - **id:** `sources`
-- **heading:** Sources (all accessed 2026-11-07)
+- **heading:** Sources (all accessed 7 November 2026)
 - **list:**
   - S1 — Repository description: "A fully open source audit logs service and embeddable UI…".
     https://github.com/retracedhq/retraced

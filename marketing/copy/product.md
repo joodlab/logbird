@@ -13,7 +13,7 @@ path: /product
 - **heading (H1):** Everything your team needs to answer "who did what".
 - **body:** The Logbird console is for the people who operate your product: engineers on call, support, and whoever
   answers the auditor. It is not a portal for your end customers. To show history inside your own product, use the
-  read API (last section on this page).
+  read API.
   <!-- source: docs/SPEC.md intro ("not an end-customer portal") -->
 - **cta:** Self-host it → `/self-hosting` · Join the waitlist → `/contact`
 - **visual:** `marketing/media/staydesk/overview-light.webp` / `marketing/media/staydesk/overview-dark.webp` (manifest id `overview`).
@@ -58,7 +58,7 @@ path: /product
   - Fields are suggested from what your project actually sends, with how often each one appears.
   - Errors point at the exact token and say what was expected, for example "attempt is a number".
   - Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 custom attributes
-    and text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON). Search limits apply to the index. You can inspect the full parsed event as JSON.
+    text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON). Search limits apply to the index. You can inspect the full parsed event as JSON.
     <!-- source: docs/SPEC.md §3 (flattening); packages/clickhouse/src/normalize.ts -->
 - **visual:** `marketing/media/staydesk/query-suggestions-light.webp` (manifest id `query-suggestions`) under the query-language code sample.
 
@@ -166,7 +166,7 @@ path: /product
   <!-- source: docs/SPEC.md §8 journeys 2 and 10 -->
 - **bullets:**
   - Onboarding picks up where you left off.
-  - "Send a test event" and "Load sample data" to see the console before you integrate. Sample data is 2000
+  - "Send a test event" and "Load sample data" show the console before you integrate. Sample data is 2000
     fictional events over seven days. It never counts as setup, and you can remove it.
     <!-- source: docs/SPEC.md §5 sample-data -->
   - A conformance score on every event, and a Fields page that shows coverage for the single-value core fields and
@@ -205,7 +205,7 @@ path: /product
 - **heading:** Owners and admins manage it. Members use it.
 - **body:** Sign-in is by emailed one-time code. There are no passwords. Owners and admins manage projects, keys,
   retention and invitations. Members search, export, save views and read workspace activity. The server checks every
-  role on every request, not just the UI.
+  role on every request.
   <!-- source: docs/SPEC.md §7, §7.1; SECURITY.md -->
 - **limit line:** SSO isn't available yet. It's on the roadmap.
 - **visual:** none (a compact card on the page).

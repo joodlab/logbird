@@ -20,9 +20,9 @@ path: /cloud
 - **id:** `hero`
 - **eyebrow:** Logbird Cloud
 - **heading (H1):** The same Logbird, run by us.
-- **body:** Logbird Cloud will run the same open-source codebase you'll be able to self-host. We'll run the servers,
+- **body:** Logbird Cloud will run the same open-source codebase you can self-host. We'll run the servers,
   the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.
-  <!-- when WEB_GITHUB_PUBLIC=true: "…codebase you can self-host." -->
+  <!-- private build: "…codebase you'll be able to self-host." -->
   <!-- source: docs/SPEC.md intro ("one codebase, self-host or cloud"); docs/deployment.md ("No cloud deployment or public signup is assumed") -->
 - **cta (primary):** Join the waitlist → `/contact`
 - **cta (secondary):** while the repository is private: "Self-host when the source opens" → `/contact?interest=self-host`;

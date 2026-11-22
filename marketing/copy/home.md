@@ -47,7 +47,7 @@ path: /
   rejected for missing them.
   <!-- source: docs/SPEC.md §1.1, §3 normalization rules -->
 - **bullets:**
-  - A TypeScript SDK with batching, retries and an explicit `flush` and `shutdown`.
+  - **TypeScript SDK** with batching, retries and an explicit flush and shutdown.
   - Middleware for Hono, TanStack Start and Nuxt; a Vue read composable. <!-- source: docs/integrations.md (Vue is useAuditTrail/AuditTimeline, a reader, not middleware) -->
   - `jobAudit` for queue workers: the job keeps the original actor and joins the request's operation.
     <!-- source: packages/sdk/README.md §Requests and workers -->
@@ -97,11 +97,11 @@ path: /
   auditor. Search every event, open a customer account or a single record, and see the before and after values you
   send for the first 256 changes of each event.
 - **bullets:**
-  - **Search** with `actor:usr_42 action:booking.* outcome:failure`, or write a guarded SQL `WHERE` expression.
-  - **Entity pages** for every actor, tenant, executor and record, each with its own timeline.
-  - **Operation trees** show the events that share an operation id, from the request to the jobs it spawned.
-  - **Impersonation** is a first-class field: when support acts for a customer, the event records who acted for whom.
-  - **Retention** per project, from 7 days to 10 years. Expired events are permanently deleted.
+  - **Search.** `actor:usr_42 action:booking.* outcome:failure`, or a guarded SQL `WHERE` expression.
+  - **Entity pages.** Actors, tenants, executors and records get their own pages and timelines.
+  - **Operation trees.** The events that share an operation id, from the request to the jobs it spawned, as one tree.
+  - **Impersonation.** When support acts for a customer, the event records who acted for whom.
+  - **Retention.** Per project, from 7 days to 10 years. Expired events are permanently deleted.
     <!-- source: packages/contracts/src/api.ts RETENTION_OPTIONS (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days) -->
 - **cta:** Take the product tour → `/product`
 - **visual:** `marketing/media/staydesk/event-sheet-light.webp` (event detail with actor, executor,
@@ -117,10 +117,10 @@ path: /
      <!-- source: docs/SPEC.md §5 -->
   2. **Send events.** Over HTTP or the SDK: one event, or up to 1000 per request.
      <!-- source: docs/SPEC.md §5 size limits -->
-  3. **Logbird stores them in ClickHouse.** On `202`, `ids` lists the events written to ClickHouse, by this request or an earlier identical one, and `rejected` names the entries that failed.
+  3. **Logbird stores them.** On `202`, `ids` lists the events written to ClickHouse, by this request or an earlier identical one, and `rejected` names the entries that failed.
      <!-- source: docs/SPEC.md §2 ingestion path -->
-  4. **Search, follow and keep them.** Use the console, or read them from your own backend with a read key. A worker
-     deletes events older than the project's retention window, every hour.
+  4. **Search, follow, keep.** Use the console, or read events from your own backend with a read key. Expired events are
+     deleted every hour.
      <!-- source: docs/SPEC.md §4 retention -->
 - **visual:** diagram: four boxes left to right — "Your product (SDK or HTTP)" → "Logbird API" → "ClickHouse" →
   "Console and read API", with a "Retention worker" box under ClickHouse and a small "Postgres: workspaces, projects,
@@ -163,13 +163,13 @@ path: /
 - **eyebrow:** Open source
 - **heading:** MIT-licensed. Runs with Docker Compose.
 - **body:** The whole product is in one repository: the API, the console, the retention worker, the SDK and the
-  integrations. Self-hosting runs the published, versioned images on your server, so your events stay on your
-  infrastructure.
+  integrations. Self-hosting runs on your server, from the published, versioned images once a release exists, so
+  your events stay on your infrastructure.
   <!-- source: LICENSE; docs/self-hosting.md -->
 - **bullets:**
-  - Bundled Docker Compose, a Coolify build, or your own Postgres, ClickHouse and Redis.
+  - Bundled Docker Compose, Coolify, or your own Postgres, ClickHouse and Redis.
   - Automatic HTTPS with Caddy, or any reverse proxy you already run.
-  - Source on GitHub — coming soon. The repository opens publicly soon.
+  - Source on GitHub, under the MIT licence. <!-- copy-sync: skip (private build: "Source on GitHub — coming soon. The repository opens publicly soon.") -->
 - **cta:** Self-host it → `/self-hosting` (public repo only; see the CTA rule) · What's in the repository → `/open-source`
 - **while the repository is private:** replace the quickstart code block with "Available when the repository opens.
   On one VM: clone, generate secrets, configure SMTP, pull the images, then `docker compose up -d --no-build`. We'll
@@ -203,8 +203,8 @@ path: /
 
 - **id:** `final-cta`
 - **heading:** Start with one event.
-- **body:** Self-host Logbird today, or join the waitlist for Logbird Cloud. (Public repo only. While private: "The source
-  opens soon. Join the waitlist to hear when you can self-host Logbird, and when Logbird Cloud opens.")
+- **body:** Self-host Logbird today, or join the waitlist for Logbird Cloud. <!-- private build: "The source opens soon.
+  Join the waitlist to hear when you can self-host Logbird, and when Logbird Cloud opens." -->
 - **cta (primary):** Join the waitlist → `/contact`
 - **cta (secondary):** Self-host it → `/self-hosting`
 - **visual:** none

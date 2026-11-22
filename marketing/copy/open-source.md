@@ -13,7 +13,7 @@ path: /open-source
 - **heading (H1):** The product is MIT-licensed.
   <!-- source: LICENSE. Covers the API, console, worker, SDK and integrations; experiments/forge carries its own
   Apache-2.0 LICENSE, so never claim "all of it". -->
-- **body:** Logbird is released under the MIT licence. The API, the console, the retention worker, the SDK and the
+- **body:** <!-- copy-sync: skip (hero body; the public build shows the licence and source link in the hero aside) --> Logbird is released under the MIT licence. The API, the console, the retention worker, the SDK and the
   integrations are in one repository. You can read the code, run it, change it and ship it in your own product.
   <!-- source: LICENSE (MIT). Its copyright line names the publisher: owner-gated (WEB_ORG_NAME), not quoted on the site until approved -->
 - **cta:** Source on GitHub — coming soon (disabled button, no link) · Self-host it → `/self-hosting`
@@ -53,7 +53,7 @@ path: /open-source
 - **id:** `contributing`
 - **eyebrow:** Contributing
 - **heading:** How to contribute.
-- **body:** Once the repository is public, contributions follow `CONTRIBUTING.md`. In short: Node 22.18+ and pnpm,
+- **body:** <!-- copy-sync: skip (rendered as the contributing checklist) --> Once the repository is public, contributions follow `CONTRIBUTING.md`. In short: Node 22.18+ and pnpm,
   focused branches, Conventional Commits, and pull requests that explain what changed, why, and how it was verified.
   UI changes include screenshots. Tests use fictional data only. Maintainers merge.
   <!-- source: CONTRIBUTING.md; AGENTS.md -->
@@ -81,9 +81,8 @@ path: /open-source
 - **id:** `security`
 - **eyebrow:** Security reports
 - **heading:** Found a vulnerability? Tell us privately.
-- **body:** Don't open a public issue. Email the security contact (`WEB_SECURITY_EMAIL`; no default). While it's unset,
-  use `SECURITY.md`'s wording: ask the maintainers for a private channel through the contact form.
-  Include the affected version, a reproduction with fictional data, and the impact. We coordinate the fix and the
+- **body:** Don't open a public issue. Email <security contact>. <!-- WEB_SECURITY_EMAIL, no default; while it's unset,
+  SECURITY.md's wording: ask the maintainers for a private channel through the contact form. --> Include the affected version, a reproduction with fictional data, and the impact. We coordinate the fix and the
   disclosure with you privately. We don't offer a response-time SLA yet.
   <!-- site rule: the site names only the security email, never a GitHub reporting flow -->
   <!-- source: SECURITY.md -->
@@ -97,8 +96,8 @@ path: /open-source
 - **heading:** Where the project is today.
 - **body:** The supported line is `<major.minor of the latest release>`, and the latest release is `<latest release>`,
   with Docker images on GHCR for amd64 and arm64. The SDK and the integrations share the platform's version. They
-  aren't on npm yet: use them from source. (Private repository: "They aren't on npm yet." With no release in the
-  list, the first sentence is "Nothing has been released yet." and the images cell shows "—".)
+  aren't on npm yet: use them from source. <!-- private repository: "They aren't on npm yet." With no release in the
+  list, the first sentence is "Nothing has been released yet." and the images cell shows "—". -->
   <!-- source: the release list (apps/web/src/lib/releases.ts, `supportedLine` and `latestRelease`); packages/*/package.json share the platform version; npm registry 404 for @logbird/sdk on 2026-11-22 -->
 - **facts panel:** Supported line — `<major.minor>` · Latest release — `<latest release>` · Docker images — GHCR · npm packages —
   Not yet.

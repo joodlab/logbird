@@ -60,14 +60,14 @@ path: /compare/pangea
   - Your events must **stay on your own servers**, under an MIT licence.
   - You want to **send any shape** without designing a fixed schema first.
   - Your team investigates with an **operator console**: entity pages, operation trees, workers and retries, and SQL.
-  - You want **SQL-level questions** answered against your own ClickHouse, under documented limits ("limits you can read in the code" once the source is public).
+  - You want **SQL-level questions** answered against your own ClickHouse, under limits you can read in the code. <!-- private build: "under documented limits" -->
 - **cta:** Self-host Logbird → `/self-hosting` · Join the waitlist → `/contact`
 - **visual:** none
 
 ## sources
 
 - **id:** `sources`
-- **heading:** Sources (all accessed 2026-11-07)
+- **heading:** Sources (all accessed 7 November 2026)
 - **list:**
   - P1 — About: "transparent, immutable, and cryptographically verifiable tamperproof audit logging".
     https://pangea.cloud/docs/audit/overview/about

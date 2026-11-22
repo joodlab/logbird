@@ -49,6 +49,22 @@ Then one `##` block per section, in page order:
 - `cta`: label → target.
 - `visual`: an exact path under `marketing/media/`, or "code sample", or "diagram: …".
 
+### One source per claim (checked)
+
+`apps/web/src/lib/copy-sync.test.ts` renders every page in the map above as the public build does. It fails when a
+`heading`, `body`, `limit line`, or a `bullets` or `steps` item in the copy doesn't appear on that page. Change a claim
+in the copy and on the page in the same pull request.
+
+- **How claims are compared.** Case, punctuation, inline marks and line breaks don't matter; words and numbers do.
+  Source citations such as `[S1–S4]` and `<!-- comments -->` are ignored.
+- **Values that come from configuration or data.** Write a placeholder: `<latest release>`, `<security contact>`.
+  A placeholder stands for one to six words.
+- **Wording the public build doesn't render.** That covers private-repository variants and engineering notes. Keep the
+  checked text to what the public page says, and put the variant in a comment, or mark the field or item on its first
+  line with `<!-- copy-sync: skip (reason) -->`.
+- **Files that aren't checked.** `blog.md` (draft), the two legal files (owner-approved wording, pinned by their own
+  tests) and `arabic-notes.md`.
+
 ## Messaging hierarchy
 
 ### Tagline

@@ -79,10 +79,10 @@ path: /self-hosting
   - A Linux host, or any machine that runs Linux containers, with Docker Engine and Compose 2.24.4 or newer.
   - An SMTP provider for sign-in codes and invitations, for example Amazon SES, Postmark or Brevo.
   - A domain and ports 80 and 443 if you want automatic HTTPS.
-  - **Starting size:** 4 vCPU, 8 GB RAM and SSD storage. That's an initial allocation, not measured capacity. Leave disk
+  - **Starting size:** 4 vCPU, 8 GB RAM and SSD storage. That is an initial allocation, not measured capacity. Leave disk
     for images as well as your data, ClickHouse merges and backups; building from source needs more headroom still.
-  - **Access:** sign-up is open: anyone who can reach the console can create an account and a workspace. Keep it private
-    while you evaluate, or restrict who can reach it.
+  - **Access:** Sign-up is open by default: anyone who can reach the console can create an account. On an
+    internet-facing instance, set `AUTH_SIGNUP=restricted` with your email domains; invitations keep working.
   <!-- source: docs/self-hosting.md §SMTP and first login, §Caddy TLS, §Sizing, §Five-minute quickstart (after #51) -->
 - **visual:** none
 
@@ -104,8 +104,7 @@ path: /self-hosting
      `docker-compose.external.yml`. Use ClickHouse 26.9. Logbird creates its own restricted query user
      and row policies.
      <!-- source: docs/self-hosting.md §External services -->
-- **limit line:** Coolify setup is documented and checked against a local simulation. It hasn't been tested on a
-  live Coolify server yet. <!-- source: docs/coolify.md §Sources and validation limits -->
+- **limit line:** Upgrades and restores through Coolify are documented but not yet verified end to end. <!-- source: docs/coolify.md §Sources and validation limits -->
 - **visual:** diagram: three cards side by side, each a small stack. "Bundled": a box labelled `docker compose` holding
   console, API, worker, Postgres, ClickHouse, Redis. "Coolify": the same stack under a Coolify proxy. "External": the
   console, API and worker in Compose, with arrows out to three external databases.
@@ -163,7 +162,7 @@ path: /self-hosting
      check doesn't apply.
   4. `docker compose pull` (skip it for a source build), then `docker compose up -d --no-build`. Migrations run first; if one fails, the new
      version doesn't start.
-  5. Verify readiness, sign-in, your events, settings and keys, and the retention runs before reopening ingress.
+  5. Verify readiness, sign-in, your events, settings and keys, and the retention runs before you reopen ingress.
 - **bullets:**
   - `docker compose down` keeps your data. `docker compose down -v` permanently deletes the Compose-managed volumes,
     which hold the bundled Postgres, ClickHouse and Redis data.

@@ -18,7 +18,7 @@ path: /contact
 - **eyebrow:** Contact
 - **heading (H1):** Join the waitlist, or ask us anything.
 - **body:** Logbird Cloud isn't open yet. Leave your email and we'll write when it is. If you have a question about
-  self-hosting, support or something else, choose "A question" below.
+  self-hosting, support or something else, choose it below.
 - **visual:** none
 
 ## form
@@ -69,6 +69,6 @@ path: /contact
 - **eyebrow:** Elsewhere
 - **heading:** Other ways to reach us.
 - **bullets:**
-  - **Security issues:** don't use this form. See `/security#reporting`.
-  - **Source and issues:** Source on GitHub — coming soon.
+  - **Security issues:** Email <security contact>. <!-- without WEB_SECURITY_EMAIL: ask the maintainers for a private channel through this form (choose "A question"), without any details of the issue -->
+  - **Source and issues:** On GitHub: report bugs and ask questions in issues. <!-- private build: "Source on GitHub — coming soon." -->
 - **visual:** none

@@ -73,7 +73,7 @@ path: /compare/bemi
 ## sources
 
 - **id:** `sources`
-- **heading:** Sources (all accessed 2026-11-07)
+- **heading:** Sources (all accessed 7 November 2026)
 - **list:**
   - B1 — README: tracks changes by connecting to the WAL using Change Data Capture; no table alterations.
     https://github.com/BemiHQ/bemi (now redirects to https://github.com/pgstack-io/bemi-io)

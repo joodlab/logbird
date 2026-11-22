@@ -69,7 +69,7 @@ path: /compare/workos-audit-logs
 ## sources
 
 - **id:** `sources`
-- **heading:** Sources (all accessed 2026-11-07)
+- **heading:** Sources (all accessed 7 November 2026)
 - **list:**
   - W1 — Product page: "Advanced event logging, auditing, and exporting for IT admins"; filtering; pricing lines.
     https://workos.com/audit-logs
