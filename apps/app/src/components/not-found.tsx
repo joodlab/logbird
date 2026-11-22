@@ -11,7 +11,7 @@ export function NotFound({ title = 'Nothing here', description }: { title?: stri
         icon={CompassIcon}
         title={title}
       >
-        <Button render={<Link to="/" />} size="sm" variant="outline">
+        <Button nativeButton={false} render={<Link to="/" />} size="sm" variant="outline">
           Back to Logbird
         </Button>
       </EmptyState>
