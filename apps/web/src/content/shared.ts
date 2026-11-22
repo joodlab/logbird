@@ -21,6 +21,8 @@ export function sharedContent(site: SiteState) {
       public: { label: 'Self-host it', to: '/self-hosting' },
       private: { label: 'Self-host when the source opens', to: '/contact', search: { interest: 'self-host' } },
     }),
+    /** The header's link to the repository, shown only while it is public. */
+    githubNav: site.githubUrl ? { label: 'GitHub', href: site.githubUrl } : undefined,
     /** The closing call to action at the bottom of most pages. */
     ctaBand: {
       title: 'Start with one event.',

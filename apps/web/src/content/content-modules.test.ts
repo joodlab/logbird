@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { parseAst } from 'vite';
 import { describe, expect, it } from 'vitest';
 import { renderPages } from '../test/render-pages';
-import { homeContent } from './home';
+import { homeContent, homeMetaFor } from './home';
 import type { SiteState } from './site';
 
 /**
@@ -15,7 +15,7 @@ import type { SiteState } from './site';
 const MOVED = [
   'routes/index.tsx',
   'components/marketing/cta-band.tsx',
-  'components/marketing/envelope.tsx',
+  'components/marketing/guarantees.tsx',
   'components/marketing/log-stack.tsx',
   'components/marketing/self-host-cta.tsx',
   'components/marketing/steps.tsx',
@@ -190,24 +190,48 @@ describe('content modules', () => {
   });
 
   it('home has every state variant, and data-derived values come from the state', () => {
-    const state = (overrides: Partial<SiteState>): SiteState => ({ repoPublic: true, cloudOpen: false, ...overrides });
+    const state = (overrides: Partial<SiteState>): SiteState => ({ repoPublic: true, cloudOpen: false, scopedReadLive: false, ...overrides });
     const closedPrivate = homeContent(state({ repoPublic: false }));
-    const openPublic = homeContent(state({ cloudOpen: true, signInUrl: 'https://app.example.test/login', selfHostVersion: '9.9.9' }));
+    const openPublic = homeContent(
+      state({ cloudOpen: true, signInUrl: 'https://app.example.test/login', githubUrl: 'https://github.example.test/acme/logbird/' }),
+    );
     expect(closedPrivate.hero.primaryCta.label).toBe('Join the waitlist');
     expect(closedPrivate.hero.status).toBe('Source on GitHub — coming soon. Logbird Cloud is not open yet.');
+    expect(closedPrivate.hero.lead).toContain('once the source opens, or join the waitlist for Logbird Cloud.');
     expect(closedPrivate.hero.signIn).toBeUndefined();
-    expect(closedPrivate.openSource.quickstart.kind).toBe('private');
+    expect(closedPrivate.hero.github).toBeUndefined();
+    expect(closedPrivate.developers.otherStacks.link).toBeUndefined();
     expect(openPublic.hero.primaryCta.label).toBe('Request access');
+    expect(openPublic.hero.lead).toMatch(/run it on your own servers, or ask for early access to Logbird Cloud\.$/);
     expect(openPublic.hero.signIn?.href).toBe('https://app.example.test/login');
-    expect(openPublic.openSource.quickstart).toMatchObject({ kind: 'public', title: 'Self-host 9.9.9' });
+    expect(openPublic.hero.github?.href).toBe('https://github.example.test/acme/logbird/');
+    expect(openPublic.developers.otherStacks.link?.href).toBe('https://github.example.test/acme/logbird/tree/master/sdks/dotnet');
+    for (const repoPublic of [true, false]) {
+      for (const cloudOpen of [true, false]) {
+        const { description } = homeMetaFor(state({ repoPublic, cloudOpen }));
+        expect(description.length, description).toBeLessThanOrEqual(155);
+        expect(/self-host it/i.test(description), description).toBe(repoPublic);
+      }
+    }
+    // No time claim until a measured, dated value exists (marketing/copy/home.md, Numbers).
+    expect(openPublic.searchLatency).toBeUndefined();
   });
 
-  it('home renders its module', async () => {
-    const [page] = await renderPages(['/'], { WEB_GITHUB_PUBLIC: 'true', WEB_GITHUB_URL: 'https://github.com/example-org/logbird' });
-    const html = page?.html ?? '';
-    const home = homeContent({ repoPublic: true, cloudOpen: false });
-    for (const text of [home.hero.title, home.developers.title, home.operators.features.retention.body, home.guarantees.cta.label]) {
-      expect(html).toContain(text.replaceAll('"', '&quot;').replaceAll("'", '&#x27;'));
+  it('home shows reading through your backend until scoped read access is proven, then scoped access in one change', async () => {
+    const env = { WEB_GITHUB_PUBLIC: 'true', WEB_GITHUB_URL: 'https://github.com/example-org/logbird' };
+    const [page] = await renderPages(['/'], env);
+    const html = (page?.html ?? '').replaceAll('&#x27;', "'").replaceAll('&quot;', '"');
+    const current = homeContent({ repoPublic: true, cloudOpen: false, scopedReadLive: false });
+    const proven = homeContent({ repoPublic: true, cloudOpen: false, scopedReadLive: true });
+    for (const text of [
+      current.hero.title,
+      current.customers.now.points[0]?.title,
+      current.evidence.rows[2]?.limit,
+      current.developers.otherStacks.text,
+    ]) {
+      expect(html).toContain(text);
     }
+    expect(html).not.toContain('Viewer tokens');
+    expect(proven.customers.scoped.points.map((point) => point.title)).toContain('Viewer tokens');
   }, 60_000);
 });

@@ -85,7 +85,8 @@ path: /self-hosting
   - **Access:** Sign-up is open by default: anyone who can reach the console can create an account. On an
     internet-facing instance, set `AUTH_SIGNUP=restricted` with your email domains; invitations keep working.
   <!-- source: docs/self-hosting.md §SMTP and first login, §Caddy TLS, §Sizing, §Five-minute quickstart (after #51) -->
-- **visual:** none
+- **visual:** diagram: the architecture at a glance (moved from home), from `apps/web/src/content/architecture.ts`.
+  <!-- source: README.md §Architecture; docs/SPEC.md §2, §4 -->
 
 ## options
 
