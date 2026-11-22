@@ -170,9 +170,12 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
     ).toBe(201);
     expect((await request(owner.cookie, '/api/workspace/invite-links', 'POST', { role: 'member', maxUses: 1, expiresInDays: 7 })).status).toBe(201);
 
+    // The wrong codes actually submitted: none may be stored anywhere in an audit row.
+    const attemptedCodes = new Set<string>();
     for (const actor of actors) {
       const otp = await challenge(actor.email);
       const wrong = otp === '000000' ? '111111' : '000000';
+      attemptedCodes.add(wrong);
       for (let i = 0; i < 7; i++) {
         const failed = await request('', '/api/auth/sign-in/email-otp', 'POST', { email: actor.email, otp: wrong });
         expect([400, 403]).toContain(failed.status);
@@ -215,7 +218,10 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
       expect(row.metadata.emailHash).toMatch(/^[a-f0-9]{64}$/);
       expect(row.context.ip).toMatch(/^203\.0\.113\.8[0-2]$/);
       expect(row.targets[0].name).toMatch(/@example.test$/); // Stored member address is an allowed display fallback.
-      expect(JSON.stringify(row)).not.toContain('000000');
+      // Compare whole digit runs, not substrings: event ids embed the failure window's end in epoch milliseconds
+      // (5-minute boundaries such as 1795377000000), which contains "000000" one window in ten.
+      const digitRuns = JSON.stringify(row).match(/\d+/g) ?? [];
+      for (const code of attemptedCodes) expect(digitRuns, `audit row must not contain the attempted code ${code}`).not.toContain(code);
     }
     const exported = await request(owner.cookie, `${path}/export?format=jsonl`);
     expect(exported.status).toBe(200);
