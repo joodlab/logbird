@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { canonicalDecimal, isRawJson, parseJsonExact, rawJsonNumber } from '@logbird/contracts';
 import type { ClickHouseClient } from './client';
 import { projectMaintenance } from './maintenance-tag';
 import { type EventRow, normalizeEvent } from './normalize';
@@ -7,6 +8,9 @@ import { resolveTimestamp } from './timestamp';
 
 function sorted(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sorted);
+  // Raw JSON numbers hash as one canonical spelling of their exact value (`…993` and `…993.0` are the same number).
+  // Doubles that round-trip stay plain numbers, so identity of events without such numbers is unchanged.
+  if (isRawJson(value)) return rawJsonNumber(canonicalDecimal(value.rawJSON) ?? value.rawJSON);
   if (value && typeof value === 'object')
     return Object.fromEntries(
       Object.entries(value)
@@ -66,17 +70,29 @@ export function legacyEventFingerprint(row: EventRow) {
 export function canonicalFingerprint(input: unknown, timestamp: string) {
   return `v1:${digest({ input, timestamp })}`;
 }
+
 /** v1 hashes parsed input and resolved time, never search columns or admission rules. */
 export function eventFingerprint(row: EventRow) {
-  return canonicalFingerprint(JSON.parse(row.payload), row.timestamp);
+  return canonicalFingerprint(parseJsonExact(row.payload), row.timestamp);
 }
 export function retryFingerprint(input: unknown, projectId: string, receivedAt: Date, eventId: string, expected = 'v1:', eventAt?: Date) {
   if (expected.startsWith('unreadable:')) return null;
   if (expected.startsWith('v1:')) {
     const occurredAt = input && typeof input === 'object' ? (input as Record<string, unknown>).occurredAt : undefined;
-    return canonicalFingerprint(input, (eventAt ?? resolveTimestamp(occurredAt, receivedAt).timestamp).toISOString());
+    const timestamp = (eventAt ?? resolveTimestamp(occurredAt, receivedAt).timestamp).toISOString();
+    // Evidence stored before exact numbers hashed rounded doubles; nothing persisted tells it apart from a fresh
+    // event, so it is never matched at double precision (a retry across the upgrade is a duplicate_id_conflict).
+    return canonicalFingerprint(input, timestamp);
   }
-  const result = normalizeEvent(input, { projectId, receivedAt });
+  // Unversioned claims hashed 3a1541f columns: keep their numeric-id indexing frozen. Those columns came from JSON.parse,
+  // so the input is re-read as doubles first: a JSON number never reaches them with digits the old parser dropped.
+  let frozen: unknown;
+  try {
+    frozen = JSON.parse(JSON.stringify(input));
+  } catch {
+    return null;
+  }
+  const result = normalizeEvent(frozen, { projectId, receivedAt, legacyColumns: true });
   if (!result.ok) return null;
   result.row.event_id = eventId;
   return legacyEventFingerprint(result.row);
@@ -93,7 +109,7 @@ function identities(rows: EventRow[]) {
       const normalized = { ...row, timestamp: eventAt.toISOString() };
       let fingerprint: string;
       try {
-        fingerprint = canonicalFingerprint(JSON.parse(row.payload), eventAt.toISOString());
+        fingerprint = canonicalFingerprint(parseJsonExact(row.payload), eventAt.toISOString());
       } catch {
         fingerprint = `unreadable:${digest({ payload: row.payload, timestamp: eventAt.toISOString() })}`;
       }

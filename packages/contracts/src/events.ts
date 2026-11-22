@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isRawJson, type RawJson } from './json';
 
 /**
  * Logbird accepts ANY JSON object as an event. Only `action` is required.
@@ -16,26 +17,30 @@ export const outcomeSchema = z.enum(OUTCOMES);
 export const severitySchema = z.enum(SEVERITIES);
 
 const id = z.string().min(1).max(256);
+/** Entity ids may also be numbers (integer keys); a number is stored as the plain decimal of its exact value. */
+// parseJsonExact keeps a number a double cannot hold as a raw JSON value with its exact digits.
+const rawNumber = z.custom<RawJson>((value) => isRawJson(value) && /^-?\d/.test(value.rawJSON), 'expected a number').meta({ type: 'number' });
+const entityId = z.union([id, z.number(), rawNumber]);
 const shortText = z.string().max(512);
 
 export const actorInputSchema = z.looseObject({
   type: z.string().max(64).optional(), // recommended: one of ACTOR_TYPES
-  id: id.optional(),
+  id: entityId.optional(),
   name: shortText.optional(),
   email: shortText.optional(),
 });
 
 export const executorInputSchema = z.looseObject({
   type: z.string().max(64).optional(), // recommended: one of EXECUTOR_TYPES
-  id: id.optional(),
+  id: entityId.optional(),
   name: shortText.optional(),
-  jobId: id.optional(),
+  jobId: entityId.optional(),
   attempt: z.number().int().min(0).max(65_535).optional(),
 });
 
 export const targetInputSchema = z.looseObject({
   type: z.string().min(1).max(64),
-  id,
+  id: entityId,
   name: shortText.optional(),
 });
 
@@ -66,7 +71,7 @@ export const eventInputSchema = z.looseObject({
     .describe('Stable string id. The trimmed key is limited to 256 UTF-16 code units. Retries resend identical parsed content.')
     .optional(), // stable event id; retries resend identical content
   action: z.string().min(1).max(200),
-  occurredAt: z.union([z.string(), z.number()]).optional(), // ISO-8601 or epoch ms; defaults to receive time
+  occurredAt: z.union([z.string(), z.number(), rawNumber]).optional(), // ISO-8601 or epoch ms; defaults to receive time
   environment: z.string().max(64).optional(), // default "production"
   outcome: z.string().max(32).optional(), // recommended: one of OUTCOMES; default "success"
   severity: z.string().max(32).optional(), // recommended: one of SEVERITIES; default "info"
@@ -74,7 +79,7 @@ export const eventInputSchema = z.looseObject({
   actor: actorInputSchema.optional(),
   impersonator: actorInputSchema.optional(),
   executor: executorInputSchema.optional(),
-  tenant: z.looseObject({ id, name: shortText.optional() }).optional(),
+  tenant: z.looseObject({ id: entityId, name: shortText.optional() }).optional(),
   source: z.string().max(128).optional(), // external system that supplied the change, e.g. "channel-manager"
   targets: z.array(targetInputSchema).max(64).optional(),
   changes: z.array(changeInputSchema).max(256).optional(),
@@ -159,7 +164,7 @@ export type AuditEvent = z.infer<typeof eventSchema>;
 
 export const eventDetailSchema = z.object({
   event: eventSchema,
-  payload: z.unknown(), // raw JSON exactly as received
+  payload: z.unknown(), // stored original JSON: same values and exact number digits; formatting not preserved
   parents: z.array(eventSchema), // causation chain root -> direct parent
   childCount: z.number().int(),
   operationSize: z.number().int(), // events sharing context.operationId
