@@ -279,7 +279,8 @@ Migration 010 adds a minmax skip index on `events.received_at` and materializes 
 discovery, alert windows, the live view) then skip granules whose arrival range misses the requested slice instead of
 reading the project's `received_at` values across its history. Event values are preserved, but the physical work is
 not free: `MATERIALIZE INDEX` writes the new index files for every part, and ClickHouse rewrites the full column data
-of compact parts while doing so, competing with merges and retention mutations. It runs as a background mutation:
+of compact parts while doing so, competing with merges and retention mutations. It runs as a background mutation
+(the statement pins `mutations_sync = 0`, so a migration user whose profile waits for mutations does not block):
 the migration returns at once, reads stay correct while it runs (parts without the index are read as before), and new
 parts get the index on insert. Measured locally on a shared 2 GiB ClickHouse: 23.8 million rows (4.05 GiB)
 materialized in about 35 seconds, roughly 2.5 minutes per 100 million rows. That is an extrapolation from one machine,

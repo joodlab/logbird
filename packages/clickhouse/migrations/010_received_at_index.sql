@@ -6,4 +6,4 @@
 -- the index on parts as they finish, and new parts get it on insert.
 -- The migration runner splits statements on semicolons, so comments here must not contain one.
 ALTER TABLE events ADD INDEX IF NOT EXISTS idx_received_at received_at TYPE minmax GRANULARITY 1;
-ALTER TABLE events MATERIALIZE INDEX idx_received_at;
+ALTER TABLE events MATERIALIZE INDEX idx_received_at SETTINGS mutations_sync = 0;
