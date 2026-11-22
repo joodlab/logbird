@@ -150,7 +150,9 @@ function ProjectExplorer({
   const saveBlocked = problem ? 'Fix the query first — a view must run without errors.' : null;
   const exportBlocked = problem ? 'Fix the query first — the export runs the same query.' : null;
   const pages = problem ? lastGood.current.pages : events.data?.pages;
-  const histogramData = problem ? lastGood.current.histogram : histogram.data;
+  // A rejected query shows the last good bars, labelled as such; otherwise bars from a previous search (a placeholder
+  // while the new range or query loads) are never drawn as if they were this one's.
+  const histogramData = problem ? lastGood.current.histogram : histogram.isPlaceholderData ? undefined : histogram.data;
 
   /* ---------------- live tail ---------------- */
   const relative = isValidRange(range) && !range.includes('..');
