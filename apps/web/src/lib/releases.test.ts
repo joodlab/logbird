@@ -45,6 +45,8 @@ describe('release list', () => {
   it('reduces every supported Markdown link form to its text and keeps code spans as written', () => {
     const cases: [string, string][] = [
       ['See the [guide](notes(v2)).', 'See the guide.'],
+      ['[guide](notes "use ) here")', 'guide'],
+      ["[guide](notes 'it (works)') too", 'guide too'],
       ['Read [the [upgrade] notes](https://example.test/a "Title").', 'Read the [upgrade] notes.'],
       ['Nested [**[docs](https://example.test/d)** page](https://example.test/p).', 'Nested **docs** page.'],
       ['![logo](https://example.test/logo.svg) Logbird', 'logo Logbird'],

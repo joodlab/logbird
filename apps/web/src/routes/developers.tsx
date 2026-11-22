@@ -444,8 +444,8 @@ function DevelopersPage() {
                   are retried with exponential backoff and jitter, up to 5 times. A numeric <code>Retry-After</code> is honoured.
                 </>,
                 <>
-                  <strong className="font-medium text-foreground">Acknowledged after storage.</strong> The server answers <code>202</code> only once
-                  ClickHouse has the rows.
+                  <strong className="font-medium text-foreground">Acknowledged after storage.</strong> On <code>202</code>, every event listed in{' '}
+                  <code>ids</code> is in ClickHouse and <code>rejected</code> names the entries that failed.
                 </>,
                 <>
                   <strong className="font-medium text-foreground">At least once, stored once.</strong> The SDK gives every event an id before it
@@ -463,9 +463,9 @@ function DevelopersPage() {
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Partial batches.</strong> Each event is checked on its own. Rejected events, such as
-                  one without an <code>action</code> or an id conflict, are listed in <code>rejected</code>, and the rest are stored. Permanent errors
-                  other than <code>429</code> drop the batch and report it through <code>onError</code> and <code>onDrop</code>, without rejecting{' '}
-                  <code>flush()</code>.
+                  one without an <code>action</code> or an id conflict, are listed in <code>rejected</code>. On <code>202</code> the rest are stored;
+                  a <code>503</code> names the events still to retry. Permanent errors other than <code>429</code> drop the batch and report it
+                  through <code>onError</code> and <code>onDrop</code>, without rejecting <code>flush()</code>.
                 </>,
               ]}
             />

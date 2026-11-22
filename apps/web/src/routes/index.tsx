@@ -73,7 +73,7 @@ function HomePage() {
             <SectionHeader
               eyebrow="For developers"
               id="developers-title"
-              lead="Any JSON object with an action string is a valid event. Add the fields you have: who did it, in which customer account, to which records, what changed. Logbird lifts the fields it knows into indexed columns and keeps everything else as searchable attributes. Off-standard events are stored, never dropped."
+              lead="Any JSON object with an action string is a valid event. Add the fields you have: who did it, in which customer account, to which records, what changed. Logbird lifts the fields it knows into indexed columns and indexes your other fields as attributes, within the ingest limits. Recommended fields are optional: an event is never rejected for missing them."
               title="One call per action. No schema to migrate."
             />
             <ul className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
@@ -164,7 +164,16 @@ function HomePage() {
             items={[
               { title: 'Create a project', body: "Copy its ingest key. It's shown once and stored only as a hash." },
               { title: 'Send events', body: 'Over HTTP or the SDK: one event, or up to 1000 per request.', detail: 'POST /v1/events' },
-              { title: 'Logbird stores them', body: 'The server answers 202 only after ClickHouse has the rows.', detail: '202 Accepted' },
+              {
+                title: 'Logbird stores them',
+                body: (
+                  <>
+                    On <code>202</code>, every event listed in <code>ids</code> is in ClickHouse and <code>rejected</code> names the entries that
+                    failed.
+                  </>
+                ),
+                detail: '202 Accepted',
+              },
               {
                 title: 'Search, follow, keep',
                 body: 'Use the console, or read events from your own backend with a read key. Expired events are deleted every hour.',
@@ -263,7 +272,7 @@ function HomePage() {
               {
                 promise: 'A `202` lists the stored event IDs in `ids` and rejected events in `rejected`.',
                 limit:
-                  'Delivery is at least once. An exact retry with the same string `id` is stored once within a project; changed content under that id is rejected with `duplicate_id_conflict`. An event sent without an id gets a new one on every retry.',
+                  'Delivery is at least once. An exact retry with the same valid, non-blank string `id` is stored once while the project retains the event; changed content under that id is rejected with `duplicate_id_conflict`. An event sent without an id gets a new one on every retry.',
               },
               {
                 promise: 'The SDK batches and retries for you.',
@@ -272,7 +281,7 @@ function HomePage() {
               {
                 promise: 'Any shape is accepted; only `action` is required.',
                 limit:
-                  'Each event is checked on its own: rejected events are listed in `rejected` with a reason, and the rest of the batch is stored.',
+                  'Each event is checked on its own: rejected events are listed in `rejected` with a reason. On `202`, the rest of the batch is stored; a `503` names the events still to retry.',
               },
               { promise: 'Retention deletes expired events for good.', limit: "There's no archive and no undo." },
               {

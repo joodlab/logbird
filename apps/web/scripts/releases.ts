@@ -54,7 +54,7 @@ function codeSpanEnd(text: string, start: number): number {
   return -1;
 }
 
-/** Index of the `close` that balances the `open` at `start` (code spans skipped), or -1. */
+/** Index of the `close` that balances the `open` at `start` (code spans and quoted link titles skipped), or -1. */
 function balancedEnd(text: string, start: number, open: string, close: string): number {
   let depth = 0;
   for (let at = start; at < text.length; at++) {
@@ -65,6 +65,12 @@ function balancedEnd(text: string, start: number, open: string, close: string): 
       const end = codeSpanEnd(text, at);
       if (end > 0) {
         at = end - 1;
+      }
+    } else if (open === '(' && (char === '"' || char === "'") && /\s/.test(text[at - 1] ?? '')) {
+      // A link title (`"…"` or `'…'` after whitespace) may contain parentheses; they never close the destination.
+      const end = text.indexOf(char, at + 1);
+      if (end > 0) {
+        at = end;
       }
     } else if (char === open) {
       depth += 1;

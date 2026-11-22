@@ -60,8 +60,8 @@ Lina is still the actor. Getting this right is most of what makes an audit log u
 from the request into the job for you.
 
 **Write the guarantees down.** When the server answers `202`, it lists the stored event IDs in `ids` and the
-rejected events in `rejected`. Delivery is at least once, and an exact retry with the same `id` is stored once within
-a project. The SDK's queue lives in memory, so a crash before that `202` can lose events.
+rejected events in `rejected`. Delivery is at least once, and an exact retry with the same valid, non-blank `id` is stored
+once while the project retains the event. The SDK's queue lives in memory, so a crash before that `202` can lose events.
 Retention deletes are permanent: when you lower a project's window, you type its slug, and the expired events are
 gone. We'd rather you read those sentences now than discover them during an incident.
 

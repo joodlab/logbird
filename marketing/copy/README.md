@@ -70,7 +70,7 @@ run it on your own servers. <!-- source: docs/brand.md §2 (cloud clause "or our
    actor, tenant, worker or record on its own page. Open one request and every job it spawned as a single tree.
    <!-- source: docs/SPEC.md §5.1, §8; docs/concepts.md -->
 3. **Own it, and know its limits.** MIT-licensed, self-hosted with Docker Compose, stored in ClickHouse. The
-   guarantees are written down: a `202` means the event is in ClickHouse, delivery is at least once, and retention
+   guarantees are written down: on `202`, every event listed in `ids` is in ClickHouse, delivery is at least once, and retention
    deletes are permanent.
    <!-- source: LICENSE; docs/self-hosting.md; docs/SPEC.md §1, §2; README.md -->
 
@@ -87,8 +87,8 @@ run it on your own servers. <!-- source: docs/brand.md §2 (cloud clause "or our
 | --- | --- |
 | MIT licence | `LICENSE` |
 | Only `action` is required; nothing is rejected for missing recommended fields | `docs/SPEC.md` §1, `README.md` |
-| The server answers `202` only after ClickHouse has the rows; the response lists stored event IDs in `ids` and rejected events in `rejected` (`async_insert=1, wait_for_async_insert=1`) | `docs/SPEC.md` §2 |
-| Delivery is at least once; an exact retry with the same string `id` is stored once within a project, changed content under that id is rejected with `duplicate_id_conflict`, and an id can be reused once retention deletes the original (the SDK sets ids; an event without an id gets a new one per retry) | `docs/SPEC.md` §3, `docs/concepts.md` (Event ids and retries) |
+| On `202`, every event listed in `ids` is in ClickHouse (a batch with no valid event can still answer `202` with empty `ids`); the response lists stored event IDs in `ids` and rejected events in `rejected` (`async_insert=1, wait_for_async_insert=1`) | `docs/SPEC.md` §2 |
+| Delivery is at least once; an exact retry with the same valid, non-blank string `id` is stored once while the project retains the event, changed content under that id is rejected with `duplicate_id_conflict`, and an id can be reused once retention deletes the original (the SDK sets ids; an event without an id gets a new one per retry) | `docs/SPEC.md` §3, `docs/concepts.md` (Event ids and retries) |
 | Historical events can be sent with their original `occurredAt`, up to 3650 days back; an older value is stored at receive time with a warning, and project retention still applies | `docs/SPEC.md` §3, `packages/clickhouse/src/timestamp.ts` |
 | Retention permanently deletes expired events; lowering it requires typing the project slug and purges immediately | `docs/SPEC.md` §1, §7.1 |
 | Retention options run from 7 days to 10 years (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days); new projects default to 90 days | `packages/contracts/src/api.ts` (`RETENTION_OPTIONS`), `docs/SPEC.md` §6 |
@@ -202,8 +202,8 @@ Use these words the same way on every page. They match `docs/concepts.md`.
 | audit log, activity history, who did what | "observability platform", "SIEM" (Logbird is neither) |
 | send, search, follow, keep, delete | leverage, unlock, supercharge, empower |
 | "permanently deleted", "no archive, no undo" | "smart data lifecycle", "auto-archiving" |
-| "at least once; a resent id is stored once" | "never lose an event", "exactly once", "100% reliable", "tamper-proof", "immutable storage" |
-| "a `202` means the event is in ClickHouse" | "real-time", "instant", any latency figure |
+| "at least once; an exact retry with the same non-blank string id is stored once while the event is retained" | "never lose an event", "exactly once", "100% reliable", "tamper-proof", "immutable storage" |
+| "on `202`, every event listed in `ids` is in ClickHouse" | "real-time", "instant", any latency figure |
 | self-host, self-hosted (adjective), on your own servers | on-prem (unless quoting someone) |
 | open source, MIT-licensed | "free forever", "community edition" (there is one edition) |
 | "Source on GitHub — coming soon" | any wording that implies the repository is public |

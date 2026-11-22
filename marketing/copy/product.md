@@ -121,7 +121,7 @@ path: /product
 - **bullets:**
   - Before and after values for every changed field.
   - The causation breadcrumb, with a link to the whole operation.
-  - Context ids (request, trace, IP), every custom attribute, and the full parsed event as JSON.
+  - Context ids (request, trace, IP), the indexed attributes, and the full parsed event as JSON.
   - Copy a link, or copy the event as a curl command.
   - Support work stands out: rows show "via support", the Done by support filter lists them, and each support agent
     has a page.
@@ -179,8 +179,8 @@ path: /product
   days. A worker deletes expired events every hour. Before you lower the window, Logbird shows how many events will
   be deleted. To confirm, you type the project's slug, and the purge starts right away.
   <!-- source: docs/SPEC.md §1.4, §4, §5 retention preview, §6 (retentionDays=90), §7.1; packages/contracts/src/api.ts RETENTION_OPTIONS -->
-- **limit line:** Retention deletes are permanent. There's no archive and no undo. The preview count is
-  approximate, because storage is at least once.
+- **limit line:** Retention deletes are permanent. There's no archive and no undo. The count can change
+  between preview and deletion.
 - **visual:** `marketing/media/staydesk/retention-light.webp` (manifest id `retention`: the 30-day preview; nothing was confirmed).
 
 ## workspace-activity
