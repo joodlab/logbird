@@ -49,6 +49,15 @@ export const screenshots: ScreenshotEntry[] = [
     alt: 'An event in detail: the actor and executor cards, the tenant, two target records, before/after field changes, and the causation chain.',
   },
   {
+    // A crop of the event-sheet capture above: the detail panel, at a size where its text is legible.
+    id: 'event-detail',
+    light: `${C}/event-detail-light.webp`,
+    dark: `${C}/event-detail-dark.webp`,
+    width: 639,
+    height: 860,
+    alt: 'One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the requests that caused it.',
+  },
+  {
     id: 'operation',
     light: `${C}/operation-light.webp`,
     ...desktop,

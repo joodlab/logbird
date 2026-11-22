@@ -1,4 +1,5 @@
 import { homeMeta } from '../content/home';
+import { complianceEvidence } from '../content/use-cases/compliance-evidence';
 import { GITHUB_PUBLIC } from '../env';
 import { CLOUD_OPEN } from './cloud';
 import { buildLog, postPath, posts, releases } from './publications';
@@ -87,6 +88,17 @@ export const siteMap: SitePage[] = [
     ready: true,
     ogSlug: 'cloud',
     inNav: true,
+    inFooter: true,
+  },
+  {
+    path: '/use-cases/compliance-evidence',
+    ...complianceEvidence.meta,
+    section: 'product',
+    priority: 0.7,
+    changefreq: 'monthly',
+    ready: true,
+    ogSlug: 'use-case-compliance-evidence',
+    inNav: false,
     inFooter: true,
   },
   {
