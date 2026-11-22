@@ -161,17 +161,22 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
         var site = "site_" + run;
         var inside = LogbirdClient.NewEventId();
         var outside = LogbirdClient.NewEventId();
+        var otherSite = LogbirdClient.NewEventId();
         await using (var client = new LogbirdClient(LiveServer.Options()))
         {
             client.Track(new AuditEvent("booking.created") { Id = inside, Tenant = new AuditTenant(tenant!) }.Target("website", site));
             client.Track(new AuditEvent("booking.created") { Id = outside, Tenant = new AuditTenant("other_" + run) }.Target("website", site));
+
+            // Same tenant, another website: the key reads it, a token narrowed to `site` must not.
+            client.Track(new AuditEvent("booking.created") { Id = otherSite, Tenant = new AuditTenant(tenant!) }.Target("website", "elsewhere_" + run));
             Assert.True(await client.FlushAsync());
-            Assert.Equal(2, client.Stats.Delivered);
+            Assert.Equal(3, client.Stats.Delivered);
         }
 
         using var reader = LiveServer.Reader();
         await LiveServer.WaitForEventAsync(reader, inside);
         await LiveServer.WaitForEventAsync(reader, outside);
+        await LiveServer.WaitForEventAsync(reader, otherSite);
 
         using var scoped = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = new Uri(LiveServer.Endpoint!), ReadKey = scopedKey });
         var from = DateTimeOffset.UtcNow.AddHours(-1);
@@ -179,12 +184,17 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
         // The key reads its tenant's event and never the other tenant's, by id or by search.
         Assert.NotNull(await scoped.GetAsync(inside));
         Assert.Null(await scoped.GetAsync(outside));
+        Assert.NotNull(await scoped.GetAsync(otherSite));
         var bySite = await scoped.SearchAsync(EventSearch.ForTrail(targetId: site, targetType: "website", from: from));
         Assert.Equal([inside], bySite.Events.Select(e => e.Id));
 
         // Facets by tenant see only the key's tenant.
         var tenants = await scoped.FacetsAsync(new FacetQuery("tenant") { From = from });
-        Assert.All(tenants.Values, v => Assert.Equal(tenant, v.Value));
+        // Facets by tenant: exactly one bucket, the key's tenant, holding at least this run's two events, and nothing else.
+        var bucket = Assert.Single(tenants.Values);
+        Assert.Equal(tenant, bucket.Value);
+        Assert.True(bucket.Count >= 2, "tenant bucket count: " + bucket.Count);
+        Assert.Equal(0, tenants.OtherCount);
 
         // It mints a narrower token (one website of its tenant), and refuses a token for another tenant.
         var token = await scoped.MintViewerTokenAsync(new ViewerScope(tenant!) { Target = new ViewerScopeTarget("website", site) }, TimeSpan.FromMinutes(2));
