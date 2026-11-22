@@ -54,6 +54,12 @@ function parseInstant(text: string): number {
   return Date.parse(text);
 }
 
+/** The length of a relative preset such as "24h". */
+function rangeDurationOf(relative: string): number {
+  const rel = RELATIVE_RE.exec(relative);
+  return rel ? Number(rel[1]) * UNIT_MS[rel[2] as keyof typeof UNIT_MS] : 0;
+}
+
 /** Bounds of a relative or absolute range, or null when it names no window (zero, reversed or unrepresentable). */
 function windowOf(range: string, now: number): { fromMs: number; toMs: number; relative: boolean } | null {
   const rel = RELATIVE_RE.exec(range);
@@ -94,7 +100,10 @@ export function resolveRange(range: string, now = Date.now()): ResolvedRange {
   // The same rule as isValidRange: a range that names no window resolves to the default instead of throwing.
   const w = windowOf(range, now);
   if (w) return { from: new Date(w.fromMs).toISOString(), to: new Date(w.toMs).toISOString(), ...w };
-  return resolveRange(DEFAULT_RANGE, now);
+  // The default window, computed directly (never recursing): clamped at 1970 for a clock that early (tests inject one).
+  const toMs = Math.floor(now / 1000) * 1000;
+  const fromMs = Math.max(0, toMs - rangeDurationOf(DEFAULT_RANGE));
+  return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString(), fromMs, toMs, relative: true };
 }
 
 export function absoluteRange(fromMs: number, toMs: number): string {

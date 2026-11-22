@@ -91,14 +91,38 @@ function sourceFiles(dir: string): string[] {
  * built from such a query, directly or through an options variable, may be read only through `current(x)` or
  * `shownDimmed(x)`: any `x.data` is a finding. No heuristics about branches: the helpers are the only way in.
  */
+/** The text of a declaration's initializer: from `start` to the first `;` or line break outside brackets. */
+function initializerAt(src: string, start: number): string {
+  let depth = 0;
+  for (let i = start; i < src.length; i++) {
+    const c = src[i];
+    if (c === '(' || c === '{' || c === '[') depth++;
+    else if (c === ')' || c === '}' || c === ']') depth--;
+    else if (depth <= 0 && (c === ';' || c === '\n')) return src.slice(start, i);
+  }
+  return src.slice(start);
+}
+
 export function unguardedReads(src: string, queries: readonly string[]): string[] {
-  const names = queries.join('|');
-  const optionVars = [...src.matchAll(new RegExp(String.raw`(?:const|let)\s+(\w+)\s*=\s*(?:\{\s*\.\.\.)?(?:${names})\(`, 'g'))].map((m) => m[1]);
-  const sources = [names, ...optionVars].join('|');
-  const results = [
-    ...src.matchAll(new RegExp(String.raw`(?:const|let)\s+(\w+)\s*=\s*use(?:Infinite)?Query\(\s*(?:\{\s*\.\.\.)?(?:${sources})\b`, 'g')),
-  ].map((m) => m[1]);
+  const declarations = [...src.matchAll(/(?:const|let)\s+(\{[^}]*\}|\w+)\s*=\s*/g)].map((m) => ({
+    target: m[1] ?? '',
+    init: initializerAt(src, (m.index ?? 0) + m[0].length),
+  }));
+  // Options that carry a placeholder-enabled query anywhere in their initializer (`{ enabled, ...fieldsQuery(...) }`).
+  const sources = [...queries];
+  for (const d of declarations)
+    if (/^\w+$/.test(d.target) && !/^use(?:Infinite)?Query\(/.test(d.init) && sources.some((q) => new RegExp(String.raw`\b${q}\b`).test(d.init)))
+      sources.push(d.target);
+  const built = (init: string) => /^use(?:Infinite)?Query\(/.test(init) && sources.some((q) => new RegExp(String.raw`\b${q}\b`).test(init));
   const problems: string[] = [];
+  const results: string[] = [];
+  for (const d of declarations) {
+    if (!built(d.init)) continue;
+    // Destructuring `data` out of the result reads it directly.
+    if (d.target.startsWith('{')) {
+      if (/\bdata\b/.test(d.target)) problems.push(`destructured data: ${d.target} = ${d.init.split('\n')[0]}`);
+    } else results.push(d.target);
+  }
   src.split('\n').forEach((line, i) => {
     for (const r of results) if (new RegExp(String.raw`\b${r}\.data\b`).test(line)) problems.push(`${r}.data on line ${i + 1}: ${line.trim()}`);
   });
@@ -132,6 +156,22 @@ describe('the guard catches direct reads', () => {
       const src = ['const fields = useQuery(fieldsQuery(p, r));', before, 'render(fields.data);'].join('\n');
       expect(unguardedReads(src, ['fieldsQuery']), before).toHaveLength(1);
     }
+  });
+  it('finds the query anywhere in the options, and destructured data', () => {
+    const later = ['const fields = useQuery({ enabled: open, ...fieldsQuery(projectId, range) });', 'return fields.data?.data;'].join('\n');
+    expect(unguardedReads(later, ['fieldsQuery'])).toHaveLength(1);
+    const multiline = ['const fields = useQuery({', '  enabled: open,', '  ...fieldsQuery(projectId, range),', '});', 'return fields.data;'].join(
+      '\n',
+    );
+    expect(unguardedReads(multiline, ['fieldsQuery'])).toHaveLength(1);
+    const options = [
+      'const opts = { enabled: open, ...fieldsQuery(projectId, range) };',
+      'const fields = useQuery(opts);',
+      'return fields.data;',
+    ].join('\n');
+    expect(unguardedReads(options, ['fieldsQuery'])).toHaveLength(1);
+    const destructured = 'const { data } = useQuery({ staleTime: 1, ...fieldsQuery(projectId, range) });';
+    expect(unguardedReads(destructured, ['fieldsQuery'])).toHaveLength(1);
   });
   it('accepts reads through the helpers', () => {
     const src = [
