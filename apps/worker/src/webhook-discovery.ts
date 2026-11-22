@@ -101,7 +101,6 @@ export async function discoverWebhookDeliveries(
 ) {
   if (!endpoint.enabled || endpoint.cursorReviewRequired) return;
   const cursorClock = clock ?? (await webhookCursorClock(prisma));
-  const now = new Date();
   const snapshot = {
     id: endpoint.id,
     enabled: true,
@@ -134,8 +133,8 @@ export async function discoverWebhookDeliveries(
     if (bounds.watermark < endpoint.cursorReceivedAt) return;
     // A null ID denotes the first unexamined millisecond, including at endpoint creation. The end is exclusive.
     const sliceEnd = new Date(Math.min(+endpoint.cursorReceivedAt + DISCOVERY_SLICE_MS, +bounds.watermark + 1));
-    const rows = await readWebhookCandidates(ch, endpoint, scope, sliceEnd, now);
-    const expiresAt = new Date(+now + WEBHOOK_LOG_RETENTION_MS);
+    const rows = await readWebhookCandidates(ch, endpoint, scope, sliceEnd, bounds.now);
+    const expiresAt = new Date(+bounds.now + WEBHOOK_LOG_RETENTION_MS);
     const commit = async (cursorReceivedAt: Date, cursorEventId: string | null, deliveries?: Prisma.WebhookDeliveryCreateManyInput[]) => {
       const position = { cursorReceivedAt, cursorEventId, lastScannedAt };
       const committed = await prisma.$transaction(async (tx) => {
@@ -160,7 +159,8 @@ export async function discoverWebhookDeliveries(
           eventId,
           receivedAt,
           webhookId: `lb1_${Buffer.from(occurrence, 'utf8').toString('base64url')}`,
-          createdAt: now,
+          // Re-evaluate relative-time filters at this same database instant on every send.
+          createdAt: bounds.now,
           expiresAt,
         };
       });

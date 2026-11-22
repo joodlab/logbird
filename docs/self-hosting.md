@@ -1145,7 +1145,8 @@ that scans completed through an otherwise plausible position.
 
 1. Stop webhook workers while reconciling the affected endpoint. Take a database
    backup and record the endpoint ID, project ID, `createdAt`, `cursorReceivedAt`,
-   `cursorEventId` and `lastScannedAt`. Use the original rollout's `started_at`
+   `cursorEventId`, `lastScannedAt` and `cursorVerifiedFloor`. If the endpoint
+   already has a verified floor, use it as the original rollout. Otherwise, use the rollout's `started_at`
    from `_prisma_migrations` for `20261122140000_webhook_deliveries`, converted to
    UTC. If the ledger was rebuilt, read the completed, non-rolled-back migration's
    `started_at` from a pre-rebuild backup of the original database, or use a verified
@@ -1184,7 +1185,8 @@ without credentials or payload data for `evidence_ref`. Use the worker's
 
 Run this transaction while webhook workers are stopped. It stores the verified
 floor and queues a workspace audit event with the operator's database login and
-the evidence reference. The checkpoint must be at or before the held cursor,
+the evidence reference. Once a floor is recorded, every subsequent reconciliation
+must supply that same UTC millisecond. The checkpoint must be at or before the held cursor,
 except that a cursor below the starting bound can move to that bound. Commit
 after confirming the statement returned one audit ID.
 Roll back if it returned zero rows and check the endpoint, hold and timestamps.
@@ -1204,8 +1206,10 @@ WITH bounds AS (
   FROM bounds b, "Project" p
   WHERE e.id = :'endpoint_id' AND e."projectId" = :'project_id'
     AND p.id = e."projectId" AND e."cursorReviewRequired"
+    AND (e."cursorVerifiedFloor" IS NULL OR e."cursorVerifiedFloor" = b.floor)
     AND b.checkpoint BETWEEN greatest(e."createdAt", b.floor) AND b.now_utc
-    AND (b.checkpoint <= e."cursorReceivedAt" OR b.checkpoint = greatest(e."createdAt", b.floor))
+    AND (b.checkpoint <= e."cursorReceivedAt"
+         OR b.checkpoint = greatest(e."createdAt", coalesce(e."cursorVerifiedFloor", b.floor)))
     AND length(trim(:'evidence_ref')) > 0 AND length(trim(:'audit_namespace')) > 0
   RETURNING e.id, p."organizationId", e."projectId", b.floor, b.checkpoint, b.now_utc
 ), audit AS (

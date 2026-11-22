@@ -9,6 +9,7 @@ import { encryptWebhookSecret, WEBHOOK_LOG_RETENTION_MS, webhookSecretKey } from
 import { generateWebhookSecret, verifyWebhook } from '@logbird/sdk';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { deliverWebhooks } from './webhook-delivery';
+import { discoverWebhookDeliveries } from './webhook-discovery';
 import { pruneWebhookLogs } from './webhook-retention';
 
 const projectId = `qa-webhook-resilience-${randomUUID()}`;
@@ -218,6 +219,54 @@ it.each([5.3, 10.8])(
     }
   },
 );
+
+it('keeps scan time monotonic and delivers relative-time matches once on a worker clock behind PostgreSQL', async () => {
+  const [{ now }] = await prisma.$queryRaw<[{ now: Date }]>`SELECT clock_timestamp() AS now`;
+  const from = new Date(+now - 8 * 60_000);
+  const action = 'qa.webhook.clock-skew';
+  const hook = await endpoint('clock-skew', true, `action:${action} AND occurredAt:[now-5m TO now]`);
+  const where = { id: hook.id };
+  const refetch = () => prisma.webhookEndpoint.findUniqueOrThrow({ where });
+  const queuedIds = async () =>
+    (await prisma.webhookDelivery.findMany({ where: { endpointId: hook.id }, orderBy: { eventId: 'asc' } })).map((d) => d.eventId);
+  await prisma.webhookEndpoint.update({ where, data: { createdAt: from, cursorReceivedAt: from } });
+  await storeEvents(['qa-outside-window'], from, action);
+  await storeEvents(['qa-before-failure'], new Date(+from + 4 * 60_000), action);
+  await storeEvents(['qa-after-failure'], new Date(+from + 6 * 60_000), action);
+  const clock = { now, rollout: new Date(+from - 1) };
+  const limited = createClient({
+    url: process.env.CLICKHOUSE_URL,
+    database: process.env.CLICKHOUSE_DATABASE,
+    username: process.env.CLICKHOUSE_USER,
+    password: process.env.CLICKHOUSE_PASSWORD,
+    clickhouse_settings: { max_bytes_to_read: '1' },
+  });
+  try {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(from);
+    await discoverWebhookDeliveries(ch, await refetch(), clock);
+    const committed = await refetch();
+    expect(committed).toMatchObject({ cursorReceivedAt: new Date(+from + 5 * 60_000), lastScannedAt: expect.any(Date) });
+    expect(await queuedIds()).toEqual(['qa-before-failure']);
+    await expect(discoverWebhookDeliveries(limited, committed, clock)).rejects.toThrow('Query exceeded its resource budget');
+    const failed = await refetch();
+    expect(failed.cursorReceivedAt).toEqual(committed.cursorReceivedAt);
+    expect(failed.lastScannedAt?.getTime()).toBeGreaterThanOrEqual(committed.lastScannedAt?.getTime() ?? Number.POSITIVE_INFINITY);
+    await discoverWebhookDeliveries(ch, failed, clock);
+    expect(await refetch()).toMatchObject({ cursorReviewRequired: false });
+    expect(await queuedIds()).toEqual(['qa-after-failure', 'qa-before-failure']);
+    // A delayed send is outside the window by its own clock. Recheck at the discovery instant.
+    vi.setSystemTime(+now + 8 * 60_000);
+    await tick();
+    await tick();
+    await tick();
+    const ids = await Promise.all(requests.map(async (request) => (await verifyWebhook<{ id: string }>({ ...request, secret })).id));
+    expect(ids.sort()).toEqual(['qa-after-failure', 'qa-before-failure']);
+  } finally {
+    vi.useRealTimers();
+    await limited.close();
+  }
+});
 
 it('retries real stored-event lookup errors and expires the claim without starting another attempt', async () => {
   const time = await storeEvents(['qa-lookup']);

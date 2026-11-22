@@ -892,9 +892,9 @@ it('rejects a forward reconciliation and delivers the intervening occurrence onc
     )`;
     return webhookCursorClock(tx);
   });
-  const held = new Date(+clock.rollout - 6 * 60_000);
-  const receivedAt = new Date(+held + 60_000);
-  const floor = new Date(+held - 60_000);
+  const held = new Date(+clock.rollout - 5 * 60_000);
+  const receivedAt = new Date(+held + 2 * 60_000);
+  const floor = new Date(+held - 5 * 60_000);
   const reconcile = await loadWebhookReconciliation();
   const secret = generateWebhookSecret();
   const hook = await prisma.webhookEndpoint.create({
@@ -921,6 +921,15 @@ it('rejects a forward reconciliation and delivers the intervening occurrence onc
       expect(await refetch()).toMatchObject({ cursorReceivedAt: held, cursorReviewRequired: true, cursorVerifiedFloor: null, lastScannedAt: held });
       expect(await reconcile(prisma, hook.id, projectId, floor, held)).toHaveLength(1);
       expect(await refetch()).toMatchObject({ cursorVerifiedFloor: floor, cursorReviewRequired: false });
+      // A later hold must retain the original floor even when the rebuilt ledger proposes a newer one.
+      await prisma.webhookEndpoint.update({ where: { id: hook.id }, data: { cursorReviewRequired: true } });
+      const auditCount = () => prisma.auditOutbox.count({ where: { stream: `ws:${org}` } });
+      expect(await auditCount()).toBe(1);
+      expect(await reconcile(prisma, hook.id, projectId, clock.rollout, clock.rollout)).toEqual([]);
+      expect(await reconcile(prisma, hook.id, projectId, new Date(+floor - 1), held)).toEqual([]);
+      expect(await refetch()).toMatchObject({ cursorReceivedAt: held, cursorVerifiedFloor: floor, cursorReviewRequired: true, lastScannedAt: held });
+      expect(await auditCount()).toBe(1);
+      expect(await reconcile(prisma, hook.id, projectId, floor, held)).toHaveLength(1);
       for (let tick = 0; tick < 2; tick++) {
         await discoverWebhookDeliveries(clickhouse, await refetch(), clock);
         await send();
