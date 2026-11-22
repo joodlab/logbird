@@ -31,10 +31,14 @@ describe('first-project wizard after creating or switching a workspace', () => {
 });
 
 describe('firstEventCopy', () => {
-  it('never says "it works" for a console test event, in the toast or the card', () => {
+  it('never claims the integration works for a console test event, in the toast or the card', () => {
     const copy = firstEventCopy('logbird-test');
-    expect(copy.toastTitle).toBe('Console test received');
-    expect(`${copy.toastDescription} ${copy.cardTitle}`).not.toMatch(/it works/i);
+    expect(copy).toEqual({
+      toastTitle: 'Console test received',
+      toastDescription: 'Logbird is receiving events. Send one from your backend to check your integration.',
+      cardTitle: 'Console test received — now send one from your backend',
+    });
+    expect(Object.values(copy).join(' ')).not.toMatch(/works/i);
   });
 
   it('celebrates an integration event', () => {
