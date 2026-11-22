@@ -65,13 +65,14 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Restore master's unfixed core files
-        run: git checkout origin/master -- src/Logbird/LogbirdClient.cs src/Logbird/Internal/BatchSender.cs && git status --short
+        run: git checkout origin/master -- src/Logbird/LogbirdClient.cs src/Logbird/Internal/BatchSender.cs src/Logbird/Internal/EventQueue.cs && git status --short
       - run: dotnet build tests/Logbird.Tests -c Release -f net48
       - name: Run the net48 suite 10 times (reports, never fails)
         run: |
           fails=0
           for i in $(seq 1 10); do
-            if ! dotnet test tests/Logbird.Tests -c Release -f net48 --no-build > run.log 2>&1; then
+            # The new deterministic test always fails on master's code; leave it out to measure the original flaky test.
+            if ! dotnet test tests/Logbird.Tests -c Release -f net48 --no-build --filter "FullyQualifiedName!~mid_send" > run.log 2>&1; then
               fails=$((fails+1)); grep -E "  Failed |Expected|Actual" run.log | head -6
             fi
             grep -E "Passed!|Failed!" run.log
