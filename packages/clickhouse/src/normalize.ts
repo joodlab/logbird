@@ -27,20 +27,25 @@ const textOf = (v: unknown, cap: number, numbers: boolean): string => {
   // A numeric id is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are all "42"); when that
   // pads too much or does not fit the column, as its canonical scientific spelling (1e256), which is unique per value.
   // A number whose digits do not fit is not indexed: truncating could merge distinct ids.
-  if (typeof v !== 'string') return (numbers ? numericId(v, cap) : null) ?? '';
+  if (typeof v !== 'string') return (numbers ? numericId(v, textNumberMax(cap)) : null) ?? '';
   return capText(wellFormed(v.trim()), cap);
 };
-// A plain decimal adds at most this many zeros (and the point) to the significant digits, so a compact spelling such
+// A plain decimal adds at most this many zeros to the significant digits, so a compact spelling such
 // as 1e+2047 never expands to kilobytes per row; past it the value keeps its unique scientific spelling.
 const PLAIN_PADDING = 32;
-// Indexed numbers are strictly shorter than their column: a longer string truncated to the cap fills it exactly, so it
-// can never equal an indexed number.
-function numericId(v: unknown, cap: number): string | null {
-  const plain = plainDecimal(v, cap - 1, PLAIN_PADDING);
+// Indexed numbers are shorter than the shortest text a longer string can be truncated to, so a truncated string can
+// never equal one. A code-unit cap keeps at least `cap - 1` units (one less when a surrogate pair straddles it); the
+// 2 KB attribute cut keeps at least 2,045 bytes (a split UTF-8 sequence is dropped, up to 3 bytes).
+const textNumberMax = (cap: number) => cap - 2;
+const ATTRIBUTE_BYTES = 2048;
+const ATTRIBUTE_NUMBER_MAX = ATTRIBUTE_BYTES - 4;
+/** The index text of a number: plain decimal, else unique scientific, else null; never longer than `maxLength`. */
+function numericId(v: unknown, maxLength: number): string | null {
+  const plain = plainDecimal(v, maxLength, PLAIN_PADDING);
   if (plain !== null) return plain;
   const text = rawJsonText(v);
   const scientific = text === null ? null : canonicalDecimal(text);
-  return scientific !== null && scientific.length < cap ? scientific : null;
+  return scientific !== null && scientific.length <= maxLength ? scientific : null;
 }
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
 const isNumber = (v: unknown) => typeof v === 'number' || isRawJson(v);
@@ -60,6 +65,16 @@ function attemptOf(v: unknown, legacy: boolean): number {
 }
 // Characters a JSON number is spelled with: a composite value cut inside one must not keep its partial digits.
 const numberChar = (c: string | undefined) => c !== undefined && /[\d.eE+-]/.test(c);
+/** True when the JSON text `json` ends inside a string literal (one linear scan honouring escapes). */
+function endsInsideString(json: string): boolean {
+  let inside = false;
+  for (let i = 0; i < json.length; i++) {
+    const c = json[i];
+    if (inside && c === '\\') i++;
+    else if (c === '"') inside = !inside;
+  }
+  return inside;
+}
 export const DEEP_NUMBERS_REASON = `invalid_event: numbers nested deeper than ${EXACT_NUMBER_MAX_DEPTH.toLocaleString('en-US')} levels cannot be stored exactly`;
 export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string; legacyColumns?: boolean }) {
   // Only identifiers index numbers (integer primary keys); other text columns keep string-only semantics.
@@ -99,17 +114,24 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
       // A number is indexed whole, as the plain decimal of its value (0.0000001, not 1e-7) or else its unique scientific
       // spelling, or not at all: a 2 KB prefix of its digits would match a different number. Legacy (pre-v1) columns
       // keep JSON.stringify spelling.
-      const exact = numericId(v, 2048);
+      const exact = numericId(v, ATTRIBUTE_NUMBER_MAX);
       if (exact !== null) attributes[path] = exact;
     } else {
       const bytes = Buffer.from(value(v));
       let cut = bytes
-        .subarray(0, 2048)
+        .subarray(0, ATTRIBUTE_BYTES)
         .toString('utf8')
         .replace(/\uFFFD$/, '');
-      // A composite value cut inside a number drops that number's partial digits: a prefix of its digits would match a
-      // different number. One backward scan; legacy columns keep the plain cut.
-      if (!ctx.legacyColumns && bytes.length > 2048 && numberChar(String.fromCharCode(bytes[2048] ?? 0))) {
+      // A composite value (JSON text) cut inside a number drops that number's partial digits: a prefix of its digits
+      // would match a different number. Only outside string literals: digits inside a string (or a plain string value)
+      // are text and keep the plain cut. One linear scan; legacy columns keep the plain cut.
+      if (
+        !ctx.legacyColumns &&
+        typeof v !== 'string' &&
+        bytes.length > ATTRIBUTE_BYTES &&
+        numberChar(String.fromCharCode(bytes[ATTRIBUTE_BYTES] ?? 0)) &&
+        !endsInsideString(cut)
+      ) {
         let end = cut.length;
         while (end > 0 && numberChar(cut[end - 1])) end--;
         cut = cut.slice(0, end);
@@ -163,7 +185,8 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
   if (occurredAtProblem) {
     // A rejected numeric timestamp is indexed whole like any number (two long values never share a prefix match).
     // Same column cap as a rejected string, so a truncated long string never equals an indexed number.
-    const rejected = isNumber(e.occurredAt) && !ctx.legacyColumns ? numericId(e.occurredAt, 256) : capText(wellFormed(value(e.occurredAt)), 256);
+    const rejected =
+      isNumber(e.occurredAt) && !ctx.legacyColumns ? numericId(e.occurredAt, textNumberMax(256)) : capText(wellFormed(value(e.occurredAt)), 256);
     // Always replace a caller-supplied value of this reserved key, even when the number cannot be indexed.
     if (rejected !== null) attributes['logbird.occurredAt.rejected'] = rejected;
     else delete attributes['logbird.occurredAt.rejected'];

@@ -191,8 +191,8 @@ Normalization rules (server):
   values stringified and capped at 2 KB. Arrays become JSON strings.
 - Every stored attribute key must be valid Unicode. Keys beyond the 256-attribute cap are not stored or checked. A lone surrogate in a stored key rejects the event before INSERT as `invalid_event: Attribute keys must be valid Unicode`; valid surrogate pairs remain verbatim. Keys are never repaired, avoiding replacement collisions. Changes values, target arrays and rejected occurredAt search copies also use `toWellFormed()`; raw input and v1 identity are unchanged.
 - The original document (≤ 256 KB) is stored in `payload` (ZSTD) with the same values it was sent with, including
-  numbers a double cannot hold (64-bit ids, long decimals), which keep their exact digits. An event that holds such a
-  number nested more than 1,000 levels deep is rejected on its own (`invalid_event: numbers nested deeper than 1,000
+  numbers a double cannot hold (64-bit ids, long decimals), which keep their exact digits. An event nested more than
+  1,000 levels deep that holds such a number anywhere is rejected on its own (`invalid_event: numbers nested deeper than 1,000
   levels cannot be stored exactly`), never rounded. Formatting is not
   preserved: whitespace, key spacing and number spelling such as `1e3` or `19.90` come back as `1000` and `19.9`.
   Numbers are indexed by their exact decimal text, so `actor.id: 42` is searchable as `actor:42`; a numeric event

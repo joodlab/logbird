@@ -147,9 +147,12 @@ it('never truncates a long numeric id: plain if it fits, else unique scientific,
   expect(ids(`1${'0'.repeat(33)}`).actor_id).toBe('1e33');
   expect(ids('1e256')).toMatchObject({ actor_id: '1e256', target_ids: ['1e256'] });
   expect(ids('2e256').target_ids).toEqual(['2e256']);
-  // Indexed numbers are strictly shorter than the column: a longer string id truncated to 256 can never equal one.
-  expect(ids('1'.repeat(255)).actor_id).toBe('1'.repeat(255));
+  // Indexed numbers are shorter than any truncated longer string id (at least 255 units): at most 254 characters.
+  expect(ids('1'.repeat(254)).actor_id).toBe('1'.repeat(254));
+  expect(ids('1'.repeat(255)).actor_id).toBe('');
   expect(ids('1'.repeat(256)).actor_id).toBe('');
+  // A surrogate pair straddling the cap leaves 255 units; no number can be those 255 digits.
+  expect(normalize(wire(`{"action":"x","actor":{"id":"${'1'.repeat(255)}😀"}}`)).row.actor_id).toBe('1'.repeat(255));
   expect(normalize(wire(`{"action":"x","actor":{"id":"${'1'.repeat(300)}"}}`)).row.actor_id).toBe('1'.repeat(256));
   // Two 257-significant-digit ids that share their first 256 digits must not merge: neither is indexed, and such a
   // target leaves the record columns entirely (no shared `order:` record).
@@ -211,8 +214,10 @@ it('indexes a rejected numeric timestamp whole, so two long values never match e
   const b = normalize(wire(`{"action":"x","occurredAt":${'1'.repeat(200)}2}`)).row.attributes['logbird.occurredAt.rejected'];
   expect(a).toBe(`${'1'.repeat(200)}1`);
   expect(b).toBe(`${'1'.repeat(200)}2`);
-  // Same cap as a rejected string: a 256-digit number is not indexed, so it never equals a truncated long string.
-  expect(normalize(wire(`{"action":"x","occurredAt":${'1'.repeat(256)}}`)).row.attributes['logbird.occurredAt.rejected']).toBeUndefined();
+  // Same cap as a rejected string: a number of 255+ digits is not indexed, so it never equals a truncated long string.
+  for (const n of [255, 256])
+    expect(normalize(wire(`{"action":"x","occurredAt":${'1'.repeat(n)}}`)).row.attributes['logbird.occurredAt.rejected']).toBeUndefined();
+  expect(normalize(wire(`{"action":"x","occurredAt":"${'1'.repeat(255)}😀"}`)).row.attributes['logbird.occurredAt.rejected']).toBe('1'.repeat(255));
   expect(normalize(wire(`{"action":"x","occurredAt":"${'1'.repeat(300)}"}`)).row.attributes['logbird.occurredAt.rejected']).toBe('1'.repeat(256));
   expect(normalize(wire('{"action":"x","occurredAt":"yesterday"}')).row.attributes['logbird.occurredAt.rejected']).toBe('yesterday');
 });
@@ -280,4 +285,31 @@ it('drops a caller-supplied rejected-timestamp attribute when no timestamp was r
     const { row } = normalize(wire(`{"action":"x","logbird":{"occurredAt":{"rejected":"42"}}${occurredAt}}`));
     expect(row.attributes['logbird.occurredAt.rejected']).toBeUndefined();
   }
+});
+
+it('keeps every indexed number shorter than the shortest truncated attribute string (2,045 bytes)', () => {
+  const attr = (json: string) => normalize(wire(`{"action":"x","metadata":{"v":${json}}}`)).row.attributes['metadata.v'];
+  expect(attr('1'.repeat(2044))).toBe('1'.repeat(2044));
+  expect(attr('1'.repeat(2045))).toBeUndefined();
+  // A two-byte character split by the 2 KB cut is dropped, leaving 2,047 digits: no number can be indexed as that.
+  expect(attr(`"${'1'.repeat(2047)}é"`)).toBe('1'.repeat(2047));
+});
+
+it('drops partial digits only for a number cut in JSON text, never digits inside a string', () => {
+  const attr = (json: string) => normalize(wire(`{"action":"x","metadata":{"v":${json}}}`)).row.attributes['metadata.v'] ?? '';
+  // A plain string keeps its 2 KB prefix, digits included.
+  expect(attr(`"${'1'.repeat(2049)}"`)).toBe('1'.repeat(2048));
+  // A string inside an array cut by the cap keeps its prefix too.
+  expect(attr(`["${'1'.repeat(2049)}"]`)).toBe(`["${'1'.repeat(2046)}`);
+  // A number cut in the JSON text loses its partial digits.
+  expect(attr(`[${'"a",'.repeat(511)}12345678901234567891]`).endsWith(',')).toBe(true);
+  // A string containing an escaped quote is still tracked as a string.
+  expect(attr(`["\\"${'1'.repeat(2049)}"]`).endsWith('1')).toBe(true);
+});
+
+it('counts only zeros against the plain-decimal padding, not the decimal point', () => {
+  const tenant = (n: string) => normalize(wire(`{"action":"x","tenant":{"id":${n}}}`)).row.tenant_id;
+  expect(tenant('1e-32')).toBe(`0.${'0'.repeat(31)}1`);
+  expect(tenant('1e-33')).toBe('1e-33');
+  expect(tenant('1.5e-31')).toBe(`0.${'0'.repeat(30)}15`);
 });
