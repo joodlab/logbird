@@ -354,7 +354,19 @@ function EndpointCard({
           </span>
         ) : null}
       </div>
-      <DeliveryLog endpoint={endpoint} onOpenChange={setLogOpen} open={logOpen} projectId={projectId} />
+      <DeliveryLog
+        endpoint={endpoint}
+        onOpenChange={setLogOpen}
+        open={logOpen}
+        projectId={projectId}
+        sendBlocked={
+          off
+            ? 'This endpoint is off: turn it on to send a delivery again.'
+            : testBlocked
+              ? 'This endpoint is held: confirm its filter or fix its scope to send a delivery again.'
+              : null
+        }
+      />
     </li>
   );
 }

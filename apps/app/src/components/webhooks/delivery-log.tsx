@@ -35,11 +35,14 @@ export function DeliveryLog({
   endpoint,
   open,
   onOpenChange,
+  sendBlocked,
 }: {
   projectId: string;
   endpoint: WebhookEndpoint;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Why the server would refuse "Send again" now (the endpoint is off or held), or null. Said once, above the list. */
+  sendBlocked: string | null;
 }) {
   const [status, setStatus] = useState('');
   const log = useInfiniteQuery({
@@ -55,7 +58,8 @@ export function DeliveryLog({
   const { host, path } = displayUrl(endpoint.url);
   return (
     <Sheet onOpenChange={onOpenChange} open={open}>
-      <SheetContent className="w-full gap-0 sm:max-w-xl" side="right">
+      {/* The side classes win over plain widths (as in the event sheet): the whole screen on phones, wider on desktop. */}
+      <SheetContent className="gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-xl" side="right">
         <SheetHeader className="border-b">
           <SheetTitle>Delivery log</SheetTitle>
           <SheetDescription className="truncate">
@@ -67,13 +71,20 @@ export function DeliveryLog({
           </SheetDescription>
         </SheetHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-          <SegmentedControl aria-label="Show deliveries" className="self-start">
+          {/* shrink-0: in this scrolling column the control would otherwise be squeezed to one line's height, and a
+              wrapped second line of filters would spill over the first delivery. */}
+          <SegmentedControl aria-label="Show deliveries" className="shrink-0 self-start">
             {FILTERS.map((f) => (
               <SegmentedControlItem active={status === f.value} aria-pressed={status === f.value} key={f.value} onClick={() => setStatus(f.value)}>
                 {f.label}
               </SegmentedControlItem>
             ))}
           </SegmentedControl>
+          {sendBlocked ? (
+            <p className="text-muted-foreground text-sm" data-testid="send-blocked">
+              {sendBlocked}
+            </p>
+          ) : null}
           {log.isPending ? (
             <div className="flex flex-col gap-2">
               <Skeleton className="h-16 w-full" />
@@ -95,7 +106,7 @@ export function DeliveryLog({
           ) : (
             <ul aria-busy={log.isFetchingNextPage || undefined} className="flex flex-col gap-2" data-testid="webhook-deliveries">
               {rows.map((d) => (
-                <DeliveryRow delivery={d} endpointId={endpoint.id} key={d.id} projectId={projectId} />
+                <DeliveryRow blocked={Boolean(sendBlocked)} delivery={d} endpointId={endpoint.id} key={d.id} projectId={projectId} />
               ))}
             </ul>
           )}
@@ -115,7 +126,7 @@ function statusTone(status: string): 'brand' | 'neutral' | 'warning' {
   return status === 'failed' ? 'warning' : status === 'succeeded' ? 'brand' : 'neutral';
 }
 
-function DeliveryRow({ projectId, endpointId, delivery }: { projectId: string; endpointId: string; delivery: Delivery }) {
+function DeliveryRow({ projectId, endpointId, delivery, blocked }: { projectId: string; endpointId: string; delivery: Delivery; blocked: boolean }) {
   const ids = useId();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(delivery.status === 'failed');
@@ -169,7 +180,7 @@ function DeliveryRow({ projectId, endpointId, delivery }: { projectId: string; e
           </Button>
         ) : null}
         {delivery.status !== 'pending' ? (
-          <Button disabled={resend.isPending} onClick={() => resend.mutate()} size="xs" variant="outline">
+          <Button disabled={resend.isPending || blocked} onClick={() => resend.mutate()} size="xs" variant="outline">
             {resend.isPending ? <Loader2Icon className="animate-spin" /> : <RotateCcwIcon />}
             {resend.isPending && resend.failureCount > 0 ? 'Busy, retrying…' : 'Send again'}
           </Button>
