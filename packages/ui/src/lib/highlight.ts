@@ -91,8 +91,6 @@ const RULES: Record<Exclude<CodeLanguage, 'text'>, [RegExp, TokenType | ((m: str
     [/^\/\*[\s\S]*?\*\//, 'comment'],
     [/^@?"(?:[^"\\]|\\.)*"/, 'string'],
     [/^\d+(?:\.\d+)?/, 'number'],
-    // Members of an anonymous object: `action = "…"`.
-    [/^[A-Za-z_][\w]*(?=\s*=(?!=))/, 'key'],
     [/^[A-Za-z_][\w]*/, (m) => (CSHARP_KEYWORDS.has(m) ? 'keyword' : 'plain')],
     [/^[{}()[\];,.:=<>+\-*/!?&|]/, 'punct'],
     [/^\s+/, 'plain'],
