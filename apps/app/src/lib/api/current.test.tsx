@@ -88,8 +88,9 @@ function sourceFiles(dir: string): string[] {
 
 /**
  * Direct `.data` reads of a placeholder-enabled query's result. Each `const x = useQuery(...)` (or `useInfiniteQuery`)
- * built from such a query, directly or through an options variable, may be read only through `current(x)` or
- * `shownDimmed(x)`: any `x.data` is a finding. No heuristics about branches: the helpers are the only way in.
+ * built from such a query (directly or through an options variable), or given `placeholderData` at the call site, may
+ * be read only through `current(x)` or `shownDimmed(x)`: any `x.data` is a finding. No heuristics about branches: the
+ * helpers are the only way in.
  */
 /** The text of a declaration's initializer: from `start` to the first `;` or line break outside brackets. */
 function initializerAt(src: string, start: number): string {
@@ -108,12 +109,16 @@ export function unguardedReads(src: string, queries: readonly string[]): string[
     target: m[1] ?? '',
     init: initializerAt(src, (m.index ?? 0) + m[0].length),
   }));
-  // Options that carry a placeholder-enabled query anywhere in their initializer (`{ enabled, ...fieldsQuery(...) }`).
+  // Options variables: the factory call itself (`fieldsQuery(...)`), or an object literal spreading one
+  // (`{ enabled, ...fieldsQuery(...) }`). A value that merely mentions a factory (`!!getQueryData(fieldsQuery(...).queryKey)`)
+  // is not options.
   const sources = [...queries];
-  for (const d of declarations)
-    if (/^\w+$/.test(d.target) && !/^use(?:Infinite)?Query\(/.test(d.init) && sources.some((q) => new RegExp(String.raw`\b${q}\b`).test(d.init)))
-      sources.push(d.target);
-  const built = (init: string) => /^use(?:Infinite)?Query\(/.test(init) && sources.some((q) => new RegExp(String.raw`\b${q}\b`).test(init));
+  const isOptions = (init: string) =>
+    sources.some((q) => new RegExp(String.raw`^${q}\(`).test(init) || (init.startsWith('{') && new RegExp(String.raw`\.\.\.\s*${q}\(`).test(init)));
+  for (const d of declarations) if (/^\w+$/.test(d.target) && !/^use(?:Infinite)?Query\(/.test(d.init) && isOptions(d.init)) sources.push(d.target);
+  // A result is placeholder-enabled when its options come from such a query, or when the call sets `placeholderData` itself.
+  const built = (init: string) =>
+    /^use(?:Infinite)?Query\(/.test(init) && (/\bplaceholderData\s*:/.test(init) || sources.some((q) => new RegExp(String.raw`\b${q}\b`).test(init)));
   const problems: string[] = [];
   const results: string[] = [];
   for (const d of declarations) {
@@ -173,6 +178,21 @@ describe('the guard catches direct reads', () => {
     const destructured = 'const { data } = useQuery({ staleTime: 1, ...fieldsQuery(projectId, range) });';
     expect(unguardedReads(destructured, ['fieldsQuery'])).toHaveLength(1);
   });
+  it('treats a call-site placeholderData as placeholder-enabled (the retention preview pattern)', () => {
+    const src = [
+      'const preview = useQuery({ ...retentionQuery(id, days), enabled, placeholderData: keepPreviousData });',
+      'return preview.data?.count;',
+    ].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toHaveLength(1);
+  });
+  it('does not take a value that merely mentions a factory for options', () => {
+    const src = [
+      'const enabled = !!client.getQueryData(fieldsQuery(p, r).queryKey);',
+      'const project = useQuery({ ...projectQuery(p), enabled });',
+      'return project.data?.name;',
+    ].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toEqual([]);
+  });
   it('accepts reads through the helpers', () => {
     const src = [
       'const list = useInfiniteQuery(entityListQuery(p, k));',
@@ -191,7 +211,11 @@ describe('every consumer of a placeholder-enabled query reads it through current
     );
   });
   const root = join(import.meta.dirname, '..', '..');
-  const files = sourceFiles(root).filter((file) => queries.some((q) => readFileSync(file, 'utf8').includes(`${q}(`)));
+  // Every file using a placeholder-enabled factory, or setting `placeholderData` on a query call itself.
+  const files = sourceFiles(root).filter((file) => {
+    const src = readFileSync(file, 'utf8');
+    return queries.some((q) => src.includes(`${q}(`)) || /use(?:Infinite)?Query\([\s\S]*?placeholderData\s*:/.test(src);
+  });
   it.each(files.map((f) => [relative(root, f).replaceAll('\\', '/'), f]))('%s', (_name, file) => {
     expect(unguardedReads(readFileSync(file, 'utf8'), queries)).toEqual([]);
   });

@@ -2,7 +2,7 @@ import type { QueryLang, SavedView, SuggestResponse } from '@logbird/contracts';
 import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { awaiting, current } from '@/lib/api/current';
+import { awaiting, current, shownDimmed } from '@/lib/api/current';
 import { fieldsQuery, SUGGEST_LIMIT, suggestQuery } from '@/lib/api/queries';
 import { formatCompact } from '@/lib/format';
 import {
@@ -232,7 +232,8 @@ export function useCompletions({
     // Keep the previous list while the next prefix loads, but never across fields.
     placeholderData: (previous: SuggestResponse | undefined) => (previous?.field === valueField ? previous : undefined),
   });
-  const valuesData = rawPrefix && !complete ? (narrowed.data ?? base.data) : base.data;
+  // The previous prefix's suggestions stay while the next prefix loads (same field only), with the loading indicator on.
+  const valuesData = rawPrefix && !complete ? (shownDimmed(narrowed) ?? base.data) : base.data;
   const valuesLoading = Boolean(valueField) && (base.isFetching || (Boolean(rawPrefix) && !complete && narrowed.isFetching));
 
   /* ---------------- free text that names an entity (`rawd` → tenant:biz_2 Rawda Suites) ---------------- */
