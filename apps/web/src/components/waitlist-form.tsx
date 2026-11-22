@@ -4,6 +4,7 @@ import { Textarea } from '@logbird/ui/components/ui/textarea';
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { CONTACT_EMAIL, GITHUB_PUBLIC } from '../env';
 import { CLOUD_OPEN } from '../lib/cloud';
+import type { NEEDS, VOLUMES } from '../lib/waitlist-schema';
 
 // Copy: marketing/copy/contact.md (form, states).
 // No mailbox is named unless WEB_CONTACT_EMAIL is configured (never a guessed address).
@@ -46,6 +47,24 @@ const INTERESTS = [
  * Progressive enhancement: a real form post that works without JavaScript (the server redirects back with
  * `?status=<code>#waitlist-<code>`, and a :target message shows), upgraded to fetch with inline field errors.
  */
+// Optional qualifying questions. Values: lib/waitlist-schema.ts (VOLUMES, NEEDS).
+const VOLUME_OPTIONS: { value: (typeof VOLUMES)[number]; label: string }[] = [
+  { value: 'unsure', label: 'Not sure yet' },
+  { value: 'under-100k', label: 'Under 100,000' },
+  { value: '100k-1m', label: '100,000 to 1 million' },
+  { value: '1m-10m', label: '1 to 10 million' },
+  { value: 'over-10m', label: 'More than 10 million' },
+];
+const NEED_OPTIONS: { value: (typeof NEEDS)[number]; label: string }[] = [
+  { value: 'customer-audit-log', label: 'Show our customers their own audit log' },
+  { value: 'compliance', label: 'Compliance evidence and retention' },
+  { value: 'investigations', label: 'Support investigations' },
+  { value: 'self-host-support', label: 'Help running it ourselves' },
+  { value: 'other', label: 'Something else' },
+];
+/** The form as JSON: every field once, except the repeated `needs` checkboxes, sent as a list. */
+export const formFields = (data: FormData) => ({ ...Object.fromEntries(data), needs: data.getAll('needs') });
+
 export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; interest?: string }) {
   // The page is prerendered once, without its query string, and hydrated at `?status=…` or `?interest=…`. The first
   // render must match that static HTML (no message, "cloud" checked), so both are applied after mount.
@@ -77,7 +96,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
       const response = await fetch(form.action, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.fromEntries(new FormData(form))),
+        body: JSON.stringify(formFields(new FormData(form))),
       });
       const body = await response.json().catch(() => ({}));
       if (response.ok) {
@@ -154,6 +173,39 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
           ))}
         </div>
         {fieldError('interest')}
+      </fieldset>
+      <div className="form-field">
+        <Label htmlFor="volume">Expected events per month (optional)</Label>
+        <select
+          className="h-10 rounded-md border bg-background px-3 text-sm sm:max-w-xs"
+          defaultValue=""
+          id="volume"
+          name="volume"
+          {...field('volume')}
+        >
+          <option value="">Choose one</option>
+          {VOLUME_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        {fieldError('volume')}
+      </div>
+      <fieldset className="form-field">
+        <legend className="mb-2 font-medium text-sm">What do you need? (optional)</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {NEED_OPTIONS.map((option) => (
+            <label
+              className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border bg-background px-3 py-2 text-sm has-[:checked]:border-brand has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50"
+              key={option.value}
+            >
+              <input className="accent-[var(--brand)]" name="needs" type="checkbox" value={option.value} />
+              {option.label}
+            </label>
+          ))}
+        </div>
+        {fieldError('needs')}
       </fieldset>
       <div className="form-field">
         <Label htmlFor="message">Message</Label>

@@ -117,7 +117,13 @@ export async function handleWaitlist(request: Request, deps: WaitlistDependencie
   let input: unknown;
   try {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    input = form ? Object.fromEntries(new URLSearchParams(text)) : JSON.parse(text);
+    if (form) {
+      // Checkboxes repeat their name; every other field is single.
+      const params = new URLSearchParams(text);
+      input = { ...Object.fromEntries(params), ...(params.has('needs') ? { needs: params.getAll('needs') } : {}) };
+    } else {
+      input = JSON.parse(text);
+    }
   } catch {
     return respond(400, 'invalid_body', 'The request body is invalid.');
   }

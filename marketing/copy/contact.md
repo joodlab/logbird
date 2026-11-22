@@ -37,6 +37,8 @@ path: /contact
   | `name` (optional) | Name | | |
   | `company` (optional) | Company | | |
   | `topic` (required, radio) | What's this about? | | Choose one. |
+  | `volume` (optional, select) | Expected events per month (optional) | | |
+  | `needs` (optional, checkboxes) | What do you need? (optional) | | |
     | `message` (optional) | Message | What are you building, and what do you need from an audit log? For a privacy request, tell us what you'd like us to do. | |
 
 - **topic options:** <!-- values: cloud, self-host, updates, correction, other, privacy -->
@@ -53,6 +55,19 @@ path: /contact
   - A correction to one of our pages
   - A question, or support and enterprise
   - A privacy request (access, deletion or another right)
+- **volume options:** <!-- values: "" (sends nothing), unsure, under-100k, 100k-1m, 1m-10m, over-10m (apps/web/src/lib/waitlist-schema.ts) -->
+  - Choose one
+  - Not sure yet
+  - Under 100,000
+  - 100,000 to 1 million
+  - 1 to 10 million
+  - More than 10 million
+- **needs options:** <!-- values: customer-audit-log, compliance, investigations, self-host-support, other. Qualifying answers for the landing page's two jobs; no prices. The privacy policy's form section lists them. -->
+  - Show our customers their own audit log
+  - Compliance evidence and retention
+  - Support investigations
+  - Help running it ourselves
+  - Something else
 - **placeholder for email:** `you@example.test`
 - **submit button:** Send
 - **privacy note (under the button, `aria-describedby` on Send):** We use these details to reply to you and handle access

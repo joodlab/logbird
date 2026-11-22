@@ -61,6 +61,49 @@ describe('waitlist boundary', () => {
     expect((await handleWaitlist(req(), { ...deps, ip: '192.0.2.2' })).status).toBe(200);
     expect((await handleWaitlist(req(), { ...deps, now: () => 61_000 })).status).toBe(200);
   });
+  it('stores the optional qualifying answers from JSON and native forms, and drops unanswered ones', async () => {
+    const json = dependencies();
+    await handleWaitlist(req({ ...valid, volume: '1m-10m', needs: ['compliance', 'customer-audit-log', 'compliance'] }), json);
+    expect(json.store).toHaveBeenCalledWith(expect.objectContaining({ volume: '1m-10m', needs: ['compliance', 'customer-audit-log'] }));
+
+    const native = dependencies();
+    const body = new URLSearchParams([
+      ['email', valid.email],
+      ['interest', 'cloud'],
+      ['volume', ''],
+      ['needs', 'investigations'],
+      ['needs', 'other'],
+    ]);
+    const response = await handleWaitlist(
+      new Request(`${origin}/site-api/waitlist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: origin },
+        body,
+      }),
+      native,
+    );
+    expect(response.status).toBe(303);
+    const [record] = native.store.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(record).toMatchObject({ needs: ['investigations', 'other'] });
+    expect(record).not.toHaveProperty('volume', expect.anything());
+
+    // The browser sends an empty list when no box is ticked.
+    const none = dependencies();
+    await handleWaitlist(req({ ...valid, volume: '', needs: [] }), none);
+    const [stored] = none.store.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(stored.volume).toBeUndefined();
+    expect(stored.needs).toBeUndefined();
+
+    for (const input of [
+      { ...valid, volume: 'lots' },
+      { ...valid, needs: ['pricing'] },
+    ]) {
+      const deps = dependencies();
+      expect((await handleWaitlist(req(input), deps)).status).toBe(400);
+      expect(deps.store).not.toHaveBeenCalled();
+    }
+  });
+
   it('redirects native form submissions for success and validation errors', async () => {
     for (const [email, status] of [
       ['test-waitlist@example.test', 'ok'],
