@@ -86,6 +86,18 @@ export const meQuery = () =>
     retry: shouldRetry,
   });
 
+/**
+ * The projects of one workspace, keyed by its id: the session's active workspace can change in another tab, and a list
+ * cached for the previous workspace must never answer for this one. Under `projects`, so creating or deleting a project
+ * (which invalidates `keys.projects`) refreshes it too.
+ */
+export const workspaceProjectsQuery = (workspaceId: string) =>
+  queryOptions({
+    queryKey: [...keys.projects, 'workspace', workspaceId] as const,
+    queryFn: ({ signal }) => api.projects.list(signal),
+    retry: shouldRetry,
+  });
+
 export const projectsQuery = () =>
   queryOptions({
     queryKey: keys.projects,

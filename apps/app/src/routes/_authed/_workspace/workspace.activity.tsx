@@ -14,7 +14,7 @@ import { EventsTable, type EventsTableHandle } from '@/components/explorer/event
 import { TimeZoneInline } from '@/components/time-zone-control';
 import { api } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
-import { projectsQuery, workspaceActivityQuery } from '@/lib/api/queries';
+import { workspaceActivityQuery, workspaceProjectsQuery } from '@/lib/api/queries';
 import { useCan } from '@/lib/permissions';
 import { formatExactTerm, includeTerm, removeTerm } from '@/lib/query-language';
 import { rangeLabel, resolveRange } from '@/lib/range';
@@ -59,7 +59,7 @@ function WorkspaceActivity() {
   const resultKey = useRef<string | undefined>(undefined);
   if (activity.isSuccess && !activity.isPlaceholderData) resultKey.current = `${range}|${q}|${category ?? ''}`;
   // A workspace without projects (reachable here before the first one exists) gets a next step.
-  const projectList = useQuery(projectsQuery());
+  const projectList = useQuery(workspaceProjectsQuery(workspace.id));
   const noProjects = projectList.data?.length === 0;
   const canCreateProject = useCan()('project.create');
   const selectedIndex = search.ev ? rows.findIndex((e) => e.id === search.ev) : -1;
