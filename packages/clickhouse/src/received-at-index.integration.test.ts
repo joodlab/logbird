@@ -17,8 +17,11 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       ).json<{ type: string; expr: string }>();
       expect(indices).toEqual([{ type: 'minmax', expr: 'received_at' }]);
       // Events arriving close to their event time, as live traffic does: 50k rows over ten days in one insert,
-      // so the project's part holds several granules with distinct arrival ranges.
-      const now = Date.now();
+      // so the project's part holds several granules with distinct arrival ranges. Anchored on the 20th (this month's or,
+      // early in a month, the last one's) so the ten days never cross a month partition.
+      const today = new Date();
+      const anchor = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 20, 12);
+      const now = anchor <= today.getTime() ? anchor : Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 20, 12);
       const count = 50_000;
       const rows = Array.from({ length: count }, (_, i) => {
         const at = now - Math.floor((i / count) * 10 * 86_400_000);
@@ -44,7 +47,8 @@ it.runIf(process.env.CLICKHOUSE_URL)(
           })
         ).json<{ explain: string }>()
       ).map((r) => r.explain);
-      const at = plan.findIndex((line) => line.includes('Name: idx_received_at'));
+      // The whole Name line: a longer index name (idx_received_at_shadow) must not stand in for this one.
+      const at = plan.findIndex((line) => line.trim() === 'Name: idx_received_at');
       expect(at).toBeGreaterThan(-1);
       // The index step's own block: lines after its Name up to the next index or step.
       const block: string[] = [];
@@ -59,8 +63,11 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       expect(kept).toBeGreaterThan(0);
       expect(kept).toBeLessThan(total);
     } finally {
-      await purgeProject(ch, p);
-      await ch.close();
+      try {
+        await purgeProject(ch, p);
+      } finally {
+        await ch.close();
+      }
     }
   },
   120_000,

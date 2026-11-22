@@ -276,8 +276,8 @@ for signal handling; its live acceptance is pending in #77.
 ### Upgrading to the arrival-time index (010)
 
 Migration 010 adds a minmax skip index on `events.received_at` and materializes it. Arrival-time reads (webhook
-discovery, alert windows, the live view) then skip granules whose arrival range misses the requested slice instead of
-reading the project's `received_at` values across its history. Event values are preserved, but the physical work is
+discovery, alert windows, the live view) then skip granules whose arrival range misses the requested range instead of
+reading every granule of the project that the partition and primary-key steps keep, which do not know arrival time. Event values are preserved, but the physical work is
 not free: `MATERIALIZE INDEX` writes the new index files for every part, and ClickHouse rewrites the full column data
 of compact parts while doing so, competing with merges and retention mutations. It runs as a background mutation
 (the statement pins `mutations_sync = 0`, so a migration user whose profile waits for mutations does not block):
@@ -294,12 +294,15 @@ WHERE database = currentDatabase() AND table = 'events' AND command LIKE '%idx_r
 ```
 
 The migration is recorded as applied once both statements were submitted, so a later `ch:migrate` does not run it
-again. If the mutation was killed or failed, fix the cause shown in `latest_fail_reason` and reissue
-`ALTER TABLE events MATERIALIZE INDEX idx_received_at SETTINGS mutations_sync = 0`; repeating it is safe for event
-data, though it repeats the physical work.
+again. If `is_done` stays 0, first check whether the original mutation is still running (`parts_to_do` falling): a
+part failure can leave it active and retrying, and reissuing then queues duplicate work. Fix any cause shown in
+`latest_fail_reason` (a mutation cancelled with `KILL MUTATION` may show none). Once no materialization of
+`idx_received_at` is active, reissue `ALTER TABLE events MATERIALIZE INDEX idx_received_at SETTINGS mutations_sync = 0`;
+repeating it is safe for event data, though it repeats the physical work.
 
 Known limit: during a large historical import (old event times arriving now), a slice that overlaps the import's
-arrival window still reads the granules the import touched, because each of them now spans that window. Draining such
+arrival window can still read granules the import touched whose arrival range overlaps the slice. In the measured
+import (one batch stream over about five minutes) every such granule overlapped it, so the index gave no gain. Draining such
 a slice in small pages repeats that read per page (see #209 for measurements), so larger pages mean fewer repeated
 reads during catch-up.
 
