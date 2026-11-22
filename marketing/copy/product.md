@@ -1,6 +1,6 @@
 ---
 title: Product tour — Logbird
-description: Search every event, follow actors, tenants, workers and records, open operation trees, and keep data for exactly as long as you choose.
+description: Search every event, follow actors, tenants, workers and records, open operation trees, and delete events when your retention window ends.
 path: /product
 ---
 
@@ -24,7 +24,9 @@ path: /product
 - **eyebrow:** Explorer
 - **heading:** Every event, in one table.
 - **body:** Pick a time range, type a query, and narrow it down with facets. Drag across the chart to zoom. Click a
-  row to open the full event. Everything lives in the URL, so a link shows a teammate exactly what you see.
+  row to open the full event. The query, time range and columns live in the URL, so a link opens the same search for a
+  teammate. A relative range such as the last hour resolves when they open it; share an absolute range or an export
+  for a fixed result.
   <!-- source: docs/SPEC.md §8 journey 4 -->
 - **bullets:**
   - Facets with counts: click to include, Alt-click to exclude.
@@ -119,7 +121,7 @@ path: /product
   ended. The actor and the executor are on separate cards. When a support agent acted for a customer, the agent
   appears beside the customer.
 - **bullets:**
-  - Before and after values for every changed field.
+  - Before and after values for each changed field, up to 256 changes per event.
   - The causation breadcrumb, with a link to the whole operation.
   - Context ids (request, trace, IP), every custom attribute, and the raw JSON exactly as received.
   - Copy a link, or copy the event as a curl command.
@@ -157,16 +159,17 @@ path: /product
 - **id:** `setup`
 - **eyebrow:** Setup that checks itself
 - **heading:** The setup page tells you what's still missing.
-- **body:** Send your first event and the setup page notices on its own. It then checks each part of your
-  integration against your real events: actors, tenants, executors, targets, operation ids, retention and team
-  invitations. For each gap it links to the events that are missing that field.
+- **body:** Send your first event and the setup page notices on its own. It then checks your integration
+  against your real events: for actors, tenants, executors, targets and operation ids it shows the coverage and links
+  to the events missing each field. Reviewing retention and inviting your team are separate checklist items.
   <!-- source: docs/SPEC.md §8 journeys 2 and 10 -->
 - **bullets:**
   - Onboarding picks up where you left off.
   - "Send a test event" and "Load sample data" to see the console before you integrate. Sample data is 2000
     fictional events over seven days. It never counts as setup, and you can remove it.
     <!-- source: docs/SPEC.md §5 sample-data -->
-  - A conformance score on every event, and a Fields page that shows every field you send and how often.
+  - A conformance score on every event, and a Fields page that lists the indexed fields your events carry and how
+    often each appears.
 - **visual:** `marketing/media/staydesk/setup-light.webp` (manifest id `setup`). The onboarding stills were discarded because the page's
   snippet prints the ingest key.
 
@@ -174,7 +177,7 @@ path: /product
 
 - **id:** `retention`
 - **eyebrow:** Retention
-- **heading:** Keep events exactly as long as you decide.
+- **heading:** Keep events as long as you decide, then delete them.
 - **body:** Each project keeps events for a window you choose, from 7 days to 10 years. New projects start at 90
   days. A worker deletes expired events every hour. Before you lower the window, Logbird shows how many events will
   be deleted. To confirm, you type the project's slug, and the purge starts right away.

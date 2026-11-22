@@ -93,7 +93,10 @@ function HomePage() {
               </li>
               <li className="text-sm leading-relaxed">
                 <strong className="font-medium">A conformance score</strong>
-                <span className="text-muted-foreground"> on every event shows which recommended fields you're missing.</span>
+                <span className="text-muted-foreground">
+                  {' '}
+                  on every event: the share of nine recommended checks it passes. The setup page shows which fields your events miss.
+                </span>
               </li>
             </ul>
             {isReady('/developers') ? (

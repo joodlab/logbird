@@ -49,7 +49,8 @@ path: /
   - Middleware for Hono, TanStack Start and Nuxt; a Vue read composable. <!-- source: docs/integrations.md (Vue is useAuditTrail/AuditTimeline, a reader, not middleware) -->
   - `jobAudit` for queue workers: the job keeps the original actor and joins the request's operation.
     <!-- source: packages/sdk/README.md §Requests and workers -->
-  - A conformance score on every event, so you can see which recommended fields you're missing.
+  - A conformance score on every event: the share of nine recommended checks it passes. The setup page shows which
+    fields your events miss.
 - **code sample:** (tabs "Route" and "Worker")
 
   ```ts

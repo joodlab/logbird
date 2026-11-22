@@ -22,13 +22,14 @@ path: /security
 - **eyebrow:** Where data lives
 - **heading:** Self-hosted, your events stay on your servers.
 - **body:** When you self-host, events are stored in your own ClickHouse, and workspaces, projects and keys in your
-  own Postgres. The self-hosted software doesn't send usage data back to us. The server's only outbound connection is to the SMTP provider
-  you choose, which delivers sign-in codes and invitations.
+  own Postgres. The self-hosted software doesn't send usage data back to us. In the bundled deployment, the server connects out to the
+  SMTP provider you choose, and resolves a webhook endpoint's hostname when you save it.
   <!-- source: docs/self-hosting.md; README.md §Architecture; no analytics/telemetry code found in apps/ or packages/ (grep, 2026-11-07) — owner to confirm -->
 - **visual:** diagram: one box labelled "Your server" holding console, API, worker, Postgres, ClickHouse and Redis.
-  The only arrow leaving the box goes to "Your SMTP provider", labelled "sign-in codes, invitations".
-  Caption: "Self-hosted: the console, API, worker, Postgres, ClickHouse and Redis all run on your server. The only
-  connection out goes to your SMTP provider, for sign-in codes and invitations."
+  The arrow leaving the box goes to "Your SMTP provider".
+  Caption: "The bundled Compose deployment: the console, API, worker, Postgres, ClickHouse and Redis all run on your
+  server. Outbound, the server connects to your SMTP provider (sign-in codes, invitations and membership notices) and
+  looks up a webhook endpoint's hostname when you save it. With your own databases, it also connects to them."
 
 ## retention
 

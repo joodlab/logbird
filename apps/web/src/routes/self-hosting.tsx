@@ -336,7 +336,7 @@ function SelfHostingPage() {
         <dl className="mt-10 grid gap-x-10 gap-y-2 md:grid-cols-2">
           {[
             ['High availability', 'The Compose setup is a single VM. It has no failover.'],
-            ['Published capacity numbers', "We haven't published load-test results yet. Size from your own measurements."],
+            ['Published capacity numbers', "There's no published sizing guarantee yet. Size from your own measurements."],
             ['SSO', 'Sign-in is by emailed code only. SSO is on the roadmap.'],
           ].map(([term, detail]) => (
             <div className="flex flex-col gap-1 border-b py-4" key={term}>

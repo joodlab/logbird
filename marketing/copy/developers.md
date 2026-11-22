@@ -46,8 +46,8 @@ path: /developers
     apiKey: process.env.LOGBIRD_INGEST_KEY, // lb_ingest_...
     enabled: Boolean(process.env.LOGBIRD_INGEST_KEY), // off locally when no key is set
     defaults: { environment: 'production' },
-    onError: (error) => console.error(error.message), // permanent rejections and background failures
-    onDrop: (event) => console.warn('audit event dropped', event.action), // each rejected or discarded event
+    onError: (error) => console.error(error.message), // rejections, failed batches and background errors
+    onDrop: (event) => console.warn('audit event dropped', event.action), // events the server rejects or a full queue discards
   });
 
   client.track({
@@ -125,8 +125,9 @@ path: /developers
   - **Scheduled jobs nobody triggered** use `actor.type: "system"`.
   - **When support acts for a customer,** the customer stays the actor and the staff member goes in `impersonator`.
   - **Never send secrets in `changes`.** Send `"[redacted]"` to record that a secret changed.
-  - **Everything else is kept.** Custom top-level keys and anything under `metadata` become searchable attributes,
-    for example `metadata.channel:whatsapp`.
+  - **Everything else is kept.** Custom top-level keys and anything under `metadata` stay in the event's JSON and are
+    indexed as searchable attributes, for example `metadata.channel:whatsapp`: up to 256 per event, 6 levels deep, and
+    the first 2 KiB of each value.
 - **worked example (condensed):** "Lina cancels booking #1042. The API records the cancellation and queues a refund.
   The refund worker fails once, then succeeds on attempt 2."
 
@@ -252,7 +253,8 @@ path: /developers
 - **bullets:**
   - **Batched.** Events go in batches of up to 100, or every second, whichever comes first.
   - **Retried.** Rate limits (`429`), server errors and network failures are retried with exponential backoff and
-    jitter, up to 5 times. A numeric `Retry-After` is honoured.
+    jitter. By default, five retries that make no progress end the attempt; a `503` that settles part of the batch
+    counts as progress. A numeric `Retry-After` is honoured, capped at 60 seconds and the 5-minute send deadline.
   - **Acknowledged after storage.** The server answers `202` only once ClickHouse has the rows.
   - **At least once.** A retry after a lost response can store an event twice. Counts may include duplicates.
   - **Bounded under outage.** The queue holds up to 10,000 events by default. When it's full, `dropPolicy: 'oldest'`

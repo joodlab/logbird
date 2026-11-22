@@ -37,7 +37,7 @@ export const siteMap: SitePage[] = [
     path: '/product',
     title: 'Product',
     description:
-      'Search every event, follow actors, tenants, workers and records, open operation trees, and keep data for exactly as long as you choose.',
+      'Search every event, follow actors, tenants, workers and records, open operation trees, and delete events when your retention window ends.',
     section: 'product',
     priority: 0.9,
     changefreq: 'weekly',

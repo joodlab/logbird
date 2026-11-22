@@ -167,7 +167,7 @@ path: /self-hosting
 - **heading:** What self-hosting doesn't include today.
 - **bullets:**
   - **High availability.** The Compose setup is a single VM. It has no failover.
-  - **Published capacity numbers.** We haven't published load-test results yet. Size from your own measurements.
+  - **Published capacity numbers.** There's no published sizing guarantee yet. Size from your own measurements.
   - **SSO.** Sign-in is by emailed code only. SSO is on the roadmap.
   <!-- source: docs/self-hosting.md; docs/deployment.md ("This single VM is a first test, not HA"); docs/roadmap.md P2-5 -->
 - **visual:** none

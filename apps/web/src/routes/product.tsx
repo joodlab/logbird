@@ -97,8 +97,9 @@ function ProductPage() {
         title="Every event, in one table."
         visual={<ClipFrame caption="Type a query, open an event, follow its operation." id="investigate" label="Explorer" />}
       >
-        Pick a time range, type a query, and narrow it down with facets. Drag across the chart to zoom. Click a row to open the full event. Everything
-        lives in the URL, so a link shows a teammate exactly what you see.
+        Pick a time range, type a query, and narrow it down with facets. Drag across the chart to zoom. Click a row to open the full event. The query,
+        time range and columns live in the URL, so a link opens the same search for a teammate. A relative range such as the last hour resolves when
+        they open it; share an absolute range or an export for a fixed result.
       </FeatureRow>
 
       <FeatureRow
@@ -216,7 +217,7 @@ function ProductPage() {
 
       <FeatureRow
         bullets={[
-          'Before and after values for every changed field.',
+          'Before and after values for each changed field, up to 256 changes per event.',
           'The causation breadcrumb, with a link to the whole operation.',
           'Context ids (request, trace, IP), every custom attribute, and the raw JSON exactly as received.',
           'Copy a link, or copy the event as a curl command.',
@@ -272,7 +273,7 @@ function ProductPage() {
         bullets={[
           'Onboarding picks up where you left off.',
           '"Send a test event" and "Load sample data" show the console before you integrate. Sample data is 2000 fictional events over seven days; it never counts as setup, and you can remove it.',
-          'A conformance score on every event, and a Fields page that shows every field you send and how often.',
+          'A conformance score on every event, and a Fields page that lists the indexed fields your events carry and how often each appears.',
         ]}
         eyebrow="Setup that checks itself"
         id="setup"
@@ -286,8 +287,9 @@ function ProductPage() {
           />
         }
       >
-        Send your first event and the setup page notices on its own. It then checks each part of your integration against your real events: actors,
-        tenants, executors, targets, operation ids, retention and team invitations. For each gap it links to the events that are missing that field.
+        Send your first event and the setup page notices on its own. It then checks your integration against your real events: for actors, tenants,
+        executors, targets and operation ids it shows the coverage and links to the events missing each field. Reviewing retention and inviting your
+        team are separate checklist items.
       </FeatureRow>
 
       <FeatureRow
@@ -295,7 +297,7 @@ function ProductPage() {
         id="retention"
         limit="Retention deletes are permanent. There's no archive and no undo. The preview count is approximate, because storage is at least once."
         reverse
-        title="Keep events exactly as long as you decide."
+        title="Keep events as long as you decide, then delete them."
         visual={
           <ScreenshotFrame
             caption="Lowering retention: the preview shows what will be deleted, and you confirm by typing the project's slug."

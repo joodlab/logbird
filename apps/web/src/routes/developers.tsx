@@ -23,8 +23,8 @@ const client = new Logbird({
   apiKey: process.env.LOGBIRD_INGEST_KEY, // lb_ingest_...
   enabled: Boolean(process.env.LOGBIRD_INGEST_KEY), // off locally when no key is set
   defaults: { environment: 'production' },
-  onError: (error) => console.error(error.message), // permanent rejections and background failures
-  onDrop: (event) => console.warn('audit event dropped', event.action), // each rejected or discarded event
+  onError: (error) => console.error(error.message), // rejections, failed batches and background errors
+  onDrop: (event) => console.warn('audit event dropped', event.action), // events the server rejects or a full queue discards
 });
 
 client.track({
@@ -351,7 +351,8 @@ function DevelopersPage() {
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Everything else is kept.</strong> Custom top-level keys and anything under{' '}
-                  <code>metadata</code> become searchable attributes, for example <code>metadata.channel:whatsapp</code>.
+                  <code>metadata</code> stay in the event's JSON and are indexed as searchable attributes, for example{' '}
+                  <code>metadata.channel:whatsapp</code>: up to 256 per event, 6 levels deep, and the first 2 KiB of each value.
                 </>,
               ]}
             />
@@ -447,7 +448,9 @@ function DevelopersPage() {
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Retried.</strong> Rate limits (<code>429</code>), server errors and network failures
-                  are retried with exponential backoff and jitter, up to 5 times. A numeric <code>Retry-After</code> is honoured.
+                  are retried with exponential backoff and jitter. By default, five retries that make no progress end the attempt; a <code>503</code>{' '}
+                  that settles part of the batch counts as progress. A numeric <code>Retry-After</code> is honoured, capped at 60 seconds and the
+                  5-minute send deadline.
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Acknowledged after storage.</strong> The server answers <code>202</code> only once
