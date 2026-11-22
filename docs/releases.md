@@ -180,7 +180,12 @@ image publishing and release creation. Fix the cause and rerun; do not bypass it
 Release concurrency serializes publications. If an index publication fails, other
 roles may receive their version tags before the GitHub Release is available.
 Inspect the run and digests, fix the cause, and rerun against the same accepted
-source before announcing availability. An existing GitHub Release blocks a full
+source before announcing availability. The publish job is safe to re-run with
+"Re-run failed jobs": it rebuilds the X.Y.Z index from the same platform digests,
+verifies it, and then moves the aliases. The registry accepts one tag at a time, so
+a job that fails partway can leave `X.Y` on the new release while `latest` is still
+on the previous one. Re-run the failed job to finish, then confirm that X.Y.Z, X.Y
+and latest resolve to the same digest with `docker buildx imagetools inspect`. An existing GitHub Release blocks a full
 rerun in preflight; retrying only release
 creation fails rather than replacing its reviewed notes. No Coolify deployment
 runs automatically.

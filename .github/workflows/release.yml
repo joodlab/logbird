@@ -120,6 +120,7 @@ jobs:
           name: digest-${{ matrix.role }}-${{ matrix.arch }}
           path: ${{ matrix.arch }}.txt
           if-no-files-found: error
+          overwrite: true
           retention-days: 7
 
   images:
@@ -188,10 +189,16 @@ jobs:
             exit 1
           fi
 
+          # The tag list can name an alias twice (the semver rule and the explicit latest rule both
+          # produce "latest"), so each alias is passed once.
           alias_args=()
+          declare -A seen=()
           version_tagged=false
           while IFS= read -r tag; do
-            [[ -z "$tag" ]] && continue
+            if [[ -z "$tag" || -n "${seen[$tag]:-}" ]]; then
+              continue
+            fi
+            seen[$tag]=1
             if [[ "$tag" == "$IMAGE:$VERSION" ]]; then
               version_tagged=true
             else
@@ -211,6 +218,7 @@ jobs:
           name: image-${{ matrix.role }}
           path: image-${{ matrix.role }}.txt
           if-no-files-found: error
+          overwrite: true
           retention-days: 7
 
   release:
