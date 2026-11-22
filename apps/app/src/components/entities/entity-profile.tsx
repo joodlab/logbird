@@ -18,6 +18,7 @@ import { Explorer, type ExplorerState } from '@/components/explorer/explorer';
 import { RankList } from '@/components/rank-list';
 import { Timestamp } from '@/components/timestamp';
 import { SaveEntityViewButton } from '@/components/views/save-entity-view-button';
+import { current } from '@/lib/api/current';
 import { ApiRequestError } from '@/lib/api/errors';
 import { entityProfileQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
@@ -25,6 +26,7 @@ import { ENTITY_SECTIONS, type EntitySection, entityQuery, splitTargetId, typeIc
 import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
+import { outcomeBandQuery } from '@/lib/overview-queries';
 import { andQuery, formatTerm } from '@/lib/query-language';
 import { ALL_RANGE, historyRange, rangeInSentence, rangeLabel } from '@/lib/range';
 import { useConsoleZone } from '@/lib/time-zone';
@@ -49,7 +51,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   const navigate = useNavigate();
   // Never another entity's or range's numbers under this URL: a placeholder (the previous query's result) renders as
   // loading, so the name, stats, charts and related lists always belong to this entity and this range.
-  const p = profile.isPlaceholderData ? undefined : profile.data;
+  const p = current(profile);
   const displayId = kind === 'target' ? splitTargetId(entityId).id : entityId;
   useSetCrumb(p?.entity.name || displayId);
   useDocumentTitle(`${p?.entity.name || displayId} · ${meta.singular} · Logbird`);
@@ -274,11 +276,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
           <Panel description={`${rangeLabel(timeline.range)} · click a band to filter the history`} title="Activity">
             <div className="p-3 pb-2">
               {p ? (
-                <OutcomeAreaChart
-                  data={p.series}
-                  height={236}
-                  onSelectOutcome={(o) => onTimelineChange({ q: formatTerm('outcome', o), ev: undefined })}
-                />
+                <OutcomeAreaChart data={p.series} height={236} onSelectOutcome={(o) => onTimelineChange({ q: outcomeBandQuery(o), ev: undefined })} />
               ) : (
                 <Skeleton className="h-[244px] w-full" />
               )}
