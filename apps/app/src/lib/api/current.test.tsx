@@ -87,11 +87,9 @@ function sourceFiles(dir: string): string[] {
 }
 
 /**
- * Reads of a placeholder-enabled query's `.data` that do not go through `current()`: each `const x = useQuery(...)` (or
- * `useInfiniteQuery`) built from such a query, directly or through an options variable, may read `x.data` only on a
- * line that branches on `x.isPlaceholderData` (`x.isPlaceholderData ? … : x.data`, `!x.isPlaceholderData && x.data`, or an
- * `if` on the line before), or
- * right after an explicit `// placeholder: shown dimmed` marker, which is how a component shows an old answer on purpose.
+ * Direct `.data` reads of a placeholder-enabled query's result. Each `const x = useQuery(...)` (or `useInfiniteQuery`)
+ * built from such a query, directly or through an options variable, may be read only through `current(x)` or
+ * `shownDimmed(x)`: any `x.data` is a finding. No heuristics about branches: the helpers are the only way in.
  */
 export function unguardedReads(src: string, queries: readonly string[]): string[] {
   const names = queries.join('|');
@@ -100,27 +98,14 @@ export function unguardedReads(src: string, queries: readonly string[]): string[
   const results = [
     ...src.matchAll(new RegExp(String.raw`(?:const|let)\s+(\w+)\s*=\s*use(?:Infinite)?Query\(\s*(?:\{\s*\.\.\.)?(?:${sources})\b`, 'g')),
   ].map((m) => m[1]);
-  const lines = src.split('\n');
   const problems: string[] = [];
-  for (const r of results) {
-    const reads = new RegExp(String.raw`\b${r}\.data\b`);
-    // Same line: a ternary or a short circuit on the flag that the read sits in (`x.isPlaceholderData ? … : x.data`,
-    // `!x.isPlaceholderData && x.data`). Line before: an `if` whose condition tests the flag. Or a whole-line marker
-    // comment. Merely mentioning the flag (a log, a string) is not a branch.
-    const inline = new RegExp(String.raw`(\b${r}\.isPlaceholderData\s*\?|!\s*${r}\.isPlaceholderData\b[^;]*&&[^;]*\b${r}\.data\b)`);
-    const opensIf = new RegExp(String.raw`^\s*(?:\}\s*else\s+)?if\s*\(.*\b${r}\.isPlaceholderData\b.*\)\s*\{?\s*$`);
-    const marker = /^\s*\/\/ placeholder: shown dimmed\b/;
-    lines.forEach((line, i) => {
-      const prev = lines[i - 1] ?? '';
-      // An `if` that tests the flag also guards the reads in its own condition (`if (x.data && !x.isPlaceholderData) {`).
-      const guarded = inline.test(line) || opensIf.test(line) || opensIf.test(prev) || marker.test(prev);
-      if (reads.test(line) && !guarded) problems.push(`${r}.data on line ${i + 1}: ${line.trim()}`);
-    });
-  }
+  src.split('\n').forEach((line, i) => {
+    for (const r of results) if (new RegExp(String.raw`\b${r}\.data\b`).test(line)) problems.push(`${r}.data on line ${i + 1}: ${line.trim()}`);
+  });
   return problems;
 }
 
-describe('the guard catches unguarded reads', () => {
+describe('the guard catches direct reads', () => {
   it('flags a second, unguarded query in a file that already uses current()', () => {
     const src = [
       "import { current } from '@/lib/api/current';",
@@ -137,32 +122,28 @@ describe('the guard catches unguarded reads', () => {
     );
     expect(unguardedReads(src, ['fieldsQuery'])).toHaveLength(1);
   });
-  it('does not accept a mere mention of the flag before an unconditional read', () => {
-    const src = ['const fields = useQuery(fieldsQuery(p, r));', 'console.log(fields.isPlaceholderData);', 'render(fields.data);'].join('\n');
-    expect(unguardedReads(src, ['fieldsQuery'])).toHaveLength(1);
+  it('flags a read whatever surrounds it: a mention, a branch either way, a comment', () => {
+    for (const before of [
+      'console.log(!fields.isPlaceholderData);',
+      'if (fields.isPlaceholderData) {',
+      'if (!fields.isPlaceholderData) {',
+      '// placeholder: shown dimmed',
+    ]) {
+      const src = ['const fields = useQuery(fieldsQuery(p, r));', before, 'render(fields.data);'].join('\n');
+      expect(unguardedReads(src, ['fieldsQuery']), before).toHaveLength(1);
+    }
   });
-  it('does not accept a negated mention or a marker inside a string', () => {
-    const negated = ['const fields = useQuery(fieldsQuery(p, r));', 'console.log(!fields.isPlaceholderData);', 'render(fields.data);'].join('\n');
-    expect(unguardedReads(negated, ['fieldsQuery'])).toHaveLength(1);
-    const quoted = ['const fields = useQuery(fieldsQuery(p, r));', 'console.log("// placeholder: shown dimmed");', 'render(fields.data);'].join('\n');
-    expect(unguardedReads(quoted, ['fieldsQuery'])).toHaveLength(1);
-  });
-  it('accepts an explicit placeholder branch or the dimmed marker', () => {
-    const marked = [
-      'const list = useInfiniteQuery(entityListQuery(p, k));',
-      '// placeholder: shown dimmed (aria-busy)',
-      'const rows = list.data?.pages;',
-    ].join('\n');
-    expect(unguardedReads(marked, ['entityListQuery'])).toEqual([]);
+  it('accepts reads through the helpers', () => {
     const src = [
-      'const facet = useQuery(facetQuery(p, f, r, q, 20));',
-      'const values = facet.isPlaceholderData ? [] : (facet.data?.values ?? []);',
+      'const list = useInfiniteQuery(entityListQuery(p, k));',
+      'const rows = shownDimmed(list)?.pages;',
+      'const total = current(list)?.pages.length;',
     ].join('\n');
-    expect(unguardedReads(src, ['facetQuery'])).toEqual([]);
+    expect(unguardedReads(src, ['entityListQuery'])).toEqual([]);
   });
 });
 
-describe('every consumer of a placeholder-enabled query reads it through current() or an explicit placeholder branch', () => {
+describe('every consumer of a placeholder-enabled query reads it through current() or shownDimmed()', () => {
   const queries = placeholderQueries();
   it('finds the placeholder-enabled queries', () => {
     expect(queries).toEqual(

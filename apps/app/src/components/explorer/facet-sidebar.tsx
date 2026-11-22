@@ -7,6 +7,7 @@ import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRightIcon, CircleAlertIcon, Loader2Icon, MinusIcon, VenetianMaskIcon } from 'lucide-react';
 import { useState } from 'react';
+import { current } from '@/lib/api/current';
 import { facetQuery } from '@/lib/api/queries';
 import { formatCompact } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
@@ -205,9 +206,10 @@ function FacetGroup({
   const facet = useQuery({ ...facetQuery(projectId, spec.field, range, scopedQ, 20, base.lang), enabled: open });
   // Values from a previous search (a placeholder while this one loads) are never shown as this search's.
   const loadingValues = (facet.isPending || facet.isPlaceholderData) && !facet.isError;
-  const allValues = facet.isPlaceholderData ? [] : (facet.data?.values ?? []);
+  const facetNow = current(facet);
+  const allValues = facetNow?.values ?? [];
   const values = spec.presence ? allValues.filter((v) => v.value !== '') : allValues;
-  const presentCount = spec.presence ? values.reduce((n, v) => n + v.count, 0) + (facet.isPlaceholderData ? 0 : (facet.data?.otherCount ?? 0)) : 0;
+  const presentCount = spec.presence ? values.reduce((n, v) => n + v.count, 0) + (facetNow?.otherCount ?? 0) : 0;
   const max = Math.max(...values.map((v) => v.count), presentCount, 1);
   // Counts still belong to the previous query (keepPreviousData) until this group's own response arrives.
   const updating = facet.isPlaceholderData || (facet.isFetching && !facet.isPending);
