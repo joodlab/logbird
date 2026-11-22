@@ -54,11 +54,10 @@ integer epoch milliseconds. The rules are in
 
 **Record histories.** Record pages, the Record facet and the read helper in the TypeScript
 SDK use `record:<type>:<id>`. A saved view that filters `target:` and `target.type:`
-separately still opens exactly as saved. When those terms sit at the top level of the
-query, the console adds a note that the view can include other records, and when that
-pair can be rewritten as a single `record:` term the note offers an "Open exact version"
-button. Other shapes, such as the pair inside parentheses, open without a note; the rule
-is in the [query language](docs/query-language.md).
+separately still opens exactly as saved. For some query shapes the console adds a note
+that the view can include other records, and, when the pair can be rewritten as a single
+`record:` term, an "Open exact version" button. Which shapes get the note is specified in
+the [query language](docs/query-language.md); a view without a note is not thereby exact.
 
 **Search totals.** A slow count no longer fails a search. The count has a one-second
 budget; when it runs out, the rows are returned with `totalExact: false` and `total` as a
