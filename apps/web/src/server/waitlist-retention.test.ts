@@ -317,42 +317,62 @@ it('resolves every alias of a store to one path, before and after its directory 
  * and meanwhile keeps rewriting today's file for real through `rewriteVia`: adds a record and forgets it again, so
  * every pass renames a new file into place. Returns how many real rewrites ran while the writers were writing.
  */
+/** Rewrites (a forget that removed its victim) that must complete while every writer is still appending. */
+const REWRITES_WHILE_WRITING = 3;
+
+/**
+ * Writers append until told to stop, and they're told only after REWRITES_WHILE_WRITING rewrites have completed, so
+ * every rewrite overlaps live appends however fast the machine is. (A fixed 30 appends per writer could all land before
+ * the first rewrite finished, leaving nothing tested.) Returns each writer's own count of acknowledged appends.
+ */
 async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
   const go = join(dir, 'go');
+  const stop = join(dir, 'stop');
   const writers = paths.map((path, writer) =>
     child(
       `const { existsSync } = await import('node:fs');
        console.log('ready');
        while (!existsSync(${JSON.stringify(go)})) await new Promise((done) => setTimeout(done, 5));
-       for (let i = 0; i < 30; i++) await waitlist.appendWaitlistRecord(${JSON.stringify(path)}, { email: 'new-${writer}-' + i + '@example.test', interest: 'cloud', receivedAt: new Date().toISOString() });`,
+       let i = 0;
+       for (; i < 5000 && (i < 1 || !existsSync(${JSON.stringify(stop)})); i++) await waitlist.appendWaitlistRecord(${JSON.stringify(path)}, { email: 'new-${writer}-' + i + '@example.test', interest: 'cloud', receivedAt: new Date().toISOString() });
+       console.log('written ' + i);`,
     ),
   );
+  const output = writers.map((writer) => {
+    let text = '';
+    writer.stdout.on('data', (chunk) => {
+      text += String(chunk);
+    });
+    return () => text;
+  });
   await Promise.all(writers.map((writer) => new Promise<void>((done) => writer.stdout.once('data', () => done()))));
   const finished = Promise.all(writers.map((writer) => new Promise((done) => writer.on('exit', done))));
-  let running = true;
-  void finished.then(() => {
-    running = false;
-  });
   await writeFile(go, '');
   let rewrites = 0;
-  for (let pass = 0; running; pass += 1) {
+  for (let pass = 0; rewrites < REWRITES_WHILE_WRITING; pass += 1) {
+    expect(pass, 'a forget never removed the record it had just appended').toBeLessThan(500);
     await appendWaitlistRecord(rewriteVia, record(`victim-${pass}@example.test`, new Date().toISOString()));
     const { removed } = await forgetWaitlistEmail(rewriteVia, `victim-${pass}@example.test`);
-    if (running && removed === 1) {
+    if (removed === 1) {
       rewrites += 1;
     }
-    await new Promise((done) => setTimeout(done, 2));
   }
+  await writeFile(stop, '');
   expect(await finished).toEqual(paths.map(() => 0));
-  return rewrites;
+  const written = output.map((text) => Number(/written (\d+)/.exec(text())?.[1]));
+  // A writer that hit the 5000 cap was never stopped by us, so the overlap wouldn't be proven.
+  expect(written.every((count) => count >= 1 && count < 5000)).toBe(true);
+  return { rewrites, written };
 }
 
+const total = (counts: number[]) => counts.reduce((sum, count) => sum + count, 0);
+
 it('never loses a submission other processes write while this one rewrites the same day file', async () => {
-  const rewrites = await rewriteWhileOthersAppend([file, file, file], file);
-  expect(rewrites).toBeGreaterThan(0);
+  const { rewrites, written } = await rewriteWhileOthersAppend([file, file, file], file);
+  expect(rewrites).toBe(REWRITES_WHILE_WRITING);
   const fresh = (await emails()).filter((email: string) => email.startsWith('new-'));
-  expect(fresh).toHaveLength(90);
-  expect(new Set(fresh).size).toBe(90);
+  expect(fresh).toHaveLength(total(written));
+  expect(new Set(fresh).size).toBe(total(written));
 }, 60_000);
 
 it('loses nothing when processes create the store through different aliases while it is rewritten', async () => {
@@ -362,9 +382,11 @@ it('loses nothing when processes create the store through different aliases whil
   await symlink(real, alias, 'junction');
   // The directory doesn't exist yet: the first writer creates it while the others are already writing.
   const paths = [join(alias, 'new', 'waitlist.jsonl'), join(real, 'new', 'waitlist.jsonl')];
-  const rewrites = await rewriteWhileOthersAppend(paths, paths[0] as string);
-  expect(rewrites).toBeGreaterThan(0);
-  expect((await emails(paths[1] as string)).filter((email: string) => email.startsWith('new-'))).toHaveLength(60);
+  const { rewrites, written } = await rewriteWhileOthersAppend(paths, paths[0] as string);
+  expect(rewrites).toBe(REWRITES_WHILE_WRITING);
+  const fresh = (await emails(paths[1] as string)).filter((email: string) => email.startsWith('new-'));
+  expect(fresh).toHaveLength(total(written));
+  expect(new Set(fresh).size).toBe(total(written));
 }, 60_000);
 
 it('the cleanup never touches the file new submissions go into, even for a writer that takes no lock', async () => {
