@@ -46,8 +46,15 @@ payload: that would cost a JSON parse per candidate event (measured at 5-10x slo
 what the console uses for tenant pages, filters, facets and exports, so a scope shows exactly what the console shows
 for that id, never more.
 
-The one case where two different sent ids share a stored id is surrounding whitespace, which ingest has trimmed so
-far: `" biz_5"` is stored, and scoped, as `biz_5`. Capped or Unicode-repaired ids can't match, because scope ids must
-already be in stored form. This is a maintainer decision (#180); ingest is being changed to store ids exactly as
-sent, after which it applies only to events stored before that change. A read-only operator query that counts
-stored ids differing from the sent ones ships with that change.
+Two different sent ids share a stored id in two cases:
+
+- Surrounding whitespace, which ingest has trimmed so far: `" biz_5"` is stored, and scoped, as `biz_5`. Ingest is
+  being changed to store ids exactly as sent; after that, this applies only to events stored before the change. A
+  read-only operator query that counts stored ids differing from the sent ones ships with that change.
+- Numbers. Since 0.2.0 an id sent as a JSON number is stored as the plain decimal text of its exact value (42, 42.0
+  and 4.2e1 are all stored as `"42"`), so the number 42 and the string `"42"` are one tenant and one scope. The
+  string `"42.0"` is a different id. Events stored before 0.2.0 with a numeric id were not indexed as an id, so no
+  scope sees them.
+
+Capped or Unicode-repaired ids can't match, because scope ids must already be in stored form. This is a maintainer
+decision (#180).

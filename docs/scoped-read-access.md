@@ -99,7 +99,7 @@ POST /api/projects/:projectId/keys
 - `embedOrigins` (read kinds only): browser origins allowed to use this key's viewer tokens, for example
   `https://cms.example.com`. Exact origins, lowercase, no path.
 - `expiresAt` (optional, in the future): an expired key is rejected like a revoked one, and so are its tokens.
-- **Check the response before you hand out a secret.** A server older than this release (during a rolling upgrade, or
+- **Check the response before you hand out a secret.** A server older than 0.2.0 (during a rolling upgrade, or
   after a rollback) ignores `expiresAt` on `read` and `ingest` keys and returns a permanent key, and ignores `expiresAt` on
   a roll. Compare the returned key's `kind`, `scope` and `expiresAt` with what you asked for; if they differ, revoke it.
   Older servers refuse `kind: "scoped-read"` outright (422).
@@ -107,8 +107,8 @@ POST /api/projects/:projectId/keys
   origins and keeps the old key's absolute expiry; pass `{ "expiresAt": "…" }` to give the replacement a different
   one. Rolling an expired key requires a new `expiresAt` (409 `key_expired` otherwise). In the console, **Roll** asks
   whether the replacement keeps the current expiry or gets a new one, and offers only a new one for an expired key.
-  A database trigger refuses any replacement that drops the scope or the expiry: this release answers 409
-  `key_restricted`; an older release (after a rollback) fails that roll with a server error and creates nothing.
+  A database trigger refuses any replacement that drops the scope or the expiry: 0.2.0 and later answer
+  409 `key_restricted`; an older release (after a rollback) fails that roll with a server error and creates nothing.
 - `api_key.created` and `api_key.revoked` in workspace activity record the scope, origins and expiry.
 
 ## Viewer tokens
