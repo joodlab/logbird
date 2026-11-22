@@ -83,6 +83,21 @@ const lastParagraph = (body) =>
 // Object.prototype member and crash rendering. Such scopes move into the description instead.
 const prototypeKey = (key) => key in Object.prototype;
 
+// Commits whose changes were removed again inside the same release range: the tree is identical before the first and
+// after the last of them, so together they carry nothing for users and the notes leave them out. Full hashes only,
+// and only when every one of them is in the range: a range that ends partway through still contains their change.
+export const omittedCommits = new Set([
+  'cb5411bc1745011c5fc82af801e4fe56f2dc8054',
+  '6537d1bdc438f1a7a0d66e66f3c881d4d688f9e1',
+  '4105495d1d3216c4e536e72f4b6635b028a9387b',
+  '480b98f607f34adc697733560000f7cfef2c47b4',
+]);
+export function withoutOmitted(commits, omitted = omittedCommits) {
+  const present = new Set(commits.map((commit) => commit.shortHash));
+  if (![...omitted].every((sha) => present.has(sha))) return commits;
+  return commits.filter((commit) => !omitted.has(commit.shortHash));
+}
+
 /**
  * Parses `git log` records with our own subject and trailer rules, and hands changelogen only `type!: description`
  * (it still extracts PR and commit references). Its greedy scope regex, Object-backed scope lookups and unanchored
@@ -346,7 +361,7 @@ async function main() {
   const config = await resolveConfig({ dry: true, from: from || to, to: version, repo });
   config.from = from ?? '';
   const readLog = (range) => applyMailmap(parseLog(run('git', ['log', '--no-merges', `--format=${LOG_FORMAT}`, range]), config));
-  const commits = readLog(from ? `${from}..${to}` : to);
+  const commits = withoutOmitted(readLog(from ? `${from}..${to}` : to));
   const previous = from ? readLog(from) : [];
   const { logins, accountTypes } = resolveLogins([...commits, ...previous], repo);
   const body = compose({
