@@ -149,7 +149,9 @@ function ProjectExplorer({
   // Nothing valid to save or export while the query is rejected (the export would fail the same way).
   const saveBlocked = problem ? 'Fix the query first — a view must run without errors.' : null;
   const exportBlocked = problem ? 'Fix the query first — the export runs the same query.' : null;
-  const pages = problem ? lastGood.current.pages : events.data?.pages;
+  // Rows from a previous search (a placeholder while the new range or query loads) are never shown or selectable as
+  // this one's; a rejected query keeps the last good rows, labelled as such.
+  const pages = problem ? lastGood.current.pages : events.isPlaceholderData ? undefined : events.data?.pages;
   // A rejected query shows the last good bars, labelled as such; otherwise bars from a previous search (a placeholder
   // while the new range or query loads) are never drawn as if they were this one's.
   const histogramData = problem ? lastGood.current.histogram : histogram.isPlaceholderData ? undefined : histogram.data;
@@ -169,7 +171,7 @@ function ProjectExplorer({
   }, [effectiveQ, lang, range, live]);
 
   // The tail follows *arrival* (`receivedAt`), so late or back-dated events still stream in.
-  const firstPage = problem ? undefined : events.data?.pages[0]?.data;
+  const firstPage = problem || events.isPlaceholderData ? undefined : events.data?.pages[0]?.data;
   useEffect(() => {
     if (!sinceRef.current && firstPage) sinceRef.current = newestArrival(firstPage) ?? new Date().toISOString();
   }, [firstPage]);
@@ -548,7 +550,7 @@ function ProjectExplorer({
               freshIds={fresh}
               hasMore={!problem && events.hasNextPage}
               loadMore={() => events.fetchNextPage()}
-              loading={events.isPending && !problem}
+              loading={(events.isPending || events.isPlaceholderData) && !problem}
               onCursorChange={setCursorId}
               resultKey={resultKey}
               onSelect={(e) => {

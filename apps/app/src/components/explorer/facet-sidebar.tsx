@@ -203,9 +203,11 @@ function FacetGroup({
   // The locked scope is query language; SQL mode is never offered together with one.
   const scopedQ = scope && base.lang !== 'sql' ? andQuery(scope, own) : own;
   const facet = useQuery({ ...facetQuery(projectId, spec.field, range, scopedQ, 20, base.lang), enabled: open });
-  const allValues = facet.data?.values ?? [];
+  // Values from a previous search (a placeholder while this one loads) are never shown as this search's.
+  const loadingValues = (facet.isPending || facet.isPlaceholderData) && !facet.isError;
+  const allValues = facet.isPlaceholderData ? [] : (facet.data?.values ?? []);
   const values = spec.presence ? allValues.filter((v) => v.value !== '') : allValues;
-  const presentCount = spec.presence ? values.reduce((n, v) => n + v.count, 0) + (facet.data?.otherCount ?? 0) : 0;
+  const presentCount = spec.presence ? values.reduce((n, v) => n + v.count, 0) + (facet.isPlaceholderData ? 0 : (facet.data?.otherCount ?? 0)) : 0;
   const max = Math.max(...values.map((v) => v.count), presentCount, 1);
   // Counts still belong to the previous query (keepPreviousData) until this group's own response arrives.
   const updating = facet.isPlaceholderData || (facet.isFetching && !facet.isPending);
@@ -327,7 +329,7 @@ function FacetGroup({
           className={cn('flex flex-col gap-px pb-2 ps-2 transition-opacity', dimmed && values.length > 0 && 'opacity-50')}
           data-stale={dimmed || undefined}
         >
-          {facet.isPending && !facet.isError ? (
+          {loadingValues ? (
             placeholderKeys(3).map((k) => <Skeleton className="h-(--control-size-compact) w-full" key={k} />)
           ) : failed && values.length === 0 ? (
             <button
