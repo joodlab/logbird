@@ -4,7 +4,7 @@ import { CopyButton, CopyValue } from '@logbird/ui/components/copy-button';
 import { EntityAvatar, EntityChip } from '@logbird/ui/components/entity-chip';
 import { JsonViewer } from '@logbird/ui/components/json-viewer';
 import { StableText } from '@logbird/ui/components/stable-text';
-import { ErrorState } from '@logbird/ui/components/states';
+import { EmptyState, ErrorState } from '@logbird/ui/components/states';
 import { Alert, AlertDescription } from '@logbird/ui/components/ui/alert';
 import { Button } from '@logbird/ui/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@logbird/ui/components/ui/collapsible';
@@ -26,17 +26,18 @@ import {
   FilterIcon,
   GitBranchIcon,
   LinkIcon,
+  SearchXIcon,
   TerminalIcon,
   UserIcon,
   VenetianMaskIcon,
 } from 'lucide-react';
-import type { ComponentProps, ReactNode } from 'react';
+import { type ComponentProps, type ReactNode, useState } from 'react';
 import { ActionName } from '@/components/action-name';
 import { EntityLink, EntityProfileLink } from '@/components/entity-link';
 import { SupportAgentLink } from '@/components/impersonation';
 import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
-import { eventQuery } from '@/lib/api/queries';
+import { eventQuery, operationQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
 import { actorAttributeHint, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
@@ -57,6 +58,8 @@ interface EventSheetProps {
   fetchDetail?: boolean;
   /** Set when a deep-linked event could not be loaded. */
   missingError?: unknown;
+  /** The id that was asked for, named in the not-found message. */
+  missingId?: string;
   /**
    * Where focus goes when the sheet closes. The sheet opens from state (URL `?event=`), so it has no trigger to return
    * to by itself: pass the row that opened it.
@@ -74,6 +77,7 @@ export function EventSheet({
   onFilter,
   fetchDetail = true,
   missingError,
+  missingId,
   finalFocus,
 }: EventSheetProps) {
   const detail = useQuery({ ...eventQuery(projectId ?? '', event?.id ?? ''), enabled: open && fetchDetail && Boolean(projectId && event) });
@@ -95,12 +99,27 @@ export function EventSheet({
           />
         ) : missingError ? (
           <div className="flex flex-1 items-center p-6">
-            <SheetTitle className="sr-only">Event not found</SheetTitle>
-            <ErrorState
-              className="w-full"
-              error={missingError}
-              title={missingError instanceof ApiRequestError && missingError.status === 404 ? 'Event not found' : 'Could not load this event'}
-            />
+            {missingError instanceof ApiRequestError && missingError.status === 404 ? (
+              <>
+                <SheetTitle className="sr-only">Event not found</SheetTitle>
+                <EmptyState
+                  className="w-full"
+                  description={
+                    <>
+                      No event {missingId ? <span className="break-all font-mono text-foreground">{missingId}</span> : 'with this id'} is stored in
+                      this project. It may be past the project's retention window, or the link has a typo.
+                    </>
+                  }
+                  icon={SearchXIcon}
+                  title="Event not found"
+                />
+              </>
+            ) : (
+              <>
+                <SheetTitle className="sr-only">Could not load this event</SheetTitle>
+                <ErrorState className="w-full" error={missingError} title="Could not load this event" />
+              </>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-3 p-6">
@@ -125,6 +144,141 @@ function Section({ title, children, actions, className }: { title: string; child
       </div>
       {children}
     </section>
+  );
+}
+
+/** Events can touch dozens of records; the drawer shows the first few and expands on request. */
+const TARGET_PREVIEW = 5;
+
+function TargetList({ targets, projectId, onFilter }: { targets: AuditEvent['targets']; projectId?: string; onFilter?: (term: string) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? targets : targets.slice(0, TARGET_PREVIEW);
+  const hidden = targets.length - visible.length;
+  return (
+    <ul className="flex flex-col divide-y rounded-lg border">
+      {visible.map((t) => (
+        <li className="group/kv flex items-center gap-2 px-3 py-2" key={`${t.type}:${t.id}`}>
+          <EntityAvatar icon={typeIcon('target', t.type)} id={targetEntityId(t.type, t.id)} name={t.name || t.id} size="md" square />
+          <div className="flex min-w-0 flex-1 flex-col">
+            {projectId ? (
+              <EntityProfileLink
+                className="truncate font-medium text-sm hover:underline"
+                id={targetEntityId(t.type, t.id)}
+                kind="target"
+                projectId={projectId}
+              >
+                {t.name || t.id}
+              </EntityProfileLink>
+            ) : (
+              <span className="truncate font-medium text-sm">{t.name || t.id}</span>
+            )}
+            <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
+              <TypePill>{t.type}</TypePill>
+              <span className="truncate font-mono">{t.id}</span>
+            </span>
+          </div>
+          <FilterButton onFilter={onFilter} term={formatTerm('target', t.id)} />
+          {projectId ? (
+            <Button
+              aria-label={`Follow ${t.name || t.id}`}
+              nativeButton={false}
+              render={<Link params={{ projectId, entityId: targetEntityId(t.type, t.id) }} to="/p/$projectId/records/$entityId" />}
+              size="icon-xs"
+              variant="ghost"
+            >
+              <ArrowRightIcon />
+            </Button>
+          ) : null}
+        </li>
+      ))}
+      {hidden > 0 ? (
+        <li>
+          <Button
+            className="w-full justify-start rounded-none rounded-b-lg px-3 text-muted-foreground"
+            onClick={() => setExpanded(true)}
+            size="sm"
+            variant="ghost"
+          >
+            <ChevronDownIcon />
+            Show {hidden} more
+          </Button>
+        </li>
+      ) : null}
+    </ul>
+  );
+}
+
+/** The drawer lists at most this many direct children; the operation page shows the full tree. */
+const CHILD_PREVIEW = 5;
+/** Above this many events the drawer does not load the whole operation just to list children. */
+const CHILD_LOOKUP_MAX_OPERATION = 1000;
+
+/**
+ * Direct children of an event (events whose `context.parentEventId` is this event), read from its operation so the
+ * operation page opens from the same cache. Children outside the operation, or in a very large one, are reached
+ * through an explorer `parent:` search instead.
+ */
+function ChildEvents({ detail, event: e, projectId, indent }: { detail: EventDetail; event: AuditEvent; projectId: string; indent: number }) {
+  const operationId = e.context.operationId;
+  const lookup = Boolean(operationId) && detail.operationSize <= CHILD_LOOKUP_MAX_OPERATION;
+  const op = useQuery({ ...operationQuery(projectId, operationId ?? ''), enabled: lookup });
+  const children = (op.data ?? [])
+    .filter((c) => c.context.parentEventId === e.id && c.id !== e.id)
+    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) || a.id.localeCompare(b.id));
+  const shown = children.slice(0, CHILD_PREVIEW);
+  // Children recorded under another operation (or none loaded) are still reachable by searching their parent id.
+  const missing = detail.childCount - shown.length;
+  const allLabel = `View all ${detail.childCount}`;
+  return (
+    <>
+      {lookup && op.isPending
+        ? Array.from({ length: Math.min(detail.childCount, CHILD_PREVIEW) }, (_, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton rows.
+            <li className="py-[3px]" key={i} style={{ paddingInlineStart: indent }}>
+              <Skeleton className="h-4 w-3/4" />
+            </li>
+          ))
+        : shown.map((c) => (
+            <li className="flex items-center gap-2 text-[13px]" key={c.id} style={{ paddingInlineStart: indent }}>
+              <OutcomeDot outcome={c.outcome} />
+              <Link
+                className="min-w-0 truncate py-[3px] hover:underline"
+                dir="auto"
+                params={{ projectId }}
+                search={(prev) => ({ ...prev, ev: c.id })}
+                to="/p/$projectId/events"
+              >
+                {eventSentence(c)}
+              </Link>
+              <Timestamp className="shrink-0 font-mono text-[11px] text-muted-foreground" format="ms" iso={c.timestamp} />
+            </li>
+          ))}
+      {missing > 0 && !(lookup && op.isPending) ? (
+        <li className="flex items-center gap-2 pt-1 text-xs" style={{ paddingInlineStart: indent }}>
+          {operationId && children.length === detail.childCount ? (
+            <Link
+              className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
+              params={{ projectId, operationId }}
+              search={{ focus: e.id }}
+              to="/p/$projectId/operations/$operationId"
+            >
+              {allLabel} in the operation
+              <ArrowRightIcon className="size-3" />
+            </Link>
+          ) : (
+            <Link
+              className="inline-flex items-center gap-1 font-medium text-brand hover:underline"
+              params={{ projectId }}
+              search={(prev) => ({ range: prev.range, q: formatTerm('parent', e.id) })}
+              to="/p/$projectId/events"
+            >
+              {allLabel} in the explorer
+              <ArrowRightIcon className="size-3" />
+            </Link>
+          )}
+        </li>
+      ) : null}
+    </>
   );
 }
 
@@ -291,7 +445,10 @@ function EventDetailBody({
   const curl = useCopy();
   const shareUrl =
     typeof window === 'undefined' ? '' : `${window.location.origin}/p/${projectId}/events?q=${encodeURIComponent(`id:${e.id}`)}&ev=${e.id}`;
-  const attributes = Object.entries(e.attributes).sort(([a], [b]) => a.localeCompare(b));
+  // `{}` / `[]` carry nothing to read here (the raw payload below keeps them).
+  const attributes = Object.entries(e.attributes)
+    .filter(([, v]) => v !== '{}' && v !== '[]')
+    .sort(([a], [b]) => a.localeCompare(b));
   const ctx = e.context;
 
   return (
@@ -451,55 +608,19 @@ function EventDetailBody({
 
         {e.targets.length > 0 ? (
           <Section title={`Targets · ${e.targets.length}`}>
-            <ul className="flex flex-col divide-y rounded-lg border">
-              {e.targets.map((t) => (
-                <li className="group/kv flex items-center gap-2 px-3 py-2" key={`${t.type}:${t.id}`}>
-                  <EntityAvatar icon={typeIcon('target', t.type)} id={targetEntityId(t.type, t.id)} name={t.name || t.id} size="md" square />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    {projectId ? (
-                      <EntityProfileLink
-                        className="truncate font-medium text-sm hover:underline"
-                        id={targetEntityId(t.type, t.id)}
-                        kind="target"
-                        projectId={projectId}
-                      >
-                        {t.name || t.id}
-                      </EntityProfileLink>
-                    ) : (
-                      <span className="truncate font-medium text-sm">{t.name || t.id}</span>
-                    )}
-                    <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
-                      <TypePill>{t.type}</TypePill>
-                      <span className="truncate font-mono">{t.id}</span>
-                    </span>
-                  </div>
-                  <FilterButton onFilter={onFilter} term={formatTerm('target', t.id)} />
-                  {projectId ? (
-                    <Button
-                      aria-label={`Follow ${t.name || t.id}`}
-                      nativeButton={false}
-                      render={<Link params={{ projectId, entityId: targetEntityId(t.type, t.id) }} to="/p/$projectId/records/$entityId" />}
-                      size="icon-xs"
-                      variant="ghost"
-                    >
-                      <ArrowRightIcon />
-                    </Button>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
+            <TargetList key={e.id} onFilter={onFilter} projectId={projectId} targets={e.targets} />
           </Section>
         ) : null}
 
         {e.changes.length > 0 ? (
           <Section title={`Changes · ${e.changes.length}`}>
             <div className="overflow-hidden rounded-lg border">
-              <table className="w-full text-[13px]">
+              <table className="w-full table-fixed text-[13px]">
                 <thead className="bg-muted/40 text-[11px] text-muted-foreground">
                   <tr>
                     <th className="w-1/4 px-3 py-1.5 text-start font-medium">Field</th>
-                    <th className="px-3 py-1.5 text-start font-medium">Before</th>
-                    <th className="px-3 py-1.5 text-start font-medium">After</th>
+                    <th className="w-3/8 px-3 py-1.5 text-start font-medium">Before</th>
+                    <th className="w-3/8 px-3 py-1.5 text-start font-medium">After</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -507,19 +628,26 @@ function EventDetailBody({
                     const redacted = c.before === '[redacted]' || c.after === '[redacted]';
                     return (
                       <tr key={c.field}>
-                        <td className="px-3 py-2 align-top font-mono text-[12px]">{c.field}</td>
+                        <td className="px-3 py-2 align-top font-mono text-[12px] [overflow-wrap:anywhere]">{c.field}</td>
                         <td className="px-3 py-2 align-top">
                           <span
                             className={cn(
-                              'break-all font-mono text-[12px]',
+                              'font-mono text-[12px] [overflow-wrap:anywhere]',
                               redacted ? 'text-muted-foreground italic' : 'text-diff-remove line-through decoration-diff-remove/40',
                             )}
+                            dir="auto"
                           >
                             {c.before || <span className="text-muted-foreground no-underline">∅</span>}
                           </span>
                         </td>
                         <td className="px-3 py-2 align-top">
-                          <span className={cn('break-all font-mono text-[12px]', redacted ? 'text-muted-foreground italic' : 'text-diff-add')}>
+                          <span
+                            className={cn(
+                              'font-mono text-[12px] [overflow-wrap:anywhere]',
+                              redacted ? 'text-muted-foreground italic' : 'text-diff-add',
+                            )}
+                            dir="auto"
+                          >
                             {c.after || <span className="text-muted-foreground">∅</span>}
                           </span>
                         </td>
@@ -544,6 +672,7 @@ function EventDetailBody({
                     {projectId ? (
                       <Link
                         className="min-w-0 truncate py-[3px] hover:underline"
+                        dir="auto"
                         params={{ projectId }}
                         search={(prev) => ({ ...prev, ev: p.id })}
                         to="/p/$projectId/events"
@@ -563,10 +692,13 @@ function EventDetailBody({
                   <span className="min-w-0 truncate">This event</span>
                   {detail && detail.childCount > 0 ? (
                     <span className="shrink-0 font-normal text-muted-foreground text-xs">
-                      → {detail.childCount} child event{detail.childCount === 1 ? '' : 's'}
+                      caused {detail.childCount} event{detail.childCount === 1 ? '' : 's'}
                     </span>
                   ) : null}
                 </li>
+                {detail && detail.childCount > 0 && projectId ? (
+                  <ChildEvents detail={detail} event={e} indent={(detail.parents.length + 1) * 14} projectId={projectId} />
+                ) : null}
                 {ctx.parentEventId && (detail?.parents.length ?? 0) === 0 ? (
                   <li className="text-muted-foreground text-xs">Parent {ctx.parentEventId} is not stored (outside retention or never sent).</li>
                 ) : null}

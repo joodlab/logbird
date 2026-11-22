@@ -20,6 +20,7 @@ import { useSetCrumb } from '@/lib/crumbs';
 import { eventSentence } from '@/lib/events';
 import { formatDuration, formatNumber } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
+import { formatTerm } from '@/lib/query-language';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/operations/$operationId')({
   validateSearch: z.object({ focus: z.string().optional(), ev: z.string().optional() }),
@@ -94,16 +95,38 @@ function OperationPage() {
   const selectedIndex = nodes.findIndex((n) => n.event.id === selectedId);
   const highlight = search.focus;
 
-  if (op.isError) {
-    const notFound = op.error instanceof ApiRequestError && op.error.status === 404;
+  // The server answers an unknown operation id with an empty list, older servers with 404.
+  const notFound = (op.isError && op.error instanceof ApiRequestError && op.error.status === 404) || (op.isSuccess && events.length === 0);
+  if (op.isError || notFound) {
     return (
       <div className="p-6">
         {notFound ? (
           <EmptyState
-            description="No stored event carries this operation id. It may be outside retention."
+            description={
+              <>
+                No stored event carries the operation id <span className="break-all font-mono text-foreground">{operationId}</span>. Its events may be
+                past the project's retention window, or the id is mistyped.
+              </>
+            }
             icon={SearchXIcon}
             title="Operation not found"
-          />
+          >
+            <Button
+              nativeButton={false}
+              render={
+                <Link
+                  params={{ projectId }}
+                  search={(prev) => ({ range: prev.range, q: formatTerm('operation', operationId) })}
+                  to="/p/$projectId/events"
+                />
+              }
+              size="sm"
+              variant="outline"
+            >
+              <Rows3Icon />
+              Search for it in the explorer
+            </Button>
+          </EmptyState>
         ) : (
           <ErrorState error={op.error} onRetry={() => op.refetch()} />
         )}
@@ -128,7 +151,13 @@ function OperationPage() {
         </div>
         <Button
           nativeButton={false}
-          render={<Link params={{ projectId }} search={(prev) => ({ range: prev.range, q: `operation:${operationId}` })} to="/p/$projectId/events" />}
+          render={
+            <Link
+              params={{ projectId }}
+              search={(prev) => ({ range: prev.range, q: formatTerm('operation', operationId) })}
+              to="/p/$projectId/events"
+            />
+          }
           size="sm"
           variant="outline"
         >
