@@ -158,8 +158,9 @@ Audit logging never takes your application down with it:
 - **Every event the running client gives up on is counted**, once, with a reason (`QueueFull`, `HttpError`,
   `Rejected`, `Shutdown`, …): rejections by the server on the `logbird.events.rejected` counter, everything else on
   `logbird.events.dropped`. A client being disposed leaves the meter, so a collection after shutdown may miss its last
-  drops. `OnDrop` and the log are told about them on the background thread, but disposal waits at most five seconds
-  for pending callbacks, so a slow callback (or a process that exits right after shutdown) can miss them. Events lost
+  drops. `OnDrop` and the log are told about them on the background thread, and both reports are best effort: disposal
+  waits at most five seconds for pending callbacks, and when the callback backlog is full (next point) the notifications
+  are skipped, so a slow callback (or a process that exits right after shutdown) can miss them. Events lost
   in a crash are not reported at all (see the outbox below).
 - **`OnDrop` is told about each one** on a background thread; if your callback falls far behind (more than
   `MaxQueueSize` notifications), further notifications are skipped and counted on `logbird.notifications.lost`, so keep
@@ -184,8 +185,8 @@ The queue lives in memory, so a crash loses what is queued. For events that must
 own database in the same transaction as the change (an outbox), with their id, their `OccurredAt` and their content,
 and send them from there exactly as stored on every attempt. A resend is then always an exact retry; an event rebuilt
 with a new timestamp would conflict with the copy the server already has. If you use a `BeforeSend` hook, make sure it
-changes an outbox event the same way on every attempt (or leaves it alone), so each resend still carries the same id
-and content.
+changes an outbox event the same way on every attempt (or leaves it alone) and keeps its id, so each resend carries
+the same id and content and you can confirm it by the id you stored.
 
 `Track` only queues an event, and a successful `FlushAsync` means each event was stored *or* given up on, so neither
 proves an event was stored. Keep each outbox row until you have confirmed its event, for example by reading it back by
