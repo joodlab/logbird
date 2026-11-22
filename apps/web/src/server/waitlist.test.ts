@@ -127,6 +127,32 @@ describe('waitlist boundary', () => {
     }
   });
 
+  it('answers a bot with the silent success even when it repeats fields', async () => {
+    for (const pairs of [
+      [
+        ['volume', 'lots'],
+        ['volume', 'unsure'],
+        ['website', 'spam'],
+      ],
+      [
+        ['website', 'spam'],
+        ['website', ''],
+      ],
+    ]) {
+      const deps = dependencies();
+      const response = await handleWaitlist(
+        new Request(`${origin}/site-api/waitlist`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: origin },
+          body: new URLSearchParams([['email', valid.email], ['interest', 'cloud'], ...pairs]),
+        }),
+        deps,
+      );
+      expect(response.headers.get('Location')).toBe('/contact?status=ok#waitlist-ok');
+      expect(deps.store).not.toHaveBeenCalled();
+    }
+  });
+
   it('leaves unanswered questions out of the notification email', () => {
     const base = { receivedAt: '2026-11-22T00:00:00.000Z', email: valid.email, interest: 'cloud' as const };
     expect(formatRecord({ ...base, volume: undefined, needs: undefined })).toBe(

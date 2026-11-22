@@ -115,22 +115,21 @@ export async function handleWaitlist(request: Request, deps: WaitlistDependencie
     offset += chunk.byteLength;
   }
   let input: unknown;
+  // Single fields a native form repeated. Refused after the honeypot check, so a bot still gets the silent success.
+  let repeated: string[] = [];
   try {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     if (form) {
       // Checkboxes repeat their name; every other field is single. A repeated single field is refused rather than
       // collapsed: Object.fromEntries keeps only the last value, so an invalid earlier one would pass unseen.
       const params = new URLSearchParams(text);
-      const repeated = [...new Set(params.keys())].filter((key) => key !== 'needs' && params.getAll(key).length > 1);
-      if (repeated.length) {
-        return respond(
-          400,
-          'validation_error',
-          'Check the highlighted fields.',
-          Object.fromEntries(repeated.map((key) => [key, ['Send this field once.']])),
-        );
-      }
-      input = { ...Object.fromEntries(params), ...(params.has('needs') ? { needs: params.getAll('needs') } : {}) };
+      repeated = [...new Set(params.keys())].filter((key) => key !== 'needs' && params.getAll(key).length > 1);
+      const honeypot = params.getAll('website').find((value) => value.length > 0);
+      input = {
+        ...Object.fromEntries(params),
+        ...(params.has('needs') ? { needs: params.getAll('needs') } : {}),
+        ...(honeypot ? { website: honeypot } : {}),
+      };
     } else {
       input = JSON.parse(text);
     }
@@ -140,6 +139,14 @@ export async function handleWaitlist(request: Request, deps: WaitlistDependencie
   // Bots receive the same success response without touching storage or SMTP.
   if (input && typeof input === 'object' && 'website' in input && typeof input.website === 'string' && input.website.length > 0) {
     return respond(200);
+  }
+  if (repeated.length) {
+    return respond(
+      400,
+      'validation_error',
+      'Check the highlighted fields.',
+      Object.fromEntries(repeated.map((key) => [key, ['Send this field once.']])),
+    );
   }
   const parsed = waitlistSchema.safeParse(input);
   if (!parsed.success) {
