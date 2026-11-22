@@ -2,6 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -15,6 +16,22 @@ import {
 } from '../../waitlist/file.mjs';
 import { createCloudflareStore, retentionDeadline } from './waitlist-cloudflare';
 import { scheduleWaitlistRetention, sweepWaitlist } from './waitlist-retention';
+
+/**
+ * Lets a test pause this process's next rename of a day file: a rewrite has then read the file and still holds the
+ * store's lock (see rewriteWhileOthersAppend). Every other rename runs unchanged.
+ */
+const renameGate = vi.hoisted(() => ({ hold: undefined as ((to: string) => Promise<void>) | undefined }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    rename: async (from: Parameters<typeof actual.rename>[0], to: Parameters<typeof actual.rename>[1]) => {
+      await renameGate.hold?.(String(to));
+      return actual.rename(from, to);
+    },
+  };
+});
 
 const fileModule = pathToFileURL(fileURLToPath(new URL('../../waitlist/file.mjs', import.meta.url))).href;
 let dir = '';
@@ -313,66 +330,155 @@ it('resolves every alias of a store to one path, before and after its directory 
 });
 
 /**
- * Starts writer processes that each append 30 records (stamped now, so all into today's file) once a go-file appears,
- * and meanwhile keeps rewriting today's file for real through `rewriteVia`: adds a record and forgets it again, so
- * every pass renames a new file into place. Returns how many real rewrites ran while the writers were writing.
+ * Concurrent rewrite proof. A writer process appends until told to stop, printing `attempt i` before each append and
+ * `done i` after it. For each of REWRITES rewrites (append a victim, then forget it), the parent pauses its own rewrite
+ * between reading the day file and renaming the rewritten copy over it (the `rename` gate above). It waits there until
+ * every writer has an append in flight, which can only be waiting for the lock the rewrite holds. It then releases the
+ * rewrite and checks that each of those appends finished afterwards. Every record shares one `receivedAt`, so all of
+ * them land in one day file whatever the time of day.
  */
-/** Rewrites (a forget that removed its victim) that must complete while every writer is still appending. */
-const REWRITES_WHILE_WRITING = 3;
+const REWRITES = 3;
+const RECEIVED_AT = '2026-01-15T12:00:00.000Z';
+const HELPER_DEADLINE_MS = 30_000;
 
-/**
- * Writers append until told to stop, and they're told only after REWRITES_WHILE_WRITING rewrites have completed, so
- * every rewrite overlaps live appends however fast the machine is. (A fixed 30 appends per writer could all land before
- * the first rewrite finished, leaving nothing tested.) Returns each writer's own count of acknowledged appends.
- */
+interface Writer {
+  process: ReturnType<typeof child>;
+  /** The append this writer has started and not yet reported done, if any. */
+  inFlight?: number;
+  /** Parent-side sequence number at which each `done i` line arrived. */
+  doneAt: Map<number, number>;
+  written?: number;
+  closed: Promise<number | null>;
+  ready: Promise<void>;
+  stderr: () => string;
+}
+
+async function until(condition: () => boolean, what: string, deadline: number) {
+  while (!condition()) {
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out waiting for ${what}.`);
+    }
+    await new Promise((done) => setTimeout(done, 5));
+  }
+}
+
 async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
   const go = join(dir, 'go');
   const stop = join(dir, 'stop');
-  const writers = paths.map((path, writer) =>
-    child(
+  const deadline = Date.now() + HELPER_DEADLINE_MS;
+  let seq = 0;
+  const writers: Writer[] = paths.map((path, index) => {
+    const proc = child(
       `const { existsSync } = await import('node:fs');
        console.log('ready');
        while (!existsSync(${JSON.stringify(go)})) await new Promise((done) => setTimeout(done, 5));
        let i = 0;
-       for (; i < 5000 && (i < 1 || !existsSync(${JSON.stringify(stop)})); i++) await waitlist.appendWaitlistRecord(${JSON.stringify(path)}, { email: 'new-${writer}-' + i + '@example.test', interest: 'cloud', receivedAt: new Date().toISOString() });
+       for (; i < 5000 && !existsSync(${JSON.stringify(stop)}); i++) {
+         console.log('attempt ' + i);
+         await waitlist.appendWaitlistRecord(${JSON.stringify(path)}, { email: 'new-${index}-' + i + '@example.test', interest: 'cloud', receivedAt: ${JSON.stringify(RECEIVED_AT)} });
+         console.log('done ' + i);
+       }
        console.log('written ' + i);`,
-    ),
-  );
-  const output = writers.map((writer) => {
-    let text = '';
-    writer.stdout.on('data', (chunk) => {
-      text += String(chunk);
+    );
+    let stderr = '';
+    proc.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
     });
-    return () => text;
+    const writer: Writer = {
+      process: proc,
+      doneAt: new Map(),
+      stderr: () => stderr,
+      closed: new Promise((done) => proc.once('close', (code) => done(code))),
+      ready: Promise.resolve(),
+    };
+    writer.ready = new Promise<void>((done, fail) => {
+      proc.once('error', fail);
+      void writer.closed.then(() => fail(new Error(`Writer ${index} exited before it was ready: ${stderr}`)));
+      createInterface({ input: proc.stdout }).on('line', (line) => {
+        const [kind, value] = line.split(' ');
+        const i = Number(value);
+        if (kind === 'ready') {
+          done();
+        } else if (kind === 'attempt') {
+          writer.inFlight = i;
+        } else if (kind === 'done') {
+          seq += 1;
+          writer.doneAt.set(i, seq);
+          writer.inFlight = undefined;
+        } else if (kind === 'written') {
+          writer.written = i;
+        }
+      });
+    });
+    return writer;
   });
-  await Promise.all(writers.map((writer) => new Promise<void>((done) => writer.stdout.once('data', () => done()))));
-  const finished = Promise.all(writers.map((writer) => new Promise((done) => writer.on('exit', done))));
-  await writeFile(go, '');
-  let rewrites = 0;
-  for (let pass = 0; rewrites < REWRITES_WHILE_WRITING; pass += 1) {
-    expect(pass, 'a forget never removed the record it had just appended').toBeLessThan(500);
-    await appendWaitlistRecord(rewriteVia, record(`victim-${pass}@example.test`, new Date().toISOString()));
-    const { removed } = await forgetWaitlistEmail(rewriteVia, `victim-${pass}@example.test`);
-    if (removed === 1) {
-      rewrites += 1;
+  try {
+    await Promise.all(writers.map((writer) => writer.ready));
+    await writeFile(go, '');
+    const blocked: { writer: Writer; i: number; releasedAt: number }[] = [];
+    for (let pass = 0; pass < REWRITES; pass += 1) {
+      const victim = `victim-${pass}@example.test`;
+      await appendWaitlistRecord(rewriteVia, record(victim, RECEIVED_AT));
+      let held = false;
+      renameGate.hold = async (to) => {
+        if (!to.endsWith('.jsonl')) {
+          return;
+        }
+        renameGate.hold = undefined;
+        held = true;
+        // This rewrite holds the lock: an append in flight now can only be waiting for it. Wait until every writer has
+        // one, and until it is still in flight a moment later (so a `done` still in the pipe isn't mistaken for one).
+        let attempts: (number | undefined)[] = [];
+        await until(
+          () => {
+            const current = writers.map((writer) => writer.inFlight);
+            const steady = current.every((i, index) => i !== undefined && i === attempts[index]);
+            attempts = current;
+            return steady;
+          },
+          `every writer to block on the lock during rewrite ${pass}`,
+          deadline,
+        );
+        await new Promise((done) => setTimeout(done, 50));
+        const releasedAt = seq;
+        for (const writer of writers) {
+          expect(writer.inFlight, 'an append finished while the rewrite held the lock').toBe(attempts[writers.indexOf(writer)]);
+          blocked.push({ writer, i: writer.inFlight as number, releasedAt });
+        }
+      };
+      const { removed } = await forgetWaitlistEmail(rewriteVia, victim);
+      expect(held, `rewrite ${pass} via ${rewriteVia} never renamed a day file`).toBe(true);
+      expect(removed, `rewrite ${pass} via ${rewriteVia} removed its victim`).toBe(1);
     }
+    await writeFile(stop, '');
+    expect(await Promise.all(writers.map((writer) => writer.closed))).toEqual(writers.map(() => 0));
+    // Each append that waited on a rewrite finished only after that rewrite let the lock go.
+    for (const { writer, i, releasedAt } of blocked) {
+      expect(writer.doneAt.get(i)).toBeGreaterThan(releasedAt);
+    }
+    const written = writers.map((writer) => writer.written ?? -1);
+    // A writer that reached the cap wasn't stopped by us, and one that wrote nothing proves nothing.
+    expect(
+      written.every((count) => count >= 1 && count < 5000),
+      `written: ${written.join(', ')}`,
+    ).toBe(true);
+    return written.flatMap((count, index) => Array.from({ length: count }, (_, i) => `new-${index}-${i}@example.test`)).sort();
+  } finally {
+    renameGate.hold = undefined;
+    await writeFile(stop, '').catch(() => undefined);
+    for (const writer of writers) {
+      if (writer.process.exitCode === null && writer.process.signalCode === null) {
+        writer.process.kill();
+      }
+    }
+    await Promise.all(writers.map((writer) => writer.closed));
   }
-  await writeFile(stop, '');
-  expect(await finished).toEqual(paths.map(() => 0));
-  const written = output.map((text) => Number(/written (\d+)/.exec(text())?.[1]));
-  // A writer that hit the 5000 cap was never stopped by us, so the overlap wouldn't be proven.
-  expect(written.every((count) => count >= 1 && count < 5000)).toBe(true);
-  return { rewrites, written };
 }
 
-const total = (counts: number[]) => counts.reduce((sum, count) => sum + count, 0);
-
 it('never loses a submission other processes write while this one rewrites the same day file', async () => {
-  const { rewrites, written } = await rewriteWhileOthersAppend([file, file, file], file);
-  expect(rewrites).toBe(REWRITES_WHILE_WRITING);
-  const fresh = (await emails()).filter((email: string) => email.startsWith('new-'));
-  expect(fresh).toHaveLength(total(written));
-  expect(new Set(fresh).size).toBe(total(written));
+  const expected = await rewriteWhileOthersAppend([file, file, file], file);
+  // Every acknowledged append, each exactly once, and no victim left behind.
+  expect((await emails()).sort()).toEqual(expected);
 }, 60_000);
 
 it('loses nothing when processes create the store through different aliases while it is rewritten', async () => {
@@ -380,13 +486,10 @@ it('loses nothing when processes create the store through different aliases whil
   const alias = join(dir, 'alias');
   await mkdir(real);
   await symlink(real, alias, 'junction');
-  // The directory doesn't exist yet: the first writer creates it while the others are already writing.
+  // The directory doesn't exist yet: whichever process writes first creates it while the others are already writing.
   const paths = [join(alias, 'new', 'waitlist.jsonl'), join(real, 'new', 'waitlist.jsonl')];
-  const { rewrites, written } = await rewriteWhileOthersAppend(paths, paths[0] as string);
-  expect(rewrites).toBe(REWRITES_WHILE_WRITING);
-  const fresh = (await emails(paths[1] as string)).filter((email: string) => email.startsWith('new-'));
-  expect(fresh).toHaveLength(total(written));
-  expect(new Set(fresh).size).toBe(total(written));
+  const expected = await rewriteWhileOthersAppend(paths, paths[0] as string);
+  expect((await emails(paths[1] as string)).sort()).toEqual(expected);
 }, 60_000);
 
 it('the cleanup never touches the file new submissions go into, even for a writer that takes no lock', async () => {
