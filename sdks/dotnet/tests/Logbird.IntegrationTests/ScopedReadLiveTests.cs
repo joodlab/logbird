@@ -146,6 +146,65 @@ public class ScopedReadLiveTests(ITestOutputHelper output)
         output.WriteLine($"server {version}: viewer token read {found.Count} in-scope events (ip, agent, email masked on search, detail and export), controls hidden, facets scoped, evidence export refused");
     }
 
+    [LiveFact(requires: "LOGBIRD_IT_SCOPED")]
+    public async Task A_scoped_read_key_reads_and_mints_only_inside_its_tenant()
+    {
+        // A scoped-read key whose scope is exactly {"tenantId": LOGBIRD_IT_SCOPED_TENANT}, created in the console.
+        var scopedKey = Environment.GetEnvironmentVariable("LOGBIRD_IT_SCOPED_READ_KEY");
+        var tenant = Environment.GetEnvironmentVariable("LOGBIRD_IT_SCOPED_TENANT");
+        Assert.False(string.IsNullOrEmpty(scopedKey), "set LOGBIRD_IT_SCOPED_READ_KEY");
+        Assert.False(string.IsNullOrEmpty(tenant), "set LOGBIRD_IT_SCOPED_TENANT");
+        var version = await LiveServer.ServerVersionAsync();
+        Assert.True(version >= new Version(0, 2, 0), "scoped read keys need 0.2.0; the server reports " + version);
+
+        var run = Guid.NewGuid().ToString("N").Substring(0, 8);
+        var site = "site_" + run;
+        var inside = LogbirdClient.NewEventId();
+        var outside = LogbirdClient.NewEventId();
+        await using (var client = new LogbirdClient(LiveServer.Options()))
+        {
+            client.Track(new AuditEvent("booking.created") { Id = inside, Tenant = new AuditTenant(tenant!) }.Target("website", site));
+            client.Track(new AuditEvent("booking.created") { Id = outside, Tenant = new AuditTenant("other_" + run) }.Target("website", site));
+            Assert.True(await client.FlushAsync());
+            Assert.Equal(2, client.Stats.Delivered);
+        }
+
+        using var reader = LiveServer.Reader();
+        await LiveServer.WaitForEventAsync(reader, inside);
+        await LiveServer.WaitForEventAsync(reader, outside);
+
+        using var scoped = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = new Uri(LiveServer.Endpoint!), ReadKey = scopedKey });
+        var from = DateTimeOffset.UtcNow.AddHours(-1);
+
+        // The key reads its tenant's event and never the other tenant's, by id or by search.
+        Assert.NotNull(await scoped.GetAsync(inside));
+        Assert.Null(await scoped.GetAsync(outside));
+        var bySite = await scoped.SearchAsync(EventSearch.ForTrail(targetId: site, targetType: "website", from: from));
+        Assert.Equal([inside], bySite.Events.Select(e => e.Id));
+
+        // Facets by tenant see only the key's tenant.
+        var tenants = await scoped.FacetsAsync(new FacetQuery("tenant") { From = from });
+        Assert.All(tenants.Values, v => Assert.Equal(tenant, v.Value));
+
+        // It mints a narrower token (one website of its tenant), and refuses a token for another tenant.
+        var token = await scoped.MintViewerTokenAsync(new ViewerScope(tenant!) { Target = new ViewerScopeTarget("website", site) }, TimeSpan.FromMinutes(2));
+        using (var viewer = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = new Uri(LiveServer.Endpoint!), ReadKey = token.Token }))
+        {
+            var seen = new List<string>();
+            await foreach (var e in viewer.SearchAllAsync(new EventSearch { From = from }))
+            {
+                seen.Add(e.Id);
+            }
+
+            Assert.Equal([inside], seen);
+        }
+
+        var wider = await Assert.ThrowsAsync<LogbirdApiException>(() => scoped.MintViewerTokenAsync(new ViewerScope("other_" + run)));
+        Assert.Equal("scope_exceeded", wider.Code);
+
+        output.WriteLine($"server {version}: scoped key read its tenant only (by id, trail and facets), minted a narrower token that saw 1 event, and was refused a token for another tenant");
+    }
+
     private static void AssertMasked(StoredEvent e)
     {
         Assert.True(string.IsNullOrEmpty(e.Context.Ip), "ip");
