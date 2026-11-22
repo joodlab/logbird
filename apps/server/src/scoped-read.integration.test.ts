@@ -237,6 +237,12 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
       '(tenant:t2) OR (NOT tenant:t2)',
       'id:qa-t2-x OR id:qa-none',
       '"Tenant two"',
+      // #182: the record field inside q stays inside the scope too (site_a exists under t2 and with no tenant).
+      'record:website:site_a',
+      'record:website:site_a OR tenant:t2',
+      '-record:website:site_a',
+      'record:*',
+      'record:(website:site_a OR page:site_a)',
     ]) {
       const scoped = await ids(t1.secret, q);
       expect(
@@ -249,6 +255,16 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
       ).toBe(true);
     }
     expect(await ids(t1.secret, 'tenant:t2 OR tenant:t1')).toEqual(tenant1);
+    // A paired record under a tenant scope: exactly that tenant's events with website:site_a on one target, counted the
+    // same way (stored ids: the trimmed tenant and target collide into t1 / site_a, see above).
+    const recordQ = 'record:website:site_a';
+    expect((await ids(t1.secret, recordQ)).sort()).toEqual(['qa-collide-target', 'qa-collide-tenant', 'qa-t1-a1', 'qa-t1-child']);
+    const recordTotal = await (
+      await v1(t1.secret, `/events?${new URLSearchParams({ q: recordQ, from: '2026-01-01T00:00:00Z', limit: '1' })}`)
+    ).json();
+    expect(recordTotal.total).toBe(4);
+    // The site-scoped key: page:site_a sits on an event whose website target is site_x, so nothing is in scope.
+    expect(await ids(site.secret, 'record:page:site_a')).toEqual([]);
     const sql = await v1(t1.secret, `/events?${new URLSearchParams({ lang: 'sql', q: '1 OR 1' })}`);
     expect(sql.status).toBe(422);
 

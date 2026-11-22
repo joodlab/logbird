@@ -15,6 +15,7 @@ import { EventListContext } from '@/components/impersonation';
 import { QueryInput, type QueryInputHandle } from '@/components/query-input/query-input';
 import { TimeZoneInline } from '@/components/time-zone-control';
 import { api, langParam } from '@/lib/api/client';
+import { awaiting, current } from '@/lib/api/current';
 import { eventQuery, eventsInfiniteQuery, histogramQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle, scopedQueryProblem } from '@/lib/query-error';
@@ -150,10 +151,12 @@ function ProjectExplorer({
     resultKey?: string;
   }>({});
   // Only settled results become "last good" (a placeholder is another search's data).
-  const scope = `${range}|${baseQuery ?? ''}`;
+  // The project is part of it: a fallback never shows another project's rows, even if this component stays mounted.
+  const scope = JSON.stringify([projectId, range, baseQuery ?? '']);
   // A blocked search fetched nothing: whatever is cached under its blank key is never this search's (nor last good).
-  if (!blocked && events.data && !events.isError && !events.isPlaceholderData) {
-    lastGood.current.pages = events.data.pages;
+  const eventsNow = blocked ? undefined : current(events);
+  if (eventsNow && !events.isError) {
+    lastGood.current.pages = eventsNow.pages;
     lastGood.current.pagesScope = scope;
   }
   if (!blocked && events.isSuccess && !events.isPlaceholderData) {
@@ -166,8 +169,9 @@ function ProjectExplorer({
   // range are committed, so the table starts that set at the top even when it shares rows with the old one (e.g. moving
   // between two entity profiles, where `q` stays empty but `baseQuery` changes).
   const resultKey = lastGood.current.resultKey;
-  if (!blocked && histogram.data && !histogram.isError && !histogram.isPlaceholderData) {
-    lastGood.current.histogram = histogram.data;
+  const histogramNow = blocked ? undefined : current(histogram);
+  if (histogramNow && !histogram.isError) {
+    lastGood.current.histogram = histogramNow;
     lastGood.current.histogramScope = scope;
   }
   // A rejected query falls back to the last good result only when it was searched over this same range and locked
@@ -179,11 +183,11 @@ function ProjectExplorer({
   const exportBlocked = problem ? 'Fix the query first — the export runs the same query.' : null;
   // Rows from a previous search (a placeholder while the new range or query loads) are never shown or selectable as
   // this one's; a rejected query keeps the last good rows, labelled as such.
-  const pages = problem ? fallbackPages : events.isPlaceholderData ? undefined : events.data?.pages;
-  const resultsLoading = (events.isPending || events.isPlaceholderData) && !problem;
+  const pages = problem ? fallbackPages : current(events)?.pages;
+  const resultsLoading = awaiting(events) && !problem;
   // A rejected query shows the last good bars, labelled as such; otherwise bars from a previous search (a placeholder
   // while the new range or query loads) are never drawn as if they were this one's.
-  const histogramData = problem ? fallbackHistogram : histogram.isPlaceholderData ? undefined : histogram.data;
+  const histogramData = problem ? fallbackHistogram : current(histogram);
 
   /* ---------------- live tail ---------------- */
   const relative = isValidRange(range) && !range.includes('..');
@@ -203,7 +207,8 @@ function ProjectExplorer({
   }, [effectiveQ, lang, range, live]);
 
   // The tail follows *arrival* (`receivedAt`), so late or back-dated events still stream in.
-  const firstPage = problem || events.isPlaceholderData ? undefined : events.data?.pages[0]?.data;
+  const firstPage = problem ? undefined : current(events)?.pages[0]?.data;
+  const firstPageTook = current(events)?.pages[0]?.tookMs;
   useEffect(() => {
     if (!sinceRef.current && firstPage) sinceRef.current = newestArrival(firstPage) ?? new Date().toISOString();
   }, [firstPage]);
@@ -502,7 +507,7 @@ function ProjectExplorer({
                   </button>
                 ) : null}
               </>
-            ) : events.isPending || events.isPlaceholderData ? (
+            ) : awaiting(events) ? (
               'Searching…'
             ) : (
               <>
@@ -510,7 +515,7 @@ function ProjectExplorer({
                   {totalLowerBound ? formatSearchTotal({ count: total, exact: false }) : formatNumber(total)}
                 </span>{' '}
                 {!totalLowerBound && total === 1 ? 'event' : 'events'} · {rangeName}
-                {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
+                {firstPageTook !== undefined ? ` · ${Math.round(firstPageTook)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>
             )}
@@ -542,7 +547,7 @@ function ProjectExplorer({
                 : (from, to) => {
                     // Keep the selection inside the search that produced the visible bars (its end can lie ahead of
                     // now, and a relative range has moved on since).
-                    const shown = histogram.data ?? resolveRange(range);
+                    const shown = current(histogram) ?? resolveRange(range);
                     const start = Math.max(from, shown.fromMs);
                     const end = Math.min(to, shown.toMs);
                     if (start < end) onChange({ range: absoluteRange(start, end), live: undefined });

@@ -7,6 +7,7 @@ import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRightIcon, CircleAlertIcon, Loader2Icon, MinusIcon, VenetianMaskIcon } from 'lucide-react';
 import { useState } from 'react';
+import { current } from '@/lib/api/current';
 import { facetQuery } from '@/lib/api/queries';
 import { formatCompact } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
@@ -126,11 +127,17 @@ function presenceOps(field: string, lang: QueryLang): FacetOps {
 
 /**
  * One row per (type, id) record from a `target` facet with `by: target.type`: the value is the encoded record pair a
- * `record:` term takes, the label the record's name (or its id). Rows are ordered by count.
+ * `record:` term takes. The label is the record's name only when the id belongs to one type: the facet's name is per
+ * id, so records of different types sharing an id show their id (their type shows beside it) rather than one borrowed
+ * name. Rows are ordered by count.
  */
 export function recordPairValues(values: FacetResponse['values']): { value: string; label: string; count: number }[] {
   return values
-    .flatMap((v) => (v.groups ?? []).map((g) => ({ value: encodeRecordPair(g.value, v.value), label: v.label || v.value, count: g.count })))
+    .flatMap((v) => {
+      const groups = v.groups ?? [];
+      const label = groups.length === 1 && (v.groupsOtherCount ?? 0) === 0 ? v.label || v.value : v.value;
+      return groups.map((g) => ({ value: encodeRecordPair(g.value, v.value), label, count: g.count }));
+    })
     .sort((a, b) => b.count - a.count || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
 }
 
@@ -224,12 +231,11 @@ function FacetGroup({
   // Values from a previous search (a placeholder while this one loads) are never shown as this search's.
   const loadingValues = (facet.isPending || facet.isPlaceholderData) && !facet.isError;
   // A blocked count fetched nothing: values cached under its blank key are another search's.
-  const fetched = facet.isPlaceholderData || scoped?.problem ? [] : (facet.data?.values ?? []);
+  const facetNow = scoped?.problem ? undefined : current(facet);
+  const fetched = facetNow?.values ?? [];
   const allValues = by ? recordPairValues(fetched) : fetched;
   const values = spec.presence ? allValues.filter((v) => v.value !== '') : allValues;
-  const presentCount = spec.presence
-    ? values.reduce((n, v) => n + v.count, 0) + (facet.isPlaceholderData || scoped?.problem ? 0 : (facet.data?.otherCount ?? 0))
-    : 0;
+  const presentCount = spec.presence ? values.reduce((n, v) => n + v.count, 0) + (facetNow?.otherCount ?? 0) : 0;
   const max = Math.max(...values.map((v) => v.count), presentCount, 1);
   // Counts still belong to the previous query (keepPreviousData) until this group's own response arrives.
   const updating = facet.isPlaceholderData || (facet.isFetching && !facet.isPending);

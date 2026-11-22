@@ -33,14 +33,17 @@ const MAX_RESOLVED_TERMS = 6;
 /**
  * Views saved from a record page before exact record matching (#169) hold `target:<id> target.type:<type>` (which also
  * matches the type on one target and the id on another) plus a Record label for that id. Opening one shows the exact
- * `record:<type>:<id>` form instead; nothing is written until the reader saves it. Only that shape is rewritten: the
- * pair must lead the query, be plain and positive, be ANDed with the rest (no top-level OR), and carry the Record label,
- * so a hand-typed `target:` + `target.type:` query is left exactly as written.
+ * `record:<type>:<id>` form instead; nothing is written until the reader saves it. Only a record page's own save is
+ * rewritten: its generated name (`<label> — <range>`), no saved columns, and a Record label for the id; the pair must
+ * lead the query, be plain and positive, and be ANDed with the rest (no top-level OR). A query typed in the explorer and
+ * saved there (its own name and columns, even with a resolved Record label) is left exactly as written.
  */
-export function upgradeRecordView(state: SavedView['state']): { state: SavedView['state']; upgraded: boolean } {
+export function upgradeRecordView(view: Pick<SavedView, 'name' | 'state'>): { state: SavedView['state']; upgraded: boolean } {
+  const { state } = view;
   const q = state.q ?? '';
   const label = state.labels?.find((l) => l.field === 'target');
   if (state.lang === 'sql' || !label || hasTopLevelOr(q)) return { state, upgraded: false };
+  if (state.columns !== undefined || !view.name.startsWith(`${label.label} — `)) return { state, upgraded: false };
   const [first, second] = fieldTerms(q);
   const simple = (t: typeof first) => t && !t.negated && !t.wildcard && (t.valueKind === 'plain' || t.valueKind === 'quoted') && t.value;
   if (!simple(first) || !simple(second) || !first || !second) return { state, upgraded: false };
@@ -61,9 +64,10 @@ export function upgradeRecordView(state: SavedView['state']): { state: SavedView
 }
 
 /** Explorer search params that open a saved view (and mark it open). */
-export function viewSearch(view: Pick<SavedView, 'id' | 'state'>) {
-  // An old record-page view opens in its exact form; the explorer banner says so and offers to save it.
-  const { state } = upgradeRecordView(view.state);
+export function viewSearch(view: Pick<SavedView, 'id' | 'state'> & { name?: string }) {
+  // An old record-page view opens in its exact form; the explorer banner says so and offers to save it. (Links built
+  // without the name open as saved; the explorer route upgrades those on arrival.)
+  const { state } = view.name === undefined ? { state: view.state } : upgradeRecordView({ name: view.name, state: view.state });
   return {
     q: state.q || undefined,
     lang: state.lang === 'sql' ? ('sql' as const) : undefined,

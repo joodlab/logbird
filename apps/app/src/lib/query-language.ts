@@ -335,6 +335,12 @@ export function removeTokens(q: string, test: (t: QueryToken) => boolean): strin
 }
 
 /** Field operands with the effective polarity of their directly attached unary operators. */
+/** Field terms with their effective polarity: a leading `-` or a unary `NOT` before them (not both) negates. */
+export function fieldTermsWithPolarity(q: string): { token: QueryToken; negated: boolean }[] {
+  // The parsed walk already folds `-` and unary NOT (an even number cancels) into each term's `negated`.
+  return fieldTerms(q).map((token) => ({ token, negated: Boolean(token.negated) }));
+}
+
 export function fieldTerms(q: string, topLevelOnly = false): QueryToken[] {
   const fields: QueryToken[] = [];
   function visit(expression: QueryExpression) {

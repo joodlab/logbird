@@ -3,7 +3,7 @@ import { Button } from '@logbird/ui/components/ui/button';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { BookmarkIcon, LinkIcon, XIcon } from 'lucide-react';
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { parseColumns, serializeColumns } from '@/components/explorer/columns';
@@ -48,7 +48,15 @@ function ExplorerPage() {
   const storedView = search.view ? views.data?.find((v) => v.id === search.view) : undefined;
   // A view saved from a record page before exact record matching opens in its exact form (viewSearch); the banner
   // says so and the reader decides whether to save it. Nothing is written on load.
-  const upgrade = storedView ? upgradeRecordView(storedView.state) : undefined;
+  const upgrade = storedView ? upgradeRecordView(storedView) : undefined;
+  // Every way into an old record-page view (sidebar, command palette, query-bar suggestions, an old shared link) carries
+  // its stored query: show the exact form instead, in place, with the note below. Nothing is saved.
+  const legacyQ = upgrade?.upgraded && storedView ? (storedView.state.q ?? '') : undefined;
+  const upgradedQ = upgrade?.upgraded ? (upgrade.state.q ?? '') : undefined;
+  useEffect(() => {
+    if (legacyQ !== undefined && upgradedQ !== undefined && (search.q ?? '') === legacyQ)
+      navigate({ replace: true, search: (prev) => ({ ...prev, q: upgradedQ || undefined }) });
+  }, [legacyQ, upgradedQ, search.q, navigate]);
   const savedView = storedView && upgrade ? { ...storedView, state: upgrade.state } : undefined;
   // The banner (and its Copy link) speaks for the view only while what is on screen is still that view: same query,
   // language and range. Narrowing it by picker, zoom or Back hides it.

@@ -2,6 +2,7 @@ import type { QueryLang, SavedView, SuggestResponse } from '@logbird/contracts';
 import { useDebouncedValue } from '@tanstack/react-pacer';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
+import { awaiting, current } from '@/lib/api/current';
 import { fieldsQuery, SUGGEST_LIMIT, suggestQuery } from '@/lib/api/queries';
 import { formatCompact } from '@/lib/format';
 import {
@@ -195,10 +196,13 @@ export function useCompletions({
   // Field metadata (types, coverage, attribute keys) is cheap and cached; it also tells the linter which bare
   // words are fields.
   const fields = useQuery({ ...fieldsQuery(projectId, range), enabled: open, staleTime: 5 * 60_000 });
+  // Coverage and samples belong to a range: another range's (the placeholder) never show; suggestions wait for this one's.
+  const fieldsData = current(fields);
+  const fieldsLoading = awaiting(fields);
   const { attributes, coverage } = useMemo(() => {
     const attrs: Attribute[] = [];
     const cov = new Map<string, number>();
-    for (const f of fields.data?.data ?? []) {
+    for (const f of fieldsData?.data ?? []) {
       if (f.kind === 'attribute') attrs.push({ key: attributeKey(f.key), coverage: f.coverage, samples: f.samples });
       else {
         const core = coreField(f.key);
@@ -207,7 +211,7 @@ export function useCompletions({
     }
     attrs.sort((a, b) => b.coverage - a.coverage);
     return { attributes: attrs, coverage: cov };
-  }, [fields.data]);
+  }, [fieldsData]);
 
   const fixes = useMemo(() => {
     if (lang !== 'query' || !draft) return [];
@@ -285,28 +289,11 @@ export function useCompletions({
       suggestions,
       hint,
       prefix: 'prefix' in context ? context.prefix : '',
-      loading: valuesLoading || (fields.isFetching && !fields.data),
+      loading: valuesLoading || (open && fieldsLoading),
       context,
       fixes,
     };
-  }, [
-    open,
-    context,
-    draft,
-    caret,
-    lang,
-    fixes,
-    attributes,
-    coverage,
-    valuesData,
-    valueField,
-    valuesLoading,
-    recent,
-    views,
-    entities,
-    fields.isFetching,
-    fields.data,
-  ]);
+  }, [open, context, draft, caret, lang, fixes, attributes, coverage, valuesData, valueField, valuesLoading, recent, views, entities, fieldsLoading]);
 }
 
 interface Input {

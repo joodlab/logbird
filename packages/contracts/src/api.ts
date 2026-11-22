@@ -163,6 +163,13 @@ export const facetResponseSchema = z.object({
 });
 export type FacetResponse = z.infer<typeof facetResponseSchema>;
 /** `GET /v1/facets`: the console schema without SQL mode (`lang=sql` is console-only). */
+/**
+ * The overview's "Recent problems": events whose outcome is one of these OR whose severity is this. The server lists
+ * them and the console's "View all" opens exactly the same group, both from these constants.
+ */
+export const RECENT_PROBLEM_OUTCOMES = ['failure', 'denied'] as const;
+export const RECENT_PROBLEM_SEVERITY = 'critical';
+
 export const publicFacetQuerySchema = facetQuerySchema.extend({ lang: z.literal('query').optional() });
 
 /* ------------------------------------------------------------------ */
@@ -187,7 +194,7 @@ export const overviewResponseSchema = z.object({
   topActors: z.array(topItem.extend({ type: z.string() })),
   topTenants: z.array(topItem),
   topExecutors: z.array(topItem.extend({ type: z.string() })),
-  recentProblems: z.array(eventSchema), // latest failure/denied/critical
+  recentProblems: z.array(eventSchema), // latest RECENT_PROBLEM_OUTCOMES or RECENT_PROBLEM_SEVERITY events
   ingest: z.object({
     lastEventAt: z.string().nullable(),
     eventsLastHour: z.number().int(),

@@ -8,6 +8,7 @@ import { cn } from '@logbird/ui/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRightIcon, UserIcon, VenetianMaskIcon } from 'lucide-react';
 import { SupportAgentLink } from '@/components/impersonation';
+import { current } from '@/lib/api/current';
 import { facetQuery } from '@/lib/api/queries';
 import { formatNumber } from '@/lib/format';
 import { splitDescription, supportAgentQuery, type WhoFilter } from '@/lib/impersonation';
@@ -31,12 +32,13 @@ export function useSupportCounts(projectId: string, kind: EntityKind, entityId: 
     enabled: Boolean(baseQuery),
   });
   const asAgent = useQuery({ ...facetQuery(projectId, 'impersonator', range, supportAgentQuery(entityId), 1), enabled: kind === 'actor' });
-  if (!baseQuery || !agents.data || agents.isPlaceholderData) return undefined;
-  const present = agents.data.values.filter((v) => v.value !== '');
+  const agentsData = baseQuery ? current(agents) : undefined;
+  if (!agentsData) return undefined;
+  const present = agentsData.values.filter((v) => v.value !== '');
   return {
-    support: present.reduce((n, v) => n + v.count, 0) + agents.data.otherCount,
+    support: present.reduce((n, v) => n + v.count, 0) + agentsData.otherCount,
     agents: present.map((v) => ({ id: v.value, name: v.label || v.value, count: v.count })),
-    asAgent: kind === 'actor' && asAgent.data && !asAgent.isPlaceholderData ? (asAgent.data.values[0]?.count ?? 0) : 0,
+    asAgent: kind === 'actor' ? (current(asAgent)?.values[0]?.count ?? 0) : 0,
   };
 }
 

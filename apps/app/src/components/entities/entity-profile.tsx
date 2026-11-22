@@ -18,6 +18,7 @@ import { Explorer, type ExplorerState } from '@/components/explorer/explorer';
 import { RankList } from '@/components/rank-list';
 import { Timestamp } from '@/components/timestamp';
 import { SaveEntityViewButton } from '@/components/views/save-entity-view-button';
+import { current } from '@/lib/api/current';
 import { ApiRequestError } from '@/lib/api/errors';
 import { entityProfileQuery } from '@/lib/api/queries';
 import { useSetCrumb } from '@/lib/crumbs';
@@ -25,6 +26,7 @@ import { ENTITY_SECTIONS, type EntitySection, entityQuery, splitTargetId, typeIc
 import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
+import { outcomeBandQuery } from '@/lib/overview-queries';
 import { formatTerm, scopedQuery } from '@/lib/query-language';
 import { ALL_RANGE, historyRange, rangeInSentence, rangeLabel } from '@/lib/range';
 import { useConsoleZone } from '@/lib/time-zone';
@@ -50,7 +52,7 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
   const navigate = useNavigate();
   // Never another entity's or range's numbers under this URL: a placeholder (the previous query's result) renders as
   // loading, so the name, stats, charts and related lists always belong to this entity and this range.
-  const p = profile.isPlaceholderData ? undefined : profile.data;
+  const p = current(profile);
   const displayId = kind === 'target' ? splitTargetId(entityId, targetType ?? p?.entity.type).id : entityId;
   useSetCrumb(p?.entity.name || displayId);
   useDocumentTitle(`${p?.entity.name || displayId} · ${meta.singular} · Logbird`);
@@ -68,7 +70,9 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
   const linkRange = rangeChosen ? timeline.range : ALL_RANGE;
   // What History shows (the entity plus any filters typed or picked there): the explorer links and Save as view use it.
   // Null while the typed filter does not parse: nothing is combined, saved or opened then (scopedQuery).
-  const historyQuery = scopedQuery(baseQuery, timeline.q).q;
+  // Also null until the entity's own filter is known (a record's type arrives with its profile): no history, link or
+  // saved view may ever run without it, whatever range is chosen.
+  const historyQuery = baseQuery ? scopedQuery(baseQuery, timeline.q).q : null;
 
   if (profile.isError && !p) {
     const notFound = profile.error instanceof ApiRequestError && profile.error.status === 404;
@@ -251,7 +255,7 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
             </div>
           </div>
           <div className="flex h-[600px] min-h-0 flex-col">
-            {timelineRange ? (
+            {timelineRange && baseQuery ? (
               <Explorer
                 baseLabel={`${kind}: ${p?.entity.name || displayId}`}
                 baseQuery={baseQuery}
@@ -276,11 +280,7 @@ export function EntityProfile({ projectId, section, entityId, targetType, timeli
           <Panel description={`${rangeLabel(timeline.range)} · click a band to filter the history`} title="Activity">
             <div className="p-3 pb-2">
               {p ? (
-                <OutcomeAreaChart
-                  data={p.series}
-                  height={236}
-                  onSelectOutcome={(o) => onTimelineChange({ q: formatTerm('outcome', o), ev: undefined })}
-                />
+                <OutcomeAreaChart data={p.series} height={236} onSelectOutcome={(o) => onTimelineChange({ q: outcomeBandQuery(o), ev: undefined })} />
               ) : (
                 <Skeleton className="h-[244px] w-full" />
               )}
