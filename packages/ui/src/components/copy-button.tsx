@@ -22,8 +22,8 @@ export function CopyButton({ value, label = 'Copy', showLabel = false, onCopied,
       className={cn('text-muted-foreground hover:text-foreground', className)}
       onClick={async (event) => {
         event.stopPropagation();
-        await copy(value);
-        onCopied?.();
+        // Only a copy that happened counts (a once-only secret's close guard listens to this).
+        if (await copy(value)) onCopied?.();
       }}
       size={size ?? (showLabel ? 'sm' : 'icon-xs')}
       type="button"

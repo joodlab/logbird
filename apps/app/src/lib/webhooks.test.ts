@@ -2,7 +2,18 @@ import { createRouter } from '@tanstack/react-router';
 import { describe, expect, it } from 'vitest';
 import { routeTree } from '@/routeTree.gen';
 import { ApiRequestError } from './api/errors';
-import { disabledCopy, displayUrl, isWebhookBusy, scopeSummary, webhookErrorCopy, webhookRetry } from './webhooks';
+import {
+  disabledCopy,
+  displayUrl,
+  type Form,
+  fieldErrorsFromValidation,
+  formFrom,
+  isWebhookBusy,
+  scopeSummary,
+  validateWebhookForm,
+  webhookErrorCopy,
+  webhookRetry,
+} from './webhooks';
 
 /** Every path the console serves, as the router resolves them. */
 function servedPaths(): string[] {
@@ -54,5 +65,30 @@ describe('busy answers', () => {
   it('explains the errors in words', () => {
     expect(webhookErrorCopy(new ApiRequestError(400, 'webhook_limit_reached', 'x'))).toMatch(/at most|already has 10/);
     expect(webhookErrorCopy(busy)).toMatch(/nothing was saved/);
+  });
+});
+
+describe('the endpoint form', () => {
+  const form = (patch: Partial<Form> = {}): Form => ({ ...formFrom(null), url: 'https://hooks.example.com/x', ...patch });
+  it('checks the contract limits on the field that breaks them', () => {
+    expect(validateWebhookForm(form())).toEqual({});
+    expect(validateWebhookForm(form({ description: 'x'.repeat(1001) })).description).toMatch(/1,000/);
+    expect(validateWebhookForm(form({ tenantId: 't'.repeat(257) })).tenantId).toMatch(/256/);
+    expect(validateWebhookForm(form({ filter: 'a'.repeat(4097) })).filter).toMatch(/4,096/);
+    expect(validateWebhookForm(form({ url: '' })).url).toMatch(/Enter the URL/);
+  });
+  it('marks the missing half of a record', () => {
+    const idOnly = validateWebhookForm(form({ targetId: 'bk_1' }));
+    expect(idOnly.targetType).toMatch(/type/);
+    expect(idOnly.targetId).toBeUndefined();
+    expect(validateWebhookForm(form({ targetType: 'booking' })).targetId).toMatch(/id/);
+  });
+  it('puts a contract rejection on its field', () => {
+    const error = new ApiRequestError(422, 'validation_error', 'Invalid request body.', [
+      { path: ['description'], message: 'Too big: expected string to have <=1000 characters' },
+      { path: ['scope', 'target', 'type'], message: 'Too small' },
+    ]);
+    expect(fieldErrorsFromValidation(error)).toEqual({ description: 'Too big: expected string to have <=1000 characters', targetType: 'Too small' });
+    expect(fieldErrorsFromValidation(new ApiRequestError(400, 'webhook_url_not_allowed', 'no'))).toEqual({});
   });
 });

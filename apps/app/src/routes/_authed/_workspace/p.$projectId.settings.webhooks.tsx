@@ -12,7 +12,7 @@ import { Switch } from '@logbird/ui/components/ui/switch';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { ChevronDownIcon, Loader2Icon, PlusIcon, TriangleAlertIcon, WebhookIcon } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AdminNote } from '@/components/admin-gate';
 import { CloseWithoutCopying, useSecretCloseGuard } from '@/components/one-time-secret';
@@ -29,10 +29,16 @@ import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import {
   disabledCopy,
   displayUrl,
+  type Form,
+  type FormErrors,
+  fieldErrorsFromValidation,
+  formFrom,
   isWebhookBusy,
   MAX_WEBHOOK_ENDPOINTS,
   OVERLAP_CHOICES,
+  scopeOf,
   scopeSummary,
+  validateWebhookForm,
   webhookErrorCopy,
   webhookRetry,
 } from '@/lib/webhooks';
@@ -225,7 +231,7 @@ function EndpointCard({
         <dt className="text-muted-foreground">Created</dt>
         <dd>
           <Timestamp format="date" iso={endpoint.createdAt} />
-          {creatorLabel(creator) ? ` by ${creatorLabel(creator)}` : ''}
+          {creatorLabel(creator) ? ` by ${creatorLabel(creator)}` : endpoint.createdById && org.data ? ' by a former member' : ''}
         </dd>
       </dl>
       <div className="flex flex-wrap gap-2">
@@ -265,23 +271,8 @@ function EndpointCard({
   );
 }
 
-type Form = { url: string; description: string; filter: string; tenantId: string; targetType: string; targetId: string; enabled: boolean };
-const formFrom = (e: WebhookEndpoint | null): Form => ({
-  url: e?.url ?? '',
-  description: e?.description ?? '',
-  filter: e?.filterQuery ?? '',
-  tenantId: e?.scope?.tenantId ?? '',
-  targetType: e?.scope?.target?.type ?? '',
-  targetId: e?.scope?.target?.id ?? '',
-  enabled: e?.enabled ?? true,
-});
-const scopeOf = (f: Form) => {
-  const tenantId = f.tenantId.trim();
-  const type = f.targetType.trim();
-  const id = f.targetId.trim();
-  if (!tenantId && !type && !id) return null;
-  return { ...(tenantId ? { tenantId } : {}), ...(type && id ? { target: { type, id } } : {}) };
-};
+/** A save from an earlier opening of the dialog: dropped, never retried. */
+class SaveAbandoned extends Error {}
 
 function EndpointDialog({
   projectId,
@@ -299,21 +290,29 @@ function EndpointDialog({
   const { refresh } = useEndpointMutations(projectId);
   const ids = useId();
   const [form, setForm] = useState<Form>(() => formFrom(endpoint));
-  const [shownFor, setShownFor] = useState<WebhookEndpoint | null | undefined>(undefined);
-  const [errors, setErrors] = useState<Partial<Record<keyof Form | 'form', string>>>({});
+  const [wasOpen, setWasOpen] = useState(false);
+  const [errors, setErrors] = useState<FormErrors>({});
   const [narrowOpen, setNarrowOpen] = useState(false);
-  // A fresh form each time the dialog opens for another endpoint (or for a new one).
-  if (open && shownFor !== endpoint) {
-    setShownFor(endpoint);
-    setForm(formFrom(endpoint));
-    setErrors({});
-    setNarrowOpen(Boolean(endpoint?.scope));
+  // Each opening is a fresh form: for the endpoint being edited, or empty for a new one (never last time's draft).
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setForm(formFrom(endpoint));
+      setErrors({});
+      setNarrowOpen(Boolean(endpoint?.scope));
+    }
   }
+  // Every opening and closing starts a new session: a save still retrying from an earlier one stops instead of
+  // applying its form to whatever the dialog shows now.
+  const session = useRef(0);
+  if (open !== wasOpen) session.current += 1;
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
   const save = useMutation({
-    mutationFn: async (f: Form) => {
+    // Everything comes from the variables captured at submit: the endpoint, its values then, the form and the session.
+    mutationFn: async ({ f, target, at }: { f: Form; target: WebhookEndpoint | null; at: number }) => {
+      if (at !== session.current) throw new SaveAbandoned();
       const scope = scopeOf(f);
-      if (!endpoint) {
+      if (!target) {
         return api.webhooks.create(projectId, {
           url: f.url.trim(),
           description: f.description.trim() || null,
@@ -321,7 +320,7 @@ function EndpointDialog({
           scope,
         });
       }
-      const before = formFrom(endpoint);
+      const before = formFrom(target);
       const body: Record<string, unknown> = {};
       // Only what changed: a changed URL is checked again (DNS); an unchanged one is not.
       if (f.url.trim() !== before.url) body.url = f.url.trim();
@@ -330,36 +329,41 @@ function EndpointDialog({
       if (JSON.stringify(scope) !== JSON.stringify(scopeOf(before))) body.scope = scope;
       if (f.enabled !== before.enabled) body.enabled = f.enabled;
       if (!Object.keys(body).length) return null;
-      return api.webhooks.update(projectId, endpoint.id, body);
+      return api.webhooks.update(projectId, target.id, body);
     },
     ...webhookRetry,
-    onSuccess: (result) => {
+    onSuccess: (result, { at }) => {
       refresh();
+      if (at !== session.current) return;
+      // The secret leaves the mutation's state at once: only the one-time dialog holds it.
+      save.reset();
       if (result && 'secret' in result) onCreated(result);
       else {
         toast.success(result ? 'Endpoint saved' : 'Nothing to save');
         onClose();
       }
     },
-    onError: (error) => {
+    onError: (error, { f, at }) => {
+      if (error instanceof SaveAbandoned || at !== session.current) return;
       const problem = queryProblem(error, 'query');
-      if (problem) setErrors({ filter: `${reasonTitle(problem.details, problem.code)}: ${queryProblemText(problem, form.filter)}` });
+      if (problem) setErrors({ filter: `${reasonTitle(problem.details, problem.code)}: ${queryProblemText(problem, f.filter)}` });
       else if (error instanceof ApiRequestError && error.code === 'webhook_url_not_allowed') setErrors({ url: webhookErrorCopy(error) });
-      else setErrors({ form: webhookErrorCopy(error) });
+      else {
+        // A body the contract rejects names its field: put the message there.
+        const onField = fieldErrorsFromValidation(error);
+        setErrors(Object.keys(onField).length ? onField : { form: webhookErrorCopy(error) });
+        if (onField.tenantId || onField.targetType || onField.targetId) setNarrowOpen(true);
+      }
     },
   });
   const submit = () => {
-    const next: typeof errors = {};
-    const url = form.url.trim();
-    if (!url) next.url = 'Enter the URL Logbird should POST to.';
-    else if (!/^https?:\/\//i.test(url)) next.url = 'Start the URL with https://.';
-    if (Boolean(form.targetType.trim()) !== Boolean(form.targetId.trim())) next.targetId = 'A record needs both its type and its id.';
+    const next = validateWebhookForm(form);
     setErrors(next);
     if (Object.keys(next).length) {
-      if (next.targetId) setNarrowOpen(true);
+      if (next.tenantId || next.targetType || next.targetId) setNarrowOpen(true);
       return;
     }
-    save.mutate(form);
+    save.mutate({ f: form, target: endpoint, at: session.current });
   };
   const retrying = save.isPending && save.failureCount > 0 && isWebhookBusy(save.failureReason);
   const scopeInvalid = Boolean(errors.tenantId || errors.targetType || errors.targetId);
@@ -511,14 +515,24 @@ function RotateDialog({
 }) {
   const ids = useId();
   const [overlap, setOverlap] = useState<number>(86_400);
+  // Each endpoint starts at the recommended overlap, not at the last one picked for another.
+  const [shownFor, setShownFor] = useState<WebhookEndpoint | null>(null);
+  if (endpoint !== shownFor) {
+    setShownFor(endpoint);
+    if (endpoint) setOverlap(86_400);
+  }
   const rotate = useMutation({
-    mutationFn: async (e: WebhookEndpoint) => ({
+    mutationFn: async ({ e, seconds }: { e: WebhookEndpoint; seconds: number }) => ({
       endpoint: e,
-      secret: (await api.webhooks.rotateSecret(projectId, e.id, overlap)).secret,
-      overlapSeconds: overlap,
+      secret: (await api.webhooks.rotateSecret(projectId, e.id, seconds)).secret,
+      overlapSeconds: seconds,
     }),
     ...webhookRetry,
-    onSuccess: onRotated,
+    onSuccess: (result) => {
+      // The secret leaves the mutation's state at once: only the one-time dialog holds it.
+      rotate.reset();
+      onRotated(result);
+    },
     onError: (error) => toast.error('Could not rotate the secret', { description: webhookErrorCopy(error) }),
   });
   const retrying = rotate.isPending && rotate.failureCount > 0 && isWebhookBusy(rotate.failureReason);
@@ -549,7 +563,7 @@ function RotateDialog({
           <Button onClick={onClose} variant="ghost">
             Cancel
           </Button>
-          <Button disabled={rotate.isPending || !endpoint} onClick={() => endpoint && rotate.mutate(endpoint)}>
+          <Button disabled={rotate.isPending || !endpoint} onClick={() => endpoint && rotate.mutate({ e: endpoint, seconds: overlap })}>
             {rotate.isPending ? <Loader2Icon className="animate-spin" /> : null}
             {retrying ? 'Busy, retrying…' : 'Rotate secret'}
           </Button>
@@ -568,7 +582,7 @@ function SecretDialog({ issued, onClose }: { issued: Issued | null; onClose: () 
   const overlap = issued?.overlapSeconds ? OVERLAP_CHOICES.find((c) => c.seconds === issued.overlapSeconds)?.label : null;
   return (
     <Dialog onOpenChange={(next, details) => guard.guard(next, details) && (next ? undefined : close())} open={Boolean(issued)}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="grid-cols-1 sm:max-w-lg [&>*]:min-w-0">
         <DialogHeader>
           <DialogTitle>{issued?.overlapSeconds === null ? 'Endpoint added: copy its secret' : 'New secret: copy it now'}</DialogTitle>
           <DialogDescription>
@@ -578,8 +592,8 @@ function SecretDialog({ issued, onClose }: { issued: Issued | null; onClose: () 
         </DialogHeader>
         {issued ? (
           <>
-            <div className="flex items-center gap-2 rounded-lg border bg-muted/40 py-1.5 ps-3 pe-1.5">
-              <code className="min-w-0 flex-1 truncate font-mono text-[13px]" data-testid="one-time-secret">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border bg-muted/40 py-1.5 ps-3 pe-1.5">
+              <code className="min-w-0 flex-1 basis-40 truncate font-mono text-[13px]" data-testid="one-time-secret">
                 {issued.secret}
               </code>
               <CopyButton label="Copy secret" onCopied={guard.markCopied} showLabel value={issued.secret} variant="outline" />
@@ -601,7 +615,9 @@ function SecretDialog({ issued, onClose }: { issued: Issued | null; onClose: () 
           />
         ) : (
           <DialogFooter>
-            <Button onClick={close}>I have stored the secret</Button>
+            <Button className="whitespace-normal" onClick={close}>
+              I have stored the secret
+            </Button>
           </DialogFooter>
         )}
       </DialogContent>

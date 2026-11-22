@@ -78,3 +78,72 @@ export function webhookErrorCopy(error: unknown): string {
       return error.message;
   }
 }
+
+/* ---------------- the endpoint form ---------------- */
+
+export type Form = { url: string; description: string; filter: string; tenantId: string; targetType: string; targetId: string; enabled: boolean };
+export const formFrom = (e: WebhookEndpoint | null): Form => ({
+  url: e?.url ?? '',
+  description: e?.description ?? '',
+  filter: e?.filterQuery ?? '',
+  tenantId: e?.scope?.tenantId ?? '',
+  targetType: e?.scope?.target?.type ?? '',
+  targetId: e?.scope?.target?.id ?? '',
+  enabled: e?.enabled ?? true,
+});
+export type FormErrors = Partial<Record<keyof Form | 'form', string>>;
+
+/** The contract's limits, checked before sending, on the field that breaks them. */
+export function validateWebhookForm(f: Form): FormErrors {
+  const e: FormErrors = {};
+  const url = f.url.trim();
+  if (!url) e.url = 'Enter the URL Logbird should POST to.';
+  else if (!/^https?:\/\//i.test(url)) e.url = 'Start the URL with https://.';
+  else if (url.length > 2048) e.url = `The URL is ${url.length.toLocaleString()} characters; the most is 2,048.`;
+  if (f.description.trim().length > 1000)
+    e.description = `The description is ${f.description.trim().length.toLocaleString()} characters; the most is 1,000.`;
+  if (f.filter.trim().length > 4096) e.filter = `The filter is ${f.filter.trim().length.toLocaleString()} characters; the most is 4,096.`;
+  for (const [field, label] of [
+    ['tenantId', 'tenant id'],
+    ['targetType', 'record type'],
+    ['targetId', 'record id'],
+  ] as const) {
+    if (f[field].trim().length > 256) e[field] = `The ${label} is ${f[field].trim().length} characters; the most is 256.`;
+  }
+  const type = f.targetType.trim();
+  const id = f.targetId.trim();
+  // The missing half is the field that needs attention.
+  if (type && !id) e.targetId ??= 'Add the record’s id: a record needs both its type and its id.';
+  if (id && !type) e.targetType ??= 'Add the record’s type: a record needs both its type and its id.';
+  return e;
+}
+
+/** Field messages from a 422 validation_error whose details name the body field (zod issues). */
+export function fieldErrorsFromValidation(error: unknown): FormErrors {
+  if (!(error instanceof ApiRequestError) || error.code !== 'validation_error' || !Array.isArray(error.details)) return {};
+  const out: FormErrors = {};
+  const map: Record<string, keyof Form> = { url: 'url', description: 'description', filterQuery: 'filter' };
+  for (const issue of error.details as { path?: unknown[]; message?: string }[]) {
+    const [top, sub, leaf] = issue.path ?? [];
+    const field =
+      top === 'scope'
+        ? sub === 'tenantId'
+          ? 'tenantId'
+          : sub === 'target'
+            ? leaf === 'type'
+              ? 'targetType'
+              : 'targetId'
+            : 'tenantId'
+        : map[String(top)];
+    if (field && !out[field]) out[field] = issue.message || 'This value is not accepted.';
+  }
+  return out;
+}
+
+export const scopeOf = (f: Form) => {
+  const tenantId = f.tenantId.trim();
+  const type = f.targetType.trim();
+  const id = f.targetId.trim();
+  if (!tenantId && !type && !id) return null;
+  return { ...(tenantId ? { tenantId } : {}), ...(type && id ? { target: { type, id } } : {}) };
+};

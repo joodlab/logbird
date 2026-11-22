@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-/** Copy text to the clipboard; `copied` flips to true for `resetMs`. */
+/**
+ * Copy text to the clipboard; `copied` flips to true for `resetMs`. Resolves whether the copy happened: a blocked
+ * clipboard whose fallback also fails reports `false` (and shows no "Copied"), so a once-only secret is never treated
+ * as copied when it was not.
+ */
 export function useCopy(resetMs = 1600) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
@@ -9,6 +13,7 @@ export function useCopy(resetMs = 1600) {
 
   const copy = useCallback(
     async (text: string) => {
+      let ok = true;
       try {
         await navigator.clipboard.writeText(text);
       } catch {
@@ -20,9 +25,14 @@ export function useCopy(resetMs = 1600) {
         area.style.opacity = '0';
         document.body.append(area);
         area.select();
-        document.execCommand('copy');
+        try {
+          ok = document.execCommand('copy');
+        } catch {
+          ok = false;
+        }
         area.remove();
       }
+      if (!ok) return false;
       setCopied(true);
       window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => setCopied(false), resetMs);
