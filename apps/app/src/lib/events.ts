@@ -222,3 +222,10 @@ export function parentActor(parents: readonly Pick<AuditEvent, 'actor'>[]): NonN
   }
   return null;
 }
+
+/** Events directly caused by `eventId` (their `context.parentEventId`), oldest first. */
+export function directChildren(events: readonly AuditEvent[], eventId: string): AuditEvent[] {
+  return events
+    .filter((c) => c.context.parentEventId === eventId && c.id !== eventId)
+    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) || a.id.localeCompare(b.id));
+}

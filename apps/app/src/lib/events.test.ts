@@ -1,6 +1,6 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
-import { actorLabel, eventSentence, humanizeNoun } from './events';
+import { actorLabel, directChildren, eventSentence, humanizeNoun } from './events';
 
 function event(patch: Partial<AuditEvent>): AuditEvent {
   return {
@@ -199,4 +199,29 @@ it.each([
   ['export.failed', 'CSV export of QA Store stopped after 20 events (download canceled) (export 12345678)'],
 ])('renders the explicit %s export sentence', (action, description) => {
   expect(eventSentence(event({ action, description, actor: vera, targets: [{ type: 'project', id: 'p', name: 'QA Store' }] }))).toBe(description);
+});
+
+describe('directChildren', () => {
+  const at = (id: string, ts: string, parent?: string) =>
+    event({ id, timestamp: ts, context: { operationId: 'op_1', parentEventId: parent ?? '', requestId: '', traceId: '', ip: '', userAgent: '' } });
+
+  it('keeps only events whose parent is the given event, oldest first', () => {
+    const events = [
+      at('root', '2026-11-05T10:00:00.000Z'),
+      at('b', '2026-11-05T10:00:02.000Z', 'root'),
+      at('grandchild', '2026-11-05T10:00:03.000Z', 'b'),
+      at('a', '2026-11-05T10:00:01.000Z', 'root'),
+      at('sibling', '2026-11-05T10:00:01.500Z'),
+    ];
+    expect(directChildren(events, 'root').map((e) => e.id)).toEqual(['a', 'b']);
+  });
+
+  it('orders same-millisecond children by id and ignores a self-reference', () => {
+    const events = [
+      at('y', '2026-11-05T10:00:01.000Z', 'root'),
+      at('x', '2026-11-05T10:00:01.000Z', 'root'),
+      at('root', '2026-11-05T10:00:00.000Z', 'root'),
+    ];
+    expect(directChildren(events, 'root').map((e) => e.id)).toEqual(['x', 'y']);
+  });
 });

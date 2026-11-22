@@ -39,7 +39,7 @@ import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery, operationQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
-import { actorAttributeHint, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
+import { actorAttributeHint, directChildren, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
 import { formatTerm } from '@/lib/query-language';
 import { eventCurl } from '@/lib/snippets';
@@ -222,9 +222,7 @@ function ChildEvents({ detail, event: e, projectId, indent }: { detail: EventDet
   const operationId = e.context.operationId;
   const lookup = Boolean(operationId) && detail.operationSize <= CHILD_LOOKUP_MAX_OPERATION;
   const op = useQuery({ ...operationQuery(projectId, operationId ?? ''), enabled: lookup });
-  const children = (op.data ?? [])
-    .filter((c) => c.context.parentEventId === e.id && c.id !== e.id)
-    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) || a.id.localeCompare(b.id));
+  const children = directChildren(op.data ?? [], e.id);
   const shown = children.slice(0, CHILD_PREVIEW);
   // Children recorded under another operation (or none loaded) are still reachable by searching their parent id.
   const missing = detail.childCount - shown.length;
@@ -332,7 +330,7 @@ function KV({
           {copy ? (
             <CopyValue className={mono ? undefined : 'font-sans text-[13px]'} value={value} />
           ) : (
-            <span className={cn('break-all', mono && 'font-mono text-[12px]')}>{value}</span>
+            <span className={cn(mono ? 'break-all font-mono text-[12px]' : '[overflow-wrap:anywhere]')}>{value}</span>
           )}
         </span>
         <span className="flex items-center">{term ? <FilterButton onFilter={onFilter} term={term} /> : null}</span>
