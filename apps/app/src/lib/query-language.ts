@@ -185,11 +185,11 @@ export function canonicalField(field: string): string {
   return `attr.${field}`;
 }
 
-/** The server lexer splits on whitespace and `():[]{}<>`; values containing them (or starting like a regex) need quotes. */
-const NEEDS_QUOTES = /[\s()"\\:[\]{}<>*]|&&|\|\||^\/|^TO$|^$/;
+/** Keep plain IDs readable and quote values that can contain query syntax. */
+const PLAIN_VALUE = /^[A-Za-z0-9_.@][A-Za-z0-9_.@-]*$/;
 
 export function quoteIfNeeded(value: string): string {
-  return NEEDS_QUOTES.test(value) || OPERATORS.has(value) ? quoteQueryValue(value) : value;
+  return PLAIN_VALUE.test(value) && value !== 'TO' && !OPERATORS.has(value) ? value : quoteQueryValue(value);
 }
 
 export function formatTerm(field: string, value: string, negated = false): string {

@@ -406,3 +406,40 @@ describe('removeTerm with a unary NOT', () => {
     expect(removeTerm('NOT actor:x action:y', 'action')).toBe('NOT actor:x');
   });
 });
+
+describe('formatTerm', () => {
+  it('keeps plain ids plain and quotes everything else', () => {
+    expect(formatTerm('parent', 'evt_1')).toBe('parent:evt_1');
+    expect(formatTerm('operation', 'op with space')).toBe('operation:"op with space"');
+    expect(formatTerm('parent', 'TO')).toBe('parent:"TO"');
+    expect(formatTerm('id', 'a&&b')).toBe('id:"a&&b"');
+    expect(formatTerm('id', '-x')).toBe('id:"-x"');
+    expect(formatTerm('id', 'self', true)).toBe('-id:self');
+  });
+
+  it('escapes trailing stars alongside other punctuation and backslashes', () => {
+    expect(formatTerm('parent', 'batch*')).toBe(String.raw`parent:"batch\*"`);
+    expect(formatTerm('id', 'a.b/c(1)*')).toBe(String.raw`id:"a.b/c(1)\*"`);
+    expect(formatTerm('id', String.raw`job\1*`)).toBe(String.raw`id:"job\\1\*"`);
+  });
+
+  it.each([
+    'evt_1',
+    'TO',
+    'AND',
+    'a&&b',
+    'x||y',
+    '-x',
+    'op with space',
+    'with"quote',
+    String.raw`back\slash`,
+    'batch*',
+    'a.b/c(1)*',
+    String.raw`job\1*`,
+    'booking:bk_1',
+  ])('round-trips %s through the server compiler', (id) => {
+    const compiled = compileQuery(formatTerm('parent', id));
+    expect(compiled.params).toEqual({ q0: id });
+    expect(compiled.sql).toBe('(parent_event_id = {q0:String})');
+  });
+});
