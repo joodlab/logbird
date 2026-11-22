@@ -170,8 +170,19 @@ jobs:
           while IFS= read -r tag; do
             tag_args+=(--tag "$tag")
           done <<< "$TAGS"
-          docker buildx imagetools create --metadata-file index.json "${tag_args[@]}" "${sources[@]}"
-          digest=$(jq -er '."containerimage.descriptor".digest' index.json)
+          docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+
+          docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' > index.json
+          digest=$(jq -er '.digest' index.json)
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Invalid index digest for $IMAGE:$VERSION" >&2
+            exit 1
+          fi
+          platforms=$(jq -r '[.manifests[] | select(.platform.os == "linux") | .platform.architecture] | sort | join(",")' index.json)
+          if [[ "$platforms" != "amd64,arm64" ]]; then
+            echo "Expected linux/amd64 and linux/arm64 in $IMAGE:$VERSION, found: $platforms" >&2
+            exit 1
+          fi
           printf '%s:%s@%s\n' "$IMAGE" "$VERSION" "$digest" > "image-${{ matrix.role }}.txt"
       - uses: actions/upload-artifact@v7
         with:

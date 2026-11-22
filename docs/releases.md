@@ -98,7 +98,7 @@ then builds these four images on native `linux/amd64` (`ubuntu-latest`) and
 Each platform build pushes by digest with OCI source/version/revision/MIT license
 labels, an SBOM and maximum-mode BuildKit provenance. After the builds pass, a job
 per role reads the two digest artifacts and uses `docker buildx imagetools create`
-to publish an image index with X.Y.Z, X.Y and latest tags. X.Y and latest are moving
+to publish an image index with X.Y.Z, X.Y and latest tags, then inspects the published index and fails unless it holds both linux/amd64 and linux/arm64. X.Y and latest are moving
 aliases; pin exact versions or digests for controlled upgrades. Only publish
 releases in increasing version order, since older tags would move these aliases
 backwards. Never rebuild a completed published release under the same version.
