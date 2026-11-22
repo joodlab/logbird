@@ -196,11 +196,15 @@ export const api = {
   keys: {
     list: (projectId: string, signal?: AbortSignal) =>
       request(listOf(apiKeySchema), 'GET', pathFor(routes.keys.list.path, { projectId }), { signal }) as Promise<ApiKey[]>,
-    create: (projectId: string, body: { name: string; kind: 'ingest' | 'read' }) =>
+    create: (projectId: string, body: z.input<typeof createApiKeySchema>) =>
       request(createApiKeyResponseSchema, 'POST', pathFor(routes.keys.create.path, { projectId }), { body }),
     revoke: (projectId: string, keyId: string) => request(ok, 'DELETE', pathFor(routes.keys.revoke.path, { projectId, keyId })),
-    /** Replacement with the same name and kind; the old key stays valid until revoked. Secret returned once. */
-    roll: (projectId: string, keyId: string) => request(createApiKeyResponseSchema, 'POST', pathFor(routes.keys.roll.path, { projectId, keyId })),
+    /**
+     * Replacement with the same name, kind, scope and origins; the old key stays valid until revoked. Without
+     * `expiresAt` it keeps the old key's expiry (an expired key needs a new one: 409 `key_expired`). Secret returned once.
+     */
+    roll: (projectId: string, keyId: string, body: z.input<typeof rollApiKeySchema> = {}) =>
+      request(createApiKeyResponseSchema, 'POST', pathFor(routes.keys.roll.path, { projectId, keyId }), { body }),
   },
 
   events: {
