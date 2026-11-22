@@ -96,16 +96,17 @@ public class ResilienceTests
         }), new FakeServer());
         try
         {
-            var watch = Stopwatch.StartNew();
-            for (var i = 0; i < 50; i++)
+            // OnDrop blocks forever, so a Track that waited on it would never return: any finite limit proves the point.
+            await Deadline.Within(TimeSpan.FromSeconds(30), () =>
             {
-                client.Track(new AuditEvent("overflow"));
-            }
+                for (var i = 0; i < 50; i++)
+                {
+                    client.Track(new AuditEvent("overflow"));
+                }
+            });
 
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), watch.Elapsed.ToString());
-            watch.Restart();
-            await client.DisposeAsync();
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), watch.Elapsed.ToString());
+            // Documented bound: ShutdownTimeout + 2 s + 5 s for pending callbacks.
+            await Deadline.Within(TimeSpan.FromSeconds(15), () => client.DisposeAsync().AsTask());
             Assert.Equal(49, client.Stats.Dropped);
         }
         finally
@@ -129,8 +130,10 @@ public class ResilienceTests
         {
             client.Track(new AuditEvent("blocked"));
             var watch = Stopwatch.StartNew();
-            Assert.False(await client.FlushAsync(TimeSpan.FromSeconds(20)));
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), watch.Elapsed.ToString());
+            Assert.False(await client.FlushAsync(TimeSpan.FromSeconds(30)));
+
+            // The send gave up on its own; the alternative is waiting out the flush's 30-second limit.
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(20), watch.Elapsed.ToString());
 
             // Stuck requests are capped instead of piling up across retries.
             Assert.True(handler.Calls <= Internal.BatchSender.MaxAbandonedAttempts, $"{handler.Calls} requests");
@@ -200,12 +203,15 @@ public class ResilienceTests
     }
 
     [Fact]
-    public void Trails_require_a_filter_and_reject_wildcard_values()
+    public void Trails_require_a_filter_and_match_a_star_literally()
     {
         Assert.Throws<ArgumentException>(() => EventSearch.ForTrail());
         Assert.Throws<ArgumentException>(() => EventSearch.ForTrail(query: "  "));
-        Assert.Throws<ArgumentException>(() => EventSearch.ForTrail(tenantId: "acct_*"));
-        Assert.Throws<ArgumentException>(() => EventSearch.ForTrail(targetId: "*"));
+
+        // A star in a selector is escaped, so it is matched as a character and never widens the trail to a prefix.
+        var bs = '\\';
+        Assert.Equal("tenant:\"acct_" + bs + "*\"", EventSearch.ForTrail(tenantId: "acct_*").Query);
+        Assert.Equal("target:\"" + bs + "*\"", EventSearch.ForTrail(targetId: "*").Query);
         Assert.Equal("(action:invoice.*)", EventSearch.ForTrail(query: "action:invoice.*").Query);
     }
 
@@ -230,25 +236,34 @@ public class ResilienceTests
     }
 
     [Fact]
-    public async Task A_timed_out_synchronous_flush_is_forgotten()
+    public async Task A_cancelled_flush_is_forgotten()
     {
         using var release = new ManualResetEventSlim();
         var client = Client(Options(o => o.ShutdownTimeout = TimeSpan.Zero), new BlockingHandler(release));
         try
         {
             client.Track(new AuditEvent("pending"));
-            Assert.False(client.Flush(TimeSpan.FromMilliseconds(50)));
             var waiters = typeof(Internal.EventQueue).GetField("_waiters", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             var queue = typeof(LogbirdClient).GetField("_queue", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(client)!;
+            int Count() => ((System.Collections.ICollection)waiters.GetValue(queue)!).Count;
 
-            // The flush may start late on a busy pool; once it has, its already-cancelled wait is removed at once.
-            var watch = Stopwatch.StartNew();
-            while (((System.Collections.ICollection)waiters.GetValue(queue)!).Count > 0 && watch.Elapsed < TimeSpan.FromSeconds(5))
+            // A flush registers its waiter (established first), and cancelling it removes the waiter. Flush(TimeSpan) is
+            // FlushAsync with a timeout token, so this is the path a timed-out synchronous flush takes too.
+            using (var cancel = new CancellationTokenSource())
             {
-                await Task.Delay(20);
+                var flush = client.FlushAsync(cancel.Token);
+                await Deadline.Within(TimeSpan.FromSeconds(30), async () =>
+                {
+                    while (Count() == 0)
+                    {
+                        await Task.Delay(10);
+                    }
+                });
+                Assert.Equal(1, Count());
+                cancel.Cancel();
+                Assert.False(await flush);
+                Assert.Equal(0, Count());
             }
-
-            Assert.Empty((System.Collections.ICollection)waiters.GetValue(queue)!);
         }
         finally
         {

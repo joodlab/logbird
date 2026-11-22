@@ -170,9 +170,12 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
     ).toBe(201);
     expect((await request(owner.cookie, '/api/workspace/invite-links', 'POST', { role: 'member', maxUses: 1, expiresInDays: 7 })).status).toBe(201);
 
+    // The wrong codes actually submitted: none may be stored anywhere in an audit row.
+    const attemptedCodes = new Set<string>();
     for (const actor of actors) {
       const otp = await challenge(actor.email);
       const wrong = otp === '000000' ? '111111' : '000000';
+      attemptedCodes.add(wrong);
       for (let i = 0; i < 7; i++) {
         const failed = await request('', '/api/auth/sign-in/email-otp', 'POST', { email: actor.email, otp: wrong });
         expect([400, 403]).toContain(failed.status);
@@ -215,7 +218,12 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
       expect(row.metadata.emailHash).toMatch(/^[a-f0-9]{64}$/);
       expect(row.context.ip).toMatch(/^203\.0\.113\.8[0-2]$/);
       expect(row.targets[0].name).toMatch(/@example.test$/); // Stored member address is an allowed display fallback.
-      expect(JSON.stringify(row)).not.toContain('000000');
+      // Compare whole alphanumeric tokens of every stored value, not substrings of the serialized row: event ids embed
+      // the failure window's end in epoch milliseconds (a 13-digit token such as 1795377000000) and 64-character hex
+      // HMACs, either of which can contain "000000". A stored code is a token of its own (a value, or `otp=000000` in
+      // prose, also after a line break); values are split before any JSON escaping.
+      const tokens = valueTokens(row);
+      for (const code of attemptedCodes) expect(tokens, `audit row must not contain the attempted code ${code}`).not.toContain(code);
     }
     const exported = await request(owner.cookie, `${path}/export?format=jsonl`);
     expect(exported.status).toBe(200);
@@ -265,3 +273,11 @@ it('SECURITY-05/06/08/10 and OWNER-12: real auth, key, rename, retention and chi
     await prisma.user.deleteMany({ where: { id: { in: users } } });
   }
 }, 360_000);
+
+/** Every alphanumeric token of every string or number value in `value`, at any depth (keys included). */
+function valueTokens(value: unknown): string[] {
+  if (typeof value === 'string' || typeof value === 'number') return String(value).split(/[^A-Za-z0-9]+/);
+  if (Array.isArray(value)) return value.flatMap(valueTokens);
+  if (value && typeof value === 'object') return Object.entries(value).flatMap(([key, child]) => [...valueTokens(key), ...valueTokens(child)]);
+  return [];
+}

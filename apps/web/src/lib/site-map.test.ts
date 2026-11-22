@@ -22,6 +22,7 @@ it('keeps route files and manifest paths in exact parity', () => {
     'Developers',
     'Self-host',
     'Cloud',
+    'Pricing',
     'Open source',
     'Compare',
   ]);

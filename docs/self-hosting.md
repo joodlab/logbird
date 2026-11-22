@@ -3,13 +3,13 @@
 ## Five-minute quickstart
 
 Install Docker Engine and Compose >=2.24.4 (Linux containers). The default stack
-pulls the four published GHCR images for `LOGBIRD_VERSION=0.1.3`; it does not
+pulls the four published GHCR images for `LOGBIRD_VERSION=0.2.1`; it does not
 compile source. Images are available only after the corresponding tagged release
 finishes publishing. Check the [release page](https://github.com/joodlab/logbird/releases)
 before installing; release preparation in Git is not proof of registry availability.
 
 ```sh
-git clone --branch v0.1.3 https://github.com/joodlab/logbird.git
+git clone --branch v0.2.1 https://github.com/joodlab/logbird.git
 cd logbird
 sh scripts/selfhost-init.sh
 # Configure SMTP in .env, or explicitly set AUTH_LOG_SIGN_IN_CODES=true.
@@ -96,7 +96,7 @@ One .env.example serves source development and containers. Empty URL overrides l
 | INGEST_RATE_LIMIT_PER_MINUTE / READ_RATE_LIMIT_PER_MINUTE | 3000 / 1200 per project key (shared Redis limits) |
 | VIEWER_READ_RATE_LIMIT_PER_MINUTE / VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE | 300 per minting key and tenant (viewer-token reads, on top of the project read limit) / 600 viewer tokens minted per key. See [scoped read access](scoped-read-access.md) |
 | LOGBIRD_BIND / LOGBIRD_HTTP_PORT | 127.0.0.1 / 4600; only app is published |
-| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / 0.1.3; pulls `<registry>/logbird-<role>:<version>` |
+| LOGBIRD_IMAGE_REGISTRY / LOGBIRD_VERSION | ghcr.io/joodlab / 0.2.1; pulls `<registry>/logbird-<role>:<version>` |
 | LOGBIRD_SOURCE_VERSION | local; only the source-build override uses this tag |
 | LOGBIRD_DOMAIN / ACME_EMAIL | TLS hostname / optional ACME email |
 | NODE_ENV / PORT | Source development / 4601; containers force production and service ports |
@@ -266,8 +266,8 @@ instead of pulling, and the image-tag check doesn't apply.
    values and warns if the file still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird`
    namespace; remove that line so the default `ghcr.io/joodlab` applies. It keeps the
    existing `LOGBIRD_VERSION`, and that value overrides the new revision's Compose
-   default, so set it to the tested release without the `v` (tag `v0.2.0` means
-   `LOGBIRD_VERSION=0.2.0`). A `LOGBIRD_VERSION` or `LOGBIRD_IMAGE_REGISTRY` exported in
+   default, so set it to the tested release without the `v` (tag `v0.2.1` means
+   `LOGBIRD_VERSION=0.2.1`). A `LOGBIRD_VERSION` or `LOGBIRD_IMAGE_REGISTRY` exported in
    your shell overrides the env file: unset it, or set it to the same values. Run
    `docker compose config --images` with the installation's project, env-file and `-f`
    flags and check the full names: all four must be

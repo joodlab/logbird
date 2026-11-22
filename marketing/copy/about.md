@@ -12,9 +12,9 @@ path: /about
 - **eyebrow:** About
 - **heading (H1):** We built the audit log we needed.
 - **body:** Logbird started as the audit log a product team needed, where every support question begins the same
-  way: who changed this, and when? We wanted the answer to take one search, on servers we run ourselves. It's
-  MIT-licensed, and the source opens publicly soon, so any product team can do the same.
-  <!-- once WEB_GITHUB_PUBLIC=true: "We released it under the MIT licence so any product team can do the same." -->
+  way: who changed this, and when? We wanted the answer to take one search, on servers we run ourselves. We released
+  it under the MIT licence so any product team can do the same.
+  <!-- private build: "It's MIT-licensed, and the source opens publicly soon, so any product team can do the same." -->
   <!-- source: docs/SPEC.md intro (audience) and docs/roadmap.md intro -->
   <!-- owner-gated: org-name, origin-story. Only once the owner approves WEB_ORG_NAME and the origin story:
        "Logbird is built by {WEB_ORG_NAME}. It started as the audit log for a hotel-booking SaaS, where every support

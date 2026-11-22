@@ -49,6 +49,12 @@ internal sealed class BatchSender
     private readonly Action<QueuedEvent, DropReason, string?> _drop;
     private readonly Action<QueuedEvent, string> _warn;
     private readonly Action _progress;
+
+    // Settling and counting happen together (under the queue lock, see EventQueue.Settle), so a flush that sees an event
+    // settled also sees it counted; _drop then only notifies.
+    private readonly Action? _delivered;
+    private readonly Action<DropReason>? _countDrop;
+    private readonly Func<QueuedEvent, Action, bool> _settle;
     private int _abandonedAttempts;
     private readonly Action<Exception> _report;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
@@ -67,8 +73,23 @@ internal sealed class BatchSender
         Action<Exception> report,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         Func<double>? random = null,
-        Func<TimeSpan>? clock = null)
+        Func<TimeSpan>? clock = null,
+        Action? delivered = null,
+        Action<DropReason>? countDrop = null,
+        Func<QueuedEvent, Action, bool>? settle = null)
     {
+        _delivered = delivered;
+        _countDrop = countDrop;
+        _settle = settle ?? ((item, count) =>
+        {
+            if (!item.TrySettle())
+            {
+                return false;
+            }
+
+            count();
+            return true;
+        });
         _http = http;
         _eventsUri = EventsUri(endpoint);
         _authorization = new AuthenticationHeaderValue("Bearer", ingestKey);
@@ -102,7 +123,7 @@ internal sealed class BatchSender
 
     public async Task<SendResult> SendAsync(QueuedEvent[] batch, CancellationToken stop)
     {
-        var state = new State(batch);
+        var state = new State(batch, _settle, _delivered, _countDrop);
         try
         {
             return await SendCoreAsync(state, stop).ConfigureAwait(false);
@@ -270,7 +291,7 @@ internal sealed class BatchSender
                 {
                     foreach (var index in state.PendingIndices())
                     {
-                        if (!state.TryReject(index))
+                        if (!state.TryReject(index, DropReason.HttpError))
                         {
                             continue;
                         }
@@ -292,7 +313,7 @@ internal sealed class BatchSender
                         var count = 0;
                         foreach (var index in state.PendingIndices())
                         {
-                            if (state.TryReject(index))
+                            if (state.TryReject(index, DropReason.Unacknowledged))
                             {
                                 count++;
                                 _drop(batch[index], DropReason.Unacknowledged, "The server answered HTTP " + status.ToString(CultureInfo.InvariantCulture) + " without acknowledging the event.");
@@ -512,7 +533,7 @@ internal sealed class BatchSender
             var reason = Text(reasonElement);
             var code = rejection.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String ? SafeCode(Text(codeElement)) : "other";
             var index = attempt[(int)wire];
-            if (!state.TryReject(index))
+            if (!state.TryReject(index, DropReason.Rejected))
             {
                 continue;
             }
@@ -785,7 +806,7 @@ internal sealed class BatchSender
     }
 
     /// <summary>Per-batch view over the events' own atomic states, so shutdown can take ownership of an event at any time.</summary>
-    private sealed class State(QueuedEvent[] batch)
+    private sealed class State(QueuedEvent[] batch, Func<QueuedEvent, Action, bool> settle, Action? onDelivered, Action<DropReason>? countDrop)
     {
         private readonly bool[] _deliveredHere = new bool[batch.Length];
 
@@ -796,11 +817,11 @@ internal sealed class BatchSender
         public bool IsSettled(long index) => !Batch[index].IsPending;
 
         /// <summary>Settles an event as rejected or dropped. False when it was already settled or abandoned by shutdown.</summary>
-        public bool TryReject(int index) => Batch[index].TrySettle();
+        public bool TryReject(int index, DropReason reason) => settle(Batch[index], () => countDrop?.Invoke(reason));
 
         public void Deliver(int index)
         {
-            if (Batch[index].TrySettle())
+            if (settle(Batch[index], () => onDelivered?.Invoke()))
             {
                 _delivered++;
                 _deliveredHere[index] = true;

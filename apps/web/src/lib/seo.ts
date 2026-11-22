@@ -9,14 +9,17 @@ export function pageMeta({
   path,
   type = 'website',
   ogSlug = 'home',
+  fullTitle: givenTitle,
 }: {
   title: string;
   description: string;
   path: string;
   type?: 'website' | 'article';
   ogSlug?: string;
+  /** The whole <title>, when the page sets its own (home: content/home.ts); otherwise "<title> · Logbird". */
+  fullTitle?: string;
 }) {
-  const fullTitle = path === '/' ? 'Logbird — open-source audit logs for your product' : `${title} · Logbird`;
+  const fullTitle = givenTitle ?? `${title} · Logbird`;
   const image = canonicalHref(`/og/${ogSlug}.png`);
   return [
     { title: fullTitle },

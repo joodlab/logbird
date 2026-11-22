@@ -4,6 +4,9 @@ Send audit events from your Node backend after an authorized business operation
 commits. Keep credentials on the server. Start with a few meaningful actions and
 verify their stored contents before expanding coverage.
 
+Using C# and .NET? Start with [Logbird for .NET](sdk-dotnet.md); the advice below on
+what to record and how to model events applies to it too.
+
 ## Configure delivery
 
 Create a project and ingest key in Logbird. Set these server environment variables:

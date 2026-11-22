@@ -21,9 +21,8 @@ path: /self-hosting
   own servers. It's the same codebase Logbird Cloud will run.
   <!-- source: LICENSE; docs/SPEC.md intro ("one codebase, self-host or cloud") -->
 - **cta:** Quickstart ↓ `#quickstart` (public repo only) · Join the Cloud waitlist → `/contact`
-- **small print:** Source on GitHub — coming soon. Once `WEB_GITHUB_PUBLIC=true`: "Compose pulls the published
-  `<latest release>` images for amd64 and arm64 from GHCR." (No release yet: "Nothing has been released yet.")
-  <!-- when WEB_GITHUB_PUBLIC=true: drop "Source on GitHub — coming soon." -->
+- **small print:** Compose pulls the published `<latest release>` images for amd64 and arm64 from GHCR.
+  <!-- private build: "Source on GitHub — coming soon."; no release yet: "Nothing has been released yet." -->
 - **visual:** a diagram of the Compose stack (console, api, worker, postgres, clickhouse, redis). The 2026-11-05
   self-hosting captures show the old name and a real key prefix, so they aren't used.
 
@@ -54,7 +53,7 @@ path: /self-hosting
   1. Open `http://localhost:4600` and sign in with the code sent to your email, or printed in the server log if you set
      `AUTH_LOG_SIGN_IN_CODES=true`.
   2. Create a workspace and a project. Copy the ingest key; it's shown once.
-  3. Set `LOGBIRD_INGEST_KEY` to the key you just copied, and send an event:
+  3. Set LOGBIRD_INGEST_KEY to the key you just copied, and send an event with the request on the right.
 
      ```sh
      curl http://localhost:4600/v1/events \
@@ -66,6 +65,8 @@ path: /self-hosting
   4. Expect `202`, and the event in the explorer.
 - **bullets:**
   - The init script generates the secrets it needs and never overwrites values you've set.
+  - Need unreleased code or a custom build? The self-hosting guide covers building from source, every setting, TLS,
+    backups and restores.
   - `/livez` checks the API process; `/readyz` checks Postgres, ClickHouse and Redis.
 - **visual:** none. The quickstart code renders only once `WEB_GITHUB_PUBLIC=true`; until then a "published when the
   repository opens" panel.
@@ -79,12 +80,13 @@ path: /self-hosting
   - A Linux host, or any machine that runs Linux containers, with Docker Engine and Compose 2.24.4 or newer.
   - An SMTP provider for sign-in codes and invitations, for example Amazon SES, Postmark or Brevo.
   - A domain and ports 80 and 443 if you want automatic HTTPS.
-  - **Starting size:** 4 vCPU, 8 GB RAM and SSD storage. That's an initial allocation, not measured capacity. Leave disk
+  - **Starting size:** 4 vCPU, 8 GB RAM and SSD storage. That is an initial allocation, not measured capacity. Leave disk
     for images as well as your data, ClickHouse merges and backups; building from source needs more headroom still.
-  - **Access:** sign-up is open: anyone who can reach the console can create an account and a workspace. Keep it private
-    while you evaluate, or restrict who can reach it.
+  - **Access:** Sign-up is open by default: anyone who can reach the console can create an account. On an
+    internet-facing instance, set `AUTH_SIGNUP=restricted` with your email domains; invitations keep working.
   <!-- source: docs/self-hosting.md §SMTP and first login, §Caddy TLS, §Sizing, §Five-minute quickstart (after #51) -->
-- **visual:** none
+- **visual:** diagram: the architecture at a glance (moved from home), from `apps/web/src/content/architecture.ts`.
+  <!-- source: README.md §Architecture; docs/SPEC.md §2, §4 -->
 
 ## options
 
@@ -97,15 +99,15 @@ path: /self-hosting
      the API and worker start.
      <!-- source: docs/self-hosting.md; docs/deployment.md -->
   2. **Coolify.** Point Coolify's Docker Compose build pack at `docker-compose.coolify.yml`. Coolify generates the
-     secrets, pulls the published images (before the first release, it builds them once you add
-     `docker-compose.build.yml`; see the Coolify guide) and routes your domain to the console.
+     secrets, pulls the published images and routes your domain to the console. <!-- no release yet: "builds the images
+     once you add docker-compose.build.yml (see the Coolify guide)" -->
      <!-- source: docs/coolify.md -->
   3. **Bring your own databases.** Use your own Postgres, ClickHouse and Redis (or Dragonfly) with
      `docker-compose.external.yml`. Use ClickHouse 26.9. Logbird creates its own restricted query user
      and row policies.
      <!-- source: docs/self-hosting.md §External services -->
-- **limit line:** Coolify setup is documented and checked against a local simulation. It hasn't been tested on a
-  live Coolify server yet. <!-- source: docs/coolify.md §Sources and validation limits -->
+- **limit line:** Step by step in the Coolify guide. Upgrades and restores through Coolify are documented but not yet
+  verified end to end. <!-- source: docs/coolify.md §Sources and validation limits -->
 - **visual:** diagram: three cards side by side, each a small stack. "Bundled": a box labelled `docker compose` holding
   console, API, worker, Postgres, ClickHouse, Redis. "Coolify": the same stack under a Coolify proxy. "External": the
   console, API and worker in Compose, with arrows out to three external databases.
@@ -148,13 +150,13 @@ path: /self-hosting
 - **eyebrow:** Upgrades and backups
 - **heading:** Upgrade to a pinned release, after a backup.
 - **steps:**
-  1. Stop writes: run every command in these steps with the installation's own Compose project, env file, `-f` files
+  1. **Stop writes.** Run every command in these steps with the installation's own Compose project, env file, `-f` files
      and profile (after a restore cutover, the restored project's). Block ingress and stop the console, server and worker. The worker gets five minutes to finish its
      current job: wait for the stop to complete, and check its logs if it had to be killed.
-  2. Back up, with writers stopped: matched Postgres (`pg_dump`) and ClickHouse (`BACKUP DATABASE`) backups and a
+  2. **Back up.** With writers stopped: matched Postgres (`pg_dump`) and ClickHouse (`BACKUP DATABASE`) backups and a
      SHA-256 checksum file. Keep the original env file; record the Git revision (`git rev-parse HEAD`) and the images
      (`docker compose images`).
-  3. Pin the new version: check out the release tag `vX.Y.Z`, then set `LOGBIRD_VERSION=X.Y.Z`, without the `v`, in
+  3. **Pin the new version.** Check out the release tag `vX.Y.Z`, then set `LOGBIRD_VERSION=X.Y.Z`, without the `v`, in
      the env file the installation runs with (`.env`, or the one you cut over to after a restore): its value overrides
      the Compose default, and a `LOGBIRD_VERSION` or `LOGBIRD_IMAGE_REGISTRY` exported in your shell overrides the env
      file (unset it). Run `docker compose config --images` and check the full names: all four must be
@@ -163,13 +165,13 @@ path: /self-hosting
      check doesn't apply.
   4. `docker compose pull` (skip it for a source build), then `docker compose up -d --no-build`. Migrations run first; if one fails, the new
      version doesn't start.
-  5. Verify readiness, sign-in, your events, settings and keys, and the retention runs before reopening ingress.
+  5. **Verify.** Readiness, sign-in, your events, settings and keys, and the retention runs, before you reopen ingress.
 - **bullets:**
   - `docker compose down` keeps your data. `docker compose down -v` permanently deletes the Compose-managed volumes,
     which hold the bundled Postgres, ClickHouse and Redis data.
   - Restore into empty, separate storage first, and check counts before you switch over.
   <!-- source: docs/self-hosting.md §Upgrades and backups -->
-- **cta:** Full self-hosting guide → `docs/self-hosting.md` (repo doc; link target pending)
+<!-- planned call to action, not on the page yet: Full self-hosting guide → docs/self-hosting.md -->
 - **visual:** none
 
 ## not-yet

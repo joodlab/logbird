@@ -153,7 +153,7 @@ path: /security
 - **id:** `reporting`
 - **eyebrow:** Responsible disclosure
 - **heading:** Report a vulnerability privately.
-- **body:** Please don't post details in a public issue. Email the security contact below. Include the affected
+- **body:** Please don't post details in a public issue. Email <security contact>. Include the affected
   version, a reproduction using fictional data, and the impact. We'll coordinate the fix and the disclosure with
   you. We don't offer a response-time SLA yet.
   <!-- site rule: the site names only the security email, never a GitHub reporting flow -->

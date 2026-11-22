@@ -1,0 +1,20 @@
+{"input":{"target":{"id":"inv_1001"}},"q":"target:\"inv_1001\""}
+{"input":{"target":{"type":"invoice","id":"inv_1001"}},"q":"record:\"invoice:inv_1001\""}
+{"input":{"target":{"type":"invoice","id":"inv\t1001\nline"}},"q":"record:\"invoice:inv\t1001\nline\""}
+{"input":{"target":{"type":"note","id":"carriage\rreturn"}},"q":"record:\"note:carriage\\rreturn\""}
+{"input":{"target":{"type":"quote\"type","id":"a \"quoted\" id"}},"q":"record:\"quote\\\"type:a \\\"quoted\\\" id\""}
+{"input":{"target":{"type":"back\\slash","id":"c:\\path\\to"}},"q":"record:\"back\\\\\\\\slash:c:\\\\path\\\\to\""}
+{"input":{"target":{"type":"ns:kind","id":"x:y:z"}},"q":"record:\"ns\\\\:kind:x:y:z\""}
+{"input":{"target":{"type":"star*","id":"prefix*"}},"q":"record:\"star\\*:prefix\\*\""}
+{"input":{"target":{"type":"فاتورة","id":"رقم-١"}},"q":"record:\"فاتورة:رقم-١\""}
+{"input":{"target":{"type":"請求書","id":"番号 7 ✓"}},"q":"record:\"請求書:番号 7 ✓\""}
+{"input":{"target":{"type":"𝄞clef","id":"emoji-😀-𠀀"}},"q":"record:\"𝄞clef:emoji-😀-𠀀\""}
+{"input":{"actor":"user-🎉"},"q":"actor:\"user-🎉\""}
+{"input":{"target":{"id":"inv_1"},"q":"  "},"q":"target:\"inv_1\""}
+{"input":{"actor":"user_42"},"q":"actor:\"user_42\""}
+{"input":{"actor":"user\t\"42\"\\*"},"q":"actor:\"user\t\\\"42\\\"\\\\\\*\""}
+{"input":{"tenant":"acct_*"},"q":"tenant:\"acct_\\*\""}
+{"input":{"tenant":"شركة\nخيالية"},"q":"tenant:\"شركة\nخيالية\""}
+{"input":{"target":{"type":"invoice","id":"inv_1"},"actor":"user_42","tenant":"acct_7"},"q":"record:\"invoice:inv_1\" AND actor:\"user_42\" AND tenant:\"acct_7\""}
+{"input":{"q":"action:invoice.* OR action:payment.*","target":{"id":"inv_1"}},"q":"(action:invoice.* OR action:payment.*) AND target:\"inv_1\""}
+{"input":{"q":"outcome:failure","target":{"type":"invoice","id":"inv_1"},"actor":"u","tenant":"t"},"q":"(outcome:failure) AND record:\"invoice:inv_1\" AND actor:\"u\" AND tenant:\"t\""}

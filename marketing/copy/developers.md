@@ -13,7 +13,6 @@ path: /developers
 - **heading (H1):** Add an audit log in an afternoon. Keep it for years.
 - **body:** Send events over HTTP or with the TypeScript SDK. Only `action` is required, so you can start with one line
   and fill in the envelope as you go. This page covers the SDK, the envelope, workers, delivery guarantees and limits.
-  The full API reference is served by your own Logbird server at `/docs`.
 - **cta:** Quickstart ↓ `#quickstart` · Self-host a server → `/self-hosting`
 - **visual:** none
 
@@ -75,7 +74,7 @@ path: /developers
   - Call `shutdown()` from your host's own exit hook. The SDK installs no process handlers.
   - Keep ingest keys on the server. Never ship one in a browser bundle.
   <!-- source: packages/sdk/README.md; docs/integrations.md §Design -->
-- **side note ("Redaction"):** `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys,
+- **side note ("Redaction"):** **Redaction:** `beforeSend: redact()` deep-copies each event and replaces passwords, tokens, API keys,
   cookies and similar keys with `[redacted]` before sending. Add your own patterns for email or phone numbers; the
   default list covers secrets, not all personal data.
   <!-- source: packages/sdk/README.md §Host context options -->
@@ -130,8 +129,8 @@ path: /developers
   - **When support acts for a customer,** the customer stays the actor and the staff member goes in `impersonator`.
   - **Never send secrets in `changes`.** Send `"[redacted]"` to record that a secret changed.
   - **Everything else is kept.** Custom top-level keys and anything under `metadata` stay in the event's JSON and are
-    indexed as searchable attributes, for example `metadata.channel:whatsapp`: up to 256 per event, 6 levels deep, and
-    text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON).
+    indexed as searchable attributes, for example `metadata.channel:whatsapp`: up to 256 custom attributes per event, 6
+    levels deep, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON).
 - **worked example (condensed):** "Lina cancels booking #1042. The API records the cancellation and queues a refund.
   The refund worker fails once, then succeeds on attempt 2."
 
@@ -160,7 +159,7 @@ path: /developers
 
   Caption: "Both events land on Lina's page, Azure Hotels' page and booking bk_1042's page. The operation page shows
   the refund nested under the cancellation." <!-- source: docs/concepts.md §Worked example -->
-- **cta:** Full concepts guide → `docs/concepts.md` (repo doc; link target pending, see `README.md`)
+<!-- planned call to action, not on the page yet: Full concepts guide → docs/concepts.md -->
 - **visual:** diagram: a two-node tree. Top node "booking.cancelled · API server · Lina Haddad"; child node
   "payment.refunded · Refunds worker · attempt 2". Both sit inside a box labelled `op_cancel_bk_1042`. To the right, three
   chips show where the events appear: "Actors: Lina Haddad", "Tenants: Azure Hotels", "Records: booking:bk_1042".
@@ -213,8 +212,8 @@ path: /developers
     authenticated backend, with loading, error, refresh and load-more states.
   - **Nuxt** (`@logbird/nuxt`): a Nitro plugin adds `event.context.audit`. A built-in history route denies every
     request until your `authorize(event, query)` hook returns a trusted query.
-- **limit line:** Express, Next.js, Laravel and Django are planned. We'll add them when we use those stacks
-  ourselves. <!-- source: docs/integrations.md (intro) -->
+- **limit line:** There are no Express, Next.js, Laravel or Django integrations. Use the TypeScript SDK or plain HTTP from
+  those stacks. <!-- source: docs/integrations.md (intro). Not on docs/roadmap.md, so not called planned. -->
 - **visual:** code sample
 
 ## workers
@@ -281,8 +280,6 @@ path: /developers
 - **heading:** The numbers to design around.
 - **table:**
 
-  | Limit | Value |
-  | --- | --- |
   | Events per request | 1 to 1000 |
   | Request size | 5 MB |
   | Event size | 256 KB |
@@ -328,7 +325,7 @@ path: /developers
 
 - **limit line:** A read key can read the whole project. A query filter is not authorization: your backend must
   check the tenant and record on every request, including each next page. The read API accepts the query language,
-  not SQL mode. Tenant-scoped read tokens are on the roadmap.
+  not SQL mode. <!-- Scoped read access (0.2.0) is not described here until the maintainer confirms its production proof. -->
   <!-- source: docs/integrations.md §Design; docs/query-language.md; docs/roadmap.md P1-1 -->
 - **visual:** code sample
 
@@ -338,7 +335,7 @@ path: /developers
 - **eyebrow:** API reference
 - **heading:** Your server documents itself.
 - **body:** Every Logbird server serves its OpenAPI document at `/openapi.json` and an interactive reference
-  (Scalar) at `/docs`, so the reference always matches the version you run. The API listener stays on the private
+  at `/docs`, so the reference always matches the version you run. The API listener stays on the private
   network; your public origin forwards `/api`, `/v1`, the health checks and these two read-only reference paths, and
   nothing else. Open `https://your-logbird-origin/docs`, or `localhost:4600/docs` when you run locally.
   <!-- source: docs/SPEC.md §2, §5; docs/decisions.md (2026-11-08); apps/server/src/app.ts (/docs, /openapi.json); apps/app/server/proxy-paths.ts (proxies /api, /v1, /health, /livez, /readyz, /docs, /openapi.json only) -->
