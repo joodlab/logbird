@@ -33,6 +33,7 @@ export async function webhookEvent(ch: ClickHouseClient, endpoint: EndpointScope
       ORDER BY timestamp LIMIT 1`,
     { ...match.params, id: eventId, from: receivedAt.toISOString() },
   );
+  // The public projection keeps stored attribute text exact, including integers beyond JavaScript's safe range.
   return row ? toEvent(row) : null;
 }
 

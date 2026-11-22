@@ -1,9 +1,15 @@
 import { createHmac, randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import { createServer, type IncomingHttpHeaders } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { createWebhookResponseSchema, listWebhooksResponseSchema, MAX_WEBHOOK_ENDPOINTS, webhookEndpointSchema } from '@logbird/contracts';
 import { prisma } from '@logbird/database';
 import { decryptWebhookSecret, type WebhookLookup, webhookSecretKey } from '@logbird/database/webhooks';
+import { verifyWebhook } from '@logbird/sdk';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { deliverWebhooks } from '../../worker/src/webhook-delivery';
 import { app } from './app';
+import { clickhouse } from './clickhouse';
 import { env } from './env';
 
 const control = vi.hoisted(() => ({ failAudit: false, lookup: undefined as WebhookLookup | undefined }));
@@ -131,8 +137,8 @@ it('creates, lists, reads, patches and deletes configuration; exposes the encryp
   expect(await prisma.webhookSecret.count({ where: { endpointId: endpoint.id } })).toBe(0);
 });
 
-it('queues synthetic pings and resends and restricts delivery logs to project owners and admins', async () => {
-  const { endpoint } = await create();
+it('sends an API test ping and resend with the same signed ID and protects the delivery log', async () => {
+  const { endpoint, secret } = await create();
   const path = `${base()}/${endpoint.id}`;
   expect((await request(`${path}/test`, 'POST', undefined, 'member')).status).toBe(403);
   expect((await request(`${path}/deliveries`, 'GET', undefined, 'member')).status).toBe(403);
@@ -147,10 +153,62 @@ it('queues synthetic pings and resends and restricts delivery logs to project ow
   const resend = `${path}/deliveries/${ping.id}/resend`;
   expect((await request(resend, 'POST')).status).toBe(409);
   expect((await request(resend, 'POST', undefined, 'member')).status).toBe(403);
-  await prisma.webhookDelivery.update({ where: { id: ping.id }, data: { status: 'succeeded', nextAttemptAt: null } });
-  const requeued = await request(resend, 'POST');
-  expect(requeued.status).toBe(202);
-  expect(await requeued.json()).toEqual(ping);
+  const received: { headers: IncomingHttpHeaders; payload: string }[] = [];
+  const receiver = createServer((req, res) => {
+    req.setEncoding('utf8');
+    let payload = '';
+    req.on('data', (chunk) => {
+      payload += chunk;
+    });
+    req.on('end', () => {
+      received.push({ headers: req.headers, payload });
+      res.writeHead(204).end();
+    });
+  });
+  try {
+    receiver.listen(0, '127.0.0.1');
+    await once(receiver, 'listening');
+    const { port } = receiver.address() as AddressInfo;
+    // Pin only the local receiver in this fixture. Production saves and sends retain their address policies.
+    await prisma.webhookEndpoint.update({ where: { id: endpoint.id }, data: { url: `http://127.0.0.1:${port}/test` } });
+    const send = () =>
+      deliverWebhooks(
+        clickhouse,
+        {
+          secretKey: webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY),
+          concurrency: 1,
+          perEndpoint: 1,
+          failureLimit: 50,
+          transport: { allowHttp: true, allowAddress: (address) => address === '127.0.0.1' },
+        },
+        projectId,
+      );
+    await send();
+    const requeued = await request(resend, 'POST');
+    expect(requeued.status).toBe(202);
+    expect(await requeued.json()).toEqual(ping);
+    await send();
+    expect(received).toHaveLength(2);
+    for (const message of received) {
+      expect(message.headers['webhook-id']).toBe(ping.eventId);
+      expect(await verifyWebhook({ ...message, secret })).toMatchObject({ id: ping.eventId, action: 'logbird.webhook.test' });
+    }
+    const completed = await request(`${path}/deliveries?status=succeeded`);
+    expect(await completed.json()).toMatchObject({
+      data: [
+        {
+          id: ping.id,
+          attempts: [
+            { number: 1, responseCode: 204 },
+            { number: 2, responseCode: 204 },
+          ],
+        },
+      ],
+    });
+  } finally {
+    receiver.closeAllConnections();
+    await new Promise<void>((resolve) => receiver.close(() => resolve()));
+  }
   expect((await request(`/api/projects/${siblingId}/webhooks/${endpoint.id}/deliveries`)).status).toBe(404);
   expect(
     await prisma.auditOutbox.count({

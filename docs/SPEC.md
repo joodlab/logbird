@@ -463,7 +463,8 @@ current scope and filter before sending an event. Events removed from storage or
 excluded by a new scope finish with `event_unavailable`.
 
 Each POST body is the public event shape returned in `/v1/events/:id`'s
-`event`. The worker signs the exact bytes with the Standard Webhooks headers
+`event`. It is built from stored event columns, which preserve exact attribute
+text such as large numeric identifiers. The worker signs the exact bytes with the Standard Webhooks headers
 `webhook-id`, `webhook-timestamp` (Unix seconds), and `webhook-signature`.
 Rotation overlap defaults to 86400 seconds, with integer bounds 0–604800.
 Every non-expired secret contributes a space-separated `v1,<base64>`
