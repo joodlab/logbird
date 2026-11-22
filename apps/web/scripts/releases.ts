@@ -26,13 +26,124 @@ export function githubRepo(url: string | undefined): string | undefined {
   return hostname === 'github.com' && match ? `${match[1]}/${match[2]}` : undefined;
 }
 
-/** The bullets under `### Highlights` in CHANGELOG.md's `## <version>` section (empty when there are none). */
-/**
- * Markdown links reduced to their text. The site's highlight renderer (Rich) has no links, and each release already
- * links to its full notes, so `[upgrade notes](https://…)` would otherwise show as raw markdown.
- */
-const withoutLinks = (text: string) => text.replace(/\[([^\]]+)\]\([^)\s]+\)/g, '$1');
+/** Deepest `[` nesting the link scanner follows; a deeper label is copied as written. */
+const MAX_LINK_DEPTH = 8;
 
+/** Index just past the code span that opens at `start` (a run of backticks), or -1 when the run is never closed. */
+function codeSpanEnd(text: string, start: number): number {
+  let run = start;
+  while (text[run] === '`') {
+    run += 1;
+  }
+  const length = run - start;
+  let at = run;
+  while (at < text.length) {
+    if (text[at] !== '`') {
+      at += 1;
+      continue;
+    }
+    let end = at;
+    while (text[end] === '`') {
+      end += 1;
+    }
+    if (end - at === length) {
+      return end;
+    }
+    at = end;
+  }
+  return -1;
+}
+
+/** Index of the `close` that balances the `open` at `start` (code spans skipped), or -1. */
+function balancedEnd(text: string, start: number, open: string, close: string): number {
+  let depth = 0;
+  for (let at = start; at < text.length; at++) {
+    const char = text[at];
+    if (char === '\\') {
+      at += 1;
+    } else if (char === '`' && open === '[') {
+      const end = codeSpanEnd(text, at);
+      if (end > 0) {
+        at = end - 1;
+      }
+    } else if (char === open) {
+      depth += 1;
+    } else if (char === close) {
+      depth -= 1;
+      if (depth === 0) {
+        return at;
+      }
+    }
+  }
+  return -1;
+}
+
+/**
+ * Markdown links and images reduced to their text. The site's highlight renderer (Rich) shows only code spans, bold
+ * and emphasis, and each release already links to its full notes, so `[upgrade notes](https://…)` would otherwise
+ * show as raw markdown.
+ *
+ * Supported, by a deliberately bounded scanner (at most {@link MAX_LINK_DEPTH} nested labels; highlights are single
+ * lines of our own CHANGELOG.md):
+ * inline links `[text](url "title")` with balanced parentheses in the URL, reference links `[text][ref]`, images
+ * `![alt](url)` (their alt text), labels with balanced brackets or nested links, and autolinks `<https://…>`. Code spans
+ * are copied unchanged, so a bracket inside backticks is never a link. Anything else, including an unbalanced bracket,
+ * is copied as written.
+ */
+export function withoutLinks(text: string, depth = 0): string {
+  let out = '';
+  let at = 0;
+  while (at < text.length) {
+    const char = text[at] ?? '';
+    if (char === '\\') {
+      out += text.slice(at, at + 2);
+      at += 2;
+      continue;
+    }
+    if (char === '`') {
+      const end = codeSpanEnd(text, at);
+      if (end > 0) {
+        out += text.slice(at, end);
+        at = end;
+        continue;
+      }
+      let run = at;
+      while (text[run] === '`') {
+        run += 1;
+      }
+      out += text.slice(at, run);
+      at = run;
+      continue;
+    }
+    if (char === '<') {
+      const autolink = /^<([a-z][a-z0-9+.-]{1,31}:[^\s<>]*)>/i.exec(text.slice(at));
+      if (autolink?.[1]) {
+        out += autolink[1];
+        at += autolink[0].length;
+        continue;
+      }
+    }
+    const image = char === '!' && text[at + 1] === '[';
+    const labelStart = image ? at + 1 : at;
+    if ((char === '[' || image) && depth < MAX_LINK_DEPTH) {
+      const labelEnd = balancedEnd(text, labelStart, '[', ']');
+      const next = labelEnd > 0 ? text[labelEnd + 1] : undefined;
+      const targetEnd = next === '(' ? balancedEnd(text, labelEnd + 1, '(', ')') : next === '[' ? balancedEnd(text, labelEnd + 1, '[', ']') : -1;
+      const target = targetEnd > 0 ? text.slice(labelEnd + 2, targetEnd) : undefined;
+      const validTarget = target !== undefined && (next === '[' || /^\s*\S*(\s+("[^"]*"|'[^']*'|\([^)]*\)))?\s*$/.test(target));
+      if (validTarget) {
+        out += withoutLinks(text.slice(labelStart + 1, labelEnd), depth + 1);
+        at = targetEnd + 1;
+        continue;
+      }
+    }
+    out += char;
+    at += 1;
+  }
+  return out;
+}
+
+/** The bullets under `### Highlights` in CHANGELOG.md's `## <version>` section (empty when there are none). */
 export function changelogHighlights(markdown: string, version: string): string[] {
   const lines = markdown.split(/\r?\n/);
   const start = lines.findIndex((line) => line.trim() === `## ${version}`);

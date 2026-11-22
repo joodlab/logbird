@@ -180,16 +180,18 @@ path: /
 - **eyebrow:** Guarantees and limits
 - **heading:** What Logbird promises, and where the promise ends.
 - **bullets (two columns: "We guarantee" / "The limit")**
-  - A `202` means the event is stored in ClickHouse. / Delivery is at least once. A resent id is stored once; an event
-    sent without an id gets a new one on every retry. <!-- source: docs/SPEC.md §2, §3; docs/concepts.md -->
+  - A `202` lists the stored event IDs in `ids` and rejected events in `rejected`. / Delivery is at least once. An
+    exact retry with the same string `id` is stored once within a project; changed content under that id is rejected
+    with `duplicate_id_conflict`. An event sent without an id gets a new one on every retry. <!-- source: docs/SPEC.md §2, §3; docs/concepts.md -->
   - The SDK batches and retries for you. / Its queue is in memory: a crash before the server acknowledges can lose
     pending events. <!-- source: packages/sdk/README.md -->
-  - Any shape is accepted; only `action` is required. / Events without an `action` are rejected and listed in the
-    response; the rest of the batch is stored. <!-- source: docs/integrations.md §Outage backpressure (ingest paragraph) -->
+  - Any shape is accepted; only `action` is required. / Each event is checked on its own: rejected events are
+    listed in `rejected` with a reason, and the rest of the batch is stored. <!-- source: docs/integrations.md §Outage backpressure (ingest paragraph) -->
   - Retention deletes expired events for good. / There's no archive and no undo.
     <!-- source: docs/SPEC.md §1.4; capture 10-retention-preview.png -->
-  - Import history by sending events with their original `occurredAt`, up to ten years back. / Logbird doesn't rebuild
-    history from your database. Events reach it only when you send them. <!-- source: docs/SPEC.md §3 -->
+  - Import history by sending events with their original `occurredAt`, up to 3650 days back. / An older `occurredAt`
+    is stored at receive time with a warning, and project retention still applies to imports. Logbird doesn't rebuild
+    history from your database. <!-- source: docs/SPEC.md §3 -->
 - **cta:** Read how we handle data → `/security`
 - **visual:** none (text block)
 

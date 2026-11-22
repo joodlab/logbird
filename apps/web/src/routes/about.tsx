@@ -24,7 +24,7 @@ const principles: { title: string; body: string }[] = [
   },
   {
     title: 'Your code sends the history.',
-    body: "Logbird doesn't rebuild history from your database. Import past events by sending them with their original `occurredAt`.",
+    body: "Logbird doesn't rebuild history from your database. Import past events by sending them with their original `occurredAt`, up to 3650 days back; an older value is stored at receive time with a warning, and project retention still applies.",
   },
   { title: 'Retention means deletion.', body: 'Expired events are deleted for good.' },
   { title: 'We audit ourselves.', body: "Logbird records its own management actions in your workspace's activity stream." },

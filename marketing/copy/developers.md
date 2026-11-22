@@ -83,7 +83,7 @@ path: /developers
 - **eyebrow:** No SDK? Use HTTP.
 - **heading:** One request, one to a thousand events.
 - **body:** `POST /v1/events` accepts one event, a JSON array, or `{ "events": [...] }`. Authenticate with an ingest
-  key. A `202` means ClickHouse has the rows.
+  key. A `202` lists the stored event IDs in `ids` and rejected events in `rejected`.
   <!-- source: docs/SPEC.md §2, §5 -->
 - **code sample:**
 
@@ -257,7 +257,8 @@ path: /developers
   - **Bounded under outage.** The queue holds up to 10,000 events by default. When it's full, `dropPolicy: 'oldest'`
     (the default) or `'newest'` decides what goes, and `onDrop` reports each event dropped.
   - **In memory.** A crash before the server acknowledges can lose pending events. Call `shutdown()` on exit.
-  - **Partial batches.** Events without an `action` are rejected and listed in the response, and the rest are stored.
+  - **Partial batches.** Each event is checked on its own. Rejected events, such as one without an `action` or an id
+    conflict, are listed in `rejected`, and the rest are stored.
     Permanent errors other than `429` drop the batch and report it through `onError` and `onDrop`, without rejecting
     `flush()`.
   <!-- source: packages/sdk/README.md (defaults: 100 rows, 1000 ms, 5 retries; maxQueueSize 10,000); docs/SPEC.md §2; docs/integrations.md -->

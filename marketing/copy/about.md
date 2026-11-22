@@ -46,7 +46,8 @@ path: /about
   2. **Capture is your code's job.** We give you the SDK, the integrations and the patterns. Our guarantee starts at
      the `202`.
   3. **Your code sends the history.** Logbird doesn't rebuild history from your database. Import past events by sending
-     them with their original `occurredAt`.
+     them with their original `occurredAt`, up to 3650 days back; an older value is stored at receive time with a
+     warning, and project retention still applies.
   4. **Retention means deletion.** Expired events are deleted for good.
   5. **We audit ourselves.** Logbird records its own management actions in your workspace's activity stream.
   <!-- source: docs/SPEC.md §1; docs/roadmap.md ("Product decisions stay fixed") -->

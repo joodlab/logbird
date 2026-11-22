@@ -139,8 +139,10 @@ path: /security
     working behind a shared network address.
   - If Redis fails, sign-in limits fail closed (requests are refused) and ingest and read limits fail open (requests
     continue).
-  - Delivery is at least once. A resent event id is stored once, so retries from the SDK, which sets ids, never
-    double-count. An event sent without an id gets a new one on every retry.
+  - Delivery is at least once. An exact retry with the same string `id` is stored once within a project, so retries
+    from the SDK, which sets ids, never double-count; changed content under that id is rejected with
+    `duplicate_id_conflict`. An event sent without an id gets a new one on every retry. Once retention deletes an
+    event, its id can be used again.
   - Don't send secrets. The SDK's `redact()` helper replaces common secret fields before sending.
   <!-- source: docs/SPEC.md §5; docs/deployment.md; README.md; packages/sdk/README.md -->
 - **visual:** none

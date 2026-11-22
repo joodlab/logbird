@@ -285,7 +285,7 @@ function DevelopersPage() {
         visual={<SiteCode code={http} language="bash" title="curl" />}
       >
         <code>POST /v1/events</code> accepts one event, a JSON array, or <code>{'{ "events": [...] }'}</code>. Authenticate with an ingest key. A{' '}
-        <code>202</code> means ClickHouse has the rows.
+        <code>202</code> lists the stored event IDs in <code>ids</code> and rejected events in <code>rejected</code>.
       </FeatureRow>
 
       <Section compact id="envelope" labelledBy="envelope-title" tone="sunken">
@@ -462,9 +462,10 @@ function DevelopersPage() {
                   Call <code>shutdown()</code> on exit.
                 </>,
                 <>
-                  <strong className="font-medium text-foreground">Partial batches.</strong> Events without an <code>action</code> are rejected and
-                  listed in the response, and the rest are stored. Permanent errors other than <code>429</code> drop the batch and report it through{' '}
-                  <code>onError</code> and <code>onDrop</code>, without rejecting <code>flush()</code>.
+                  <strong className="font-medium text-foreground">Partial batches.</strong> Each event is checked on its own. Rejected events, such as
+                  one without an <code>action</code> or an id conflict, are listed in <code>rejected</code>, and the rest are stored. Permanent errors
+                  other than <code>429</code> drop the batch and report it through <code>onError</code> and <code>onDrop</code>, without rejecting{' '}
+                  <code>flush()</code>.
                 </>,
               ]}
             />

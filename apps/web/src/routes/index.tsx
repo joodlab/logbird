@@ -261,21 +261,24 @@ function HomePage() {
           <Guarantees
             items={[
               {
-                promise: 'A 202 means the event is stored in ClickHouse.',
-                limit: 'Delivery is at least once. A resent id is stored once; an event sent without an id gets a new one on every retry.',
+                promise: 'A `202` lists the stored event IDs in `ids` and rejected events in `rejected`.',
+                limit:
+                  'Delivery is at least once. An exact retry with the same string `id` is stored once within a project; changed content under that id is rejected with `duplicate_id_conflict`. An event sent without an id gets a new one on every retry.',
               },
               {
                 promise: 'The SDK batches and retries for you.',
                 limit: 'Its queue is in memory: a crash before the server acknowledges can lose pending events.',
               },
               {
-                promise: 'Any shape is accepted; only action is required.',
-                limit: 'Events without an action are rejected and listed in the response; the rest of the batch is stored.',
+                promise: 'Any shape is accepted; only `action` is required.',
+                limit:
+                  'Each event is checked on its own: rejected events are listed in `rejected` with a reason, and the rest of the batch is stored.',
               },
               { promise: 'Retention deletes expired events for good.', limit: "There's no archive and no undo." },
               {
-                promise: 'Import history by sending events with their original occurredAt, up to ten years back.',
-                limit: "Logbird doesn't rebuild history from your database. Events reach it only when you send them.",
+                promise: 'Import history by sending events with their original `occurredAt`, up to 3650 days back.',
+                limit:
+                  "An older `occurredAt` is stored at receive time with a warning, and project retention still applies to imports. Logbird doesn't rebuild history from your database.",
               },
             ]}
           />

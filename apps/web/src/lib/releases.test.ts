@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { CHANGELOG_PATH, changelogHighlights, githubRepo, loadReleases } from '../../scripts/releases';
+import { CHANGELOG_PATH, changelogHighlights, githubRepo, loadReleases, withoutLinks } from '../../scripts/releases';
 import { byVersionDesc, releaseUrl } from './releases';
 import { snapshotReleases } from './releases.snapshot';
 
@@ -40,6 +40,25 @@ describe('release list', () => {
     expect(changelogHighlights(changelog, '9.9.0')).toEqual(['Fictional `code` highlight one.', 'Fictional highlight two, with the upgrade notes.']);
     expect(changelogHighlights(changelog, '9.8.0')).toEqual([]);
     expect(changelogHighlights(changelog, '9.9')).toEqual([]);
+  });
+
+  it('reduces every supported Markdown link form to its text and keeps code spans as written', () => {
+    const cases: [string, string][] = [
+      ['See the [guide](notes(v2)).', 'See the guide.'],
+      ['Read [the [upgrade] notes](https://example.test/a "Title").', 'Read the [upgrade] notes.'],
+      ['Nested [**[docs](https://example.test/d)** page](https://example.test/p).', 'Nested **docs** page.'],
+      ['![logo](https://example.test/logo.svg) Logbird', 'logo Logbird'],
+      ['A [reference link][notes] here.', 'A reference link here.'],
+      ['An autolink <https://example.test/x>.', 'An autolink https://example.test/x.'],
+      ['Code stays: `[not](a link)` and ``a `[b](c)` d``.', 'Code stays: `[not](a link)` and ``a `[b](c)` d``.'],
+      ['Unbalanced [bracket and [a](b) after.', 'Unbalanced [bracket and a after.'],
+      ['A [label] without a target.', 'A [label] without a target.'],
+      ['Not a link: [text] (spaced).', 'Not a link: [text] (spaced).'],
+      ['An unclosed `tick and [a](b).', 'An unclosed `tick and a.'],
+    ];
+    for (const [input, expected] of cases) {
+      expect(withoutLinks(input)).toBe(expected);
+    }
   });
 
   it('every snapshot release has its highlights in the real CHANGELOG.md', () => {

@@ -87,9 +87,9 @@ run it on your own servers. <!-- source: docs/brand.md §2 (cloud clause "or our
 | --- | --- |
 | MIT licence | `LICENSE` |
 | Only `action` is required; nothing is rejected for missing recommended fields | `docs/SPEC.md` §1, `README.md` |
-| The server answers `202` only after ClickHouse has the rows (`async_insert=1, wait_for_async_insert=1`) | `docs/SPEC.md` §2 |
-| Delivery is at least once; a resent event id is stored once (the SDK sets ids; an event without an id gets a new one per retry) | `docs/SPEC.md` §3, `docs/concepts.md` (Event ids and retries) |
-| Historical events can be sent with their original `occurredAt`, up to 3650 days back | `docs/SPEC.md` §3 |
+| The server answers `202` only after ClickHouse has the rows; the response lists stored event IDs in `ids` and rejected events in `rejected` (`async_insert=1, wait_for_async_insert=1`) | `docs/SPEC.md` §2 |
+| Delivery is at least once; an exact retry with the same string `id` is stored once within a project, changed content under that id is rejected with `duplicate_id_conflict`, and an id can be reused once retention deletes the original (the SDK sets ids; an event without an id gets a new one per retry) | `docs/SPEC.md` §3, `docs/concepts.md` (Event ids and retries) |
+| Historical events can be sent with their original `occurredAt`, up to 3650 days back; an older value is stored at receive time with a warning, and project retention still applies | `docs/SPEC.md` §3, `packages/clickhouse/src/timestamp.ts` |
 | Retention permanently deletes expired events; lowering it requires typing the project slug and purges immediately | `docs/SPEC.md` §1, §7.1 |
 | Retention options run from 7 days to 10 years (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days); new projects default to 90 days | `packages/contracts/src/api.ts` (`RETENTION_OPTIONS`), `docs/SPEC.md` §6 |
 | One ingest request carries up to 1000 events or 5 MB; one event up to 256 KB | `docs/SPEC.md` §5, `packages/sdk/README.md` |
