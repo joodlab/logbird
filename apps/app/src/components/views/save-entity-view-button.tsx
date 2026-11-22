@@ -1,4 +1,3 @@
-import type { EntityKind } from '@logbird/contracts';
 import { Button } from '@logbird/ui/components/ui/button';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
@@ -7,9 +6,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keys, viewsQuery } from '@/lib/api/queries';
-import { splitTargetId } from '@/lib/entities';
 import { rangeInSentence, rangeLabel } from '@/lib/range';
-import { useCopyViewLink, type ViewLabelField, viewSearch } from '@/lib/views';
+import { nameableTerms, useCopyViewLink, viewSearch } from '@/lib/views';
 
 /** "Bayt Al Rimal — last 7 days" ("… — Nov 22, 08:00 – 10:00 Berlin time" for an absolute range). */
 export function entityViewName(name: string, range: string): string {
@@ -35,15 +33,13 @@ export function findSavedEntityView<V extends { state: { q?: string | null; lang
  */
 export function SaveEntityViewButton({
   projectId,
-  kind,
-  entityId,
+  displayId,
   name,
   query,
   range,
 }: {
   projectId: string;
-  kind: EntityKind;
-  entityId: string;
+  displayId: string;
   /** Display name; the raw id when the entity has none. */
   name: string;
   /** The entity's explorer query (`entityQuery`). */
@@ -58,7 +54,7 @@ export function SaveEntityViewButton({
   const existing = findSavedEntityView(views.data, query, range);
   const open = (view: { id: string; state: Parameters<typeof viewSearch>[0]['state'] }) =>
     navigate({ to: '/p/$projectId/events', params: { projectId }, search: viewSearch(view) });
-  const value = kind === 'target' ? splitTargetId(entityId).id : entityId;
+  const labelTerm = nameableTerms(query)[0];
   const save = useMutation({
     mutationFn: () =>
       api.views.create(projectId, {
@@ -68,7 +64,7 @@ export function SaveEntityViewButton({
           q: query,
           lang: 'query',
           range,
-          ...(name && name !== value ? { labels: [{ field: kind as ViewLabelField, value, label: name.slice(0, 200) }] } : {}),
+          ...(labelTerm && name && name !== displayId ? { labels: [{ ...labelTerm, label: name.slice(0, 200) }] } : {}),
         },
       }),
     onSuccess: async (view) => {

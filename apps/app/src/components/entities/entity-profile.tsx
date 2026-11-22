@@ -27,7 +27,7 @@ import { OUTCOME_ORDER } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { type WhoFilter, whoFilter, withWhoFilter } from '@/lib/impersonation';
 import { outcomeBandQuery } from '@/lib/overview-queries';
-import { andQuery, formatTerm } from '@/lib/query-language';
+import { formatTerm, scopedQuery } from '@/lib/query-language';
 import { ALL_RANGE, historyRange, rangeInSentence, rangeLabel } from '@/lib/range';
 import { useConsoleZone } from '@/lib/time-zone';
 import { useDocumentTitle } from '@/lib/use-document-title';
@@ -39,23 +39,24 @@ interface EntityProfileProps {
   projectId: string;
   section: EntitySection;
   entityId: string;
+  targetType?: string;
   timeline: ExplorerState;
   onTimelineChange: (patch: Partial<ExplorerState>) => void;
 }
 
-export function EntityProfile({ projectId, section, entityId, timeline, onTimelineChange }: EntityProfileProps) {
+export function EntityProfile({ projectId, section, entityId, targetType, timeline, onTimelineChange }: EntityProfileProps) {
   useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const meta = ENTITY_SECTIONS[section];
   const kind = meta.kind;
-  const profile = useQuery(entityProfileQuery(projectId, kind, entityId, timeline.range));
+  const profile = useQuery(entityProfileQuery(projectId, kind, entityId, timeline.range, targetType));
   const navigate = useNavigate();
   // Never another entity's or range's numbers under this URL: a placeholder (the previous query's result) renders as
   // loading, so the name, stats, charts and related lists always belong to this entity and this range.
   const p = current(profile);
-  const displayId = kind === 'target' ? splitTargetId(entityId).id : entityId;
+  const displayId = kind === 'target' ? splitTargetId(entityId, targetType ?? p?.entity.type).id : entityId;
   useSetCrumb(p?.entity.name || displayId);
   useDocumentTitle(`${p?.entity.name || displayId} · ${meta.singular} · Logbird`);
-  const baseQuery = entityQuery(kind, entityId);
+  const baseQuery = kind === 'target' && !p ? '' : entityQuery(kind, entityId, p?.entity.type);
   const support = useSupportCounts(projectId, kind, entityId, baseQuery, timeline.range);
   const lang = timeline.lang ?? 'query';
   const who = whoFilter(timeline.q, lang);
@@ -68,7 +69,10 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
   // Out of a full history, links say "all" rather than this entity's computed window, so the next page is not narrowed.
   const linkRange = rangeChosen ? timeline.range : ALL_RANGE;
   // What History shows (the entity plus any filters typed or picked there): the explorer links and Save as view use it.
-  const historyQuery = andQuery(baseQuery, timeline.q);
+  // Null while the typed filter does not parse: nothing is combined, saved or opened then (scopedQuery).
+  // Also null until the entity's own filter is known (a record's type arrives with its profile): no history, link or
+  // saved view may ever run without it, whatever range is chosen.
+  const historyQuery = baseQuery ? scopedQuery(baseQuery, timeline.q).q : null;
 
   if (profile.isError && !p) {
     const notFound = profile.error instanceof ApiRequestError && profile.error.status === 404;
@@ -146,11 +150,10 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {timelineRange && own ? (
+            {timelineRange && own && historyQuery !== null ? (
               <>
                 <SaveEntityViewButton
-                  entityId={entityId}
-                  kind={kind}
+                  displayId={displayId}
                   name={own.entity.name || displayId}
                   projectId={projectId}
                   query={historyQuery}
@@ -168,7 +171,8 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
                 </Button>
               </>
             ) : (
-              // Until the history's range is known, neither action could say what it saves or opens.
+              // Until the history's range is known, or while the typed filter does not parse, neither action could say
+              // what it saves or opens.
               <>
                 <Button disabled size="sm" variant="outline">
                   <BookmarkIcon />
@@ -216,10 +220,10 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
                 ) : !own ? (
                   <Skeleton className="h-4 w-56" />
                 ) : kind === 'target' ? (
-                  // The timeline matches this record's id and type separately (the query language has no paired form
-                  // yet), so it may include events about another record of the same id: no exact count is claimed here.
+                  // The history matches this record's type and id at the same position (`record:`), but the all-time count
+                  // comes from the colon-joined rollup key, which another type can share: no exact count is claimed here.
                   <>
-                    Events with this record's id and type since <Timestamp format="date" iso={own.entity.firstSeen} />, newest first
+                    Every event for this record since <Timestamp format="date" iso={own.entity.firstSeen} />, newest first
                   </>
                 ) : (
                   <>
@@ -234,9 +238,9 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
               <WhoSegmentedControl kind={kind} onWho={onWho} who={who} />
               <button
                 className="text-muted-foreground text-xs hover:text-foreground disabled:opacity-50"
-                disabled={!timelineRange}
+                disabled={!timelineRange || historyQuery === null}
                 onClick={() =>
-                  timelineRange
+                  timelineRange && historyQuery !== null
                     ? navigate({
                         to: '/p/$projectId/events',
                         params: { projectId },
@@ -251,7 +255,7 @@ export function EntityProfile({ projectId, section, entityId, timeline, onTimeli
             </div>
           </div>
           <div className="flex h-[600px] min-h-0 flex-col">
-            {timelineRange ? (
+            {timelineRange && baseQuery ? (
               <Explorer
                 baseLabel={`${kind}: ${p?.entity.name || displayId}`}
                 baseQuery={baseQuery}
@@ -359,9 +363,10 @@ function Related({ projectId, related }: { projectId: string; related: Profile['
                 <EntityProfileLink
                   className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-[13px] outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
                   id={r.id}
-                  key={`${r.kind}:${r.id}`}
+                  key={JSON.stringify([r.kind, r.type, r.id])}
                   kind={r.kind}
                   projectId={projectId}
+                  type={r.type}
                 >
                   <EntityAvatar
                     icon={showIcon ? typeIcon(r.kind, r.type) : undefined}

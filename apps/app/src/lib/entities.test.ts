@@ -26,6 +26,7 @@ describe('free text that could be an id', () => {
   });
   it('builds the id query for each kind', () => {
     expect(entityQuery('tenant', 'biz_27')).toBe('tenant:biz_27');
-    expect(entityQuery('target', 'article:article_27_2')).toBe('target:article_27_2 target.type:article');
+    // A record is one paired term: its type and id at the same position.
+    expect(entityQuery('target', 'article:article_27_2', 'article')).toBe('record:"article:article_27_2"');
   });
 });

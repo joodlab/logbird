@@ -9,6 +9,9 @@ const SPARSE_COLUMNS = new Set(['impersonator_id']);
 export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<typeof suggestQuerySchema>): Promise<SuggestResponse> {
   const f = QUERY_FIELDS.find((f) => f.key === q.field || f.aliases?.includes(q.field));
   if (f?.suggest === 'none') return { field: q.field, values: [], complete: true };
+  const record = f?.type === 'record';
+  const recordValue = (type: string, id: string) =>
+    `concat(replaceAll(replaceAll(${type}, {recordSlash:String}, {recordDoubleSlash:String}), ':', {recordEscapedColon:String}), ':', ${id})`;
   const scoped = !!(q.q?.trim() || q.from || q.to);
   const params: Record<string, unknown> = {
     p,
@@ -16,6 +19,7 @@ export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<
     limit: q.limit + 1,
     key: q.field.replace(/^(attr|attributes)\./, ''),
     kind: (f?.key ?? q.field).split('.')[0],
+    ...(record ? { recordSlash: '\\', recordDoubleSlash: '\\\\', recordEscapedColon: '\\:' } : {}),
   };
   let source: string;
   let sample: string | undefined;
@@ -26,15 +30,27 @@ export async function suggestValues(ch: ClickHouseClient, p: string, q: z.infer<
     // Select recent rows first, then filter. This bounds attribute scans even for rare predicates. A sparse column
     // (support agents are on ~1% of events) filters inside the sample, or a busy project's newest 50k rows would hide
     // every agent who acted a few hours ago.
-    const sparse = f && SPARSE_COLUMNS.has(f.column) ? ` AND ${f.column}!=''` : '';
+    const column = f?.column;
+    const sparse = column && SPARSE_COLUMNS.has(column) ? ` AND ${column}!=''` : '';
     sample = `SELECT * FROM events WHERE project_id={project:String} AND timestamp>={from:DateTime64(3)} AND timestamp<{to:DateTime64(3)}${sparse} ORDER BY timestamp DESC,event_id DESC LIMIT 50001`;
     const events = `(SELECT * FROM (${sample}) LIMIT 50000)`;
-    const value = !f ? 'attributes[{key:String}]' : f.type === 'array' ? `arrayJoin(${f.column})` : f.column;
+    const value = record
+      ? recordValue('target.1', 'target.2')
+      : !column
+        ? 'attributes[{key:String}]'
+        : f?.type === 'array'
+          ? `arrayJoin(${column})`
+          : column;
     const kind = f?.key.split('.')[0];
     // Ids with a display name: label them by name so `Yusuf` finds `impersonator:support_2`.
     const named = (f?.suggest === 'entities' || f?.key === 'impersonator') && !f.key.includes('.');
-    const label = named && ['actor', 'impersonator', 'tenant', 'executor'].includes(kind ?? '') ? `${kind}_name` : value;
-    source = `SELECT ${value} value,anyLast(${label}) label,count() count FROM ${events} WHERE (${w.sql}) ${!f ? 'AND mapContains(attributes,{key:String})' : ''} GROUP BY value`;
+    const label = record ? 'target.3' : named && ['actor', 'impersonator', 'tenant', 'executor'].includes(kind ?? '') ? `${kind}_name` : value;
+    const join = record ? 'ARRAY JOIN arrayZip(target_types,target_ids,target_names) AS target' : '';
+    source = `SELECT ${value} value,anyLast(${label}) label,count() count FROM ${events} ${join} WHERE (${w.sql}) ${!f ? 'AND mapContains(attributes,{key:String})' : ''} GROUP BY value`;
+  } else if (record) {
+    source = `SELECT ${recordValue('record_type', 'substring(entity_id,length(record_type)+2)')} value,label,count
+      FROM (SELECT entity_id,anyLast(type) record_type,anyLast(name) label,sum(events) count
+        FROM entities WHERE project_id={p:String} AND kind='target' GROUP BY entity_id)`;
   } else if (f.suggest === 'entities') {
     const name = f.key.endsWith('.name'),
       type = f.key.endsWith('.type');

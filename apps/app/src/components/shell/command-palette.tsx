@@ -32,7 +32,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api/client';
 import { entitySearchQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { ENTITY_SECTIONS, entityMatchRank, entityQuery, sectionForKind } from '@/lib/entities';
-import { formatExactTerm } from '@/lib/query-language';
+import { formatTerm } from '@/lib/query-language';
 import { PROJECT_NAV } from './nav';
 
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
@@ -123,9 +123,7 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
             {looksLikeEvent ? (
               <CommandItem
                 onSelect={() =>
-                  go(() =>
-                    navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: formatExactTerm('id', trimmed), ev: trimmed } }),
-                  )
+                  go(() => navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: formatTerm('id', trimmed), ev: trimmed } }))
                 }
                 value={`event ${trimmed}`}
               >
@@ -151,16 +149,18 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                   onSelect={() =>
                     go(() =>
                       navigate({
-                        to: `/p/$projectId/${section}/$entityId` as '/p/$projectId/actors/$entityId',
+                        to: `/p/$projectId/${section}/$entityId` as '/p/$projectId/records/$entityId',
                         params: { projectId, entityId: e.id },
+                        search: e.kind === 'target' ? { targetType: e.type } : {},
                       }),
                     )
                   }
                   value={openValue(e)}
                 >
                   <Icon />
-                  Open {ENTITY_SECTIONS[section].singular.toLowerCase()} <span className="truncate font-mono text-xs">{e.id}</span>
-                  {e.name ? <span className="truncate text-muted-foreground">{e.name}</span> : null}
+                  <span className="shrink-0 whitespace-nowrap">Open {ENTITY_SECTIONS[section].singular.toLowerCase()}</span>
+                  <span className="min-w-0 truncate">{e.name || e.id}</span>
+                  {e.name ? <span className="min-w-0 shrink-[2] truncate font-mono text-muted-foreground text-xs">{e.id}</span> : null}
                 </CommandItem>
               );
             })}
@@ -169,13 +169,18 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
               <CommandItem
                 onSelect={() =>
                   go(() =>
-                    navigate({ to: '/p/$projectId/events', params: { projectId }, search: { q: entityQuery(firstExact.kind, firstExact.id) } }),
+                    navigate({
+                      to: '/p/$projectId/events',
+                      params: { projectId },
+                      search: { q: entityQuery(firstExact.kind, firstExact.id, firstExact.type) },
+                    }),
                   )
                 }
                 value={`search ${trimmed}`}
               >
                 <SearchIcon />
-                Search events for <span className="font-mono text-xs">{entityQuery(firstExact.kind, firstExact.id)}</span>
+                <span className="shrink-0 whitespace-nowrap">Search events for</span>
+                <span className="min-w-0 truncate font-mono text-xs">{entityQuery(firstExact.kind, firstExact.id, firstExact.type)}</span>
               </CommandItem>
             ) : (
               <CommandItem
@@ -183,7 +188,8 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                 value={`search ${trimmed}`}
               >
                 <SearchIcon />
-                Search events for <span className="font-mono text-xs">{trimmed}</span>
+                <span className="shrink-0 whitespace-nowrap">Search events for</span>
+                <span className="min-w-0 truncate font-mono text-xs">{trimmed}</span>
               </CommandItem>
             )}
           </CommandGroup>
@@ -199,8 +205,9 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
                   onSelect={() =>
                     go(() =>
                       navigate({
-                        to: `/p/$projectId/${section}/$entityId` as '/p/$projectId/actors/$entityId',
+                        to: `/p/$projectId/${section}/$entityId` as '/p/$projectId/records/$entityId',
                         params: { projectId: projectId ?? '', entityId: e.id },
+                        search: e.kind === 'target' ? { targetType: e.type } : {},
                       }),
                     )
                   }

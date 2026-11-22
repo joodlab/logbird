@@ -91,6 +91,14 @@ describe('#138 scoped read contract', () => {
 });
 
 describe('#180 facet attribute paths', () => {
+  it('allows a paired record filter while grouping by stored fields and attribute keys', () => {
+    const query = { field: 'target.type', q: 'record:page:7' };
+    expect(facetQuerySchema.safeParse(query).success).toBe(true);
+    expect(facetQuerySchema.safeParse({ ...query, by: 'attr.record' }).success).toBe(true);
+    expect(facetQuerySchema.safeParse({ ...query, field: 'record' }).success).toBe(false);
+    expect(facetQuerySchema.safeParse({ ...query, by: 'record' }).success).toBe(false);
+  });
+
   it('bounds the stored path the same way for both aliases and both facet levels', () => {
     for (const prefix of ['attr.', 'attributes.'])
       for (const level of ['field', 'by'] as const) {

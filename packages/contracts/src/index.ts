@@ -5,6 +5,8 @@ export * from './events';
 export * from './invitations';
 export * from './json';
 export * from './query';
+export * from './query-syntax';
+export * from './record-selector';
 export * from './routes';
 export * from './setup';
 export * from './webhooks';
