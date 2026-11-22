@@ -55,7 +55,8 @@ export const requireReader = ({ tokens = true, limits = publicRateLimits } = {})
     }
     const secret = bearer?.match(new RegExp(`^(?:lb|tm)_read_${API_KEY_BODY}$`))?.[0];
     if (!secret) {
-      if (await limits.precheck(c)) return limits.denied(c);
+      const exhausted = await limits.precheck(c);
+      if (exhausted) return exhausted;
       return limits.reject(c);
     }
     const key = await prisma.apiKey.findUnique({ where: { hash: hashApiKey(secret) }, include: { project: true } });

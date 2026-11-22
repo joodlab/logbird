@@ -3104,7 +3104,6 @@
                   "type": "string"
                 },
                 {
-                  "maxLength": 4096,
                   "pattern": "^(?:attr|attributes)\\..+",
                   "type": "string"
                 }
@@ -3168,7 +3167,6 @@
                   "type": "string"
                 },
                 {
-                  "maxLength": 4096,
                   "pattern": "^(?:attr|attributes)\\..+",
                   "type": "string"
                 }
@@ -12211,7 +12209,6 @@
                   "type": "string"
                 },
                 {
-                  "maxLength": 4096,
                   "pattern": "^(?:attr|attributes)\\..+",
                   "type": "string"
                 }
@@ -12275,7 +12272,6 @@
                   "type": "string"
                 },
                 {
-                  "maxLength": 4096,
                   "pattern": "^(?:attr|attributes)\\..+",
                   "type": "string"
                 }

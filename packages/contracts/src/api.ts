@@ -132,11 +132,11 @@ export const FACETABLE_FIELDS = [...new Set([...FACET_FIELDS, ...QUERY_FIELDS.fl
 /** Any envelope field, or any attribute key as `attr.<path>` or `attributes.<path>` (array-valued attributes count each element). */
 export const facetFieldSchema = z.union([
   z.enum(FACETABLE_FIELDS),
-  // Same bound as a query (4096): `attr.` and `attributes.` name the same stored path, so neither alias is narrower.
+  // The stored path after the prefix is bounded (4096, the query bound) the same way for `attr.` and `attributes.`.
   z
     .string()
-    .max(4096)
-    .regex(/^(?:attr|attributes)\..+/),
+    .regex(/^(?:attr|attributes)\..+/)
+    .refine((field) => field.replace(/^(?:attr|attributes)\./, '').length <= 4096, 'Attribute path exceeds 4096 characters.'),
 ]);
 export const facetQuerySchema = rangeQuerySchema.extend({
   field: facetFieldSchema.meta({ example: 'attr.metadata.missing' }),

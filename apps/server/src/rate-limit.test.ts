@@ -44,7 +44,7 @@ it('fails open and logs storage errors, including abuse protection', async () =>
       })
       .get('/valid', limits.authenticated('read'), (c) => c.json({ ok: true }))
       .get('/invalid', async (c) => {
-        expect(await limits.precheck(c)).toBe(false);
+        expect(await limits.precheck(c)).toBeNull();
         return limits.reject(c);
       });
     expect((await app.request('/valid')).status).toBe(200);
@@ -79,4 +79,17 @@ it('#180: denials across a minute rollover advertise the end of the charged wind
   expect(peer.status).toBe(429);
   expect(peer.headers.get('Retry-After')).toBe('1');
   expect(String(evalScript.mock.calls[1]?.[2])).toMatch(/:0$/);
+});
+
+it('#180: the peer precheck denies with the window it looked up', async () => {
+  const times = [59_900, 60_100];
+  let call = 0;
+  const now = () => times[Math.min(call++, times.length - 1)] ?? 60_100;
+  const get = vi.fn().mockResolvedValue('5');
+  const limits = createPublicRateLimits({ store: { eval: vi.fn(), get }, prefix: '{test}', peerLimit: 1, now });
+  const app = new Hono<AppEnv>().get('/pre', async (c) => (await limits.precheck(c)) ?? c.json({ ok: true }));
+  const pre = await app.request('/pre');
+  expect(pre.status).toBe(429);
+  expect(pre.headers.get('Retry-After')).toBe('1');
+  expect(String(get.mock.calls[0]?.[0])).toMatch(/:0$/);
 });

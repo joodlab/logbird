@@ -8,7 +8,8 @@ export const requireApiKey = (kind: 'ingest' | 'read', limits = publicRateLimits
   createMiddleware<AppEnv>(async (c, next) => {
     const secret = c.req.header('authorization')?.match(new RegExp(`^Bearer ((?:lb|tm)_(?:ingest|read)_${API_KEY_BODY})$`))?.[1];
     if (!secret || !new RegExp(`^(?:lb|tm)_${kind}_`).test(secret)) {
-      if (await limits.precheck(c)) return limits.denied(c);
+      const exhausted = await limits.precheck(c);
+      if (exhausted) return exhausted;
       return limits.reject(c);
     }
     const key = await prisma.apiKey.findUnique({ where: { hash: hashApiKey(secret) }, include: { project: true } });

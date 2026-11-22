@@ -3,6 +3,7 @@ import {
   apiKeySchema,
   createApiKeySchema,
   createSavedViewSchema,
+  facetQuerySchema,
   rollApiKeySchema,
   routes,
   viewerTokenRequestSchema,
@@ -86,5 +87,16 @@ describe('#138 scoped read contract', () => {
     expect(rollApiKeySchema.safeParse({}).success).toBe(true);
     expect(rollApiKeySchema.safeParse({ expiresAt: '2027-01-01T00:00:00Z' }).success).toBe(true);
     expect(rollApiKeySchema.safeParse({ scope: { tenantId: 'b' } }).success).toBe(false);
+  });
+});
+
+describe('#180 facet attribute paths', () => {
+  it('bounds the stored path the same way for both aliases and both facet levels', () => {
+    for (const prefix of ['attr.', 'attributes.'])
+      for (const level of ['field', 'by'] as const) {
+        const base = { field: 'tenant', [level]: '' };
+        expect(facetQuerySchema.safeParse({ ...base, [level]: prefix + 'a'.repeat(4096) }).success, `${prefix} ${level} 4096`).toBe(true);
+        expect(facetQuerySchema.safeParse({ ...base, [level]: prefix + 'a'.repeat(4097) }).success, `${prefix} ${level} 4097`).toBe(false);
+      }
   });
 });

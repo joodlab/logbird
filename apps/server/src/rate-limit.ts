@@ -94,13 +94,17 @@ export function createPublicRateLimits({
     return c.json({ error: { code: 'rate_limited', message: 'Too many requests. Retry shortly.' } }, 429);
   };
   return {
-    // Only credentials which cannot authenticate can be rejected before lookup.
+    /**
+     * Only credentials which cannot authenticate can be rejected before lookup. Returns the 429 response (computed from
+     * the window it looked up, so a rollover never advertises a fresh minute) or null to continue.
+     */
     async precheck(c: Context) {
+      const minute = window();
       try {
-        return Number(await store.get(peerKey(c))) >= peerLimit;
+        return Number(await store.get(peerKey(c, minute))) >= peerLimit ? denied(c, minute) : null;
       } catch {
         storageError();
-        return false;
+        return null;
       }
     },
     async reject(c: Context) {
