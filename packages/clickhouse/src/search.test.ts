@@ -93,3 +93,33 @@ it('expiration probes stay narrow and bounded in both raw rows and the identity 
   expect(sql.match(/LIMIT 1/g)).toHaveLength(2);
   expect(sql).not.toContain('SELECT *');
 });
+
+it('#180: binds every new cursor to its project, keeps legacy two-part cursors for unscoped reads, rejects bad positions', async () => {
+  const at = '2026-11-07T10:01:00.000Z';
+  const page = async (project: string, cursor?: string, scope?: { tenantId: string } | null) => {
+    const { ch } = client([row('a', at), row('b', at)], 2);
+    return searchEvents(ch, project, { from, to, order: 'desc', limit: 1, cursor }, undefined, scope);
+  };
+  const first = (await page('qa-cursor-a')).nextCursor as string;
+  const parts = JSON.parse(Buffer.from(first, 'base64url').toString()) as string[];
+  expect(parts).toHaveLength(3);
+  expect(parts[2]).toMatch(/^u\./);
+  await expect(page('qa-cursor-a', first)).resolves.toBeTruthy();
+  // Replayed in another project: refused, even though both readers are unscoped.
+  await expect(page('qa-cursor-b', first)).rejects.toThrow('Invalid cursor');
+  // A scoped reader never accepts an unscoped cursor, and vice versa.
+  await expect(page('qa-cursor-a', first, { tenantId: 't1' })).rejects.toThrow('Invalid cursor');
+  const scoped = (await page('qa-cursor-a', undefined, { tenantId: 't1' })).nextCursor as string;
+  await expect(page('qa-cursor-a', scoped)).rejects.toThrow('Invalid cursor');
+  // Legacy two-part cursors keep working for unscoped readers only.
+  const legacy = Buffer.from(JSON.stringify([at, 'z'])).toString('base64url');
+  await expect(page('qa-cursor-a', legacy)).resolves.toBeTruthy();
+  await expect(page('qa-cursor-a', legacy, { tenantId: 't1' })).rejects.toThrow('Invalid cursor');
+  for (const bad of [
+    ['2026-02-30T10:00:00.000Z', 'x'], // calendar overflow
+    ['2026-11-07T10:00:00Z', 'x'], // no milliseconds: not a position this API issued
+    ['not-a-date', 'x'],
+    [at, ''], // empty id
+  ])
+    await expect(page('qa-cursor-a', Buffer.from(JSON.stringify(bad)).toString('base64url')), JSON.stringify(bad)).rejects.toThrow('Invalid cursor');
+});

@@ -23,7 +23,6 @@ export const requireReader = ({ tokens = true, limits = publicRateLimits } = {})
   createMiddleware<AppEnv>(async (c, next) => {
     const bearer = c.req.header('authorization')?.match(/^Bearer (\S+)$/)?.[1];
     if (bearer?.startsWith(`${VIEWER_TOKEN_PREFIX}.`)) {
-      if (!tokens) throw new ApiError(403, 'forbidden', 'Viewer tokens cannot mint viewer tokens. Use a read key.');
       const payload = verifyViewerToken(bearer);
       const key = payload ? await tokenKey(payload.kid) : null;
       const keyScope = key ? storedScope(key) : undefined;
@@ -37,6 +36,8 @@ export const requireReader = ({ tokens = true, limits = publicRateLimits } = {})
         !scopeWithin(payload.s, keyScope)
       )
         return limits.reject(c);
+      // Only a valid token reaches this: it authenticates, but may not mint (403), whatever its origin.
+      if (!tokens) throw new ApiError(403, 'forbidden', 'Viewer tokens cannot mint viewer tokens. Use a read key.');
       const origin = c.req.header('origin');
       if (origin && !key.embedOrigins.includes(origin))
         throw new ApiError(403, 'origin_not_allowed', 'This origin is not allowed to use viewer tokens of this key.');

@@ -280,6 +280,12 @@ type ExportCaller = {
   };
 };
 async function runExport(c: Context<AppEnv>, input: s.ExportQuery, caller: ExportCaller) {
+  // Hono answers HEAD through GET handlers and drops the body: refuse it before admission, so a HEAD can neither take the
+  // caller's export slot nor record export.requested.
+  if (c.req.method === 'HEAD') {
+    c.header('Allow', 'GET');
+    return c.body(null, 405);
+  }
   const clock = Date.now();
   const project = c.get('project');
   const exportId = randomUUID();

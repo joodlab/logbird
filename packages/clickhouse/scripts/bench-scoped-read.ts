@@ -116,7 +116,7 @@ try {
     let rows = 0;
     results.push(
       await measure(`export 1h csv ${label}`, async () => {
-        rows = 0;
+        rows = -1; // the CSV header line is not an event
         for await (const chunk of exportEvents(ch, p, { ...hour, q: '', format: 'csv' }, undefined, undefined, { scope }))
           rows += chunk.split('\n').length - 1;
       }),

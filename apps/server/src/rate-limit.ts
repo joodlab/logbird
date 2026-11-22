@@ -82,14 +82,15 @@ export function createPublicRateLimits({
   now?: () => number;
 } = {}) {
   const window = () => Math.floor(now() / 60_000);
-  const retryAfter = () => Math.ceil((60_000 - (now() % 60_000)) / 1000);
+  /** Seconds until the end of `minute` (default: the current window), at least 1. */
+  const retryAfter = (minute = window()) => Math.max(1, Math.ceil(((minute + 1) * 60_000 - now()) / 1000));
   const peerKey = (c: Context) =>
     `${prefix}:rate:public-failures:${createHash('sha256')
       .update(clientAddress(c) || 'unknown')
       .digest('hex')}:${window()}`;
   const storageError = () => console.error(JSON.stringify({ level: 'error', event: 'rate_limit.storage_error' }));
-  const denied = (c: Context) => {
-    c.header('Retry-After', String(retryAfter()));
+  const denied = (c: Context, minute?: number) => {
+    c.header('Retry-After', String(retryAfter(minute)));
     return c.json({ error: { code: 'rate_limited', message: 'Too many requests. Retry shortly.' } }, 429);
   };
   return {
@@ -154,15 +155,15 @@ export function createPublicRateLimits({
             const tighter = tenantRemaining <= projectRemaining;
             c.header('RateLimit-Limit', String(tighter ? viewerReadLimit : limit));
             c.header('RateLimit-Remaining', String(tighter ? tenantRemaining : projectRemaining));
-            c.header('RateLimit-Reset', String(retryAfter()));
-            if (Number(projectCount) < 0 || Number(projectCount) > limit) return denied(c);
+            c.header('RateLimit-Reset', String(retryAfter(minute)));
+            if (Number(projectCount) < 0 || Number(projectCount) > limit) return denied(c, minute);
             return next();
           }
           const count = Number(await store.eval(script, 1, projectKey, 120_000));
           c.header('RateLimit-Limit', String(limit));
           c.header('RateLimit-Remaining', String(Math.max(0, limit - count)));
-          c.header('RateLimit-Reset', String(retryAfter()));
-          if (count > limit) return denied(c);
+          c.header('RateLimit-Reset', String(retryAfter(minute)));
+          if (count > limit) return denied(c, minute);
         } catch {
           storageError();
         }

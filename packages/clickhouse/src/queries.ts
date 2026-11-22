@@ -365,7 +365,9 @@ function facetLevel(field: string, n: number, sharedTargets = false) {
     // Array-valued attributes are stored as JSON text ("[\"a\",\"b\"]"): count each element (#140). Strings unwrap;
     // other element types keep their JSON text. An empty array contributes no group.
     const a = `attributes[{attr${n}:String}]`;
-    expr = `arrayJoin(if(startsWith(${a},'[') AND isValidJSON(${a}),arrayMap(x -> if(JSONType(x)='String',JSONExtractString(x),x),JSONExtractArrayRaw(${a})),[${a}]))`;
+    // JSON whitespace (space, tab, LF, CR) may precede the array; the scalar fallback keeps the original text.
+    const lead = `trimLeft(replaceAll(replaceAll(replaceAll(${a},char(9),' '),char(10),' '),char(13),' '))`;
+    expr = `arrayJoin(if(startsWith(${lead},'[') AND isValidJSON(${a}),arrayMap(x -> if(JSONType(x)='String',JSONExtractString(x),x),JSONExtractArrayRaw(${a})),[${a}]))`;
     label = expr;
   }
   if (QUERY_FIELDS.some((f) => f.column === col && ['number', 'date'].includes(f.type))) {

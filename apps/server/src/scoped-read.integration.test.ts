@@ -399,6 +399,7 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect((await mint(bookings.secret, { scope: { tenantId: 't1', actionPrefixes: ['booking.created'] } })).status).toBe(201);
     expect((await mint(read.secret, { scope: { tenantId: 't1' }, ttlSeconds: 7200 })).status).toBe(422);
     expect((await mint(token.token, { scope: { tenantId: 't1' } })).status).toBe(403);
+    expect((await mint('lbv1.not.valid', { scope: { tenantId: 't1' } })).status).toBe(401);
     expect((await mint(result.ingestKey.secret, { scope: { tenantId: 't1' } })).status).toBe(401);
 
     expect(await ids(token.token)).toEqual(siteIds);
@@ -440,6 +441,13 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     // A read key used from a browser gets no CORS: keys belong on servers.
     expect((await v1(read.secret, '/events', { origin: EMBED })).headers.get('access-control-allow-origin')).toBeNull();
 
+    // HEAD must not start an export: 405 before admission, so no lease and no export.requested record.
+    const head = await app.request(`/v1/export?${new URLSearchParams({ format: 'csv' })}`, {
+      method: 'HEAD',
+      headers: { Authorization: `Bearer ${token.token}` },
+    });
+    expect(head.status).toBe(405);
+    expect(await prisma.exportLease.count({ where: { userId: `api_key:${read.key.id}` } })).toBe(0);
     // Export with a viewer token: only in-scope rows; audited with the key as actor and the tenant/token recorded.
     const exported = await v1(token.token, `/export?${new URLSearchParams({ format: 'jsonl', from: '2026-01-01T00:00:00Z' })}`);
     expect(exported.status).toBe(200);
@@ -512,6 +520,7 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
       { id: 'qa-tags-array', tags: ['red', 'blue'] },
       { id: 'qa-tags-string', tags: '["red","blue"]' },
       { id: 'qa-tags-plain', tags: 'red' },
+      { id: 'qa-tags-padded', tags: ' \t["green","red"]' },
       { id: 'qa-tags-long', tags: Array.from({ length: 300 }, (_, n) => `long-${n}`) },
     ].map((e) => ({ id: e.id, occurredAt: ts(14), action: 'booking.created', tenant: { id: 'tfacet' }, metadata: { tags: e.tags } }));
     expect(
@@ -524,11 +533,12 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
           })
         ).json()
       ).accepted,
-    ).toBe(4);
+    ).toBe(5);
     const facetKey = await createKey({ name: 'Facet tenant', kind: 'scoped-read', scope: { tenantId: 'tfacet' } });
     const tags = await facets(facetKey.secret, { field: 'attr.metadata.tags', limit: '100' });
     const tagCount = new Map(tags.values.map((v) => [v.value, v.count]));
-    expect(tagCount.get('red')).toBe(3);
+    expect(tagCount.get('red')).toBe(4);
+    expect(tagCount.get('green')).toBe(1);
     expect(tagCount.get('blue')).toBe(2);
     expect([...tagCount.keys()].some((v) => v.startsWith('long-'))).toBe(false); // the cut array is one opaque value
     expect([...tagCount.entries()].filter(([v]) => v.startsWith('["long-0"')).map(([, n]) => n)).toEqual([1]);
