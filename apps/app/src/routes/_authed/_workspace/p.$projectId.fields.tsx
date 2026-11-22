@@ -14,7 +14,8 @@ import { Timestamp } from '@/components/timestamp';
 import { fieldsQuery } from '@/lib/api/queries';
 import { formatCompact, formatPercent } from '@/lib/format';
 import { placeholderKeys } from '@/lib/placeholders';
-import { DEFAULT_RANGE, isValidRange, rangeLabel } from '@/lib/range';
+import { DEFAULT_RANGE, isValidRange, rangeInSentence, rangeLabel } from '@/lib/range';
+import { useConsoleZone } from '@/lib/time-zone';
 import { useRange } from '@/lib/use-range';
 
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/fields')({
@@ -80,6 +81,7 @@ function presenceQuery(key: string): string | null {
 }
 
 function FieldsPage() {
+  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
   const { projectId } = Route.useParams();
   const { kind = 'all' } = Route.useSearch();
   const navigate = Route.useNavigate();
@@ -101,7 +103,7 @@ function FieldsPage() {
       <div className="flex flex-col gap-1">
         <h1 className="font-semibold text-xl tracking-tight">Fields</h1>
         <p className="text-muted-foreground text-sm">
-          Every field Logbird has seen in {rangeLabel(range).toLowerCase()}: recommended envelope fields and the attributes you send on top.
+          Every field Logbird has seen in {rangeInSentence(rangeLabel(range))}: recommended envelope fields and the attributes you send on top.
         </p>
       </div>
 

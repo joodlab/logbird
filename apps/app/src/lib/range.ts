@@ -4,7 +4,8 @@
  * "<isoFrom>..<isoTo>" window (what drag-to-zoom and the custom picker produce).
  */
 
-import { formatClock, formatDate, formatMonthDay, localDayKey } from './format';
+import { formatClock, formatDate, formatMonthDay, formatOffset, isRepeatedWallTime, localDayKey, zoneOffsetMs } from './format';
+import { consoleTimeZone, shortZoneLabel } from './time-zone';
 
 export const RANGE_PRESETS = [
   { value: '15m', label: 'Last 15 minutes', short: '15m' },
@@ -112,10 +113,20 @@ export function rangeLabel(range: string): string {
   const year = (ms: number) => localDayKey(ms).slice(0, 4);
   const withYear = year(r.fromMs) !== year(r.toMs) || year(r.fromMs) !== year(Date.now());
   const day = (ms: number) => (withYear ? formatDate(new Date(ms).toISOString()) : formatMonthDay(ms));
+  // An absolute window names the zone its clock times are in.
+  const zone = consoleTimeZone();
+  const inZone = zone === 'UTC' ? ' UTC' : ` ${shortZoneLabel(zone)} time`;
+  // Across a clock change (02:45 – 02:00 when the clocks go back) each end names its offset, so the window never reads backwards.
+  // Inside a repeated hour the clock alone is ambiguous too.
+  const withOffsets = zoneOffsetMs(r.fromMs) !== zoneOffsetMs(r.toMs) || isRepeatedWallTime(r.fromMs) || isRepeatedWallTime(r.toMs);
+  const clock = (ms: number) => (withOffsets ? `${formatClock(ms)} (${formatOffset(ms)})` : formatClock(ms));
   return localDayKey(r.fromMs) === localDayKey(r.toMs)
-    ? `${day(r.fromMs)}, ${formatClock(r.fromMs)} – ${formatClock(r.toMs)}`
-    : `${day(r.fromMs)} ${formatClock(r.fromMs)} – ${day(r.toMs)} ${formatClock(r.toMs)}`;
+    ? `${day(r.fromMs)}, ${clock(r.fromMs)} – ${clock(r.toMs)}${inZone}`
+    : `${day(r.fromMs)} ${clock(r.fromMs)} – ${day(r.toMs)} ${clock(r.toMs)}${inZone}`;
 }
+
+/** A range label inside a sentence: "last 7 days", "all time", but "Nov 22, 08:00 – 10:00 Berlin time" keeps its capitals. */
+export const rangeInSentence = (label: string): string => (/^(Last|All) /.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label);
 
 export function rangeShortLabel(range: string): string {
   const preset = RANGE_PRESETS.find((p) => p.value === range);

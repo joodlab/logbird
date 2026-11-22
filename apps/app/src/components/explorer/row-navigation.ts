@@ -1,7 +1,8 @@
 import type { AuditEvent } from '@logbird/contracts';
 import { eventSentence, personLabel } from '@/lib/events';
-import { formatTimestamp } from '@/lib/format';
+import { displayTimeZone, formatTimestamp } from '@/lib/format';
 import { jobHint, supportPhrase } from '@/lib/impersonation';
+import { shortZoneLabel } from '@/lib/time-zone';
 
 /**
  * The row's accessible name: what happened (actor, action, target), who was really at the keyboard, how it ended,
@@ -23,7 +24,9 @@ export function eventRowLabel(e: AuditEvent, now = Date.now()): string {
   if (sentence !== e.action) parts.push(e.action);
   const job = jobHint(e);
   if (job) parts.push(job.label);
-  parts.push(formatTimestamp(e.timestamp, now));
+  // The row is announced on its own, without the column header: name the zone with the time.
+  const zone = displayTimeZone();
+  parts.push(`${formatTimestamp(e.timestamp, now)} ${zone === 'UTC' ? 'UTC' : `${shortZoneLabel(zone)} time`}`);
   return parts.join(', ');
 }
 

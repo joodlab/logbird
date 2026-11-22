@@ -10,6 +10,7 @@ import { NameForm } from '@/components/account/name-form';
 import { UserAvatar } from '@/components/account/user-avatar';
 import { SettingsSection } from '@/components/settings-section';
 import { AppShell } from '@/components/shell/app-shell';
+import { TimeZoneSetting } from '@/components/time-zone-control';
 import { meQuery } from '@/lib/api/queries';
 import { lastProject } from '@/lib/session';
 import { displayName, hasName } from '@/lib/user';
@@ -80,6 +81,9 @@ function AccountPage() {
               toast.success('Name updated');
             }}
           />
+        </SettingsSection>
+        <SettingsSection description="Which zone every time in the console is shown in." title="Time zone">
+          <TimeZoneSetting />
         </SettingsSection>
         <SettingsSection description="You sign in with a one-time code sent to this address. There is no password to manage." title="Sign-in email">
           <div className="flex max-w-md flex-col gap-1.5">
