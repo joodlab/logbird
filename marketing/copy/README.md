@@ -158,7 +158,9 @@ These variants are **not** used anywhere on the site. The owner may approve them
 - **Docs links.** Pages link to repository docs (for example `docs/concepts.md`). Those links resolve once the
   repository is public or a docs site exists. Until then, the engineer can hide them or point them at `/developers`.
 - **Security contact.** `SECURITY.md` sends reports through GitHub private vulnerability reporting, with a fallback
-  route. The website's own security mailbox is optional (`WEB_SECURITY_EMAIL`); without it, pages point to that route.
+  route. On the website, `WEB_SECURITY_EMAIL` sets the security mailbox; without it, pages ask researchers to request a
+  private channel through the contact form, and the site stays a release blocker (noindex; the Cloudflare package
+  refuses to build) until it is set (`apps/web/src/lib/release.ts`).
 
 ## Captures
 

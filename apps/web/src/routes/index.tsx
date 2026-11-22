@@ -128,7 +128,7 @@ function HomePage() {
         />
         <div className="mt-12 grid gap-10 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] lg:items-start">
           <ScreenshotFrame
-            caption="An event in detail: who asked, what did the work, whose account, which records, and the before and after values sent for each change."
+            caption="An event in detail: who asked, what did the work, whose account, which records, and the before and after values sent for each change (the first 256 per event)."
             id="event-sheet"
             label="Event detail"
             sizes="(min-width: 1024px) 680px, calc(100vw - 2rem)"

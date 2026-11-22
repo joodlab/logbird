@@ -89,7 +89,8 @@ path: /product
 - **id:** `entities`
 - **eyebrow:** Follow anything
 - **heading:** A page for each actor, tenant, worker and record.
-- **body:** Every actor, tenant, executor and record in your events gets its own page. Each one shows an activity
+- **body:** Actors, tenants, executors and records in your events get their own pages (records from the first 64
+  targets of each event). Each one shows an activity
   chart, its top actions, its outcome split, related entities and a full timeline. Directory pages list them all,
   most active first, with fuzzy search.
   <!-- source: docs/SPEC.md §8 journey 5; docs/concepts.md -->
@@ -215,7 +216,7 @@ path: /product
 - **eyebrow:** Read API
 - **heading:** Show history inside your own product.
 - **body:** Give your customers a "History" tab. Your backend calls `GET /v1/events` with a read key and a query
-  such as a query for that record and tenant (checking that each returned event names that record), then returns the page to your UI. Results are paginated with a cursor. The
+  for that record and tenant, and checks that each returned event names that record, then returns the page to your UI. Results are paginated with a cursor. The
   Vue, Nuxt and TanStack Start packages include helpers for this.
   <!-- source: packages/contracts/src/routes.ts, api.ts; docs/integrations.md -->
 - **limit line:** A read key can read the whole project. Your backend must check that the person asking may see

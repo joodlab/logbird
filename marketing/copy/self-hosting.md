@@ -22,7 +22,7 @@ path: /self-hosting
   <!-- source: LICENSE; docs/SPEC.md intro ("one codebase, self-host or cloud") -->
 - **cta:** Quickstart ↓ `#quickstart` (public repo only) · Join the Cloud waitlist → `/contact`
 - **small print:** Source on GitHub — coming soon. Once `WEB_GITHUB_PUBLIC=true`: "Compose pulls the published
-  `<latest release>` images for amd64 and arm64 from `ghcr.io/<owner>`."
+  `<latest release>` images for amd64 and arm64 from GHCR." (No release yet: "Nothing has been released yet.")
   <!-- when WEB_GITHUB_PUBLIC=true: drop "Source on GitHub — coming soon." -->
 - **visual:** a diagram of the Compose stack (console, api, worker, postgres, clickhouse, redis). The 2026-11-05
   self-hosting captures show the old name and a real key prefix, so they aren't used.
@@ -34,8 +34,10 @@ path: /self-hosting
 - **heading:** From clone to your first event.
 - **body:** You need Docker Engine and Docker Compose 2.24.4 or newer. Compose pulls the four published Logbird role images; nothing
   is compiled on your server. <!-- source: docs/self-hosting.md §Five-minute quickstart -->
-- **code sample (rendered only once `WEB_GITHUB_PUBLIC=true`; until then the section reads "The quickstart is published
-  when the repository opens." with the self-host CTA — see `README.md` § Self-host CTA rule):**
+- **code sample (rendered only when `WEB_GITHUB_PUBLIC=true` and the release list has a release; while the repository
+  is private the section reads "The quickstart is published when the repository opens." with the self-host CTA — see
+  `README.md` § Self-host CTA rule; in a public build with no release it reads "Nothing has been released yet." and links
+  to the guide's "Build from source"):**
 
   ```sh
   git clone --branch v<latest release> <repository URL>.git logbird
@@ -95,7 +97,8 @@ path: /self-hosting
      the API and worker start.
      <!-- source: docs/self-hosting.md; docs/deployment.md -->
   2. **Coolify.** Point Coolify's Docker Compose build pack at `docker-compose.coolify.yml`. Coolify generates the
-     secrets, pulls the published images (builds them before the first release) and routes your domain to the console.
+     secrets, pulls the published images (before the first release, it builds them once you add
+     `docker-compose.build.yml`; see the Coolify guide) and routes your domain to the console.
      <!-- source: docs/coolify.md -->
   3. **Bring your own databases.** Use your own Postgres, ClickHouse and Redis (or Dragonfly) with
      `docker-compose.external.yml`. Use ClickHouse 26.9. Logbird creates its own restricted query user

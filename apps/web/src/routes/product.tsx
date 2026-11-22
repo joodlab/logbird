@@ -28,7 +28,9 @@ const page = await readAuditTrail(
     range: { from: '2026-01-01T00:00:00Z', to: new Date().toISOString() },
   }),
 );
-// page.data: events; page.nextCursor: pass back as \`cursor\` for the next page`;
+// Keep only events where one target is this booking (type and id on the same target).
+const events = page.data.filter((event) => event.targets.some((t) => t.type === 'booking' && t.id === 'bk_1042'));
+// page.nextCursor: pass back as \`cursor\` for the next page`;
 
 const toc = [
   ['explorer', 'Explorer'],

@@ -507,8 +507,8 @@ function DevelopersPage() {
               items={[
                 'Rate limits are shared by all keys of the same kind in a project, across replicas. Self-hosters can change them.',
                 <>
-                  Authenticated responses carry <code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code> and <code>RateLimit-Reset</code>. A{' '}
-                  <code>429</code> includes <code>Retry-After</code>.
+                  Authenticated responses carry <code>RateLimit-Limit</code>, <code>RateLimit-Remaining</code> and <code>RateLimit-Reset</code> when
+                  the limiter can account for the request. A <code>429</code> includes <code>Retry-After</code>.
                 </>,
                 <>
                   An unusable <code>occurredAt</code> never drops the event. It is stored at receive time, the original value is kept, and the

@@ -164,11 +164,17 @@ function SelfHostingPage() {
             </h2>
             <p className="lead max-w-3xl">
               {GITHUB_PUBLIC
-                ? 'There are no published images yet. Build the four roles from source with the self-hosting guide, start them, then sign in and send your first event. You need Docker Engine and Docker Compose 2.24.4 or newer.'
+                ? 'There are no published images yet. Build the four roles from source, start them, then sign in and send your first event. You need Docker Engine and Docker Compose 2.24.4 or newer.'
                 : 'On one VM: clone the repository, generate secrets, configure SMTP, start Logbird with Docker Compose and send your first event. You need Docker Engine and Docker Compose 2.24.4 or newer.'}
             </p>
             <div>
-              <SelfHostCta size="default" variant="outline" />
+              {GITHUB_PUBLIC ? (
+                <a className="text-link" href={`${repoFile('docs/self-hosting.md')}#build-from-source`}>
+                  Build from source (self-hosting guide)
+                </a>
+              ) : (
+                <SelfHostCta size="default" variant="outline" />
+              )}
             </div>
           </div>
         </Section>
@@ -223,7 +229,10 @@ function SelfHostingPage() {
               body: (
                 <>
                   Point Coolify's Docker Compose build pack at <code>docker-compose.coolify.yml</code>. Coolify generates the secrets,{' '}
-                  {SELF_HOST_VERSION ? 'pulls the published images' : 'builds the images'} and routes your domain to the console.
+                  {SELF_HOST_VERSION
+                    ? 'pulls the published images'
+                    : 'builds the images once you add docker-compose.build.yml (see the Coolify guide)'}{' '}
+                  and routes your domain to the console.
                 </>
               ),
               stack: (
