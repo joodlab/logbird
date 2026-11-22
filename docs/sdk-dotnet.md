@@ -212,22 +212,31 @@ dispose it on shutdown. Disposing sends what is queued, within `ShutdownTimeout`
 using System;
 using Logbird;
 
-using (var logbird = new LogbirdClient(new LogbirdOptions
+public static class Program
 {
-    Endpoint = new Uri("https://audit.example.com"),
-    IngestKey = Environment.GetEnvironmentVariable("LOGBIRD_INGEST_KEY"),
-}))
-{
-    logbird.Track(new AuditEvent("invoice.status_changed")
+    public static void Main()
     {
-        Actor = AuditActor.User("user_42"),
-        Tenant = new AuditTenant("acct_7"),
-    }.Target("invoice", "inv_1001").Change("status", "draft", "sent"));
+        using (var logbird = new LogbirdClient(new LogbirdOptions
+        {
+            Endpoint = new Uri("https://audit.example.com"),
+            IngestKey = Environment.GetEnvironmentVariable("LOGBIRD_INGEST_KEY"),
+        }))
+        {
+            logbird.Track(new AuditEvent("invoice.status_changed")
+            {
+                Actor = AuditActor.User("user_42"),
+                Tenant = new AuditTenant("acct_7"),
+            }.Target("invoice", "inv_1001").Change("status", "draft", "sent"));
+        }
+    }
 }
 ```
 
-This form compiles on every C# version; on .NET 8 you can write `await using var logbird = ...` instead. To send what
-is queued without disposing, call `logbird.Flush(TimeSpan.FromSeconds(5))`.
+This compiles with C# 7.3, the default for .NET Framework projects, and every newer version. A .NET Framework project
+also needs a reference to `System.Net.Http` (`<Reference Include="System.Net.Http" />` in the project file, or Add
+Reference, Assemblies), because the client's constructors accept an `HttpClient`. In a long-running
+process, create the client once at startup instead and dispose it when the process stops. On .NET 8 you can write
+`await using var logbird = ...`. To send what is queued without disposing, call `logbird.Flush(TimeSpan.FromSeconds(5))`.
 
 ## Going further
 

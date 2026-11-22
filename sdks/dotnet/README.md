@@ -15,7 +15,8 @@ in [Logbird](https://github.com/joodlab/logbird). The client is built to sit ins
   bytes, and Logbird stores one event per id.
 
 Targets .NET 8 and later (trimming and Native AOT compatible) and .NET Standard 2.0, so .NET Framework 4.6.2+
-applications can use it too. Dependencies: `System.Text.Json` and `Microsoft.Extensions.Logging.Abstractions`.
+applications can use it too. Dependencies: `System.Text.Json` and `Microsoft.Extensions.Logging.Abstractions`. A .NET
+Framework project also needs a reference to `System.Net.Http` (`<Reference Include="System.Net.Http" />`).
 
 New to Logbird? [Logbird for .NET](https://github.com/joodlab/logbird/blob/master/docs/sdk-dotnet.md) walks through a
 first event in an ASP.NET Core app, and [`examples/aspnetcore`](https://github.com/joodlab/logbird/tree/master/examples/aspnetcore)

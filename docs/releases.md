@@ -211,16 +211,21 @@ publishes a package:
 
 - It publishes only when the repository variable `NUGET_PUBLISH_ENABLED` is exactly
   `true` (lowercase; Settings, Secrets and variables, Actions, Variables) and the
-  `NUGET_API_KEY` secret exists. Otherwise it ends with a notice and publishes nothing.
+  `NUGET_API_KEY` secret exists. When the variable is unset or `false`, the job is
+  skipped. When it is another spelling of true (such as `TRUE`), or the secret is
+  missing, the job runs, ends with a notice and publishes nothing.
 - It builds, runs the unit tests, packs both packages, and checks that each packed
   manifest carries the release version.
 - It pushes `Logbird` first, then waits (up to an hour) until nuget.org serves that
   version, which happens after nuget.org's validation, and only then pushes
   `Logbird.AspNetCore`, which depends on it. If `Logbird` is not available in time,
   the job fails without pushing `Logbird.AspNetCore`; rerun it later.
-- Packages and symbol packages are pushed separately and each push skips a version
-  already on nuget.org, so a rerun completes whatever an earlier run left out. A
-  published version can never be replaced.
+- Packages and symbol packages are pushed separately, so a rerun completes whatever
+  an earlier run left out. A package push skips a version already on nuget.org, and a
+  published package version can never be replaced. A symbol package is pushed again
+  on every rerun: nuget.org accepts a new symbol package for a published version
+  (it refuses one only while an earlier one is still being validated), and the
+  deterministic build makes it the same symbols.
 
 Before the first publication, an owner:
 
