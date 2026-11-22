@@ -55,7 +55,7 @@ export function stepCopy(id: SetupStepId, setup: ProjectSetup, status: SetupStep
             ? `Nothing from your backend in the last 24 hours — last event ${formatRelative(setup.ingest.lastEventAt)}.`
             : onlyConsoleTest(setup)
               ? 'From your backend: none yet (the console test doesn’t count).'
-              : 'Wire the SDK into the code paths that change data, so events arrive every day.',
+              : 'Send events from the code paths that change data, so they arrive every day.',
         action: 'Check ingestion',
       };
     case 'envelope':
