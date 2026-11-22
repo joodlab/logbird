@@ -177,17 +177,7 @@ internal sealed class BatchSender
                                     }
                                 }
 
-                                foreach (var index in attempt)
-                                {
-                                    var key = EventJson.JsTrim(batch[index].Id);
-                                    if (state.IsSettled(index) || !acknowledged.TryGetValue(key, out var acknowledgements) || acknowledgements == 0)
-                                    {
-                                        continue;
-                                    }
-
-                                    acknowledged[key] = acknowledgements - 1;
-                                    state.Deliver(index);
-                                }
+                                Credit(state, attempt, acknowledged, wire => true);
                             }
                         }
                     }
@@ -233,16 +223,7 @@ internal sealed class BatchSender
 
                                 // Each accepted id settles one entry; a second entry with the same id stays unaccounted,
                                 // which makes the details incomplete and keeps the previous body.
-                                for (var wire = 0; wire < attempt.Length; wire++)
-                                {
-                                    var index = attempt[wire];
-                                    var key = EventJson.JsTrim(batch[index].Id);
-                                    if (!unresolved.Contains(wire) && !state.IsSettled(index) && acceptedIds.TryGetValue(key, out var times) && times > 0)
-                                    {
-                                        acceptedIds[key] = times - 1;
-                                        state.Deliver(index);
-                                    }
-                                }
+                                Credit(state, attempt, acceptedIds, wire => !unresolved.Contains(wire));
 
                                 // Every omitted position must be settled; otherwise malformed details keep the previous body.
                                 var allAccounted = true;
@@ -541,6 +522,35 @@ internal sealed class BatchSender
     }
 
     /// <summary>
+    /// Credits accepted ids to entries, one acknowledgement per entry. Entries already delivered earlier in this batch
+    /// (for example by an identical earlier 503) consume their acknowledgement first, so a repeated response can never
+    /// credit the same acknowledgement to a second entry with that id.
+    /// </summary>
+    private static void Credit(State state, int[] attempt, Dictionary<string, int> acknowledgements, Func<int, bool> eligible)
+    {
+        for (var wire = 0; wire < attempt.Length; wire++)
+        {
+            var index = attempt[wire];
+            var key = EventJson.JsTrim(state.Batch[index].Id);
+            if (state.WasDelivered(index) && acknowledgements.TryGetValue(key, out var times) && times > 0)
+            {
+                acknowledgements[key] = times - 1;
+            }
+        }
+
+        for (var wire = 0; wire < attempt.Length; wire++)
+        {
+            var index = attempt[wire];
+            var key = EventJson.JsTrim(state.Batch[index].Id);
+            if (eligible(wire) && !state.IsSettled(index) && acknowledgements.TryGetValue(key, out var times) && times > 0)
+            {
+                acknowledgements[key] = times - 1;
+                state.Deliver(index);
+            }
+        }
+    }
+
+    /// <summary>
     /// Reports the server's per-event warnings (for example an adjusted timestamp or whitespace kept in an identifier).
     /// Warnings for still-unresolved rows of a 503 are left for the attempt that settles them.
     /// </summary>
@@ -769,6 +779,8 @@ internal sealed class BatchSender
     /// <summary>Per-batch view over the events' own atomic states, so shutdown can take ownership of an event at any time.</summary>
     private sealed class State(QueuedEvent[] batch)
     {
+        private readonly bool[] _deliveredHere = new bool[batch.Length];
+
         private int _delivered;
 
         public QueuedEvent[] Batch { get; } = batch;
@@ -783,8 +795,12 @@ internal sealed class BatchSender
             if (Batch[index].TrySettle())
             {
                 _delivered++;
+                _deliveredHere[index] = true;
             }
         }
+
+        /// <summary>Whether this batch's own responses delivered the entry (not rejected, not abandoned).</summary>
+        public bool WasDelivered(int index) => _deliveredHere[index];
 
         public void DeliverRest(int[] attempt)
         {

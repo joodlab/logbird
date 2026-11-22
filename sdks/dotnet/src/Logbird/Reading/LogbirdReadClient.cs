@@ -29,6 +29,12 @@ public sealed class LogbirdReadOptions
 
     /// <summary>The time limit for one request. Defaults to 30 seconds.</summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The most pages one <c>SearchAllAsync</c> iteration requests before it stops with <c>page_limit</c> (when more
+    /// remain). Unlimited by default; set it to bound an iteration against a server that misbehaves.
+    /// </summary>
+    public int? MaxPages { get; set; }
 }
 
 /// <summary>
@@ -46,6 +52,7 @@ public sealed class LogbirdReadClient : IDisposable
     private readonly string _eventsUrl;
     private readonly AuthenticationHeaderValue _authorization;
     private readonly TimeSpan _timeout;
+    private readonly int? _maxPages;
 
     /// <summary>The largest response read (200 events with their attributes fit easily); a larger one fails the read.</summary>
     internal const int MaxResponseBytes = 64 * 1024 * 1024;
@@ -65,6 +72,12 @@ public sealed class LogbirdReadClient : IDisposable
             throw new ArgumentException("ReadKey is required.", nameof(options));
         }
 
+        if (options.MaxPages is < 1)
+        {
+            throw new ArgumentException("MaxPages must be at least 1.", nameof(options));
+        }
+
+        _maxPages = options.MaxPages;
         if (options.Timeout <= TimeSpan.Zero || options.Timeout > TimeSpan.FromMilliseconds(int.MaxValue))
         {
             throw new ArgumentException("Timeout must be positive and at most 24 days.", nameof(options));
@@ -85,32 +98,18 @@ public sealed class LogbirdReadClient : IDisposable
     public Task<EventPage> SearchAsync(EventSearch? search = null, CancellationToken cancellationToken = default)
         => GetAsync(_eventsUrl + (search ?? new EventSearch()).ToQueryString(), ReadJsonContext.Default.EventPage, cancellationToken)!;
 
-    /// <summary>Iterates every matching event, requesting further pages as you go.</summary>
+    /// <summary>
+    /// Iterates every matching event, requesting further pages as you go. Logbird's cursors are keyset-ordered and do not
+    /// repeat; as a guard against a misbehaving server, the iteration stops with <see cref="LogbirdApiException"/>
+    /// (<c>pagination_stalled</c>) if a cursor repeats within the last 1,000 pages, and after
+    /// <see cref="LogbirdReadOptions.MaxPages"/> pages (<c>page_limit</c>) when that limit is set and more pages remain.
+    /// </summary>
     /// <param name="search">The search. Its <see cref="EventSearch.Cursor"/> is the starting point.</param>
-    /// <param name="cancellationToken">Cancels the iteration.</param>
-    /// <exception cref="LogbirdApiException">The server answered an error, or could not be reached.</exception>
-    public IAsyncEnumerable<StoredEvent> SearchAllAsync(EventSearch? search, CancellationToken cancellationToken)
-        => SearchAllAsync(search, maxPages: null, cancellationToken);
-
-    /// <summary>Iterates every matching event, requesting further pages as you go, optionally bounded by a page limit.</summary>
-    /// <param name="search">The search. Its <see cref="EventSearch.Cursor"/> is the starting point.</param>
-    /// <param name="maxPages">
-    /// Stops with <see cref="LogbirdApiException"/> (code <c>page_limit</c>) after this many pages if more remain. Logbird's
-    /// cursors are keyset-ordered and do not repeat; the client also detects a cursor repeated within its last 1,000
-    /// pages. Use this limit to bound an iteration against a server that misbehaves in a longer cycle.
-    /// </param>
     /// <param name="cancellationToken">Cancels the iteration.</param>
     /// <exception cref="LogbirdApiException">The server answered an error, could not be reached, or the page limit was reached.</exception>
-    public async IAsyncEnumerable<StoredEvent> SearchAllAsync(
-        EventSearch? search = null,
-        int? maxPages = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<StoredEvent> SearchAllAsync(EventSearch? search = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (maxPages is < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(maxPages), maxPages, "maxPages must be at least 1.");
-        }
-
+        var maxPages = _maxPages;
         var pages = 0;
         var current = search ?? new EventSearch();
         // A bounded window of recent cursors catches repeats and short cycles without growing with the result set.
