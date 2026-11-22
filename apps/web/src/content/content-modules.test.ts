@@ -22,9 +22,13 @@ const MOVED = [
 ];
 
 /** Props and keys whose string value is always wording, even one word. */
-const WORDING = new Set(['alt', 'aria-label', 'body', 'caption', 'description', 'eyebrow', 'label', 'lead', 'note', 'placeholder', 'title']);
-/** Expressions a string passes through on its way to where it's used: `a ? 'x' : 'y'`, `ok && 'x'`, `{'x'}`, `'x' as const`. */
+const WORDING = new Set(['alt', 'aria-label', 'body', 'caption', 'description', 'eyebrow', 'label', 'lead', 'note', 'placeholder', 'text', 'title']);
+/**
+ * Expressions a string passes through on its way to where it's used: `a ? 'x' : 'y'`, `ok && 'x'`, `{'x'}`, `{['x']}`,
+ * `'x' as const`.
+ */
 const PASS_THROUGH = new Set([
+  'ArrayExpression',
   'ConditionalExpression',
   'LogicalExpression',
   'JSXExpressionContainer',
@@ -32,10 +36,30 @@ const PASS_THROUGH = new Set([
   'TSAsExpression',
   'TSSatisfiesExpression',
 ]);
-/** Attributes whose value is layout, whatever it looks like. */
-const LAYOUT_ATTRIBUTES = new Set(['className', 'sizes']);
+/** Attributes (and object keys) whose value is layout or a reference, whatever it looks like: classes, styles, ids. */
+const LAYOUT_ATTRIBUTES = new Set([
+  'className',
+  'sizes',
+  'style',
+  'id',
+  'htmlFor',
+  'labelledBy',
+  'aria-labelledby',
+  'aria-describedby',
+  'aria-controls',
+  'aria-owns',
+  'role',
+  'rel',
+  'target',
+  'type',
+  'd',
+  'viewBox',
+  'points',
+  'transform',
+]);
 const LAYOUT_CALLS = new Set(['cn', 'cx']);
-const TWO_WORDS = /\p{L}{2,}[^\S\n]+\p{L}{2,}/u;
+/** Two words, the first of at least two letters ("Join a team", "Retrace every step"). */
+const TWO_WORDS = /\p{L}{2,}[^\S\n]+\p{L}/u;
 
 interface AstNode {
   type: string;
@@ -119,6 +143,9 @@ describe('content modules', () => {
       '    {ok ? `Self-host ${version}` : "from source"}',
       "    <p>{'Join'}</p>",
       "    <Badge title={open ? 'Public' : 'Private'} />",
+      '    <Rich text="Join a team" />',
+      "    <h1>{['Join a team']}</h1>",
+      `    <div style={{ gridTemplateAreas: '"hero main"' }} aria-labelledby="hero-title hero-status" />`,
       '  </section>',
       ');',
       "const planClass = { className: 'grid gap-2', label: 'Plans' };",
@@ -133,8 +160,11 @@ describe('content modules', () => {
       'file.tsx:9: "Join"',
       'file.tsx:10: "Public"',
       'file.tsx:10: "Private"',
+      'file.tsx:11: "Join a team"',
+      'file.tsx:12: "Join a team"',
+      // Line 13: a style value and an id list are layout and references, not prose.
       // The class-name exemption covers the variable's own value, not data nested in it.
-      'file.tsx:13: "Plans"',
+      'file.tsx:16: "Plans"',
     ]);
   });
 

@@ -61,7 +61,7 @@ Every claim on the page, with its source in the repository. Update the source an
 | Retention from 7 days to 10 years, permanent deletion (`operators.features.retention`, `guarantees.items[3]`) | `packages/contracts/src/api.ts` `RETENTION_OPTIONS` (7, 14, 30, 60, 90, 180, 365, 730, 1825, 3650 days); `docs/SPEC.md` §1.4, §4 |
 | Ingest key shown once, stored as a hash (`howItWorks.steps[0]`) | `docs/SPEC.md` §5 |
 | Up to 1000 events per request (`howItWorks.steps[1]`) | `docs/SPEC.md` §5 size limits |
-| `202` with `ids` and `rejected` (`howItWorks.steps[2]`, `guarantees.items[0]`) | `docs/SPEC.md` §2 ingestion path |
+| `202` with `ids` and `rejected` (`howItWorks.steps[2]`, `guarantees.items[0]`) | `docs/SPEC.md` §3 (which events appear in `ids` and which in `rejected`); §2 (acknowledged after the write) |
 | Expired events deleted every hour (`howItWorks.steps[3]`, `howItWorks.architecture`) | `docs/SPEC.md` §4 retention |
 | The envelope example (`envelope.lines`) | `docs/concepts.md` worked example, event 1 (condensed) |
 | One repository, MIT, Compose, Coolify, Caddy (`openSource`) | `LICENSE`; `docs/self-hosting.md` |
