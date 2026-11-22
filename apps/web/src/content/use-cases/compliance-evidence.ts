@@ -43,7 +43,8 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
           id: 'event-detail',
           label: 'Event detail',
           caption:
-            'One event in the console: who caused it and what performed it, the customer account, the records it touched, the before and after value, and what caused it.',
+            'One event in the console: who caused it and what performed it, the customer account, the records it touched, the before and after value, and what caused it. Select the image to open it full size.',
+          zoom: true,
         },
       },
       {

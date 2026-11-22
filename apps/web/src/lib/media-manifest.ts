@@ -89,6 +89,14 @@ export const screenshots: ScreenshotEntry[] = [
     alt: "A tenant's page: event counts, an activity chart, outcomes, top actions and the related actors, executors and records.",
   },
   {
+    // A crop of the tenant capture above: the header, the counts and "who did it", at a size where the text reads.
+    id: 'tenant-account',
+    light: `${C}/tenant-account-light.webp`,
+    width: 588,
+    height: 414,
+    alt: 'One customer account in the console: Dar Al Wafa Hotels, with 428 events in the last 24 hours and 2,634 in all, and 5 of them done by a support agent signed in as the customer, Leena Ashford.',
+  },
+  {
     id: 'actor',
     light: `${C}/actor-light.webp`,
     ...desktop,

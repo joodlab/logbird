@@ -1,0 +1,49 @@
+---
+path: /use-cases/customer-audit-logs
+module: apps/web/src/content/use-cases/customer-audit-logs.ts
+---
+
+# Customer-facing audit logs: brief
+
+**The words live in the module.** The page renders `apps/web/src/content/use-cases/customer-audit-logs.ts` through the
+shared use-case layout (`components/marketing/use-case.tsx`), the same as the compliance evidence page. This file holds
+the page's job and the proof behind every claim.
+
+## The page's job
+
+The first paid job in depth: a B2B product whose customers' admins ask to see who did what in their account. The first
+screen makes clear that the history appears inside *your* product, through *your* backend. The steps:
+1. send `tenant` with each event;
+2. understand the read-key limit, which comes before the how-to, as its own section;
+3. authorize every read;
+4. render it with your own components.
+
+The landing page's customer section links here.
+
+## Gated (maintainer)
+
+Scoped read keys and viewer tokens are released in 0.2.0, but they aren't described until the maintainer confirms their
+production proof (`SiteState.scopedReadLive`). Until then the page describes reading through your own backend, and
+`use-cases.test.ts` fails if "viewer token", "scoped read" or "scoped key" appears.
+
+## Proof
+
+| Claim (section) | Source |
+| --- | --- |
+| `tenant` names the account an event belongs to; only `action` is required (`send`) | `docs/concepts.md` § Tenants; `docs/SPEC.md` §1.1 |
+| Logbird can't infer the account of an event without `tenant` (`send` limit) | `docs/SPEC.md` §1 item 2 ("Capture is the client's job") |
+| A read key reads the whole project; a query filter is not authorization; authorize on every request, including each next page (`before`) | `docs/integrations.md` § Design; `/developers` § Read API limit |
+| Keys stay on the server, never in a browser bundle or public configuration (`before`) | `docs/integrations.md` § Design ("Never put an ingest or read key in public runtime config, client components or browser bundles") |
+| Never trust the browser's tenant or query (`before`) | `packages/integrations/vue/README.md` ("Never trust a browser's tenant or q as authorization") |
+| The Nuxt history route denies by default; only the query `authorize()` returns is forwarded (`read`) | `packages/integrations/nuxt/README.md`; `docs/integrations.md` § Design |
+| The `authorize()` sample returns `{ q: 'tenant:"…"' }` (`read`) | The `SearchQuery` shape in `packages/sdk/src/read.ts` (no tenant field; the query language scopes it); `examples/nuxt/server/logbird.ts` |
+| TanStack Start: `readAuditTrail` with `trailQuery`; any backend: the read API with the read key (`read`) | `packages/integrations/tanstack-start/README.md`; `docs/SPEC.md` §5 (read keys) |
+| `useAuditTrail` pages, has loading/error/refresh/load-more, discards stale responses; `AuditTimeline` is headless (`render`) | `packages/integrations/vue/README.md`; `docs/integrations.md` § Design |
+| In Nuxt, `useAuditTrail` reads through the module's authorized route (`render` sample) | `packages/integrations/nuxt/README.md` ("Auto-imported `useAuditTrail(...)` uses the server route `/api/_logbird/events`") |
+| The tenant-page visual: events in 24 hours and in all, and the support agents who acted while signed in as the customer (`render`) | The reviewed `tenant` capture (`marketing/media/staydesk/tenant-light.webp`), cropped |
+
+## Visual
+
+`tenant-account`: a crop of the reviewed `tenant` capture (header, counts and "who did it"). It opens full size on tap
+(the layout's `zoom`), because console detail is too small to read at phone width. The caption says it's your team's
+view in the console, not what your customers see.
