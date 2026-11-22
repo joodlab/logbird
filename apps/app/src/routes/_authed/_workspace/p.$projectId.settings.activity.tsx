@@ -104,7 +104,7 @@ function WorkspaceActivity() {
           </fieldset>
           <span className="text-muted-foreground text-xs sm:ms-auto">
             {activity.data
-              ? `${formatNumber(activity.data.pages[0]?.total ?? 0)} ${(activity.data.pages[0]?.total ?? 0) === 1 ? 'action' : 'actions'} · ${rangeLabel(range)}`
+              ? `${activity.data.pages[0]?.totalExact === false ? '≥ ' : ''}${formatNumber(activity.data.pages[0]?.total ?? 0)} ${(activity.data.pages[0]?.total ?? 0) === 1 ? 'action' : 'actions'} · ${rangeLabel(range)}`
               : null}
           </span>
         </div>

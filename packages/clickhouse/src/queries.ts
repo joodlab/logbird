@@ -169,6 +169,21 @@ function cursor(s: string): [string, string] {
   }
   throw new Error('Invalid cursor');
 }
+/** Distinct matches up to the 10,001 cap. `exact` is false when capped, over its one-second guard, or failed. */
+export const COUNT_CAP = 10_001;
+async function countMatches(ch: ClickHouseClient, w: { sql: string; params: Params }): Promise<{ n: number; exact: boolean }> {
+  try {
+    const n = Number(
+      (await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT ${COUNT_CAP})`, w.params, 1))[0]
+        ?.n ?? 0,
+    );
+    return { n, exact: n < COUNT_CAP };
+  } catch (error) {
+    const reason = error instanceof QueryError ? error.details.reason : 'error';
+    console.warn(JSON.stringify({ level: 'warn', event: 'search.count_unavailable', reason }));
+    return { n: 0, exact: false };
+  }
+}
 async function searchPage(
   ch: ClickHouseClient,
   projectId: string,
@@ -195,6 +210,8 @@ async function searchPage(
     params.cursorId = id;
     tail = ` AND (timestamp,event_id) ${op} ({cursorTs:DateTime64(3)},{cursorId:String})`;
   }
+  // The count runs beside the rows and can never fail or delay them past its own short guard.
+  const counted = exportClock ? undefined : countMatches(ch, w);
   const rows = await read<EventRow>(
     ch,
     // Select pairs in the MergeTree's timestamp/id order; resolve receipt ties only in the bounded fetch.
@@ -204,18 +221,20 @@ async function searchPage(
     10,
     Boolean(exportClock),
     execution,
-  );
+  ).catch(async (error) => {
+    await counted; // never leave the count running unobserved
+    throw error;
+  });
   const hasMore = rows.length > q.limit,
     data = rows.slice(0, q.limit).map(toEvent),
     last = data.at(-1);
-  const total = exportClock
-    ? 0
-    : Number(
-        (await read<{ n: number }>(ch, `SELECT count() n FROM (SELECT DISTINCT event_id FROM events WHERE ${w.sql} LIMIT 10001)`, w.params, 1))[0]
-          ?.n ?? 0,
-      );
+  const count = await counted;
+  // Lower bound when the count did not finish: the rows seen, plus the extra row that proves there are more.
+  const seen = data.length + (hasMore ? 1 : 0);
+  const total = count === undefined ? 0 : count.exact ? count.n : Math.max(count.n, seen);
+  const totalExact = count === undefined ? true : count.exact && count.n >= seen;
   return {
-    page: { data, total, nextCursor: hasMore && last ? encode([last.timestamp, last.id]) : null, tookMs: performance.now() - start },
+    page: { data, total, totalExact, nextCursor: hasMore && last ? encode([last.timestamp, last.id]) : null, tookMs: performance.now() - start },
     payloads: includePayload ? rows.slice(0, q.limit).map((row) => row.payload) : [],
   };
 }

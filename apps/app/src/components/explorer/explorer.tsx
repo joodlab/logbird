@@ -191,7 +191,8 @@ export function Explorer({
   const histogramTotal =
     histogramData && (problem || !histogram.isPlaceholderData) ? histogramData.buckets.reduce((n, b) => n + b.total, 0) : undefined;
   const total = (histogramTotal ?? searchTotal) + liveRows.length;
-  const totalCapped = histogramTotal === undefined && searchTotal > 10_000;
+  // Without the histogram, the search total may be a lower bound (capped, or its count did not finish in time).
+  const totalLowerBound = histogramTotal === undefined && (searchTotal > 10_000 || pages?.[0]?.totalExact === false);
 
   /* ---------------- selection ---------------- */
   const selectedIndex = ev ? rows.findIndex((e) => e.id === ev) : -1;
@@ -447,7 +448,7 @@ export function Explorer({
               'Searching…'
             ) : (
               <>
-                <span className="font-medium text-foreground">{totalCapped ? '10,000+' : formatNumber(total)}</span> events · {rangeLabel(range)}
+                <span className="font-medium text-foreground">{totalLowerBound ? (searchTotal > 10_000 ? '10,000+' : `≥ ${formatNumber(total)}`) : formatNumber(total)}</span> events · {rangeLabel(range)}
                 {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>
