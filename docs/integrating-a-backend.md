@@ -99,7 +99,8 @@ Numeric attribute values follow the same rule with a 2,044-character limit (stri
 values are cut at 2 KB). A composite
 attribute value (an array, or an object deeper than the flattening limit) is indexed as
 its first 2 KB; a number cut by that limit is left out of the indexed copy instead of
-keeping partial digits (text inside strings keeps its plain 2 KB prefix). The normalized `executor.attempt` is the whole part of its exact
+keeping partial digits; digits inside strings are text and follow the usual 2 KB prefix
+(cut at a UTF-8 boundary, so a character at the edge, including U+FFFD, can drop). The normalized `executor.attempt` is the whole part of its exact
 value. A string id is indexed as sent, with surrounding whitespace trimmed and a
 256-character cap (the original payload always keeps it exactly). An event nested more
 than 1,000 levels deep that holds a number a double cannot keep (anywhere in the event)
