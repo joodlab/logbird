@@ -193,11 +193,11 @@ export function Explorer({
   const searchCount = known.count;
   const histogramTotal =
     histogramData && (problem || !histogram.isPlaceholderData) ? histogramData.buckets.reduce((n, b) => n + b.total, 0) : undefined;
-  // Live rows the pages do not already show (the table deduplicates them the same way).
+  // Live rows the pages do not show may or may not be in the aggregate already, so they never add to it: the label is
+  // at least the aggregate and the visible rows, and becomes a lower bound while such live rows exist.
   const liveExtra = rows.length - pagedCount;
-  const total = (histogramTotal ?? searchCount) + liveExtra;
-  // Without the histogram, the search total may be a lower bound (capped, or its count did not finish in time).
-  const totalLowerBound = histogramTotal === undefined && !known.exact;
+  const total = Math.max(histogramTotal ?? searchCount, rows.length);
+  const totalLowerBound = (histogramTotal === undefined && !known.exact) || liveExtra > 0;
 
   /* ---------------- selection ---------------- */
   const selectedIndex = ev ? rows.findIndex((e) => e.id === ev) : -1;

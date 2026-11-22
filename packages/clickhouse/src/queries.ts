@@ -195,12 +195,12 @@ type CountResult = { n: number; exact: boolean };
 function countMatches(ch: ClickHouseClient, w: { sql: string; params: Params }) {
   const controller = new AbortController();
   const fallback: CountResult = { n: 0, exact: false };
-  let stopped: 'budget' | 'cancelled' | 'settled' | undefined;
+  let stopped: 'budget' | 'settled' | undefined;
   let settle: (value: CountResult) => void = () => undefined;
   const deadline = new Promise<CountResult>((resolve) => {
     settle = resolve;
   });
-  const stop = (why: 'budget' | 'cancelled') => {
+  const stop = (why: 'budget') => {
     if (stopped) return;
     stopped = why;
     console.warn(JSON.stringify({ level: 'warn', event: 'search.count_unavailable', reason: why }));
@@ -225,7 +225,7 @@ function countMatches(ch: ClickHouseClient, w: { sql: string; params: Params }) 
       clearTimeout(timer);
     }
   })();
-  return { result: Promise.race([counted, deadline]), cancel: () => stop('cancelled') };
+  return { result: Promise.race([counted, deadline]) };
 }
 async function searchPage(
   ch: ClickHouseClient,
@@ -264,22 +264,13 @@ async function searchPage(
       Boolean(exportClock),
       execution,
     );
-  // Rows first: their request is sent before the count's, so the count never takes ClickHouse's last query slot ahead
-  // of them. The count runs beside the rows and can never fail or delay them past its own short guard.
-  const pending = readRows();
-  const counted = exportClock ? undefined : countMatches(ch, w);
-  const rows = await pending.catch(async (error) => {
-    // A failed row query must not wait for the count: cancelling settles it at once.
-    counted?.cancel();
-    await counted?.result;
-    // If the count still took the last slot, the rows get one retry on their own.
-    if (counted && /TOO_MANY_SIMULTANEOUS_QUERIES/.test(error instanceof Error ? error.message : String(error))) return readRows();
-    throw error;
-  });
+  // Rows first and alone, as before: the optional count never competes with them for a ClickHouse query slot, and a
+  // row error surfaces unchanged. The count then gets at most COUNT_BUDGET_MS and can only lower the total's precision.
+  const rows = await readRows();
   const hasMore = rows.length > q.limit,
     data = rows.slice(0, q.limit).map(toEvent),
     last = data.at(-1);
-  const count = await counted?.result;
+  const count = exportClock ? undefined : await countMatches(ch, w).result;
   // Lower bound when the count did not finish: the rows seen, plus the extra row that proves there are more.
   const seen = data.length + (hasMore ? 1 : 0);
   // A count from an earlier snapshot can be below what this page proves; never report less than that.

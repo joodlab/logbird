@@ -115,53 +115,35 @@ it('settles a stalled count body by its deadline and closes the stream', async (
   expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)).reason)).toEqual(['budget']);
   warn.mockRestore();
 });
-it('fails a row error at once, cancelling a stalled count instead of waiting for it', async () => {
-  const close = vi.fn();
-  const query = vi.fn(async (args: { query: string }) => {
-    if (isCount(args.query)) return { json: () => new Promise(() => undefined), close };
-    throw new Error('fictional row failure');
-  });
-  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-  const started = Date.now();
-  await expect(searchEvents({ query } as unknown as ClickHouseClient, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 })).rejects.toThrow(
-    'fictional row failure',
-  );
-  expect(Date.now() - started).toBeLessThan(500);
-  expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)).reason)).toEqual(['cancelled']);
-  warn.mockRestore();
-});
-it('sends the row query before the count and retries rows alone if the count took the last slot', async () => {
+it('runs the count only after the rows, and never when the rows fail', async () => {
   const b = row('b', '2026-11-07T10:02:00.000Z');
   const order: string[] = [];
-  let rowAttempts = 0;
+  let rowsDone = false;
   const query = vi.fn(async (args: { query: string }) => {
-    order.push(isCount(args.query) ? 'count' : 'rows');
-    if (isCount(args.query)) return { json: () => new Promise(() => undefined), close: vi.fn() };
-    rowAttempts++;
-    if (rowAttempts === 1) throw new Error('Code: 202. DB::Exception: Too many simultaneous queries. (TOO_MANY_SIMULTANEOUS_QUERIES)');
-    return { json: async () => [b], close: vi.fn() };
+    order.push(isCount(args.query) ? `count(rowsDone=${rowsDone})` : 'rows');
+    if (isCount(args.query)) return { json: async () => [{ n: 1 }], close: vi.fn() };
+    return {
+      json: async () => {
+        rowsDone = true;
+        return [b];
+      },
+      close: vi.fn(),
+    };
+  });
+  expect(await searchEvents({ query } as unknown as ClickHouseClient, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 })).toMatchObject({
+    total: 1,
+    totalExact: true,
+  });
+  expect(order).toEqual(['rows', 'count(rowsDone=true)']);
+  const failing = vi.fn(async (args: { query: string }) => {
+    if (isCount(args.query)) throw new Error('count must not run');
+    throw Object.assign(new Error('Too many simultaneous queries.'), { code: '202', type: 'TOO_MANY_SIMULTANEOUS_QUERIES' });
   });
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-  const page = await searchEvents({ query } as unknown as ClickHouseClient, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 });
-  warn.mockRestore();
-  expect(order.slice(0, 2)).toEqual(['rows', 'count']);
-  expect(rowAttempts).toBe(2);
-  expect(page).toMatchObject({ total: 1, totalExact: false });
-  expect(page.data.map((e) => e.id)).toEqual(['b']);
-});
-it('does not log a cancellation for a count that already settled', async () => {
-  let rowCalls = 0;
-  const query = vi.fn(async (args: { query: string }) => {
-    if (isCount(args.query)) return { json: async () => [{ n: 3 }], close: vi.fn() };
-    rowCalls++;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    throw new Error('fictional late row failure');
-  });
-  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-  await expect(searchEvents({ query } as unknown as ClickHouseClient, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 })).rejects.toThrow(
-    'fictional late row failure',
-  );
-  expect(rowCalls).toBe(1);
+  await expect(
+    searchEvents({ query: failing } as unknown as ClickHouseClient, 'qa-narrow-search', { from, to, order: 'desc', limit: 5 }),
+  ).rejects.toThrow('Too many simultaneous queries.');
+  expect(failing).toHaveBeenCalledTimes(1);
   expect(warn).not.toHaveBeenCalled();
   warn.mockRestore();
 });

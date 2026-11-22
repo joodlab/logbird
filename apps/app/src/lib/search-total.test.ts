@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { formatSearchTotal, searchTotal } from './search-total';
 
-it('prefers an exact page, else the largest lower bound', () => {
+it('uses the newest page, else a lower bound', () => {
   expect(searchTotal(undefined)).toEqual({ count: 0, exact: true });
   expect(searchTotal([{ total: 42 }])).toEqual({ count: 42, exact: true });
   expect(
@@ -10,6 +10,17 @@ it('prefers an exact page, else the largest lower bound', () => {
       { total: 202, totalExact: false },
     ]),
   ).toEqual({ count: 202, exact: false });
+  // An older, larger total is stale once a newer page counts exactly.
+  expect(
+    searchTotal(
+      [
+        { total: 350, totalExact: true },
+        { total: 300, totalExact: true },
+      ],
+      200,
+      true,
+    ),
+  ).toEqual({ count: 300, exact: true });
   expect(
     searchTotal([
       { total: 101, totalExact: false },
