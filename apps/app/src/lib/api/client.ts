@@ -1,8 +1,7 @@
 import {
   type ApiKey,
   acceptInviteLinkResponseSchema,
-  apiKeySchema,
-  createApiKeyResponseSchema,
+  type createApiKeySchema,
   createProjectResponseSchema,
   type EntityKind,
   type EntitySort,
@@ -27,6 +26,7 @@ import {
   projectSetupSchema,
   type QueryLang,
   retentionStatusSchema,
+  type rollApiKeySchema,
   routes,
   type SavedView,
   sampleDataResponseSchema,
@@ -37,6 +37,7 @@ import {
   workspaceSetupSchema,
 } from '@logbird/contracts';
 import { z } from 'zod';
+import { issuedKeyResponseSchema, issuedKeySchema } from '@/lib/api-keys';
 import { timeoutError, toApiError } from './errors';
 
 type Query = Record<string, string | number | boolean | null | undefined>;
@@ -195,12 +196,17 @@ export const api = {
 
   keys: {
     list: (projectId: string, signal?: AbortSignal) =>
-      request(listOf(apiKeySchema), 'GET', pathFor(routes.keys.list.path, { projectId }), { signal }) as Promise<ApiKey[]>,
-    create: (projectId: string, body: { name: string; kind: 'ingest' | 'read' }) =>
-      request(createApiKeyResponseSchema, 'POST', pathFor(routes.keys.create.path, { projectId }), { body }),
+      request(listOf(issuedKeySchema), 'GET', pathFor(routes.keys.list.path, { projectId }), { signal }) as Promise<ApiKey[]>,
+    // Tolerant of servers older than scoped keys: the secret is never lost to a parse error (see issuedKeySchema).
+    create: (projectId: string, body: z.input<typeof createApiKeySchema>) =>
+      request(issuedKeyResponseSchema, 'POST', pathFor(routes.keys.create.path, { projectId }), { body }),
     revoke: (projectId: string, keyId: string) => request(ok, 'DELETE', pathFor(routes.keys.revoke.path, { projectId, keyId })),
-    /** Replacement with the same name and kind; the old key stays valid until revoked. Secret returned once. */
-    roll: (projectId: string, keyId: string) => request(createApiKeyResponseSchema, 'POST', pathFor(routes.keys.roll.path, { projectId, keyId })),
+    /**
+     * Replacement with the same name, kind, scope and origins; the old key stays valid until revoked. Without
+     * `expiresAt` it keeps the old key's expiry (an expired key needs a new one: 409 `key_expired`). Secret returned once.
+     */
+    roll: (projectId: string, keyId: string, body: z.input<typeof rollApiKeySchema> = {}) =>
+      request(issuedKeyResponseSchema, 'POST', pathFor(routes.keys.roll.path, { projectId, keyId }), { body }),
   },
 
   events: {

@@ -79,8 +79,10 @@ A scope matches the ids Logbird **stored**, the same ids the console shows on a 
 
 ## Keys
 
-Create scoped keys with `POST /api/projects/:projectId/keys` (a console form follows; today the console creates ingest and
-ordinary read keys):
+Create scoped keys in the console (project **Settings → API keys → Create key → Scoped read**) or with
+`POST /api/projects/:projectId/keys`. The console form shows each limit before you submit, previews what the key can
+read, and afterwards shows the kind, scope and expiry the server actually returned, with a warning if they differ from
+the request:
 
 ```http
 POST /api/projects/:projectId/keys
@@ -103,9 +105,10 @@ POST /api/projects/:projectId/keys
   Older servers refuse `kind: "scoped-read"` outright (422).
 - Scope, origins and expiry are fixed at creation. **Rolling** (`POST …/keys/:keyId/roll`) copies the scope and
   origins and keeps the old key's absolute expiry; pass `{ "expiresAt": "…" }` to give the replacement a different
-  one. Rolling an expired key requires a new `expiresAt` (409 `key_expired` otherwise). A database trigger refuses any
-  replacement that drops the scope or the expiry: this release answers 409 `key_restricted`; an older release (after a
-  rollback) fails that roll with a server error and creates nothing.
+  one. Rolling an expired key requires a new `expiresAt` (409 `key_expired` otherwise). In the console, **Roll** asks
+  whether the replacement keeps the current expiry or gets a new one, and offers only a new one for an expired key.
+  A database trigger refuses any replacement that drops the scope or the expiry: this release answers 409
+  `key_restricted`; an older release (after a rollback) fails that roll with a server error and creates nothing.
 - `api_key.created` and `api_key.revoked` in workspace activity record the scope, origins and expiry.
 
 ## Viewer tokens
