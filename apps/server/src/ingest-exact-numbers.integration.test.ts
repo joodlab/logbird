@@ -1,4 +1,4 @@
-import { exportEvents, searchEvents } from '@logbird/clickhouse';
+import { canonicalFingerprint, exportEvents, insertEvents, read, searchEvents } from '@logbird/clickhouse';
 import { prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { clickhouse } from './clickhouse';
@@ -77,5 +77,29 @@ it('treats an identical raw retry as the same event and the rounded number as di
   const roundedBody = await rounded.json();
   expect(roundedBody.accepted).toBe(0);
   expect(roundedBody.rejected[0].code).toBe('duplicate_id_conflict');
+  expect(await f.count()).toBe(1);
+});
+
+it('accepts an exact retry of an event stored before exact numbers (rounded payload), without a second row', async () => {
+  await insertEvents(clickhouse, [f.row(JSON.parse(body))]);
+  const retry = await rawPost(body);
+  expect(retry.status).toBe(202);
+  expect(await retry.json()).toMatchObject({ accepted: 1, ids: ['exact-1'], rejected: [] });
+  expect(await f.count()).toBe(1);
+});
+
+it('takes over an abandoned receipt claimed before exact numbers and stores the exact digits', async () => {
+  const old = JSON.parse(body);
+  const normalized = f.row(old);
+  await f.pending(old, { expired: true, legacy: canonicalFingerprint(old, normalized.timestamp) });
+  let retry = await rawPost(body);
+  for (let attempt = 0; retry.status === 503 && attempt < 5; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    retry = await rawPost(body);
+  }
+  expect(retry.status).toBe(202);
+  expect(await retry.json()).toMatchObject({ accepted: 1, ids: ['exact-1'], rejected: [] });
+  const [stored] = await read<{ payload: string }>(clickhouse, 'SELECT payload FROM events WHERE project_id={p:String}', { p: f.project });
+  expect(stored?.payload).toContain('"snowflake":1234567890123456789');
   expect(await f.count()).toBe(1);
 });

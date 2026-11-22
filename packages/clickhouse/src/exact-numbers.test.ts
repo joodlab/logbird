@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { parseJsonExact } from '@logbird/contracts';
 import { expect, it } from 'vitest';
-import { canonicalFingerprint, eventFingerprint, retryFingerprint } from './identity';
+import { canonicalFingerprint, eventFingerprint, retryFingerprint, roundedFingerprint } from './identity';
 import { normalizeEvent } from './normalize';
 
 const ctx = { projectId: 'fictional-exact', receivedAt: new Date('2026-11-22T12:00:00Z') };
@@ -91,4 +91,48 @@ it('computes the stored fingerprint and the retry fingerprint from the same exac
   const input = wire('{"id":"e2","action":"x","metadata":{"snowflake":1234567890123456789}}');
   const { row } = normalize(input);
   expect(retryFingerprint(input, ctx.projectId, ctx.receivedAt, 'e2')).toBe(eventFingerprint(row));
+});
+
+it('hashes equivalent spellings of an exact number the same, and keeps the sent spelling in the payload', () => {
+  const at = '2026-11-22T12:00:00.000Z';
+  const a = canonicalFingerprint(wire('{"action":"x","n":9007199254740993}'), at);
+  expect(canonicalFingerprint(wire('{"action":"x","n":9007199254740993.0}'), at)).toBe(a);
+  expect(canonicalFingerprint(wire('{"action":"x","n":9.007199254740993e15}'), at)).toBe(a);
+  expect(normalize(wire('{"action":"x","n":9007199254740993.0}')).row.payload).toBe('{"action":"x","n":9007199254740993.0}');
+});
+
+it('matches evidence from before exact numbers (rounded fingerprints) for the same wire input', () => {
+  const text = '{"id":"old","action":"x","occurredAt":"2026-11-22T11:59:00.000Z","metadata":{"snowflake":1234567890123456789}}';
+  const at = new Date('2026-11-22T11:59:00.000Z');
+  const old = canonicalFingerprint(JSON.parse(text), at.toISOString());
+  expect(roundedFingerprint(wire(text), at.toISOString())).toBe(old);
+  expect(retryFingerprint(wire(text), ctx.projectId, ctx.receivedAt, 'old', old, at)).toBe(old);
+  // Without a raw number there is no rounded variant, and a different event never matches.
+  expect(roundedFingerprint(wire('{"action":"x","n":1}'), at.toISOString())).toBeNull();
+  const other = '{"id":"old","action":"x","occurredAt":"2026-11-22T11:59:00.000Z","metadata":{"snowflake":1234567890123456000}}';
+  expect(retryFingerprint(wire(other), ctx.projectId, ctx.receivedAt, 'old', canonicalFingerprint(wire(text), at.toISOString()), at)).not.toBe(
+    canonicalFingerprint(wire(text), at.toISOString()),
+  );
+});
+
+it('indexes numbers only in identifier columns and counts numeric ids in conformance', () => {
+  const { row } = normalize(
+    wire('{"action":"x","outcome":1,"severity":2,"environment":3,"description":4,"actor":{"id":0,"name":5},"schemaVersion":2}'),
+  );
+  expect([row.outcome, row.severity, row.environment, row.description, row.actor_name]).toEqual(['success', 'info', 'production', '', '']);
+  expect([row.actor_id, row.schema_version]).toEqual(['0', '2']);
+  const withZero = normalize(wire('{"action":"x","actor":{"id":0}}')).row.conformance;
+  const without = normalize(wire('{"action":"x"}')).row.conformance;
+  expect(withZero).toBeGreaterThan(without);
+});
+
+it('stores a numeric id as the plain decimal of its exact value, one spelling per value', () => {
+  for (const spelling of ['42', '42.0', '4.2e1'])
+    expect(normalize(wire(`{"action":"x","tenant":{"id":${spelling}},"targets":[{"type":"page","id":${spelling}}]}`)).row).toMatchObject({
+      tenant_id: '42',
+      target_ids: ['42'],
+    });
+  expect(normalize(wire('{"action":"x","actor":{"id":9007199254740993.0}}')).row.actor_id).toBe('9007199254740993');
+  // Strings stay exactly as sent.
+  expect(normalize(wire('{"action":"x","tenant":{"id":"42.0"}}')).row.tenant_id).toBe('42.0');
 });

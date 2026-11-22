@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { isRawJson, rawJsonText } from '@logbird/contracts';
+import { isRawJson, plainDecimal, rawJsonText } from '@logbird/contracts';
 import { resolveTimestamp } from './timestamp';
 
 function uuidv7() {
@@ -24,13 +24,18 @@ const wellFormed = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|
 // Numbers (ids from integer keys, numeric names) are indexed by their exact decimal text, like a string would be.
 // Legacy (pre-v1) receipt fingerprints froze the old columns, where a number indexed as ''.
 const textOf = (v: unknown, cap: number, numbers: boolean): string => {
-  const s = typeof v === 'string' ? v : numbers ? rawJsonText(v) : null;
+  // A numeric id is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are all "42").
+  const s = typeof v === 'string' ? v : numbers ? plainDecimal(v) : null;
   return s === null ? '' : capText(wellFormed(s.trim()), cap);
 };
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
 const isNumber = (v: unknown) => typeof v === 'number' || isRawJson(v);
 export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string; legacyColumns?: boolean }) {
-  const text = (v: unknown, cap = 512) => textOf(v, cap, !ctx.legacyColumns);
+  // Only identifiers index numbers (integer primary keys); other text columns keep string-only semantics.
+  const text = (v: unknown, cap = 512) => textOf(v, cap, false);
+  const idText = (v: unknown, cap = 256) => textOf(v, cap, !ctx.legacyColumns);
+  // A numeric id (even 0) is present; legacy columns keep the old truthiness score.
+  const present = (v: unknown) => (!ctx.legacyColumns && isNumber(v)) || Boolean(v);
   // Search normalization is intentionally lossy. Identity v1 hashes canonical raw input, NOT these columns.
   // Changing caps/flattening must not change v1 or remove the legacy receipt compatibility path.
   const e = object(input);
@@ -120,29 +125,29 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     severity: text(e.severity, 32) || 'info',
     description: text(e.description, 4096),
     actor_type: text(actor.type, 64),
-    actor_id: text(actor.id, 256),
+    actor_id: idText(actor.id),
     actor_name: text(actor.name),
     actor_email: text(actor.email),
-    impersonator_id: text(imp.id, 256),
+    impersonator_id: idText(imp.id),
     impersonator_name: text(imp.name),
     executor_type: text(executor.type, 64),
-    executor_id: text(executor.id, 256),
+    executor_id: idText(executor.id),
     executor_name: text(executor.name),
-    job_id: text(executor.jobId, 256),
+    job_id: idText(executor.jobId),
     job_attempt: isNumber(executor.attempt) ? Math.min(65_535, Math.max(0, Math.trunc(Number(rawJsonText(executor.attempt) ?? 0)) || 0)) : 0,
-    tenant_id: text(tenant.id, 256),
+    tenant_id: idText(tenant.id),
     tenant_name: text(tenant.name),
     source: text(e.source, 128),
     target_types: targets.map((t) => text(t.type, 64)),
-    target_ids: targets.map((t) => text(t.id, 256)),
+    target_ids: targets.map((t) => idText(t.id)),
     target_names: targets.map((t) => text(t.name)),
     changes_fields: changes.map((c) => text(c.field, 256)),
     changes_before: changes.map((c) => wellFormed(value(c.before))),
     changes_after: changes.map((c) => wellFormed(value(c.after))),
-    operation_id: text(context.operationId, 256),
-    parent_event_id: text(context.parentEventId, 256),
-    request_id: text(context.requestId, 256),
-    trace_id: text(context.traceId, 256),
+    operation_id: idText(context.operationId),
+    parent_event_id: idText(context.parentEventId),
+    request_id: idText(context.requestId),
+    trace_id: idText(context.traceId),
     ip: text(context.ip, 64),
     user_agent: text(context.userAgent, 1024),
     attributes,
@@ -150,19 +155,19 @@ export function normalizeEvent(input: unknown, ctx: { projectId: string; receive
     conformance: Math.round(
       ([
         occurredAtValid,
-        actor.id,
+        present(actor.id),
         actor.type,
         e.outcome,
         targets.length,
-        tenant.id,
+        present(tenant.id),
         executor.type,
-        context.operationId || context.requestId,
+        present(context.operationId) || present(context.requestId),
         e.description,
       ].filter(Boolean).length /
         9) *
         100,
     ),
-    schema_version: text(e.schemaVersion, 32),
+    schema_version: idText(e.schemaVersion, 32),
     sdk: text(ctx.sdk, 128),
   };
   return { ok: true as const, row, id, warning };

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { isRawJson, parseJsonExact } from '@logbird/contracts';
+import { canonicalDecimal, isRawJson, parseJsonExact, rawJsonNumber } from '@logbird/contracts';
 import type { ClickHouseClient } from './client';
 import { projectMaintenance } from './maintenance-tag';
 import { type EventRow, normalizeEvent } from './normalize';
@@ -8,9 +8,9 @@ import { resolveTimestamp } from './timestamp';
 
 function sorted(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sorted);
-  // Raw JSON numbers serialize as their exact digits. Doubles that round-trip stay plain numbers, so identity of
-  // events without such numbers is unchanged.
-  if (isRawJson(value)) return value;
+  // Raw JSON numbers hash as one canonical spelling of their exact value (`…993` and `…993.0` are the same number).
+  // Doubles that round-trip stay plain numbers, so identity of events without such numbers is unchanged.
+  if (isRawJson(value)) return rawJsonNumber(canonicalDecimal(value.rawJSON) ?? value.rawJSON);
   if (value && typeof value === 'object')
     return Object.fromEntries(
       Object.entries(value)
@@ -70,6 +70,18 @@ export function legacyEventFingerprint(row: EventRow) {
 export function canonicalFingerprint(input: unknown, timestamp: string) {
   return `v1:${digest({ input, timestamp })}`;
 }
+const hasRawNumber = (value: unknown): boolean =>
+  isRawJson(value) || (value !== null && typeof value === 'object' && Object.values(value).some(hasRawNumber));
+/** The input as releases before exact numbers parsed it: every number rounded to a double. */
+const rounded = (input: unknown) => JSON.parse(JSON.stringify(input)) as unknown;
+/**
+ * The fingerprint the previous release computed for the same wire input, or null when the input has no number a
+ * double cannot hold. Receipts and stored events from before the upgrade hold this value; a fingerprint computed from
+ * exact digits can never equal it, so a match identifies the same original event at double precision.
+ */
+export function roundedFingerprint(input: unknown, timestamp: string) {
+  return hasRawNumber(input) ? canonicalFingerprint(rounded(input), timestamp) : null;
+}
 /** v1 hashes parsed input and resolved time, never search columns or admission rules. */
 export function eventFingerprint(row: EventRow) {
   return canonicalFingerprint(parseJsonExact(row.payload), row.timestamp);
@@ -78,13 +90,19 @@ export function retryFingerprint(input: unknown, projectId: string, receivedAt: 
   if (expected.startsWith('unreadable:')) return null;
   if (expected.startsWith('v1:')) {
     const occurredAt = input && typeof input === 'object' ? (input as Record<string, unknown>).occurredAt : undefined;
-    return canonicalFingerprint(input, (eventAt ?? resolveTimestamp(occurredAt, receivedAt).timestamp).toISOString());
+    const timestamp = (eventAt ?? resolveTimestamp(occurredAt, receivedAt).timestamp).toISOString();
+    const exact = canonicalFingerprint(input, timestamp);
+    return exact !== expected && roundedFingerprint(input, timestamp) === expected ? expected : exact;
   }
-  // Unversioned claims hashed 3a1541f columns: keep their numeric-id indexing frozen.
-  const result = normalizeEvent(input, { projectId, receivedAt, legacyColumns: true });
-  if (!result.ok) return null;
-  result.row.event_id = eventId;
-  return legacyEventFingerprint(result.row);
+  // Unversioned claims hashed 3a1541f columns: keep their numeric-id indexing and rounded numbers frozen.
+  const legacy = (value: unknown) => {
+    const result = normalizeEvent(value, { projectId, receivedAt, legacyColumns: true });
+    if (!result.ok) return null;
+    result.row.event_id = eventId;
+    return legacyEventFingerprint(result.row);
+  };
+  const exact = legacy(input);
+  return exact !== expected && hasRawNumber(input) && legacy(rounded(input)) === expected ? expected : exact;
 }
 export type EventIdentity = { fingerprint: string; legacyFingerprint: string; receivedAt: Date; eventAt: Date };
 export const matchesIdentity = (fingerprint: string, identity: EventIdentity) =>

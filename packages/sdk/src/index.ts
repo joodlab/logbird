@@ -1,3 +1,5 @@
+import { isRawJson, parseJsonExact } from './exact-json';
+
 export {
   generateWebhookSecret,
   type SignWebhookOptions,
@@ -13,6 +15,8 @@ export {
 const SDK_VERSION = '0.1.2';
 const MAX_SEND_MS = 5 * 60_000;
 
+/** A string id, or a number (including a `JSON.rawJSON` 64-bit value) from an integer key. */
+export type EntityId = string | number | { readonly rawJSON: string };
 /** Copied structural envelope: no runtime or workspace dependency in the published SDK. */
 export interface EventInput {
   action: string;
@@ -22,18 +26,19 @@ export interface EventInput {
   outcome?: string;
   severity?: string;
   description?: string;
-  actor?: { type?: string; id?: string; name?: string; email?: string; [key: string]: unknown };
-  impersonator?: { id?: string; name?: string; [key: string]: unknown };
-  executor?: { type?: string; id?: string; name?: string; jobId?: string; attempt?: number; [key: string]: unknown };
-  tenant?: { id: string; name?: string; [key: string]: unknown };
+  // Entity ids may be numbers (integer primary keys); they are indexed by their exact decimal text.
+  actor?: { type?: string; id?: EntityId; name?: string; email?: string; [key: string]: unknown };
+  impersonator?: { id?: EntityId; name?: string; [key: string]: unknown };
+  executor?: { type?: string; id?: EntityId; name?: string; jobId?: EntityId; attempt?: number; [key: string]: unknown };
+  tenant?: { id: EntityId; name?: string; [key: string]: unknown };
   source?: string;
-  targets?: { type: string; id: string; name?: string; [key: string]: unknown }[];
+  targets?: { type: string; id: EntityId; name?: string; [key: string]: unknown }[];
   changes?: { field: string; before?: unknown; after?: unknown }[];
   context?: {
-    operationId?: string;
-    parentEventId?: string;
-    requestId?: string;
-    traceId?: string;
+    operationId?: EntityId;
+    parentEventId?: EntityId;
+    requestId?: EntityId;
+    traceId?: EntityId;
     ip?: string;
     userAgent?: string;
     [key: string]: unknown;
@@ -143,7 +148,8 @@ export class Logbird {
       if (typeof prepared.id !== 'string' || !prepared.id.trim()) prepared = { ...prepared, id: uuidv7() };
       const serialized = JSON.stringify(prepared);
       if (new TextEncoder().encode(serialized).length > 256 * 1024) throw new Error('Event exceeds 256 KB');
-      const copy = JSON.parse(serialized) as EventInput;
+      // Exact parse: a JSON.rawJSON value (64-bit id) keeps its digits in the queued copy.
+      const copy = parseJsonExact(serialized) as EventInput;
       if (this.queue.length >= this.capacity) {
         if (this.options.dropPolicy === 'newest') {
           this.drop(copy);
@@ -352,9 +358,10 @@ export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacem
     return pattern.test(key);
   };
   return (event) => {
-    const copy = structuredClone(event);
+    // A JSON copy that keeps exact numbers (structuredClone would turn JSON.rawJSON values into plain objects).
+    const copy = parseJsonExact(JSON.stringify(event)) as EventInput;
     function walk(value: unknown, top = false): void {
-      if (!value || typeof value !== 'object') return;
+      if (!value || typeof value !== 'object' || isRawJson(value)) return;
       for (const [key, child] of Object.entries(value)) {
         if (top && (key === 'id' || key === 'action')) continue;
         if (matches(keys, key)) (value as Record<string, unknown>)[key] = replacement;

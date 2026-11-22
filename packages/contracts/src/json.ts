@@ -14,23 +14,48 @@ type ExactJson = JSON & { rawJSON?: (text: string) => RawJson; isRawJSON?: (valu
 const json = JSON as ExactJson;
 const NUMBER = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/;
 
-/** Sign, significant digits and exponent of a JSON/JS number spelling, or null when it is not one (e.g. Infinity). */
-function canonicalDecimal(text: string): string | null {
+/**
+ * One spelling per decimal value: `-123e-5` for `-0.00123`, `0` for any zero; null when `text` is not a finite JSON/JS
+ * number spelling (e.g. Infinity). Linear in the input: digit scans, no backtracking patterns.
+ */
+export function canonicalDecimal(text: string): string | null {
   const m = NUMBER.exec(text);
   if (!m) return null;
   const fraction = m[3] ?? '';
-  let digits = `${m[2]}${fraction}`.replace(/^0+/, '');
-  if (!digits) return '0';
-  let exponent = Number(m[4] ?? 0) - fraction.length;
-  const trailing = /0+$/.exec(digits)?.[0].length ?? 0;
-  digits = digits.slice(0, digits.length - trailing);
-  exponent += trailing;
-  return `${m[1]}${digits}e${exponent}`;
+  const all = `${m[2]}${fraction}`;
+  let start = 0;
+  while (start < all.length && all.charCodeAt(start) === 48) start++;
+  if (start === all.length) return '0';
+  let end = all.length;
+  while (all.charCodeAt(end - 1) === 48) end--;
+  const exponent = BigInt(m[4] ?? 0) - BigInt(fraction.length) + BigInt(all.length - end);
+  return `${m[1]}${all.slice(start, end)}e${exponent}`;
 }
 
 /** True when the double `value` denotes exactly the decimal written as `source` (`19.90` → 19.9 and `1e3` → 1000 do). */
 export function isExactNumber(source: string, value: number) {
   return Number.isFinite(value) && canonicalDecimal(source) === canonicalDecimal(String(value));
+}
+
+/**
+ * Plain decimal text of a number's exact value, one spelling per value: `42`, `42.0` and `4.2e1` give `42`;
+ * `-0.00123` gives `-0.00123`. Null when not a finite number or when the plain form would exceed `maxLength`.
+ */
+export function plainDecimal(value: unknown, maxLength = 1024): string | null {
+  const source = isRawJson(value) ? value.rawJSON : typeof value === 'number' && Number.isFinite(value) ? String(value) : null;
+  const canonical = source === null ? null : canonicalDecimal(source);
+  if (canonical === null) return null;
+  if (canonical === '0') return '0';
+  const e = canonical.indexOf('e');
+  const sign = canonical.startsWith('-') ? '-' : '';
+  const digits = canonical.slice(sign.length, e);
+  const exponent = BigInt(canonical.slice(e + 1));
+  const length = BigInt(sign.length + digits.length) + (exponent >= 0n ? exponent : -exponent + 1n);
+  if (length > BigInt(maxLength)) return null;
+  const exp = Number(exponent);
+  if (exp >= 0) return `${sign}${digits}${'0'.repeat(exp)}`;
+  const point = digits.length + exp;
+  return point > 0 ? `${sign}${digits.slice(0, point)}.${digits.slice(point)}` : `${sign}0.${'0'.repeat(-point)}${digits}`;
 }
 
 export const isRawJson = (value: unknown): value is RawJson => typeof json.isRawJSON === 'function' && json.isRawJSON(value) === true;
@@ -43,6 +68,12 @@ export function rawJsonText(value: unknown): string | null {
 }
 
 export const supportsExactJson = typeof json.rawJSON === 'function' && typeof json.isRawJSON === 'function';
+
+/** A raw JSON number from exact decimal text (`JSON.rawJSON`); only valid where `supportsExactJson`. */
+export function rawJsonNumber(text: string): RawJson {
+  if (!json.rawJSON) throw new Error('JSON.rawJSON is not supported by this runtime');
+  return json.rawJSON(text);
+}
 
 export function parseJsonExact(text: string): unknown {
   if (!supportsExactJson) return JSON.parse(text);

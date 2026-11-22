@@ -80,6 +80,25 @@ to retain default secret protection while adding personal-data fields.
 payload as well as attributes.
 See [SDK redaction options](../packages/sdk/README.md#host-context-options-02).
 
+### Numbers and ids
+
+Logbird stores every number with the exact digits it was sent with, including 64-bit
+integers and long decimals, and returns them as JSON numbers with those digits. Search
+matches them exactly: `metadata.orderId:9007199254740993`. Entity ids may be numbers, so
+integer primary keys work as sent. A numeric id is stored as the plain decimal text of its
+exact value (`42`, `42.0` and `4.2e1` are all stored as `"42"`); a string id is stored
+exactly as sent. An event's own `id` must be a string (a numeric event id gets a fresh id
+and a warning).
+
+JavaScript numbers cannot hold integers above 2^53 − 1 (`Number.MAX_SAFE_INTEGER`):
+`9007199254740993` is already `9007199254740992` in your process before any SDK sees it.
+From TypeScript, send such ids **as strings** (`String(row.id)` from a `bigint` or a
+database driver's string mode), or as `JSON.rawJSON(text)` where the runtime supports it
+(Node 21+, current browsers); the SDK keeps a `JSON.rawJSON` value's digits. Backends with
+exact 64-bit types (.NET `long` and `decimal`, Java `long`, Go `int64`) can send numbers
+directly. Logbird never rounds a number it receives; what a client rounded before sending
+cannot be recovered.
+
 ## Capture a committed change
 
 Call this helper from an existing authenticated route after its write commits.

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { isExactNumber, isRawJson, parseJsonExact, rawJsonText, supportsExactJson } from './json';
+import { canonicalDecimal, isExactNumber, isRawJson, parseJsonExact, plainDecimal, rawJsonText, supportsExactJson } from './json';
 
 it('runs on a runtime with JSON.parse source text access', () => {
   expect(supportsExactJson).toBe(true);
@@ -56,4 +56,42 @@ it('reads plain numbers and rejects other values in rawJsonText', () => {
   expect(rawJsonText(Number.NaN)).toBeNull();
   expect(rawJsonText('12')).toBeNull();
   expect(rawJsonText({ rawJSON: '12' })).toBeNull();
+});
+
+it('gives one canonical spelling per value, with exact exponents', () => {
+  for (const s of ['9007199254740993', '9007199254740993.0', '9.007199254740993e15', '900719925474099300e-2', '0009007199254740993'])
+    expect(canonicalDecimal(s)).toBe('9007199254740993e0');
+  expect(canonicalDecimal('-0.00123')).toBe('-123e-5');
+  expect(canonicalDecimal('0.000')).toBe('0');
+  expect(canonicalDecimal('1e99999999999999999999')).toBe('1e99999999999999999999');
+  expect(canonicalDecimal('Infinity')).toBeNull();
+});
+
+it('canonicalizes a hostile number token in linear time', () => {
+  const token = `1${'0'.repeat(4_000_000)}1`;
+  const start = Date.now();
+  expect(canonicalDecimal(token)).toBe(`${token}e0`);
+  expect(isRawJson((parseJsonExact(`[${token}]`) as unknown[])[0])).toBe(true);
+  expect(Date.now() - start).toBeLessThan(1000);
+});
+
+it.each([
+  ['42', '42'],
+  ['42.0', '42'],
+  ['4.2e1', '42'],
+  ['-0.00123', '-0.00123'],
+  ['1.5e-3', '0.0015'],
+  ['9007199254740993.0', '9007199254740993'],
+  ['12345678901234567891', '12345678901234567891'],
+  ['0.12345678901234567890123', '0.12345678901234567890123'],
+  ['-0', '0'],
+])('writes %s as the plain decimal %s', (source, expected) => {
+  expect(plainDecimal((parseJsonExact(`[${source}]`) as unknown[])[0])).toBe(expected);
+});
+
+it('refuses plain decimals that would be huge, and non-numbers', () => {
+  expect(plainDecimal((parseJsonExact('[1e2000]') as unknown[])[0])).toBeNull();
+  expect(plainDecimal((parseJsonExact('[1e400]') as unknown[])[0])).toHaveLength(401);
+  expect(plainDecimal('42')).toBeNull();
+  expect(plainDecimal(true)).toBeNull();
 });
