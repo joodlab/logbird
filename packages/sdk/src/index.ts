@@ -1,5 +1,3 @@
-import { isRawJson, parseJsonExact } from './exact-json';
-
 export {
   generateWebhookSecret,
   type SignWebhookOptions,
@@ -12,11 +10,14 @@ export {
 } from './webhooks';
 
 // Keep in sync with packages/sdk/package.json (verified by index.test.ts).
-const SDK_VERSION = '0.1.2';
+const SDK_VERSION = '0.1.3';
 const MAX_SEND_MS = 5 * 60_000;
 
-/** A string id, or a number (including a `JSON.rawJSON` 64-bit value) from an integer key. */
-export type EntityId = string | number | { readonly rawJSON: string };
+/**
+ * A string id, or a JavaScript number from an integer key. A JS number cannot hold integers above 2^53 − 1: send
+ * 64-bit ids as strings. The server indexes a numeric id as the plain decimal of its value.
+ */
+export type EntityId = string | number;
 /** Copied structural envelope: no runtime or workspace dependency in the published SDK. */
 export interface EventInput {
   action: string;
@@ -26,7 +27,6 @@ export interface EventInput {
   outcome?: string;
   severity?: string;
   description?: string;
-  // Entity ids may be numbers (integer primary keys); they are indexed by their exact decimal text.
   actor?: { type?: string; id?: EntityId; name?: string; email?: string; [key: string]: unknown };
   impersonator?: { id?: EntityId; name?: string; [key: string]: unknown };
   executor?: { type?: string; id?: EntityId; name?: string; jobId?: EntityId; attempt?: number; [key: string]: unknown };
@@ -148,8 +148,7 @@ export class Logbird {
       if (typeof prepared.id !== 'string' || !prepared.id.trim()) prepared = { ...prepared, id: uuidv7() };
       const serialized = JSON.stringify(prepared);
       if (new TextEncoder().encode(serialized).length > 256 * 1024) throw new Error('Event exceeds 256 KB');
-      // Exact parse: a JSON.rawJSON value (64-bit id) keeps its digits in the queued copy.
-      const copy = parseJsonExact(serialized) as EventInput;
+      const copy = JSON.parse(serialized) as EventInput;
       if (this.queue.length >= this.capacity) {
         if (this.options.dropPolicy === 'newest') {
           this.drop(copy);
@@ -347,22 +346,6 @@ export class Logbird {
   }
 }
 
-/**
- * Deep copy that keeps JSON.rawJSON values as they are (structuredClone would turn them into plain objects) and
- * clones everything else like structuredClone, so a bigint or Date under a redacted key is still copied, then replaced.
- */
-function exactClone(value: unknown): unknown {
-  if (isRawJson(value)) return value;
-  // Fail closed like structuredClone: a function (for example a toJSON method) could reveal fields after redaction.
-  if (typeof value === 'function') throw new DOMException('A function cannot be cloned for redaction.', 'DataCloneError');
-  if (Array.isArray(value)) return value.map(exactClone);
-  if (value !== null && typeof value === 'object') {
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype === Object.prototype || prototype === null)
-      return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, exactClone(child)]));
-  }
-  return typeof value === 'object' && value !== null ? structuredClone(value) : value;
-}
 export const DEFAULT_SECRET_KEYS = /passw(or)?d|secret|token|otp|api[-_]?key|authorization|cookie|credential|private[-_]?key/i;
 /** Redact a deep copy; combine this hook with application-specific filtering as needed. */
 export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacement?: string } = {}): (event: EventInput) => EventInput {
@@ -374,9 +357,9 @@ export function redact(options: { keys?: RegExp; changeFields?: RegExp; replacem
     return pattern.test(key);
   };
   return (event) => {
-    const copy = exactClone(event) as EventInput;
+    const copy = structuredClone(event);
     function walk(value: unknown, top = false): void {
-      if (!value || typeof value !== 'object' || isRawJson(value)) return;
+      if (!value || typeof value !== 'object') return;
       for (const [key, child] of Object.entries(value)) {
         if (top && (key === 'id' || key === 'action')) continue;
         if (matches(keys, key)) (value as Record<string, unknown>)[key] = replacement;

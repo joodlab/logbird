@@ -1,4 +1,3 @@
-import { parseJsonExact } from './exact-json';
 import { type EventInput, type Logbird, uuidv7 } from './index';
 export interface AuditCarrier {
   operationId: string;
@@ -128,10 +127,8 @@ function capture<C>(options: CaptureOptions<C>, context: C, envelope: EventInput
         },
         true,
       ).then(
-        // Exact copy: a JSON.rawJSON id keeps its digits in process. A queue that JSON-parses job data rounds it
-        // again, so 64-bit ids that cross a queue should be strings.
         (event) =>
-          parseJsonExact(
+          JSON.parse(
             JSON.stringify({
               operationId: event.context?.operationId ?? envelope.context?.operationId,
               requestId: event.context?.requestId,
@@ -168,9 +165,7 @@ export function jobAudit(options: JobAuditOptions): Audit {
       type: 'worker',
       id: executor?.id ?? job.queueName ?? 'worker',
       name: executor?.name ?? job.name,
-      // A string as before; an integer is written as plain digits (1e21 → "1000000000000000000000", not "1e+21"),
-      // matching how the server indexes numeric ids.
-      jobId: job.id === undefined ? undefined : typeof job.id === 'number' && Number.isInteger(job.id) ? BigInt(job.id).toString() : String(job.id),
+      jobId: job.id === undefined ? undefined : String(job.id),
       attempt: (job.attemptsMade ?? 0) + 1,
     },
     context: {

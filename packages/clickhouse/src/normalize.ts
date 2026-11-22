@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { canonicalDecimal, isRawJson, plainDecimal, rawJsonText } from '@logbird/contracts';
+import { isRawJson, plainDecimal } from '@logbird/contracts';
 import { resolveTimestamp } from './timestamp';
 
 function uuidv7() {
@@ -24,17 +24,11 @@ const wellFormed = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|
 // Numbers (ids from integer keys, numeric names) are indexed by their exact decimal text, like a string would be.
 // Legacy (pre-v1) receipt fingerprints froze the old columns, where a number indexed as ''.
 const textOf = (v: unknown, cap: number, numbers: boolean): string => {
-  // A numeric id is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are all "42"). One too
-  // long for the column keeps a unique scientific spelling (1e256), never a truncated or empty one.
-  const s = typeof v === 'string' ? v : numbers ? numericId(v, cap) : null;
-  return s === null ? '' : capText(wellFormed(s.trim()), cap);
+  // A numeric id is stored as the plain decimal text of its exact value (42, 42.0 and 4.2e1 are all "42"). One whose
+  // plain decimal is longer than the column is not indexed: truncating could merge two distinct ids.
+  if (typeof v !== 'string') return (numbers ? plainDecimal(v, cap) : null) ?? '';
+  return capText(wellFormed(v.trim()), cap);
 };
-function numericId(v: unknown, cap: number): string | null {
-  const plain = plainDecimal(v, cap);
-  if (plain !== null) return plain;
-  const text = rawJsonText(v);
-  return text === null ? null : (canonicalDecimal(text) ?? text);
-}
 const value = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? ''));
 const isNumber = (v: unknown) => typeof v === 'number' || isRawJson(v);
 export function normalizeEvent(input: unknown, ctx: { projectId: string; receivedAt: Date; sdk?: string; legacyColumns?: boolean }) {

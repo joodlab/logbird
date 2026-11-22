@@ -138,10 +138,13 @@ it('stores a numeric id as the plain decimal of its exact value, one spelling pe
   expect(normalize(wire('{"action":"x","tenant":{"id":"42.0"}}')).row.tenant_id).toBe('42.0');
 });
 
-it('never truncates or empties a long numeric id: it keeps a unique scientific spelling', () => {
+it('never truncates a long numeric id: one longer than the column is not indexed', () => {
   const ids = (n: string) => normalize(wire(`{"action":"x","actor":{"id":${n}},"targets":[{"type":"t","id":${n}}]}`)).row;
-  expect(ids('1e256')).toMatchObject({ actor_id: '1e256', target_ids: ['1e256'] });
-  expect(ids('1e257').actor_id).toBe('1e257');
-  expect(ids('1e100').actor_id).toBe(`1${'0'.repeat(100)}`);
-  expect(ids(`1e${'9'.repeat(20)}`).actor_id).toBe(`1e${'9'.repeat(20)}`);
+  expect(ids('1e255')).toMatchObject({ actor_id: `1${'0'.repeat(255)}`, target_ids: [`1${'0'.repeat(255)}`] });
+  expect(ids('1e256')).toMatchObject({ actor_id: '', target_ids: [''] });
+  // Two 257-digit ids that share their first 256 digits must not merge.
+  const a = ids(`${'1'.repeat(256)}1`).actor_id;
+  const b = ids(`${'1'.repeat(256)}2`).actor_id;
+  expect([a, b]).toEqual(['', '']);
+  expect(ids(`1e${'9'.repeat(20)}`).actor_id).toBe('');
 });

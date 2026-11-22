@@ -63,7 +63,9 @@ it('gives one canonical spelling per value, with exact exponents', () => {
     expect(canonicalDecimal(s)).toBe('9007199254740993e0');
   expect(canonicalDecimal('-0.00123')).toBe('-123e-5');
   expect(canonicalDecimal('0.000')).toBe('0');
-  expect(canonicalDecimal('1e99999999999999999999')).toBeNull();
+  expect(canonicalDecimal('1e99999999999999999999')).toBe('1e99999999999999999999');
+  expect(canonicalDecimal('1e1000000000000000')).toBe(canonicalDecimal('1E+1000000000000000'));
+  expect(canonicalDecimal('12.5e99999999999999999999')).toBe('125e99999999999999999998');
   expect(canonicalDecimal('Infinity')).toBeNull();
 });
 
@@ -97,7 +99,7 @@ it('refuses plain decimals that would be huge, and non-numbers', () => {
 });
 
 it('skips arithmetic for exponents over 15 significant digits, in linear time', () => {
-  const huge = `1e-${'9'.repeat(1_000_000)}`;
+  const huge = `1e-${'9'.repeat(1_000_000)}`; // more than 1000 exponent digits: kept as sent
   const padded = `1e-${'0'.repeat(1_000_000)}5`;
   const start = Date.now();
   expect(canonicalDecimal(huge)).toBeNull();
@@ -125,4 +127,18 @@ it('lets the input contract accept the exact ids the parser produces', async () 
   );
   expect(eventInputSchema.safeParse(event).success).toBe(true);
   expect(eventInputSchema.safeParse({ action: 'x', actor: { id: true } }).success).toBe(false);
+});
+
+it('hashes huge equal exponents the same way and parses deep documents without failing', async () => {
+  const { canonicalDecimal: c } = await import('./json');
+  expect(c('1e1000000000000000')).toBe('1e1000000000000000');
+  const deep = `${'['.repeat(5000)}12345678901234567891${']'.repeat(5000)}`;
+  expect(() => parseJsonExact(deep)).not.toThrow();
+});
+
+it('rejects a raw JSON value that is not a number in the entity id contract', async () => {
+  const { eventInputSchema } = await import('./events');
+  const rawJSON = (JSON as JSON & { rawJSON: (t: string) => unknown }).rawJSON;
+  expect(eventInputSchema.safeParse({ action: 'x', actor: { id: rawJSON('false') } }).success).toBe(false);
+  expect(eventInputSchema.safeParse({ action: 'x', actor: { id: rawJSON('9007199254740993') } }).success).toBe(true);
 });

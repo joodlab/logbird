@@ -22,7 +22,7 @@ const entityId = z.union([
   id,
   z.number(),
   // parseJsonExact keeps a number a double cannot hold as a raw JSON value with its exact digits.
-  z.custom<RawJson>((value) => isRawJson(value), 'expected a number').meta({ type: 'number' }),
+  z.custom<RawJson>((value) => isRawJson(value) && /^-?\d/.test(value.rawJSON), 'expected a number').meta({ type: 'number' }),
 ]);
 const shortText = z.string().max(512);
 

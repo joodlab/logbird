@@ -14,8 +14,10 @@ type ExactJson = JSON & { rawJSON?: (text: string) => RawJson; isRawJSON?: (valu
 const json = JSON as ExactJson;
 const NUMBER = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/;
 
-/** Exponents with more digits than this are never canonicalized: arithmetic stays in safe integers. */
-const MAX_EXPONENT_DIGITS = 15;
+/** Exponents up to this many significant digits use safe-integer arithmetic. */
+const SAFE_EXPONENT_DIGITS = 15;
+/** Longer exponents (up to this) use bounded BigInt arithmetic; beyond it a number keeps its sent spelling. */
+const MAX_EXPONENT_DIGITS = 1000;
 /**
  * One spelling per decimal value: `-123e-5` for `-0.00123`, `0` for any zero. Null when `text` is not a JSON/JS
  * number spelling (e.g. Infinity) or its exponent has more than 15 digits (such a number overflows or underflows a
@@ -30,10 +32,12 @@ export function canonicalDecimal(text: string): string | null {
   while (start < all.length && all.charCodeAt(start) === 48) start++;
   // Zero is zero whatever its exponent; padded exponents (`1e0000000000000000`) are measured without their zeros.
   if (start === all.length) return '0';
-  if ((m[4] ?? '').replace(/^[+-]/, '').replace(/^0+/, '').length > MAX_EXPONENT_DIGITS) return null;
+  const expDigits = (m[4] ?? '').replace(/^[+-]/, '').replace(/^0+/, '').length;
+  if (expDigits > MAX_EXPONENT_DIGITS) return null;
   let end = all.length;
   while (all.charCodeAt(end - 1) === 48) end--;
-  const exponent = Number(m[4] ?? 0) - fraction.length + (all.length - end);
+  const shift = all.length - end - fraction.length;
+  const exponent = expDigits > SAFE_EXPONENT_DIGITS ? (BigInt(m[4] ?? 0) + BigInt(shift)).toString() : String(Number(m[4] ?? 0) + shift);
   return `${m[1]}${all.slice(start, end)}e${exponent}`;
 }
 
@@ -90,8 +94,15 @@ const MAYBE_INEXACT = /\d[\d.]{15}|[eE][+-]?\d{3}/;
 export function parseJsonExact(text: string): unknown {
   if (!supportsExactJson || !MAYBE_INEXACT.test(text)) return JSON.parse(text);
   const raw = json.rawJSON as (text: string) => RawJson;
-  return JSON.parse(text, function reviver(this: unknown, _key: string, value: unknown, context?: { source?: string }) {
-    if (typeof value !== 'number' || typeof context?.source !== 'string' || isExactNumber(context.source, value)) return value;
-    return raw(context.source);
-  } as (this: unknown, key: string, value: unknown) => unknown);
+  try {
+    return JSON.parse(text, function reviver(this: unknown, _key: string, value: unknown, context?: { source?: string }) {
+      if (typeof value !== 'number' || typeof context?.source !== 'string' || isExactNumber(context.source, value)) return value;
+      return raw(context.source);
+    } as (this: unknown, key: string, value: unknown) => unknown);
+  } catch (error) {
+    // The reviver recurses; a document nested past its stack depth (thousands of levels) is parsed like before
+    // rather than refused. Its inexact numbers then round as plain JSON.parse does.
+    if (error instanceof RangeError) return JSON.parse(text);
+    throw error;
+  }
 }

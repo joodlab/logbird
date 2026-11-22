@@ -18,11 +18,13 @@ function canonicalDecimal(text: string): string | null {
   let start = 0;
   while (start < all.length && all.charCodeAt(start) === 48) start++;
   if (start === all.length) return '0';
-  // An exponent over 15 significant digits overflows or underflows a double: keep the sent spelling.
-  if ((m[4] ?? '').replace(/^[+-]/, '').replace(/^0+/, '').length > 15) return null;
+  // Same bounds as @logbird/contracts: safe-integer exponents, bounded BigInt up to 1000 digits, else the spelling.
+  const expDigits = (m[4] ?? '').replace(/^[+-]/, '').replace(/^0+/, '').length;
+  if (expDigits > 1000) return null;
   let end = all.length;
   while (all.charCodeAt(end - 1) === 48) end--;
-  const exponent = Number(m[4] ?? 0) - fraction.length + (all.length - end);
+  const shift = all.length - end - fraction.length;
+  const exponent = expDigits > 15 ? (BigInt(m[4] ?? 0) + BigInt(shift)).toString() : String(Number(m[4] ?? 0) + shift);
   return `${m[1]}${all.slice(start, end)}e${exponent}`;
 }
 
@@ -34,9 +36,15 @@ const MAYBE_INEXACT = /\d[\d.]{15}|[eE][+-]?\d{3}/;
 export function parseJsonExact(text: string): unknown {
   const raw = json.rawJSON;
   if (typeof raw !== 'function' || typeof json.isRawJSON !== 'function' || !MAYBE_INEXACT.test(text)) return JSON.parse(text);
-  return JSON.parse(text, function reviver(this: unknown, _key: string, value: unknown, context?: { source?: string }) {
-    if (typeof value !== 'number' || typeof context?.source !== 'string') return value;
-    if (Number.isFinite(value) && canonicalDecimal(context.source) === canonicalDecimal(String(value))) return value;
-    return raw(context.source);
-  } as (this: unknown, key: string, value: unknown) => unknown);
+  try {
+    return JSON.parse(text, function reviver(this: unknown, _key: string, value: unknown, context?: { source?: string }) {
+      if (typeof value !== 'number' || typeof context?.source !== 'string') return value;
+      if (Number.isFinite(value) && canonicalDecimal(context.source) === canonicalDecimal(String(value))) return value;
+      return raw(context.source);
+    } as (this: unknown, key: string, value: unknown) => unknown);
+  } catch (error) {
+    // Documents nested past the reviver's stack depth parse like plain JSON.parse instead of failing.
+    if (error instanceof RangeError) return JSON.parse(text);
+    throw error;
+  }
 }
