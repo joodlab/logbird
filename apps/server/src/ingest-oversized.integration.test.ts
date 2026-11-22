@@ -1,4 +1,7 @@
+import { read } from '@logbird/clickhouse';
+import { prisma } from '@logbird/database';
 import { afterEach, beforeEach, expect, it } from 'vitest';
+import { clickhouse } from './clickhouse';
 import { type ImmutableFixture, immutableFixture } from './immutable-fixture';
 
 let f: ImmutableFixture;
@@ -37,4 +40,15 @@ it('keeps the 1000-event request limit whole-request', async () => {
   expect(response.status).toBe(413);
   expect(await response.json()).toEqual({ error: { code: 'payload_too_large', message: 'Maximum 1000 events per request.' } });
   expect(await f.count()).toBe(0);
+});
+
+it('stores a test event for a user with a large profile image, without copying profile fields', async () => {
+  await f.authorize();
+  const member = await prisma.member.findFirstOrThrow({ where: { organizationId: f.org } });
+  await prisma.user.update({ where: { id: member.userId }, data: { image: `data:image/png;base64,${'A'.repeat(300 * 1024)}` } });
+  const response = await f.management(`/api/projects/${f.project}/test-event`, 'POST', {});
+  expect(response.status).toBe(202);
+  expect((await response.json()).accepted).toBe(1);
+  const [row] = await read<{ payload: string }>(clickhouse, 'SELECT payload FROM events WHERE project_id={p:String}', { p: f.project });
+  expect(Object.keys(JSON.parse(row?.payload ?? '{}').actor).sort()).toEqual(['email', 'id', 'name', 'type']);
 });
