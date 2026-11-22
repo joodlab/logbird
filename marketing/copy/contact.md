@@ -59,9 +59,9 @@ path: /contact
   - Choose one
   - Not sure yet
   - Under 100,000
-  - 100,000 to 1 million
-  - 1 to 10 million
-  - More than 10 million
+  - 100,000 to under 1 million
+  - 1 million to under 10 million
+  - 10 million or more
 - **needs options:** <!-- values: customer-audit-log, compliance, investigations, self-host-support, other. Qualifying answers for the landing page's two jobs; no prices. The privacy policy's form section lists them. -->
   - Show our customers their own audit log
   - Compliance evidence and retention

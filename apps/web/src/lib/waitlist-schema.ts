@@ -4,9 +4,9 @@ import { z } from 'zod';
 export const VOLUMES = ['unsure', 'under-100k', '100k-1m', '1m-10m', 'over-10m'] as const;
 export const NEEDS = ['customer-audit-log', 'compliance', 'investigations', 'self-host-support', 'other'] as const;
 
-// A native form sends an unanswered select as "" and checkboxes as repeated fields; JSON sends a list.
+// A form sends an unanswered select as "". Checkboxes always arrive as a list: the server collects repeated native
+// fields, and the enhanced form sends an array.
 const blankToUndefined = (value: unknown) => (value === '' ? undefined : value);
-const toList = (value: unknown) => (value === undefined || value === '' ? undefined : Array.isArray(value) ? value : [value]);
 
 export const waitlistSchema = z.object({
   email: z.email().max(254),
@@ -15,7 +15,9 @@ export const waitlistSchema = z.object({
   interest: z.enum(['cloud', 'self-host', 'updates', 'correction', 'other', 'privacy']),
   volume: z.preprocess(blankToUndefined, z.enum(VOLUMES).optional()),
   needs: z
-    .preprocess(toList, z.array(z.enum(NEEDS)).max(NEEDS.length).optional())
+    .array(z.enum(NEEDS))
+    .max(NEEDS.length)
+    .optional()
     .transform((list) => (list?.length ? [...new Set(list)] : undefined))
     .optional(),
   message: z.string().trim().max(2000).optional(),

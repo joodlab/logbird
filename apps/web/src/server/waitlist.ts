@@ -118,8 +118,18 @@ export async function handleWaitlist(request: Request, deps: WaitlistDependencie
   try {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     if (form) {
-      // Checkboxes repeat their name; every other field is single.
+      // Checkboxes repeat their name; every other field is single. A repeated single field is refused rather than
+      // collapsed: Object.fromEntries keeps only the last value, so an invalid earlier one would pass unseen.
       const params = new URLSearchParams(text);
+      const repeated = [...new Set(params.keys())].filter((key) => key !== 'needs' && params.getAll(key).length > 1);
+      if (repeated.length) {
+        return respond(
+          400,
+          'validation_error',
+          'Check the highlighted fields.',
+          Object.fromEntries(repeated.map((key) => [key, ['Send this field once.']])),
+        );
+      }
       input = { ...Object.fromEntries(params), ...(params.has('needs') ? { needs: params.getAll('needs') } : {}) };
     } else {
       input = JSON.parse(text);

@@ -51,9 +51,9 @@ const INTERESTS = [
 const VOLUME_OPTIONS: { value: (typeof VOLUMES)[number]; label: string }[] = [
   { value: 'unsure', label: 'Not sure yet' },
   { value: 'under-100k', label: 'Under 100,000' },
-  { value: '100k-1m', label: '100,000 to 1 million' },
-  { value: '1m-10m', label: '1 to 10 million' },
-  { value: 'over-10m', label: 'More than 10 million' },
+  { value: '100k-1m', label: '100,000 to under 1 million' },
+  { value: '1m-10m', label: '1 million to under 10 million' },
+  { value: 'over-10m', label: '10 million or more' },
 ];
 const NEED_OPTIONS: { value: (typeof NEEDS)[number]; label: string }[] = [
   { value: 'customer-audit-log', label: 'Show our customers their own audit log' },
@@ -200,7 +200,7 @@ export function WaitlistForm({ status, interest = 'cloud' }: { status?: string; 
               className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border bg-background px-3 py-2 text-sm has-[:checked]:border-brand has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50"
               key={option.value}
             >
-              <input className="accent-[var(--brand)]" name="needs" type="checkbox" value={option.value} />
+              <input className="accent-[var(--brand)]" name="needs" type="checkbox" value={option.value} {...field('needs')} />
               {option.label}
             </label>
           ))}
