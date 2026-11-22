@@ -79,8 +79,8 @@ export const siteMap: SitePage[] = [
     path: '/cloud',
     title: 'Cloud',
     description: CLOUD_OPEN
-      ? "Logbird Cloud runs the same open-source codebase for you. Early access for invited teams: request access or sign in. Pricing isn't set yet."
-      : "Logbird Cloud will run the same open-source codebase for you. It isn't open yet. Join the waitlist. Pricing isn't set yet.",
+      ? `Logbird Cloud runs the same ${GITHUB_PUBLIC ? 'open-source ' : ''}codebase for you. Early access for invited teams: request access or sign in. Pricing isn't set yet.`
+      : `Logbird Cloud will run the same ${GITHUB_PUBLIC ? 'open-source ' : ''}codebase for you. It isn't open yet. Join the waitlist. Pricing isn't set yet.`,
     section: 'product',
     priority: 0.9,
     changefreq: 'weekly',
@@ -195,7 +195,7 @@ export const siteMap: SitePage[] = [
   {
     path: '/blog',
     title: 'Blog',
-    description: 'Notes on building an open-source audit log: design decisions, guarantees and limits, written by the people building Logbird.',
+    description: `Notes on building ${GITHUB_PUBLIC ? 'an open-source' : 'an'} audit log: design decisions, guarantees and limits, written by the people building Logbird.`,
     section: 'resources',
     priority: 0.6,
     changefreq: 'weekly',
@@ -220,7 +220,7 @@ export const siteMap: SitePage[] = [
   {
     path: '/about',
     title: 'About',
-    description: 'Logbird is an open-source audit log for teams who owe their customers a trail of who did what.',
+    description: `Logbird is ${GITHUB_PUBLIC ? 'an open-source' : 'an'} audit log for teams who owe their customers a trail of who did what.`,
     section: 'company',
     priority: 0.6,
     changefreq: 'monthly',

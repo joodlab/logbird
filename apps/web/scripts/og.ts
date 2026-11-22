@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
 import { createElement as h } from 'react';
 import satori from 'satori';
+import { homeMeta } from '../src/content/home';
 import { siteConfigFrom } from '../src/env';
 import { siteMap } from '../src/lib/site-map';
 import { loadPublicEnv } from './public-env';
@@ -23,8 +24,9 @@ await mkdir('public/og', { recursive: true });
 const box = (style: Record<string, unknown>, ...children: Parameters<typeof h>[2][]) =>
   h('div', { style: { display: 'flex', ...style } }, ...children);
 for (const page of siteMap) {
-  const title = page.ogSlug === 'home' ? 'Retrace every step.' : page.title;
-  const description = page.ogSlug === 'home' ? 'Open-source audit logs you can self-host.' : page.description;
+  // Home's card words come from content/home.ts and follow the repository state.
+  const title = page.ogSlug === 'home' ? homeMeta.ogTitle : page.title;
+  const description = page.ogSlug === 'home' ? homeMeta.ogDescription : page.description;
   const rows = [1, 0.83, 0.67, 0.5, 0.35].map((opacity, index) =>
     box(
       {

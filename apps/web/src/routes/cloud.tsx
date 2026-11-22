@@ -173,8 +173,8 @@ function CloudPage() {
         eyebrow="Logbird Cloud"
         lead={
           CLOUD_OPEN
-            ? `Logbird Cloud runs the same open-source codebase you${GITHUB_PUBLIC ? ' can' : "'ll be able to"} self-host. We run the servers, the upgrades and the backups. It's in early access: sign-ups are limited to invited teams for now. Request access, or sign in if you've been invited.`
-            : `Logbird Cloud will run the same open-source codebase you${GITHUB_PUBLIC ? ' can' : "'ll be able to"} self-host. We'll run the servers, the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.`
+            ? `Logbird Cloud runs the same ${GITHUB_PUBLIC ? 'open-source codebase you can' : "codebase you'll be able to"} self-host. We run the servers, the upgrades and the backups. It's in early access: sign-ups are limited to invited teams for now. Request access, or sign in if you've been invited.`
+            : `Logbird Cloud will run the same ${GITHUB_PUBLIC ? 'open-source codebase you can' : "codebase you'll be able to"} self-host. We'll run the servers, the upgrades and the backups. It isn't open yet. Join the waitlist and we'll email you when it is.`
         }
         title="The same Logbird, run by us."
       />

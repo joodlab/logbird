@@ -239,6 +239,20 @@ describe('content modules', () => {
     expect(proven.customers.access.points.map((point) => point.title)).toContain('Viewer tokens');
   }, 60_000);
 
+  it('a private build never calls the source open-source: home social card, and the pages a visitor reaches from home', async () => {
+    expect(homeMetaFor({ repoPublic: false, cloudOpen: false, scopedReadLive: false }).ogDescription).not.toMatch(/open.source/i);
+    expect(homeMetaFor({ repoPublic: true, cloudOpen: false, scopedReadLive: false }).ogDescription).toMatch(/open-source/i);
+    const github = { WEB_GITHUB_URL: 'https://github.com/example-org/logbird' };
+    for (const env of [github, { ...github, WEB_APP_URL: 'https://app.example.test' }]) {
+      for (const { path, html } of await renderPages(['/', '/cloud', '/about', '/blog'], env)) {
+        // Descriptions, social titles and the visible hero; the /open-source nav label names a page, not the licence.
+        const meta = [...html.matchAll(/<meta [^>]*content="([^"]*)"/g)].map(([, content]) => content).join(' | ');
+        expect(meta, `${path} meta`).not.toMatch(/open-source/i);
+        expect(html, `${path} body`).not.toMatch(/open-source codebase|an open-source audit log/i);
+      }
+    }
+  }, 60_000);
+
   it('every repository and Cloud state renders a page that matches that state', async () => {
     const github = { WEB_GITHUB_URL: 'https://github.com/example-org/logbird' };
     const states = [
