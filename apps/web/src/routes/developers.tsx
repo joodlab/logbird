@@ -292,7 +292,7 @@ function DevelopersPage() {
         <SectionHeader
           eyebrow="The envelope"
           id="envelope-title"
-          lead="Only action is required, and any event within the ingest limits is accepted. These recommended fields become indexed columns, each one fills a page in the console, and the conformance score tells you how many of them an event has."
+          lead="Only an action string is required, and each event must fit the ingest limits. These recommended fields become indexed columns, each one fills a page in the console, and the conformance score tells you how many of them an event has."
           title="Six fields that make an audit log useful."
         />
         <div className="panel mt-10 overflow-hidden">
@@ -451,7 +451,8 @@ function DevelopersPage() {
                 <>
                   <strong className="font-medium text-foreground">At least once, stored once.</strong> The SDK gives every event an id before it
                   queues it, so a retry after a lost response reuses the stored event while the project retains it. Raw HTTP clients should send their
-                  own valid, non-blank string <code>id</code>: without one, each retry gets a new id.
+                  own string <code>id</code>: a missing, blank or non-string id gets a new generated id on every retry, and an invalid one (over 256
+                  UTF-16 code units, or containing NUL) is rejected with <code>invalid_event_id</code>.
                 </>,
                 <>
                   <strong className="font-medium text-foreground">Bounded under outage.</strong> The queue holds up to 10,000 events by default. When

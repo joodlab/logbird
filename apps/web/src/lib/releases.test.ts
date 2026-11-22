@@ -68,6 +68,7 @@ describe('release list', () => {
     // An empty fallback would pass the loop below; v0.1.2 was tagged but never published, so it must never appear.
     expect(snapshotReleases.length).toBeGreaterThan(0);
     expect(snapshotReleases.map((release) => release.version)).not.toContain('0.1.2');
+    expect(snapshotReleases.map((release) => release.version)).toContain('0.1.3');
     for (const release of snapshotReleases) {
       expect(release.highlights).toEqual(changelogHighlights(real, release.version));
       expect(release.highlights.length).toBeGreaterThan(0);
