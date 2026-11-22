@@ -44,11 +44,21 @@ export function loosePairNotice(q: string, lang: 'query' | 'sql' | undefined): {
   const terms = fieldTerms(q);
   const targets = terms.filter((t) => canonicalField(t.field ?? '') === 'target');
   const types = terms.filter((t) => canonicalField(t.field ?? '') === 'target.type');
-  if (!targets.length || !types.length) return null;
+  // The statement is about terms that select ids and types: a positive term with a value (not `-target:…`, and not a
+  // presence check such as `target:*` or `_exists_:target`). Without one of each, the query has no loose pair.
+  const selects = (t: (typeof terms)[number]) => !t.negated && !(t.wildcard && t.value === '*');
+  if (!targets.some(selects) || !types.some(selects)) return null;
   const [id, type] = [targets[0], types[0]];
   const topLevel = new Set(fieldTerms(q, true).map((t) => t.start));
+  // An empty quoted id or type (`target:""`) is a real value too.
   const simple = (t: (typeof terms)[number] | undefined) =>
-    Boolean(t?.value) && !t?.negated && !t?.wildcard && (t?.valueKind === 'plain' || t?.valueKind === 'quoted') && topLevel.has(t?.start ?? -1);
+    t !== undefined &&
+    t.value !== undefined &&
+    (t.value !== '' || t.valueKind === 'quoted') &&
+    !t.negated &&
+    !t.wildcard &&
+    (t.valueKind === 'plain' || t.valueKind === 'quoted') &&
+    topLevel.has(t.start);
   if (targets.length !== 1 || types.length !== 1 || !simple(id) || !simple(type) || hasTopLevelOr(q)) return { exact: null };
   const rest = removeTerm(removeTerm(q, 'target'), 'target.type').trim();
   const exact = andQuery(formatRecordTerm(type?.value ?? '', id?.value ?? ''), rest);

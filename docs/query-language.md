@@ -40,7 +40,7 @@ The record directory and unscoped record suggestions still group targets by the 
 
 For records counted from the rollup, an event that lists the same target twice contributes twice to the directory and the profile's **Events · all time** tile. The timeline and its date-range totals count that event once.
 
-`target:12 target.type:site` checks the arrays independently, so it also matches an event with targets `page:12` and `site:7`. Saved views using those terms, including views saved from record pages before `record:` existed, open exactly as saved. The explorer then says that the view matches id and type separately and, when the pair is one positive `target:` and one positive `target.type:` term at the top level, offers **Open exact version** with the `record:` form; saving it is up to you. Use `record:site:12` for the paired match.
+`target:12 target.type:site` checks the arrays independently, so it also matches an event with targets `page:12` and `site:7`. Saved views using those terms, including views saved from record pages before `record:` existed, open exactly as saved. The explorer then says that the view matches id and type separately and, when the pair is exactly one positive `target:` and one positive `target.type:` term, both at the top level of a query without a top-level `OR`, offers **Open exact version** with the `record:` form; saving it is up to you. Use `record:site:12` for the paired match.
 
 An entity page (record, actor, tenant or executor) always applies its own filter to everything typed in its history: `outcome:failure OR action:x` there means that entity AND (`outcome:failure OR action:x`). A query that does not parse is not run there; fix it first.
 

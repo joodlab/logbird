@@ -26,7 +26,8 @@ const searchSchema = z.object({
 export const Route = createFileRoute('/_authed/_workspace/p/$projectId/events')({
   validateSearch: searchSchema,
   staticData: { crumb: 'Explorer', range: true },
-  loaderDeps: ({ search }) => ({ q: search.q ?? '', lang: search.lang ?? 'query', range: search.range }),
+  // The explorer searches the trimmed query (scopedQuery): prefetch exactly that, so a padded saved query loads once.
+  loaderDeps: ({ search }) => ({ q: (search.q ?? '').trim(), lang: search.lang ?? 'query', range: search.range }),
   loader: ({ context, params, deps }) => {
     const range = deps.range && isValidRange(deps.range) ? deps.range : DEFAULT_RANGE;
     context.queryClient.prefetchInfiniteQuery(eventsInfiniteQuery(params.projectId, range, deps.q, deps.lang));
