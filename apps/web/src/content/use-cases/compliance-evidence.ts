@@ -5,7 +5,6 @@ import type { UseCase } from './types';
  * /use-cases/compliance-evidence. Brief, with the source of every claim: marketing/copy/use-cases/compliance-evidence.md.
  * No integrity, tamper, proof or certified wording near the export digest (maintainer rule).
  */
-const file = 'logbird-events-<export-id>-evidence.jsonl';
 
 export function complianceEvidenceContent(_site: SiteState): UseCase {
   return {
@@ -30,7 +29,10 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
           { title: 'Impersonator', body: 'When support acts for a customer, the staff member who acted for whom (`impersonator`).' },
           { title: 'Executor', body: 'What performed it, such as the API or a worker, and on which attempt.' },
           { title: 'Customer account', body: 'The tenant the event belongs to, so each account has its own history.' },
-          { title: 'Records', body: 'Each record the action touched, by type and id.' },
+          {
+            title: 'Records',
+            body: 'The records the action touched, by type and id. Logbird indexes up to 64 records per event; the evidence export carries the original JSON with all of them.',
+          },
           {
             title: 'Changes',
             body: "The before and after values your code sends. Logbird keeps up to 256 changes per event in the event's change fields, which the console shows; the evidence export also carries the original JSON Logbird stored for the event.",
@@ -49,11 +51,11 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
         eyebrow: 'Retention',
         title: 'Keep events as long as you need, then they are gone.',
         points: [
-          { title: 'Per project', body: 'Choose a window from 7 days to 10 years. New projects start at 90 days.' },
-          { title: 'Hourly deletion', body: 'A worker deletes events older than the window every hour. Each run is recorded and shown in Settings.' },
+          { title: 'Per project', body: 'Choose a window from 7 days to 10 years. The default for a new project is 90 days.' },
+          { title: 'Hourly deletion', body: 'A worker deletes events older than the window every hour. Settings shows the latest run.' },
           {
             title: 'Lowering it',
-            body: "Logbird shows roughly how many events will be deleted, and you confirm by typing the project's slug. The deletion starts right away.",
+            body: "Logbird shows an estimate of how many events will be deleted when it can, and you confirm by typing the project's slug. The deletion starts right away.",
           },
         ],
         limits: {
@@ -85,17 +87,21 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
           },
           {
             title: 'Logbird records the export',
-            body: "Workspace activity gets a record when the export starts and another when it completes. The completed record keeps the export's id, the format, the filter and time range it resolved, the fixed query clock, the SHA-256 of the file, its size and its number of rows.",
+            body: "Workspace activity records each export Logbird admits when it starts, and records how it ended. When it completes, the completed record keeps the export's id, the format, the filter and time range it resolved, the fixed query clock, the SHA-256 of the file, its size and its number of rows. An export whose ending Logbird couldn't confirm has no digest to compare.",
           },
           {
             title: 'Match the file to its record',
-            body: 'Compute the SHA-256 and size of the file you hold, and compare them with the completed record.',
-            code: { title: 'Linux and macOS', code: `sha256sum ${file}\nwc -c ${file}`, language: 'bash' },
+            body: 'Set `file` to the name of the file you downloaded, compute its SHA-256 and size, and compare them with the export’s completed record.',
+            code: {
+              title: 'Linux and macOS',
+              code: 'file="logbird-events-EXPORT_ID-evidence.jsonl"  # the file you downloaded\nsha256sum "$file"       # Linux\nshasum -a 256 "$file"   # macOS\nwc -c < "$file"         # size in bytes',
+              language: 'bash',
+            },
           },
         ],
         limit: {
           label: 'What a match shows',
-          text: 'A matching SHA-256 and size show that the file you hold is the file Logbird produced for that export. They do not show who saved it or when, and they do not show that the events were never changed before the export ran.',
+          text: 'A matching SHA-256 shows that the file you hold is the file Logbird produced for that export, not that the events were never changed before the export ran, and not who saved the file or when.',
         },
       },
       {
@@ -106,7 +112,11 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
           {
             title: 'Compute the SHA-256 and size',
             body: 'Then compare both values with the completed export record.',
-            code: { title: 'PowerShell', code: `Get-FileHash -Algorithm SHA256 ${file}\n(Get-Item ${file}).Length`, language: 'bash' },
+            code: {
+              title: 'PowerShell',
+              code: '$file = "logbird-events-EXPORT_ID-evidence.jsonl"  # the file you downloaded\nGet-FileHash -Algorithm SHA256 $file\n(Get-Item $file).Length  # size in bytes',
+              language: 'text',
+            },
           },
         ],
         limit: {
@@ -124,22 +134,29 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
             body: 'Creating, changing and deleting projects, and every retention change with its before and after.',
           },
           { title: 'Keys', body: 'Keys created, rolled and revoked, without the key itself.' },
-          { title: 'People', body: 'Invitations, members joining or leaving, and role changes.' },
+          {
+            title: 'People',
+            body: 'Invitations, members joining through an invitation or a link, members removed by an owner or admin, and role changes.',
+          },
           { title: 'Exports', body: 'Each export requested, and how it ended.' },
-          { title: 'Sessions', body: 'Sign-ins, failed sign-in attempts, sign-outs and revoked sessions.' },
+          {
+            title: 'Sessions',
+            body: 'Sign-ins, sign-outs and revoked sessions, and failed sign-in attempts for members (repeated failures are summarised).',
+          },
         ],
-        limit: { label: 'The limit', text: "It doesn't record who searched or opened events." },
+        limit: { label: 'The limit', text: "It doesn't record who searched or opened events, or a member leaving the workspace on their own." },
       },
       {
         id: 'not',
         eyebrow: "What Logbird doesn't do",
         title: 'Say these out loud before an auditor asks.',
         limits: {
+          questions: true,
           headers: { promise: 'Question', limit: 'Answer' },
           rows: [
             {
-              promise: 'Is Logbird certified (SOC 2, ISO 27001…)?',
-              limit: "No. Logbird holds no certification, and using it doesn't make you compliant with any law or standard.",
+              promise: 'Does Logbird hold a certification such as SOC 2 or ISO 27001?',
+              limit: "No. Logbird doesn't hold SOC 2, ISO 27001 or any other certification, and we don't claim that using it makes you compliant.",
             },
             {
               promise: 'Can stored events be shown to be unchanged?',

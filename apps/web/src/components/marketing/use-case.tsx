@@ -94,7 +94,7 @@ function UseCaseBlock({ section, sunken }: { section: UseCaseSection; sunken: bo
       )}
       {section.limits ? (
         <div className="mt-10">
-          <Guarantees headers={section.limits.headers} items={section.limits.rows} />
+          <Guarantees headers={section.limits.headers} items={section.limits.rows} questions={section.limits.questions} />
         </div>
       ) : null}
       {section.cta && isReady(section.cta.to) ? (

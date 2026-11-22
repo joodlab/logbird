@@ -55,7 +55,7 @@ export const screenshots: ScreenshotEntry[] = [
     dark: `${C}/event-detail-dark.webp`,
     width: 639,
     height: 860,
-    alt: 'One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the requests that caused it.',
+    alt: 'One event in detail: the actor who caused it and the worker that performed it, the customer account, two target records, a status changed from pending to confirmed, and the request and its completion that caused it.',
   },
   {
     id: 'operation',
