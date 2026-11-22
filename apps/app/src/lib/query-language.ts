@@ -238,11 +238,11 @@ export function removeTokens(q: string, test: (t: QueryToken) => boolean): strin
   function expression(depth: number): string | null {
     if (depth > 16) return null;
     const branches: string[] = [];
-    do {
+    for (;;) {
       const terms: string[] = [];
       let connector = '';
       let previousEnd: number | undefined;
-      do {
+      for (;;) {
         const start = tokens[i]?.start;
         let not = '';
         while (isOperator('NOT')) {
@@ -271,11 +271,11 @@ export function removeTokens(q: string, test: (t: QueryToken) => boolean): strin
           connector = '';
           if (!tokens[i] || tokens[i]?.raw === ')' || isOperator('OR')) break;
         }
-      } while (true);
+      }
       if (terms.length) branches.push(terms.join(''));
       if (!isOperator('OR')) break;
       i += 1;
-    } while (true);
+    }
     return branches.join(' OR ');
   }
   if (!tokens.length) return '';
