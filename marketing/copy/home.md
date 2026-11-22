@@ -45,8 +45,9 @@ one fails `tsc`.
 | Cloud open (`WEB_APP_URL`) | The primary CTA asks for access; the lead and the Cloud card say early access; a sign-in link appears | `shared.accessCta`, `hero.lead`, `hero.signIn`, `hosting.cloud.body`, `homeMetaFor` |
 | Scoped read access proven on production (`SCOPED_READ_LIVE`) | Job 1 swaps "read through your backend" for viewer tokens and scoped keys, each state with its own limit | `customers.now`, `customers.scoped` |
 
-`SCOPED_READ_LIVE` in `content/site.ts` stays `false` until the maintainer confirms the production proof (#138). Then
-it flips in one change. The test renders the current state and checks the other one.
+`SCOPED_READ_LIVE` in `content/site.ts` has been on since 2026-11-23: v0.2.0 runs on production and the maintainer
+confirmed the scoped-read production proof (31/31, #138). The test renders the state the flag selects and checks the
+other one.
 
 ## Sections, in order
 
@@ -81,7 +82,7 @@ Every claim on the page, with its source. Update the source and the module toget
 | The Nuxt proxy denies by default; `authorize()` returns the only forwarded query (`customers.now.points[1]`) | `docs/integrations.md` § Design |
 | `useAuditTrail` loads pages (`loadMore`); headless `AuditTimeline` (`customers.now.points[2]`) | `docs/integrations.md` § Design |
 | A read key reads the whole project, so your backend authorizes (`customers.now.limit`) | `docs/integrations.md` § Design ("A project read key is project-wide; a query filter is not authorization.") |
-| After the proof: viewer tokens of 15 minutes by default, one hour at most; the scope applied outside every query on search, detail, counts and export; scoped keys with optional target and action prefixes; one tenant per scope, stored ids, ClickHouse enforcement only with the restricted query user (`customers.scoped`) | `docs/scoped-read-access.md`; `CHANGELOG.md` 0.2.0 (release branch) § Scoped read access |
+| After the proof: viewer tokens of 15 minutes by default, one hour at most; the scope applied outside every query on search, detail, counts and export; scoped keys with optional target and action prefixes; one tenant per scope, stored ids, ClickHouse enforcement only with the restricted query user; browser reads only from the key's listed origins (`customers.scoped`) | `docs/scoped-read-access.md` (including § Browser use (CORS): `embedOrigins`); `CHANGELOG.md` 0.2.0 (release branch) § Scoped read access |
 | Actor, `impersonator`, tenant, records, before and after for up to 256 changes (`evidence.rows[0]`, `operators.screenshot`) | `docs/concepts.md` § Actors; `packages/clickhouse/src/normalize.ts` (`e.changes.slice(0, 256)`: the first 256 are kept, with their before and after values) |
 | Logbird records what your code sends (`evidence.rows[0].limit`) | `docs/SPEC.md` §1 item 2 ("Capture is the client's job") |
 | Retention from 7 days to 10 years; hourly deletion (`evidence.rows[1]`, `guarantees.items[3]`) | `packages/contracts/src/api.ts` `RETENTION_OPTIONS`; `docs/SPEC.md` §1.4, §4 |

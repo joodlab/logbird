@@ -199,9 +199,8 @@ These variants are **not** used anywhere on the site. The owner may approve them
   <!-- Name design partners only after they approve publication. -->
 - **Cloud clause in the positioning:** used only once Logbird Cloud accepts sign-ups.
   <!-- owner-gated: cloud-clause. "…and run it on your own servers or ours." (docs/brand.md) -->
-- **Scoped read access:** home's customer-facing section describes reading through your own backend until the
-  maintainer confirms the production proof of scoped read keys and viewer tokens (#138). Then `SCOPED_READ_LIVE` in
-  `apps/web/src/content/site.ts` flips, in one change.
+- **Scoped read access:** shown since 2026-11-23 (`SCOPED_READ_LIVE` in `apps/web/src/content/site.ts`): v0.2.0 runs on
+  production and the maintainer confirmed the production proof of scoped read keys and viewer tokens (31/31, #138).
 - **.NET:** one sentence on home (in the repository, not yet on NuGet). No C# code or install command until the packages
   are on NuGet.
 - **Repository link:** comes from `WEB_GITHUB_URL`. Until the repository is public, every mention reads

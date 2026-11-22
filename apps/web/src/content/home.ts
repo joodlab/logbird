@@ -145,7 +145,7 @@ export function homeContent(site: SiteState) {
           },
         ] satisfies Item[],
         limit:
-          "One customer account per scope, matched on the id Logbird stored. ClickHouse enforces the customer account as well only when the restricted query user is configured; otherwise Logbird's query builders are the single layer.",
+          "One customer account per scope, matched on the id Logbird stored. ClickHouse enforces the customer account as well only when the restricted query user is configured; otherwise Logbird's query builders are the single layer. A browser can read with a token only from the origins listed on the key.",
       },
       /** What the page shows: scoped access only once its production proof is confirmed. */
       get access() {

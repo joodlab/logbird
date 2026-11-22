@@ -4,7 +4,7 @@ import { parseAst } from 'vite';
 import { describe, expect, it } from 'vitest';
 import { renderPages } from '../test/render-pages';
 import { homeContent, homeMetaFor } from './home';
-import type { SiteState } from './site';
+import { SITE, type SiteState } from './site';
 
 /**
  * Pages render the typed content modules in this folder, so each claim has one source (#250). A file that has moved holds
@@ -228,15 +228,21 @@ describe('content modules', () => {
     const html = (page?.html ?? '').replaceAll('&#x27;', "'").replaceAll('&quot;', '"');
     const current = homeContent({ repoPublic: true, cloudOpen: false, scopedReadLive: false });
     const proven = homeContent({ repoPublic: true, cloudOpen: false, scopedReadLive: true });
+    // What the page renders: the state SITE.scopedReadLive selects.
+    const shown = SITE.scopedReadLive ? proven : current;
     for (const text of [
-      current.hero.title,
-      current.customers.now.points[0]?.title,
-      current.evidence.rows[2]?.limit,
-      current.developers.otherStacks.text,
+      shown.hero.title,
+      shown.customers.access.points[0]?.title,
+      shown.customers.access.limit,
+      shown.evidence.rows[2]?.limit,
+      shown.developers.otherStacks.text,
     ]) {
       expect(html).toContain(text);
     }
-    expect(html).not.toContain('Viewer tokens');
+    // The other state's limit is not on the page.
+    expect(html).not.toContain((SITE.scopedReadLive ? current : proven).customers.access.limit);
+    // The page shows the state SCOPED_READ_LIVE selects: scoped access once its production proof is confirmed.
+    expect(html.includes('Viewer tokens'), 'scoped access shown').toBe(SITE.scopedReadLive);
     // The route renders `customers.access`: the backend state now, the scoped state once proven.
     expect(current.customers.access).toBe(current.customers.now);
     expect(proven.customers.access).toBe(proven.customers.scoped);
