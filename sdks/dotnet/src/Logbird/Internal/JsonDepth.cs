@@ -109,6 +109,9 @@ internal static class JsonDepth
                 return Shape.TooDeep;
             }
 
+            // Every value costs at least one byte on the wire, so a huge array of numbers is caught here too.
+            size++;
+
             switch (node)
             {
                 case JsonObject obj:

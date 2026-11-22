@@ -166,21 +166,27 @@ internal sealed class BatchSender
                                     Warn(state, attempt, warnings, unresolved: null);
                                 }
 
-                                var acknowledged = new HashSet<string>(StringComparer.Ordinal);
+                                // Each accepted id acknowledges one entry: two entries with the same id need two.
+                                var acknowledged = new Dictionary<string, int>(StringComparer.Ordinal);
                                 foreach (var acceptedId in ids.EnumerateArray())
                                 {
                                     if (acceptedId.ValueKind == JsonValueKind.String)
                                     {
-                                        acknowledged.Add(Text(acceptedId));
+                                        var key = Text(acceptedId);
+                                        acknowledged[key] = acknowledged.TryGetValue(key, out var times) ? times + 1 : 1;
                                     }
                                 }
 
                                 foreach (var index in attempt)
                                 {
-                                    if (acknowledged.Contains(EventJson.JsTrim(batch[index].Id)))
+                                    var key = EventJson.JsTrim(batch[index].Id);
+                                    if (state.IsSettled(index) || !acknowledged.TryGetValue(key, out var acknowledgements) || acknowledgements == 0)
                                     {
-                                        state.Deliver(index);
+                                        continue;
                                     }
+
+                                    acknowledged[key] = acknowledgements - 1;
+                                    state.Deliver(index);
                                 }
                             }
                         }
@@ -406,13 +412,7 @@ internal sealed class BatchSender
         var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         try
         {
-            // .NET Framework leaves Content null when a handler builds a response without a body.
-            if (response.Content is null)
-            {
-                return (response, []);
-            }
-
-            return (response, await ReadCappedAsync(response.Content, MaxResponseBytes, cancellationToken).ConfigureAwait(false));
+            return (response, await ReadBodyAsync(response, MaxResponseBytes, cancellationToken).ConfigureAwait(false));
         }
         catch
         {
@@ -423,6 +423,24 @@ internal sealed class BatchSender
 
     /// <summary>The largest ingest response read (a 1000-event answer is far smaller); a larger one is treated as a failure.</summary>
     internal const int MaxResponseBytes = 4 * 1024 * 1024;
+
+    /// <summary>
+    /// Reads a response body under a size cap. Cancellation disposes the response, which aborts a body read that the
+    /// stream itself would not cancel (as on .NET Framework), so a stalled body cannot outlive the deadline.
+    /// </summary>
+    internal static async Task<byte[]> ReadBodyAsync(HttpResponseMessage response, int limit, CancellationToken cancellationToken)
+    {
+        // .NET Framework leaves Content null when a handler builds a response without a body.
+        if (response.Content is null)
+        {
+            return [];
+        }
+
+        using (cancellationToken.Register(static state => ((HttpResponseMessage)state!).Dispose(), response))
+        {
+            return await ReadCappedAsync(response.Content, limit, cancellationToken).ConfigureAwait(false);
+        }
+    }
 
     /// <summary>Reads a response body, failing (rather than buffering without bound) once it exceeds <paramref name="limit"/>.</summary>
     internal static async Task<byte[]> ReadCappedAsync(HttpContent content, int limit, CancellationToken cancellationToken)
@@ -689,24 +707,18 @@ internal sealed class BatchSender
         }
     }
 
-    /// <summary>A rejection code from the response, kept only if it has the shape of a code (it reaches messages and logs).</summary>
-    internal static string SafeCode(string code)
+    private static readonly HashSet<string> KnownCodes = new(StringComparer.Ordinal)
     {
-        if (code.Length is 0 or > 64 || code[0] is < 'a' or > 'z')
-        {
-            return "other";
-        }
+        "invalid_event",
+        "invalid_event_id",
+        "duplicate_id_conflict",
+        "stored_event_unreadable",
+        "unverified_after_parse_failure",
+        "invalid_entity_id",
+    };
 
-        foreach (var c in code)
-        {
-            if (c is not ((>= 'a' and <= 'z') or (>= '0' and <= '9') or '_'))
-            {
-                return "other";
-            }
-        }
-
-        return code;
-    }
+    /// <summary>A rejection code from the response, kept only if it is a known protocol code (it reaches messages and logs).</summary>
+    internal static string SafeCode(string code) => KnownCodes.Contains(code) ? code : "other";
 
     private static bool TryParse(byte[]? body, out JsonDocument document)
     {

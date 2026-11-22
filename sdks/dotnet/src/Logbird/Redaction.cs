@@ -114,8 +114,16 @@ public sealed class Redactor
         var matched = new List<string>();
         foreach (var key in StructuralKeys)
         {
-            if (_keys.IsMatch(key))
+            try
             {
+                if (_keys.IsMatch(key))
+                {
+                    matched.Add(key);
+                }
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                // A pattern that times out on a field name is reported as matching; startup must not fail.
                 matched.Add(key);
             }
         }
@@ -155,6 +163,7 @@ public sealed class Redactor
         Top,
         Entity,
         Targets,
+        Target,
     }
 
     private void Walk(JsonNode? node, Level level = Level.Nested)
@@ -165,7 +174,8 @@ public sealed class Redactor
                 foreach (var key in obj.Select(pair => pair.Key).ToList())
                 {
                     // Event identity and entity identifiers are structural: never replaced, whatever the pattern.
-                    if ((level == Level.Top && key is "id" or "action") || (level == Level.Entity && key is "id" or "type"))
+                    // Only "id" is exempt on actor, impersonator, executor and tenant; "type" and "id" only on targets.
+                    if ((level == Level.Top && key is "id" or "action") || (level == Level.Entity && key == "id") || (level == Level.Target && key is "id" or "type"))
                     {
                         continue;
                     }
@@ -196,7 +206,7 @@ public sealed class Redactor
                 {
                     if (level == Level.Targets)
                     {
-                        Walk(array[i], Level.Entity);
+                        Walk(array[i], Level.Target);
                     }
                     else if (_keys.IsMatch(i.ToString(CultureInfo.InvariantCulture)))
                     {

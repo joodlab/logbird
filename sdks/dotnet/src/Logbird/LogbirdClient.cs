@@ -85,6 +85,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     private int _signaled;
     private readonly object _disposeGate = new();
+    private readonly object _abandonGate = new();
     private Task? _disposeTask;
     private volatile bool _closing;
     private volatile bool _flushRequested;
@@ -136,7 +137,18 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         _onDrop = options.OnDrop;
         _logger = logger ?? NullLogger.Instance;
         _notifier = new Notifier(Math.Max(1_000, options.MaxQueueSize), lost => Interlocked.Add(ref _notificationsLost, lost), () => Interlocked.Increment(ref _callbackFailures));
-        if (_redactor?.IdentifierFieldsMatched() is { Count: > 0 } identifierFields)
+        List<string>? identifierFields = null;
+        try
+        {
+            identifierFields = _redactor?.IdentifierFieldsMatched();
+        }
+        catch (Exception e)
+        {
+            // Diagnostics must never fail construction.
+            Report(new LogbirdDeliveryException("Checking the redaction pattern failed: " + e.GetType().Name));
+        }
+
+        if (identifierFields is { Count: > 0 })
         {
             // Reported once, at startup: identifier fields are structural and are never redacted.
             Report(new LogbirdDeliveryException(
@@ -323,7 +335,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
             // Host exceptions (from BeforeSend, a redaction pattern, a JSON value) can quote event data, so only the
             // exception type is reported, never the exception itself.
-            Report(e is LogbirdDeliveryException ? e : new LogbirdDeliveryException("An audit event could not be recorded: " + e.GetType().Name));
+            Report(e is SdkDropException ? e : new LogbirdDeliveryException("An audit event could not be recorded: " + e.GetType().Name));
         }
         finally
         {
@@ -481,6 +493,15 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     /// once. A late response for an abandoned batch is ignored.
     /// </summary>
     private void AbandonRemaining()
+    {
+        // One report at a time: a second caller returns only after the first has posted every drop.
+        lock (_abandonGate)
+        {
+            AbandonRemainingCore();
+        }
+    }
+
+    private void AbandonRemainingCore()
     {
         try
         {
@@ -742,7 +763,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         var shape = JsonDepth.Measure(auditEvent, MaxEventBytes);
         if (shape == JsonDepth.Shape.TooDeep)
         {
-            throw new LogbirdDeliveryException($"An audit event nests JSON deeper than {JsonDepth.Max} levels and was dropped.");
+            throw new SdkDropException($"An audit event nests JSON deeper than {JsonDepth.Max} levels and was dropped.");
         }
 
         if (shape == JsonDepth.Shape.TooLarge)
@@ -762,6 +783,9 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
         LogQueueFull();
     }
 
+    private static string? Bounded(string? value, int max = 256)
+        => value is null || value.Length <= max ? value : value.Substring(0, max);
+
     private void OnSenderDrop(QueuedEvent item, DropReason reason, string? detail)
         => Drop(reason, item.Id, item.Action, item.Json, detail);
 
@@ -769,25 +793,12 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
     private void OnSenderWarning(QueuedEvent item, string reason)
         => Warn(item.Id, item.Action, reason, "server warning (" + SafePrefix(reason) + ")");
 
+    // A server reason is free text that can quote the event's values; the summary names only a fixed topic.
     private static string SafePrefix(string reason)
-    {
-        var colon = reason.IndexOf(':');
-        if (colon is <= 0 or > 40)
-        {
-            return "unspecified";
-        }
-
-        for (var i = 0; i < colon; i++)
-        {
-            var c = reason[i];
-            if (c is not ((>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '_' or '.'))
-            {
-                return "unspecified";
-            }
-        }
-
-        return reason.Substring(0, colon);
-    }
+        => reason.Contains("occurredAt") ? "occurredAt"
+            : reason.Contains("whitespace") || reason.Contains("Whitespace") ? "identifier whitespace"
+            : reason.Contains("id") ? "id"
+            : "other";
 
     private void Warn(string id, string action, string reason, string summary)
     {
@@ -825,7 +836,9 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
         if (_onDrop is { } onDrop)
         {
-            var dropped = new DroppedEvent(reason, id, action, json, detail);
+            // Display fields are bounded (an oversized action or id must not be kept whole in the backlog); the JSON, when
+            // kept, carries the event for replay.
+            var dropped = new DroppedEvent(reason, Bounded(id), Bounded(action)!, json, Bounded(detail, 1_024));
             Notify(() => onDrop(dropped));
         }
     }
@@ -889,4 +902,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
     [LoggerMessage(EventId = 4, Level = LogLevel.Error, Message = "Logbird shut down with {Count} unsent audit event(s)")]
     private static partial void LogShutdownDropped(ILogger logger, int count);
+
+    /// <summary>A drop the SDK itself decided; its message is SDK-owned and safe to forward as it is.</summary>
+    private sealed class SdkDropException(string message) : LogbirdDeliveryException(message);
 }

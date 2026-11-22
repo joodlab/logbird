@@ -37,7 +37,8 @@ internal sealed class QueuedEvent(byte[] json, string id, string action, long se
 /// <summary>One flush target, shared by every caller waiting for the same events.</summary>
 internal sealed class FlushWaiter(long target)
 {
-    public long Target { get; } = target;
+    /// <summary>The highest sequence this waiter covers; only raised, under the queue lock.</summary>
+    public long Target { get; set; } = target;
 
     public TaskCompletionSource<bool> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -55,6 +56,8 @@ internal sealed class FlushWaiter(long target)
 internal sealed class EventQueue(int capacity, QueueFullBehavior behavior, Action<QueuedEvent> evicted)
 {
     private readonly object _gate = new();
+    internal const int MaxWaiters = 1_024;
+
     private readonly List<FlushWaiter> _waiters = [];
     private QueuedEvent?[] _items = new QueuedEvent?[Math.Min(capacity, 256)];
     private QueuedEvent[]? _inFlight;
@@ -198,9 +201,12 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior, Actio
                 return null;
             }
 
-            if (_waiters.Count > 0 && _waiters[_waiters.Count - 1].Target == target)
+            // Callers waiting for the same events share a waiter. Past MaxWaiters, a new caller joins the newest waiter and
+            // raises its target: its callers may wait a little longer, which is still correct, and the list stays bounded.
+            if (_waiters.Count > 0 && (_waiters[_waiters.Count - 1].Target == target || _waiters.Count >= MaxWaiters))
             {
                 var shared = _waiters[_waiters.Count - 1];
+                shared.Target = Math.Max(shared.Target, target);
                 shared.Callers++;
                 return shared;
             }
@@ -291,12 +297,19 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior, Actio
     /// <summary>The abandoned events have been reported: complete the flushes that arrived meanwhile.</summary>
     public void FinishAbandon(bool anyAbandoned)
     {
+        List<FlushWaiter> done;
         lock (_gate)
         {
             _abandonReported = true;
+            done = [.. _waiters];
+            _waiters.Clear();
         }
 
-        CompleteAllWaiters(outstandingResult: !anyAbandoned);
+        // These flushes arrived while events were being abandoned: they succeed only if nothing was abandoned.
+        foreach (var waiter in done)
+        {
+            waiter.Completion.TrySetResult(!anyAbandoned);
+        }
     }
 
     private void Evict(QueuedEvent item)
@@ -313,11 +326,16 @@ internal sealed class EventQueue(int capacity, QueueFullBehavior behavior, Actio
         List<(FlushWaiter Waiter, bool Result)>? done = null;
         lock (_gate)
         {
-            var reporting = _abandoned && !_abandonReported;
+            // While shutdown is reporting abandoned events, nothing completes: those flushes wait for the report.
+            if (_abandoned && !_abandonReported)
+            {
+                return;
+            }
+
             var min = MinOutstanding();
             for (var i = _waiters.Count - 1; i >= 0; i--)
             {
-                var settled = !reporting && _waiters[i].Target < min;
+                var settled = _waiters[i].Target < min;
                 if (settled || failOutstanding)
                 {
                     (done ??= []).Add((_waiters[i], settled || outstandingResult));
