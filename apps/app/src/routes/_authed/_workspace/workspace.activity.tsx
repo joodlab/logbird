@@ -12,11 +12,12 @@ import { z } from 'zod';
 import { EventSheet } from '@/components/explorer/event-sheet';
 import { EventsTable, type EventsTableHandle } from '@/components/explorer/events-table';
 import { TimeZoneInline } from '@/components/time-zone-control';
+import { activityChip, activityFreeText, activityQuery, toggleActivityChip } from '@/lib/activity-search';
 import { api } from '@/lib/api/client';
 import { awaiting, current } from '@/lib/api/current';
 import { workspaceActivityQuery, workspaceProjectsQuery } from '@/lib/api/queries';
 import { useCan } from '@/lib/permissions';
-import { formatExactTerm, includeTerm, removeTerm } from '@/lib/query-language';
+import { formatExactTerm } from '@/lib/query-language';
 import { rangeLabel, resolveRange } from '@/lib/range';
 import { formatSearchTotal, searchTotal } from '@/lib/search-total';
 import { useConsoleZone } from '@/lib/time-zone';
@@ -39,15 +40,39 @@ function WorkspaceActivity() {
   // Management actions are rare: this page defaults to a 90-day window (staticData.defaultRange).
   const { range } = useRange();
   const q = search.q ?? '';
-  const [draft, setDraft] = useState(q.replace(/category:\S+/g, '').trim());
+  // The area chip is the query's positive `category:` term; the box holds the rest (negated categories included), so a
+  // bookmark such as `-category:auth` opens exactly as written (lib/activity-search.ts).
+  const category = activityChip(q);
+  const [draft, setDraft] = useState(() => activityFreeText(q));
   const [debounced] = useDebouncedValue(draft, { wait: 250 });
-  const category = /category:(\S+)/.exec(q)?.[1];
+  // The `q` the reader's current edit started from; null when no edit is pending. The URL is written only for an edit,
+  // never on mount, and never over a `q` that changed meanwhile (Back/Forward, a chip, a link).
+  const editedFrom = useRef<string | null>(null);
+  const written = useRef<string | null>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sync the debounced free text into the URL
+  // biome-ignore lint/correctness/useExhaustiveDependencies: write the debounced edit to the URL
   useEffect(() => {
-    const next = [category ? `category:${category}` : '', debounced.trim()].filter(Boolean).join(' ');
-    if (next !== q) navigate({ search: (prev) => ({ ...prev, q: next || undefined }), replace: true });
+    const base = editedFrom.current;
+    if (base === null) return;
+    editedFrom.current = null;
+    if (base !== q) return; // the query changed while the edit was pending: that navigation wins
+    const next = activityQuery(category, debounced);
+    if (next !== q) {
+      written.current = next;
+      navigate({ search: (prev) => ({ ...prev, q: next || undefined }), replace: true });
+    }
   }, [debounced]);
+
+  // A query that changed from outside the box (Back/Forward, a chip, a link) brings the box in line with it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: react to the URL's query only
+  useEffect(() => {
+    if (written.current === q) {
+      written.current = null;
+      return;
+    }
+    if (editedFrom.current !== null && editedFrom.current !== q) editedFrom.current = null;
+    setDraft(activityFreeText(q));
+  }, [q]);
 
   const activity = useInfiniteQuery(workspaceActivityQuery(workspace.id, range, q));
   // Another range's or search's actions never show (or count) under this one's label.
@@ -124,7 +149,10 @@ function WorkspaceActivity() {
             <Input
               aria-label="Search workspace activity"
               className="ps-9"
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                if (editedFrom.current === null) editedFrom.current = q;
+                setDraft(e.target.value);
+              }}
               placeholder="Search activity…"
               ref={searchInput}
               size="sm"
@@ -141,7 +169,7 @@ function WorkspaceActivity() {
                   navigate({
                     search: (prev) => ({
                       ...prev,
-                      q: (category === value ? removeTerm(q, 'category') : includeTerm(q, 'category', value)) || undefined,
+                      q: toggleActivityChip(q, value) || undefined,
                     }),
                     replace: true,
                   })
