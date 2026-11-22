@@ -244,3 +244,9 @@ repeated delivery, an outage and shutdown with fictional data. If customers read
 history, keep read keys server-side and authorize tenant and target on every
 request, including cursor requests. A search filter alone is not authorization.
 See [framework integrations](integrations.md).
+
+## Show customers their own audit trail
+
+To show each business or website only its own events, keep one `read` key on your server and mint short-lived
+viewer tokens for each dashboard view. The server enforces the scope on search, detail, facets and export. See
+[scoped read access](scoped-read-access.md).

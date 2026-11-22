@@ -7,7 +7,8 @@ export function routeDoc(summary: string, options: DescribeRouteOptions = {}, se
   const tag = security === 'session' ? 'console' : security === 'none' ? 'system' : 'public/v1';
   const publicApi = security === 'ingestKey' || security === 'readKey' || security === 'readKeyOrViewerToken';
   // Read routes accept a read/scoped-read key or a viewer token: either scheme satisfies the operation.
-  const requirements = security === 'none' ? [] : security === 'readKeyOrViewerToken' ? [{ readKey: [] }, { viewerToken: [] }] : [{ [security]: [] }];
+  const requirements: Record<string, string[]>[] =
+    security === 'none' ? [] : security === 'readKeyOrViewerToken' ? [{ readKey: [] }, { viewerToken: [] }] : [{ [security]: [] }];
   const headers = {
     'RateLimit-Limit': { description: 'Requests per project and key kind per minute', schema: { type: 'integer' as const } },
     'RateLimit-Remaining': { description: 'Requests remaining in this window', schema: { type: 'integer' as const } },
@@ -22,7 +23,11 @@ export function routeDoc(summary: string, options: DescribeRouteOptions = {}, se
     responses: {
       default: { description: 'Request failed', content: { 'application/json': { schema: resolver(apiErrorSchema) } } },
       ...Object.fromEntries(
-        Object.entries(options.responses ?? {}).map(([status, response]) => [status, publicApi ? { ...response, headers } : response]),
+        Object.entries(options.responses ?? {}).map(([status, response]) => [
+          status,
+          // Route-specific headers (e.g. the export id) are kept next to the rate-limit headers.
+          publicApi ? { ...response, headers: { ...headers, ...('headers' in response ? response.headers : {}) } } : response,
+        ]),
       ),
       ...(publicApi
         ? {

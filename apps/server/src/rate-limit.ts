@@ -53,6 +53,7 @@ export const rateLimit = createMiddleware((c, next) => {
   return next();
 });
 
+const projectRemaining = new WeakMap<Context, number>();
 /** Injectable store/clock keep tests isolated without changing process configuration. */
 export function createPublicRateLimits({
   store = rateLimitStore,
@@ -60,6 +61,8 @@ export function createPublicRateLimits({
   ingestLimit = env.INGEST_RATE_LIMIT_PER_MINUTE,
   readLimit = env.READ_RATE_LIMIT_PER_MINUTE,
   peerLimit = env.PUBLIC_RATE_LIMIT_PER_MINUTE,
+  mintLimit = env.VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE,
+  viewerReadLimit = env.VIEWER_READ_RATE_LIMIT_PER_MINUTE,
   now = Date.now,
 }: {
   store?: Pick<Redis, 'eval' | 'get'>;
@@ -67,6 +70,8 @@ export function createPublicRateLimits({
   ingestLimit?: number;
   readLimit?: number;
   peerLimit?: number;
+  mintLimit?: number;
+  viewerReadLimit?: number;
   now?: () => number;
 } = {}) {
   const window = () => Math.floor(now() / 60_000);
@@ -99,6 +104,37 @@ export function createPublicRateLimits({
       return c.json({ error: { code: 'invalid_api_key', message: 'A valid API key is required.' } }, 401);
     },
     denied,
+    /**
+     * Second bucket for the reader (#138): viewer-token reads per minting key and tenant, and token minting per key.
+     * Runs after the project bucket; the tighter of the two answers RateLimit-*.
+     */
+    reader: (bucket: 'mint' | 'viewer') =>
+      createMiddleware<AppEnv>(async (c, next) => {
+        const reader = c.get('reader');
+        if (bucket === 'viewer' && reader.via !== 'token') return next();
+        const limit = bucket === 'mint' ? mintLimit : viewerReadLimit;
+        const tenant =
+          bucket === 'viewer'
+            ? `:${createHash('sha256')
+                .update(reader.scope?.tenantId ?? '')
+                .digest('hex')
+                .slice(0, 32)}`
+            : '';
+        try {
+          const key = `${prefix}:rate:${bucket}:${reader.keyId}${tenant}:${window()}`;
+          const count = Number(await store.eval(script, 1, key, 120_000));
+          const remaining = Math.max(0, limit - count);
+          if (bucket === 'mint' || remaining < (projectRemaining.get(c) ?? Number.POSITIVE_INFINITY)) {
+            c.header('RateLimit-Limit', String(limit));
+            c.header('RateLimit-Remaining', String(remaining));
+            c.header('RateLimit-Reset', String(retryAfter()));
+          }
+          if (count > limit) return denied(c);
+        } catch {
+          storageError();
+        }
+        await next();
+      }),
     authenticated: (kind: 'ingest' | 'read') =>
       createMiddleware<AppEnv>(async (c, next) => {
         const limit = kind === 'ingest' ? ingestLimit : readLimit;
@@ -107,6 +143,7 @@ export function createPublicRateLimits({
           const count = Number(await store.eval(script, 1, key, 120_000));
           c.header('RateLimit-Limit', String(limit));
           c.header('RateLimit-Remaining', String(Math.max(0, limit - count)));
+          projectRemaining.set(c, Math.max(0, limit - count));
           c.header('RateLimit-Reset', String(retryAfter()));
           if (count > limit) return denied(c);
         } catch {

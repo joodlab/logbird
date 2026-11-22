@@ -43,6 +43,12 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/
 const KIND_COPY = {
   ingest: { label: 'Ingest', hint: 'Can only send events (POST /v1/events). Use in your services.', short: 'sends events only' },
   read: { label: 'Read', hint: 'Can only search and read events (GET /v1/events). Use in products that show history.', short: 'reads events only' },
+  // Created through the API until the console form lands (#138); listed here so existing keys render.
+  'scoped-read': {
+    label: 'Scoped read',
+    hint: 'Can only read events of one tenant (and optionally one target), enforced by the server.',
+    short: 'reads one tenant only',
+  },
 } as const;
 
 function KeysSettings() {

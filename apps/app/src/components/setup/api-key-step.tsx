@@ -19,7 +19,7 @@ import { AdminNote } from '../admin-gate';
 import { Timestamp } from '../timestamp';
 import { useInvalidateSetup } from './use-setup';
 
-type Kind = ApiKey['kind'];
+type Kind = Exclude<ApiKey['kind'], 'scoped-read'>;
 
 const COPY: Record<Kind, { defaultName: string; label: string; prefix: string }> = {
   ingest: { defaultName: 'Production backend', label: 'ingest key', prefix: 'lb_ingest_' },

@@ -354,8 +354,9 @@ export const apiKeySchema = z.object({
 export type ApiKey = z.infer<typeof apiKeySchema>;
 /**
  * Create a key. `scope` is required for `scoped-read` and rejected otherwise. `embedOrigins` is for read kinds only.
- * `expiresAt` must be in the future. Scope, origins and expiry are fixed at creation (rolling copies scope and origins,
- * not expiry); change them by creating a new key.
+ * `expiresAt` must be in the future. Scope, origins and expiry are fixed at creation; change them by creating a new key.
+ * Rolling copies scope and origins, and keeps the old key's absolute expiry unless the roll passes a new one
+ * (`rollApiKeySchema`): a replacement never silently outlives the key it replaces.
  */
 export const createApiKeySchema = z
   .object({
@@ -372,6 +373,12 @@ export const createApiKeySchema = z
       ctx.addIssue({ code: 'custom', path: ['embedOrigins'], message: 'Embed origins apply to read keys only.' });
   });
 export const createApiKeyResponseSchema = z.object({ key: apiKeySchema, secret: z.string() });
+/**
+ * Optional body of `POST …/keys/:keyId/roll`. Without `expiresAt` the replacement keeps the old key's absolute expiry
+ * (none stays none); with it, the replacement expires then (must be in the future). Rolling a key that has already
+ * expired requires a new `expiresAt` (409 `key_expired` otherwise).
+ */
+export const rollApiKeySchema = z.object({ expiresAt: z.iso.datetime().optional() }).strict();
 
 export const VIEWER_TOKEN_TTL_SECONDS = { min: 60, default: 900, max: 3600 } as const;
 /**

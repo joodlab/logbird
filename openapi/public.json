@@ -1543,7 +1543,7 @@
                 }
               }
             },
-            "description": "Versioned CSV/JSONL or complete original-payload JSONL, limited to the caller scope and audited as export.created. See docs/exports.md.",
+            "description": "Versioned CSV/JSONL or complete original-payload JSONL (jsonl-evidence; 422 masked_export for masked scopes), limited to the caller scope. CSV columns: id, timestamp, action, outcome, description, project_id, received_at, environment, category, severity, actor_type, actor_id, actor_name, actor_email, impersonator_id, impersonator_name, executor_type, executor_id, executor_name, job_id, job_attempt, tenant_id, tenant_name, source, targets, changes, context, attributes, conformance, schema_version, sdk, schemaVersion. There is no trailer: a complete file ends with a newline and a normal end of the chunked body; a failure after the headers aborts the connection, so treat any transport error as an incomplete file and discard it. Audited in workspace activity as export.requested, then export.completed or export.failed (actor = the API key; metadata.access names the key, tenant and viewer token). See docs/exports.md.",
             "headers": {
               "RateLimit-Limit": {
                 "description": "Requests per project and key kind per minute",
@@ -1561,6 +1561,19 @@
                 "description": "Seconds until the fixed window resets",
                 "schema": {
                   "type": "integer"
+                }
+              },
+              "X-Logbird-Export-Id": {
+                "description": "Stable export id in filename and workspace records.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              },
+              "X-Logbird-Export-Schema": {
+                "description": "Export format and schema version.",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -2006,16 +2019,6 @@
         "requestBody": {
           "content": {
             "application/json": {
-              "example": {
-                "scope": {
-                  "target": {
-                    "id": "site_42",
-                    "type": "website"
-                  },
-                  "tenantId": "biz_5"
-                },
-                "ttlSeconds": 900
-              },
               "schema": {
                 "additionalProperties": false,
                 "properties": {
@@ -2221,6 +2224,34 @@
             }
           },
           "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
             "description": "scope_exceeded: the requested scope is wider than the key scope.",
             "headers": {
               "RateLimit-Limit": {

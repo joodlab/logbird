@@ -4307,6 +4307,28 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "expiresAt": "2027-01-01T00:00:00Z"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expiresAt": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "description": "Optional. Without expiresAt the replacement keeps the old key expiry; scope and embed origins are always copied.",
+          "required": false
+        },
         "responses": {
           "201": {
             "content": {
@@ -4507,7 +4529,7 @@
                 }
               }
             },
-            "description": "Roll API key: create a replacement with the same name and kind; the old key stays valid until revoked"
+            "description": "Replacement key; the secret is shown once"
           },
           "default": {
             "content": {
@@ -11896,7 +11918,7 @@
                 }
               }
             },
-            "description": "Versioned CSV/JSONL or complete original-payload JSONL, limited to the caller scope and audited as export.created. See docs/exports.md.",
+            "description": "Versioned CSV/JSONL or complete original-payload JSONL (jsonl-evidence; 422 masked_export for masked scopes), limited to the caller scope. CSV columns: id, timestamp, action, outcome, description, project_id, received_at, environment, category, severity, actor_type, actor_id, actor_name, actor_email, impersonator_id, impersonator_name, executor_type, executor_id, executor_name, job_id, job_attempt, tenant_id, tenant_name, source, targets, changes, context, attributes, conformance, schema_version, sdk, schemaVersion. There is no trailer: a complete file ends with a newline and a normal end of the chunked body; a failure after the headers aborts the connection, so treat any transport error as an incomplete file and discard it. Audited in workspace activity as export.requested, then export.completed or export.failed (actor = the API key; metadata.access names the key, tenant and viewer token). See docs/exports.md.",
             "headers": {
               "RateLimit-Limit": {
                 "description": "Requests per project and key kind per minute",
@@ -11914,6 +11936,19 @@
                 "description": "Seconds until the fixed window resets",
                 "schema": {
                   "type": "integer"
+                }
+              },
+              "X-Logbird-Export-Id": {
+                "description": "Stable export id in filename and workspace records.",
+                "schema": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              },
+              "X-Logbird-Export-Schema": {
+                "description": "Export format and schema version.",
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -12359,16 +12394,6 @@
         "requestBody": {
           "content": {
             "application/json": {
-              "example": {
-                "scope": {
-                  "target": {
-                    "id": "site_42",
-                    "type": "website"
-                  },
-                  "tenantId": "biz_5"
-                },
-                "ttlSeconds": 900
-              },
               "schema": {
                 "additionalProperties": false,
                 "properties": {
@@ -12574,6 +12599,34 @@
             }
           },
           "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {},
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
             "description": "scope_exceeded: the requested scope is wider than the key scope.",
             "headers": {
               "RateLimit-Limit": {
