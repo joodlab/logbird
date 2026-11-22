@@ -138,7 +138,8 @@ export const facetFieldSchema = z.union([
   z
     .string()
     .regex(/^(?:attr|attributes)\..+/)
-    .refine((field) => field.replace(/^(?:attr|attributes)\./, '').length <= 4096, 'Attribute path exceeds 4096 characters.'),
+    .refine((field) => field.replace(/^(?:attr|attributes)\./, '').length <= 4096, 'Attribute path exceeds 4096 characters.')
+    .meta({ description: '`attr.<path>` or `attributes.<path>`; the path after the prefix is at most 4096 characters.' }),
 ]);
 export const facetQuerySchema = rangeQuerySchema.extend({
   field: facetFieldSchema.meta({ example: 'attr.metadata.missing' }),

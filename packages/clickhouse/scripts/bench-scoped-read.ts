@@ -9,7 +9,17 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { ReadScope } from '@logbird/contracts';
-import { createClickHouseClient, exportEvents, facets, getEvent, purgeProject, searchEvents } from '../src/index';
+import {
+  type ClickHouseClient,
+  createClickHouseClient,
+  createQueryClickHouseClient,
+  exportEvents,
+  facets,
+  getEvent,
+  purgeProject,
+  searchEvents,
+  withTenant,
+} from '../src/index';
 
 const total = Number(process.argv[2] ?? 1_000_000);
 const runs = Number(process.argv[3] ?? 30);
@@ -17,6 +27,10 @@ const runs = Number(process.argv[3] ?? 30);
 if (!Number.isInteger(total) || total < 100_000) throw new Error('events must be an integer >= 100000');
 if (!Number.isInteger(runs) || runs < 1) throw new Error('runs must be a positive integer');
 const ch = createClickHouseClient();
+// BENCH_CLIENT=query: scoped reads run as the restricted query user, as the API does when it is configured (#138 phase 2).
+const restricted = process.env.BENCH_CLIENT === 'query' ? createQueryClickHouseClient() : null;
+if (process.env.BENCH_CLIENT === 'query' && !restricted) throw new Error('BENCH_CLIENT=query needs CLICKHOUSE_QUERY_USER/PASSWORD');
+const reader = (scope: ReadScope | null): ClickHouseClient => (scope && restricted ? withTenant(restricted, scope.tenantId) : ch);
 const p = `qa-bench-scoped-${randomUUID()}`;
 const span = 7 * 86_400_000;
 const step = Math.floor(span / total);
@@ -96,19 +110,21 @@ try {
       ['24h', day],
       ['7d', week],
     ] as const) {
-      results.push(await measure(`search ${range} ${label}`, () => searchEvents(ch, p, { ...r, limit: 50, order: 'desc' }, undefined, scope)));
+      results.push(
+        await measure(`search ${range} ${label}`, () => searchEvents(reader(scope), p, { ...r, limit: 50, order: 'desc' }, undefined, scope)),
+      );
     }
-    results.push(await measure(`facets 7d action ${label}`, () => facets(ch, p, { ...week, field: 'action', limit: 10 }, scope)));
+    results.push(await measure(`facets 7d action ${label}`, () => facets(reader(scope), p, { ...week, field: 'action', limit: 10 }, scope)));
     results.push(
       await measure(`facets 7d attr×tenant ${label}`, () =>
-        facets(ch, p, { ...week, field: 'attr.metadata.missing', by: 'tenant', limit: 10, byLimit: 5 }, scope),
+        facets(reader(scope), p, { ...week, field: 'attr.metadata.missing', by: 'tenant', limit: 10, byLimit: 5 }, scope),
       ),
     );
     // Detail of an event inside the scope (bench-7: tiny tenant on site_0; bench-2: big; bench-16: m16).
     const id = scope?.tenantId === 'tiny' ? 'bench-7' : scope?.tenantId === 'm16' ? 'bench-16' : 'bench-2';
     results.push(
       await measure(`detail ${label}`, async () => {
-        if (!(await getEvent(ch, p, id, scope))) throw new Error(`detail ${id} missing for ${label}`);
+        if (!(await getEvent(reader(scope), p, id, scope, ch))) throw new Error(`detail ${id} missing for ${label}`);
       }),
     );
     // Full CSV export of the last hour (every page, every row), as GET /v1/export streams it.
@@ -117,7 +133,7 @@ try {
     results.push(
       await measure(`export 1h csv ${label}`, async () => {
         rows = -1; // the CSV header line is not an event
-        for await (const chunk of exportEvents(ch, p, { ...hour, q: '', format: 'csv' }, undefined, undefined, { scope }))
+        for await (const chunk of exportEvents(reader(scope), p, { ...hour, q: '', format: 'csv' }, undefined, undefined, { scope }))
           rows += chunk.split('\n').length - 1;
       }),
     );
@@ -135,5 +151,6 @@ try {
     console.error(JSON.stringify({ cleanup: p, failed: String(error) }));
   } finally {
     await ch.close();
+    await restricted?.close();
   }
 }
