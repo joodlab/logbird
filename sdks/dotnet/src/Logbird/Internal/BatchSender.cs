@@ -49,6 +49,9 @@ internal sealed class BatchSender
     private readonly Action<QueuedEvent, DropReason, string?> _drop;
     private readonly Action<QueuedEvent, string> _warn;
     private readonly Action _progress;
+
+    // Counts a delivery the moment its event settles, before any flush waiting on that event can be completed.
+    private readonly Action? _delivered;
     private int _abandonedAttempts;
     private readonly Action<Exception> _report;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
@@ -67,8 +70,10 @@ internal sealed class BatchSender
         Action<Exception> report,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         Func<double>? random = null,
-        Func<TimeSpan>? clock = null)
+        Func<TimeSpan>? clock = null,
+        Action? delivered = null)
     {
+        _delivered = delivered;
         _http = http;
         _eventsUri = EventsUri(endpoint);
         _authorization = new AuthenticationHeaderValue("Bearer", ingestKey);
@@ -102,7 +107,7 @@ internal sealed class BatchSender
 
     public async Task<SendResult> SendAsync(QueuedEvent[] batch, CancellationToken stop)
     {
-        var state = new State(batch);
+        var state = new State(batch, _delivered);
         try
         {
             return await SendCoreAsync(state, stop).ConfigureAwait(false);
@@ -785,7 +790,7 @@ internal sealed class BatchSender
     }
 
     /// <summary>Per-batch view over the events' own atomic states, so shutdown can take ownership of an event at any time.</summary>
-    private sealed class State(QueuedEvent[] batch)
+    private sealed class State(QueuedEvent[] batch, Action? onDelivered)
     {
         private readonly bool[] _deliveredHere = new bool[batch.Length];
 
@@ -804,6 +809,7 @@ internal sealed class BatchSender
             {
                 _delivered++;
                 _deliveredHere[index] = true;
+                onDelivered?.Invoke();
             }
         }
 

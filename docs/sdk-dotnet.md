@@ -183,7 +183,9 @@ builder.Services.AddLogbird(
 The queue lives in memory, so a crash loses what is queued. For events that must survive a crash, write them to your
 own database in the same transaction as the change (an outbox), with their id, their `OccurredAt` and their content,
 and send them from there exactly as stored on every attempt. A resend is then always an exact retry; an event rebuilt
-with a new timestamp would conflict with the copy the server already has.
+with a new timestamp would conflict with the copy the server already has. If you use a `BeforeSend` hook, make sure it
+changes an outbox event the same way on every attempt (or leaves it alone), so each resend still carries the same id
+and content.
 
 `Track` only queues an event, and a successful `FlushAsync` means each event was stored *or* given up on, so neither
 proves an event was stored. Keep each outbox row until you have confirmed its event, for example by reading it back by

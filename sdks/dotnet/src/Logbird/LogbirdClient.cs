@@ -164,7 +164,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
 
         var http = httpClient ?? (_ownedHttp = CreateHttpClient());
         _queue = new EventQueue(options.MaxQueueSize, options.QueueFullBehavior, OnEvicted);
-        _sender = new BatchSender(http, options.Endpoint!, options.IngestKey!, options.MaxRetries, options.RequestTimeout, OnSenderDrop, OnSenderWarning, () => _queue!.CompleteSatisfiedWaiters(), Report, delay);
+        _sender = new BatchSender(http, options.Endpoint!, options.IngestKey!, options.MaxRetries, options.RequestTimeout, OnSenderDrop, OnSenderWarning, () => _queue!.CompleteSatisfiedWaiters(), Report, delay, delivered: () => Interlocked.Increment(ref _delivered));
         _loop = Task.Run(RunAsync);
         LogbirdMetrics.Register(this);
     }
@@ -782,11 +782,7 @@ public sealed partial class LogbirdClient : ILogbirdClient, IAsyncDisposable, ID
                 result = new SendResult([.. batch.Where(item => item.IsPending)], new LogbirdDeliveryException("Logbird delivery failed unexpectedly: " + e.GetType().Name), 0);
             }
 
-            if (result.Delivered > 0)
-            {
-                Interlocked.Add(ref _delivered, result.Delivered);
-            }
-
+            // Deliveries were counted as each event settled (a flush can complete mid-send, and its caller may read Stats).
             if (!_queue.FinishBatch(result.Failure is null ? [] : result.Unsettled, out _))
             {
                 // Shutdown took ownership of this batch and reported it; ignore the late result.
