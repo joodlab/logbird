@@ -1,3 +1,4 @@
+import { webhookSettingsPath } from '@logbird/contracts';
 import * as React from 'react';
 import type { EmailDefinition } from '../render';
 import { plainText } from '../text';
@@ -17,7 +18,7 @@ const guidance = 'Deliveries are paused until you review and save the filter.';
 const reason = 'you manage this project.';
 const endpoint = (props: WebhookFilterReviewEmailProps) =>
   `Webhook in ${props.project} at ${props.host}${props.description ? ` (${props.description})` : ''}.`;
-const settings = (props: WebhookFilterReviewEmailProps) => new URL(`/p/${encodeURIComponent(props.projectId)}/settings/webhooks`, props.appUrl).href;
+const settings = (props: WebhookFilterReviewEmailProps) => new URL(webhookSettingsPath(props.projectId), props.appUrl).href;
 
 function WebhookFilterReviewEmail(props: WebhookFilterReviewEmailProps) {
   return (

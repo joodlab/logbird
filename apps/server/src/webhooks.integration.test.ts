@@ -10,6 +10,7 @@ import {
   MAX_WEBHOOK_ENDPOINTS,
   SCOPE_MASKS,
   webhookEndpointSchema,
+  webhookSettingsPath,
 } from '@logbird/contracts';
 import { prisma, withProjectLock } from '@logbird/database';
 import { decryptWebhookSecret, encryptWebhookSecret, type WebhookLookup, webhookCursorClock, webhookSecretKey } from '@logbird/database/webhooks';
@@ -365,7 +366,7 @@ it('sends one filter-review email per held endpoint across repeated worker passe
     for (const body of bodies) {
       expect(body).toContain('8.8.8.8');
       expect(body).toContain('Deliveries are paused');
-      expect(body).toContain(`/p/${projectId}/settings/webhooks`);
+      expect(body).toContain(webhookSettingsPath(projectId));
       expect(body).not.toContain('qa-private-token');
     }
     expect(await prisma.webhookEndpoint.count({ where: { id: { in: held }, filterReviewNoticeClaimedAt: { not: null } } })).toBe(2);

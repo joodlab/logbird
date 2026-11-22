@@ -630,6 +630,9 @@ importers:
 
   packages/email:
     dependencies:
+      '@logbird/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@t3-oss/env-core':
         specifier: ^0.13.11
         version: 0.13.11(typescript@7.0.2)(valibot@1.4.2(typescript@7.0.2))(zod@4.6.7)
