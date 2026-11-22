@@ -138,7 +138,7 @@ export function complianceEvidenceContent(_site: SiteState): UseCase {
             title: 'People',
             body: 'Invitations, members joining through an invitation or a link, members removed by an owner or admin, and role changes.',
           },
-          { title: 'Exports', body: 'Each export requested, and how it ended.' },
+          { title: 'Exports', body: 'Each export Logbird admits, and how it ended. A request refused because another export is running leaves no record.' },
           {
             title: 'Sessions',
             body: 'Sign-ins, sign-outs and revoked sessions, and failed sign-in attempts for members (repeated failures are summarised).',
