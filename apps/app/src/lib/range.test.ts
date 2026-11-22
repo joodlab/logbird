@@ -88,7 +88,17 @@ describe('admittedRange with stored rows older than the admission window', () =>
 describe('isValidRange rejects ranges that name no window (#203)', () => {
   const now = Date.parse('2026-11-22T12:00:00.000Z');
   it('accepts real windows', () => {
-    for (const r of ['all', '15m', '24h', '7d', '3650d', '2026-11-22T00:00:00.000Z..2026-11-22T04:00:00.000Z'])
+    for (const r of [
+      'all',
+      '15m',
+      '24h',
+      '7d',
+      '3650d',
+      '2026-11-22T00:00:00.000Z..2026-11-22T04:00:00.000Z',
+      // Offsets with and without a colon, as saved views and shared links may carry them.
+      '2026-11-01T09:00:00+0000..2026-11-07T09:00:00+0000',
+      '2026-11-01T09:00:00+03:00..2026-11-07T09:00:00-05:30',
+    ])
       expect(isValidRange(r, now), r).toBe(true);
   });
   it('rejects zero, unrepresentable, reversed, equal and malformed ranges', () => {

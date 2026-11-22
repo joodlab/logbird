@@ -89,7 +89,9 @@ function sourceFiles(dir: string): string[] {
 /**
  * Reads of a placeholder-enabled query's `.data` that do not go through `current()`: each `const x = useQuery(...)` (or
  * `useInfiniteQuery`) built from such a query, directly or through an options variable, may read `x.data` only on a
- * line that branches on `x.isPlaceholderData` (or right after one), which is how a component shows an old answer dimmed.
+ * line that branches on `x.isPlaceholderData` (`x.isPlaceholderData ? … : x.data`, `!x.isPlaceholderData && x.data`, or an
+ * `if` on the line before), or
+ * right after an explicit `// placeholder: shown dimmed` marker, which is how a component shows an old answer on purpose.
  */
 export function unguardedReads(src: string, queries: readonly string[]): string[] {
   const names = queries.join('|');
@@ -102,9 +104,14 @@ export function unguardedReads(src: string, queries: readonly string[]): string[
   const problems: string[] = [];
   for (const r of results) {
     const reads = new RegExp(String.raw`\b${r}\.data\b`);
-    const branch = new RegExp(String.raw`\b${r}\.isPlaceholderData\b`);
+    // A condition on the flag in the same expression: `flag ?`, `!flag`, `flag &&` or `flag ||`. Merely mentioning it is not.
+    const branch = new RegExp(String.raw`(!\s*${r}\.isPlaceholderData\b|\b${r}\.isPlaceholderData\s*(\?|&&|\|\|))`);
+    const marker = /\/\/ placeholder: shown dimmed/;
     lines.forEach((line, i) => {
-      if (reads.test(line) && !branch.test(line) && !branch.test(lines[i - 1] ?? '')) problems.push(`${r}.data on line ${i + 1}: ${line.trim()}`);
+      // The branch can open on the line before (`if (… && !x.isPlaceholderData) {`).
+      const prev = lines[i - 1] ?? '';
+      if (reads.test(line) && !branch.test(line) && !branch.test(prev) && !marker.test(prev))
+        problems.push(`${r}.data on line ${i + 1}: ${line.trim()}`);
     });
   }
   return problems;
@@ -127,7 +134,17 @@ describe('the guard catches unguarded reads', () => {
     );
     expect(unguardedReads(src, ['fieldsQuery'])).toHaveLength(1);
   });
-  it('accepts an explicit placeholder branch', () => {
+  it('does not accept a mere mention of the flag before an unconditional read', () => {
+    const src = ['const fields = useQuery(fieldsQuery(p, r));', 'console.log(fields.isPlaceholderData);', 'render(fields.data);'].join('\n');
+    expect(unguardedReads(src, ['fieldsQuery'])).toHaveLength(1);
+  });
+  it('accepts an explicit placeholder branch or the dimmed marker', () => {
+    const marked = [
+      'const list = useInfiniteQuery(entityListQuery(p, k));',
+      '// placeholder: shown dimmed (aria-busy)',
+      'const rows = list.data?.pages;',
+    ].join('\n');
+    expect(unguardedReads(marked, ['entityListQuery'])).toEqual([]);
     const src = [
       'const facet = useQuery(facetQuery(p, f, r, q, 20));',
       'const values = facet.isPlaceholderData ? [] : (facet.data?.values ?? []);',
