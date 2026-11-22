@@ -81,7 +81,7 @@ export function SetupChecklistCard({ projectId, projectName }: { projectId: stri
               </span>
             </p>
             {nextCopy && next ? (
-              <p className="truncate text-muted-foreground text-sm">
+              <p className="text-muted-foreground text-sm sm:truncate">
                 <span className="text-foreground">Next:</span> {nextCopy.title} — {nextCopy.detail}
               </p>
             ) : null}
@@ -168,7 +168,7 @@ function StepColumn({ label, steps, setup, projectId }: { label: string; steps: 
                 <StepStatusIcon className="mt-px size-4 [&_svg]:size-4" status={step.status} />
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className={cn('text-sm', step.status === 'done' ? 'text-muted-foreground' : 'font-medium')}>{copy.title}</span>
-                  <span className="line-clamp-1 text-muted-foreground text-xs">{copy.detail}</span>
+                  <span className="text-muted-foreground text-xs sm:line-clamp-1">{copy.detail}</span>
                 </span>
                 {step.status === 'done' ? null : (
                   <span className="mt-0.5 shrink-0 text-brand text-xs opacity-80 group-hover:opacity-100">{copy.action} →</span>

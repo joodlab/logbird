@@ -1,4 +1,4 @@
-import type { ProjectSetup, SetupStep, SetupStepId } from '@logbird/contracts';
+import { CONSOLE_TEST_EVENT_SOURCE, type ProjectSetup, type SetupStep, type SetupStepId } from '@logbird/contracts';
 import { cn } from '@logbird/ui/lib/utils';
 import { CheckIcon, CircleAlertIcon } from 'lucide-react';
 import { formatRelative, formatRetention, pluralize } from '@/lib/format';
@@ -12,6 +12,14 @@ export interface StepCopy {
   detail: string;
   /** Primary action label (the action itself lives on the Setup page section). */
   action: string;
+}
+
+/**
+ * The first event was the console's test and nothing has come from the backend yet. The first-event step counts the
+ * test (it proves the pipeline works); every later fact counts only events the backend sends, so say which is which.
+ */
+export function onlyConsoleTest(setup: ProjectSetup): boolean {
+  return setup.ingest.firstEvent?.source === CONSOLE_TEST_EVENT_SOURCE && !setup.ingest.lastEventAt;
 }
 
 /** Title, live one-liner and call to action for each checklist step. */
@@ -30,7 +38,9 @@ export function stepCopy(id: SetupStepId, setup: ProjectSetup, status: SetupStep
       return {
         title: 'Send your first event',
         detail: done
-          ? `First event received ${formatRelative(setup.ingest.firstEventAt)}.`
+          ? onlyConsoleTest(setup)
+            ? `Console test received ${formatRelative(setup.ingest.firstEventAt)}: the pipeline works.`
+            : `First event received ${formatRelative(setup.ingest.firstEventAt)}.`
           : status === 'attention'
             ? 'Only sample data so far — sample events never count. Send one real event.'
             : 'Any JSON object with an action is a valid event. One curl is enough.',
@@ -40,10 +50,12 @@ export function stepCopy(id: SetupStepId, setup: ProjectSetup, status: SetupStep
       return {
         title: 'Keep events flowing',
         detail: done
-          ? `${pluralize(setup.ingest.eventsLast24h, 'event')} in the last 24 hours.`
+          ? `${pluralize(setup.ingest.eventsLast24h, 'event')} from your backend in the last 24 hours.`
           : setup.ingest.lastEventAt
-            ? `Nothing in the last 24 hours — last event ${formatRelative(setup.ingest.lastEventAt)}.`
-            : 'Wire the SDK into the code paths that change data, so events arrive every day.',
+            ? `Nothing from your backend in the last 24 hours — last event ${formatRelative(setup.ingest.lastEventAt)}.`
+            : onlyConsoleTest(setup)
+              ? 'From your backend: none yet (the console test doesn’t count).'
+              : 'Wire the SDK into the code paths that change data, so events arrive every day.',
         action: 'Check ingestion',
       };
     case 'envelope':

@@ -14,7 +14,7 @@ import { InviteForm } from '@/components/members/invite-form';
 import { ApiKeyStep, useSessionKey } from '@/components/setup/api-key-step';
 import { EnvelopePanel } from '@/components/setup/envelope-panel';
 import { FirstEventPanel } from '@/components/setup/first-event-panel';
-import { ProgressBar, STATUS_LABEL, StepStatusIcon, stepAnchor, stepCopy } from '@/components/setup/steps';
+import { onlyConsoleTest, ProgressBar, STATUS_LABEL, StepStatusIcon, stepAnchor, stepCopy } from '@/components/setup/steps';
 import { useDismissSetup, useReviewRetention } from '@/components/setup/use-setup';
 import { Timestamp } from '@/components/timestamp';
 import { projectSetupQuery } from '@/lib/api/queries';
@@ -244,12 +244,15 @@ function RecentEvents({ projectId, setup }: { projectId: string; setup: ProjectS
   const { ingest } = setup;
   return (
     <div className="flex flex-col gap-3">
+      {/* Events from the backend only: sample data and the console test never count here. */}
+      <p className="font-medium text-sm">From your backend</p>
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Fact label="Last 24 hours" value={formatNumber(ingest.eventsLast24h)} />
-        <Fact label="Last event" value={<Timestamp fallback="never" format="relative" iso={ingest.lastEventAt} />} />
+        <Fact label="Last event" value={<Timestamp fallback="none yet" format="relative" iso={ingest.lastEventAt} />} />
         <Fact label="Active ingest keys" value={formatNumber(ingest.activeIngestKeys)} />
       </dl>
       <p className="text-muted-foreground text-sm">
+        {onlyConsoleTest(setup) ? 'The console test doesn’t count here: these show events your backend sends. ' : null}
         Track events where data changes — API handlers, workers, schedulers, webhooks — not only from the UI. If events stopped, check that the ingest
         key was not revoked and that your process calls <span className="font-mono text-foreground">shutdown()</span> or{' '}
         <span className="font-mono text-foreground">flush()</span> before exiting.
