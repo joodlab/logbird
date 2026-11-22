@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import type { AuditEvent } from '@logbird/contracts';
+import type { AuditEvent, ReadScope } from '@logbird/contracts';
 import { describe, expect, it } from 'vitest';
 import { maskEvent, maskedEmail, mintViewerToken, scopeWithin, verifyViewerToken, viewerTokenKey } from './read-access';
 
@@ -59,8 +59,7 @@ describe('scopeWithin', () => {
     [{ tenantId: 't1', mask: ['ip', 'actor_email'] }, { tenantId: 't1', mask: ['ip'] }, true],
     [{ tenantId: 't1' }, { tenantId: 't1', mask: ['ip'] }, false],
   ] as const)('%j within %j = %s', (child, parent, expected) => {
-    // biome-ignore lint/suspicious/noExplicitAny: table-driven literal scopes
-    expect(scopeWithin(child as any, parent as any)).toBe(expected);
+    expect(scopeWithin(child as ReadScope, parent as ReadScope | null)).toBe(expected);
   });
 });
 

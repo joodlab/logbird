@@ -249,16 +249,12 @@ export async function searchEvents(
   return (await searchPage(ch, projectId, q, compiled, false, undefined, undefined, scope)).page;
 }
 async function eventRow(ch: ClickHouseClient, p: string, id: string, scope?: ReadScope | null) {
+  const canonical = 'SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp LIMIT 1';
+  if (!scope) return (await read<EventRow>(ch, canonical, { p, id }))[0];
   const s = scopePredicate(scope);
   // Pick the canonical stored row first, then test the scope on it: a scoped caller sees exactly the row an unscoped
   // reader sees, or nothing (never a different stored version that happens to match).
-  return (
-    await read<EventRow>(
-      ch,
-      `SELECT * FROM (SELECT * FROM events WHERE project_id={p:String} AND event_id={id:String} ORDER BY received_at,timestamp LIMIT 1) WHERE ${s.sql}`,
-      { p, id, ...s.params },
-    )
-  )[0];
+  return (await read<EventRow>(ch, `SELECT * FROM (${canonical}) WHERE ${s.sql}`, { p, id, ...s.params }))[0];
 }
 /** With a scope, an out-of-scope id is indistinguishable from an unknown one (null → 404). */
 export async function getEvent(ch: ClickHouseClient, projectId: string, eventId: string, scope?: ReadScope | null): Promise<EventDetail | null> {

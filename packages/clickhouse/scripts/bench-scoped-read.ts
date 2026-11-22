@@ -54,7 +54,7 @@ try {
         map('metadata.missing', if(number % 3 = 0, '["roles:create"]', '["staff:invite","roles:create"]')), '{}'
       FROM numbers({offset:UInt64}, {batch:UInt64})`,
       query_params: { p, step, offset, batch: Math.min(100_000, total - offset) },
-      clickhouse_settings: { max_insert_threads: 2, max_memory_usage: '1073741824' },
+      clickhouse_settings: { max_insert_threads: '2', max_memory_usage: '1073741824' },
     });
   console.log(JSON.stringify({ project: p, inserted: total, seconds: Math.round((performance.now() - started) / 100) / 10 }));
   const now = Date.now();
@@ -67,7 +67,7 @@ try {
     ['tiny tenant', { tenantId: 'tiny' }],
     ['tiny tenant + website', { tenantId: 'tiny', target: { type: 'website', id: 'site_7' } }],
   ];
-  const results = [];
+  const results: { name: string; p50: number; p95: number }[] = [];
   for (const [label, scope] of scopes) {
     for (const [range, r] of [
       ['24h', day],

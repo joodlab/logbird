@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { apiKeySchema, createSavedViewSchema, routes, workspaceNameSuggestionSchema } from './index';
+import {
+  apiKeySchema,
+  createApiKeySchema,
+  createSavedViewSchema,
+  rollApiKeySchema,
+  routes,
+  viewerTokenRequestSchema,
+  workspaceNameSuggestionSchema,
+} from './index';
 
 const key = {
   id: 'key_1',
@@ -11,6 +19,9 @@ const key = {
   createdBy: null,
   lastUsedAt: '2026-11-08T10:05:00.000Z',
   revokedAt: null,
+  scope: null,
+  embedOrigins: [],
+  expiresAt: null,
 };
 
 describe('#63 / #65 contract additions', () => {
@@ -38,5 +49,25 @@ describe('#63 / #65 contract additions', () => {
     expect(routes.keys.roll).toEqual({ method: 'POST', path: '/api/projects/:projectId/keys/:keyId/roll', auth: 'session' });
     expect(routes.workspaceNameSuggestion).toEqual({ method: 'GET', path: '/api/onboarding/workspace-name', auth: 'session' });
     expect(workspaceNameSuggestionSchema.parse({ name: null })).toEqual({ name: null });
+  });
+});
+
+describe('#138 scoped read contract', () => {
+  it('requires a scope exactly on scoped-read keys and origins only on read kinds', () => {
+    const scope = { tenantId: 'biz_5', target: { type: 'website', id: 'site_42' } };
+    expect(createApiKeySchema.safeParse({ name: 'x', kind: 'scoped-read', scope }).success).toBe(true);
+    expect(createApiKeySchema.safeParse({ name: 'x', kind: 'scoped-read' }).success).toBe(false);
+    expect(createApiKeySchema.safeParse({ name: 'x', kind: 'read', scope }).success).toBe(false);
+    expect(createApiKeySchema.safeParse({ name: 'x', kind: 'ingest', embedOrigins: ['https://cms.example.com'] }).success).toBe(false);
+    expect(createApiKeySchema.safeParse({ name: 'x', kind: 'read', embedOrigins: ['https://CMS.example.com/'] }).success).toBe(false);
+    expect(createApiKeySchema.safeParse({ name: 'x', kind: 'scoped-read', scope: { tenantId: 'b', extra: 1 } }).success).toBe(false);
+  });
+  it('bounds viewer-token lifetimes and keeps roll bodies strict', () => {
+    expect(viewerTokenRequestSchema.parse({ scope: { tenantId: 'b' } }).ttlSeconds).toBe(900);
+    expect(viewerTokenRequestSchema.safeParse({ scope: { tenantId: 'b' }, ttlSeconds: 3601 }).success).toBe(false);
+    expect(viewerTokenRequestSchema.safeParse({ scope: { tenantId: 'b' }, ttlSeconds: 59 }).success).toBe(false);
+    expect(rollApiKeySchema.safeParse({}).success).toBe(true);
+    expect(rollApiKeySchema.safeParse({ expiresAt: '2027-01-01T00:00:00Z' }).success).toBe(true);
+    expect(rollApiKeySchema.safeParse({ scope: { tenantId: 'b' } }).success).toBe(false);
   });
 });
