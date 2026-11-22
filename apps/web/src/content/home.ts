@@ -1,18 +1,38 @@
 import { DESIGN_PARTNER_LINE } from '../lib/copy-flags';
-import { selfHostQuickstart } from '../lib/selfhost';
 import { sharedContent } from './shared';
-import { byRepo, type Cta, type Item, type Marked, SITE, type SiteState } from './site';
+import { byCloud, byRepo, type Cta, type Item, type Marked, SITE, type SiteState } from './site';
 
 /**
- * The home page's words (routes/index.tsx). Brief: marketing/copy/home.md (messaging, proof and owner notes).
- * Every claim here must be true of the product today; the sources are listed in the brief.
+ * The home page's words (routes/index.tsx), built around the two jobs people pay for: an audit log their customers can
+ * see, and evidence for their auditors. Brief, with the source of every claim: marketing/copy/home.md. Every claim is
+ * true for master; numbers appear only when measured and sourced.
  */
 
-/** Head metadata, read by lib/site-map.ts. */
-export const homeMeta = {
-  title: 'Home',
-  description: 'Open-source audit logs you can self-host.',
-};
+/** Head metadata, read by lib/site-map.ts. The description stays within 155 characters in every state. */
+export function homeMetaFor(site: SiteState) {
+  return {
+    title: 'Home',
+    /** The social card (scripts/og.ts): the brand line and one line under it. */
+    ogTitle: 'Retrace every step.',
+    ogDescription: byRepo(site, {
+      public: 'Open-source audit logs you can self-host.',
+      private: 'Audit logs for your product. The source opens soon.',
+    }),
+    /** "Open-source" only while the source is public. */
+    fullTitle: byRepo(site, { public: 'Logbird — open-source audit logs for your product', private: 'Logbird — audit logs for your product' }),
+    description: `The audit log your customers ask for, and the evidence your auditors ask for. ${byRepo(site, {
+      public: byCloud(site, {
+        open: 'Open source: self-host it, or ask for early access to Logbird Cloud.',
+        closed: 'Open source: self-host it, or join the Logbird Cloud waitlist.',
+      }),
+      private: byCloud(site, {
+        open: 'The source opens soon; request early access to Logbird Cloud.',
+        closed: 'The source opens soon; join the waitlist to hear when.',
+      }),
+    })}`,
+  };
+}
+export const homeMeta = homeMetaFor(SITE);
 
 const curl = `curl http://localhost:4600/v1/events \\
   -H "Authorization: Bearer $LOGBIRD_INGEST_KEY" \\
@@ -46,18 +66,30 @@ new Worker('refunds', async (job) => {
   await audit.pending();
 });`;
 
-/** The self-host quickstart beside the open-source section: the commands once the source is public, a waitlist panel before. */
-export type HomeQuickstart =
-  | { kind: 'public'; title: string; code: string; next: Marked }
-  | { kind: 'private'; eyebrow: string; title: string; body: Marked; cta: Cta };
+/** A promise and where it ends: one row of a limits table (components/marketing/guarantees.tsx). */
+export interface Limit {
+  promise: Marked;
+  limit: Marked;
+}
 
 export function homeContent(site: SiteState) {
   const shared = sharedContent(site);
+  const hosting = byRepo(site, {
+    public: byCloud(site, {
+      open: 'run it on your own servers, or ask for early access to Logbird Cloud.',
+      closed: 'run it on your own servers, or join the waitlist for Logbird Cloud.',
+    }),
+    private: byCloud(site, {
+      open: 'run it on your own servers once the source opens, or ask for early access to Logbird Cloud.',
+      closed: 'run it on your own servers once the source opens, or join the waitlist for Logbird Cloud.',
+    }),
+  });
   return {
     hero: {
-      eyebrow: 'Open-source audit logs · MIT',
-      title: 'Retrace every step.',
-      lead: 'Logbird is the audit log for your product. Send who-did-what events over HTTP or the SDK. Search them, follow any user, customer account or record, and run it on your own servers.',
+      /** The brand line, kept near the wordmark and in the closing band. */
+      eyebrow: 'Retrace every step.',
+      title: 'The audit log your customers ask for, and the evidence your auditors ask for.',
+      lead: `Send one event per action over HTTP or the TypeScript SDK. Show each customer account its own history in your product, search your events in the console, and export them complete when an auditor asks. MIT-licensed: ${hosting}`,
       primaryCta: { label: shared.accessCta, to: '/contact' } satisfies Cta,
       status: byRepo(site, {
         public: shared.cloudStatusLine,
@@ -65,12 +97,120 @@ export function homeContent(site: SiteState) {
       }),
       /** Shown only when the console takes sign-ins; rendered as "Already invited? Sign in." */
       signIn: site.signInUrl ? { prompt: 'Already invited?', label: 'Sign in', href: site.signInUrl } : undefined,
+      /** Shown only while the repository is public. */
+      github: site.githubUrl ? { label: 'Source on GitHub', href: site.githubUrl } : undefined,
       sample: { title: 'Send your first event', code: curl, caption: "That's a valid event. Only `action` is required." },
     },
     explorer: {
       label: 'The Logbird explorer',
       frameLabel: 'Explorer',
       caption: 'The explorer: search, facets, a histogram you can zoom, and every event in a dense table.',
+    },
+    customers: {
+      eyebrow: 'Customer-facing audit logs',
+      title: 'Show each customer their own history.',
+      lead: "Your customers' admins want to see who did what in their account. Send each event with the customer account it belongs to (`tenant`), and your product can show every account its own trail.",
+      /** Today: reads go through your backend, which authorizes each customer account. */
+      now: {
+        points: [
+          {
+            title: 'Read from your backend',
+            body: 'Your server reads the trail with a read key and the query language, for example `tenant:biz_7`.',
+          },
+          {
+            title: 'Authorize in one place',
+            body: "The Nuxt integration's proxy denies by default: your `authorize()` decides which customer account a user may see and returns the only query that is forwarded.",
+          },
+          {
+            title: 'Render it in your product',
+            body: "Vue's `useAuditTrail` loads the events page by page, and a headless `AuditTimeline` renders them with your own markup.",
+          },
+        ] satisfies Item[],
+        limit: 'A read key reads the whole project, so your backend must decide which customer account each user may see.',
+      },
+      /** After the production proof of scoped read access (SiteState.scopedReadLive). */
+      scoped: {
+        points: [
+          {
+            title: 'Viewer tokens',
+            body: 'Your server mints a token for one customer account and hands it to the browser. It expires after 15 minutes by default, one hour at most.',
+          },
+          {
+            title: 'Enforced by Logbird',
+            body: 'The scope applies outside every query, on search, event detail, counts and export. Nothing in the query can widen it.',
+          },
+          {
+            title: 'Scoped server keys',
+            body: 'A scoped read key can only ever read one customer account, optionally narrowed to one record or to actions with given prefixes.',
+          },
+        ] satisfies Item[],
+        limit:
+          "One customer account per scope, matched on the id Logbird stored. ClickHouse enforces the customer account as well only when the restricted query user is configured; otherwise Logbird's query builders are the single layer.",
+      },
+      /** What the page shows: scoped access only once its production proof is confirmed. */
+      get access() {
+        return site.scopedReadLive ? this.scoped : this.now;
+      },
+      limitLabel: 'The limit',
+      screenshot: {
+        label: 'Customer account',
+        caption:
+          "A customer account's page in the console: its events, activity, outcomes, top actions and the people, workers and records involved.",
+      },
+      cta: { label: 'Read the integration guide', to: '/developers', hash: 'integrations' } satisfies Cta,
+    },
+    evidence: {
+      eyebrow: 'Compliance evidence',
+      title: 'Answer the auditor with evidence.',
+      lead: "When an auditor or a customer's security team asks what happened, show them the events: who acted, for whom, on which records, and what changed.",
+      headers: { promise: 'What you can show', limit: 'The limit' },
+      rows: [
+        {
+          promise:
+            'Each event can name the actor, the staff member acting for them (`impersonator`), the customer account, the records, and the before and after values of up to 256 changes.',
+          limit: "Logbird records what your code sends. It can't add an actor or a change that your event leaves out.",
+        },
+        {
+          promise: 'Retention per project, from 7 days to 10 years. Expired events are permanently deleted every hour.',
+          limit:
+            'An owner or admin can shorten retention, and the deletion then starts immediately and is final. There is no retention lock or legal hold yet.',
+        },
+        {
+          promise:
+            'The evidence export (`jsonl-evidence`) carries every matching event with its original payload. When the export completes, its record keeps the filter, the fixed query clock, the SHA-256, the size and the row count, so a file can be matched to its record.',
+          limit:
+            "Matching the SHA-256 and size establishes that the file matches Logbird's output; it does not establish who saved it or when it reached a client's disk.",
+        },
+        {
+          promise:
+            'Workspace activity records what your team does in Logbird: project and retention changes, keys, members and roles, saved views, invite links, exports, sign-ins, sign-outs and revoked sessions.',
+          limit: "It doesn't record who searched or opened events.",
+        },
+      ] satisfies Limit[],
+      screenshot: {
+        label: 'Retention',
+        caption: "A project's retention settings: the current window and the policies you can choose.",
+      },
+      cta: { label: 'Retention and workspace activity, in detail', to: '/security', hash: 'retention' } satisfies Cta,
+    },
+    operators: {
+      eyebrow: 'Support investigations',
+      title: 'Answer "what happened in this account?" in one search.',
+      lead: 'Support and operations open a customer account or a single record and see its events in order, with the before and after values you send.',
+      screenshot: {
+        label: 'Event detail',
+        caption:
+          'An event in detail: who asked, what did the work, whose account, which records, and the before and after values sent for each change (the first 256 per event).',
+      },
+      features: {
+        search: { title: 'Search', body: '`actor:usr_42 action:booking.* outcome:failure`, or a guarded SQL `WHERE` expression.' },
+        entities: { title: 'Entity pages', body: 'Actors, tenants, executors and records get their own pages and timelines.' },
+        operations: {
+          title: 'Operation trees',
+          body: 'The events that share an operation id, from the request to the jobs it spawned, as one tree.',
+        },
+      } satisfies Record<string, Item>,
+      cta: { label: 'Take the product tour', to: '/product' } satisfies Cta,
     },
     developers: {
       eyebrow: 'For developers',
@@ -86,6 +226,13 @@ export function homeContent(site: SiteState) {
           body: ' on every event: the share of nine recommended checks it passes. The setup page shows which fields your events miss.',
         },
       ] satisfies Item[],
+      /** Other stacks, and the .NET package: in the repository, not on NuGet. No C# code or install command until it is. */
+      otherStacks: {
+        text: 'Not on TypeScript? Any language that can POST JSON over HTTP works. A .NET package is in the repository and not yet on NuGet:',
+        /** The package folder while the repository is public; a note while it is private. */
+        link: site.githubUrl ? { label: 'sdks/dotnet', href: `${site.githubUrl.replace(/\/+$/, '')}/tree/master/sdks/dotnet` } : undefined,
+        privateNote: '`sdks/dotnet`, once the source opens.',
+      },
       cta: { label: 'Read the developer guide', to: '/developers' } satisfies Cta,
       code: [
         { id: 'route', label: 'Route', code: routeSample },
@@ -93,124 +240,47 @@ export function homeContent(site: SiteState) {
       ],
       codeCaption: 'The actor is Lina on both events. The worker only carried it out.',
     },
-    operators: {
-      eyebrow: 'For support, operations and compliance',
-      title: 'Answer "what happened in this account?" in one search.',
-      lead: 'The console is built for the people who get the question: support, operators, and whoever answers the auditor. Search every event, open a customer account or a single record, and see the before and after values you send for the first 256 changes of each event.',
-      screenshot: {
-        label: 'Event detail',
-        caption:
-          'An event in detail: who asked, what did the work, whose account, which records, and the before and after values sent for each change (the first 256 per event).',
-      },
-      features: {
-        search: { title: 'Search', body: '`actor:usr_42 action:booking.* outcome:failure`, or a guarded SQL `WHERE` expression.' },
-        entities: { title: 'Entity pages', body: 'Actors, tenants, executors and records get their own pages and timelines.' },
-        operations: {
-          title: 'Operation trees',
-          body: 'The events that share an operation id, from the request to the jobs it spawned, as one tree.',
-        },
-        impersonation: { title: 'Impersonation', body: 'When support acts for a customer, the event records who acted for whom.' },
-        retention: { title: 'Retention', body: 'Per project, from 7 days to 10 years. Expired events are permanently deleted.' },
-      } satisfies Record<string, Item>,
-      cta: { label: 'Take the product tour', to: '/product' } satisfies Cta,
-    },
-    howItWorks: {
-      eyebrow: 'How it works',
-      title: 'From one curl to a searchable history.',
-      steps: [
-        { title: 'Create a project', body: "Copy its ingest key. It's shown once and stored only as a hash." },
-        { title: 'Send events', body: 'Over HTTP or the SDK: one event, or up to 1000 per request.', detail: 'POST /v1/events' },
-        {
-          title: 'Logbird stores them',
-          body: 'On `202`, `ids` lists the events written to ClickHouse, by this request or an earlier identical one, and `rejected` names the entries that failed.',
-          detail: '202 Accepted',
-        },
-        {
-          title: 'Search, follow, keep',
-          body: 'Use the console, or read events from your own backend with a read key. Expired events are deleted every hour.',
-        },
-      ] satisfies (Item & { detail?: string })[],
-      /** Architecture at a glance: the README's mermaid diagram as accessible HTML (components/marketing/steps.tsx). */
-      architecture: {
-        flow: [
-          { name: 'Your product', role: 'SDK or HTTP, ingest key' },
-          { name: 'Logbird API', role: 'Validates, answers 202 after the write' },
-          { name: 'ClickHouse', role: 'Events, rollups, entity pages' },
-          { name: 'Console and read API', role: 'Your team, and your own backend' },
-        ],
-        /** Each detail continues its name, so it starts with its own separator. */
-        stores: [
-          { name: 'Postgres', role: ' · workspaces, projects, members, hashed keys' },
-          { name: 'Retention worker', role: ' · deletes expired events every hour, on Redis or Dragonfly' },
-        ],
-        caption:
-          'Your product sends events to the Logbird API, which writes them to ClickHouse. The console and the read API read from ClickHouse. Postgres stores workspaces, projects and hashed keys. A retention worker deletes expired events every hour.',
-      },
-    },
-    envelope: {
-      eyebrow: 'The envelope at a glance',
-      title: 'Who caused it, what did the work, what changed.',
-      lead: "Only action is required. These fields fill the console's pages and make search precise.",
-      cta: { label: 'Read the envelope guide', to: '/developers' } satisfies Cta,
-      frameTitle: 'POST /v1/events',
-      /** The recommended envelope; each annotated key's line is marked in the JSON. */
-      lines: [
-        { text: '{' },
-        { text: '  "action": "booking.cancelled",', key: 'action' },
-        { text: '  "actor": { "type": "user", "id": "usr_42", "name": "Lina Haddad" },', key: 'actor' },
-        { text: '  "executor": { "type": "api", "id": "api-server" },', key: 'executor' },
-        { text: '  "tenant": { "id": "biz_7", "name": "Azure Hotels" },', key: 'tenant' },
-        { text: '  "targets": [{ "type": "booking", "id": "bk_1042" }],', key: 'targets' },
-        { text: '  "changes": [{ "field": "status", "before": "confirmed", "after": "cancelled" }],', key: 'changes' },
-        { text: '  "context": { "operationId": "op_cancel_bk_1042" }', key: 'operationId' },
-        { text: '}' },
-      ] as { text: string; key?: string }[],
-      /** The annotation list repeats the key, so the pairing reads without colour. */
-      notes: [
-        { key: 'action', text: 'What happened. The only required field.', required: true },
-        { key: 'actor', text: 'Who asked.' },
-        { key: 'executor', text: 'What did the work, and on which attempt.' },
-        { key: 'tenant', text: 'Whose account.' },
-        { key: 'targets', text: 'Which records.' },
-        { key: 'changes', text: 'Before and after. Never secrets.' },
-        { key: 'operationId', text: 'Ties a request to the jobs it started.' },
-      ] as { key: string; text: string; required?: boolean }[],
-      requiredBadge: 'required',
-    },
-    openSource: {
-      eyebrow: 'Open source',
-      title: 'MIT-licensed. Runs with Docker Compose.',
-      lead: byRepo(site, {
-        public:
-          'The whole product is in one repository: the API, the console, the retention worker, the SDK and the integrations. Self-hosting runs on your server, from the published, versioned images once a release exists, so your events stay on your infrastructure.',
-        private:
-          'The whole product is in one repository: the API, the console, the retention worker, the SDK and the integrations. Self-hosting runs it on your server, so your events stay on your infrastructure.',
+    hosting: {
+      eyebrow: 'Self-host or Cloud',
+      /** "…or ours" only as far as Logbird Cloud is open (README.md § Owner-gated copy, cloud-clause). */
+      title: byRepo(site, {
+        public: byCloud(site, {
+          open: 'Run it on your servers, or on ours in early access.',
+          closed: 'Run it on your servers today, or join the Logbird Cloud waitlist.',
+        }),
+        private: byCloud(site, {
+          open: 'Run it on ours in early access, or on yours once the source opens.',
+          closed: 'Run it on your servers once the source opens, or join the Logbird Cloud waitlist.',
+        }),
       }),
-      bullets: [
-        'Bundled Docker Compose, Coolify, or your own Postgres, ClickHouse and Redis.',
-        'Automatic HTTPS with Caddy, or any reverse proxy you already run.',
-        byRepo(site, { public: 'Source on GitHub, under the MIT licence.', private: 'Source on GitHub — coming soon.' }),
-      ],
-      repositoryCta: { label: "What's in the repository", to: '/open-source' } satisfies Cta,
-      quickstart: byRepo<HomeQuickstart>(site, {
-        public: {
-          kind: 'public',
-          title: site.selfHostVersion ? `Self-host ${site.selfHostVersion}` : 'Self-host from source',
-          code: selfHostQuickstart,
-          next: 'Then open `http://localhost:4600`, sign in with the emailed code and create a project. Configure SMTP first, or enable sign-in codes in the server log.',
-        },
-        private: {
-          kind: 'private',
-          eyebrow: 'Self-host quickstart',
-          title: 'Available when the repository opens.',
-          body: "On one VM: clone, generate secrets, configure SMTP, pull the images, then `docker compose up -d --no-build`. We'll publish the commands here the day the source is public.",
-          cta: { label: 'Tell me when it opens', to: '/contact', search: { interest: 'self-host' } },
-        },
-      }),
+      selfHost: {
+        title: 'Self-host',
+        body: byRepo(site, {
+          public:
+            'Every feature, MIT-licensed. Docker Compose on one VM, Coolify, or your own Postgres, ClickHouse and Redis. Your events stay on your infrastructure.',
+          private:
+            'Every feature, MIT-licensed, once the source opens. Docker Compose on one VM, Coolify, or your own Postgres, ClickHouse and Redis. Your events stay on your infrastructure.',
+        }),
+        repositoryCta: { label: "What's in the repository", to: '/open-source' } satisfies Cta,
+      },
+      cloud: {
+        title: 'Logbird Cloud',
+        /** Present tense only once it is open; "open-source" only while the repository is public. */
+        body: `${byRepo(site, { public: 'The same open-source codebase', private: 'The same codebase you will be able to self-host' })}, ${byCloud(
+          site,
+          {
+            open: 'and we run the servers, the upgrades and the backups. It is in early access: sign-ups are limited to invited teams for now.',
+            closed: "and we will run the servers, the upgrades and the backups. It isn't open yet: join the waitlist to hear when it opens.",
+          },
+        )}`,
+        primaryCta: { label: shared.accessCta, to: '/contact' } satisfies Cta,
+        moreCta: { label: 'About Logbird Cloud', to: '/cloud' } satisfies Cta,
+      },
     },
     guarantees: {
       eyebrow: 'Guarantees and limits',
       title: 'What Logbird promises, and where the promise ends.',
+      headers: { promise: 'We guarantee', limit: 'The limit' },
       items: [
         {
           promise: 'A `202` lists accepted event IDs in `ids` and rejected events in `rejected`.',
@@ -219,7 +289,8 @@ export function homeContent(site: SiteState) {
         },
         {
           promise: 'The SDK batches and retries for you.',
-          limit: 'Its queue is in memory: a crash before the server acknowledges can lose pending events.',
+          limit:
+            'Its queue is in memory and bounded: a crash before the server acknowledges, or an outage long enough to fill the queue, can lose pending events.',
         },
         {
           promise: 'Only an `action` string is required, and each event must fit the ingest limits.',
@@ -232,10 +303,19 @@ export function homeContent(site: SiteState) {
           limit:
             "An older `occurredAt` is stored at receive time with a warning, and project retention still applies to imports. Logbird doesn't rebuild history from your database.",
         },
-      ],
+      ] satisfies Limit[],
       cta: { label: 'Read how Logbird handles data', to: '/security' } satisfies Cta,
     },
-    closingNote: DESIGN_PARTNER_LINE,
+    closing: {
+      /** The brand line above the shared closing band's heading. */
+      eyebrow: 'Retrace every step.',
+      note: DESIGN_PARTNER_LINE,
+    },
+    /**
+     * Ingest-to-search time. Empty until T1 sends a measured value with its date and hardware: no time claim before
+     * then. Numbers on this page are measured and sourced, or absent.
+     */
+    searchLatency: undefined as Marked | undefined,
   };
 }
 

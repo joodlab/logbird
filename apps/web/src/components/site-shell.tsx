@@ -2,6 +2,7 @@ import { type Theme, useTheme } from '@logbird/ui/theme';
 import { Link, rootRouteId, useRouterState } from '@tanstack/react-router';
 import { MenuIcon, MonitorIcon, MoonIcon, SunIcon, XIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { shared } from '../content/shared';
 import { COPYRIGHT_HOLDER, GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import { ACCESS_CTA, SIGN_IN_URL } from '../lib/cloud';
 import { siteMap } from '../lib/site-map';
@@ -89,6 +90,11 @@ export function SiteHeader() {
           </nav>
         ) : null}
         <div className="ms-auto hidden items-center gap-2 lg:flex">
+          {shared.githubNav ? (
+            <a className="nav-link" href={shared.githubNav.href}>
+              {shared.githubNav.label}
+            </a>
+          ) : null}
           <ThemeSwitch />
           {SIGN_IN_URL ? (
             <a className="nav-link" href={SIGN_IN_URL}>
@@ -116,6 +122,11 @@ export function SiteHeader() {
                     {page.title}
                   </Link>
                 ))}
+                {shared.githubNav ? (
+                  <a className="flex min-h-12 items-center border-b font-medium text-base last:border-b-0" href={shared.githubNav.href}>
+                    {shared.githubNav.label}
+                  </a>
+                ) : null}
               </nav>
             ) : null}
             <div className="container-site flex flex-col gap-3 border-t py-4">
@@ -160,7 +171,7 @@ export function SiteFooter() {
           <p className="max-w-xs text-muted-foreground text-sm leading-relaxed">
             Retrace every step.
             <br />
-            The open-source audit log for your product.
+            {shared.footerTagline}
           </p>
         </div>
         <div className="grid grid-cols-2 gap-8 sm:grid-cols-3 lg:grid-cols-5">

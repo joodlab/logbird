@@ -21,6 +21,13 @@ export function sharedContent(site: SiteState) {
       public: { label: 'Self-host it', to: '/self-hosting' },
       private: { label: 'Self-host when the source opens', to: '/contact', search: { interest: 'self-host' } },
     }),
+    /** The footer's line under the brand line. "Open-source" only while the source is public. */
+    footerTagline: byRepo(site, {
+      public: 'The open-source audit log for your product.',
+      private: 'The audit log for your product. The source opens soon.',
+    }),
+    /** The header's link to the repository, shown only while it is public. */
+    githubNav: site.githubUrl ? { label: 'GitHub', href: site.githubUrl } : undefined,
     /** The closing call to action at the bottom of most pages. */
     ctaBand: {
       title: 'Start with one event.',
@@ -29,7 +36,10 @@ export function sharedContent(site: SiteState) {
           open: 'Self-host Logbird today, or request access to Logbird Cloud, where sign-ups are limited to invited teams for now.',
           closed: 'Self-host Logbird today, or join the waitlist for Logbird Cloud.',
         }),
-        private: 'The source opens soon. Join the waitlist to hear when you can self-host Logbird, and when Logbird Cloud opens.',
+        private: byCloud(site, {
+          open: "The source opens soon. Request access to Logbird Cloud, where sign-ups are limited to invited teams for now, and we'll tell you when you can self-host.",
+          closed: 'The source opens soon. Join the waitlist to hear when you can self-host Logbird, and when Logbird Cloud opens.',
+        }),
       }),
     },
   };

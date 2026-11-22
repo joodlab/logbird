@@ -5,7 +5,8 @@ import { CtaBand } from '../components/marketing/cta-band';
 import { FeatureRow } from '../components/marketing/feature-row';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
-import { Steps } from '../components/marketing/steps';
+import { Architecture, Steps } from '../components/marketing/steps';
+import { architecture } from '../content/architecture';
 import { GITHUB_PUBLIC } from '../env';
 import { CLOUD_OPEN } from '../lib/cloud';
 import { repoFile, SELF_HOST_VERSION, selfHostQuickstart } from '../lib/selfhost';
@@ -202,6 +203,9 @@ function SelfHostingPage() {
             </div>
           ))}
         </dl>
+        <div className="mt-12">
+          <Architecture {...architecture} />
+        </div>
       </Section>
 
       <Section compact id="options" labelledBy="options-title">

@@ -4,13 +4,17 @@ import { dirname, resolve } from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
 import { createElement as h } from 'react';
 import satori from 'satori';
+import { homeMetaFor } from '../src/content/home';
+import { SITE } from '../src/content/site';
 import { siteConfigFrom } from '../src/env';
 import { siteMap } from '../src/lib/site-map';
 import { loadPublicEnv } from './public-env';
 
 const require = createRequire(import.meta.url);
 // The same resolved origin as the bundle and the discovery files (scripts/public-env.ts).
-const { SITE_URL } = siteConfigFrom(loadPublicEnv());
+const { SITE_URL, GITHUB_PUBLIC, APP_URL } = siteConfigFrom(loadPublicEnv());
+// The card's words follow the configuration this build resolved (env files included), not the import-time defaults.
+const homeCard = homeMetaFor({ ...SITE, repoPublic: GITHUB_PUBLIC, cloudOpen: Boolean(APP_URL) });
 console.log(`og: cards for ${new URL(SITE_URL).host}`);
 const font = (pkg: string, file: string) => readFile(resolve(dirname(require.resolve(`${pkg}/package.json`)), 'files', file));
 const [regular, semibold, mono, logo] = await Promise.all([
@@ -23,8 +27,9 @@ await mkdir('public/og', { recursive: true });
 const box = (style: Record<string, unknown>, ...children: Parameters<typeof h>[2][]) =>
   h('div', { style: { display: 'flex', ...style } }, ...children);
 for (const page of siteMap) {
-  const title = page.ogSlug === 'home' ? 'Retrace every step.' : page.title;
-  const description = page.ogSlug === 'home' ? 'Open-source audit logs you can self-host.' : page.description;
+  // Home's card words come from content/home.ts and follow the repository state.
+  const title = page.ogSlug === 'home' ? homeCard.ogTitle : page.title;
+  const description = page.ogSlug === 'home' ? homeCard.ogDescription : page.description;
   const rows = [1, 0.83, 0.67, 0.5, 0.35].map((opacity, index) =>
     box(
       {
