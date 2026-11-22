@@ -2,9 +2,20 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClickHouseClient, createQueryClickHouseClient, insertEvents } from './client';
 import { normalizeEvent } from './normalize';
-import { entityProfile, listFields, liveEvents, overview, projectStats } from './queries';
+import { entityProfile, listFields, liveEvents, overview, projectStats, purgeProject } from './queries';
 
-const enabled = !!process.env.CLICKHOUSE_QUERY_PASSWORD;
+/**
+ * This suite probes the row policies the migrations install on the `logbird` database (and writes a probe table and
+ * fixture events there). It runs only when the environment explicitly selects that database: on a shared machine it
+ * must never create, insert into or query a database it was not told to use.
+ */
+const REQUIRED_DATABASE = 'logbird';
+const selectedDatabase = process.env.CLICKHOUSE_DATABASE;
+const enabled = !!process.env.CLICKHOUSE_QUERY_PASSWORD && selectedDatabase === REQUIRED_DATABASE;
+if (process.env.CLICKHOUSE_QUERY_PASSWORD && !enabled)
+  console.warn(
+    `row-policies: skipped. It needs CLICKHOUSE_DATABASE=${REQUIRED_DATABASE} (the database whose row policies it probes); got ${selectedDatabase ?? 'none'}.`,
+  );
 const main = enabled ? createClickHouseClient() : null;
 const restricted = enabled ? createQueryClickHouseClient() : null;
 const projects = [`row-policy-a-${randomUUID()}`, `row-policy-b-${randomUUID()}`];
@@ -18,10 +29,15 @@ const range = {
 };
 const tables = ['events', 'events_by_minute', 'entities', 'attribute_keys'];
 afterAll(async () => {
-  if (main) await main.command({ query: `DROP TABLE IF EXISTS logbird.${ddlTable}` });
+  if (main) {
+    await main.command({ query: `DROP TABLE IF EXISTS logbird.${ddlTable}` });
+    // The fixture projects' events (and their rollups) go too, not only the probe table.
+    for (const projectId of projects) await purgeProject(main, projectId);
+  }
   await main?.close();
   await restricted?.close();
-});
+  // Purging runs mutations on the events and rollup tables: allow them to finish.
+}, 120_000);
 
 describe.runIf(enabled)('database-enforced project isolation (real ClickHouse)', () => {
   beforeAll(async () => {
