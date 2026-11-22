@@ -20,10 +20,14 @@ import { Route as LoginIndexRouteImport } from './routes/login.index'
 import { Route as LoginVerifyRouteImport } from './routes/login.verify'
 import { Route as AuthedWorkspaceAccountRouteImport } from './routes/_authed/_workspace/account'
 import { Route as AuthedWorkspaceProjectsRouteImport } from './routes/_authed/_workspace/projects'
+import { Route as AuthedWorkspaceWorkspaceRouteImport } from './routes/_authed/_workspace/workspace'
 import { Route as AuthedOnboardingIndexRouteImport } from './routes/_authed/onboarding.index'
 import { Route as AuthedOnboardingProfileRouteImport } from './routes/_authed/onboarding.profile'
 import { Route as AuthedOnboardingProjectRouteImport } from './routes/_authed/onboarding.project'
 import { Route as AuthedWorkspacePProjectIdRouteImport } from './routes/_authed/_workspace/p.$projectId'
+import { Route as AuthedWorkspaceWorkspaceIndexRouteImport } from './routes/_authed/_workspace/workspace.index'
+import { Route as AuthedWorkspaceWorkspaceActivityRouteImport } from './routes/_authed/_workspace/workspace.activity'
+import { Route as AuthedWorkspaceWorkspaceMembersRouteImport } from './routes/_authed/_workspace/workspace.members'
 import { Route as AuthedOnboardingFirstEventProjectIdRouteImport } from './routes/_authed/onboarding.first-event.$projectId'
 import { Route as AuthedWorkspacePProjectIdIndexRouteImport } from './routes/_authed/_workspace/p.$projectId.index'
 import { Route as AuthedWorkspacePProjectIdDocsRouteImport } from './routes/_authed/_workspace/p.$projectId.docs'
@@ -103,6 +107,12 @@ const AuthedWorkspaceProjectsRoute = AuthedWorkspaceProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => AuthedWorkspaceRoute,
 } as any)
+const AuthedWorkspaceWorkspaceRoute =
+  AuthedWorkspaceWorkspaceRouteImport.update({
+    id: '/workspace',
+    path: '/workspace',
+    getParentRoute: () => AuthedWorkspaceRoute,
+  } as any)
 const AuthedOnboardingIndexRoute = AuthedOnboardingIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -123,6 +133,24 @@ const AuthedWorkspacePProjectIdRoute =
     id: '/p/$projectId',
     path: '/p/$projectId',
     getParentRoute: () => AuthedWorkspaceRoute,
+  } as any)
+const AuthedWorkspaceWorkspaceIndexRoute =
+  AuthedWorkspaceWorkspaceIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthedWorkspaceWorkspaceRoute,
+  } as any)
+const AuthedWorkspaceWorkspaceActivityRoute =
+  AuthedWorkspaceWorkspaceActivityRouteImport.update({
+    id: '/activity',
+    path: '/activity',
+    getParentRoute: () => AuthedWorkspaceWorkspaceRoute,
+  } as any)
+const AuthedWorkspaceWorkspaceMembersRoute =
+  AuthedWorkspaceWorkspaceMembersRouteImport.update({
+    id: '/members',
+    path: '/members',
+    getParentRoute: () => AuthedWorkspaceWorkspaceRoute,
   } as any)
 const AuthedOnboardingFirstEventProjectIdRoute =
   AuthedOnboardingFirstEventProjectIdRouteImport.update({
@@ -279,11 +307,15 @@ export interface FileRoutesByFullPath {
   '/login/': typeof LoginIndexRoute
   '/account': typeof AuthedWorkspaceAccountRoute
   '/projects': typeof AuthedWorkspaceProjectsRoute
+  '/workspace': typeof AuthedWorkspaceWorkspaceRouteWithChildren
   '/onboarding/profile': typeof AuthedOnboardingProfileRoute
   '/onboarding/project': typeof AuthedOnboardingProjectRoute
   '/onboarding/': typeof AuthedOnboardingIndexRoute
   '/p/$projectId': typeof AuthedWorkspacePProjectIdRouteWithChildren
+  '/workspace/activity': typeof AuthedWorkspaceWorkspaceActivityRoute
+  '/workspace/members': typeof AuthedWorkspaceWorkspaceMembersRoute
   '/onboarding/first-event/$projectId': typeof AuthedOnboardingFirstEventProjectIdRoute
+  '/workspace/': typeof AuthedWorkspaceWorkspaceIndexRoute
   '/p/$projectId/docs': typeof AuthedWorkspacePProjectIdDocsRoute
   '/p/$projectId/events': typeof AuthedWorkspacePProjectIdEventsRoute
   '/p/$projectId/fields': typeof AuthedWorkspacePProjectIdFieldsRoute
@@ -319,7 +351,10 @@ export interface FileRoutesByTo {
   '/onboarding/profile': typeof AuthedOnboardingProfileRoute
   '/onboarding/project': typeof AuthedOnboardingProjectRoute
   '/onboarding': typeof AuthedOnboardingIndexRoute
+  '/workspace/activity': typeof AuthedWorkspaceWorkspaceActivityRoute
+  '/workspace/members': typeof AuthedWorkspaceWorkspaceMembersRoute
   '/onboarding/first-event/$projectId': typeof AuthedOnboardingFirstEventProjectIdRoute
+  '/workspace': typeof AuthedWorkspaceWorkspaceIndexRoute
   '/p/$projectId/docs': typeof AuthedWorkspacePProjectIdDocsRoute
   '/p/$projectId/events': typeof AuthedWorkspacePProjectIdEventsRoute
   '/p/$projectId/fields': typeof AuthedWorkspacePProjectIdFieldsRoute
@@ -356,11 +391,15 @@ export interface FileRoutesById {
   '/login/': typeof LoginIndexRoute
   '/_authed/_workspace/account': typeof AuthedWorkspaceAccountRoute
   '/_authed/_workspace/projects': typeof AuthedWorkspaceProjectsRoute
+  '/_authed/_workspace/workspace': typeof AuthedWorkspaceWorkspaceRouteWithChildren
   '/_authed/onboarding/profile': typeof AuthedOnboardingProfileRoute
   '/_authed/onboarding/project': typeof AuthedOnboardingProjectRoute
   '/_authed/onboarding/': typeof AuthedOnboardingIndexRoute
   '/_authed/_workspace/p/$projectId': typeof AuthedWorkspacePProjectIdRouteWithChildren
+  '/_authed/_workspace/workspace/activity': typeof AuthedWorkspaceWorkspaceActivityRoute
+  '/_authed/_workspace/workspace/members': typeof AuthedWorkspaceWorkspaceMembersRoute
   '/_authed/onboarding/first-event/$projectId': typeof AuthedOnboardingFirstEventProjectIdRoute
+  '/_authed/_workspace/workspace/': typeof AuthedWorkspaceWorkspaceIndexRoute
   '/_authed/_workspace/p/$projectId/docs': typeof AuthedWorkspacePProjectIdDocsRoute
   '/_authed/_workspace/p/$projectId/events': typeof AuthedWorkspacePProjectIdEventsRoute
   '/_authed/_workspace/p/$projectId/fields': typeof AuthedWorkspacePProjectIdFieldsRoute
@@ -397,11 +436,15 @@ export interface FileRouteTypes {
     | '/login/'
     | '/account'
     | '/projects'
+    | '/workspace'
     | '/onboarding/profile'
     | '/onboarding/project'
     | '/onboarding/'
     | '/p/$projectId'
+    | '/workspace/activity'
+    | '/workspace/members'
     | '/onboarding/first-event/$projectId'
+    | '/workspace/'
     | '/p/$projectId/docs'
     | '/p/$projectId/events'
     | '/p/$projectId/fields'
@@ -437,7 +480,10 @@ export interface FileRouteTypes {
     | '/onboarding/profile'
     | '/onboarding/project'
     | '/onboarding'
+    | '/workspace/activity'
+    | '/workspace/members'
     | '/onboarding/first-event/$projectId'
+    | '/workspace'
     | '/p/$projectId/docs'
     | '/p/$projectId/events'
     | '/p/$projectId/fields'
@@ -473,11 +519,15 @@ export interface FileRouteTypes {
     | '/login/'
     | '/_authed/_workspace/account'
     | '/_authed/_workspace/projects'
+    | '/_authed/_workspace/workspace'
     | '/_authed/onboarding/profile'
     | '/_authed/onboarding/project'
     | '/_authed/onboarding/'
     | '/_authed/_workspace/p/$projectId'
+    | '/_authed/_workspace/workspace/activity'
+    | '/_authed/_workspace/workspace/members'
     | '/_authed/onboarding/first-event/$projectId'
+    | '/_authed/_workspace/workspace/'
     | '/_authed/_workspace/p/$projectId/docs'
     | '/_authed/_workspace/p/$projectId/events'
     | '/_authed/_workspace/p/$projectId/fields'
@@ -590,6 +640,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedWorkspaceProjectsRouteImport
       parentRoute: typeof AuthedWorkspaceRoute
     }
+    '/_authed/_workspace/workspace': {
+      id: '/_authed/_workspace/workspace'
+      path: '/workspace'
+      fullPath: '/workspace'
+      preLoaderRoute: typeof AuthedWorkspaceWorkspaceRouteImport
+      parentRoute: typeof AuthedWorkspaceRoute
+    }
     '/_authed/onboarding/': {
       id: '/_authed/onboarding/'
       path: '/'
@@ -617,6 +674,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/p/$projectId'
       preLoaderRoute: typeof AuthedWorkspacePProjectIdRouteImport
       parentRoute: typeof AuthedWorkspaceRoute
+    }
+    '/_authed/_workspace/workspace/': {
+      id: '/_authed/_workspace/workspace/'
+      path: '/'
+      fullPath: '/workspace/'
+      preLoaderRoute: typeof AuthedWorkspaceWorkspaceIndexRouteImport
+      parentRoute: typeof AuthedWorkspaceWorkspaceRoute
+    }
+    '/_authed/_workspace/workspace/activity': {
+      id: '/_authed/_workspace/workspace/activity'
+      path: '/activity'
+      fullPath: '/workspace/activity'
+      preLoaderRoute: typeof AuthedWorkspaceWorkspaceActivityRouteImport
+      parentRoute: typeof AuthedWorkspaceWorkspaceRoute
+    }
+    '/_authed/_workspace/workspace/members': {
+      id: '/_authed/_workspace/workspace/members'
+      path: '/members'
+      fullPath: '/workspace/members'
+      preLoaderRoute: typeof AuthedWorkspaceWorkspaceMembersRouteImport
+      parentRoute: typeof AuthedWorkspaceWorkspaceRoute
     }
     '/_authed/onboarding/first-event/$projectId': {
       id: '/_authed/onboarding/first-event/$projectId'
@@ -789,6 +867,25 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthedWorkspaceWorkspaceRouteChildren {
+  AuthedWorkspaceWorkspaceActivityRoute: typeof AuthedWorkspaceWorkspaceActivityRoute
+  AuthedWorkspaceWorkspaceMembersRoute: typeof AuthedWorkspaceWorkspaceMembersRoute
+  AuthedWorkspaceWorkspaceIndexRoute: typeof AuthedWorkspaceWorkspaceIndexRoute
+}
+
+const AuthedWorkspaceWorkspaceRouteChildren: AuthedWorkspaceWorkspaceRouteChildren =
+  {
+    AuthedWorkspaceWorkspaceActivityRoute:
+      AuthedWorkspaceWorkspaceActivityRoute,
+    AuthedWorkspaceWorkspaceMembersRoute: AuthedWorkspaceWorkspaceMembersRoute,
+    AuthedWorkspaceWorkspaceIndexRoute: AuthedWorkspaceWorkspaceIndexRoute,
+  }
+
+const AuthedWorkspaceWorkspaceRouteWithChildren =
+  AuthedWorkspaceWorkspaceRoute._addFileChildren(
+    AuthedWorkspaceWorkspaceRouteChildren,
+  )
+
 interface AuthedWorkspacePProjectIdSettingsRouteChildren {
   AuthedWorkspacePProjectIdSettingsActivityRoute: typeof AuthedWorkspacePProjectIdSettingsActivityRoute
   AuthedWorkspacePProjectIdSettingsDangerRoute: typeof AuthedWorkspacePProjectIdSettingsDangerRoute
@@ -879,12 +976,14 @@ const AuthedWorkspacePProjectIdRouteWithChildren =
 interface AuthedWorkspaceRouteChildren {
   AuthedWorkspaceAccountRoute: typeof AuthedWorkspaceAccountRoute
   AuthedWorkspaceProjectsRoute: typeof AuthedWorkspaceProjectsRoute
+  AuthedWorkspaceWorkspaceRoute: typeof AuthedWorkspaceWorkspaceRouteWithChildren
   AuthedWorkspacePProjectIdRoute: typeof AuthedWorkspacePProjectIdRouteWithChildren
 }
 
 const AuthedWorkspaceRouteChildren: AuthedWorkspaceRouteChildren = {
   AuthedWorkspaceAccountRoute: AuthedWorkspaceAccountRoute,
   AuthedWorkspaceProjectsRoute: AuthedWorkspaceProjectsRoute,
+  AuthedWorkspaceWorkspaceRoute: AuthedWorkspaceWorkspaceRouteWithChildren,
   AuthedWorkspacePProjectIdRoute: AuthedWorkspacePProjectIdRouteWithChildren,
 }
 

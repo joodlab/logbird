@@ -204,6 +204,12 @@ export function formatTerm(field: string, value: string, negated = false): strin
   return `${negated ? '-' : ''}${field}:${quoteIfNeeded(value)}`;
 }
 
+/**
+ * A term that matches exactly `value`. `formatTerm` already does (a literal star is escaped, never a prefix search);
+ * this name is kept for callers that ask for exactness explicitly.
+ */
+export const formatExactTerm = formatTerm;
+
 function editableExpression(q: string): QueryExpression | null {
   try {
     return parseQueryExpression(q);
