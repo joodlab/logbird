@@ -384,6 +384,40 @@ public class FinalCycleTests
     }
 
     [Fact]
+    public async Task Stats_count_every_delivery_by_the_time_FlushAsync_returns_even_when_a_flush_completes_mid_send()
+    {
+        // A 503 with partial acknowledgements settles events while the send is still running, and a flush can complete
+        // then. Deliveries must already be counted at that point; this race showed up once in CI on .NET Framework, and
+        // the loop keeps exercising that window (it cannot be forced deterministically).
+        var server = new FakeServer { Fallback = request => Task.FromResult(FakeServer.Json(HttpStatusCode.Accepted, JsonSerializer.Serialize(new { accepted = request.Ids.Length, ids = request.Ids, rejected = Array.Empty<object>() }))) };
+        await using var client = Client(Options(), server);
+        for (var round = 1; round <= 100; round++)
+        {
+            server.Then(request => FakeServer.Json(HttpStatusCode.ServiceUnavailable, JsonSerializer.Serialize(new
+            {
+                error = new
+                {
+                    code = "ingest_pending",
+                    details = new
+                    {
+                        accepted = request.Ids.Length - 1,
+                        ids = request.Ids.Take(request.Ids.Length - 1).ToArray(),
+                        rejected = Array.Empty<object>(),
+                        warnings = Array.Empty<object>(),
+                        indices = new[] { request.Ids.Length - 1 },
+                        eventIds = new[] { request.Ids[request.Ids.Length - 1] },
+                    },
+                },
+            })));
+            client.Track(new AuditEvent("a"));
+            client.Track(new AuditEvent("b"));
+            client.Track(new AuditEvent("c"));
+            Assert.True(await client.FlushAsync());
+            Assert.Equal(3 * round, client.Stats.Delivered);
+        }
+    }
+
+    [Fact]
     public async Task Missing_and_non_protocol_rejection_codes_become_other()
     {
         var errors = new ConcurrentQueue<Exception>();
