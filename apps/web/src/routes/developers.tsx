@@ -378,7 +378,7 @@ function DevelopersPage() {
       <FeatureRow
         eyebrow="Integrations"
         id="integrations"
-        limit="Express, Next.js, Laravel and Django are planned. We'll add them when we use those stacks ourselves."
+        limit="There are no Express, Next.js, Laravel or Django integrations. Use the TypeScript SDK or plain HTTP from those stacks."
         title="Middleware for the stacks we run."
         visual={<SiteCodeTabs tabs={[{ id: 'hono', label: 'Hono', code: hono, language: 'ts' }]} />}
       >
