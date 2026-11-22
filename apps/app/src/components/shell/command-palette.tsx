@@ -145,10 +145,21 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
     const answer = await queryClient.fetchQuery(entitySearchQuery(pid, text)).catch(() => null);
     if (token !== selection.current) return;
     const target = resolveJump(text, shape, answer?.entities);
-    if (target.kind === 'entity') openEntity(pid, target.entity);
-    else if (target.kind === 'operation')
-      go(() => navigate({ to: '/p/$projectId/operations/$operationId', params: { projectId: pid, operationId: text } }));
-    else go(() => navigate({ to: '/p/$projectId/events', params: { projectId: pid }, search: { q: formatTerm('id', text), ev: text } }));
+    const openShape = () =>
+      shape === 'operation'
+        ? go(() => navigate({ to: '/p/$projectId/operations/$operationId', params: { projectId: pid, operationId: text } }))
+        : go(() => navigate({ to: '/p/$projectId/events', params: { projectId: pid }, search: { q: formatTerm('id', text), ev: text } }));
+    if (target.kind === 'entity') return openEntity(pid, target.entity);
+    // The shape is the fallback only after a complete lookup found no entity with this id: a failed or partial one
+    // cannot tell whether a tenant (or actor, or record) is called this, so say so and let the reader choose.
+    if (!answer || answer.partial) {
+      toast.error('Could not check whether this is an entity id', {
+        description: 'Some entities could not be searched. Try again, or open it anyway.',
+        action: { label: `Open ${shape} anyway`, onClick: () => token === selection.current && openShape() },
+      });
+      return;
+    }
+    openShape();
   };
 
   return (
