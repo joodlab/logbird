@@ -15,7 +15,7 @@ import { Link } from '@tanstack/react-router';
 import { BookOpenIcon, Loader2Icon, SearchIcon, SearchXIcon } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { Timestamp } from '@/components/timestamp';
-import { current } from '@/lib/api/current';
+import { current, shownDimmed } from '@/lib/api/current';
 import { entityListQuery, facetQuery } from '@/lib/api/queries';
 import { ENTITY_SECTIONS, type EntitySection, splitTargetId, typeIcon } from '@/lib/entities';
 import { formatCompact } from '@/lib/format';
@@ -104,8 +104,7 @@ export function EntityDirectory({ projectId, section, q, type, sort = 'events', 
   // While a new search loads, the previous search's rows stay, dimmed and marked busy (the spinner in the search box says
   // why); the empty state and the type chips only ever describe the current answer.
   const updating = list.isPlaceholderData;
-  // placeholder: shown dimmed (aria-busy while `updating`)
-  const rows = list.data?.pages.flatMap((p) => p.data) ?? [];
+  const rows = shownDimmed(list)?.pages.flatMap((p) => p.data) ?? [];
   // Events without a type cannot be filtered by type: only offer real values.
   const typeValues = (current(types)?.values ?? []).filter((t) => t.value);
 

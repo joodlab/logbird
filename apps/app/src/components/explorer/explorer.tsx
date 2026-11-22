@@ -149,8 +149,9 @@ function ProjectExplorer({
   }>({});
   // Only settled results become "last good" (a placeholder is another search's data).
   const scope = `${range}|${baseQuery ?? ''}`;
-  if (events.data && !events.isError && !events.isPlaceholderData) {
-    lastGood.current.pages = events.data.pages;
+  const eventsNow = current(events);
+  if (eventsNow && !events.isError) {
+    lastGood.current.pages = eventsNow.pages;
     lastGood.current.pagesScope = scope;
   }
   if (events.isSuccess && !events.isPlaceholderData) {
@@ -163,8 +164,9 @@ function ProjectExplorer({
   // range are committed, so the table starts that set at the top even when it shares rows with the old one (e.g. moving
   // between two entity profiles, where `q` stays empty but `baseQuery` changes).
   const resultKey = lastGood.current.resultKey;
-  if (histogram.data && !histogram.isError && !histogram.isPlaceholderData) {
-    lastGood.current.histogram = histogram.data;
+  const histogramNow = current(histogram);
+  if (histogramNow && !histogram.isError) {
+    lastGood.current.histogram = histogramNow;
     lastGood.current.histogramScope = scope;
   }
   // A rejected query falls back to the last good result only when it was searched over this same range and locked
