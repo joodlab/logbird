@@ -225,7 +225,12 @@ describe('content modules', () => {
   it('home shows reading through your backend until scoped read access is proven, then scoped access in one change', async () => {
     const env = { WEB_GITHUB_PUBLIC: 'true', WEB_GITHUB_URL: 'https://github.com/example-org/logbird' };
     const [page] = await renderPages(['/'], env);
-    const html = (page?.html ?? '').replaceAll('&#x27;', "'").replaceAll('&quot;', '"');
+    // The page's text without tags, and each module text without its inline-code backticks, as Rich renders them.
+    const html = (page?.html ?? '')
+      .replace(/<[^>]+>/g, '')
+      .replaceAll('&#x27;', "'")
+      .replaceAll('&quot;', '"');
+    const shownText = (text: string | undefined) => (text ?? '').replaceAll('`', '');
     const current = homeContent({ repoPublic: true, cloudOpen: false, scopedReadLive: false });
     const proven = homeContent({ repoPublic: true, cloudOpen: false, scopedReadLive: true });
     // What the page renders: the state SITE.scopedReadLive selects.
@@ -237,10 +242,10 @@ describe('content modules', () => {
       shown.evidence.rows[2]?.limit,
       shown.developers.otherStacks.text,
     ]) {
-      expect(html).toContain(text);
+      expect(html).toContain(shownText(text));
     }
     // The other state's limit is not on the page.
-    expect(html).not.toContain((SITE.scopedReadLive ? current : proven).customers.access.limit);
+    expect(html).not.toContain(shownText((SITE.scopedReadLive ? current : proven).customers.access.limit));
     // The page shows the state SCOPED_READ_LIVE selects: scoped access once its production proof is confirmed.
     expect(html.includes('Viewer tokens'), 'scoped access shown').toBe(SITE.scopedReadLive);
     // The route renders `customers.access`: the backend state now, the scoped state once proven.
