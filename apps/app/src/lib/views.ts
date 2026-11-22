@@ -68,7 +68,7 @@ export function upgradeRecordView(view: Pick<SavedView, 'name' | 'state'> & { de
   const shape = Object.keys(state).sort().join(',');
   const label = state.labels?.length === 1 ? state.labels[0] : undefined;
   if (shape !== 'labels,lang,q,range' || state.lang !== 'query' || typeof state.range !== 'string') return { state, upgraded: false };
-  if (!label || label.field !== 'target' || view.description != null || hasTopLevelOr(q)) return { state, upgraded: false };
+  if (label?.field !== 'target' || view.description != null || hasTopLevelOr(q)) return { state, upgraded: false };
   if (!recordPageName(view.name, label.label, state.range)) return { state, upgraded: false };
   const [first, second] = fieldTerms(q);
   const simple = (t: typeof first) => t && !t.negated && !t.wildcard && (t.valueKind === 'plain' || t.valueKind === 'quoted') && t.value;
