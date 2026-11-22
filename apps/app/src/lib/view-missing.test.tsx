@@ -92,3 +92,19 @@ it("never lets one project's confirmation release another project's link with th
   h.unmount();
   expect(h.seen.at(-1)).toEqual({ project: 'B', found: true, confirmedMissing: false });
 });
+
+it("keeps this project's confirmation when another project's late answer arrives", async () => {
+  const h = harness({ A: { views: [], delayMs: 150 }, B: { views: [] } });
+  h.client.setQueryData(['views', 'A'], []);
+  h.client.setQueryData(['views', 'B'], []);
+  // A starts its confirmation fetch; the reader moves to B before A answers; B confirms its own.
+  await h.render('A', 5);
+  await h.render('B', 40);
+  expect(h.seen.at(-1)).toEqual({ project: 'B', found: false, confirmedMissing: true });
+  // A's late answer adds its own confirmation and must not undo B's (no hold again, no extra fetch for B).
+  await act(() => settle(200));
+  h.unmount();
+  const afterB = h.seen.slice(h.seen.findIndex((s) => s.project === 'B' && s.confirmedMissing));
+  expect(afterB.every((s) => s.confirmedMissing)).toBe(true);
+  expect(h.fetches.filter((p) => p === 'B')).toEqual(['B']);
+});

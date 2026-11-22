@@ -103,15 +103,18 @@ export function useConfirmedMissingView(
   viewId: string | undefined,
   found: boolean,
 ): boolean {
-  const key = viewId === undefined ? undefined : JSON.stringify([projectId, viewId]);
-  const [confirmed, setConfirmed] = useState<string | undefined>(undefined);
+  // An empty `?view=` is no view, as for the hold itself.
+  const key = viewId ? JSON.stringify([projectId, viewId]) : undefined;
+  // Every confirmation is kept: a late answer for another project or view adds its own, never replaces this one's.
+  const [confirmed, setConfirmed] = useState<ReadonlySet<string>>(() => new Set());
+  const isConfirmed = key !== undefined && confirmed.has(key);
   const missing = key !== undefined && views.isSuccess && !found;
   const { refetch, isFetching } = views;
   useEffect(() => {
-    if (!missing || key === undefined || confirmed === key || isFetching) return;
-    void refetch().finally(() => setConfirmed(key));
-  }, [missing, key, confirmed, isFetching, refetch]);
-  return key !== undefined && confirmed === key && !found;
+    if (!missing || key === undefined || isConfirmed || isFetching) return;
+    void refetch().finally(() => setConfirmed((prev) => new Set(prev).add(key)));
+  }, [missing, key, isConfirmed, isFetching, refetch]);
+  return isConfirmed && !found;
 }
 
 /** Explorer search params that open a saved view (and mark it open). */
