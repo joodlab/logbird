@@ -15,6 +15,14 @@ rateLimitStore.on('error', () => console.error(JSON.stringify({ level: 'error', 
 const script = `local n = redis.call('INCR', KEYS[1])
 if n == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
 return n`;
+// Two buckets, both in the same hash slot (the prefix carries the hash tag): the first (tenant) is always charged; the
+// second (project) only when the first admits. Returns {first, second}, second = -1 when the first refused.
+const viewerScript = `local t = redis.call('INCR', KEYS[1])
+if t == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+if t > tonumber(ARGV[2]) then return {t, -1} end
+local p = redis.call('INCR', KEYS[2])
+if p == 1 then redis.call('PEXPIRE', KEYS[2], ARGV[1]) end
+return {t, p}`;
 /**
  * The client address we can trust: with TRUST_PROXY hops, the X-Forwarded-For entry written by the outermost
  * trusted proxy (see client-address.ts); otherwise the socket peer. Used for rate limits, audit context and the
@@ -60,6 +68,8 @@ export function createPublicRateLimits({
   ingestLimit = env.INGEST_RATE_LIMIT_PER_MINUTE,
   readLimit = env.READ_RATE_LIMIT_PER_MINUTE,
   peerLimit = env.PUBLIC_RATE_LIMIT_PER_MINUTE,
+  mintLimit = env.VIEWER_TOKEN_MINT_RATE_LIMIT_PER_MINUTE,
+  viewerReadLimit = env.VIEWER_READ_RATE_LIMIT_PER_MINUTE,
   now = Date.now,
 }: {
   store?: Pick<Redis, 'eval' | 'get'>;
@@ -67,48 +77,99 @@ export function createPublicRateLimits({
   ingestLimit?: number;
   readLimit?: number;
   peerLimit?: number;
+  mintLimit?: number;
+  viewerReadLimit?: number;
   now?: () => number;
 } = {}) {
   const window = () => Math.floor(now() / 60_000);
-  const retryAfter = () => Math.ceil((60_000 - (now() % 60_000)) / 1000);
-  const peerKey = (c: Context) =>
+  /** Seconds until the end of `minute` (default: the current window), at least 1. */
+  const retryAfter = (minute = window()) => Math.max(1, Math.ceil(((minute + 1) * 60_000 - now()) / 1000));
+  const peerKey = (c: Context, minute = window()) =>
     `${prefix}:rate:public-failures:${createHash('sha256')
       .update(clientAddress(c) || 'unknown')
-      .digest('hex')}:${window()}`;
+      .digest('hex')}:${minute}`;
   const storageError = () => console.error(JSON.stringify({ level: 'error', event: 'rate_limit.storage_error' }));
-  const denied = (c: Context) => {
-    c.header('Retry-After', String(retryAfter()));
+  const denied = (c: Context, minute?: number) => {
+    c.header('Retry-After', String(retryAfter(minute)));
     return c.json({ error: { code: 'rate_limited', message: 'Too many requests. Retry shortly.' } }, 429);
   };
   return {
-    // Only credentials which cannot authenticate can be rejected before lookup.
+    /**
+     * Only credentials which cannot authenticate can be rejected before lookup. Returns the 429 response (computed from
+     * the window it looked up, so a rollover never advertises a fresh minute) or null to continue.
+     */
     async precheck(c: Context) {
+      const minute = window();
       try {
-        return Number(await store.get(peerKey(c))) >= peerLimit;
+        return Number(await store.get(peerKey(c, minute))) >= peerLimit ? denied(c, minute) : null;
       } catch {
         storageError();
-        return false;
+        return null;
       }
     },
     async reject(c: Context) {
       try {
-        if (Number(await store.eval(script, 1, peerKey(c), 120_000)) > peerLimit) return denied(c);
+        const minute = window();
+        if (Number(await store.eval(script, 1, peerKey(c, minute), 120_000)) > peerLimit) return denied(c, minute);
       } catch {
         storageError();
       }
       return c.json({ error: { code: 'invalid_api_key', message: 'A valid API key is required.' } }, 401);
     },
     denied,
+    /** Viewer-token minting per key (#138). */
+    mint: () =>
+      createMiddleware<AppEnv>(async (c, next) => {
+        try {
+          const minute = window();
+          const key = `${prefix}:rate:mint:${c.get('reader').keyId}:${minute}`;
+          const count = Number(await store.eval(script, 1, key, 120_000));
+          c.header('RateLimit-Limit', String(mintLimit));
+          c.header('RateLimit-Remaining', String(Math.max(0, mintLimit - count)));
+          c.header('RateLimit-Reset', String(retryAfter(minute)));
+          if (count > mintLimit) return denied(c, minute);
+        } catch {
+          storageError();
+        }
+        await next();
+      }),
     authenticated: (kind: 'ingest' | 'read') =>
       createMiddleware<AppEnv>(async (c, next) => {
         const limit = kind === 'ingest' ? ingestLimit : readLimit;
+        const minute = window(); // one window for both buckets, even across a minute boundary
+        const projectKey = `${prefix}:rate:project:${c.get('project').id}:${kind}:${minute}`;
+        const reader = kind === 'read' ? c.get('reader') : undefined;
         try {
-          const key = `${prefix}:rate:project:${c.get('project').id}:${kind}:${window()}`;
-          const count = Number(await store.eval(script, 1, key, 120_000));
+          if (reader?.via === 'token') {
+            // #138: a viewer-token read is charged to its minting key + tenant bucket first, and to the project only
+            // when that bucket admits it (one atomic script), so a throttled tenant can't drain other tenants' budget.
+            const tenant = createHash('sha256')
+              .update(reader.scope?.tenantId ?? '')
+              .digest('hex')
+              .slice(0, 32);
+            const [tenantCount, projectCount] = (await store.eval(
+              viewerScript,
+              2,
+              `${prefix}:rate:viewer:${reader.keyId}:${tenant}:${minute}`,
+              projectKey,
+              120_000,
+              viewerReadLimit,
+            )) as [number, number];
+            const tenantRemaining = Math.max(0, viewerReadLimit - Number(tenantCount));
+            const projectRemaining = Number(projectCount) < 0 ? limit : Math.max(0, limit - Number(projectCount));
+            // RateLimit-* report the tighter bucket.
+            const tighter = tenantRemaining <= projectRemaining;
+            c.header('RateLimit-Limit', String(tighter ? viewerReadLimit : limit));
+            c.header('RateLimit-Remaining', String(tighter ? tenantRemaining : projectRemaining));
+            c.header('RateLimit-Reset', String(retryAfter(minute)));
+            if (Number(projectCount) < 0 || Number(projectCount) > limit) return denied(c, minute);
+            return next();
+          }
+          const count = Number(await store.eval(script, 1, projectKey, 120_000));
           c.header('RateLimit-Limit', String(limit));
           c.header('RateLimit-Remaining', String(Math.max(0, limit - count)));
-          c.header('RateLimit-Reset', String(retryAfter()));
-          if (count > limit) return denied(c);
+          c.header('RateLimit-Reset', String(retryAfter(minute)));
+          if (count > limit) return denied(c, minute);
         } catch {
           storageError();
         }

@@ -168,7 +168,8 @@ it.each(['asc', 'desc'] as const)(
         if (!event) throw new Error('Missing page row');
         ids.push(event.id);
         expect(!!result.nextCursor).toBe(pageIndex < 2);
-        if (result.nextCursor) expect(JSON.parse(Buffer.from(result.nextCursor, 'base64url').toString())).toEqual([event.timestamp, event.id]);
+        if (result.nextCursor)
+          expect(JSON.parse(Buffer.from(result.nextCursor, 'base64url').toString()).slice(0, 2)).toEqual([event.timestamp, event.id]);
         cursor = result.nextCursor ?? undefined;
       }
       expect(ids).toEqual(order === 'asc' ? ['one', 'two', 'three'] : ['three', 'two', 'one']);

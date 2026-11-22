@@ -13,13 +13,14 @@ import { useId, useState } from 'react';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keysQuery } from '@/lib/api/queries';
+import { isKeyUsable } from '@/lib/api-keys';
 import { ingestSecretId, readSecretId, stashSecret, useSecret } from '@/lib/one-time-secrets';
 import { useCan } from '@/lib/permissions';
 import { AdminNote } from '../admin-gate';
 import { Timestamp } from '../timestamp';
 import { useInvalidateSetup } from './use-setup';
 
-type Kind = ApiKey['kind'];
+type Kind = Exclude<ApiKey['kind'], 'scoped-read'>;
 
 const COPY: Record<Kind, { defaultName: string; label: string; prefix: string }> = {
   ingest: { defaultName: 'Production backend', label: 'ingest key', prefix: 'lb_ingest_' },
@@ -57,7 +58,7 @@ export function ApiKeyStep({ projectId, kind }: { projectId: string; kind: Kind 
     },
   });
 
-  const active = (list.data ?? []).filter((k) => k.kind === kind && !k.revokedAt);
+  const active = (list.data ?? []).filter((k) => k.kind === kind && isKeyUsable(k));
   const pastedValid = pasted.trim().startsWith(COPY[kind].prefix) && pasted.trim().length > COPY[kind].prefix.length + 8;
 
   if (list.isPending) return <Skeleton className="h-24 w-full" />;
