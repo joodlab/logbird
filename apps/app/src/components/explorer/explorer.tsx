@@ -75,7 +75,16 @@ function isPageOrRow(target: EventTarget | null): boolean {
   return !el || el === document.body || el.getAttribute('role') === 'row';
 }
 
-export function Explorer({
+/**
+ * One explorer instance per project. Live-tail rows, the last successful result (shown while a query is rejected),
+ * the selection and gestures all live inside it, so none of them can outlive a project switch and show or open
+ * project A's events under project B.
+ */
+export function Explorer(props: ExplorerProps) {
+  return <ProjectExplorer key={props.projectId} {...props} />;
+}
+
+function ProjectExplorer({
   projectId,
   state,
   onChange,
