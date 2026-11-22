@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { checkVersions, repositoryVersion } from './check-version-consistency.mjs';
+import { checkVersions, msbuildVersion, repositoryVersion } from './check-version-consistency.mjs';
 import { requireQuality } from './release-preflight.mjs';
 
 test('all manifests, including examples and integrations, must match the stable tag', () => {
@@ -14,6 +14,16 @@ test('all manifests, including examples and integrations, must match the stable 
   assert.throws(() => checkVersions([...manifests, ['packages/sdk/package.json', { version: '0.2.0' }]]), /packages\/sdk/);
   for (const version of ['01.0.0', '0.1.0-rc.1', undefined]) assert.throws(() => checkVersions([['package.json', { version }]]), /X.Y.Z/);
   assert.equal(repositoryVersion(), JSON.parse(readFileSync('package.json', 'utf8')).version);
+});
+
+test('the .NET SDK version in Directory.Build.props must match the release', () => {
+  assert.equal(msbuildVersion('<Project><PropertyGroup><VersionPrefix> 0.1.2 </VersionPrefix></PropertyGroup></Project>'), '0.1.2');
+  assert.equal(msbuildVersion('<Project></Project>'), undefined);
+  assert.equal(msbuildVersion('<VersionPrefix>1.0.0</VersionPrefix><VersionPrefix>2.0.0</VersionPrefix>'), undefined);
+  const root = ['package.json', { version: '0.1.2' }];
+  assert.throws(() => checkVersions([root, ['sdks/dotnet/Directory.Build.props', { version: '0.1.1' }]]), /sdks\/dotnet/);
+  assert.throws(() => checkVersions([root, ['sdks/dotnet/Directory.Build.props', { version: undefined }]]), /sdks\/dotnet/);
+  assert.equal(msbuildVersion(readFileSync('sdks/dotnet/Directory.Build.props', 'utf8')), JSON.parse(readFileSync('package.json', 'utf8')).version);
 });
 
 test('requires the latest exact-head Quality from successful master CI, rejects PRs and lookalikes', () => {

@@ -19,7 +19,7 @@ import { formatNumber } from '@/lib/format';
 import { queryProblem, queryProblemText, reasonTitle } from '@/lib/query-error';
 import { andQuery } from '@/lib/query-language';
 import { translateQueryToSql } from '@/lib/query-translate';
-import { absoluteRange, isValidRange, rangeLabel } from '@/lib/range';
+import { absoluteRange, isValidRange, rangeLabel, resolveRange } from '@/lib/range';
 import { explorerTotal, formatSearchTotal, searchTotal } from '@/lib/search-total';
 import { appendSqlPredicate } from '@/lib/sql-language';
 import { EventSheet } from './event-sheet';
@@ -76,7 +76,16 @@ function isPageOrRow(target: EventTarget | null): boolean {
   return !el || el === document.body || el.getAttribute('role') === 'row';
 }
 
-export function Explorer({
+/**
+ * One explorer instance per project. Live-tail rows, the last successful result (shown while a query is rejected),
+ * the selection and gestures all live inside it, so none of them can outlive a project switch and show or open
+ * project A's events under project B.
+ */
+export function Explorer(props: ExplorerProps) {
+  return <ProjectExplorer key={props.projectId} {...props} />;
+}
+
+function ProjectExplorer({
   projectId,
   state,
   onChange,
@@ -113,13 +122,17 @@ export function Explorer({
   // A rejected query keeps the last good results on screen (dimmed) and explains itself in the bar.
   const problem = queryProblem(events.error, lang) ?? queryProblem(histogram.error, lang);
   const lastGood = useRef<{
+    projectId?: string;
     pages?: SearchResponse[];
     histogram?: HistogramResponse;
     query?: { q: string; lang: QueryLang };
     range?: string;
     resultKey?: string;
   }>({});
-  if (events.data && !events.isError) lastGood.current.pages = events.data.pages;
+  // The fallback belongs to one project: after switching projects, a rejected query must not show the old project's
+  // rows, chart or total.
+  if (lastGood.current.projectId !== projectId) lastGood.current = { projectId };
+  if (events.data && !events.isError && !events.isPlaceholderData) lastGood.current.pages = events.data.pages;
   if (events.isSuccess && !events.isPlaceholderData) {
     lastGood.current.query = { q, lang };
     lastGood.current.range = range;
@@ -129,7 +142,7 @@ export function Explorer({
   // range are committed, so the table starts that set at the top even when it shares rows with the old one (e.g. moving
   // between two entity profiles, where `q` stays empty but `baseQuery` changes).
   const resultKey = lastGood.current.resultKey;
-  if (histogram.data && !histogram.isError) lastGood.current.histogram = histogram.data;
+  if (histogram.data && !histogram.isError && !histogram.isPlaceholderData) lastGood.current.histogram = histogram.data;
   // Nothing valid to save or export while the query is rejected (the export would fail the same way).
   const saveBlocked = problem ? 'Fix the query first — a view must run without errors.' : null;
   const exportBlocked = problem ? 'Fix the query first — the export runs the same query.' : null;
@@ -148,7 +161,7 @@ export function Explorer({
   useEffect(() => {
     setLiveRows([]);
     sinceRef.current = null;
-  }, [effectiveQ, lang, range, live]);
+  }, [projectId, effectiveQ, lang, range, live]);
 
   // The tail follows *arrival* (`receivedAt`), so late or back-dated events still stream in.
   const firstPage = problem ? undefined : events.data?.pages[0]?.data;
@@ -471,10 +484,25 @@ export function Explorer({
         </div>
         {showChart ? (
           <EventHistogram
+            // A new search (or Back to a cached one) starts with no drag in progress.
+            key={explorerResultKey(projectId, range, effectiveQ, lang)}
             data={histogramData}
             height={embedded ? 96 : 112}
             loading={histogram.isFetching && !histogram.isPending}
-            onZoom={(from, to) => onChange({ range: absoluteRange(from, to), live: undefined })}
+            // Clamp to the search's own end (which can lie ahead of now), so a bar's events stay in the zoomed range.
+            onZoom={
+              // Bars from the previous range linger while the new one loads: no zooming on them.
+              histogram.isPlaceholderData
+                ? undefined
+                : (from, to) => {
+                    // Keep the selection inside the search that produced the visible bars (its end can lie ahead of
+                    // now, and a relative range has moved on since).
+                    const shown = histogram.data ?? resolveRange(range);
+                    const start = Math.max(from, shown.fromMs);
+                    const end = Math.min(to, shown.toMs);
+                    if (start < end) onChange({ range: absoluteRange(start, end), live: undefined });
+                  }
+            }
             stale={Boolean(problem)}
           />
         ) : null}
@@ -546,6 +574,7 @@ export function Explorer({
         }}
         onPrev={selectedIndex > 0 ? () => move(-1) : undefined}
         missingError={deepLinked.isError ? deepLinked.error : undefined}
+        missingId={ev}
         open={Boolean(ev)}
         projectId={projectId}
       />
