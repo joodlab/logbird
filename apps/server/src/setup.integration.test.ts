@@ -178,12 +178,13 @@ it('real services: setup, keys, raw envelope coverage, samples, membership and i
     await api(`${base}/sample-data`, 'DELETE');
     state = await status();
     expect(state.ingest.sampleEvents).toBe(0);
-    expect(state.ingest.firstEvent?.action).toBe('x');
+    expect(state.ingest.firstEvent?.action).toBe('sample.record.updated');
     expect((await setupEventFacts(clickhouse, neighbor.id)).sampleEvents).toBe(1);
     const fields = s.fieldsResponseSchema.parse(await (await api(`${base}/fields`)).json());
     expect(fields.data.some((f) => f.key === 'attr.metadata.channel')).toBe(false);
     const entities = s.entityListResponseSchema.parse(await (await api(`${base}/entities?kind=actor`)).json());
-    expect(entities.data.map((e) => e.id)).toEqual(['fixture-user']);
+    // The console test event's actor (the signed-in tester) is a real actor too; sample data adds none.
+    expect(entities.data.map((e) => e.id).sort()).toEqual([state.ingest.firstEvent?.actor?.id, 'fixture-user'].sort());
     // A separate project and backdated occurrence prove arrival-time semantics and isolation.
     const other = await prisma.project.create({ data: { organizationId: orgId, name: 'Other fixture', slug: randomUUID() } });
     projectIds.push(other.id);
