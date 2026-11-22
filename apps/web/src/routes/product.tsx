@@ -6,6 +6,7 @@ import { FeatureRow, MiniFeature } from '../components/marketing/feature-row';
 import { ClipFrame, ScreenshotFrame } from '../components/marketing/frame';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
+import { roadmap } from '../content/roadmap';
 import { ACCESS_CTA } from '../lib/cloud';
 import { pageHead } from '../lib/seo';
 
@@ -333,19 +334,9 @@ function ProductPage() {
       </FeatureRow>
 
       <Section labelledBy="roadmap-title">
-        <SectionHeader
-          eyebrow="On the roadmap"
-          id="roadmap-title"
-          lead="These are candidates from our public roadmap, not features or commitments. Order and timing can change."
-          title="What's on our roadmap."
-        />
+        <SectionHeader eyebrow={roadmap.eyebrow} id="roadmap-title" lead={roadmap.lead} title={roadmap.title} />
         <ul className="mt-10 grid gap-x-10 gap-y-3 md:grid-cols-2">
-          {[
-            'Project-level redaction controls, behind the redaction your client already does.',
-            'Alerts on chosen actions.',
-            'Signed webhooks and archive exports.',
-            'Single sign-on for the console.',
-          ].map((item) => (
+          {roadmap.items.map((item) => (
             <li className="flex gap-3 border-b py-3 text-sm leading-relaxed" key={item}>
               <span aria-hidden="true" className="mt-1.5 size-2 shrink-0 rounded-full border border-dashed border-muted-foreground" />
               {item}

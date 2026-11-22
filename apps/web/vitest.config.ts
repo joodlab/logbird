@@ -22,6 +22,7 @@ export const TEST_PUBLIC_ENV = {
   WEB_EMAIL_PROVIDER: '',
   WEB_MAILBOX_PROVIDER: '',
   WEB_FORM_RETENTION_MONTHS: '',
+  WEB_CHECKOUT_URL: '',
 };
 
 export default defineConfig({
