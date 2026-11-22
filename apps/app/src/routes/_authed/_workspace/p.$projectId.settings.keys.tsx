@@ -388,7 +388,9 @@ function RollKeyDialog({
       const expiresAt = expiry === 'keep' ? undefined : expiryFor(expiry);
       const result = await api.keys.roll(projectId, key.id, expiresAt ? { expiresAt } : {});
       // Whether the old key still worked, as the dialog knew it (including a server-confirmed expiry the browser's clock missed).
-      return { ...result, expected: expectedFromRoll(key, expiresAt), oldUsable };
+      // Still usable when the answer arrives (it can expire while the roll is in flight), and as the dialog knew it at the
+      // click (including a server-confirmed expiry the browser's clock missed).
+      return { ...result, expected: expectedFromRoll(key, expiresAt), oldUsable: oldUsable && isKeyUsable(key) };
     },
     onSuccess: (issued) => {
       queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'keys'] });
@@ -451,7 +453,8 @@ function RollKeyDialog({
               options={options}
               value={value}
             />
-            {roll.isError ? <p className="text-destructive text-sm">{errorMessage(roll.error)}</p> : null}
+            {/* Only this key's own roll: a roll for another key that was cancelled while in flight reports nothing here. */}
+            {roll.isError && roll.variables?.key.id === apiKey.id ? <p className="text-destructive text-sm">{errorMessage(roll.error)}</p> : null}
             <DialogFooter>
               <Button onClick={close} type="button" variant="outline">
                 Cancel
@@ -468,7 +471,7 @@ function RollKeyDialog({
                   if (value) roll.mutate({ key: apiKey, expiry: value, oldUsable: !expired && isKeyUsable(apiKey) });
                 }}
               >
-                {roll.isPending ? <Loader2Icon className="animate-spin" /> : null}
+                {roll.isPending && roll.variables?.key.id === apiKey.id ? <Loader2Icon className="animate-spin" /> : null}
                 Roll key
               </Button>
             </DialogFooter>
