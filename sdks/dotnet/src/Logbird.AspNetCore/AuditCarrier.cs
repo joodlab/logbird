@@ -9,6 +9,15 @@ namespace Logbird.AspNetCore;
 /// </summary>
 public sealed record AuditCarrier
 {
+    /// <summary>Lists no values (it carries user and tenant ids), so logging this object cannot leak them.</summary>
+#pragma warning disable CA1822 // The compiler-generated record ToString calls this instance member by name.
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        _ = builder;
+        return false;
+    }
+#pragma warning restore CA1822
+
     /// <summary>The operation id that groups the request and everything it started.</summary>
     public string? OperationId { get; init; }
 
