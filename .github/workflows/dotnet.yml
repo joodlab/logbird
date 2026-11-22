@@ -1,81 +1,79 @@
 name: .NET SDK
 
+# Scratch branch only (never merged): repeats the .NET Framework 4.8 suite to prove the delivered-count fix is stable,
+# with a control run of master's unfixed core files to show the failure reproduces there.
 on:
   pull_request:
     paths:
-      - 'sdks/dotnet/**'
-      - 'packages/sdk/src/**'
-      - '.github/workflows/dotnet.yml'
-  push:
-    branches: [master]
-    paths:
-      - 'sdks/dotnet/**'
-      - 'packages/sdk/src/**'
       - '.github/workflows/dotnet.yml'
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 env:
   DOTNET_NOLOGO: '1'
   DOTNET_CLI_TELEMETRY_OPTOUT: '1'
 
 jobs:
-  dotnet:
-    name: .NET build, test, pack
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: sdks/dotnet
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: |
-            8.0.x
-            10.0.x
-      - run: dotnet build Logbird.slnx -c Release
-      # Unit tests on .NET 8 and .NET 10; the live-server tests skip without LOGBIRD_IT_* variables.
-      - run: dotnet test Logbird.slnx -c Release --no-build
-      - run: dotnet pack src/Logbird/Logbird.csproj -c Release --no-build -o ${{ runner.temp }}/nupkg
-      - run: dotnet pack src/Logbird.AspNetCore/Logbird.AspNetCore.csproj -c Release --no-build -o ${{ runner.temp }}/nupkg
-      - uses: actions/upload-artifact@v7
-        with:
-          name: nuget-packages
-          path: ${{ runner.temp }}/nupkg
-          retention-days: 7
-
-  dotnet-framework:
-    name: .NET Framework 4.8 tests
+  net48-fixed:
+    name: net48 with the fix (runner ${{ matrix.shard }}, 10 runs)
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     defaults:
       run:
         working-directory: sdks/dotnet
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
-      # Runs the netstandard2.0 build on .NET Framework.
-      - run: dotnet test tests/Logbird.Tests -c Release -f net48
+      - run: dotnet build tests/Logbird.Tests -c Release -f net48
+      - name: Run the net48 suite 10 times
+        run: |
+          fails=0
+          for i in $(seq 1 10); do
+            if ! dotnet test tests/Logbird.Tests -c Release -f net48 --no-build > run.log 2>&1; then
+              fails=$((fails+1)); grep -E "  Failed |Expected|Actual" run.log | head -6
+            fi
+            grep -E "Passed!|Failed!" run.log
+          done
+          echo "failures with the fix: $fails/10"
+          test "$fails" -eq 0
 
-  wire-format:
-    name: Wire format matches the TypeScript SDK
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  net48-control:
+    name: net48 without the fix, control (runner ${{ matrix.shard }}, 10 runs)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    defaults:
+      run:
+        working-directory: sdks/dotnet
+        shell: bash
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
         with:
-          node-version: '22.18.0'
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile --filter . --filter @logbird/sdk
-      # Fails when the TypeScript SDK's wire JSON drifts from the golden file the .NET tests compare against.
-      - run: pnpm exec tsx sdks/dotnet/tests/cross-sdk/typescript-envelope.ts --check
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore master's unfixed core files
+        run: git checkout origin/master -- src/Logbird/LogbirdClient.cs src/Logbird/Internal/BatchSender.cs && git status --short
+      - run: dotnet build tests/Logbird.Tests -c Release -f net48
+      - name: Run the net48 suite 10 times (reports, never fails)
+        run: |
+          fails=0
+          for i in $(seq 1 10); do
+            if ! dotnet test tests/Logbird.Tests -c Release -f net48 --no-build > run.log 2>&1; then
+              fails=$((fails+1)); grep -E "  Failed |Expected|Actual" run.log | head -6
+            fi
+            grep -E "Passed!|Failed!" run.log
+          done
+          echo "failures without the fix: $fails/10"
