@@ -42,6 +42,8 @@ it('explains without a button when the pair has no single unambiguous record: fo
     'target:12 target.type:site OR outcome:failure',
     'target:12 OR target.type:site',
     'target:1* target.type:site',
+    'target:/^12$/ target.type:site',
+    'target:12 target.type:/^si/',
   ])
     expect(loosePairNotice(q, 'query'), q).toEqual({ exact: null });
 });
@@ -68,6 +70,9 @@ it('says nothing when there is no loose pair', () => {
     // Value groups (including presence inside one) are not single values.
     'target:(*) target.type:(*)',
     'target:(12 OR 13) target.type:site',
+    // Any other target or target-type term (excluded, grouped) could narrow or contradict the pair.
+    'target:12 target.type:site NOT (target:12 OR target.type:site)',
+    'target:12 target.type:site -target.type:page',
   ])
     expect(loosePairNotice(q, 'query'), q).toBeNull();
   expect(loosePairNotice("has(target_ids, '12')", 'sql')).toBeNull();

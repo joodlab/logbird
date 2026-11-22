@@ -54,7 +54,9 @@ export function loosePairNotice(q: string, lang: 'query' | 'sql' | undefined): {
     !t.negated &&
     (t.valueKind === 'plain' || t.valueKind === 'quoted' || t.valueKind === 'regex') &&
     !(t.wildcard && t.value === '*');
-  if (!targets.some(selects) || !types.some(selects)) return null;
+  // Every target and target-type term must be such a term: any other one (excluded, grouped, a presence check) could
+  // narrow or contradict the pair, so the note would claim too much.
+  if (!targets.length || !types.length || !targets.every(selects) || !types.every(selects)) return null;
   const [id, type] = [targets[0], types[0]];
   // An empty quoted id or type (`target:""`) is a real value too.
   const simple = (t: (typeof terms)[number] | undefined) =>
