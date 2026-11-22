@@ -29,6 +29,7 @@ import {
   VenetianMaskIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { api } from '@/lib/api/client';
 import { entitySearchQuery, projectsQuery, viewsQuery } from '@/lib/api/queries';
 import { ENTITY_SECTIONS, entityMatchRank, entityQuery, sectionForKind } from '@/lib/entities';
@@ -79,25 +80,36 @@ export function CommandPalette({ open, onOpenChange, projectId }: { open: boolea
   const others = (found ?? []).filter((e) => !exact.includes(e));
   // "Search events for": an id searches its own events, never free text (which matches names, not ids). Enter can land
   // before the lookup for this exact text (debounce, a slow kind): then finish the lookup first and decide.
-  // Each selection or close bumps the token: a lookup that lands after the palette closed or moved on does nothing.
+  // Each selection, keystroke, close or project change bumps the token: a lookup that lands after the palette closed or
+  // moved on does nothing.
   const selection = useRef(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: bump on every change of either, whatever the value
   useEffect(() => {
-    if (!open) selection.current += 1;
-  }, [open]);
+    selection.current += 1;
+  }, [open, projectId]);
   const searchEvents = async () => {
     if (!projectId || !trimmed) return;
     const pid = projectId;
     const text = trimmed;
     const token = ++selection.current;
     // The row shows the id query once the exact id is known: submit exactly that. Otherwise finish the lookup first.
+    const run = (q: string) => go(() => navigate({ to: '/p/$projectId/events', params: { projectId: pid }, search: { q } }));
     let id = firstExact;
     if (!id) {
-      const answer = await queryClient.fetchQuery(entitySearchQuery(pid, text)).catch(() => undefined);
+      // Free text is the fallback only when a complete lookup found no exact id. A failed or partial lookup cannot
+      // tell, so say so and let the reader choose.
+      const answer = await queryClient.fetchQuery(entitySearchQuery(pid, text)).catch(() => null);
       if (token !== selection.current) return;
       id = answer?.entities.find((e) => entityMatchRank(e, text) === 0);
+      if (!id && (!answer || answer.partial)) {
+        toast.error('Could not check whether this is an id', {
+          description: 'Some entities could not be searched. Try again, or search it as text.',
+          action: { label: 'Search as text', onClick: () => run(text) },
+        });
+        return;
+      }
     }
-    const q = id ? entityQuery(id.kind, id.id, id.type) : text;
-    go(() => navigate({ to: '/p/$projectId/events', params: { projectId: pid }, search: { q } }));
+    run(id ? entityQuery(id.kind, id.id, id.type) : text);
   };
 
   const go = (fn: () => void) => {

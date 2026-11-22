@@ -304,6 +304,26 @@ it.runIf(process.env.CLICKHOUSE_URL)(
       expect(await ids('tenant', 'bi')).toEqual(expect.arrayContaining(['biz_2']));
       expect(await ids('tenant', 'Ma', 1)).toEqual(['biz_7']);
       expect(await ids('actor', 'rs')).toEqual([]);
+      // A renamed entity keeps its whole history: 99 events as "North", then one as "Marsa Main", in separate inserts
+      // (separate rollup parts). Wherever it is found, its count, first sighting and paging stay whole.
+      await insertEvents(ch, event(99, { actor: { id: 'act_renamed', name: 'North' } }));
+      await insertEvents(ch, event(1, { actor: { id: 'act_renamed', name: 'Marsa Main' } }));
+      await insertEvents(ch, event(10, { actor: { id: 'act_annex', name: 'Marsa Annex' } }));
+      for (const q of ['Ma', 'Marsa', 'act_renamed']) {
+        const found = entityListResponseSchema.parse(await listEntities(ch, p, { kind: 'actor', q, limit: 25 })).data;
+        const renamed = found.find((e) => e.id === 'act_renamed');
+        if (renamed) expect(renamed.events, q).toBe(100);
+        // Paging one at a time returns the same entities as one page: nothing skipped, nothing repeated.
+        const paged: string[] = [];
+        let next: string | undefined;
+        do {
+          const page = entityListResponseSchema.parse(await listEntities(ch, p, { kind: 'actor', q, limit: 1, cursor: next }));
+          paged.push(...page.data.map((e) => e.id));
+          next = page.nextCursor ?? undefined;
+        } while (next);
+        expect(paged, q).toEqual(found.map((e) => e.id));
+      }
+      expect((await listEntities(ch, p, { kind: 'actor', q: 'act_renamed', limit: 1 })).data[0]?.events).toBe(100);
       // Without a search, the directory order is unchanged (most active first).
       expect((await listEntities(ch, p, { kind: 'tenant', limit: 2 })).data.map((e) => e.id)).toEqual(['biz_2', 'biz_7']);
       // A search pages by rank, then activity, without gaps or repeats; its cursor only fits a search.
