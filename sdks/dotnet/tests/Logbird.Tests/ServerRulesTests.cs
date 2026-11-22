@@ -17,18 +17,21 @@ namespace Logbird.Tests;
 /// </summary>
 public class ServerRulesTests
 {
-    private static LogbirdClient Client(FakeServer server, ConcurrentQueue<DroppedEvent>? drops = null) => new(
-        new LogbirdOptions
+    private static LogbirdClient Client(FakeServer server, ConcurrentQueue<DroppedEvent>? drops = null, Action<LogbirdOptions>? configure = null)
+    {
+        var options = new LogbirdOptions
         {
             Endpoint = new Uri("https://audit.example.invalid"),
             IngestKey = "lb_ingest_fictional",
             FlushInterval = TimeSpan.FromHours(1),
             OnDrop = drops is null ? null : drops.Enqueue,
-        },
-        new HttpClient(server));
+        };
+        configure?.Invoke(options);
+        return new LogbirdClient(options, new HttpClient(server));
+    }
 
     [Fact]
-    public async Task OccurredAt_is_always_an_ISO_8601_UTC_string_with_milliseconds_never_a_number()
+    public async Task OccurredAt_is_by_default_an_ISO_8601_UTC_string_with_milliseconds()
     {
         var server = new FakeServer();
         await using (var client = Client(server))
@@ -54,25 +57,73 @@ public class ServerRulesTests
     }
 
     [Fact]
-    public async Task Nothing_sent_comes_near_the_servers_1000_level_depth_rule()
+    public async Task OccurredAt_is_never_sent_as_a_number_even_when_a_hook_or_redaction_changes_it()
     {
+        var server = new FakeServer();
+        await using (var client = Client(server, configure: o =>
+        {
+            // A hook may clear the timestamp (the server then stamps the event), and a host may redact the field.
+            o.BeforeSend = e =>
+            {
+                if (e.Action == "hook.cleared")
+                {
+                    e.OccurredAt = null;
+                }
+
+                return e;
+            };
+            o.Redaction.AddKeys("occurredAt");
+        }))
+        {
+            client.Track(new AuditEvent("hook.cleared") { OccurredAt = DateTimeOffset.UtcNow });
+            client.Track(new AuditEvent("redacted") { OccurredAt = DateTimeOffset.UtcNow });
+            Assert.True(await client.FlushAsync());
+        }
+
+        var events = server.Requests.SelectMany(r => r.Events).ToArray();
+        Assert.Equal(2, events.Length);
+        Assert.False(events[0].TryGetProperty("occurredAt", out _));
+        foreach (var e in events)
+        {
+            Assert.False(e.TryGetProperty("occurredAt", out var at) && at.ValueKind == JsonValueKind.Number);
+        }
+
+        Assert.Equal(JsonValueKind.String, events[1].GetProperty("occurredAt").ValueKind);
+    }
+
+    [Fact]
+    public void The_client_depth_limit_is_far_below_the_servers_1000_levels()
+        => Assert.InRange(Logbird.Internal.JsonDepth.Max, 8, 64);
+
+    [Fact]
+    public async Task The_depth_boundary_is_exact_for_metadata_and_change_values_and_the_deepest_body_stays_shallow()
+    {
+        // Metadata is level 1, its "tree" member level 2, and Chain(n)'s leaf value level n + 3; a change value is itself
+        // level 1, so Chain(n)'s leaf is level n + 2. A node deeper than JsonDepth.Max is refused.
+        var max = Logbird.Internal.JsonDepth.Max;
+        var metadataOk = max - 3;
+        var changeOk = max - 2;
+        var big = 9_007_199_254_740_993L;
         var server = new FakeServer();
         var drops = new ConcurrentQueue<DroppedEvent>();
         await using (var client = Client(server, drops))
         {
-            client.Track(new AuditEvent("deep.allowed") { Metadata = { ["tree"] = Chain(40), ["big"] = JsonValue.Create(9_007_199_254_740_993L) } });
-            client.Track(new AuditEvent("deep.refused") { Metadata = { ["tree"] = Chain(1_200), ["big"] = JsonValue.Create(9_007_199_254_740_993L) } });
+            client.Track(new AuditEvent("metadata.last_accepted") { Metadata = { ["tree"] = Chain(metadataOk), ["big"] = JsonValue.Create(big) } });
+            client.Track(new AuditEvent("metadata.first_refused") { Metadata = { ["tree"] = Chain(metadataOk + 1), ["big"] = JsonValue.Create(big) } });
+            client.Track(new AuditEvent("change.last_accepted").Change("tree", Chain(changeOk), JsonValue.Create(big)));
+            client.Track(new AuditEvent("change.first_refused").Change("tree", Chain(changeOk + 1), JsonValue.Create(big)));
             Assert.True(await client.FlushAsync());
         }
 
-        // The client's own limit (48 levels inside metadata and change values) refuses the deep event before sending.
-        var sent = Assert.Single(server.Requests.SelectMany(r => r.Events));
-        Assert.Equal("deep.allowed", sent.GetProperty("action").GetString());
-        Assert.Contains(drops, d => d.Action == "deep.refused" && d.Reason == DropReason.Invalid);
+        var sent = server.Requests.SelectMany(r => r.Events).Select(e => e.GetProperty("action").GetString()!).OrderBy(a => a, StringComparer.Ordinal).ToArray();
+        Assert.Equal(["change.last_accepted", "metadata.last_accepted"], sent);
+        Assert.Equal(
+            ["change.first_refused", "metadata.first_refused"],
+            drops.Where(d => d.Reason == DropReason.Invalid).Select(d => d.Action).OrderBy(a => a, StringComparer.Ordinal).ToArray());
 
-        // The deepest request body stays far below 1,000 levels.
+        // The accepted boundary events on the wire: the envelope adds a few levels, far below the server's 1,000.
         var deepest = server.Requests.Max(r => Depth(r.Body));
-        Assert.True(deepest < 60, "deepest body nesting: " + deepest);
+        Assert.InRange(deepest, max, max + 8);
     }
 
     private static JsonNode Chain(int depth)

@@ -39,13 +39,16 @@ dotnet user-secrets set Logbird:IngestKey <your ingest key>   # development
 export Logbird__IngestKey=<your ingest key>                     # production
 ```
 
-`Endpoint` is your Logbird origin (without `/v1/events`). It must be `https`, except `localhost` during development.
+`Endpoint` is your Logbird origin (without `/v1/events`). It must use `https`; plain `http` is accepted only for a
+loopback address such as `localhost` or `127.0.0.1`, or for any host if you set `AllowInsecureHttp = true` (only for a
+network you trust).
 
 ## 3. Record your first event
 
 Register Logbird and its middleware in `Program.cs`:
 
 ```csharp
+using Logbird;
 using Logbird.AspNetCore;
 
 builder.Services.AddLogbird(builder.Configuration.GetSection("Logbird"));
@@ -58,6 +61,9 @@ app.UseLogbird();
 Then inject `IAuditLog` wherever a change is committed. In a controller:
 
 ```csharp
+using Logbird;
+using Logbird.AspNetCore;
+
 [Authorize]
 public class InvoicesController(InvoiceService invoices, IAuditLog audit) : ControllerBase
 {
@@ -99,14 +105,17 @@ You did not pass the user or the tenant. `IAuditLog` fills every field the event
 - **Executor**: `api:<your application name>` (set `ServiceName` to choose the name).
 - **Context**: operation, request and trace ids, client IP and user agent, from the request.
 
-Your claims are different? Change the claim types or supply your own resolvers:
+Your claims are different? Change the claim types or supply your own resolvers. These options go into your one
+`AddLogbird` call (it is registered once; a second call changes nothing):
 
 ```csharp
 builder.Services.AddLogbird(builder.Configuration.GetSection("Logbird"), configureRequests: r =>
 {
     r.ServiceName = "billing-api";
     r.ActorIdClaimTypes.Insert(0, "uid");
-    r.ResolveTenant = http => http.Request.RouteValues["tenant"] is string t ? new AuditTenant(t) : null;
+
+    // Read the tenant your own authorization already checked, never one the caller chose (such as a raw route value).
+    r.ResolveTenant = http => http.Items["AuthorizedTenantId"] is string t ? new AuditTenant(t) : null;
 });
 ```
 
@@ -142,27 +151,33 @@ Audit logging never takes your application down with it:
 
 - **`Record` never throws and never waits for the network.** It queues the event in memory and returns. A background
   loop sends batches every second.
-- **Failures are retried** with backoff (network errors, 429, 5xx), resending identical bytes with the same event ids,
-  so the server never stores an event twice.
+- **Failures are retried** with backoff (network errors, 429, 5xx). Each retried event keeps its exact bytes and id, so
+  the server never stores an event twice.
 - **The queue is bounded** (`MaxQueueSize`, 10,000 events by default). If Logbird stays unreachable long enough to fill
   it, the oldest events are dropped and each drop is reported.
-- **Every event that is not stored is reported exactly once**, through `OnDrop` with a reason (`QueueFull`, `HttpError`,
-  `Rejected`, `Shutdown`, …), and counted on the `Logbird` meter (`logbird.events.dropped`).
+- **Every event Logbird gives up on is counted**, once, with a reason (`QueueFull`, `HttpError`, `Rejected`, `Shutdown`,
+  …): rejections by the server on the `logbird.events.rejected` counter, everything else on `logbird.events.dropped`.
+  `OnDrop` is told about each one on a background thread; if your callback falls far behind (more than `MaxQueueSize`
+  notifications), further notifications are skipped and counted on `logbird.notifications.lost`, so keep it fast.
+- **Some of those events are unconfirmed rather than lost**: when a request times out or shutdown ends while a batch
+  is in flight, the server may already have stored it. Treat `HttpError` and `Shutdown` drops as "not confirmed".
 - **On shutdown** the host sends what is queued, within `ShutdownTimeout` (10 seconds) and the host's own shutdown
   budget.
 
-Wire the reports into your logs or alerting:
+Wire the reports into your logs or alerting, in the same `AddLogbird` call as the request options above:
 
 ```csharp
-builder.Services.AddLogbird(builder.Configuration.GetSection("Logbird"), o =>
-{
-    o.OnDrop = dropped => Console.Error.WriteLine($"audit event {dropped.Id} ({dropped.Action}) not stored: {dropped.Reason}");
-});
+builder.Services.AddLogbird(
+    builder.Configuration.GetSection("Logbird"),
+    configure: o => o.OnDrop = dropped =>
+        Console.Error.WriteLine($"audit event {dropped.Id} ({dropped.Action}) not confirmed: {dropped.Reason}"),
+    configureRequests: r => r.ServiceName = "billing-api");
 ```
 
 The queue lives in memory, so a crash loses what is queued. For events that must survive a crash, write them to your
-own database in the same transaction as the change (an outbox) and send them from there with their ids; a resend is
-then always an exact retry.
+own database in the same transaction as the change (an outbox), with their id, their `OccurredAt` and their content,
+and send them from there exactly as stored on every attempt. A resend is then always an exact retry; an event rebuilt
+with a new timestamp would conflict with the copy the server already has.
 
 ## 6. Check that it worked
 
@@ -171,6 +186,8 @@ then always an exact retry.
 - **From code**, read the trail back with a read key (server side only):
 
   ```csharp
+  using Logbird;
+
   using var reader = new LogbirdReadClient(new LogbirdReadOptions
   {
       Endpoint = new Uri("https://audit.example.com"),
@@ -189,29 +206,35 @@ against your Logbird and follow its README.
 ## Without ASP.NET Core
 
 For a console app, a worker without the generic host, or .NET Framework, create one client for the process and
-dispose it on shutdown:
+dispose it on shutdown. Disposing sends what is queued, within `ShutdownTimeout`:
 
 ```csharp
-await using var logbird = new LogbirdClient(new LogbirdOptions
+using System;
+using Logbird;
+
+using (var logbird = new LogbirdClient(new LogbirdOptions
 {
     Endpoint = new Uri("https://audit.example.com"),
     IngestKey = Environment.GetEnvironmentVariable("LOGBIRD_INGEST_KEY"),
-});
-
-logbird.Track(new AuditEvent("invoice.status_changed")
+}))
 {
-    Actor = AuditActor.User("user_42"),
-    Tenant = new AuditTenant("acct_7"),
-}.Target("invoice", "inv_1001").Change("status", "draft", "sent"));
+    logbird.Track(new AuditEvent("invoice.status_changed")
+    {
+        Actor = AuditActor.User("user_42"),
+        Tenant = new AuditTenant("acct_7"),
+    }.Target("invoice", "inv_1001").Change("status", "draft", "sent"));
+}
 ```
 
-Without a generic host, call `logbird.Flush(TimeSpan.FromSeconds(5))` before the process exits.
+This form compiles on every C# version; on .NET 8 you can write `await using var logbird = ...` instead. To send what
+is queued without disposing, call `logbird.Flush(TimeSpan.FromSeconds(5))`.
 
 ## Going further
 
-- [`Logbird` package README](../sdks/dotnet/README.md): every option, the exact failure contract, redaction (secrets are
-  removed before sending; identifiers are never changed), reading the trail, verifying webhooks, and the guarantees about
-  the wire format.
+- [`Logbird` package README](../sdks/dotnet/README.md): every option, the exact failure contract, redaction (values under
+  keys and change fields that match the secret pattern, such as `password` or `token`, are replaced before sending;
+  free text such as `Description` is not scanned, so never put secrets there; identifiers are never changed), reading
+  the trail, verifying webhooks, and the guarantees about the wire format.
 - [`Logbird.AspNetCore` README](../sdks/dotnet/src/Logbird.AspNetCore/README.md): request context, fill rules, jobs,
   shutdown ordering.
 - [Integrating an existing backend](integrating-a-backend.md): what to record and how to model events, whatever the

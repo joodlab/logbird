@@ -23,7 +23,11 @@ dotnet user-secrets set Logbird:Endpoint https://audit.example.com
 dotnet run
 ```
 
-The API listens on `http://127.0.0.1:4740`. In another terminal:
+`dotnet run` uses the `Development` launch profile in `Properties/launchSettings.json`, which is what makes ASP.NET Core
+load user secrets. If you start the app another way (for example `dotnet bin/.../Logbird.Example.AspNetCore.dll`), set
+`ASPNETCORE_ENVIRONMENT=Development` or pass the key as the `Logbird__IngestKey` environment variable.
+
+The API listens on `http://127.0.0.1:4740`. In another terminal (`cookies.txt` is git-ignored):
 
 ```sh
 B=http://127.0.0.1:4740
@@ -34,11 +38,13 @@ curl -s -b cookies.txt -X POST $B/invoices/inv_1001/send
 curl -s -b cookies.txt -X PUT $B/invoices/inv_2001/status -H 'content-type: application/json' -d '{"status":"void"}'   # another tenant's invoice: 404
 ```
 
-Each call that records an event returns its id.
+Each successful call returns the id of the event it recorded (the failed sign-in records one too, but returns an
+empty `401`).
 
 ## Check the trail
 
-Open the project in the Logbird console. You should see, newest last:
+Open the project in the Logbird console. The Explorer lists the newest first; in the order they happened, you should
+see:
 
 - `user.sign_in_failed` (outcome failure, no actor)
 - `user.signed_in` by `user_ana`, tenant `acct_acme`
@@ -58,7 +64,7 @@ curl -s -H "Authorization: Bearer <read key>" "http://127.0.0.1:4601/v1/events?l
   once, after the change succeeds.
 - `Invoices.cs`: the worker turns the carrier from the job payload back into an `IAuditLog` with
   `IAuditLogFactory.ForJob`.
-- In your project, replace the `ProjectReference` in the `.csproj` with `<PackageReference Include="Logbird.AspNetCore" />`
-  once the package is published.
+- In your project, reference the package instead of the source once it is published: `dotnet add package
+  Logbird.AspNetCore` (or `<PackageReference Include="Logbird.AspNetCore" Version="0.1.3" />`).
 
 The full guide is [docs/sdk-dotnet.md](../../docs/sdk-dotnet.md).

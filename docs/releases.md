@@ -209,19 +209,28 @@ After the GitHub Release exists, the `nuget` job can publish `Logbird` and
 maintainers turn it on after the pre-publication gate; a release tag alone never
 publishes a package:
 
-- The job runs only when the repository variable `NUGET_PUBLISH_ENABLED` is `true`
-  (Settings, Secrets and variables, Actions, Variables).
-- It publishes only when the `NUGET_API_KEY` secret also exists. Without it, the job
-  ends with a notice and publishes nothing.
-- It checks that the package version equals the release version, builds, runs the
-  unit tests, packs, and pushes `Logbird` before `Logbird.AspNetCore` with their
-  symbol packages. A rerun skips versions already on nuget.org; a published version
-  can never be replaced.
+- It publishes only when the repository variable `NUGET_PUBLISH_ENABLED` is exactly
+  `true` (lowercase; Settings, Secrets and variables, Actions, Variables) and the
+  `NUGET_API_KEY` secret exists. Otherwise it ends with a notice and publishes nothing.
+- It builds, runs the unit tests, packs both packages, and checks that each packed
+  manifest carries the release version.
+- It pushes `Logbird` first, then waits (up to an hour) until nuget.org serves that
+  version, which happens after nuget.org's validation, and only then pushes
+  `Logbird.AspNetCore`, which depends on it. If `Logbird` is not available in time,
+  the job fails without pushing `Logbird.AspNetCore`; rerun it later.
+- Packages and symbol packages are pushed separately and each push skips a version
+  already on nuget.org, so a rerun completes whatever an earlier run left out. A
+  published version can never be replaced.
 
-Before the first publication, an owner reserves the `Logbird.*` ID prefix on
-nuget.org for the publishing account, creates an API key scoped to push
-`Logbird.*` packages only, stores it as `NUGET_API_KEY`, and sets
-`NUGET_PUBLISH_ENABLED=true`. Remove the variable to stop publishing.
+Before the first publication, an owner:
+
+1. Asks nuget.org to reserve the `Logbird` ID prefix for the publishing account, so
+   it covers both `Logbird` and `Logbird.AspNetCore` (and any later `Logbird.*` package).
+2. Creates an API key with the push scope and the glob pattern `Logbird*`. A pattern
+   of `Logbird.*` would not match the `Logbird` package itself.
+3. Stores the key as the `NUGET_API_KEY` secret and sets `NUGET_PUBLISH_ENABLED=true`.
+
+Remove the variable to stop publishing.
 
 ## First publication: make GHCR packages public
 

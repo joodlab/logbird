@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
@@ -81,11 +82,12 @@ public class IngestRoundTripTests(ITestOutputHelper output)
     {
         var operation = "op_" + Guid.NewGuid().ToString("N");
         var handler = new FailAfterForwardingHandler(failures: 2);
+        var submitted = Enumerable.Range(0, 20).Select(_ => LogbirdClient.NewEventId()).ToArray();
         await using (var client = new LogbirdClient(LiveServer.Options(), new HttpClient(handler)))
         {
             for (var i = 0; i < 20; i++)
             {
-                client.Track(new AuditEvent("retry.checked") { Context = { OperationId = operation } }.Target("record", $"rec_{i}"));
+                client.Track(new AuditEvent("retry.checked") { Id = submitted[i], Context = { OperationId = operation } }.Target("record", $"rec_{i}"));
             }
 
             Assert.True(await client.FlushAsync());
@@ -99,6 +101,15 @@ public class IngestRoundTripTests(ITestOutputHelper output)
         count = await LiveServer.CountAsync(reader, $"operation:\"{operation}\"", 20);
         output.WriteLine($"server accepted the batch {handler.Forwarded} times (other responses passed through: {handler.OtherResponses}); stored {count} events");
         Assert.Equal(20, count);
+
+        // Exactly the submitted events, each once: a duplicate cannot hide behind a missing event.
+        var stored = new List<string>();
+        await foreach (var e in reader.SearchAllAsync(new EventSearch { Query = $"operation:\"{operation}\"", Limit = 200, From = DateTimeOffset.UtcNow.AddHours(-1) }))
+        {
+            stored.Add(e.Id);
+        }
+
+        Assert.Equal(submitted.OrderBy(id => id, StringComparer.Ordinal), stored.OrderBy(id => id, StringComparer.Ordinal));
     }
 
     [LiveFact]
