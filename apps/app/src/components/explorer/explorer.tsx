@@ -506,12 +506,13 @@ function ProjectExplorer({
                   {totalLowerBound ? formatSearchTotal({ count: total, exact: false }) : formatNumber(total)}
                 </span>{' '}
                 {!totalLowerBound && total === 1 ? 'event' : 'events'} · {rangeName}
-                {/* Below md the table has no column header (useIsMobile): name the zone here (and switch it) instead. */}
-                <TimeZoneInline className="md:hidden" />
                 {events.data?.pages[0] ? ` · ${Math.round(events.data.pages[0].tookMs)} ms` : ''}
                 {events.isFetching && !events.isFetchingNextPage ? ' · refreshing…' : ''}
               </>
             )}
+            {/* Below md the table has no column header (useIsMobile): name the zone here (and switch it) in every state,
+                including the last good rows shown after a rejected query. */}
+            <TimeZoneInline className="md:hidden" />
           </span>
           <button
             aria-expanded={showChart}

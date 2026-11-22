@@ -87,7 +87,7 @@ export function rangePhrase(range: string): string {
   return preset ? `the ${preset.label.charAt(0).toLowerCase()}${preset.label.slice(1)}` : rangeLabel(range);
 }
 
-export function rangeLabel(range: string): string {
+export function rangeLabel(range: string, { zone: withZone = true }: { zone?: boolean } = {}): string {
   if (range === ALL_RANGE) return 'All time';
   const preset = RANGE_PRESETS.find((p) => p.value === range);
   if (preset) return preset.label;
@@ -103,7 +103,7 @@ export function rangeLabel(range: string): string {
   const day = (ms: number) => (withYear ? formatDate(new Date(ms).toISOString()) : formatMonthDay(ms));
   // An absolute window names the zone its clock times are in.
   const zone = consoleTimeZone();
-  const inZone = zone === 'UTC' ? ' UTC' : ` ${shortZoneLabel(zone)} time`;
+  const inZone = !withZone ? '' : zone === 'UTC' ? ' UTC' : ` ${shortZoneLabel(zone)} time`;
   return localDayKey(r.fromMs) === localDayKey(r.toMs)
     ? `${day(r.fromMs)}, ${formatClock(r.fromMs)} – ${formatClock(r.toMs)}${inZone}`
     : `${day(r.fromMs)} ${formatClock(r.fromMs)} – ${day(r.toMs)} ${formatClock(r.toMs)}${inZone}`;

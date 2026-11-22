@@ -36,26 +36,25 @@ interface TimeRangePickerProps {
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
-const toTime = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-function withTime(day: Date, time: string): Date {
-  const [h, m] = time.split(':').map(Number);
-  const d = new Date(day);
-  d.setHours(h ?? 0, m ?? 0, 0, 0);
-  return d;
-}
+/** The browser's own offset, when no zone is given. */
+const browserOffset = (utcMs: number) => -new Date(utcMs).getTimezoneOffset() * 60_000;
+
 /**
- * The editor works on wall-clock dates: Date objects whose local fields hold the chosen zone's fields (that is what the
- * calendar and the time inputs show). These convert between instants and wall-clock dates.
+ * The editor keeps a day and a clock apart: the day is a calendar `Date` at local noon (noon exists on every day, so the
+ * browser's own DST gaps never move it) and the clock is "HH:MM" in the chosen zone. A zone's wall time is never pushed
+ * through a browser-local `Date`, so 02:30 UTC stays 02:30 even on the day a Berlin browser skips 02:00–03:00.
  */
-function toWall(instant: Date, offsetMs?: (utcMs: number) => number): Date {
-  if (!offsetMs) return instant;
+export function toWall(instant: Date, offsetMs: (utcMs: number) => number): { day: Date; time: string } {
   const u = new Date(instant.getTime() + offsetMs(instant.getTime()));
-  return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate(), u.getUTCHours(), u.getUTCMinutes(), u.getUTCSeconds());
+  return {
+    day: new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate(), 12),
+    time: `${pad(u.getUTCHours())}:${pad(u.getUTCMinutes())}`,
+  };
 }
-function fromWall(wall: Date, offsetMs?: (utcMs: number) => number): Date {
-  if (!offsetMs) return wall;
-  const asUtc = Date.UTC(wall.getFullYear(), wall.getMonth(), wall.getDate(), wall.getHours(), wall.getMinutes(), wall.getSeconds());
-  // The offset at the guess, then at the corrected instant (DST changes inside the gap).
+export function fromWall(day: Date, time: string, offsetMs: (utcMs: number) => number): Date {
+  const [h, m] = time.split(':').map(Number);
+  const asUtc = Date.UTC(day.getFullYear(), day.getMonth(), day.getDate(), h ?? 0, m ?? 0);
+  // The offset at the guess, then at the corrected instant (the zone's own DST change inside the gap).
   const first = asUtc - offsetMs(asUtc);
   return new Date(asUtc - offsetMs(first));
 }
@@ -73,26 +72,27 @@ export function TimeRangePicker({
   size = 'sm',
   zone,
 }: TimeRangePickerProps) {
-  const offsetMs = zone?.offsetMs;
+  const offsetMs = zone?.offsetMs ?? browserOffset;
   const wallFrom = toWall(resolved.from, offsetMs);
   const wallTo = toWall(resolved.to, offsetMs);
   const [open, setOpen] = useState(false);
-  const [days, setDays] = useState<DateRange | undefined>({ from: wallFrom, to: wallTo });
-  const [fromTime, setFromTime] = useState(toTime(wallFrom));
-  const [toTimeValue, setToTimeValue] = useState(toTime(wallTo));
+  const [days, setDays] = useState<DateRange | undefined>({ from: wallFrom.day, to: wallTo.day });
+  const [fromTime, setFromTime] = useState(wallFrom.time);
+  const [toTimeValue, setToTimeValue] = useState(wallTo.time);
   const isPreset = presets.some((p) => p.value === value);
 
   useEffect(() => {
     if (!open) return;
     const f = toWall(resolved.from, offsetMs);
     const t = toWall(resolved.to, offsetMs);
-    setDays({ from: f, to: t });
-    setFromTime(toTime(f));
-    setToTimeValue(toTime(t));
+    setDays({ from: f.day, to: t.day });
+    setFromTime(f.time);
+    setToTimeValue(t.time);
   }, [open, resolved.from, resolved.to, offsetMs]);
 
-  const from = days?.from ? fromWall(withTime(days.from, fromTime), offsetMs) : null;
-  const to = days?.to ? fromWall(withTime(days.to, toTimeValue), offsetMs) : days?.from ? fromWall(withTime(days.from, toTimeValue), offsetMs) : null;
+  const from = days?.from ? fromWall(days.from, fromTime, offsetMs) : null;
+  const toDay = days?.to ?? days?.from;
+  const to = toDay ? fromWall(toDay, toTimeValue, offsetMs) : null;
   const valid = Boolean(from && to && from < to && to.getTime() <= Date.now() + 60_000);
   const zoneSuffix = zone ? ` · ${zone.label}` : '';
 
@@ -135,12 +135,12 @@ export function TimeRangePicker({
           </div>
           <div className="flex flex-col gap-3 p-3">
             <Calendar
-              disabled={{ after: toWall(new Date(), offsetMs) }}
+              disabled={{ after: toWall(new Date(), offsetMs).day }}
               mode="range"
               numberOfMonths={1}
               onSelect={setDays}
               selected={days}
-              defaultMonth={wallTo}
+              defaultMonth={wallTo.day}
             />
             <div className="grid grid-cols-2 gap-2">
               <div className="flex flex-col gap-1">

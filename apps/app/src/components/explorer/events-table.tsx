@@ -146,7 +146,8 @@ export function EventsTable({
   resultKey,
   ref,
 }: EventsTableProps) {
-  useConsoleZone(); // Range labels and times read the console zone: re-render when the reader switches it.
+  // Range labels and times read the console zone: re-render when the reader switches it.
+  const zone = useConsoleZone();
   const isMobile = useIsMobile();
   const scrollRef = useRef<HTMLDivElement>(null);
   const columnVisibility = useMemo(() => Object.fromEntries(EVENT_COLUMNS.map((c) => [c.id, columns.includes(c.id)])), [columns]);
@@ -161,7 +162,8 @@ export function EventsTable({
 
   const visible = table.getVisibleLeafColumns();
   // "Dec 31, 2025, 23:59:59" is wider than this year's "Nov 22, 10:17:20": widen the time column only when a row needs it.
-  const withYear = useMemo(() => rows.some((e) => timestampNeedsYear(e.timestamp)), [rows]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: whether a row needs its year depends on the console zone.
+  const withYear = useMemo(() => rows.some((e) => timestampNeedsYear(e.timestamp)), [rows, zone]);
   const width = (id: string) => (id === 'time' && withYear ? TIME_WIDTH_WITH_YEAR : WIDTH.get(id));
   const template = visible.map((c) => (width(c.id) === 'flex' ? 'minmax(200px,1fr)' : `${width(c.id)}px`)).join(' ');
   const minWidth = visible.reduce((sum, c) => sum + (width(c.id) === 'flex' ? 200 : Number(width(c.id))), 0) + 16;

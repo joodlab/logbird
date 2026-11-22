@@ -273,7 +273,7 @@ export function useConfirmRemoveSampleData(count: number) {
   return () =>
     confirm({
       title: 'Remove sample data?',
-      description: `Deletes every event tagged source:${SAMPLE_DATA_SOURCE} (${formatNumber(count)} now), including any your integration sent with that tag. Events with any other source are not touched.`,
+      description: `Deletes every event tagged source:${SAMPLE_DATA_SOURCE}, including any your integration sent with that tag (${formatNumber(count)} when this page last checked). Events with any other source are not touched.`,
       confirmLabel: 'Remove sample data',
       destructive: true,
     });

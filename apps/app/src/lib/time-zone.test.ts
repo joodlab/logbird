@@ -13,11 +13,15 @@ async function load(zone: string, storage?: Partial<Storage>) {
   const format = await import('./format');
   const range = await import('./range');
   const series = await import('@/components/charts/outcome-series');
-  return { ...tz, ...format, ...range, ...series };
+  const picker = await import('@logbird/ui/components/time-range-picker');
+  return { ...tz, ...format, ...range, ...series, toWall: picker.toWall, fromWall: picker.fromWall };
 }
 
 beforeEach(() => vi.unstubAllGlobals());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 afterAll(() => {
   process.env.TZ = originalTz;
 });
@@ -56,6 +60,8 @@ describe('console time zone', () => {
   });
 
   it('names the zone of absolute ranges and of UTC-aligned day buckets that span two local dates', async () => {
+    // Labels add the year outside the current one: pin "now" so the expectations do not age.
+    vi.useFakeTimers({ now: Date.parse('2026-11-22T12:00:00.000Z'), toFake: ['Date'] });
     const m = await load('America/Los_Angeles');
     const day = Date.parse('2026-11-22T00:00:00.000Z');
     expect(m.bucketLabel(day, 86_400)).toBe('Nov 21, 16:00 – Nov 22, 16:00');
@@ -63,6 +69,25 @@ describe('console time zone', () => {
     m.setZonePreference('utc');
     expect(m.bucketLabel(day, 86_400)).toBe('Nov 22');
     expect(m.rangeLabel('2026-11-22T00:00:00.000Z..2026-11-22T04:00:00.000Z')).toBe('Nov 22, 00:00 – 04:00 UTC');
+    // Saved views named before absolute ranges carried their zone are still found under the zone-free name.
+    expect(m.rangeLabel('2026-11-22T00:00:00.000Z..2026-11-22T04:00:00.000Z', { zone: false })).toBe('Nov 22, 00:00 – 04:00');
+  });
+
+  it('edits custom ranges in the console zone, even on a day the browser skips an hour', async () => {
+    const m = await load('Europe/Berlin');
+    m.setZonePreference('utc');
+    // Berlin skips 02:00–03:00 local on Mar 29, 2026; 02:30 UTC exists and must survive an unchanged Apply.
+    const start = new Date('2026-03-29T02:30:00.000Z');
+    const wall = m.toWall(start, m.zoneOffsetMs);
+    expect(wall.time).toBe('02:30');
+    expect(wall.day.getDate()).toBe(29);
+    expect(m.fromWall(wall.day, wall.time, m.zoneOffsetMs).toISOString()).toBe('2026-03-29T02:30:00.000Z');
+    m.setZonePreference('local');
+    const local = m.toWall(start, m.zoneOffsetMs);
+    expect(local.time).toBe('04:30');
+    expect(m.fromWall(local.day, local.time, m.zoneOffsetMs).toISOString()).toBe('2026-03-29T02:30:00.000Z');
+    // Typing 09:00 in UTC applies 09:00Z, not the browser's 09:00.
+    expect(m.fromWall(new Date(2026, 10, 22, 12), '09:00', () => 0).toISOString()).toBe('2026-11-22T09:00:00.000Z');
   });
 
   it('reads a saved choice, and keeps working in this tab when storage is blocked', async () => {

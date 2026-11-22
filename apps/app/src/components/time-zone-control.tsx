@@ -1,5 +1,6 @@
 import { RadioChoice, RadioGroup } from '@logbird/ui/components/ui/radio-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
+import { cn } from '@logbird/ui/lib/utils';
 import { useId } from 'react';
 import { BROWSER_ZONE, setZonePreference, shortZoneLabel, useZonePreference, type ZonePreference, zoneFor } from '@/lib/time-zone';
 
@@ -67,7 +68,7 @@ export function TimeZoneInline({ className }: { className?: string }) {
   const zone = zoneFor(preference);
   const next: ZonePreference = preference === 'utc' ? 'local' : 'utc';
   return (
-    <span className={className}>
+    <span className={cn('text-muted-foreground', className)}>
       {' · '}
       <button
         aria-label={`Times in ${zone}. Show times in ${zoneFor(next)} instead.`}
