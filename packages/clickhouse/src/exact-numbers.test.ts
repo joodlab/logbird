@@ -111,7 +111,7 @@ it('never matches a different number at double precision, in either order', () =
 });
 
 it('keeps a number with a huge exponent as sent, without big arithmetic', () => {
-  const token = `1e-${'0'.repeat(20)}5`;
+  const token = `1e-${'9'.repeat(20)}`;
   const { row } = normalize(wire(`{"action":"x","metadata":{"tiny":${token}}}`));
   expect(row.payload).toContain(`"tiny":${token}`);
 });
@@ -136,4 +136,12 @@ it('stores a numeric id as the plain decimal of its exact value, one spelling pe
   expect(normalize(wire('{"action":"x","actor":{"id":9007199254740993.0}}')).row.actor_id).toBe('9007199254740993');
   // Strings stay exactly as sent.
   expect(normalize(wire('{"action":"x","tenant":{"id":"42.0"}}')).row.tenant_id).toBe('42.0');
+});
+
+it('never truncates or empties a long numeric id: it keeps a unique scientific spelling', () => {
+  const ids = (n: string) => normalize(wire(`{"action":"x","actor":{"id":${n}},"targets":[{"type":"t","id":${n}}]}`)).row;
+  expect(ids('1e256')).toMatchObject({ actor_id: '1e256', target_ids: ['1e256'] });
+  expect(ids('1e257').actor_id).toBe('1e257');
+  expect(ids('1e100').actor_id).toBe(`1${'0'.repeat(100)}`);
+  expect(ids(`1e${'9'.repeat(20)}`).actor_id).toBe(`1e${'9'.repeat(20)}`);
 });

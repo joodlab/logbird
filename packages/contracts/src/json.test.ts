@@ -96,13 +96,18 @@ it('refuses plain decimals that would be huge, and non-numbers', () => {
   expect(plainDecimal(true)).toBeNull();
 });
 
-it('skips arithmetic for exponents over 15 digits, in linear time', () => {
-  const token = `1e-${'0'.repeat(1_000_000)}5`;
+it('skips arithmetic for exponents over 15 significant digits, in linear time', () => {
+  const huge = `1e-${'9'.repeat(1_000_000)}`;
+  const padded = `1e-${'0'.repeat(1_000_000)}5`;
   const start = Date.now();
-  expect(canonicalDecimal(token)).toBeNull();
-  const parsed = (parseJsonExact(`[${token}]`) as unknown[])[0];
-  expect(isRawJson(parsed)).toBe(true);
+  expect(canonicalDecimal(huge)).toBeNull();
+  expect(isRawJson((parseJsonExact(`[${huge}]`) as unknown[])[0])).toBe(true);
+  // Exponent padding is not significant: this is 0.00001, a plain number.
+  expect(canonicalDecimal(padded)).toBe('1e-5');
+  expect((parseJsonExact(`[${padded}]`) as unknown[])[0]).toBe(0.000_01);
   expect(Date.now() - start).toBeLessThan(1000);
+  expect((parseJsonExact('[1e0000000000000000]') as unknown[])[0]).toBe(1);
+  expect((parseJsonExact('[0e99999999999999999999]') as unknown[])[0]).toBe(0);
   expect(canonicalDecimal('1e123456789012345')).toBe('1e123456789012345');
 });
 
@@ -111,4 +116,13 @@ it('measures plain decimal length exactly', () => {
   expect(plainDecimal(1.23, 3)).toBeNull();
   expect(plainDecimal(0.001, 5)).toBe('0.001');
   expect(plainDecimal(-1200, 5)).toBe('-1200');
+});
+
+it('lets the input contract accept the exact ids the parser produces', async () => {
+  const { eventInputSchema } = await import('./events');
+  const event = parseJsonExact(
+    '{"action":"x","actor":{"id":9007199254740993},"tenant":{"id":7},"targets":[{"type":"page","id":12345678901234567891}]}',
+  );
+  expect(eventInputSchema.safeParse(event).success).toBe(true);
+  expect(eventInputSchema.safeParse({ action: 'x', actor: { id: true } }).success).toBe(false);
 });

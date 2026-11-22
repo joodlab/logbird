@@ -13,13 +13,13 @@ const NUMBER = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/;
 function canonicalDecimal(text: string): string | null {
   const m = NUMBER.exec(text);
   if (!m) return null;
-  // An exponent over 15 digits overflows or underflows a double: keep the sent spelling, no big arithmetic.
-  if ((m[4]?.replace(/^[+-]/, '').length ?? 0) > 15) return null;
   const fraction = m[3] ?? '';
   const all = `${m[2]}${fraction}`;
   let start = 0;
   while (start < all.length && all.charCodeAt(start) === 48) start++;
   if (start === all.length) return '0';
+  // An exponent over 15 significant digits overflows or underflows a double: keep the sent spelling.
+  if ((m[4] ?? '').replace(/^[+-]/, '').replace(/^0+/, '').length > 15) return null;
   let end = all.length;
   while (all.charCodeAt(end - 1) === 48) end--;
   const exponent = Number(m[4] ?? 0) - fraction.length + (all.length - end);

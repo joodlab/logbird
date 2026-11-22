@@ -24,12 +24,13 @@ const MAX_EXPONENT_DIGITS = 15;
 export function canonicalDecimal(text: string): string | null {
   const m = NUMBER.exec(text);
   if (!m) return null;
-  if ((m[4]?.replace(/^[+-]/, '').length ?? 0) > MAX_EXPONENT_DIGITS) return null;
   const fraction = m[3] ?? '';
   const all = `${m[2]}${fraction}`;
   let start = 0;
   while (start < all.length && all.charCodeAt(start) === 48) start++;
+  // Zero is zero whatever its exponent; padded exponents (`1e0000000000000000`) are measured without their zeros.
   if (start === all.length) return '0';
+  if ((m[4] ?? '').replace(/^[+-]/, '').replace(/^0+/, '').length > MAX_EXPONENT_DIGITS) return null;
   let end = all.length;
   while (all.charCodeAt(end - 1) === 48) end--;
   const exponent = Number(m[4] ?? 0) - fraction.length + (all.length - end);

@@ -353,6 +353,8 @@ export class Logbird {
  */
 function exactClone(value: unknown): unknown {
   if (isRawJson(value)) return value;
+  // Fail closed like structuredClone: a function (for example a toJSON method) could reveal fields after redaction.
+  if (typeof value === 'function') throw new DOMException('A function cannot be cloned for redaction.', 'DataCloneError');
   if (Array.isArray(value)) return value.map(exactClone);
   if (value !== null && typeof value === 'object') {
     const prototype = Object.getPrototypeOf(value);

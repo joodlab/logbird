@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isRawJson, type RawJson } from './json';
 
 /**
  * Logbird accepts ANY JSON object as an event. Only `action` is required.
@@ -17,7 +18,12 @@ export const severitySchema = z.enum(SEVERITIES);
 
 const id = z.string().min(1).max(256);
 /** Entity ids may also be numbers (integer keys); a number is stored as the plain decimal of its exact value. */
-const entityId = z.union([id, z.number()]);
+const entityId = z.union([
+  id,
+  z.number(),
+  // parseJsonExact keeps a number a double cannot hold as a raw JSON value with its exact digits.
+  z.custom<RawJson>((value) => isRawJson(value), 'expected a number').meta({ type: 'number' }),
+]);
 const shortText = z.string().max(512);
 
 export const actorInputSchema = z.looseObject({

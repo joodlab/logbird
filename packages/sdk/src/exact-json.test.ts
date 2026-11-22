@@ -61,3 +61,23 @@ it('keeps an exact actor id in an in-process carrier', async () => {
   await job.pending();
   expect(JSON.stringify(track.mock.calls.at(-1)?.[0].actor)).toContain('"id":9007199254740993');
 });
+
+it('refuses to redact an event with a function inside (fail closed, nothing sent)', async () => {
+  const fetcher = vi.fn();
+  vi.stubGlobal('fetch', fetcher);
+  const onError = vi.fn();
+  const sdk = new Logbird({ apiKey: 'fictional', endpoint: 'http://exact.invalid', beforeSend: redact(), onError });
+  sdk.track({ id: 'fn', action: 'x', metadata: { profile: { toJSON: () => ({ password: 'fictional-secret' }) } } });
+  await sdk.flush();
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(onError).toHaveBeenCalled();
+});
+
+it('writes a large integer job id as plain digits, as the server indexes numbers', async () => {
+  const client = new Logbird({ enabled: false });
+  const track = vi.spyOn(client, 'track');
+  const job = jobAudit({ client, job: { id: 1e21, queueName: 'q' } });
+  job('done');
+  await job.pending();
+  expect(track.mock.calls.at(-1)?.[0].executor?.jobId).toBe('1000000000000000000000');
+});

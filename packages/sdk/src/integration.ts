@@ -168,7 +168,9 @@ export function jobAudit(options: JobAuditOptions): Audit {
       type: 'worker',
       id: executor?.id ?? job.queueName ?? 'worker',
       name: executor?.name ?? job.name,
-      jobId: job.id === undefined ? undefined : String(job.id),
+      // A string as before; an integer is written as plain digits (1e21 → "1000000000000000000000", not "1e+21"),
+      // matching how the server indexes numeric ids.
+      jobId: job.id === undefined ? undefined : typeof job.id === 'number' && Number.isInteger(job.id) ? BigInt(job.id).toString() : String(job.id),
       attempt: (job.attemptsMade ?? 0) + 1,
     },
     context: {
