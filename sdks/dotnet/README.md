@@ -238,7 +238,8 @@ EventDetail? detail = await reader.GetAsync(eventId);   // null when it does not
 
 `SearchAllAsync` follows cursors until the last page. Logbird's cursors are keyset-ordered and never repeat; as a guard
 against a misbehaving server, the client stops with `LogbirdApiException` (`pagination_stalled`) if a cursor repeats within
-its last 1,000 pages, and you can bound any iteration with `maxPages` (code `page_limit` when more pages remain).
+its last 1,000 pages, and you can bound every iteration with `LogbirdReadOptions.MaxPages` (code `page_limit` when more
+pages remain).
 
 `ForTrail` throws `ArgumentException` when it has no selector or query, for an empty selector (pass `null` to leave one
 out) and for a value ending in `*` (the query language would read it as a prefix wildcard), so a bug cannot silently

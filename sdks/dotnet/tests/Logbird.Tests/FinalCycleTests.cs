@@ -274,10 +274,10 @@ public class FinalCycleTests
         {
             Fallback = _ => Task.FromResult(FakeServer.Json(HttpStatusCode.OK, $$"""{"data":[],"nextCursor":"c{{Interlocked.Increment(ref page)}}","total":0,"tookMs":1}""")),
         };
-        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "k" }, new HttpClient(server));
+        using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "k", MaxPages = 5 }, new HttpClient(server));
         var error = await Assert.ThrowsAsync<LogbirdApiException>(async () =>
         {
-            await foreach (var _ in reader.SearchAllAsync(maxPages: 5))
+            await foreach (var _ in reader.SearchAllAsync())
             {
             }
         });
@@ -324,7 +324,7 @@ public class FinalCycleTests
     [Fact]
     public async Task A_503_acknowledging_a_duplicated_id_once_keeps_the_previous_body()
     {
-        var server = new FakeServer().Then(request =>
+        static HttpResponseMessage Pending(CapturedRequest request)
         {
             var ids = request.Ids;
             var details = new
@@ -337,7 +337,10 @@ public class FinalCycleTests
                 eventIds = new[] { ids[2] },
             };
             return FakeServer.Json(HttpStatusCode.ServiceUnavailable, JsonSerializer.Serialize(new { error = new { code = "ingest_pending", details } }));
-        });
+        }
+
+        // The identical 503 twice: the acknowledgement for "dup" must not be credited to the second "dup" entry.
+        var server = new FakeServer().Then(Pending).Then(Pending);
         await using var client = Client(Options(), server);
         client.Track(new AuditEvent("first") { Id = "dup" });
         client.Track(new AuditEvent("second") { Id = "dup" });
@@ -345,6 +348,7 @@ public class FinalCycleTests
         Assert.True(await client.FlushAsync());
         var requests = server.Requests.ToArray();
         Assert.Equal(requests[0].Body, requests[1].Body);
+        Assert.Equal(requests[0].Body, requests[2].Body);
     }
 
     [Fact]
@@ -391,7 +395,10 @@ public class FinalCycleTests
     [Fact]
     public async Task The_earlier_SearchAll_signature_still_compiles_and_works()
     {
-        var server = new FakeServer().ThenStatus(HttpStatusCode.OK, """{"data":[],"nextCursor":null,"total":0,"tookMs":1}""");
+        var server = new FakeServer
+        {
+            Fallback = _ => Task.FromResult(FakeServer.Json(HttpStatusCode.OK, """{"data":[],"nextCursor":null,"total":0,"tookMs":1}""")),
+        };
         using var reader = new LogbirdReadClient(new LogbirdReadOptions { Endpoint = Endpoint, ReadKey = "k" }, new HttpClient(server));
         var count = 0;
         await foreach (var _ in reader.SearchAllAsync(new EventSearch { Limit = 10 }, CancellationToken.None))
@@ -399,7 +406,13 @@ public class FinalCycleTests
             count++;
         }
 
+        // A positional default for the token keeps compiling too.
+        await foreach (var _ in reader.SearchAllAsync(new EventSearch { Limit = 10 }, default))
+        {
+            count++;
+        }
+
         Assert.Equal(0, count);
-        Assert.Single(server.Requests);
+        Assert.Equal(2, server.Requests.Count);
     }
 }
