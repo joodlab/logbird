@@ -112,6 +112,9 @@ describe('isValidRange rejects ranges that name no window (#203)', () => {
     const fallback = resolveRange('24h', now);
     expect(resolveRange('99999999999d', now)).toEqual(fallback);
     expect(resolveRange('0d', now)).toEqual(fallback);
+  });
+});
+
 describe('rangeInSentence', () => {
   it('lowercases relative labels but keeps month and zone names', () => {
     expect(rangeInSentence('Last 7 days')).toBe('last 7 days');
