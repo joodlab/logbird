@@ -174,6 +174,13 @@ public sealed record EventSearch
     /// would otherwise end a value in a wildcard) are escaped, and a carriage return is written as <c>\r</c> so the
     /// text survives editors and the clipboard. Everything else (tabs, newlines, Unicode) stays as it is.
     /// </summary>
+    /// <remarks>
+    /// A value that contains a carriage return or ends in <c>*</c> is matched literally only by Logbird 0.2.0 and later;
+    /// older servers read <c>\r</c> as the letter <c>r</c> and a trailing escaped <c>*</c> as a prefix wildcard.
+    /// <see cref="ForTrail(string, string, string, string, DateTimeOffset?, DateTimeOffset?, int?, string, string)"/>
+    /// marks such a search so <see cref="LogbirdReadClient"/> checks the server's version before sending it; a search
+    /// you build yourself from <see cref="Quote"/> is sent without that check.
+    /// </remarks>
     /// <param name="value">The raw value.</param>
     public static string Quote(string value)
     {
