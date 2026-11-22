@@ -800,7 +800,18 @@ test('a tag whose release never completed is not a baseline for the next release
   const directory = mkdtempSync(join(tmpdir(), 'logbird-notes-test-'));
   const git = (...args) => execFileSync('git', args, { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const addCommit = (message) =>
-    git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@users.noreply.github.com', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', message);
+    git(
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@users.noreply.github.com',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '--allow-empty',
+      '-m',
+      message,
+    );
   try {
     git('init');
     addCommit('feat: first');
