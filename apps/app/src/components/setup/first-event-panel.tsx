@@ -87,7 +87,11 @@ export function FirstEventPanel({ projectId, showSnippets = true }: { projectId:
   return (
     <div className="flex flex-col gap-4">
       {showSnippets ? <SendEventSnippets projectId={projectId} /> : null}
-      {first ? <ReceivedEvent celebrate={celebrate} event={first} projectId={projectId} /> : <Listening projectId={projectId} setup={data} />}
+      {first ? (
+        <ReceivedEvent backendSeen={Boolean(data.ingest.lastEventAt)} celebrate={celebrate} event={first} projectId={projectId} />
+      ) : (
+        <Listening projectId={projectId} setup={data} />
+      )}
       <SampleDataControl projectId={projectId} setup={data} />
     </div>
   );
@@ -130,7 +134,18 @@ function Listening({ projectId, setup }: { projectId: string; setup: ProjectSetu
   );
 }
 
-function ReceivedEvent({ projectId, event, celebrate }: { projectId: string; event: AuditEvent; celebrate: boolean }) {
+function ReceivedEvent({
+  projectId,
+  event,
+  celebrate,
+  backendSeen,
+}: {
+  projectId: string;
+  event: AuditEvent;
+  celebrate: boolean;
+  /** The backend has sent an event since: stop asking for one. */
+  backendSeen: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div
@@ -148,7 +163,7 @@ function ReceivedEvent({ projectId, event, celebrate }: { projectId: string; eve
           </span>
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p className="font-medium text-sm">{firstEventCopy(event.source, celebrate).cardTitle}</p>
+          <p className="font-medium text-sm">{firstEventCopy(event.source, celebrate, backendSeen).cardTitle}</p>
           <p className="text-muted-foreground text-xs">
             <Timestamp format="full" iso={event.receivedAt} /> · via {event.sdk || 'HTTP'}
           </p>
