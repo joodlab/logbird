@@ -1,16 +1,7 @@
 import type { QueryLang } from '@logbird/contracts';
 import { coreField } from '@/lib/query-catalog';
-import {
-  andQuery,
-  canonicalField,
-  fieldTermsWithPolarity,
-  formatTerm,
-  hasTopLevelOr,
-  type QueryToken,
-  removeTokens,
-  topLevelFieldTerms,
-} from '@/lib/query-language';
-import { appendSqlPredicate, removeSqlConjuncts, sqlConjuncts, sqlString } from '@/lib/sql-language';
+import { andQuery, canonicalField, fieldTerms, formatTerm, hasTopLevelOr, type QueryToken, removeTokens } from '@/lib/query-language';
+import { appendSqlPredicate, removeSqlConjuncts, sqlConjuncts, sqlString, unquoteSql } from '@/lib/sql-language';
 
 /**
  * Filters on a field that is often empty (the support agent behind an impersonated event). `*` means "has any
@@ -49,22 +40,15 @@ function queryAdapter(field: string): Adapter {
   const f = canonicalField(field);
   const isOwn = (t: { valueKind?: string; field?: string }) => OWN_KINDS.has(t.valueKind ?? '') && canonicalField(t.field ?? '') === f;
   // Polarity counts a unary NOT (`NOT impersonator:(a OR b)` is an exclusion), and removal takes that NOT with it.
-  const own = (q: string) => fieldTermsWithPolarity(q).filter((x) => isOwn(x.token));
-  const term = ({ token, negated }: { token: QueryToken; negated: boolean }): PresenceTerm => ({
+  const own = (q: string) => fieldTerms(q).filter(isOwn);
+  const term = (token: QueryToken): PresenceTerm => ({
     value: isPresence(token) ? null : (token.value ?? ''),
-    negated,
+    negated: token.negated,
     prefix: token.wildcard && token.value !== '*',
   });
   return {
     terms: (q) => own(q).map(term),
-    remove: (q, test) => {
-      const doomed = new Set(
-        own(q)
-          .filter((x) => test(term(x)))
-          .map((x) => x.token.start),
-      );
-      return removeTokens(q, (t) => t.kind === 'field' && doomed.has(t.start));
-    },
+    remove: (q, test) => removeTokens(q, (t) => isOwn(t) && test(term(t))),
     add: (q, t) => andQuery(q, t.value === null ? presenceTerm(field, t.negated) : formatTerm(field, t.value, t.negated)),
   };
 }
@@ -107,7 +91,7 @@ export function parsePresenceSql(conjunct: string, column: string): PresenceTerm
   const m = new RegExp(`^${escapeRegExp(column)}\\s*(!=|<>|=)\\s*'((?:[^'\\\\]|\\\\.)*)'$`).exec(unwrapParens(conjunct));
   if (!m) return null;
   const notEqual = m[1] !== '=';
-  const value = (m[2] ?? '').replace(/\\(.)/g, '$1');
+  const value = unquoteSql(m[2] ?? '');
   if (value === '') return { value: null, negated: !notEqual };
   return { value, negated: notEqual };
 }
@@ -168,14 +152,7 @@ export function withPresence(q: string, field: string, lang: QueryLang = 'query'
     return a.terms(q).some((x) => same(x, any)) ? q.trim() : a.add(q, any);
   }
   const f = canonicalField(field);
-  const notted = new Set(
-    fieldTermsWithPolarity(q)
-      .filter((x) => x.negated !== x.token.negated)
-      .map((x) => x.token.start),
-  );
-  const constrained =
-    !hasTopLevelOr(q) &&
-    topLevelFieldTerms(q).some((t) => !t.negated && !notted.has(t.start) && isPresence(t) && canonicalField(t.field ?? '') === f);
+  const constrained = !hasTopLevelOr(q) && fieldTerms(q, true).some((t) => !t.negated && isPresence(t) && canonicalField(t.field ?? '') === f);
   return constrained ? q.trim() : andQuery(q, presenceTerm(field));
 }
 

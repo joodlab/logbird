@@ -26,6 +26,10 @@ Arrays (target, target.type, target.name, changes.field) match any element. Attr
 
 Use `\*` for a literal asterisk in a quoted or unquoted value. For example, `tenant:team\*` and `tenant:"team\*"` both match the exact ID `team*`. An unescaped trailing star remains a wildcard even inside quotes, and unescaped internal stars are literal. An unescaped `*` on its own checks presence. An odd number of consecutive backslashes escapes the following star. In a bare value, only the escaping backslash is removed.
 
+In a quoted value, `\r` means a carriage return, and `\\r` means a backslash followed by `r`. Literal carriage returns in existing quoted queries still work. Generated selectors use the escape so they can be copied and pasted as written.
+
+Field names use their exact spelling when bare. `_exists_:attr.tag\*` checks the attribute named `tag\*`, including the backslash. Quote the field name to use query-value escapes, as in `_exists_:"attr.tag\*"`, which checks `tag*`. The same rule applies to the name before `:`.
+
 Use `record:<type>:<id>` to filter a record's history. The first unescaped colon separates the type from the id. Within the type, `\:` means a literal colon and `\\` means a literal backslash. Everything after the separator is the literal id. For example, `record:order\:archived:A1` matches type `order:archived` and id `A1`, while `record:order:archived:A1` matches type `order` and id `archived:A1`.
 
 Quote the whole pair if it contains whitespace or grammar punctuation such as parentheses. Query-value escapes apply before record-pair escapes. For example, `record:"order\\:archived:A1"` matches type `order:archived` and id `A1`, and `record:"page:home (west)"` matches id `home (west)`. `record:page:/home/`, `record:page:home*`, and `record:page:home\*` use literal ids.

@@ -12,11 +12,11 @@ it('keeps structural read types aligned with public contracts and quotes selecto
   expect(trailQuery({ target: { type: String.raw`order\:archived`, id: 'A:"1"' } }).q).toBe(String.raw`record:"order\\\\\\:archived:A:\"1\""`);
 });
 
-it('keeps control characters literal in SDK trail selectors', () => {
+it('escapes carriage returns in SDK trail selectors', () => {
   const id = ' x\t\n\r:y"\\ ';
   const { q } = trailQuery({ target: { type: 'page:section\\v2', id }, actor: id, tenant: id });
-  expect(q).toBe('record:"page\\\\:section\\\\\\\\v2: x\t\n\r:y\\"\\\\ " AND actor:" x\t\n\r:y\\"\\\\ " AND tenant:" x\t\n\r:y\\"\\\\ "');
-  expect(trailQuery({ target: { id } }).q).toBe('target:" x\t\n\r:y\\"\\\\ "');
+  expect(q).toBe('record:"page\\\\:section\\\\\\\\v2: x\t\n\\r:y\\"\\\\ " AND actor:" x\t\n\\r:y\\"\\\\ " AND tenant:" x\t\n\\r:y\\"\\\\ "');
+  expect(trailQuery({ target: { id } }).q).toBe('target:" x\t\n\\r:y\\"\\\\ "');
 });
 
 it('escapes every star in exact trail selectors', () => {

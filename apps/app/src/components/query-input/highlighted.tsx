@@ -51,15 +51,12 @@ function CaretMarker() {
  */
 export function HighlightedText({
   value,
-  displayValue = value,
   lang = 'query',
   error,
   typingAt,
   warnings,
 }: {
   value: string;
-  /** Optional visual text with the same offsets as the source. */
-  displayValue?: string;
   lang?: QueryLang;
   error?: HighlightError | null;
   /** Caret offset while editing: the word being typed is not flagged as unknown yet. */
@@ -83,13 +80,13 @@ export function HighlightedText({
           className={cn(CLASS[s.cls === 'unknown' && typingAt === s.end ? 'ident' : s.cls], s.warn && WARN, s.error && ERROR)}
           key={`${s.start}-${s.end}`}
         >
-          {displayValue.slice(s.start, s.end)}
+          {value.slice(s.start, s.end)}
         </span>,
       );
     }
     if (caretAt !== null && caretAt >= value.length) out.push(<CaretMarker key="caret" />);
     return out;
-  }, [value, displayValue, lang, error?.start, error?.end, typingAt, warnings]);
+  }, [value, lang, error?.start, error?.end, typingAt, warnings]);
   return <>{nodes}</>;
 }
 

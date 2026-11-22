@@ -33,6 +33,7 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
         outcome: 'failure',
         actor: { id: 'different-actor' },
         tenant: { id: 'teamA' },
+        'tag*': 'plain star',
         targets: [
           { type: 'page', id: '12', name: 'Page 12' },
           { type: 'site', id: '7' },
@@ -45,6 +46,7 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
         actor: { id: 'publishing-actor' },
         tenant: { id: 'team*' },
         note: '',
+        'tag\\*': 'escaped star',
         targets: [{ type: 'site', id: '12' }],
       },
       { id: 'no-targets', action: 'job.started', outcome: 'success', note: 'ordinary' },
@@ -83,6 +85,8 @@ describe.runIf(process.env.CLICKHOUSE_URL)('record selectors on real ClickHouse'
         for (const [q, sql, ids] of [
           ['attr.note:""', predicate, ['paired']],
           ['NOT attr.note:""', `NOT ${predicate}`, ['no-targets', 'separate']],
+          [String.raw`_exists_:attr.tag\*`, String.raw`(mapContains(attributes, 'tag\\*') AND attributes['tag\\*'] != '')`, ['paired']],
+          [String.raw`_exists_:"attr.tag\*"`, "(mapContains(attributes, 'tag*') AND attributes['tag*'] != '')", ['separate']],
         ] as const) {
           const base = { ...range, limit: 10, order: 'asc' as const };
           const query = await searchEvents(ch, projectId, { ...base, q });

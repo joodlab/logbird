@@ -64,9 +64,14 @@ it.each([
   }
 });
 
-it.each(['\r', '\r\n'])('preserves CR in a generated record selector while editing with %j', (separator) => {
-  const id = `A${separator}B*`;
-  const value = formatRecordTerm('page', id);
+it.each([
+  { name: 'a generated CR', separator: '\r', legacy: false },
+  { name: 'a generated CRLF', separator: '\r\n', legacy: false },
+  { name: 'a saved literal CR', separator: '\r', legacy: true },
+])('preserves $name when editing and copying a record selector into a fresh editor', ({ separator, legacy }) => {
+  const id = `A${separator}B* and \\r`;
+  const visible = formatRecordTerm('page', id);
+  const value = legacy ? visible.replace('\\r', '\r') : visible;
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
@@ -76,30 +81,42 @@ it.each(['\r', '\r\n'])('preserves CR in a generated record selector while editi
   const submit = vi.fn();
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   try {
-    act(() =>
-      root.render(
-        <QueryClientProvider client={client}>
-          <QueryInput lang="query" onSubmit={submit} projectId="fictional" range="24h" value={value} />
-        </QueryClientProvider>,
-      ),
-    );
-    const input = host.querySelector('textarea');
-    if (!input) throw new Error('Missing query editor');
-    const visible = value.replaceAll('\r', '␍');
+    const render = (query: string, key: string) => {
+      act(() =>
+        root.render(
+          <QueryClientProvider client={client}>
+            <QueryInput key={key} lang="query" onSubmit={submit} projectId="fictional" range="24h" value={query} />
+          </QueryClientProvider>,
+        ),
+      );
+      const input = host.querySelector('textarea');
+      if (!input) throw new Error('Missing query editor');
+      return input;
+    };
+    const input = render(value, 'source');
     expect(input.value).toBe(visible);
+    expect(input.value).not.toContain('\r');
     const setNativeValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-    const edit = (text: string, caret: number) =>
+    const edit = (target: HTMLTextAreaElement, text: string, caret: number) =>
       act(() => {
-        setNativeValue?.call(input, text);
-        input.setSelectionRange(caret, caret);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+        setNativeValue?.call(target, text);
+        target.setSelectionRange(caret, caret);
+        target.dispatchEvent(new Event('input', { bubbles: true }));
       });
     const prefix = 'outcome:success ';
-    edit(prefix + visible, prefix.length);
+    edit(input, prefix + visible, prefix.length);
     const suffix = ' action:booked';
-    edit(prefix + visible + suffix, prefix.length + visible.length + suffix.length);
-    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ctrlKey: true, key: 'Enter' })));
-    expect(submit).toHaveBeenCalledExactlyOnceWith(prefix + value + suffix, 'query');
+    edit(input, prefix + visible + suffix, prefix.length + visible.length + suffix.length);
+
+    // happy-dom has no default clipboard action. Emulate the browser copying the selected textarea text.
+    input.setSelectionRange(prefix.length, prefix.length + visible.length);
+    const selected = input.value.slice(input.selectionStart, input.selectionEnd);
+    const fresh = render('', 'destination');
+    expect(fresh.value).toBe('');
+    edit(fresh, selected, selected.length);
+    act(() => fresh.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ctrlKey: true, key: 'Enter' })));
+    expect(submit).toHaveBeenCalledExactlyOnceWith(visible, 'query');
+    expect(compileQuery(submit.mock.calls[0]?.[0])).toEqual(compileQuery(value));
     expect(compileQuery(submit.mock.calls[0]?.[0]).params).toMatchObject({ recordId0: id });
   } finally {
     act(() => root.unmount());

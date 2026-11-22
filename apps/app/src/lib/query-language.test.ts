@@ -287,28 +287,44 @@ describe('queryCompletionAt', () => {
 });
 
 describe('removeTerm', () => {
-  it('preserves compiled boolean structure when removing a facet across generated expressions', () => {
-    for (const record of ['record:page:7', formatRecordTerm('page', 'A  B*')]) {
-      for (const action of ['action:booked', '-action:booked', 'NOT action:booked']) {
-        for (const and of ['', 'AND ']) {
-          const facet = 'outcome:failure';
-          const cases = [
-            [`${record} OR ${facet} ${and}${action}`, `${record} OR ${action}`],
-            [`${record} ${and}${facet} OR ${action}`, `${record} OR ${action}`],
-            [`${record} OR ${facet} OR ${action}`, `${record} OR ${action}`],
-            [`${record} ${and}${facet} ${and}${action}`, `${record} ${and}${action}`],
-            [`(${record} OR (${facet})) ${and}${action}`, `(${record}) ${and}${action}`],
-            [`${record} OR NOT (-(${facet}) AND ${action})`, `${record} OR NOT (${action})`],
-            [`${record} OR NOT NOT ${facet} AND ${action}`, `${record} OR ${action}`],
-            [`${record} AND (${facet} OR outcome:denied) OR ${action}`, `${record} OR ${action}`],
-          ];
-          for (const [query = '', expected = ''] of cases) {
-            expect(compileQuery(query).params).toHaveProperty('q0');
-            expect(compileQuery(removeTerm(query, 'outcome')), query).toEqual(compileQuery(expected));
+  it('removes unrelated operands without changing what the remaining query compiles to', () => {
+    const selectors = ['record:page:7', formatRecordTerm('page', 'A  B*'), 'record:(page:7 OR site:/x/)'];
+    const actions = ['action:booked', '- action:booked', 'NOT action:(booked OR paid)', 'NOT -action:/book.*/', '"action":booked'];
+    const outcomes = ['outcome:failure', '-outcome:failure', '- outcome:(failure OR denied)', 'NOT outcome:failure', 'NOT - outcome:failure'];
+    for (const record of selectors) {
+      for (const action of actions) {
+        for (const facet of outcomes) {
+          for (const and of ['', 'AND ']) {
+            const cases = [
+              [`${record} OR ${facet} ${and}${action}`, `${record} OR ${action}`, true],
+              [`${record} ${and}${facet} OR ${action}`, `${record} OR ${action}`, true],
+              [`${record} OR ${facet} OR ${action}`, `${record} OR ${action}`, true],
+              [`${record} ${and}${facet} ${and}${action}`, `${record} ${and}${action}`, false],
+              [`(${record} OR (${facet})) ${and}${action}`, `(${record}) ${and}${action}`, false],
+              [`${record} OR NOT (- (${facet}) AND ${action})`, `${record} OR NOT (${action})`, true],
+            ] as const;
+            for (const [query, expected, topLevelOr] of cases) {
+              expect(compileQuery(query).params, query).toHaveProperty('q0');
+              expect(compileQuery(removeTerm(query, 'outcome')), query).toEqual(compileQuery(expected));
+              const narrowed = `${topLevelOr ? `(${query})` : query} AND severity:warning`;
+              expect(compileQuery(includeTerm(query, 'severity', 'warning')), query).toEqual(compileQuery(narrowed));
+            }
           }
         }
       }
     }
+  });
+
+  it('keeps a dash parsed as field-name data from becoming a negation at a splice', () => {
+    const q = '(outcome:failure)-action:booked';
+    expect(compileQuery(removeTerm(q, 'outcome'))).toEqual(compileQuery('"-action":booked'));
+  });
+
+  it('uses the effective polarity of standalone and attached negations when toggling a value', () => {
+    expect(toggleTerm('- outcome:failure action:booked', 'outcome', 'failure', 'exclude')).toBe('action:booked');
+    expect(toggleTerm('NOT -outcome:failure action:booked', 'outcome', 'failure', 'include')).toBe('action:booked');
+    // The server rejects !field:value and the editor offers a dialect fix before submission.
+    expect(removeTerm('!outcome:failure action:booked', 'outcome')).toBe('!outcome:failure action:booked');
   });
 
   it('removes a whole OR group without leaving dangling syntax', () => {

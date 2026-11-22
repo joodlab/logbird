@@ -1,20 +1,16 @@
 import {
   decodeRecordPair,
-  QUERY_DIALECT_PREFIX,
+  failQuery as fail,
+  type ParsedQueryToken,
+  parseQueryExpression,
   QUERY_FIELDS,
-  type QueryErrorDetails,
-  readQueryValue,
-  scanBareRecordValue,
+  type QueryAtom,
+  type QueryExpression,
+  type QuerySyntaxToken,
+  RECORD_HINT,
 } from '@logbird/contracts';
-export class QueryError extends Error {
-  constructor(
-    message: string,
-    readonly details: QueryErrorDetails,
-  ) {
-    super(message);
-    this.name = 'QueryError';
-  }
-}
+
+export { QueryError } from '@logbird/contracts';
 export const columns: Record<string, string> = Object.fromEntries(
   QUERY_FIELDS.flatMap(({ aliases, column, key }) => (column ? [key, ...(aliases ?? [])].map((field) => [field, column]) : [])),
 );
@@ -29,120 +25,25 @@ export function recordTargetPredicate(type: string, id: string, index?: number) 
   };
 }
 
-const RECORD_HINT = 'Use record:<type>:<id>, for example record:booking:bk_1042';
-type ParsedToken = { kind: string; value: string; start: number; end: number };
-type Token = ParsedToken & { wildcard?: boolean };
 export type Term = { field: string; value: string; negate: boolean; start: number; end: number };
-function fail(reason: QueryErrorDetails['reason'], start: number, end: number, hint: string): never {
-  throw new QueryError(reason === 'syntax' ? `Invalid query syntax: ${hint}` : hint, { lang: 'query', reason, start, end, hint });
-}
-function queryLexer(q: string) {
-  if (Buffer.byteLength(q) > 4096) fail('too_complex', 0, q.length, 'Query exceeds 4096 bytes');
-  let i = 0;
-  return (record = false): Token | undefined => {
-    while (i < q.length && /\s/.test(q[i]!)) i++;
-    if (i === q.length) return undefined;
-    // Only inspect outside quoted/regex tokens, so literal punctuation stays literal.
-    const dialect = QUERY_DIALECT_PREFIX.exec(q.slice(i));
-    if (dialect) {
-      const text = dialect[1]
-        ? `${dialect[2] === '!=' ? '-' : ''}${dialect[1]}:${dialect[3]}`
-        : dialect[4]
-          ? '-'
-          : dialect[5] === '&&'
-            ? ' AND '
-            : ' OR ';
-      throw new QueryError('Use Logbird query syntax', {
-        lang: 'query',
-        reason: 'syntax',
-        start: i,
-        end: i + dialect[0].length,
-        hint: `Use ${text.trim()}`,
-        replacement: {
-          start: i,
-          end: i + dialect[0].length,
-          text: dialect[5] ? `${i && !/\s/.test(q[i - 1]!) ? ' ' : ''}${text.trim()}${q[i + 2] && !/\s/.test(q[i + 2]!) ? ' ' : ''}` : text,
-        },
-      });
-    }
-    const start = i,
-      c = q[i++]!;
-    if ('()[]{}<>'.includes(c) || (!record && c === ':')) {
-      const v = (c === '<' || c === '>') && q[i] === '=' ? c + q[i++] : c;
-      return { kind: v, value: v, start, end: i };
-    }
-    if (!record && c === '-' && (start === 0 || /[\s(]/.test(q[start - 1]!))) {
-      return { kind: 'NOT', value: c, start, end: i };
-    }
-    if (c === '"' || c === '/') {
-      let value = '',
-        closed = false;
-      while (i < q.length) {
-        const ch = q[i++]!;
-        if (ch === c) {
-          closed = true;
-          break;
-        }
-        if (ch === '\\' && i < q.length) {
-          const next = q[i++]!;
-          if (c === '/') value += next === '/' ? next : `\\${next}`;
-        } else if (c === '/') value += ch;
-      }
-      if (!closed) fail('syntax', start, i, c === '"' ? 'Unterminated quoted query' : 'Unterminated regex');
-      if (c === '/') return { kind: 'regex', value, start, end: i };
-      return { kind: 'value', ...readQueryValue(q.slice(start, i)), start, end: i };
-    }
-    if (record) i = scanBareRecordValue(q, start);
-    else while (i < q.length && !/[\s():[\]{}<>]/.test(q[i]!) && !['&&', '||'].includes(q.slice(i, i + 2))) i++;
-    const raw = q.slice(start, i);
-    return { kind: !record && ['AND', 'OR', 'NOT', 'TO'].includes(raw) ? raw : 'value', ...readQueryValue(raw), start, end: i };
-  };
-}
-// Parsing and compilation share spans; no user value is emitted into SQL.
-function compile(q: string, now: number, tokens?: ParsedToken[]) {
-  const nextToken = queryLexer(q);
+
+// Parse with the same grammar used by the console. All data values are bound as parameters.
+function compile(q: string, now: number, tokens?: ParsedQueryToken[]) {
   const params: Record<string, string | number> = {};
-  let buffered: Token | undefined;
-  let terms = 0,
-    parameter = 0,
-    recordIndex = 0;
-  const peek = (record = false) => {
-    buffered ??= nextToken(record);
-    return buffered;
-  };
-  const take = (record = false) => {
-    const token = peek(record);
-    buffered = undefined;
-    if (token && tokens) {
-      const { kind, value: text, start, end } = token;
-      tokens.push({ kind, value: text, start, end });
-    }
-    return token;
-  };
-  const error = (hint: string, t = peek()) => fail('syntax', t?.start ?? q.length, t?.end ?? q.length, hint);
-  const fieldName = (t: Token) => (q[t.start] === '"' || t.kind === 'regex' ? t.value : q.slice(t.start, t.end));
+  let terms = 0;
+  let parameter = 0;
+  let recordIndex = 0;
   const bind = (value: string | number, type = 'String') => {
     const key = `q${parameter++}`;
     params[key] = value;
     return `{${key}:${type}}`;
   };
-  function value(joinColons = true, record = false): Token {
-    const t = take(record);
-    if (!t || !['value', 'regex'].includes(t.kind)) return error(record ? RECORD_HINT : 'Expected value', t);
-    if (joinColons && !record) {
-      let afterColon = false;
-      for (let next = peek(); next?.start === t.end; next = peek()) {
-        if (next.kind !== ':' && !(afterColon && next.kind === 'value')) break;
-        t.value += next.value;
-        t.wildcard = next.wildcard;
-        t.end = next.end;
-        afterColon = next.kind === ':';
-        take();
-      }
-    }
-    return t;
-  }
-  function predicate(field: string, token: Token, operator = '=', countTerm = true): string {
+  function predicate(
+    field: string,
+    token: Omit<QuerySyntaxToken, 'kind'> & { kind: QuerySyntaxToken['kind'] | 'presence' },
+    operator = '=',
+    countTerm = true,
+  ): string {
     if (countTerm && ++terms > 64) fail('too_complex', token.start, token.end, 'Query exceeds 64 terms');
     if (field === 'record') {
       if (token.kind === 'presence' || (token.wildcard && token.value === '*' && q[token.start] !== '"')) return 'notEmpty(target_ids)';
@@ -211,107 +112,71 @@ function compile(q: string, now: number, tokens?: ParsedToken[]) {
     if (!col) return `mapContains(attributes,${attrParameter}) AND (${test})`;
     return test;
   }
-  function fieldValue(field: string, depth: number): string {
-    const record = field === 'record';
-    const t = peek(record);
-    if (!t) return error(record ? RECORD_HINT : 'Expected field value');
-    if (record && ['>', '>=', '<', '<=', '[', '{'].includes(t.kind)) fail('type', t.start, t.end, RECORD_HINT);
-    if (['>', '>=', '<', '<='].includes(t.kind)) {
-      take();
-      return predicate(field, value(), t.kind);
-    }
-    if (t.kind === '[' || t.kind === '{') {
-      take();
-      const lower = value();
-      if (peek()?.kind !== 'TO') error('Expected TO');
-      take();
-      const upper = value(),
-        close = peek();
-      if (!close || ![']', '}'].includes(close.kind)) error('Expected closing range bracket');
-      take();
-      const parts: string[] = [];
-      const openLower = lower.wildcard && lower.value === '*';
-      const openUpper = upper.wildcard && upper.value === '*';
-      if (!openLower) parts.push(predicate(field, lower, t.kind === '[' ? '>=' : '>'));
-      if (!openUpper) parts.push(predicate(field, upper, close?.kind === ']' ? '<=' : '<', openLower));
-      return parts.length ? parts.join(' AND ') : predicate(field, lower);
-    }
-    if (t.kind === '(') {
-      if (depth >= 16) fail('too_complex', t.start, t.end, 'Query exceeds 16 nesting levels');
-      take();
-      const members = [value(true, record)];
-      while (peek()?.kind === 'OR') {
-        take();
-        members.push(value(true, record));
+  function fieldValue(atom: Extract<QueryAtom, { kind: 'field' }>): string {
+    const { field, value } = atom;
+    switch (value.kind) {
+      case 'value':
+        return predicate(field, value.token);
+      case 'presence':
+        return predicate(field, { ...value.token, kind: field === 'record' ? 'presence' : value.token.kind, value: '*', wildcard: true });
+      case 'compare':
+        return predicate(field, value.token, value.op);
+      case 'range': {
+        const { lower, upper, open, close } = value;
+        const parts: string[] = [];
+        const openLower = lower.wildcard && lower.value === '*';
+        const openUpper = upper.wildcard && upper.value === '*';
+        if (!openLower) parts.push(predicate(field, lower, open === '[' ? '>=' : '>'));
+        if (!openUpper) parts.push(predicate(field, upper, close === ']' ? '<=' : '<', openLower));
+        return parts.length ? parts.join(' AND ') : predicate(field, lower);
       }
-      if (peek()?.kind !== ')') error('Expected closing value group parenthesis');
-      take();
-      const info = QUERY_FIELDS.find((f) => f.key === field || f.aliases?.includes(field));
-      if (info && ['string', 'text'].includes(info.type) && members.every((m) => m.kind === 'value' && !m.wildcard)) {
-        terms += members.length;
-        if (terms > 64) fail('too_complex', t.start, peek()?.start ?? q.length, 'Query exceeds 64 terms');
-        return `${info.column} IN (${members.map((m) => bind(m.value)).join(',')})`;
+      case 'group': {
+        const info = QUERY_FIELDS.find((f) => f.key === field || f.aliases?.includes(field));
+        const { members } = value;
+        if (info && ['string', 'text'].includes(info.type) && members.every((m) => m.kind === 'value' && !m.wildcard)) {
+          terms += members.length;
+          if (terms > 64) fail('too_complex', atom.valueStart, atom.end, 'Query exceeds 64 terms');
+          return `${info.column} IN (${members.map((m) => bind(m.value)).join(',')})`;
+        }
+        return members.map((m) => `(${predicate(field, m)})`).join(' OR ');
       }
-      return members.map((m) => `(${predicate(field, m)})`).join(' OR ');
+      default:
+        return value satisfies never;
     }
-    return predicate(field, value(true, record));
   }
-  function atom(depth: number): string {
-    const t = peek();
-    if (!t) return error('Expected term');
-    if (t.kind === 'NOT') {
-      take();
-      return `NOT (${atom(depth)})`;
-    }
-    if (t.kind === '(') {
-      if (depth >= 16) fail('too_complex', t.start, t.end, 'Query exceeds 16 nesting levels');
-      take();
-      const sql = disjunction(depth + 1);
-      if (peek()?.kind !== ')') error('Expected closing parenthesis');
-      take();
-      return `(${sql})`;
-    }
-    const v = value(false);
-    if (peek()?.kind === ':') {
-      take();
-      const field = fieldName(v);
-      if (field === '_exists_') {
-        const name = value(false);
-        const operand = fieldName(name);
-        return `(${predicate(operand, { ...name, kind: operand === 'record' ? 'presence' : name.kind, value: '*', wildcard: true })})`;
+
+  function atom(node: QueryAtom): string {
+    switch (node.kind) {
+      case 'not':
+        return `NOT (${atom(node.operand)})`;
+      case 'group':
+        return `(${disjunction(node.expression)})`;
+      case 'field':
+        return `(${fieldValue(node)})`;
+      case 'text': {
+        const v = node.token;
+        if (++terms > 64) fail('too_complex', v.start, v.end, 'Query exceeds 64 terms');
+        if (v.kind === 'regex') return `(${predicate('description', v, '=', false)})`;
+        const p = bind(v.value);
+        return /^[\p{L}\p{N}]+$/u.test(v.value) ? `(hasToken(search_text, lowerUTF8(${p})))` : `(position(search_text, lowerUTF8(${p})) > 0)`;
       }
-      return `(${fieldValue(field, depth)})`;
+      default:
+        return node satisfies never;
     }
-    if (++terms > 64) fail('too_complex', v.start, v.end, 'Query exceeds 64 terms');
-    if (v.kind === 'regex') return `(${predicate('description', v, '=', false)})`;
-    const p = bind(v.value);
-    return /^[\p{L}\p{N}]+$/u.test(v.value) ? `(hasToken(search_text, lowerUTF8(${p})))` : `(position(search_text, lowerUTF8(${p})) > 0)`;
   }
-  function conjunction(depth: number): string {
-    const parts = [atom(depth)];
-    while (peek() && !['OR', ')'].includes(peek()?.kind ?? '')) {
-      if (peek()?.kind === 'AND') take();
-      parts.push(atom(depth));
-    }
-    return parts.join(' AND ');
+
+  function disjunction(expression: QueryExpression): string {
+    const parts = expression.map((branch) => branch.map((term) => atom(term.atom)).join(' AND '));
+    return parts.length > 1 ? `(${parts.join(' OR ')})` : (parts[0] ?? '1');
   }
-  function disjunction(depth: number): string {
-    const parts = [conjunction(depth)];
-    while (peek()?.kind === 'OR') {
-      take();
-      parts.push(conjunction(depth));
-    }
-    return parts.length > 1 ? `(${parts.join(' OR ')})` : parts[0]!;
-  }
-  const sql = peek() ? disjunction(0) : '1';
-  if (peek()) error('Unexpected token');
-  return { sql, params };
+
+  return { sql: disjunction(parseQueryExpression(q, tokens)), params };
 }
 export function compileQuery(q = '', now = Date.now()) {
   return compile(q, now);
 }
 export function parseQuery(q = '') {
-  const tokens: ParsedToken[] = [];
+  const tokens: ParsedQueryToken[] = [];
   compile(q, Date.now(), tokens);
   return tokens;
 }

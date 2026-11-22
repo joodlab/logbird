@@ -248,8 +248,8 @@ export type SqlCompletion =
   | { kind: 'operand'; column: string }
   | { kind: 'none' };
 
-function unquoteSql(raw: string): string {
-  return raw.replace(/\\(.)/g, '$1').replaceAll("''", "'");
+export function unquoteSql(raw: string): string {
+  return raw.replace(/\\([\s\S])/g, (_, escaped: string) => (escaped === 'r' ? '\r' : escaped)).replaceAll("''", "'");
 }
 
 /** A column reference ending at solid index `k`: an allowed identifier or `attributes['key']`. */
@@ -395,7 +395,7 @@ export function sqlCallAt(q: string, caret: number): { name: string; arg: number
 
 /** ClickHouse single-quoted string literal. */
 export function sqlString(value: string): string {
-  return `'${value.replace(/[\\']/g, '\\$&')}'`;
+  return `'${value.replace(/[\\']/g, '\\$&').replaceAll('\r', '\\r')}'`;
 }
 
 /**

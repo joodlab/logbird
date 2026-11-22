@@ -5,7 +5,15 @@
  * query bar, drive autocomplete, and add/remove filter terms from facets, charts and entity pages
  * without destroying what the user typed.
  */
-import { quoteQueryValue, readQueryValue, scanBareRecordValue } from '@logbird/contracts';
+import {
+  parseQueryExpression,
+  type QueryAtom,
+  QueryError,
+  type QueryExpression,
+  quoteQueryValue,
+  readQueryValue,
+  scanBareRecordValue,
+} from '@logbird/contracts';
 import { attributeKey, coreField } from './query-catalog';
 
 export type TokenKind = 'field' | 'text' | 'phrase' | 'regex' | 'operator' | 'paren' | 'space';
@@ -196,115 +204,124 @@ export function formatTerm(field: string, value: string, negated = false): strin
   return `${negated ? '-' : ''}${field}:${quoteIfNeeded(value)}`;
 }
 
-/** True when `q` has an `OR` outside every group. Adjacent terms bind tighter than `OR` (`a b OR c` = `(a b) OR c`). */
-export function hasTopLevelOr(q: string): boolean {
-  let depth = 0;
-  for (const t of tokenize(q)) {
-    if (t.kind === 'paren') depth += t.raw === ')' ? -1 : 1;
-    else if (depth === 0 && t.kind === 'operator' && t.raw === 'OR') return true;
+function editableExpression(q: string): QueryExpression | null {
+  try {
+    return parseQueryExpression(q);
+  } catch (error) {
+    if (error instanceof QueryError) return null;
+    throw error;
   }
-  return false;
 }
 
-/**
- * `a` AND `b`, as one query. A side with a top-level `OR` is parenthesised, so the other side constrains all of it:
- * `andQuery('impersonator:x', 'outcome:failure OR outcome:denied')` → `impersonator:x (outcome:failure OR outcome:denied)`.
- */
+/** True when the query has an OR outside every group. */
+export function hasTopLevelOr(q: string): boolean {
+  return (editableExpression(q)?.length ?? 0) > 1;
+}
+
+/** AND two queries, wrapping a top-level OR so both sides constrain the whole search. */
 export function andQuery(a: string, b: string): string {
   const x = a.trim();
   const y = b.trim();
-  if (!x) return y;
-  if (!y) return x;
+  if (!x || !y) return x || y;
   const wrap = (s: string) => (hasTopLevelOr(s) ? `(${s})` : s);
   return `${wrap(x)} ${wrap(y)}`;
 }
 
-/** Terms outside every group (`depth 0`), i.e. the ones that constrain the whole query when it has no top-level OR. */
-export function topLevelFieldTerms(q: string): QueryToken[] {
-  let depth = 0;
-  const out: QueryToken[] = [];
-  for (const t of tokenize(q)) {
-    if (t.kind === 'paren') depth += t.raw === ')' ? -1 : 1;
-    else if (depth === 0 && t.kind === 'field') out.push(t);
-  }
-  return out;
+function fieldToken(q: string, node: Extract<QueryAtom, { kind: 'field' }>, start: number, negated: boolean): QueryToken {
+  const { field, end, value, valueStart } = node;
+  const raw = q.slice(valueStart, end);
+  const token = value.kind === 'value' || value.kind === 'compare' ? value.token : undefined;
+  let valueKind: ValueKind;
+  if (value.kind === 'presence') valueKind = 'plain';
+  else if (value.kind !== 'value') valueKind = value.kind;
+  else if (value.token.kind === 'regex') valueKind = 'regex';
+  else valueKind = raw.startsWith('"') ? 'quoted' : 'plain';
+  return {
+    kind: 'field',
+    raw: q.slice(start, end),
+    start,
+    end,
+    negated,
+    field,
+    value: value.kind === 'presence' ? '*' : (token?.value ?? raw),
+    wildcard: value.kind === 'presence' || (field === 'record' ? raw === '*' : token?.wildcard),
+    valueKind,
+    valueStart,
+    op: value.kind === 'compare' ? value.op : undefined,
+  };
 }
 
-/** Drop operands within each AND branch, then drop empty branches from the enclosing OR. */
+function unwrapNot(atom: QueryAtom) {
+  let node = atom;
+  let negated = false;
+  while (node.kind === 'not') {
+    negated = !negated;
+    node = node.operand;
+  }
+  return { node, negated };
+}
+
+/** Drop matched operands with their unary operators, and omit Boolean branches emptied by the edit. */
 export function removeTokens(q: string, test: (t: QueryToken) => boolean): string {
-  const tokens = tokenize(q).filter((t) => t.kind !== 'space');
-  let i = 0;
-  const isOperator = (raw: string) => tokens[i]?.kind === 'operator' && tokens[i]?.raw === raw;
-  function expression(depth: number): string | null {
-    if (depth > 16) return null;
-    const branches: string[] = [];
-    for (;;) {
-      const terms: string[] = [];
-      let connector = '';
-      let previousEnd: number | undefined;
-      for (;;) {
-        const start = tokens[i]?.start;
-        let not = '';
-        while (isOperator('NOT')) {
-          not += 'NOT ';
-          i += 1;
-        }
-        const token = tokens[i++];
-        if (!token || token.kind === 'operator' || token.raw === ')') return null;
-        let term = '';
-        if (token.kind === 'paren') {
-          const group = expression(depth + 1);
-          if (group === null || tokens[i++]?.raw !== ')') return null;
-          if (group) term = `${token.raw}${group})`;
-        } else if (!test(token)) {
-          term = token.raw;
-        }
-        if (term) {
-          const separator = terms.length && (connector || previousEnd !== start) ? ' ' : '';
-          terms.push(`${separator}${terms.length ? connector : ''}${not}${term}`);
-          previousEnd = tokens[i - 1]?.end;
-        }
-        if (isOperator('AND')) {
-          i += 1;
-          connector = 'AND ';
-        } else {
-          connector = '';
-          if (!tokens[i] || tokens[i]?.raw === ')' || isOperator('OR')) break;
-        }
-      }
-      if (terms.length) branches.push(terms.join(''));
-      if (!isOperator('OR')) break;
-      i += 1;
+  let removed = false;
+  function rewriteAtom(atom: QueryAtom): string {
+    const { node, negated } = unwrapNot(atom);
+    const prefix = q.slice(atom.start, node.start);
+    if (node.kind === 'group') {
+      const inner = rewrite(node.expression);
+      return inner ? `${prefix}(${inner})` : '';
     }
-    return branches.join(' OR ');
+    if (node.kind === 'field' && test(fieldToken(q, node, atom.start, negated))) {
+      removed = true;
+      return '';
+    }
+    // After a splice a bare leading '-' could become unary NOT. Quote it when the parser read it as data.
+    const key = node.kind === 'field' ? node.key : node.kind === 'text' ? node.token : undefined;
+    if (q[node.start] === '-' && key) return prefix + quoteQueryValue(node.kind === 'field' ? node.field : key.value) + q.slice(key.end, node.end);
+    return q.slice(atom.start, atom.end);
   }
-  if (!tokens.length) return '';
-  const result = expression(0);
-  return result !== null && i === tokens.length ? result : q.trim();
+
+  function rewrite(expression: QueryExpression): string {
+    return expression
+      .map((branch) => {
+        let text = '';
+        let previousEnd: number | undefined;
+        for (const { atom, explicitAnd } of branch) {
+          const term = rewriteAtom(atom);
+          if (!term) continue;
+          if (text) {
+            // An inserted separator must also avoid forming a foreign-dialect "key = value".
+            if (explicitAnd || (previousEnd !== atom.start && /^(?:=|!=)/.test(term))) text += ' AND ';
+            else if (previousEnd !== atom.start) text += ' ';
+          }
+          text += term;
+          previousEnd = atom.end;
+        }
+        return text;
+      })
+      .filter(Boolean)
+      .join(' OR ');
+  }
+
+  const expression = editableExpression(q);
+  const edited = expression && rewrite(expression);
+  return removed && edited !== null ? edited : q.trim();
 }
 
-/** Field terms with their effective polarity: a leading `-` or a unary `NOT` before them (not both) negates. */
-export function fieldTermsWithPolarity(q: string): { token: QueryToken; negated: boolean }[] {
-  const tokens = tokenize(q);
-  const out: { token: QueryToken; negated: boolean }[] = [];
-  tokens.forEach((t, i) => {
-    if (t.kind !== 'field') return;
-    let j = i - 1;
-    let negated = t.negated;
-    while (j >= 0) {
-      const previous = tokens[j--];
-      if (previous?.kind === 'space') continue;
-      if (previous?.kind !== 'operator' || previous.raw !== 'NOT') break;
-      negated = !negated;
+/** Field operands with the effective polarity of their directly attached unary operators. */
+export function fieldTerms(q: string, topLevelOnly = false): QueryToken[] {
+  const fields: QueryToken[] = [];
+  function visit(expression: QueryExpression) {
+    for (const branch of expression) {
+      for (const { atom } of branch) {
+        const { node, negated } = unwrapNot(atom);
+        if (node.kind === 'field') fields.push(fieldToken(q, node, atom.start, negated));
+        else if (node.kind === 'group' && !topLevelOnly) visit(node.expression);
+      }
     }
-    out.push({ token: t, negated });
-  });
-  return out;
-}
-
-/** Field terms present in the query (non-space tokens only). */
-export function fieldTerms(q: string): QueryToken[] {
-  return tokenize(q).filter((t) => t.kind === 'field');
+  }
+  visit(editableExpression(q) ?? []);
+  return fields;
 }
 
 /** Only plain `field:value` / `field:"value"` terms count as a facet value being selected. */

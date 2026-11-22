@@ -1,4 +1,12 @@
-import { type QueryLang, SQL_MAX_QUERY_BYTES } from '@logbird/contracts';
+import {
+  type ParsedQueryToken,
+  parseQueryExpression,
+  QueryError,
+  type QueryExpression,
+  type QueryLang,
+  quoteQueryValue,
+  SQL_MAX_QUERY_BYTES,
+} from '@logbird/contracts';
 import { Kbd } from '@logbird/ui/components/ui/kbd';
 import { SegmentedControl, SegmentedControlItem } from '@logbird/ui/components/ui/segmented-control';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@logbird/ui/components/ui/tooltip';
@@ -15,6 +23,7 @@ import type { QueryProblem } from '@/lib/query-error';
 import { applyFixes, autoFixes } from '@/lib/query-lint';
 import { translateQueryToSql } from '@/lib/query-translate';
 import { useRecentQueries } from '@/lib/recent-queries';
+import { tokenizeSql } from '@/lib/sql-language';
 import { HighlightedText } from './highlighted';
 import { QueryHelp } from './query-help';
 import { SuggestionPanel } from './suggestion-panel';
@@ -79,20 +88,41 @@ const TEXT = 'px-2.5 py-[calc((var(--query-bar-height)-2px-1.25rem)/2)] font-mon
 /** A 16px icon centred on the first line. */
 const FIRST_LINE_ICON = 'mt-[calc((var(--query-bar-height)-2px-1rem)/2)]';
 
-/** Textareas normalize CR. Display it as a single character to keep caret and query offsets aligned. */
-const displayQuery = (draft: string) => draft.replaceAll('\r', '␍');
-
-function applyTextareaEdit(draft: string, displayed: string, edited: string, caret: number): string {
-  if (displayed === draft) return edited;
-  let start = 0;
-  let oldEnd = displayed.length;
-  let newEnd = edited.length;
-  while (newEnd > caret && oldEnd > 0 && displayed[oldEnd - 1] === edited[newEnd - 1]) {
-    oldEnd -= 1;
-    newEnd -= 1;
+/** Preserve the meaning of saved queries with literal CRs before passing them to a textarea. */
+function editorQuery(value: string, lang: QueryLang): string {
+  if (!value.includes('\r')) return value;
+  let literals: { start: number; end: number }[];
+  const regexKeys = new Map<number, string>();
+  if (lang === 'sql') {
+    literals = tokenizeSql(value).filter(({ kind }) => kind === 'string' || kind === 'quotedIdent');
+  } else {
+    const tokens: ParsedQueryToken[] = [];
+    try {
+      function collectRegexKeys(expression: QueryExpression) {
+        for (const branch of expression) {
+          for (const { atom } of branch) {
+            let node = atom;
+            while (node.kind === 'not') node = node.operand;
+            if (node.kind === 'group') collectRegexKeys(node.expression);
+            else if (node.kind === 'field' && node.key.kind === 'regex' && node.key.value.includes('\r'))
+              regexKeys.set(node.key.start, quoteQueryValue(node.key.value));
+          }
+        }
+      }
+      collectRegexKeys(parseQueryExpression(value, tokens));
+    } catch (error) {
+      if (!(error instanceof QueryError)) throw error;
+    }
+    literals = tokens.filter(({ start, kind }) => (kind === 'value' && value[start] === '"') || kind === 'regex');
   }
-  while (start < oldEnd && start < newEnd && displayed[start] === edited[start]) start += 1;
-  return draft.slice(0, start) + edited.slice(start, newEnd) + draft.slice(oldEnd);
+  let start = 0;
+  let text = '';
+  for (const literal of literals) {
+    text += value.slice(start, literal.start).replace(/\r\n?/g, '\n');
+    text += value.slice(literal.start, literal.end).replace(/\\([\s\S])|\r/g, (raw, escaped) => (raw === '\r' || escaped === '\r' ? '\\r' : raw));
+    start = literal.end;
+  }
+  return text + value.slice(start).replace(/\r\n?/g, '\n');
 }
 
 /**
@@ -122,8 +152,8 @@ export function QueryInput({
   className,
   ref,
 }: QueryInputProps) {
-  const [draft, setDraft] = useState(value);
-  const displayed = displayQuery(draft);
+  const editorValue = editorQuery(value, lang);
+  const [draft, setDraft] = useState(editorValue);
   const [caret, setCaret] = useState(0);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -137,7 +167,7 @@ export function QueryInput({
 
   useImperativeHandle(ref, () => ({ focus: () => inputRef.current?.focus(), element: () => inputRef.current }), []);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-sync the draft when the submitted query or its language changes
-  useEffect(() => setDraft(value), [value, lang]);
+  useEffect(() => setDraft(editorValue), [editorValue, lang]);
 
   const recent = useRecentQueries(projectId);
   const views = useQuery({ ...viewsQuery(projectId), enabled: showViews && open, staleTime: 60_000 });
@@ -334,8 +364,8 @@ export function QueryInput({
     }
   };
 
-  const showProblem = Boolean(problem) && draft === value;
-  const error = showProblem ? { start: problem?.details?.start ?? null, end: problem?.details?.end ?? null } : null;
+  const showProblem = Boolean(problem) && draft === editorValue;
+  const error = showProblem && draft === value ? { start: problem?.details?.start ?? null, end: problem?.details?.end ?? null } : null;
 
   return (
     <div className={cn('relative min-w-0 flex-1', SIZE[size], INNER, className)}>
@@ -391,14 +421,7 @@ export function QueryInput({
           <div aria-hidden className={cn(TEXT, 'pointer-events-none [grid-area:1/1]')}>
             {draft ? (
               <>
-                <HighlightedText
-                  displayValue={displayed}
-                  error={error}
-                  lang={lang}
-                  typingAt={open ? caret : undefined}
-                  value={draft}
-                  warnings={completions.fixes}
-                />
+                <HighlightedText error={error} lang={lang} typingAt={open ? caret : undefined} value={draft} warnings={completions.fixes} />
                 {/* Keep a trailing newline measurable so the mirror grows with the textarea. */}
                 {'​'}
               </>
@@ -427,7 +450,7 @@ export function QueryInput({
             onBlur={() => setTimeout(() => setOpen(false), 120)}
             onChange={(e) => {
               const { value: edited, selectionStart } = e.currentTarget;
-              setDraft(applyTextareaEdit(draft, displayed, edited, selectionStart));
+              setDraft(edited);
               setCaret(selectionStart);
               setNavigated(false);
               setOpen(true);
@@ -439,7 +462,7 @@ export function QueryInput({
             role="combobox"
             rows={1}
             spellCheck={false}
-            value={displayed}
+            value={draft}
           />
         </div>
         <div className="flex shrink-0 items-center gap-0.5 pe-(--control-group-inset) pt-(--control-group-inset)">

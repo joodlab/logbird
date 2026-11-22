@@ -32,14 +32,14 @@ export function readQueryValue(raw: string): { value: string; wildcard: boolean 
   const body = quoted ? raw.slice(1, raw.endsWith('"') && raw.length > 1 ? -1 : undefined) : raw;
   const wildcard = body.endsWith('*') && /(?:^|[^\\])(?:\\\\)*\*$/.test(body);
   const value = quoted
-    ? body.replace(/\\([\s\S])/g, '$1')
+    ? body.replace(/\\([\s\S])/g, (_, escaped: string) => (escaped === 'r' ? '\r' : escaped))
     : body.replace(/(\\+)\*/g, (match, slashes: string) => (slashes.length % 2 === 0 ? match : match.slice(1)));
   return { value, wildcard };
 }
 
-/** Quote an exact query value, keeping whitespace literal. */
+/** Quote an exact query value, escaping carriage returns so the text survives editors and the clipboard. */
 export function quoteQueryValue(value: string): string {
-  return `"${value.replace(/["\\*]/g, '\\$&')}"`;
+  return `"${value.replace(/["\\*]/g, '\\$&').replaceAll('\r', '\\r')}"`;
 }
 
 /** Quotes use standard query escaping around the already encoded pair. */

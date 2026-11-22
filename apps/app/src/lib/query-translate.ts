@@ -5,7 +5,7 @@
  * Only constructs with an unambiguous SQL equivalent are translated; anything else (free text, phrases,
  * the `description` text field) returns null so the caller can ask instead of guessing.
  */
-import { decodeRecordPair, QUERY_DIALECT_PREFIX, readQueryValue, scanBareRecordValue } from '@logbird/contracts';
+import { decodeRecordPair, QUERY_DIALECT_PREFIX, queryFieldName, readQueryValue, scanBareRecordValue } from '@logbird/contracts';
 import { attributeKey, coreField } from './query-catalog';
 import { type QueryToken, tokenize } from './query-language';
 import { sqlString } from './sql-language';
@@ -106,8 +106,9 @@ function termToSql(token: QueryToken): string | null {
   if (token.field === 'record') return recordTermToSql(token, raw);
   if (token.field === '_exists_') {
     if (!isSimpleOperand(token, raw, start) || (token.valueKind === 'plain' && raw.includes(':'))) return null;
-    if (value === 'record') return 'notEmpty(target_ids)';
-    const target = targetFor(value);
+    const field = queryFieldName(raw);
+    if (field === 'record') return 'notEmpty(target_ids)';
+    const target = targetFor(field);
     return target ? attributePredicate(target, presence(target)) : null;
   }
   const t = targetFor(token.field ?? '');

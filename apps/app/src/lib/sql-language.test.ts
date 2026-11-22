@@ -316,6 +316,16 @@ describe('translateQueryToSql', () => {
     expect(translateQueryToSql(`${key}:(value OR "*")`)).toBe(`(has(${column}, 'value') OR ${presence})`);
   });
 
+  it.each([
+    [String.raw`_exists_:attr.tag\*`, String.raw`tag\*`],
+    [String.raw`_exists_:"attr.tag\*"`, 'tag*'],
+  ])('uses the same escaped attribute key for %s in both modes', (q, field) => {
+    const compiled = compileQuery(q);
+    expect(compiled.params).toEqual({ q0: field });
+    const key = sqlString(field);
+    expect(translateQueryToSql(q)).toBe(`(mapContains(attributes, ${key}) AND attributes[${key}] != '')`);
+  });
+
   it('preserves presence alongside exact records and on scalar or attribute filters', () => {
     const q = 'record:page:7 target.name:"*"';
     expect(translateQueryToSql(q)).toBe(
