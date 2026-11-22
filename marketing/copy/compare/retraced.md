@@ -37,7 +37,7 @@ path: /compare/retraced
   | Programmatic read | `GET /v1/events` with a project read key | Enterprise API (GraphQL) for end customers [S15] |
   | Storage | ClickHouse for events, Postgres for metadata | Postgres; optional Elasticsearch; NSQ queue [S4, S13] |
   | Pricing | Self-host free (MIT); Cloud pricing not set | No pricing page found [S8] |
-  | Latest release | `<latest release>`; first release v0.1.0, 9 Nov 2026 | v1.13.1, 6 Nov 2024; latest commit on `main` 26 Aug 2025; not archived [S16, S17] |
+  | Latest release | `<latest release>`, its date; first release `<first release>`, its date (from the release list) | v1.13.1, 6 Nov 2024; latest commit on `main` 26 Aug 2025; not archived [S16, S17] |
 
 - **visual:** none
 
@@ -49,7 +49,7 @@ path: /compare/retraced
   - You want to **embed an audit log viewer in your own React app**, so customers can browse their own events.
   - Your customers' IT teams need a **programmatic API of their own** to pull their events.
   - You prefer **Apache-2.0**, or you already run Postgres and Elasticsearch and want the audit log there too.
-  - You want a project with **a long release history** behind it. Logbird's first release was in November 2026.
+  - You want a project with **a long release history** behind it. Logbird's first release was `<first release>`, on its date.
 - **visual:** none
 
 ## choose-us

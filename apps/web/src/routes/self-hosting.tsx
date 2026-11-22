@@ -106,7 +106,7 @@ function SelfHostingPage() {
               <SectionHeader
                 eyebrow="Quickstart"
                 id="quickstart-title"
-                lead="You need Docker Engine and Docker Compose 2.24.4 or newer. Compose pulls four published images; nothing is compiled on your server."
+                lead="You need Docker Engine and Docker Compose 2.24.4 or newer. Compose pulls the four published Logbird role images; nothing is compiled on your server."
                 title="From clone to your first event."
               />
               <ol className="flex flex-col gap-4 text-sm leading-relaxed">
@@ -311,7 +311,7 @@ function SelfHostingPage() {
                 },
                 {
                   title: 'Pin the new version',
-                  body: 'Check out the new release tag, then set LOGBIRD_VERSION in .env to that version: the value already in .env overrides the Compose default. Run docker compose config --images and check every Logbird image shows the new tag.',
+                  body: 'Check out the release tag vX.Y.Z, then set LOGBIRD_VERSION=X.Y.Z in .env, without the v: the value already in .env overrides the Compose default. Run docker compose config --images and check all four logbird-* images end in :X.Y.Z.',
                 },
                 {
                   title: 'Pull, then start',
@@ -336,7 +336,7 @@ function SelfHostingPage() {
         <dl className="mt-10 grid gap-x-10 gap-y-2 md:grid-cols-2">
           {[
             ['High availability', 'The Compose setup is a single VM. It has no failover.'],
-            ['Published capacity numbers', "There's no published sizing guarantee yet. Size from your own measurements."],
+            ['Production sizing guarantee', "There's no published sizing guarantee yet. Size from your own measurements."],
             ['SSO', 'Sign-in is by emailed code only. SSO is on the roadmap.'],
           ].map(([term, detail]) => (
             <div className="flex flex-col gap-1 border-b py-4" key={term}>

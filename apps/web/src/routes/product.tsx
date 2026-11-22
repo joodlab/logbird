@@ -99,14 +99,14 @@ function ProductPage() {
       >
         Pick a time range, type a query, and narrow it down with facets. Drag across the chart to zoom. Click a row to open the full event. The query,
         time range and columns live in the URL, so a link opens the same search for a teammate. A relative range such as the last hour resolves when
-        they open it; share an absolute range or an export for a fixed result.
+        they open it. Share an absolute range to preserve the time window, or a downloaded export to preserve the results.
       </FeatureRow>
 
       <FeatureRow
         bullets={[
           'Fields are suggested from what your project actually sends, with how often each one appears.',
           'Errors point at the exact token and say what was expected, for example "attempt is a number".',
-          'Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 attributes and the first 2 KiB of each value. Search limits apply to the index. You can inspect the full parsed event as JSON.',
+          'Nested fields are searchable by their dotted path, up to 6 levels deep. Each event indexes up to 256 attributes, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON). Search limits apply to the index. You can inspect the full parsed event as JSON.',
         ]}
         eyebrow="Search"
         id="search"
@@ -217,7 +217,7 @@ function ProductPage() {
 
       <FeatureRow
         bullets={[
-          'Before and after values for each changed field, up to 256 changes per event.',
+          'The before and after values you send, for the first 256 changes.',
           'The causation breadcrumb, with a link to the whole operation.',
           'Context ids (request, trace, IP), the indexed attributes, and the full parsed event as JSON.',
           'Copy a link, or copy the event as a curl command.',
@@ -273,7 +273,7 @@ function ProductPage() {
         bullets={[
           'Onboarding picks up where you left off.',
           '"Send a test event" and "Load sample data" show the console before you integrate. Sample data is 2000 fictional events over seven days; it never counts as setup, and you can remove it.',
-          'A conformance score on every event, and a Fields page that lists the indexed fields your events carry and how often each appears.',
+          'A conformance score on every event, and a Fields page that shows coverage for the single-value core fields and the attributes your events carry in the selected range.',
         ]}
         eyebrow="Setup that checks itself"
         id="setup"
@@ -288,8 +288,8 @@ function ProductPage() {
         }
       >
         Send your first event and the setup page notices on its own. It then checks your integration against your real events: for actors, tenants,
-        executors, targets and operation ids it shows the coverage and links to the events missing each field. Reviewing retention and inviting your
-        team are separate checklist items.
+        executors and targets it shows the coverage and links to the events missing each one; for operation ids it shows the coverage and links to the
+        events that have one. Reviewing retention and inviting your team are separate checklist items.
       </FeatureRow>
 
       <FeatureRow

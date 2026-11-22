@@ -8,7 +8,7 @@ import { SecurityContact } from '../components/marketing/security-contact';
 import { SelfHostCta } from '../components/marketing/self-host-cta';
 import { StackedTable } from '../components/marketing/stacked-table';
 import { GITHUB_PUBLIC, GITHUB_URL, ORG_NAME } from '../env';
-import { latestRelease, supportedLine } from '../lib/releases';
+import { latestRelease, NO_RELEASES, supportedLine } from '../lib/releases';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/open-source')({ head: () => pageHead('/open-source'), component: OpenSourcePage });
@@ -203,7 +203,7 @@ function OpenSourcePage() {
             <SectionHeader
               eyebrow="Versions"
               id="versions-title"
-              lead={`${latestRelease && supportedLine ? `The supported line is ${supportedLine}, and the latest release is ${latestRelease.version}, with Docker images on GHCR for amd64 and arm64. ` : ''}The SDK and the integrations share the platform's version. They aren't on npm yet: use them from source.`}
+              lead={`${latestRelease && supportedLine ? `The supported line is ${supportedLine}, and the latest release is ${latestRelease.version}, with Docker images on GHCR for amd64 and arm64.` : NO_RELEASES} The SDK and the integrations share the platform's version. They aren't on npm yet${GITHUB_PUBLIC ? ': use them from source.' : '.'}`}
               title="Where the project is today."
             />
             <div>
@@ -216,7 +216,7 @@ function OpenSourcePage() {
             {[
               { label: 'Supported line', value: supportedLine ?? '—' },
               { label: 'Latest release', value: latestRelease ? latestRelease.version : '—' },
-              { label: 'Docker images', value: 'GHCR' },
+              { label: 'Docker images', value: latestRelease ? 'GHCR' : '—' },
               { label: 'npm packages', value: 'Not yet' },
             ].map((item) => (
               <div className="flex flex-col gap-1 border-b p-5 odd:border-e [&:nth-last-child(-n+2)]:border-b-0" key={item.label}>

@@ -32,7 +32,7 @@ path: /self-hosting
 - **id:** `quickstart`
 - **eyebrow:** Quickstart
 - **heading:** From clone to your first event.
-- **body:** You need Docker Engine and Docker Compose 2.24.4 or newer. Compose pulls four published images; nothing
+- **body:** You need Docker Engine and Docker Compose 2.24.4 or newer. Compose pulls the four published Logbird role images; nothing
   is compiled on your server. <!-- source: docs/self-hosting.md §Five-minute quickstart -->
 - **code sample (rendered only once `WEB_GITHUB_PUBLIC=true`; until then the section reads "The quickstart is published
   when the repository opens." with the self-host CTA — see `README.md` § Self-host CTA rule):**
@@ -147,9 +147,9 @@ path: /self-hosting
   1. Stop writes: block ingress and stop the console, server and worker (the worker finishes its current job first).
   2. Back up, with writers stopped: matched Postgres (`pg_dump`) and ClickHouse (`BACKUP DATABASE`) backups and a
      SHA-256 checksum file. Keep the original `.env`; record the Git revision and image IDs.
-  3. Pin the new version: check out the new release tag, then set `LOGBIRD_VERSION` in `.env` to that version (the
-     value already in `.env` overrides the Compose default). Run `docker compose config --images` and check every
-     Logbird image shows the new tag.
+  3. Pin the new version: check out the release tag `vX.Y.Z`, then set `LOGBIRD_VERSION=X.Y.Z` in `.env`, without the
+     `v` (the value already in `.env` overrides the Compose default). Run `docker compose config --images` and check
+     all four `logbird-*` images end in `:X.Y.Z`.
   4. `docker compose pull`, then `docker compose up -d --no-build`. Migrations run first; if one fails, the new
      version doesn't start.
   5. Verify readiness, sign-in, your events, settings and keys, and the retention runs before reopening ingress.
@@ -167,7 +167,7 @@ path: /self-hosting
 - **heading:** What self-hosting doesn't include today.
 - **bullets:**
   - **High availability.** The Compose setup is a single VM. It has no failover.
-  - **Published capacity numbers.** There's no published sizing guarantee yet. Size from your own measurements.
+  - **Production sizing guarantee.** There's no published sizing guarantee yet. Size from your own measurements.
   - **SSO.** Sign-in is by emailed code only. SSO is on the roadmap.
   <!-- source: docs/self-hosting.md; docs/deployment.md ("This single VM is a first test, not HA"); docs/roadmap.md P2-5 -->
 - **visual:** none

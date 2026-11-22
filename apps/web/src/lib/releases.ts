@@ -41,5 +41,11 @@ export const releaseUrl = (githubUrl: string, release: Pick<Release, 'version'>)
 /** The newest published release, which the self-host quickstart pins. */
 export const latestRelease: Release | undefined = [...releases].sort(byVersionDesc)[0];
 
+/** The oldest published release (the project's first). */
+export const firstRelease: Release | undefined = [...releases].sort(byVersionDesc).at(-1);
+
+/** What every surface says when the release list is empty. */
+export const NO_RELEASES = 'Nothing has been released yet.';
+
 /** The supported line (`major.minor`) of the newest release, e.g. `0.2` for 0.2.0; undefined before any release. */
 export const supportedLine: string | undefined = latestRelease?.version.split('.').slice(0, 2).join('.');

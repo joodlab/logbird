@@ -21,7 +21,7 @@ function CompareIndexPage() {
     <>
       <PageHero
         eyebrow="Compare"
-        lead={`There's more than one good way to keep an audit trail. These pages compare Logbird with other tools, using only facts we could check in their official docs, pricing pages and repositories. Each page says where the other tool is the better fit. We checked every fact on ${longDate(ACCESSED)} and list every source. If something has changed, tell us and we'll fix it.`}
+        lead={`There's more than one good way to keep an audit trail. These pages compare Logbird with other tools, using only facts we could check in their official docs, pricing pages and repositories. Each page says where the other tool is the better fit. We checked every fact about the other tools on ${longDate(ACCESSED)} and list every source. If something has changed, tell us and we'll fix it.`}
         title="How Logbird compares."
       />
 

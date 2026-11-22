@@ -46,7 +46,7 @@ path: /developers
     apiKey: process.env.LOGBIRD_INGEST_KEY, // lb_ingest_...
     enabled: Boolean(process.env.LOGBIRD_INGEST_KEY), // off locally when no key is set
     defaults: { environment: 'production' },
-    onError: (error) => console.error(error.message), // rejections, failed batches and background errors
+    onError: (error) => console.error(error.message), // capture errors, permanent rejections and background flush failures
     onDrop: (event) => console.warn('audit event dropped', event.action), // events the server rejects or a full queue discards
   });
 
@@ -128,7 +128,7 @@ path: /developers
   - **Never send secrets in `changes`.** Send `"[redacted]"` to record that a secret changed.
   - **Everything else is kept.** Custom top-level keys and anything under `metadata` stay in the event's JSON and are
     indexed as searchable attributes, for example `metadata.channel:whatsapp`: up to 256 per event, 6 levels deep, and
-    the first 2 KiB of each value.
+    text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON).
 - **worked example (condensed):** "Lina cancels booking #1042. The API records the cancellation and queues a refund.
   The refund worker fails once, then succeeds on attempt 2."
 
@@ -283,7 +283,7 @@ path: /developers
   | Events per request | 1 to 1000 |
   | Request size | 5 MB |
   | Event size | 256 KB |
-  | Attributes per event | Up to 256 indexed, 6 levels deep, the first 2 KiB of each value |
+  | Attributes per event | Up to 256 indexed, 6 levels deep, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON) |
   | `occurredAt` | ISO-8601 or epoch milliseconds, from 3650 days ago to 24 hours ahead |
   | Ingest rate (default, per project) | 3000 requests a minute |
   | Read rate (default, per project) | 1200 requests a minute |

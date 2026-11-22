@@ -8,7 +8,11 @@ import { latestRelease } from './releases';
  */
 export const SELF_HOST_VERSION = latestRelease?.version ?? '0.1.0';
 
-export const selfHostQuickstart = `git clone --branch v${SELF_HOST_VERSION} ${GITHUB_URL}.git
+/** The clone URL: WEB_GITHUB_URL may be configured with or without a trailing `.git` or slash. */
+export const cloneUrl = (url: string) => `${url.replace(/\/+$/, '').replace(/\.git$/, '')}.git`;
+export const CLONE_URL = GITHUB_URL ? cloneUrl(GITHUB_URL) : undefined;
+
+export const selfHostQuickstart = `git clone --branch v${SELF_HOST_VERSION} ${CLONE_URL}
 cd logbird
 sh scripts/selfhost-init.sh   # creates .env and generates secrets
 # Set SMTP in .env, or AUTH_LOG_SIGN_IN_CODES=true for a first local test.

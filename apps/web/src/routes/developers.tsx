@@ -4,15 +4,15 @@ import { SiteCode, SiteCodeTabs } from '../components/marketing/code';
 import { CtaBand } from '../components/marketing/cta-band';
 import { FeatureRow } from '../components/marketing/feature-row';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
-import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
-import { SELF_HOST_VERSION } from '../lib/selfhost';
+import { GITHUB_PUBLIC } from '../env';
+import { CLONE_URL, SELF_HOST_VERSION } from '../lib/selfhost';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/developers')({ head: () => pageHead('/developers'), component: DevelopersPage });
 
 // Copy: marketing/copy/developers.md. Every sample is checked against packages/sdk and packages/integrations READMEs.
 /** The working install until the packages are on npm (packages/sdk/README.md): link the SDK from a checkout of the release. */
-const sourceInstall = `git clone --branch v${SELF_HOST_VERSION} ${GITHUB_URL}.git ../logbird
+const sourceInstall = `git clone --branch v${SELF_HOST_VERSION} ${CLONE_URL} ../logbird
 pnpm -C ../logbird install
 pnpm add @logbird/sdk@link:../logbird/packages/sdk`;
 
@@ -23,7 +23,7 @@ const client = new Logbird({
   apiKey: process.env.LOGBIRD_INGEST_KEY, // lb_ingest_...
   enabled: Boolean(process.env.LOGBIRD_INGEST_KEY), // off locally when no key is set
   defaults: { environment: 'production' },
-  onError: (error) => console.error(error.message), // rejections, failed batches and background errors
+  onError: (error) => console.error(error.message), // capture errors, permanent rejections and background flush failures
   onDrop: (event) => console.warn('audit event dropped', event.action), // events the server rejects or a full queue discards
 });
 
@@ -142,7 +142,10 @@ const limits: [string, string][] = [
   ['Events per request', '1 to 1000'],
   ['Request size', '5 MB'],
   ['Event size', '256 KB'],
-  ['Attributes per event', 'Up to 256 indexed, 6 levels deep, the first 2 KiB of each value'],
+  [
+    'Attributes per event',
+    'Up to 256 indexed, 6 levels deep, text values indexed up to their first 2 KiB (a number too long to index stays in the event JSON)',
+  ],
   ['occurredAt', 'ISO-8601 or epoch milliseconds, from 3650 days ago to 24 hours ahead'],
   ['Ingest rate (default, per project)', '3000 requests a minute'],
   ['Read rate (default, per project)', '1200 requests a minute'],
@@ -352,7 +355,8 @@ function DevelopersPage() {
                 <>
                   <strong className="font-medium text-foreground">Everything else is kept.</strong> Custom top-level keys and anything under{' '}
                   <code>metadata</code> stay in the event's JSON and are indexed as searchable attributes, for example{' '}
-                  <code>metadata.channel:whatsapp</code>: up to 256 per event, 6 levels deep, and the first 2 KiB of each value.
+                  <code>metadata.channel:whatsapp</code>: up to 256 per event, 6 levels deep, text values indexed up to their first 2 KiB (a number
+                  too long to index stays in the event JSON).
                 </>,
               ]}
             />

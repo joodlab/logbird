@@ -259,8 +259,9 @@ Redis 7 is default. Dragonfly requires `--cluster_mode=emulated --lock_on_hashta
    `.env` still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird` namespace; remove that
    line so the default `ghcr.io/joodlab` applies). It keeps the existing
    `LOGBIRD_VERSION`, and that `.env` value overrides the new revision's Compose
-   default, so edit it to the tested release. Run `docker compose config --images`
-   and check that every `logbird-*` image shows the new tag, then run
+   default, so set it to the tested release without the `v` (tag `v0.2.0` means
+   `LOGBIRD_VERSION=0.2.0`). Run `docker compose config --images` and check that
+   all four `logbird-*` images end in that version, then run
    `docker compose pull` and `docker compose up -d --no-build`.
    One-shot migrate gates new API/worker startup; failure blocks startup.
 6. Verify readiness, SMTP login, retained events/settings/keys and retention

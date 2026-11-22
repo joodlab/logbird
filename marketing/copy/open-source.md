@@ -97,8 +97,8 @@ path: /open-source
 - **heading:** Where the project is today.
 - **body:** The supported line is `<major.minor of the latest release>`, and the latest release is `<latest release>`,
   with Docker images on GHCR for amd64 and arm64. The SDK and the integrations share the platform's version. They
-  aren't on npm yet: use them from source.
-  <!-- the version comes from the release list (apps/web/src/lib/releases.ts); packages/*/package.json are 0.1.3 -->
+  aren't on npm yet: use them from source. (Private repository: "They aren't on npm yet." With no release in the
+  list, the first sentence is "Nothing has been released yet." and the images cell shows "—".)
   <!-- source: the release list (apps/web/src/lib/releases.ts, `supportedLine` and `latestRelease`); packages/*/package.json share the platform version; npm registry 404 for @logbird/sdk on 2026-11-22 -->
 - **facts panel:** Supported line — `<major.minor>` · Latest release — `<latest release>` · Docker images — GHCR · npm packages —
   Not yet.

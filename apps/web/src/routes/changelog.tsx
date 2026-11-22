@@ -4,7 +4,7 @@ import { Rich } from '../components/marketing/rich';
 import { PageHero, Section, SectionHeader } from '../components/marketing/section';
 import { GITHUB_PUBLIC, GITHUB_URL } from '../env';
 import { buildLog, publicationDate as longDate, newestFirst } from '../lib/publications';
-import { byVersionDesc, type Release, releases, releaseUrl } from '../lib/releases';
+import { byVersionDesc, NO_RELEASES, type Release, releases, releaseUrl } from '../lib/releases';
 import { pageHead } from '../lib/seo';
 
 export const Route = createFileRoute('/changelog')({ head: () => pageHead('/changelog'), component: ChangelogPage });
@@ -67,7 +67,7 @@ function ChangelogPage() {
             })}
           </ol>
         ) : (
-          <Empty>Nothing has been released yet. The first release will list everything since the start of the project.</Empty>
+          <Empty>{`${NO_RELEASES} The first release will list everything since the start of the project.`}</Empty>
         )}
       </Section>
 
