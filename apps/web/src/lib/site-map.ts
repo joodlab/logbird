@@ -37,7 +37,7 @@ export const siteMap: SitePage[] = [
     path: '/product',
     title: 'Product',
     description:
-      'Search every event, follow actors, tenants, workers and records, open operation trees, and keep data for exactly as long as you choose.',
+      "Search every event, follow actors, tenants, workers and records, and open operation trees. An hourly worker deletes events older than your project's retention window.",
     section: 'product',
     priority: 0.9,
     changefreq: 'weekly',
@@ -51,7 +51,7 @@ export const siteMap: SitePage[] = [
     path: '/developers',
     title: 'Developers',
     description:
-      'Send audit events from TypeScript, Hono, TanStack Start, Vue, Nuxt or any HTTP client. Envelope guide, workers, delivery semantics and limits.',
+      'Send audit events from TypeScript, Hono, TanStack Start, Nuxt or any HTTP client, and show history with the Vue helpers. Envelope guide, workers, delivery semantics and limits.',
     section: 'developers',
     priority: 0.9,
     changefreq: 'weekly',
