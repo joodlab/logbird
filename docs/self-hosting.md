@@ -266,10 +266,13 @@ instead of pulling, and the image-tag check doesn't apply.
    values and warns if the file still pins the old `LOGBIRD_IMAGE_REGISTRY=logbird`
    namespace; remove that line so the default `ghcr.io/joodlab` applies. It keeps the
    existing `LOGBIRD_VERSION`, and that value overrides the new revision's Compose
-   default (a `LOGBIRD_VERSION` exported in your shell overrides both), so set it to the
-   tested release without the `v` (tag `v0.2.0` means `LOGBIRD_VERSION=0.2.0`). Run
+   default, so set it to the tested release without the `v` (tag `v0.2.0` means
+   `LOGBIRD_VERSION=0.2.0`). A `LOGBIRD_VERSION` or `LOGBIRD_IMAGE_REGISTRY` exported in
+   your shell overrides the env file: unset it, or set it to the same values. Run
    `docker compose config --images` with the installation's project, env-file and `-f`
-   flags and check that all four `logbird-*` images end in that version, then run
+   flags and check the full names: all four must be
+   `<registry>/logbird-<role>:<version>`, with `ghcr.io/joodlab` as the default
+   registry, before you run
    `docker compose pull` and `docker compose up -d --no-build`.
    One-shot migrate gates new API/worker startup; failure blocks startup.
 6. Verify readiness, SMTP login, retained events/settings/keys and retention

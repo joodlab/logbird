@@ -327,7 +327,7 @@ function SelfHostingPage() {
                 },
                 {
                   title: 'Pin the new version',
-                  body: "Check out the release tag vX.Y.Z, then set LOGBIRD_VERSION=X.Y.Z, without the v, in the env file the installation runs with (.env, or the one you cut over to after a restore): its value overrides the Compose default, and a LOGBIRD_VERSION exported in your shell overrides both. Run docker compose config --images and check all four logbird-* images end in :X.Y.Z. Built from source (docker-compose.build.yml)? Keep that override and build the four roles from the new revision instead; the image check doesn't apply.",
+                  body: "Check out the release tag vX.Y.Z, then set LOGBIRD_VERSION=X.Y.Z, without the v, in the env file the installation runs with (.env, or the one you cut over to after a restore): its value overrides the Compose default, and a LOGBIRD_VERSION or LOGBIRD_IMAGE_REGISTRY exported in your shell overrides the env file (unset it). Run docker compose config --images and check the full names: all four must be <registry>/logbird-<role>:X.Y.Z, with the registry you expect (the project's GHCR namespace by default). Built from source (docker-compose.build.yml)? Keep that override and build the four roles from the new revision instead; the image check doesn't apply.",
                 },
                 {
                   title: 'Pull, then start',
