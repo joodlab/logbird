@@ -244,3 +244,93 @@ jobs:
           gh release create "$GITHUB_REF_NAME" images.txt \
             --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Logbird $GITHUB_REF_NAME" --notes-file release-notes.md
+
+  nuget:
+    name: Publish NuGet packages
+    needs: [preflight, release]
+    # The first NuGet publication is the maintainers' decision after the pre-publication gate, not a side effect of a tag.
+    # Publishing needs the repository variable NUGET_PUBLISH_ENABLED set to exactly `true` (checked case-sensitively
+    # below; this job-level condition only skips the job early) and the NUGET_API_KEY secret. Package versions are the
+    # release version.
+    if: vars.NUGET_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      # Not named VERSION: MSBuild reads environment variables as properties, and Version would override the package version.
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - name: Require publication to be enabled and the NuGet API key
+        id: gate
+        env:
+          ENABLED: ${{ vars.NUGET_PUBLISH_ENABLED }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ "$ENABLED" != "true" ]; then
+            echo "::notice::NUGET_PUBLISH_ENABLED is not exactly 'true'; no NuGet package is published."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$NUGET_API_KEY" ]; then
+            echo "::notice::NUGET_PUBLISH_ENABLED is set, but the NUGET_API_KEY secret is missing; no NuGet package is published."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.gate.outputs.publish == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        if: steps.gate.outputs.publish == 'true'
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: Build, test and pack the released version
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: sdks/dotnet
+        run: |
+          dotnet build Logbird.slnx -c Release
+          dotnet test Logbird.slnx -c Release --no-build
+          dotnet pack src/Logbird/Logbird.csproj -c Release --no-build -o "$RUNNER_TEMP/nupkg"
+          dotnet pack src/Logbird.AspNetCore/Logbird.AspNetCore.csproj -c Release --no-build -o "$RUNNER_TEMP/nupkg"
+          # The packed manifests, not the build inputs, must carry the release version.
+          for id in Logbird Logbird.AspNetCore; do
+            package="$RUNNER_TEMP/nupkg/$id.$RELEASE_VERSION.nupkg"
+            test -f "$package" || { echo "::error::$id was not packed as $RELEASE_VERSION."; ls "$RUNNER_TEMP/nupkg"; exit 1; }
+            test -f "$RUNNER_TEMP/nupkg/$id.$RELEASE_VERSION.snupkg" || { echo "::error::$id has no symbol package."; exit 1; }
+            packed="$(unzip -p "$package" "$id.nuspec" | sed -n 's:.*<version>\(.*\)</version>.*:\1:p' | head -1)"
+            if [ "$packed" != "$RELEASE_VERSION" ]; then
+              echo "::error::$id.nuspec has version '$packed', not the release version $RELEASE_VERSION."
+              exit 1
+            fi
+          done
+      - name: Push Logbird, then wait until nuget.org serves it
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        # Logbird.AspNetCore depends on Logbird, so it is pushed only once Logbird has passed nuget.org's validation and
+        # can be downloaded. Packages and symbol packages are pushed separately, each skipping a version already there, so
+        # a rerun completes whatever an earlier run left out.
+        run: |
+          dotnet nuget push "$RUNNER_TEMP/nupkg/Logbird.$RELEASE_VERSION.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --no-symbols --skip-duplicate
+          dotnet nuget push "$RUNNER_TEMP/nupkg/Logbird.$RELEASE_VERSION.snupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          url="https://api.nuget.org/v3-flatcontainer/logbird/$RELEASE_VERSION/logbird.$RELEASE_VERSION.nupkg"
+          for attempt in $(seq 1 120); do
+            if curl -sfI "$url" > /dev/null; then
+              echo "Logbird $RELEASE_VERSION is available on nuget.org."
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::Logbird $RELEASE_VERSION was not available on nuget.org within an hour; Logbird.AspNetCore was not pushed. Rerun this job once it is."
+          exit 1
+      - name: Push Logbird.AspNetCore
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push "$RUNNER_TEMP/nupkg/Logbird.AspNetCore.$RELEASE_VERSION.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --no-symbols --skip-duplicate
+          dotnet nuget push "$RUNNER_TEMP/nupkg/Logbird.AspNetCore.$RELEASE_VERSION.snupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
