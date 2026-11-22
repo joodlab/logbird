@@ -16,10 +16,12 @@ it.runIf(process.env.CLICKHOUSE_URL)(
         })
       ).json<{ type: string; expr: string }>();
       expect(indices).toEqual([{ type: 'minmax', expr: 'received_at' }]);
-      // A year of events arriving close to their event time, as live traffic does.
+      // Events arriving close to their event time, as live traffic does: 50k rows over ten days in one insert,
+      // so the project's part holds several granules with distinct arrival ranges.
       const now = Date.now();
-      const rows = Array.from({ length: 20_000 }, (_, i) => {
-        const at = now - Math.floor((i / 20_000) * 365 * 86_400_000);
+      const count = 50_000;
+      const rows = Array.from({ length: count }, (_, i) => {
+        const at = now - Math.floor((i / count) * 10 * 86_400_000);
         const n = normalizeEvent(
           { id: `r${i}`, action: 'qa.arrival', occurredAt: new Date(at).toISOString() },
           { projectId: p, receivedAt: new Date(at + 1000) },
@@ -37,14 +39,25 @@ it.runIf(process.env.CLICKHOUSE_URL)(
               "EXPLAIN indexes = 1 SELECT event_id FROM events WHERE project_id = {p:String} AND received_at >= {from:DateTime64(3,'UTC')} AND received_at < {to:DateTime64(3,'UTC')}",
             query_params: { p, from, to },
             format: 'JSONEachRow',
+            // Interpretable EXPLAIN counts: no condition cache, no skip-index use at read time.
+            clickhouse_settings: { use_query_condition_cache: 0, use_skip_indexes_on_data_read: 0 },
           })
         ).json<{ explain: string }>()
       ).map((r) => r.explain);
       const at = plan.findIndex((line) => line.includes('Name: idx_received_at'));
       expect(at).toBeGreaterThan(-1);
-      // The step after the index name reports how many granules it kept.
-      const kept = plan.slice(at).find((line) => line.includes('Granules:'));
-      expect(kept).toMatch(/Granules: \d+\/\d+/);
+      // The index step's own block: lines after its Name up to the next index or step.
+      const block: string[] = [];
+      for (const line of plan.slice(at + 1)) {
+        if (/Name:|^\s*\w+ \(/.test(line)) break;
+        block.push(line);
+      }
+      const granules = block.map((line) => /Granules: (\d+)\/(\d+)/.exec(line)).find(Boolean);
+      expect(granules).toBeTruthy();
+      const [kept, total] = [Number(granules?.[1]), Number(granules?.[2])];
+      // The fixture spans ten days in several granules; a 6-minute slice must skip some of them.
+      expect(kept).toBeGreaterThan(0);
+      expect(kept).toBeLessThan(total);
     } finally {
       await purgeProject(ch, p);
       await ch.close();

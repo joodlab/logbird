@@ -277,15 +277,29 @@ for signal handling; its live acceptance is pending in #77.
 
 Migration 010 adds a minmax skip index on `events.received_at` and materializes it. Arrival-time reads (webhook
 discovery, alert windows, the live view) then skip granules whose arrival range misses the requested slice instead of
-reading the project's whole `received_at` history. It is additive: no rows are rewritten and nothing else changes.
-`MATERIALIZE INDEX` runs as a background mutation. The migration returns at once, reads stay correct while it runs
-(parts without the index are read as before), and new parts get the index on insert. Measured locally on a shared
-2 GiB ClickHouse: 23.8 million rows (4.05 GiB) materialized in about 35 seconds, roughly 2.5 minutes per 100 million
-rows. That is an extrapolation from one machine, not a bound; busy or slower storage takes longer. Confirm completion
-with `SELECT is_done FROM system.mutations WHERE table = 'events' AND command LIKE '%idx_received_at%'`.
+reading the project's `received_at` values across its history. Event values are preserved, but the physical work is
+not free: `MATERIALIZE INDEX` writes the new index files for every part, and ClickHouse rewrites the full column data
+of compact parts while doing so, competing with merges and retention mutations. It runs as a background mutation:
+the migration returns at once, reads stay correct while it runs (parts without the index are read as before), and new
+parts get the index on insert. Measured locally on a shared 2 GiB ClickHouse: 23.8 million rows (4.05 GiB)
+materialized in about 35 seconds, roughly 2.5 minutes per 100 million rows. That is an extrapolation from one machine,
+not a bound: many compact parts, busy or slower storage take longer.
+
+Check completion in the Logbird database:
+
+```sql
+SELECT mutation_id, is_done, parts_to_do, latest_fail_reason FROM system.mutations
+WHERE database = currentDatabase() AND table = 'events' AND command LIKE '%idx_received_at%';
+```
+
+The migration is recorded as applied once both statements were submitted, so a later `ch:migrate` does not run it
+again. If the mutation was killed or failed, fix the cause shown in `latest_fail_reason` and reissue
+`ALTER TABLE events MATERIALIZE INDEX idx_received_at`; repeating it is safe.
+
 Known limit: during a large historical import (old event times arriving now), a slice that overlaps the import's
-arrival window still reads the granules the import touched, because each of them now spans that window. Slices after
-the import are fast again.
+arrival window still reads the granules the import touched, because each of them now spans that window. Draining such
+a slice in small pages repeats that read per page (see #209 for measurements), so arrival-time readers should fetch
+large pages during catch-up.
 
 ### Upgrading to immutable ids
 
