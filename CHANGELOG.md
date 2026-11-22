@@ -70,6 +70,9 @@ lower bound. When the console cannot show an exact total it shows a lower bound 
 Inside those limits, an event over 256 KB is rejected on its own (`invalid_event`) and the
 rest of its batch is stored. A console test event completes only the "first event" setup
 step; sources beginning with `logbird-` are reserved for events Logbird generates.
+Events sent through the console's origin by a client that sent neither `X-Logbird-SDK` nor
+a User-Agent were labelled "via node"; new events like that now show "via HTTP". Events
+stored earlier keep their label.
 
 **Arrival-time index.** Migration 010 adds a min/max index on `received_at`. The live view
 uses it today to skip parts of a project's history whose arrival time misses the requested
