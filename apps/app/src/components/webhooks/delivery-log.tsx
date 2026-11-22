@@ -15,7 +15,7 @@ import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { keys as queryKeys } from '@/lib/api/queries';
 import { formatTerm } from '@/lib/query-language';
-import { ATTEMPT_STATUS_LABEL, attemptErrorCopy, DELIVERY_STATUS_LABEL, displayUrl, webhookErrorCopy, webhookRetry } from '@/lib/webhooks';
+import { ATTEMPT_STATUS_LABEL, attemptWhy, DELIVERY_STATUS_LABEL, displayUrl, webhookErrorCopy, webhookRetry } from '@/lib/webhooks';
 
 type Delivery = Awaited<ReturnType<typeof api.webhooks.deliveries>>['data'][number];
 const FILTERS = [
@@ -48,6 +48,8 @@ export function DeliveryLog({
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: open,
+    // While a shown delivery waits for its outcome, look again every few seconds so the open log settles by itself.
+    refetchInterval: (query) => (open && query.state.data?.pages.some((p) => p.data.some((d) => d.status === 'pending')) ? 3000 : false),
   });
   const rows = log.data?.pages.flatMap((p) => p.data) ?? [];
   const { host, path } = displayUrl(endpoint.url);
@@ -127,7 +129,7 @@ function DeliveryRow({ projectId, endpointId, delivery }: { projectId: string; e
     onError: (error) => toast.error('Could not send it again', { description: webhookErrorCopy(error) }),
   });
   const last = delivery.attempts.at(-1);
-  const why = attemptErrorCopy(last?.error ?? null);
+  const why = last ? attemptWhy(last) : null;
   return (
     <li className="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
@@ -190,7 +192,7 @@ function DeliveryRow({ projectId, endpointId, delivery }: { projectId: string; e
               {a.responseCode ? ` · answered ${a.responseCode}` : ''}
               {a.latencyMs != null ? ` in ${a.latencyMs} ms` : ''}
             </span>
-            {a.error ? <span>{attemptErrorCopy(a.error)}</span> : null}
+            {attemptWhy(a) ? <span>{attemptWhy(a)}</span> : null}
             {a.responseBody ? (
               <CodeBlock code={a.responseBody} copyLabel="Copy response" language="text" maxHeight={160} title="Response (first 2 KiB)" />
             ) : null}

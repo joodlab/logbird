@@ -11,12 +11,15 @@ import { CURSOR_REVIEW_DOCS, type EndpointState, endpointStates } from '@/lib/we
  */
 export function EndpointStates({
   endpoint,
+  filterError,
   onConfirmFilter,
   confirming,
   onEdit,
   onRotate,
 }: {
   endpoint: WebhookEndpoint;
+  /** The server's explanation when it rejected the stored filter on confirmation: kept beside the filter. */
+  filterError: string | null;
   onConfirmFilter: () => void;
   confirming: boolean;
   onEdit: () => void;
@@ -36,6 +39,11 @@ export function EndpointStates({
                   {endpoint.filterQuery}
                 </code>
               </p>
+              {filterError ? (
+                <p className="text-destructive text-sm" role="alert">
+                  {filterError} Edit the filter to fix it.
+                </p>
+              ) : null}
               <div className="flex flex-wrap gap-2">
                 <Button disabled={confirming} onClick={onConfirmFilter} size="sm">
                   {confirming ? <Loader2Icon className="animate-spin" /> : null}
@@ -89,10 +97,7 @@ function StatePanel({ state, children }: { state: EndpointState; children: React
         {state.title}
       </h3>
       <p className="text-muted-foreground">{state.what}</p>
-      <p className="text-muted-foreground">
-        {hold ? <span className="font-medium text-foreground">Nothing is lost. </span> : null}
-        {state.lost}
-      </p>
+      <p className="text-muted-foreground">{state.lost}</p>
       <p>{state.todo}</p>
       {children}
     </section>

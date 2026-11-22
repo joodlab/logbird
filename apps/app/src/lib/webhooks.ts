@@ -17,7 +17,8 @@ export function disabledCopy(reason: WebhookEndpoint['disabledReason']): { title
     case 'gone_410':
       return {
         title: 'Turned off: the endpoint answered 410 Gone',
-        detail: 'The receiver said this URL no longer exists. Point it at a live URL, then turn it back on.',
+        detail:
+          'The receiver said this URL no longer exists. Nothing is sent while it is off. Point it at a live URL, then turn it back on: it resumes where it stopped.',
       };
     case 'consecutive_failures':
       return {
@@ -203,7 +204,8 @@ export type EndpointState = {
 /** Every state the API reports for an endpoint, holds first. A held endpoint delivers nothing and loses nothing. */
 export function endpointStates(e: WebhookEndpoint): EndpointState[] {
   const states: EndpointState[] = [];
-  const kept = 'It keeps its place: every event that arrives meanwhile is sent once it resumes.';
+  const kept =
+    'Nothing is sent while it is held, and nothing is skipped: it keeps its place. When it resumes, it checks the events that arrived meanwhile against its filter and scope, and sends the ones that match and are still stored.';
   if (e.filterWarning) {
     states.push({
       key: 'filter',
@@ -254,7 +256,7 @@ export function endpointStates(e: WebhookEndpoint): EndpointState[] {
 /* ---------------- delivery log ---------------- */
 
 const ATTEMPT_ERRORS: Record<string, string> = {
-  destination_rejected: 'Your endpoint answered with an error status.',
+  destination_rejected: 'Logbird did not send it: the address no longer passes the destination check (https, public addresses only).',
   timeout: 'Your endpoint did not answer in time.',
   network_error: 'Logbird could not connect to your endpoint.',
   event_unavailable: 'The event is no longer stored (retention), so there was nothing to send.',
@@ -267,7 +269,30 @@ const ATTEMPT_ERRORS: Record<string, string> = {
 /** Why an attempt failed, in words. A code this console does not know yet still shows, as a generic error with its code. */
 export function attemptErrorCopy(code: string | null): string | null {
   if (!code) return null;
-  return ATTEMPT_ERRORS[code] ?? `The attempt failed (${code}).`;
+  return Object.hasOwn(ATTEMPT_ERRORS, code) ? (ATTEMPT_ERRORS[code] as string) : `The attempt failed (${code}).`;
+}
+
+/**
+ * Why an attempt did not deliver, from its error and its response code together: an answer outside 2xx is the
+ * receiver's own (even with no error code), a destination rejection without an answer means nothing was sent.
+ */
+export function attemptWhy(attempt: { status: string; error: string | null; responseCode: number | null }): string | null {
+  if (attempt.status === 'succeeded' || attempt.status === 'sending') return null;
+  if (attempt.responseCode !== null && (attempt.responseCode < 200 || attempt.responseCode >= 300)) {
+    return `Your endpoint answered ${attempt.responseCode}${attempt.responseCode >= 500 ? ' (a server error on its side)' : ''}.`;
+  }
+  if (attempt.error) return attemptErrorCopy(attempt.error);
+  return attempt.status === 'interrupted' ? 'The attempt was interrupted before it finished; it is retried.' : null;
+}
+
+/** The scope exactly as stored (not trimmed), to tell whether an edit changes it. */
+export function storedScope(e: WebhookEndpoint) {
+  if (!e.scope) return null;
+  return {
+    ...(e.scope.tenantId !== undefined ? { tenantId: e.scope.tenantId } : {}),
+    ...(e.scope.target ? { target: { type: e.scope.target.type, id: e.scope.target.id } } : {}),
+    ...(e.scope.mask?.length ? { mask: [...e.scope.mask].sort() } : {}),
+  };
 }
 
 export const DELIVERY_STATUS_LABEL: Record<string, string> = {

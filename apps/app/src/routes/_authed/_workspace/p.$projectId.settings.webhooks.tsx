@@ -43,6 +43,7 @@ import {
   OVERLAP_CHOICES,
   scopeOf,
   scopeSummary,
+  storedScope,
   validateWebhookForm,
   webhookErrorCopy,
   webhookRetry,
@@ -60,6 +61,8 @@ function WebhooksSettings() {
   const can = useCan();
   const list = useQuery({ ...webhooksQuery(projectId), enabled: can.isAdmin });
   const [editing, setEditing] = useState<WebhookEndpoint | 'new' | null>(null);
+  // The server's explanation of a filter it rejected, carried into the editor so it stays beside the filter.
+  const [editFilterError, setEditFilterError] = useState<string | null>(null);
   const [rotating, setRotating] = useState<WebhookEndpoint | null>(null);
   // Every issued secret waits its turn: one finishing while another is on screen never replaces it.
   const [issued, setIssued] = useState<(Issued & { n: number })[]>([]);
@@ -125,7 +128,10 @@ function WebhooksSettings() {
               <EndpointCard
                 endpoint={endpoint}
                 key={endpoint.id}
-                onEdit={() => setEditing(endpoint)}
+                onEdit={(filterError) => {
+                  setEditFilterError(filterError ?? null);
+                  setEditing(endpoint);
+                }}
                 onRotate={() => setRotating(endpoint)}
                 projectId={projectId}
               />
@@ -135,6 +141,7 @@ function WebhooksSettings() {
       </SettingsSection>
       <EndpointDialog
         endpoint={editing === 'new' ? null : editing}
+        filterError={editFilterError}
         onClose={() => setEditing(null)}
         onSecret={enqueue}
         open={editing !== null}
@@ -160,10 +167,12 @@ function EndpointCard({
 }: {
   projectId: string;
   endpoint: WebhookEndpoint;
-  onEdit: () => void;
+  /** Open the editor, optionally with the server's explanation of a rejected filter. */
+  onEdit: (filterError?: string) => void;
   onRotate: () => void;
 }) {
   const { refresh } = useEndpointMutations(projectId);
+  const queryClient = useQueryClient();
   const confirm = useConfirm();
   const { org } = useOrganization();
   const creator = org.data?.members.find((m) => m.userId === endpoint.createdById)?.user;
@@ -187,19 +196,35 @@ function EndpointCard({
     onError: (error) => toast.error('Could not delete the endpoint', { description: webhookErrorCopy(error) }),
   });
   // Confirming the stored filter as it is: a PATCH that includes filterQuery, unchanged, lifts the hold.
+  const [filterError, setFilterError] = useState<string | null>(null);
   const confirmFilter = useMutation({
     mutationFn: () => api.webhooks.update(projectId, endpoint.id, { filterQuery: endpoint.filterQuery }),
     ...webhookRetry,
-    onSuccess: () => {
-      toast.success('Filter confirmed', { description: 'Delivery resumes where it paused, including events that arrived meanwhile.' });
+    onSuccess: (updated) => {
+      setFilterError(null);
       refresh();
+      // Say what the returned endpoint says: another hold (a scope, an operator review) can still keep it paused.
+      const still = endpointStates(updated).filter((s) => s.kind === 'hold');
+      if (still.length)
+        toast.warning('Filter confirmed, still paused', {
+          description: `It also needs: ${still.map((s) => s.badge.replace(/^Held: /, '')).join(', ')}.`,
+        });
+      else if (!updated.enabled) toast.success('Filter confirmed', { description: 'The endpoint is off: turn it on to resume delivery.' });
+      else toast.success('Filter confirmed', { description: 'Delivery resumes where it paused.' });
     },
-    onError: (error) => toast.error('Could not confirm the filter', { description: webhookErrorCopy(error) }),
+    onError: (error) => {
+      const problem = queryProblem(error, 'query');
+      if (problem) setFilterError(`${reasonTitle(problem.details, problem.code)}: ${queryProblemText(problem, endpoint.filterQuery)}`);
+      else toast.error('Could not confirm the filter', { description: webhookErrorCopy(error) });
+    },
   });
   const test = useMutation({
     mutationFn: () => api.webhooks.test(projectId, endpoint.id),
     ...webhookRetry,
-    onSuccess: () => toast.success('Test ping queued', { description: 'It is sent within seconds and shows up in the delivery log.' }),
+    onSuccess: () => {
+      toast.success('Test ping queued', { description: 'It is sent within seconds and shows up in the delivery log.' });
+      queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks', endpoint.id, 'deliveries'] });
+    },
     onError: (error) => toast.error('Could not send a test ping', { description: webhookErrorCopy(error) }),
   });
   const [logOpen, setLogOpen] = useState(false);
@@ -207,6 +232,8 @@ function EndpointCard({
   const reason = disabledCopy(endpoint.disabledReason);
   const states = endpointStates(endpoint);
   const held = states.find((s) => s.kind === 'hold');
+  // The API refuses a test ping while the endpoint is off or held for its filter or scope; cursor review allows it.
+  const testBlocked = states.find((s) => s.key === 'filter' || s.key === 'scope');
   const busy = [toggle, remove, confirmFilter, test].some((m) => m.isPending && m.failureCount > 0);
   return (
     <li className="flex min-w-0 flex-col gap-3 rounded-lg border p-4" data-testid="webhook-endpoint">
@@ -240,8 +267,9 @@ function EndpointCard({
       <EndpointStates
         confirming={confirmFilter.isPending}
         endpoint={endpoint}
+        filterError={filterError}
         onConfirmFilter={() => confirmFilter.mutate()}
-        onEdit={onEdit}
+        onEdit={() => onEdit(filterError ?? undefined)}
         onRotate={onRotate}
       />
       <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
@@ -258,7 +286,7 @@ function EndpointCard({
         </dd>
       </dl>
       <div className="flex flex-wrap gap-2">
-        <Button onClick={onEdit} size="sm" variant="outline">
+        <Button onClick={() => onEdit()} size="sm" variant="outline">
           Edit
         </Button>
         <Button onClick={onRotate} size="sm" variant="outline">
@@ -268,10 +296,10 @@ function EndpointCard({
           Delivery log
         </Button>
         <Button
-          disabled={test.isPending || off || Boolean(held)}
+          disabled={test.isPending || off || Boolean(testBlocked)}
           onClick={() => test.mutate()}
           size="sm"
-          title={off ? 'Turn the endpoint on first.' : held ? 'Resolve the hold first.' : undefined}
+          title={off ? 'Turn the endpoint on first.' : testBlocked ? 'Confirm the filter or fix the scope first.' : undefined}
           variant="outline"
         >
           {test.isPending ? <Loader2Icon className="animate-spin" /> : null}
@@ -314,12 +342,15 @@ class SaveAbandoned extends Error {}
 function EndpointDialog({
   projectId,
   endpoint,
+  filterError,
   open,
   onClose,
   onSecret,
 }: {
   projectId: string;
   endpoint: WebhookEndpoint | null;
+  /** The server's explanation of a rejected filter, shown on the filter field when the editor opens. */
+  filterError?: string | null;
   open: boolean;
   onClose: () => void;
   /** A created endpoint's secret, handed straight to the one-time dialog (never kept in mutation state). */
@@ -336,7 +367,7 @@ function EndpointDialog({
     setWasOpen(open);
     if (open) {
       setForm(formFrom(endpoint));
-      setErrors({});
+      setErrors(filterError ? { filter: filterError } : {});
       setNarrowOpen(Boolean(endpoint?.scope));
     }
   }
@@ -371,7 +402,9 @@ function EndpointDialog({
       if (f.url.trim() !== before.url) body.url = f.url.trim();
       if (f.description.trim() !== before.description) body.description = f.description.trim() || null;
       if (f.filter.trim() !== before.filter) body.filterQuery = f.filter.trim();
-      if (JSON.stringify(scope) !== JSON.stringify(scopeOf(before))) body.scope = scope;
+      // Compared with the scope as stored (not trimmed), and always sent while the stored scope is invalid: repairing
+      // a held scope must send the chosen scope, even when it reads the same or is empty.
+      if (target.scopeWarning || JSON.stringify(scope) !== JSON.stringify(storedScope(target))) body.scope = scope;
       if (f.enabled !== before.enabled) body.enabled = f.enabled;
       if (!Object.keys(body).length) return null;
       return api.webhooks.update(projectId, target.id, body);
@@ -531,7 +564,7 @@ function EndpointDialog({
                   </label>
                 ))}
                 <p className={errors.masks ? 'text-destructive text-xs' : 'text-muted-foreground text-xs'} id={`${ids}-masks-hint`}>
-                  {errors.masks ?? 'Hidden fields are emptied in every delivery, retries and test pings included, and the filter cannot use them.'}
+                  {errors.masks ?? 'Each delivery, retry and test ping leaves the chosen fields out as described, and the filter cannot use them.'}
                 </p>
               </fieldset>
             </div>
@@ -579,6 +612,7 @@ function RotateDialog({
   onSecret: (issued: Issued) => void;
 }) {
   const ids = useId();
+  const queryClient = useQueryClient();
   const [overlap, setOverlap] = useState<number>(86_400);
   // Each endpoint starts at the recommended overlap, not at the last one picked for another.
   const [shownFor, setShownFor] = useState<WebhookEndpoint | null>(null);
@@ -605,6 +639,8 @@ function RotateDialog({
     ...webhookRetry,
     // Close only the opening that asked, never one opened since (for this endpoint or another).
     onSuccess: (_id, { at }) => {
+      // The endpoint's signing warning can clear after a rotation with no overlap.
+      queryClient.invalidateQueries({ queryKey: [...queryKeys.project(projectId), 'webhooks'] });
       if (at === session.current) onClose();
     },
     onError: (error, { at }) => {

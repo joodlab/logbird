@@ -5,6 +5,7 @@ import { routeTree } from '@/routeTree.gen';
 import { ApiRequestError } from './api/errors';
 import {
   attemptErrorCopy,
+  attemptWhy,
   disabledCopy,
   displayUrl,
   endpointStates,
@@ -15,6 +16,7 @@ import {
   lenientDeliveriesSchema,
   scopeOf,
   scopeSummary,
+  storedScope,
   validateWebhookForm,
   webhookErrorCopy,
   webhookRetry,
@@ -173,5 +175,31 @@ describe('webhooks after delivery (#179)', () => {
     expect(validateWebhookForm(f).masks).toMatch(/tenant or a record/);
     expect(validateWebhookForm({ ...f, tenantId: 'biz_7' }).masks).toBeUndefined();
     expect(scopeOf({ ...f, tenantId: 'biz_7', masks: ['user_agent', 'ip'] })).toEqual({ tenantId: 'biz_7', mask: ['ip', 'user_agent'] });
+  });
+});
+
+describe('why an attempt did not deliver', () => {
+  it('uses the response code and the error together', () => {
+    // Refused before any HTTP: nothing was sent.
+    expect(attemptWhy({ status: 'failed', error: 'destination_rejected', responseCode: null })).toMatch(/did not send it/);
+    // The receiver's own answer, even without an error code.
+    expect(attemptWhy({ status: 'failed', error: null, responseCode: 500 })).toBe('Your endpoint answered 500 (a server error on its side).');
+    expect(attemptWhy({ status: 'failed', error: 'destination_rejected', responseCode: 404 })).toBe('Your endpoint answered 404.');
+    expect(attemptWhy({ status: 'succeeded', error: null, responseCode: 200 })).toBeNull();
+    expect(attemptWhy({ status: 'interrupted', error: null, responseCode: null })).toMatch(/interrupted/);
+  });
+  it('never mistakes an inherited name for a known code', () => {
+    expect(attemptErrorCopy('toString')).toBe('The attempt failed (toString).');
+    expect(attemptErrorCopy('constructor')).toBe('The attempt failed (constructor).');
+  });
+});
+
+describe('scope repairs', () => {
+  it('compares with the scope as stored, untrimmed', () => {
+    expect(storedScope({ scope: { tenantId: ' biz_7 ', mask: ['user_agent', 'ip'] } } as never)).toEqual({
+      tenantId: ' biz_7 ',
+      mask: ['ip', 'user_agent'],
+    });
+    expect(storedScope({ scope: null } as never)).toBeNull();
   });
 });
