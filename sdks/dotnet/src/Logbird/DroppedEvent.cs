@@ -74,7 +74,10 @@ public sealed class DroppedEvent
     public string JsonText => _json is null ? string.Empty : Encoding.UTF8.GetString(_json);
 }
 
-/// <summary>A snapshot of a client's counters since it was created.</summary>
+/// <summary>
+/// A snapshot of a client's counters since it was created. Unlike the event records, its <c>ToString()</c> prints its
+/// values on purpose: they are counts only and carry no event, identity or query data.
+/// </summary>
 /// <param name="Tracked">Events accepted into the queue.</param>
 /// <param name="Delivered">Events the server stored (or already had, for a retry).</param>
 /// <param name="Rejected">Events the server rejected individually.</param>

@@ -118,7 +118,12 @@ internal static class JsonDepth
                     foreach (var pair in obj)
                     {
                         size += pair.Key.Length;
-                        if (pair.Value is not null)
+                        if (pair.Value is null)
+                        {
+                            // A JSON null is written as "null".
+                            size += 4;
+                        }
+                        else
                         {
                             pending.Push((pair.Value, depth + 1));
                         }
@@ -128,7 +133,11 @@ internal static class JsonDepth
                 case JsonArray array:
                     foreach (var item in array)
                     {
-                        if (item is not null)
+                        if (item is null)
+                        {
+                            size += 4;
+                        }
+                        else
                         {
                             pending.Push((item, depth + 1));
                         }
