@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { type Prisma, prisma } from '@logbird/database';
 import { webhookCursorClock, webhookCursorNeedsReview } from '@logbird/database/webhooks';
 import { expect, it } from 'vitest';
+import { loadWebhookReconciliation } from './webhook-reconciliation-fixture';
 
 const rolloutName = '20261122140000_webhook_deliveries';
 const repairName = '20261122150000_webhook_rollout_utc';
@@ -121,15 +122,8 @@ it.each(['Pacific/Auckland', 'America/Los_Angeles'])('detects a stranded rollout
   });
 });
 
-it('accepts an earlier verified checkpoint after reading a rebuilt ledger in a non-UTC session', async () => {
-  const [reconciliation, guide] = await Promise.all([
-    migration(reconciliationName),
-    readFile(new URL('../../../docs/self-hosting.md', import.meta.url), 'utf8'),
-  ]);
-  const statement = guide.match(/WITH bounds AS \([\s\S]+?RETURNING id;/)?.[0];
-  if (!statement) throw new Error('Missing operator reconciliation statement');
-  const parameters = ['endpoint_id', 'project_id', 'original_rollout', 'checkpoint', 'evidence_ref', 'audit_namespace'];
-  const sql = statement.replace(/:'(\w+)'/g, (_, name: string) => `$${parameters.indexOf(name) + 1}::text`);
+it('rewinds a held cursor and only moves a below-floor cursor up to its starting bound', async () => {
+  const [reconciliation, reconcile] = await Promise.all([migration(reconciliationName), loadWebhookReconciliation()]);
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL TIME ZONE 'Pacific/Auckland'`;
     await tx.$executeRaw`CREATE TEMP TABLE "WebhookEndpoint" (
@@ -157,27 +151,39 @@ it('accepts an earlier verified checkpoint after reading a rebuilt ledger in a n
       return row;
     };
     expect(webhookCursorNeedsReview(await endpoint(), clock)).toBe(true);
-    const reconcile = (project: string) =>
-      tx.$queryRawUnsafe<{ id: string }[]>(
-        sql,
-        'qa-rebuilt',
-        project,
-        '2026-10-01T14:00:00.000Z',
-        '2026-10-01T15:02:00.000Z',
-        'qa-backup',
-        '{logbird-t2w}',
-      );
-    expect(await reconcile('qa-unrelated')).toEqual([]);
-    expect(await reconcile('qa-project')).toHaveLength(1);
-    expect(await reconcile('qa-project')).toEqual([]);
+    const floor = new Date('2026-10-01T14:00:00.000Z');
+    const rewind = new Date('2026-10-01T15:01:00.000Z');
+    expect(await reconcile(tx, 'qa-rebuilt', 'qa-unrelated', floor, rewind)).toEqual([]);
+    expect(await reconcile(tx, 'qa-rebuilt', 'qa-project', floor, new Date('2026-10-01T15:03:00.000Z'))).toEqual([]);
+    expect(await reconcile(tx, 'qa-rebuilt', 'qa-project', floor, rewind)).toHaveLength(1);
+    expect(await reconcile(tx, 'qa-rebuilt', 'qa-project', floor, rewind)).toEqual([]);
     const restored = await endpoint();
-    expect(restored).toMatchObject({ cursorEventId: null, cursorReviewRequired: false });
-    expect(restored.cursorVerifiedFloor?.toISOString()).toBe('2026-10-01T14:00:00.000Z');
+    expect(restored).toMatchObject({
+      cursorReceivedAt: rewind,
+      cursorEventId: null,
+      cursorReviewRequired: false,
+      cursorVerifiedFloor: floor,
+      lastScannedAt: new Date('2026-10-01T15:02:00.000Z'),
+    });
     expect(webhookCursorNeedsReview(restored, clock)).toBe(false);
     expect(webhookCursorNeedsReview({ ...restored, cursorReceivedAt: new Date('2026-10-01T13:59:59.999Z') }, clock)).toBe(true);
     expect(webhookCursorNeedsReview({ ...restored, createdAt: new Date('2026-10-01T15:03:00.000Z') }, clock)).toBe(true);
     expect(await tx.$queryRaw`SELECT stream, namespace, payload FROM "AuditOutbox"`).toMatchObject([
       { stream: 'ws:qa-org', namespace: '{logbird-t2w}', payload: { action: 'webhook.cursor_reconciled', metadata: { evidenceRef: 'qa-backup' } } },
     ]);
+
+    // Endpoint creation is later than the original rollout, so it defines the starting bound.
+    const start = new Date('2026-10-01T14:30:00.000Z');
+    const belowStart = new Date(+floor - 1);
+    await tx.$executeRaw`UPDATE "WebhookEndpoint"
+      SET "createdAt" = (${start.toISOString()}::timestamptz AT TIME ZONE 'UTC'),
+          "cursorReceivedAt" = (${belowStart.toISOString()}::timestamptz AT TIME ZONE 'UTC'), "cursorReviewRequired" = true`;
+    expect(await reconcile(tx, 'qa-rebuilt', 'qa-project', floor, floor)).toEqual([]);
+    expect(await reconcile(tx, 'qa-rebuilt', 'qa-project', floor, new Date(+start + 1))).toEqual([]);
+    expect(await endpoint()).toMatchObject({ cursorReceivedAt: belowStart, cursorReviewRequired: true });
+    expect(await reconcile(tx, 'qa-rebuilt', 'qa-project', floor, start)).toHaveLength(1);
+    const recovered = await endpoint();
+    expect(recovered).toMatchObject({ cursorReceivedAt: start, cursorVerifiedFloor: floor, cursorReviewRequired: false });
+    expect(webhookCursorNeedsReview(recovered, clock)).toBe(false);
   });
 });

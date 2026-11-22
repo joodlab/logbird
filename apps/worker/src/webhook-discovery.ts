@@ -62,14 +62,14 @@ export async function webhookEvent(
   return present ? 'scope_mismatch' : null;
 }
 
-async function captureWatermark(projectId: string) {
+async function captureScanBounds(projectId: string) {
   // Capture after current admissions commit their receipts. Their ClickHouse writes can still be in flight.
   return withIngestReceiptGate(projectId, 'exclusive', async (db) => {
     const [row] = await db.$queryRaw<{ now: Date; pending: Date | null }[]>`
         SELECT clock_timestamp() AS now, (
           SELECT min("receivedAt") FROM "IngestReceipt" WHERE "projectId"=${projectId} AND "confirmedAt" IS NULL
         ) AS pending`;
-    return row ? webhookWatermark(row.now, row.pending) : null;
+    return row ? { now: row.now, watermark: webhookWatermark(row.now, row.pending) } : null;
   });
 }
 
@@ -123,15 +123,18 @@ export async function discoverWebhookDeliveries(
     return;
   }
   let scanRecorded = false;
+  // The compare-and-swap includes lastScannedAt, so a stale scan cannot overwrite a newer timestamp.
+  let lastScannedAt = new Date(Math.max(+cursorClock.now, +(endpoint.lastScannedAt ?? cursorClock.now)));
   try {
     const scope = storedWebhookScope(endpoint);
     if (scope === undefined) return;
-    const watermark = await captureWatermark(endpoint.projectId);
-    if (!watermark || watermark < endpoint.cursorReceivedAt) return;
+    const bounds = await captureScanBounds(endpoint.projectId);
+    if (!bounds) return;
+    if (bounds.now > lastScannedAt) lastScannedAt = bounds.now;
+    if (bounds.watermark < endpoint.cursorReceivedAt) return;
     // A null ID denotes the first unexamined millisecond, including at endpoint creation. The end is exclusive.
-    const sliceEnd = new Date(Math.min(+endpoint.cursorReceivedAt + DISCOVERY_SLICE_MS, +watermark + 1));
+    const sliceEnd = new Date(Math.min(+endpoint.cursorReceivedAt + DISCOVERY_SLICE_MS, +bounds.watermark + 1));
     const rows = await readWebhookCandidates(ch, endpoint, scope, sliceEnd, now);
-    const lastScannedAt = new Date(Math.max(+now, +sliceEnd));
     const expiresAt = new Date(+now + WEBHOOK_LOG_RETENTION_MS);
     const commit = async (cursorReceivedAt: Date, cursorEventId: string | null, deliveries?: Prisma.WebhookDeliveryCreateManyInput[]) => {
       const position = { cursorReceivedAt, cursorEventId, lastScannedAt };
@@ -169,7 +172,7 @@ export async function discoverWebhookDeliveries(
     if (rows.length < DISCOVERY_PAGE_SIZE) await commit(sliceEnd, null);
   } finally {
     // Move a busy/failing endpoint to the back of the scan without changing its cursor.
-    if (!scanRecorded) await prisma.webhookEndpoint.updateMany({ where: snapshot, data: { lastScannedAt: now, updatedAt: endpoint.updatedAt } });
+    if (!scanRecorded) await prisma.webhookEndpoint.updateMany({ where: snapshot, data: { lastScannedAt, updatedAt: endpoint.updatedAt } });
   }
 }
 

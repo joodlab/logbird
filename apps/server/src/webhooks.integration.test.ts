@@ -22,6 +22,7 @@ import { app } from './app';
 import { clickhouse, purgeProjectEvents } from './clickhouse';
 import { env } from './env';
 import { immutableFixture } from './immutable-fixture';
+import { loadWebhookReconciliation } from './webhook-reconciliation-fixture';
 
 const control = vi.hoisted(() => ({ failAudit: false, lookup: undefined as WebhookLookup | undefined }));
 vi.mock('@logbird/database/webhooks', async (original) => {
@@ -880,7 +881,7 @@ it('preserves future and implausibly old rollout cursors, records a sticky warni
   }
 });
 
-it('discovers a retained occurrence between the verified checkpoint and a rebuilt ledger timestamp', async () => {
+it('rejects a forward reconciliation and delivers the intervening occurrence once', async () => {
   const clock = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET LOCAL TIME ZONE 'Pacific/Auckland'`;
     await tx.$executeRaw`CREATE TEMP TABLE "_prisma_migrations" (
@@ -891,33 +892,47 @@ it('discovers a retained occurrence between the verified checkpoint and a rebuil
     )`;
     return webhookCursorClock(tx);
   });
-  const checkpoint = new Date(+clock.rollout - 60_000);
-  const floor = new Date(+checkpoint - 60_000);
+  const held = new Date(+clock.rollout - 6 * 60_000);
+  const receivedAt = new Date(+held + 60_000);
+  const floor = new Date(+held - 60_000);
+  const reconcile = await loadWebhookReconciliation();
+  const secret = generateWebhookSecret();
   const hook = await prisma.webhookEndpoint.create({
     data: {
       projectId,
       url: receiver,
       createdAt: new Date(+floor - 60_000),
-      cursorReceivedAt: checkpoint,
-      lastScannedAt: checkpoint,
+      cursorReceivedAt: held,
+      lastScannedAt: held,
+      filterQuery: 'action:qa.webhook.reconciled',
+      secrets: { create: { ciphertext: encryptWebhookSecret(secret, webhookSecretKey(env.BETTER_AUTH_SECRET, env.WEBHOOK_SECRET_KEY)) } },
     },
   });
-  const event = normalizeEvent({ id: 'qa-rebuilt-ledger', action: 'qa.webhook' }, { projectId, receivedAt: checkpoint });
+  const event = normalizeEvent({ id: 'qa-rebuilt-ledger', action: 'qa.webhook.reconciled' }, { projectId, receivedAt });
   if (!event.ok) throw new Error(event.reason);
   try {
     await insertEvents(clickhouse, [event.row]);
-    await discoverWebhookDeliveries(clickhouse, hook, clock);
-    expect(await prisma.webhookEndpoint.findUnique({ where: { id: hook.id } })).toMatchObject({ cursorReviewRequired: true });
-    expect(await prisma.webhookDelivery.count({ where: { endpointId: hook.id } })).toBe(0);
-    const reconciled = await prisma.webhookEndpoint.update({
-      where: { id: hook.id },
-      data: { cursorVerifiedFloor: floor, cursorReviewRequired: false },
+    const refetch = () => prisma.webhookEndpoint.findUniqueOrThrow({ where: { id: hook.id } });
+    await withLocalReceiver(hook.id, async (requests) => {
+      await discoverWebhookDeliveries(clickhouse, await refetch(), clock);
+      expect(await refetch()).toMatchObject({ cursorReviewRequired: true });
+      expect(await prisma.webhookDelivery.count({ where: { endpointId: hook.id } })).toBe(0);
+      expect(await reconcile(prisma, hook.id, projectId, floor, new Date(+held + 5 * 60_000))).toEqual([]);
+      expect(await refetch()).toMatchObject({ cursorReceivedAt: held, cursorReviewRequired: true, cursorVerifiedFloor: null, lastScannedAt: held });
+      expect(await reconcile(prisma, hook.id, projectId, floor, held)).toHaveLength(1);
+      expect(await refetch()).toMatchObject({ cursorVerifiedFloor: floor, cursorReviewRequired: false });
+      for (let tick = 0; tick < 2; tick++) {
+        await discoverWebhookDeliveries(clickhouse, await refetch(), clock);
+        await send();
+      }
+      expect(await prisma.webhookDelivery.findMany({ where: { endpointId: hook.id } })).toMatchObject([
+        { eventId: 'qa-rebuilt-ledger', receivedAt, status: 'succeeded' },
+      ]);
+      expect(requests).toHaveLength(1);
+      const request = requests[0];
+      if (!request) throw new Error('Missing webhook request');
+      expect(await verifyWebhook({ ...request, secret })).toMatchObject({ id: 'qa-rebuilt-ledger' });
     });
-    await discoverWebhookDeliveries(clickhouse, reconciled, clock);
-    expect(await prisma.webhookEndpoint.findUnique({ where: { id: hook.id } })).toMatchObject({ cursorReviewRequired: false });
-    expect(await prisma.webhookDelivery.findMany({ where: { endpointId: hook.id } })).toMatchObject([
-      { eventId: 'qa-rebuilt-ledger', receivedAt: checkpoint, status: 'pending' },
-    ]);
   } finally {
     await withProjectLock(projectId, () => purgeProjectEvents(projectId));
   }

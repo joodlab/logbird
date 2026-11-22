@@ -141,6 +141,38 @@ it('walks five-minute slices across a backlog, including an empty slice and a la
   expect(await queuedIds(hook.id)).toEqual(['first-slice', 'third-slice']);
 });
 
+it('keeps scan time monotonic after a failed scan on a worker clock behind PostgreSQL', async () => {
+  const from = new Date(Date.now() - 8 * 60_000);
+  const { hook, row } = await fixture(from, 'clock-skew');
+  await insertEvents(ch, [row('qa-before-failure', from), row('qa-after-failure', new Date(+from + 6 * 60_000))]);
+  const clock = scanClock(from);
+  const limited = createClient({
+    url: process.env.CLICKHOUSE_URL,
+    database: process.env.CLICKHOUSE_DATABASE,
+    username: process.env.CLICKHOUSE_USER,
+    password: process.env.CLICKHOUSE_PASSWORD,
+    clickhouse_settings: { max_bytes_to_read: '1' },
+  });
+  try {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(from);
+    await discoverWebhookDeliveries(ch, hook, clock);
+    const committed = await refetch(hook.id);
+    expect(committed).toMatchObject({ cursorReceivedAt: new Date(+from + 5 * 60_000), lastScannedAt: expect.any(Date) });
+    expect(await queuedIds(hook.id)).toEqual(['qa-before-failure']);
+    await expect(discoverWebhookDeliveries(limited, committed, clock)).rejects.toThrow('Query exceeded its resource budget');
+    const failed = await refetch(hook.id);
+    expect(failed.cursorReceivedAt).toEqual(committed.cursorReceivedAt);
+    expect(failed.lastScannedAt?.getTime()).toBeGreaterThanOrEqual(committed.lastScannedAt?.getTime() ?? Number.POSITIVE_INFINITY);
+    await discoverWebhookDeliveries(ch, failed, clock);
+    expect(await refetch(hook.id)).toMatchObject({ cursorReviewRequired: false });
+    expect(await queuedIds(hook.id)).toEqual(['qa-after-failure', 'qa-before-failure']);
+  } finally {
+    vi.useRealTimers();
+    await limited.close();
+  }
+});
+
 it.each([
   { max_rows_to_read: '1', read_overflow_mode: 'break' as const },
   { max_result_rows: '1', result_overflow_mode: 'break' as const },

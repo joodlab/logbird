@@ -1121,17 +1121,19 @@ that scans completed through an otherwise plausible position.
    stored event receive times and receiver records, using `webhook-id` where available. Test
    pings (`receivedAt IS NULL`), a scan timestamp, and the newest successful
    delivery alone cannot prove coverage. Choose the earliest uncertain receive
-   millisecond, no earlier than the later of endpoint creation and rollout. If
-   you cannot prove coverage, use that starting bound. Preserve the delivery
-   history so rediscovery can deduplicate retained occurrences. Receivers may
-   see duplicates where earlier delivery records have expired.
+   millisecond, no earlier than the later of endpoint creation and rollout.
+   Rewind or keep the held cursor. If the held cursor is below that starting
+   bound, move it to the bound exactly. If you cannot prove coverage, use the
+   starting bound. Preserve the delivery history so rediscovery can deduplicate
+   retained occurrences. Receivers may see duplicates where earlier delivery
+   records have expired.
 3. In one transaction, lock and re-read the exact endpoint by project and ID.
    Set `cursorReceivedAt` to the chosen UTC millisecond, set `cursorEventId` to
    `NULL` to include all events at that millisecond, and clear
-   `cursorReviewRequired`. If using a later independently verified checkpoint,
-   preserve `lastScannedAt` or set it to the checkpoint if the stored value was
-   absent or earlier. Update `updatedAt` in UTC. Verify exactly one row changed
-   before committing. Leave delivery and attempt records intact. For a rebuilt
+   `cursorReviewRequired`. Set `lastScannedAt` to the greater of its stored value
+   and the checkpoint, using the checkpoint if no scan time was recorded.
+   Update `updatedAt` in UTC and verify exactly one row changed before committing.
+   Leave delivery and attempt records intact. For a rebuilt
    ledger, record the verified original rollout on the endpoint in the same
    transaction using the procedure below.
 4. Restart workers. Verify the warning clears, the cursor resumes moving and
@@ -1148,7 +1150,9 @@ without credentials or payload data for `evidence_ref`. Use the worker's
 
 Run this transaction while webhook workers are stopped. It stores the verified
 floor and queues a workspace audit event with the operator's database login and
-the evidence reference. Commit after confirming the statement returned one audit ID.
+the evidence reference. The checkpoint must be at or before the held cursor,
+except that a cursor below the starting bound can move to that bound. Commit
+after confirming the statement returned one audit ID.
 Roll back if it returned zero rows and check the endpoint, hold and timestamps.
 
 ```sql
@@ -1161,12 +1165,13 @@ WITH bounds AS (
 ), reconciled AS (
   UPDATE "WebhookEndpoint" e
   SET "cursorVerifiedFloor" = b.floor, "cursorReceivedAt" = b.checkpoint,
-      "cursorEventId" = NULL, "lastScannedAt" = b.checkpoint,
+      "cursorEventId" = NULL, "lastScannedAt" = greatest(e."lastScannedAt", b.checkpoint),
       "cursorReviewRequired" = false, "updatedAt" = b.now_utc
   FROM bounds b, "Project" p
   WHERE e.id = :'endpoint_id' AND e."projectId" = :'project_id'
     AND p.id = e."projectId" AND e."cursorReviewRequired"
     AND b.checkpoint BETWEEN greatest(e."createdAt", b.floor) AND b.now_utc
+    AND (b.checkpoint <= e."cursorReceivedAt" OR b.checkpoint = greatest(e."createdAt", b.floor))
     AND length(trim(:'evidence_ref')) > 0 AND length(trim(:'audit_namespace')) > 0
   RETURNING e.id, p."organizationId", e."projectId", b.floor, b.checkpoint, b.now_utc
 ), audit AS (
