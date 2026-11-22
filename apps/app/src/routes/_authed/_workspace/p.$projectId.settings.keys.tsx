@@ -26,6 +26,7 @@ import { Timestamp } from '@/components/timestamp';
 import { api } from '@/lib/api/client';
 import { errorMessage } from '@/lib/api/errors';
 import { keysQuery, keys as queryKeys } from '@/lib/api/queries';
+import { isKeyExpired, isKeyUsable } from '@/lib/api-keys';
 import { creatorLabel } from '@/lib/events';
 import { fieldErrorMessage } from '@/lib/forms';
 import { useCan } from '@/lib/permissions';
@@ -43,6 +44,12 @@ export const Route = createFileRoute('/_authed/_workspace/p/$projectId/settings/
 const KIND_COPY = {
   ingest: { label: 'Ingest', hint: 'Can only send events (POST /v1/events). Use in your services.', short: 'sends events only' },
   read: { label: 'Read', hint: 'Can only search and read events (GET /v1/events). Use in products that show history.', short: 'reads events only' },
+  // Created through the API until the console form lands (#138); listed here so existing keys render.
+  'scoped-read': {
+    label: 'Scoped read',
+    hint: 'Can only read events of one tenant (and optionally one target), enforced by the server.',
+    short: 'reads one tenant only',
+  },
 } as const;
 
 function KeysSettings() {
@@ -76,8 +83,8 @@ function KeysSettings() {
   const active = list.data?.filter((k) => !k.revokedAt) ?? [];
   const revoked = list.data?.filter((k) => k.revokedAt) ?? [];
   const byId = new Map((list.data ?? []).map((k) => [k.id, k]));
-  /** The active key that replaced `key` through a roll, if any. */
-  const replacementOf = (key: ApiKey) => active.find((k) => k.replacesKeyId === key.id);
+  /** The usable key that replaced `key` through a roll, if any (an expired replacement does not count). */
+  const replacementOf = (key: ApiKey) => active.find((k) => k.replacesKeyId === key.id && isKeyUsable(k));
 
   return (
     <div className="flex flex-col gap-5">
@@ -138,6 +145,10 @@ function KeysSettings() {
                         <TypePill tone="warning">
                           revoked <Timestamp format="relative" iso={k.revokedAt} />
                         </TypePill>
+                      ) : isKeyExpired(k) ? (
+                        <TypePill tone="warning">
+                          expired <Timestamp format="relative" iso={k.expiresAt} />
+                        </TypePill>
                       ) : replacement ? (
                         <TypePill tone="warning">replaced · still valid</TypePill>
                       ) : null}
@@ -179,7 +190,8 @@ function KeysSettings() {
                     </span>
                     {k.revokedAt || !manage ? null : (
                       <span className="ms-auto flex items-center gap-1">
-                        {replacement ? null : (
+                        {/* Rolling an expired key needs a new expiry, which this dialog does not ask for yet. */}
+                        {replacement || isKeyExpired(k) ? null : (
                           <Button
                             data-testid="roll-key"
                             disabled={roll.isPending}

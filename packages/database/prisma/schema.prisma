@@ -194,7 +194,17 @@ model ApiKey {
   /// Rolled keys point at the key they replace; the old key stays valid until revoked.
   replacesKeyId String?
   revokedAt   DateTime?
+  /// Read keys only. Non-null makes the key a `scoped-read` key: `{tenantId, target?, actionPrefixes?, mask?}`,
+  /// enforced on every read and viewer token. Fixed at creation; rolling copies it.
+  scope       Json?
+  /// Read keys only: browser origins allowed to use this key's viewer tokens (CORS). Rolling copies them.
+  embedOrigins String[] @default([])
+  /// Optional expiry; an expired key (and its viewer tokens) is rejected like a revoked one. Rolling keeps the absolute
+  /// expiry unless the roll passes a new one.
+  expiresAt   DateTime?
 
+  /// Rollback safety: the raw-SQL trigger "ApiKey_roll_fence" (migration 20261122110000) refuses a replacement
+  /// (replacesKeyId) that drops the replaced key's scope or expiry, so older releases can't widen a restricted key.
   @@index([projectId])
 }
 
