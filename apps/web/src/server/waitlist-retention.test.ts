@@ -337,7 +337,7 @@ it('resolves every alias of a store to one path, before and after its directory 
  * prints `done <tag>` once the append returned. Test-only patches in the writer report what its lock really does:
  * `contended <tag> <address>` whenever a lock bind on that address fails with EADDRINUSE (someone else holds it: the
  * writer must wait), `opened <tag> <address>` when the append opens the day file, and `wrote <tag> <before> <after>`
- * around the append's write itself, each naming the lock address the writer is listening on at that moment (`none`
+ * around every write call into the day file, each naming the lock address the writer is listening on at that moment (`none`
  * if it holds none). The parent tracks the address its own lock listens on the same way, from `listening` to `close`.
  *
  * First every writer appends at once (`init`), so they race to create the store. Then, for each of REWRITES rewrites
@@ -368,8 +368,8 @@ interface Writer {
   /** The addresses each append collided on, and the lock address held when it opened the day file. */
   contendedOn: Map<string, Set<string>>;
   opened: Map<string, string>;
-  /** The lock address held when each append's write started and when it finished. */
-  wrote: Map<string, [string, string]>;
+  /** For every write call of each append, the lock address held when it started and when it finished. */
+  wrote: Map<string, [string, string][]>;
   failure?: string;
   stopping: boolean;
   exit?: { code: number | null; signal: NodeJS.Signals | null };
@@ -450,13 +450,16 @@ function startWriter(path: string, index: number): Writer {
       if (watched) console.log('opened ' + current + ' ' + owned);
       const handle = await open.call(this, file, flags, ...rest);
       if (watched) {
-        const appendFile = handle.appendFile.bind(handle);
-        handle.appendFile = async (...args) => {
-          const before = owned;
-          const result = await appendFile(...args);
-          console.log('wrote ' + current + ' ' + before + ' ' + owned);
-          return result;
-        };
+        // Every call that can put bytes into the day file reports its own sample.
+        for (const method of ['appendFile', 'write', 'writev', 'writeFile']) {
+          const original = handle[method].bind(handle);
+          handle[method] = async (...args) => {
+            const before = owned;
+            const result = await original(...args);
+            console.log('wrote ' + current + ' ' + before + ' ' + owned);
+            return result;
+          };
+        }
       }
       return handle;
     };
@@ -520,7 +523,7 @@ function startWriter(path: string, index: number): Writer {
         on.add(rest.join(' '));
         writer.contendedOn.set(value, on);
       } else if (kind === 'wrote' && value) {
-        writer.wrote.set(value, [rest[0] ?? '', rest[1] ?? '']);
+        writer.wrote.set(value, [...(writer.wrote.get(value) ?? []), [rest[0] ?? '', rest[1] ?? '']]);
       } else if (kind === 'opened' && value) {
         writer.opened.set(value, rest.join(' '));
       } else if (kind === 'failed') {
@@ -634,7 +637,9 @@ async function rewriteWhileOthersAppend(paths: string[], rewriteVia: string) {
       for (const tag of tags) {
         const where = `writer ${writer.index}, append ${tag}`;
         expect(writer.opened.get(tag), `${where}: lock held when it opened the day file`).toBe(lock);
-        expect(writer.wrote.get(tag), `${where}: lock held when its write started and finished`).toEqual([lock, lock]);
+        const samples = writer.wrote.get(tag) ?? [];
+        expect(samples.length, `${where}: write calls`).toBeGreaterThan(0);
+        expect(samples, `${where}: lock held when each write started and finished`).toEqual(samples.map(() => [lock, lock]));
       }
     }
     return writers.flatMap((writer) => tags.map((tag) => `new-${writer.index}-${tag}@example.test`)).sort();
