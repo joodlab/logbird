@@ -95,6 +95,10 @@ POST /api/projects/:projectId/keys
 - `embedOrigins` (read kinds only): browser origins allowed to use this key's viewer tokens, for example
   `https://cms.example.com`. Exact origins, lowercase, no path.
 - `expiresAt` (optional, in the future): an expired key is rejected like a revoked one, and so are its tokens.
+- **Check the response before you hand out a secret.** A server older than this release (during a rolling upgrade, or
+  after a rollback) ignores `expiresAt` on `read` and `ingest` keys and returns a permanent key, and ignores `expiresAt` on
+  a roll. Compare the returned key's `kind`, `scope` and `expiresAt` with what you asked for; if they differ, revoke it.
+  Older servers refuse `kind: "scoped-read"` outright (422).
 - Scope, origins and expiry are fixed at creation. **Rolling** (`POST …/keys/:keyId/roll`) copies the scope and
   origins and keeps the old key's absolute expiry; pass `{ "expiresAt": "…" }` to give the replacement a different
   one. Rolling an expired key requires a new `expiresAt` (409 `key_expired` otherwise). A database trigger refuses any

@@ -1763,7 +1763,7 @@
                   "type": "string"
                 },
                 {
-                  "maxLength": 256,
+                  "maxLength": 4096,
                   "pattern": "^(?:attr|attributes)\\..+",
                   "type": "string"
                 }
@@ -1827,7 +1827,7 @@
                   "type": "string"
                 },
                 {
-                  "maxLength": 256,
+                  "maxLength": 4096,
                   "pattern": "^(?:attr|attributes)\\..+",
                   "type": "string"
                 }
@@ -2294,7 +2294,7 @@
                 }
               }
             },
-            "description": "scope_exceeded: the requested scope is wider than the key scope.",
+            "description": "scope_exceeded: the requested scope is wider than the key scope. forbidden: the credential is a viewer token, which can never mint (use a read key).",
             "headers": {
               "RateLimit-Limit": {
                 "description": "Requests per minute of the tightest bucket that applies: the project bucket for its key kind; for viewer-token reads the minting key + tenant bucket when it is tighter; for minting, the per-key mint bucket",

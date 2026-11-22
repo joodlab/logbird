@@ -108,6 +108,14 @@ const projectRead = createMiddleware<AppEnv>(async (c, next) => {
   // Hono has materialized even an error response here: a concurrent repair must override false 404s too.
   await finishRollupRead(projectId, generation);
 });
+/** Hono answers HEAD through GET handlers: exports refuse it before validation and admission (405, Allow: GET). */
+const noHeadExport = createMiddleware<AppEnv>(async (c, next) => {
+  if (c.req.method === 'HEAD') {
+    c.header('Allow', 'GET');
+    return c.body(null, 405);
+  }
+  await next();
+});
 const publicQueryLanguage = createMiddleware<AppEnv>(async (c, next) => {
   if (c.req.query('lang') === 'sql')
     throw new ApiError(
@@ -190,6 +198,7 @@ export const publicRoutes = new Hono<AppEnv>()
   )
   .get(
     '/export',
+    noHeadExport,
     requireReader(),
     publicRateLimits.authenticated('read'),
     publicQueryLanguage,
@@ -243,7 +252,8 @@ export const publicRoutes = new Hono<AppEnv>()
         responses: {
           201: { description: 'Viewer token', content: { 'application/json': { schema: resolver(s.viewerTokenResponseSchema) } } },
           403: {
-            description: 'scope_exceeded: the requested scope is wider than the key scope.',
+            description:
+              'scope_exceeded: the requested scope is wider than the key scope. forbidden: the credential is a viewer token, which can never mint (use a read key).',
             content: { 'application/json': { schema: resolver(s.apiErrorSchema) } },
           },
         },
@@ -537,6 +547,7 @@ export const dataRoutes = new Hono<AppEnv>()
         },
       },
     }),
+    noHeadExport,
     query(s.exportQuerySchema),
     async (c) =>
       runExport(c, c.req.valid('query'), {

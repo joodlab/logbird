@@ -442,11 +442,13 @@ it('scoped read keys and viewer tokens cannot escape their scope (real services)
     expect((await v1(read.secret, '/events', { origin: EMBED })).headers.get('access-control-allow-origin')).toBeNull();
 
     // HEAD must not start an export: 405 before admission, so no lease and no export.requested record.
-    const head = await app.request(`/v1/export?${new URLSearchParams({ format: 'csv' })}`, {
-      method: 'HEAD',
-      headers: { Authorization: `Bearer ${token.token}` },
-    });
-    expect(head.status).toBe(405);
+    // Also without the required format (405 comes before validation), and on the console route.
+    for (const path of ['/v1/export', `/v1/export?${new URLSearchParams({ format: 'csv' })}`]) {
+      const head = await app.request(path, { method: 'HEAD', headers: { Authorization: `Bearer ${token.token}` } });
+      expect(head.status, path).toBe(405);
+      expect(head.headers.get('allow')).toBe('GET');
+    }
+    expect((await app.request(`/api/projects/${project.id}/export`, { method: 'HEAD', headers: { cookie: ownerCookie } })).status).toBe(405);
     expect(await prisma.exportLease.count({ where: { userId: `api_key:${read.key.id}` } })).toBe(0);
     // Export with a viewer token: only in-scope rows; audited with the key as actor and the tenant/token recorded.
     const exported = await v1(token.token, `/export?${new URLSearchParams({ format: 'jsonl', from: '2026-01-01T00:00:00Z' })}`);

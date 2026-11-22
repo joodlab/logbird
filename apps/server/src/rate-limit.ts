@@ -84,10 +84,10 @@ export function createPublicRateLimits({
   const window = () => Math.floor(now() / 60_000);
   /** Seconds until the end of `minute` (default: the current window), at least 1. */
   const retryAfter = (minute = window()) => Math.max(1, Math.ceil(((minute + 1) * 60_000 - now()) / 1000));
-  const peerKey = (c: Context) =>
+  const peerKey = (c: Context, minute = window()) =>
     `${prefix}:rate:public-failures:${createHash('sha256')
       .update(clientAddress(c) || 'unknown')
-      .digest('hex')}:${window()}`;
+      .digest('hex')}:${minute}`;
   const storageError = () => console.error(JSON.stringify({ level: 'error', event: 'rate_limit.storage_error' }));
   const denied = (c: Context, minute?: number) => {
     c.header('Retry-After', String(retryAfter(minute)));
@@ -105,7 +105,8 @@ export function createPublicRateLimits({
     },
     async reject(c: Context) {
       try {
-        if (Number(await store.eval(script, 1, peerKey(c), 120_000)) > peerLimit) return denied(c);
+        const minute = window();
+        if (Number(await store.eval(script, 1, peerKey(c, minute), 120_000)) > peerLimit) return denied(c, minute);
       } catch {
         storageError();
       }
@@ -116,12 +117,13 @@ export function createPublicRateLimits({
     mint: () =>
       createMiddleware<AppEnv>(async (c, next) => {
         try {
-          const key = `${prefix}:rate:mint:${c.get('reader').keyId}:${window()}`;
+          const minute = window();
+          const key = `${prefix}:rate:mint:${c.get('reader').keyId}:${minute}`;
           const count = Number(await store.eval(script, 1, key, 120_000));
           c.header('RateLimit-Limit', String(mintLimit));
           c.header('RateLimit-Remaining', String(Math.max(0, mintLimit - count)));
-          c.header('RateLimit-Reset', String(retryAfter()));
-          if (count > mintLimit) return denied(c);
+          c.header('RateLimit-Reset', String(retryAfter(minute)));
+          if (count > mintLimit) return denied(c, minute);
         } catch {
           storageError();
         }
