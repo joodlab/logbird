@@ -20,7 +20,8 @@ sourced web research dated 2026-11-07 (see `compare/`). The voice follows `docs/
 | [`product.md`](product.md) | Product tour | `/product` |
 | [`developers.md`](developers.md) | Developers | `/developers` |
 | [`self-hosting.md`](self-hosting.md) | Self-hosting | `/self-hosting` |
-| [`cloud.md`](cloud.md) | Cloud and pricing | `/cloud` |
+| [`cloud.md`](cloud.md) | Cloud | `/cloud` |
+| [`pricing.md`](pricing.md) | Pricing (brief; the words and data are in `apps/web/src/content/pricing.ts`) | `/pricing` |
 | [`open-source.md`](open-source.md) | Open source | `/open-source` |
 | [`security.md`](security.md) | Security and data handling | `/security` |
 | [`compare/README.md`](compare/README.md) | Compare (index) | `/compare` |
@@ -59,7 +60,7 @@ source, the visuals and the owner notes, but not the page text. Change wording i
 against the brief's sources in the same pull request. `apps/web/src/content/content-modules.test.ts` fails if prose
 comes back into a moved route file or component.
 
-Moved so far: home (`home.md` is its brief).
+Moved so far: home (`home.md` is its brief) and pricing (`pricing.md`).
 
 ### Interim drift check
 
@@ -85,7 +86,8 @@ elements rather than loose text. Change a claim in the copy and on the page in t
 - **Citations.** `[S1–S4]` is written out as `[S1, S2, S3, S4]`, the way the page renders it.
 - **Placeholders.** Values from configuration or the release list are written as named placeholders, resolved from the
   test's configuration and `releases.ts`: `<latest release>`, `<latest release date>`, `<first release>`,
-  `<first release date>`, `<supported line>`, `<security contact>`, `<contact email>`, `<sign-in URL>`. Any other
+  `<first release date>`, `<supported line>`, `<security contact>`, `<contact email>`, `<sign-in URL>`, and the pricing
+  words from `apps/web/src/content/pricing.ts`: `<pricing heading>`, `<pricing summary>`, `<pricing status>`. Any other
   `<…>` is literal text.
 - **Variants.**
   - Wording shown only while Logbird Cloud is open goes in a field named `… (when Cloud is open)`, which is checked

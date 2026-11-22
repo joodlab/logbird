@@ -17,6 +17,7 @@ import { Route as CloudRouteImport } from './routes/cloud'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as DevelopersRouteImport } from './routes/developers'
 import { Route as OpenSourceRouteImport } from './routes/open-source'
+import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as ProductRouteImport } from './routes/product'
 import { Route as SecurityRouteImport } from './routes/security'
 import { Route as SelfHostingRouteImport } from './routes/self-hosting'
@@ -68,6 +69,11 @@ const DevelopersRoute = DevelopersRouteImport.update({
 const OpenSourceRoute = OpenSourceRouteImport.update({
   id: '/open-source',
   path: '/open-source',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PricingRoute = PricingRouteImport.update({
+  id: '/pricing',
+  path: '/pricing',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProductRoute = ProductRouteImport.update({
@@ -140,6 +146,7 @@ export interface FileRoutesByFullPath {
   '/contact': typeof ContactRoute
   '/developers': typeof DevelopersRoute
   '/open-source': typeof OpenSourceRoute
+  '/pricing': typeof PricingRoute
   '/product': typeof ProductRoute
   '/security': typeof SecurityRoute
   '/self-hosting': typeof SelfHostingRoute
@@ -162,6 +169,7 @@ export interface FileRoutesByTo {
   '/contact': typeof ContactRoute
   '/developers': typeof DevelopersRoute
   '/open-source': typeof OpenSourceRoute
+  '/pricing': typeof PricingRoute
   '/product': typeof ProductRoute
   '/security': typeof SecurityRoute
   '/self-hosting': typeof SelfHostingRoute
@@ -185,6 +193,7 @@ export interface FileRoutesById {
   '/contact': typeof ContactRoute
   '/developers': typeof DevelopersRoute
   '/open-source': typeof OpenSourceRoute
+  '/pricing': typeof PricingRoute
   '/product': typeof ProductRoute
   '/security': typeof SecurityRoute
   '/self-hosting': typeof SelfHostingRoute
@@ -209,6 +218,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/developers'
     | '/open-source'
+    | '/pricing'
     | '/product'
     | '/security'
     | '/self-hosting'
@@ -231,6 +241,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/developers'
     | '/open-source'
+    | '/pricing'
     | '/product'
     | '/security'
     | '/self-hosting'
@@ -253,6 +264,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/developers'
     | '/open-source'
+    | '/pricing'
     | '/product'
     | '/security'
     | '/self-hosting'
@@ -276,6 +288,7 @@ export interface RootRouteChildren {
   ContactRoute: typeof ContactRoute
   DevelopersRoute: typeof DevelopersRoute
   OpenSourceRoute: typeof OpenSourceRoute
+  PricingRoute: typeof PricingRoute
   ProductRoute: typeof ProductRoute
   SecurityRoute: typeof SecurityRoute
   SelfHostingRoute: typeof SelfHostingRoute
@@ -346,6 +359,13 @@ declare module '@tanstack/react-router' {
       path: '/open-source'
       fullPath: '/open-source'
       preLoaderRoute: typeof OpenSourceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pricing': {
+      id: '/pricing'
+      path: '/pricing'
+      fullPath: '/pricing'
+      preLoaderRoute: typeof PricingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/product': {
@@ -444,6 +464,7 @@ const rootRouteChildren: RootRouteChildren = {
   ContactRoute: ContactRoute,
   DevelopersRoute: DevelopersRoute,
   OpenSourceRoute: OpenSourceRoute,
+  PricingRoute: PricingRoute,
   ProductRoute: ProductRoute,
   SecurityRoute: SecurityRoute,
   SelfHostingRoute: SelfHostingRoute,

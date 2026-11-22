@@ -32,34 +32,35 @@ path: /cloud
   /contact?interest=self-host (see README.md § Self-host CTA rule) -->
 - **cta (when Cloud is open):** Request access → `/contact` · Sign in → `<sign-in URL>`
 - **eyebrow:** Where things stand
-- **facts panel:** Logbird Cloud — Not open yet Waitlist · Pricing — Isn't set yet Published before launch · Self-host —
+- **facts panel:** Logbird Cloud — Not open yet Waitlist · Pricing — <pricing status> · Self-host —
   Available today Free, MIT <!-- private build: Self-host — When the source opens -->
-- **facts panel (when Cloud is open):** Logbird Cloud — Early access Invited teams · Pricing — Isn't set yet Published
-  before sign-ups open · Self-host — Available today Free, MIT
+- **facts panel (when Cloud is open):** Logbird Cloud — Early access Invited teams · Pricing — <pricing status> ·
+  Self-host — Available today Free, MIT
 
 ## pricing
 
 - **id:** `pricing`
 - **eyebrow:** Pricing
-- **heading:** Pricing isn't set yet.
-- **body:** We'll publish prices before Logbird Cloud opens. Here is the shape we're planning. Nothing here is final.
-- **body (when Cloud is open):** We'll publish prices before sign-ups open to everyone. Here is the shape we're planning.
-  Nothing here is final.
+- **heading:** <pricing heading>
+- **body:** <pricing summary>
+  <!-- The pricing words come from apps/web/src/content/pricing.ts (`pricing.cloud`; brief and sources: pricing.md), so approval is a data-only change. Today: "Pricing isn't set yet." / "Self-hosting is free under the MIT licence. Logbird Cloud is free during early access (/legal/terms); its pricing after that will be published before billing starts." -->
 - **cards (no prices, no limits):**
   1. **Self-host.** Free, MIT. Free and MIT-licensed. Every feature in the repository. You run it.
      CTA: Self-host it → `/self-hosting`
-  2. **Cloud.** Waitlist. We run it for you. Waitlist only for now.
+     <!-- private build: "Free and MIT-licensed once the source opens, with every feature in the repository. You'll run it." -->
+  2. **Cloud.** Waitlist. We'll run it for you. Free during early access; waitlist only for now.
      CTA: Join the waitlist → `/contact`
   3. **Support and enterprise.** Talk to us. For teams that want help running Logbird, or terms we haven't covered here.
      CTA: Contact us → `/contact`
 - **cards (when Cloud is open):**
   1. **Self-host.** Free, MIT. Free and MIT-licensed. Every feature in the repository. You run it.
      CTA: Self-host it → `/self-hosting`
-  2. **Cloud.** Early access. We run it for you. Open to invited teams for now.
+  2. **Cloud.** Early access. We run it for you. Free during early access, which is open to invited teams for now.
      CTA: Request access → `/contact`
   3. **Support and enterprise.** Talk to us. For teams that want help running Logbird, or terms we haven't covered here.
      CTA: Contact us → `/contact`
-- **small print:** Plans, prices and limits will be announced before launch. Nothing on this page is an offer.
+- **cta:** See pricing → `/pricing`
+- **small print:** Nothing on this page is an offer.
 - **visual:** none. Three equal cards with no prices or "per month" text.
 
 ## faq
@@ -72,12 +73,12 @@ path: /cloud
   - **Where will my data be stored?** Not decided yet. We'll publish the hosting region before the cloud opens. If
     your data must stay in a particular place today, self-host Logbird.
     <!-- private build: "If your data must stay in a particular place, self-hosting is an option once the source opens." -->
-  - **Is the cloud a different product?** No. It runs the same codebase as the self-hosted version. One difference is
-    already decided: Logbird Cloud won't offer a free-form SQL console. The guarded SQL `WHERE` mode in the explorer
+  - **Is the cloud a different product?** No. It will run the same codebase as the self-hosted version. One difference
+    is already decided: Logbird Cloud won't offer a free-form SQL console. The guarded SQL `WHERE` mode in the explorer
     is in both. <!-- source: docs/SPEC.md intro, §5.1.2; docs/roadmap.md -->
-  - **Can I move between self-host and cloud?** Not with a tool or a guide today. Both run the same codebase, but
-    there's no migration tool and no documented migration path yet.
-  - **How much will it cost?** Pricing isn't set yet. Self-hosting is free under the MIT licence.
+  - **Can I move between self-host and cloud?** Not with a tool or a guide. Logbird Cloud will run the same codebase,
+    but there's no migration tool and no documented migration path yet.
+  - **How much will it cost?** <pricing summary>
   - **Will there be an SLA?** There are no published service levels or limits yet.
     <!-- docs/roadmap.md lists measured limits as a candidate with no date, so the page states the absence and stops (maintainer rule, 2026-11-22) -->
   - **What do you do with my waitlist email?** We store it to contact you about Logbird. No trackers. See
@@ -87,13 +88,13 @@ path: /cloud
     invited teams while we onboard them. Request access and we'll be in touch.
   - **Where will my data be stored?** We'll publish the hosting region with the Cloud's launch terms. Ask us before you
     send production data. If your data must stay in a particular place, self-host Logbird.
+    <!-- private build: "If your data must stay in a particular place, self-hosting is an option once the source opens." -->
   - **Is the cloud a different product?** No. It runs the same codebase as the self-hosted version. One difference is
     already decided: Logbird Cloud won't offer a free-form SQL console. The guarded SQL `WHERE` mode in the explorer
     is in both.
   - **Can I move between self-host and cloud?** Not with a tool or a guide today. Both run the same codebase, but
     there's no migration tool and no documented migration path yet.
-  - **How much will it cost?** Logbird Cloud is free during early access, and pricing for later isn't set yet.
-    Self-hosting is free under the MIT licence.
+  - **How much will it cost?** <pricing summary>
   - **Will there be an SLA?** Not during early access. There are no published service levels or limits yet.
   - **What do you do with the email I give you?** We store it to contact you about Logbird. No trackers. See the
     [privacy policy](/legal/privacy).

@@ -20,6 +20,8 @@ const ROADMAP_SENTENCES: Record<string, string[]> = {
     'These are candidates from our public roadmap, not features or commitments.', // the doc's "candidates, not delivery commitments"
   ],
   '/self-hosting': ['SSO is on the roadmap.'], // § Later candidates: "Console SSO"
+  // The same roadmap section as /product (content/roadmap.ts), checked item by item below.
+  '/pricing': ['On the roadmap', "What's on our roadmap.", 'These are candidates from our public roadmap, not features or commitments.'],
   '/about': ['Integration feedback helps inform the roadmap.'], // says where feedback goes; names no feature
 };
 /** The /product roadmap list, item by item, each with the docs/roadmap.md entry behind it. Nothing built goes here. */
@@ -91,8 +93,8 @@ describe('roadmap claims', () => {
     expect([...found]).toEqual([]);
   }, 180_000);
 
-  it('the /product roadmap section says exactly the approved heading, introduction and items', async () => {
-    const [page] = await renderPages(['/product'], STATES.public);
+  it.each(['/product', '/pricing'])('the %s roadmap section says exactly the approved heading, introduction and items', async (path) => {
+    const [page] = await renderPages([path], STATES.public);
     const html = page?.html ?? '';
     const plain = (fragment: string) =>
       fragment

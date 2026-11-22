@@ -20,6 +20,7 @@
  *   WEB_EMAIL_PROVIDER    email delivery provider (privacy)          unset → Postmark, Logbird Cloud's provider
  *   WEB_MAILBOX_PROVIDER  host of the team mailbox (privacy)         unset → "our mailbox provider" (pending owner)
  *   WEB_FORM_RETENTION_MONTHS  months the site keeps a form submission  default 24 (privacy policy and the cleanup)
+ *   WEB_CHECKOUT_URL   Cloud checkout; used only once pricing is approved (content/pricing.ts)  default unset
  */
 /** The only variables the build passes to the site (vite.config.ts) and that Turbo hashes (turbo.json). */
 export const PUBLIC_ENV_KEYS = [
@@ -37,6 +38,7 @@ export const PUBLIC_ENV_KEYS = [
   'WEB_EMAIL_PROVIDER',
   'WEB_MAILBOX_PROVIDER',
   'WEB_FORM_RETENTION_MONTHS',
+  'WEB_CHECKOUT_URL',
 ] as const;
 
 declare const __SITE_ENV__: Record<string, string | undefined> | undefined;
@@ -50,6 +52,8 @@ export interface SiteConfig {
   SITE_URL: string;
   /** Undefined while Cloud is waitlist-only: the header shows no "Sign in" link. */
   APP_URL?: string;
+  /** Where a Cloud plan's button leads once pricing is approved; unset keeps the access call to action. */
+  CHECKOUT_URL?: string;
   GITHUB_PUBLIC: boolean;
   GITHUB_URL?: string;
   /** The publisher's legal name is pending the owner; until it is set the site names no company. */
@@ -103,6 +107,18 @@ function formRetentionMonths(value: string | undefined): number {
  * Builds the public configuration from WEB_* values. The bundle (via __SITE_ENV__), discovery files and OG cards all
  * call this with the same resolved values (scripts/public-env.ts), so their origins always agree.
  */
+/** An absolute URL kept exactly as written (after trimming), or undefined when unset. */
+function exactUrl(name: string, raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value) {
+    return undefined;
+  }
+  if (!URL.canParse(value)) {
+    throw new Error(`${name} must be an absolute URL.`);
+  }
+  return value;
+}
+
 export function siteConfigFrom(values: Record<string, string | undefined>): SiteConfig {
   const url = (name: string, fallback?: string): string | undefined => {
     const value = values[name]?.trim();
@@ -118,6 +134,8 @@ export function siteConfigFrom(values: Record<string, string | undefined>): Site
   const config: SiteConfig = {
     SITE_URL: url('WEB_SITE_URL', `https://${DOMAIN}`) as string,
     APP_URL: url('WEB_APP_URL'),
+    // Kept exactly as configured (only validated): a checkout link may carry a token that must not be rewritten.
+    CHECKOUT_URL: exactUrl('WEB_CHECKOUT_URL', values.WEB_CHECKOUT_URL),
     GITHUB_PUBLIC: values.WEB_GITHUB_PUBLIC === 'true',
     // The browser URL of the repository: a configured trailing `.git` is dropped, so release and file links work and
     // the clone URL (lib/selfhost.ts) adds it exactly once.
@@ -153,6 +171,7 @@ export const siteConfig = siteConfigFrom(source);
 export const {
   SITE_URL,
   APP_URL,
+  CHECKOUT_URL,
   GITHUB_PUBLIC,
   GITHUB_URL,
   ORG_NAME,
