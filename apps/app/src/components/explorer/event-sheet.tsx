@@ -39,7 +39,16 @@ import { Timestamp } from '@/components/timestamp';
 import { ApiRequestError } from '@/lib/api/errors';
 import { eventQuery, oldestStoredQuery, operationQuery } from '@/lib/api/queries';
 import { targetEntityId, typeIcon } from '@/lib/entities';
-import { actorAttributeHint, causedCount, directChildren, eventSentence, outcomeWasSent, parentActor, personLabel } from '@/lib/events';
+import {
+  actorAttributeHint,
+  causedCount,
+  directChildren,
+  eventSentence,
+  outcomeWasSent,
+  parentActor,
+  personLabel,
+  roundsLargeNumbers,
+} from '@/lib/events';
 import { formatTimeMs } from '@/lib/format';
 import { andQuery, formatTerm } from '@/lib/query-language';
 import { admittedRange } from '@/lib/range';
@@ -845,6 +854,11 @@ function EventDetailBody({
             </CollapsibleTrigger>
             {detail ? <CopyButton label="Copy JSON" value={JSON.stringify(detail.payload, null, 2)} /> : null}
           </div>
+          {detail && roundsLargeNumbers ? (
+            <p className="mt-1 text-muted-foreground text-xs">
+              This browser may round long numbers here and in Copy JSON. The stored event and the Complete export keep their exact digits.
+            </p>
+          ) : null}
           <CollapsibleContent className="pt-3">
             {detailError ? (
               <ErrorState error={detailError} onRetry={onRetry} size="sm" title="Could not load the raw payload" />

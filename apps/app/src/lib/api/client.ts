@@ -24,6 +24,7 @@ import {
   meResponseSchema,
   overviewResponseSchema,
   type Project,
+  parseJsonExact,
   projectSchema,
   projectSetupSchema,
   type QueryLang,
@@ -98,7 +99,8 @@ async function request<S extends z.ZodType>(schema: S, method: string, path: str
     });
     if (!response.ok) throw await toApiError(response);
     if (response.status === 204) return schema.parse({ ok: true });
-    const json: unknown = await response.json();
+    // Exact parsing keeps digits a double cannot hold (64-bit ids in raw payloads) as the server sent them.
+    const json: unknown = parseJsonExact(await response.text());
     const parsed = schema.safeParse(json);
     if (!parsed.success) {
       console.error(`[api] ${method} ${path} returned an unexpected shape`, parsed.error.issues);

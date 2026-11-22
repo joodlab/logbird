@@ -1,5 +1,9 @@
+import { isRawJson } from '@logbird/contracts';
+
 /** Receipt-relative resolution is identity policy; keep it independent of input admission and search caps. */
-export function resolveTimestamp(value: unknown, receivedAt: Date) {
+export function resolveTimestamp(input: unknown, receivedAt: Date) {
+  // Epoch milliseconds with digits beyond a double (sub-millisecond fractions) resolve exactly as JSON.parse did.
+  const value = isRawJson(input) ? Number(input.rawJSON) : input;
   const supplied = value !== undefined && value !== null && value !== '';
   let problem: string | null = null;
   if (supplied) {
