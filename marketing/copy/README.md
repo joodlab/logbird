@@ -22,6 +22,7 @@ sourced web research dated 2026-11-07 (see `compare/`). The voice follows `docs/
 | [`self-hosting.md`](self-hosting.md) | Self-hosting | `/self-hosting` |
 | [`cloud.md`](cloud.md) | Cloud | `/cloud` |
 | [`pricing.md`](pricing.md) | Pricing (brief; the words and data are in `apps/web/src/content/pricing.ts`) | `/pricing` |
+| [`use-cases/compliance-evidence.md`](use-cases/compliance-evidence.md) | Compliance evidence (brief; the words are in `apps/web/src/content/use-cases/compliance-evidence.ts`) | `/use-cases/compliance-evidence` |
 | [`open-source.md`](open-source.md) | Open source | `/open-source` |
 | [`security.md`](security.md) | Security and data handling | `/security` |
 | [`compare/README.md`](compare/README.md) | Compare (index) | `/compare` |
@@ -60,7 +61,7 @@ source, the visuals and the owner notes, but not the page text. Change wording i
 against the brief's sources in the same pull request. `apps/web/src/content/content-modules.test.ts` fails if prose
 comes back into a moved route file or component.
 
-Moved so far: home (`home.md` is its brief) and pricing (`pricing.md`).
+Moved so far: home (`home.md` is its brief), pricing (`pricing.md`) and the use-case pages (`use-cases/*.md`).
 
 ### Interim drift check
 

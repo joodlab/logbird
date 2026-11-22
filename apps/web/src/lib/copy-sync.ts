@@ -28,6 +28,7 @@ export const NOT_CHECKED: Record<string, string> = {
   'arabic-notes.md': 'reference strings for a future localization, not a page',
   'home.md': 'a brief: the page renders apps/web/src/content/home.ts, and content-modules.test.ts guards the route file',
   'pricing.md': 'a brief: the page renders apps/web/src/content/pricing.ts; pricing.test.ts and content-modules.test.ts guard it',
+  'use-cases/compliance-evidence.md': 'a brief: the page renders apps/web/src/content/use-cases/compliance-evidence.ts',
 };
 
 const releaseDate = (iso: string) => {

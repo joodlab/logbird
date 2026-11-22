@@ -30,6 +30,7 @@ import { Route as CompareRetracedRouteImport } from './routes/compare.retraced'
 import { Route as CompareWorkosAuditLogsRouteImport } from './routes/compare.workos-audit-logs'
 import { Route as LegalPrivacyRouteImport } from './routes/legal.privacy'
 import { Route as LegalTermsRouteImport } from './routes/legal.terms'
+import { Route as UseCasesComplianceEvidenceRouteImport } from './routes/use-cases.compliance-evidence'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -136,6 +137,12 @@ const LegalTermsRoute = LegalTermsRouteImport.update({
   path: '/legal/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
+const UseCasesComplianceEvidenceRoute =
+  UseCasesComplianceEvidenceRouteImport.update({
+    id: '/use-cases/compliance-evidence',
+    path: '/use-cases/compliance-evidence',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -157,6 +164,7 @@ export interface FileRoutesByFullPath {
   '/compare/workos-audit-logs': typeof CompareWorkosAuditLogsRoute
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
+  '/use-cases/compliance-evidence': typeof UseCasesComplianceEvidenceRoute
   '/blog/': typeof BlogIndexRoute
   '/compare/': typeof CompareIndexRoute
 }
@@ -180,6 +188,7 @@ export interface FileRoutesByTo {
   '/compare/workos-audit-logs': typeof CompareWorkosAuditLogsRoute
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
+  '/use-cases/compliance-evidence': typeof UseCasesComplianceEvidenceRoute
   '/blog': typeof BlogIndexRoute
   '/compare': typeof CompareIndexRoute
 }
@@ -204,6 +213,7 @@ export interface FileRoutesById {
   '/compare/workos-audit-logs': typeof CompareWorkosAuditLogsRoute
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
+  '/use-cases/compliance-evidence': typeof UseCasesComplianceEvidenceRoute
   '/blog/': typeof BlogIndexRoute
   '/compare/': typeof CompareIndexRoute
 }
@@ -229,6 +239,7 @@ export interface FileRouteTypes {
     | '/compare/workos-audit-logs'
     | '/legal/privacy'
     | '/legal/terms'
+    | '/use-cases/compliance-evidence'
     | '/blog/'
     | '/compare/'
   fileRoutesByTo: FileRoutesByTo
@@ -252,6 +263,7 @@ export interface FileRouteTypes {
     | '/compare/workos-audit-logs'
     | '/legal/privacy'
     | '/legal/terms'
+    | '/use-cases/compliance-evidence'
     | '/blog'
     | '/compare'
   id:
@@ -275,6 +287,7 @@ export interface FileRouteTypes {
     | '/compare/workos-audit-logs'
     | '/legal/privacy'
     | '/legal/terms'
+    | '/use-cases/compliance-evidence'
     | '/blog/'
     | '/compare/'
   fileRoutesById: FileRoutesById
@@ -299,6 +312,7 @@ export interface RootRouteChildren {
   CompareWorkosAuditLogsRoute: typeof CompareWorkosAuditLogsRoute
   LegalPrivacyRoute: typeof LegalPrivacyRoute
   LegalTermsRoute: typeof LegalTermsRoute
+  UseCasesComplianceEvidenceRoute: typeof UseCasesComplianceEvidenceRoute
   BlogIndexRoute: typeof BlogIndexRoute
   CompareIndexRoute: typeof CompareIndexRoute
 }
@@ -452,6 +466,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LegalTermsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/use-cases/compliance-evidence': {
+      id: '/use-cases/compliance-evidence'
+      path: '/use-cases/compliance-evidence'
+      fullPath: '/use-cases/compliance-evidence'
+      preLoaderRoute: typeof UseCasesComplianceEvidenceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -475,6 +496,7 @@ const rootRouteChildren: RootRouteChildren = {
   CompareWorkosAuditLogsRoute: CompareWorkosAuditLogsRoute,
   LegalPrivacyRoute: LegalPrivacyRoute,
   LegalTermsRoute: LegalTermsRoute,
+  UseCasesComplianceEvidenceRoute: UseCasesComplianceEvidenceRoute,
   BlogIndexRoute: BlogIndexRoute,
   CompareIndexRoute: CompareIndexRoute,
 }

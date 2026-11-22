@@ -191,7 +191,7 @@ export function homeContent(site: SiteState) {
         label: 'Retention',
         caption: "A project's retention settings: the current window and the policies you can choose.",
       },
-      cta: { label: 'Retention and workspace activity, in detail', to: '/security', hash: 'retention' } satisfies Cta,
+      cta: { label: 'How to answer an auditor', to: '/use-cases/compliance-evidence' } satisfies Cta,
     },
     operators: {
       eyebrow: 'Support investigations',
