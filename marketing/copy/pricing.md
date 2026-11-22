@@ -46,7 +46,8 @@ In `content/pricing.ts`, add the plans with their `figures` and the `dimensions`
 | --- | --- |
 | Self-hosting is free, MIT-licensed, with every feature in the repository (`hero`, `plans[0]`, `faq.items[0]`, `included.lead`) | `LICENSE` |
 | Logbird Cloud runs (or will run) the same codebase; early access or waitlist by state (`hero.lead`, `plans[1]`) | `marketing/copy/cloud.md` hero; `content/shared.ts` (Cloud CTA rule) |
-| Cloud pricing isn't set and will be published before billing starts (`hero`, `faq.items[1]`) | Maintainer ruling 2026-11-22; `/legal/terms` (fees are announced in advance) |
+| Logbird Cloud is free during early access (`plans[1]`, `cloud.lead`, `faq.items[1]`) | `/legal/terms` ("Logbird Cloud is free during early access.", owner-approved, merged 2026-11-10) |
+| Cloud pricing after that isn't set and will be published before billing starts (`hero`, `cloud`, `faq.items[1]`) | Maintainer ruling 2026-11-22; `/legal/terms` (fees are announced in advance) |
 | Support and enterprise: talk to us (`plans[2]`) | The existing `/cloud` card |
 | Each feature in "What you get when you self-host" (`included.features`) | The `source` field on each row in `content/pricing.ts` |
 | The roadmap items (`roadmap`) | `docs/roadmap.md`, item by item in `content/roadmap.ts` |

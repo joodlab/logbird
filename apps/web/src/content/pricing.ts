@@ -77,9 +77,10 @@ export function pricingContent(site: SiteState, approved = PRICING_APPROVED) {
       id: 'cloud',
       name: 'Cloud',
       status: byCloud(site, { open: 'Early access', closed: 'Waitlist' }),
+      // "Free during early access" is the published commitment in /legal/terms (merged 2026-11-10), not a price.
       body: byCloud(site, {
-        open: 'We run it for you. Open to invited teams for now.',
-        closed: "We'll run it for you. Waitlist only for now.",
+        open: 'We run it for you. Free during early access, which is open to invited teams for now.',
+        closed: "We'll run it for you. Free during early access; waitlist only for now.",
       }),
       icon: 'cloud',
       cta: cloudCta,
@@ -185,7 +186,7 @@ export function pricingContent(site: SiteState, approved = PRICING_APPROVED) {
       eyebrow: 'Pricing',
       title: unset ? "Pricing isn't set yet." : 'Pricing',
       lead: unset
-        ? "Self-hosting is free under the MIT licence. Logbird Cloud's pricing will be published before billing starts."
+        ? 'Self-hosting is free under the MIT licence. Logbird Cloud is free during early access; its pricing after that will be published before billing starts.'
         : "Self-hosting is free under the MIT licence. Logbird Cloud's prices are on the pricing page.",
       note: 'Nothing on this page is an offer.',
       more: { label: 'See pricing', to: '/pricing' } satisfies Cta,
@@ -217,7 +218,9 @@ export function pricingContent(site: SiteState, approved = PRICING_APPROVED) {
         },
         {
           q: 'How much will Logbird Cloud cost?',
-          a: unset ? "Pricing isn't set yet. We'll publish it before billing starts." : 'See the plans at the top of this page.',
+          a: unset
+            ? "It's free during early access. Pricing after that isn't set yet; we'll publish it before billing starts."
+            : 'See the plans at the top of this page.',
         },
         {
           q: 'How do I get early access?',

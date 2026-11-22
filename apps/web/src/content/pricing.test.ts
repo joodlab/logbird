@@ -15,8 +15,8 @@ const SELF_HOST = {
     "Self-host Free, MIT Free and MIT-licensed once the source opens, with every feature in the repository. You'll run it. Self-host when the source opens",
 };
 const CLOUD = {
-  closed: "Cloud Waitlist We'll run it for you. Waitlist only for now. Join the waitlist",
-  open: 'Cloud Early access We run it for you. Open to invited teams for now. Request access',
+  closed: "Cloud Waitlist We'll run it for you. Free during early access; waitlist only for now. Join the waitlist",
+  open: 'Cloud Early access We run it for you. Free during early access, which is open to invited teams for now. Request access',
 };
 const SUPPORT = "Support and enterprise Talk to us For teams that want help running Logbird, or terms we haven't covered here. Contact us";
 
@@ -94,7 +94,8 @@ describe('pricing', () => {
           expect(html, where).not.toContain('checkout.example.test');
           const offers = structuredData(html).filter((node) => (node as { '@type'?: unknown })['@type'] === 'Offer');
           expect(offers, `${where}: no structured-data offer on the pricing pages`).toEqual([]);
-          expect(plain(html), where).toContain("Pricing isn't set yet");
+          expect(plain(html), where).toMatch(/[Pp]ricing isn[’']t set yet/);
+          expect(plain(html), where).toContain('free during early access');
         }
       }
     }, 120_000);
