@@ -34,7 +34,7 @@ path: /
   <!-- source: README.md Quickstart; docs/SPEC.md §1.1 -->
 - **small print under the CTAs:** Logbird Cloud is not open yet. <!-- private build: prefixed with "Source on GitHub — coming soon." -->
 - **small print under the CTAs (when Cloud is open):** Logbird Cloud is in early access: sign-ups are limited to invited teams for
-  now. Already invited? [Sign in](https://app.example.test/login).
+  now. Already invited? [Sign in](<sign-in URL>).
 - **visual:** `marketing/media/staydesk/explorer-light.webp` (dark-mode pair:
   `marketing/media/staydesk/explorer-dark.webp`).
 

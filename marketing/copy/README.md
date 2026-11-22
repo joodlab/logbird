@@ -55,7 +55,7 @@ Then one `##` block per section, in page order:
 check catches common drift between these files and the pages until then, and is deleted when the modules land. It
 doesn't make each claim single-source; its known gaps are listed in the pull request that added it (#249).
 
-`apps/web/src/lib/copy-sync.test.ts` renders every page in the map above as the public build does, once with Logbird
+`apps/web/src/lib/copy-sync.test.ts` renders every mapped page except the exempt ones listed below, as the public build does, once with Logbird
 Cloud closed and once open (`WEB_APP_URL` set). It looks for the claims the copy file states for that page, bound to
 elements rather than loose text. Change a claim in the copy and on the page in the same pull request.
 

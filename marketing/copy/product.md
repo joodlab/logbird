@@ -136,7 +136,7 @@ path: /product
 
 ## more
 
-- **id:** `more`
+- **id:** `more-title` (the heading's id; the section has none of its own)
 - **heading:** And the parts you use every day.
 
 ## live-tail
