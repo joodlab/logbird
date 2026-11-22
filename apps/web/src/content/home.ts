@@ -142,11 +142,11 @@ export function homeContent(site: SiteState) {
           },
           {
             title: 'Scoped server keys',
-            body: 'A scoped read key can only ever read one customer account, optionally narrowed to one record or to actions with given prefixes.',
+            body: "A scoped read key reads one customer account's events. It can also be limited to events that name one record, to actions with given prefixes, or both.",
           },
         ] satisfies Item[],
         limit:
-          "One customer account per scope, matched on the id Logbird stored. ClickHouse enforces the customer account as well only when the restricted query user is configured; otherwise Logbird's query builders are the single layer.",
+          "One customer account per scope, matched on the id Logbird stored. Logbird's query builders always apply the scope. ClickHouse checks the customer account as well once the restricted query user has its tenant row policy: the Compose and Coolify stacks install it on upgrade, and a source installation runs `create-query-user` once. A web page on another origin can read with a token only if that origin is listed on the key.",
       },
       /** What the page shows: scoped access only once its production proof is confirmed. */
       get access() {

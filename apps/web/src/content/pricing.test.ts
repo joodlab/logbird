@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { quietHrefWarnings, renderPages } from '../test/render-pages';
 import { PRICING_APPROVED, pricing, pricingContent } from './pricing';
-import type { SiteState } from './site';
+import { SITE, type SiteState } from './site';
 
 /**
  * Maintainer ruling (2026-11-22): until the owner approves pricing, the site states only what is public: self-hosting is
@@ -68,6 +68,18 @@ const state = (overrides: Partial<SiteState> = {}): SiteState => ({
 });
 
 describe('pricing', () => {
+  // quietHrefWarnings spies on console.error; restore it so a second call doesn't wrap the first spy.
+  afterEach(() => vi.restoreAllMocks());
+
+  it('lists customer-facing history only once scoped read access is live, and the page follows SITE', async () => {
+    const titles = (site: SiteState) => pricingContent(site, false).included.features.map((feature) => feature.title);
+    expect(titles(state({ scopedReadLive: true }))).toContain('Customer-facing history');
+    expect(titles(state({ scopedReadLive: false }))).not.toContain('Customer-facing history');
+    quietHrefWarnings();
+    const [page] = await renderPages(['/pricing']);
+    expect(plain(page?.html ?? '').includes('Customer-facing history'), 'row shown').toBe(SITE.scopedReadLive);
+  }, 60_000);
+
   it('links a plan to checkout only once pricing is approved and a checkout URL is configured, keeping the URL exact', () => {
     const cloud = (approved: boolean, site: SiteState) => pricingContent(site, approved).plans.find((plan) => plan.id === 'cloud');
     expect(cloud(false, state())?.cta.href).toBeUndefined();
