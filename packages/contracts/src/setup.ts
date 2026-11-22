@@ -68,6 +68,12 @@ export const ENVELOPE_MISSING_QUERIES: Record<EnvelopeField, string | null> = {
 /** Events loaded by "Load sample data" carry this `source`; they never count toward setup steps. */
 export const SAMPLE_DATA_SOURCE = 'logbird-sample';
 export const SAMPLE_DATA_SOURCES = [SAMPLE_DATA_SOURCE];
+/**
+ * "Send a test event" in the console stores a real event with this `source`. It completes the "first event" step,
+ * which proves the pipeline end to end, but never the steps that describe a real integration (events keep flowing,
+ * envelope coverage, operation ids): one console click must not look like a production-ready trail.
+ */
+export const CONSOLE_TEST_EVENT_SOURCE = 'logbird-test';
 export const SAMPLE_DATA_EVENTS = 2000;
 
 export const projectSetupSchema = z.object({

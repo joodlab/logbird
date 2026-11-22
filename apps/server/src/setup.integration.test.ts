@@ -109,6 +109,17 @@ it('real services: setup, keys, raw envelope coverage, samples, membership and i
     expect((await status()).ingest.sampleEvents).toBe(2000);
     await api(`${base}/sample-data`, 'DELETE');
     expect((await status()).ingest.sampleEvents).toBe(0);
+    // A console test event proves the pipeline (first event) but completes none of the integration steps.
+    await api(`${base}/test-event`, 'POST');
+    state = await status();
+    expect(state.ingest.firstEvent?.action).toBe('sample.record.updated');
+    expect(state.ingest.firstEvent?.source).toBe(s.CONSOLE_TEST_EVENT_SOURCE);
+    expect(state.steps.find((step) => step.id === 'first_event')?.status).toBe('done');
+    for (const id of ['recent_events', 'envelope', 'operation_id'] as const)
+      expect(state.steps.find((step) => step.id === id)?.status).not.toBe('done');
+    expect(state.ingest.eventsLast24h).toBe(0);
+    expect(state.envelope.sampledEvents).toBe(0);
+    expect(state.operations.eventsWithOperationId).toBe(0);
     const ingest = async (event: unknown) => {
       const r = await app.request('/v1/events', {
         method: 'POST',
@@ -119,7 +130,10 @@ it('real services: setup, keys, raw envelope coverage, samples, membership and i
     };
     await ingest({ action: 'x' });
     state = await status();
-    expect(state.ingest.firstEvent?.action).toBe('x');
+    // The test event stays the project's first event; the integration's own events now count.
+    expect(state.ingest.firstEvent?.action).toBe('sample.record.updated');
+    expect(state.ingest.eventsLast24h).toBe(1);
+    expect(state.steps.find((step) => step.id === 'recent_events')?.status).toBe('done');
     expect(state.steps.find((s) => s.id === 'envelope')?.status).toBe('attention');
     expect(state.envelope.fields.every((f) => f.coverage === 0)).toBe(true);
     await ingest({

@@ -119,7 +119,7 @@ function Listening({ projectId, setup }: { projectId: string; setup: ProjectSetu
           </Button>
         </AdminOnly>
         <span className="text-[11px] text-muted-foreground">
-          {canSend ? 'Sent from the console as you · counts as a real event' : 'Ask an admin to send one, or run a snippet'}
+          {canSend ? 'Sent from the console as you · completes the first-event step only' : 'Ask an admin to send one, or run a snippet'}
         </span>
       </div>
     </div>

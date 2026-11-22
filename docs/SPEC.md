@@ -602,7 +602,7 @@ User journeys (each must work end-to-end against the real server):
    `onboarding.next`, so leaving and coming back resumes at the missing step; the wizard's progress reflects real
    state. The first-event step reuses the Setup page's component: ingest key shown once (copy), curl / SDK / fetch
    snippets pre-filled, a **live waiting indicator** that polls setup every 2.5 s and flips to the received event,
-   "Send a test event", "Load sample data" (never counts) and "Skip for now" → Overview. The workspace step pre-fills
+   "Send a test event" (stored with `source: logbird-test`; completes only the first-event step), "Load sample data" (never counts) and "Skip for now" → Overview. The workspace step pre-fills
    the name from `GET /api/onboarding/workspace-name` (selected, so typing replaces it). The full-screen wizard is only
    for a workspace's first project: later projects are created from a dialog inside the app shell (Projects page and
    switcher → New project) that lands on the new project's Setup page.
